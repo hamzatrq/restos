@@ -2,3 +2,7 @@ packages:
   - "apps/*"
   - "services/*"
   - "packages/*"
+
+# better-sqlite3 needs its install script (prebuilt native binding, 18 §4 device DB)
+onlyBuiltDependencies:
+  - better-sqlite3

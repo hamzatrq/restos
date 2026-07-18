@@ -19,7 +19,7 @@ Sessions are sized to 1–4 FRs (24-F4). Acceptance tests per task are authored 
 - Vitest reporter → `conformance/01.yml` status derivation (24 §11.1); `verify:01` script. After T-01-01 (needs real test results to derive).
 
 ### T-01-02  sync-protocol wire messages (PROTOCOL.md → zod schemas + codec round-trip property tests, 20 §2.3)
-- **Status: T-01-01/T-01-00/T-01-02 DONE** (commits 8eb4a1a, f8826e9, bae0547 + gate-fix follow-up). T-01-03 planned + acceptance tests authored (test session); implementation session next — it may not touch `__acceptance__/`.
+- **Status: T-01-01/T-01-00/T-01-02/T-01-03 DONE** (8eb4a1a, f8826e9, bae0547 + follow-ups; T-01-03 landed with adversarial-review fix round). Next: T-01-04 — oracle session first (24 §3 step 2), implementer never touches `__acceptance__/`.
 - **FRs:** 01-F8 (push/ack watermark semantics), 01-F9 (catchup range fetch), 01-F37 (quarantine notice), 01-F39/01-F40 (device classes on `hello`; slices are sender-enforced — the protocol carries class, never client-declared slices). Contract-fixture law: 20 §2.7.
 - **Files touchable:** `packages/sync-protocol/src/**` (impl session); `packages/sync-protocol/src/__acceptance__/**` incl. `fixtures/` (test session only); `packages/domain/src/**` for the DEVICE_CLASSES addition below (impl session; protected-path review applies).
 - **Check:** `pnpm --filter @restos/sync-protocol test` + `pnpm verify:01`.

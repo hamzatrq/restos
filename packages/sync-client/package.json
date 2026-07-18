@@ -4,7 +4,19 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "test": "echo 'no tests yet — acceptance tests arrive with first FRs (24 §3)'",
+    "test": "vitest run",
     "build": "echo 'no build yet — scaffold stub'"
+  },
+  "dependencies": {
+    "@restos/domain": "workspace:*",
+    "better-sqlite3": "12.11.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "7.6.13",
+    "fast-check": "4.9.0",
+    "vitest": "4.1.10"
+  },
+  "exports": {
+    ".": "./src/index.ts"
   }
 }

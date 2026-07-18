@@ -1,11 +1,17 @@
 # DERIVED by scripts/verify-module.mjs — do not hand-edit (24-F5).
 module: "01"
-derived_from: 2 suite run(s)
+derived_from: 3 suite run(s)
 rows:
   - fr: 01-F1
     status: unmapped
   - fr: 01-F2
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/crash-resume.test.ts#01-F2/20 §2.6: every event confirmed before an abrupt abandon survives reopen, gap-free"
+      - "packages/sync-client/src/__acceptance__/crash-resume.test.ts#01-F2/01-F3/20 §2.6: a seeded run of append/ack cycles across abrupt reopens never loses a confirmed event nor leaves a gap"
+      - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F2: append returns the confirmed envelope — store-assigned gap-free lamport, null server_received_at, fields preserved"
+      - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F2/20 §2.6: at append return the event is visible to an independent handle on the same file — persisted, not buffered"
+      - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F2: append with an identity not matching the store throws and persists nothing"
   - fr: 01-F3
     status: green
     tests:
@@ -16,6 +22,11 @@ rows:
       - "packages/domain/src/__acceptance__/envelope.test.ts#01-F3: rejects non-integer sequence and timestamp fields"
       - "packages/sync-protocol/src/__acceptance__/fixtures.test.ts#01-F3/01-F9: the event_batch fixture carries a cloud-assigned non-negative integer global_seq"
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F3/PROTOCOL.md: event_batch events allow an optional non-negative integer global_seq"
+      - "packages/sync-client/src/__acceptance__/crash-resume.test.ts#01-F3: after reopen the next append continues the lamport sequence — no gap, no reuse"
+      - "packages/sync-client/src/__acceptance__/crash-resume.test.ts#01-F2/01-F3/20 §2.6: a seeded run of append/ack cycles across abrupt reopens never loses a confirmed event nor leaves a gap"
+      - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F3: lamport_seq starts at 0 and increments gap-free across appends"
+      - "packages/sync-client/src/__acceptance__/properties.test.ts#01-F3/01-F8: for any interleaving of appends and legal acks, lamport stays gap-free and the unacked set matches the checkpoint model"
+      - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F3: readOwnEvents(fromLamport) is inclusive and stays in lamport order"
   - fr: 01-F4
     status: green
     tests:
@@ -23,6 +34,8 @@ rows:
       - "packages/domain/src/__acceptance__/registry.test.ts#01-F4: parseEvent returns a typed event for a valid order.created envelope, preserving its payload"
       - "packages/domain/src/__acceptance__/registry.test.ts#01-F4: an unknown event type throws UnknownEventTypeError, never silent acceptance"
       - "packages/domain/src/__acceptance__/registry.test.ts#01-F4: a malformed payload for a known type is a parse failure, not silent acceptance"
+      - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F4: an unknown event type throws and persists nothing"
+      - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F4: an invalid payload for a known type throws and persists nothing"
   - fr: 01-F5
     status: unmapped
   - fr: 01-F6
@@ -36,6 +49,18 @@ rows:
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F8: push.watermark is a non-negative integer — 0 accepted, negatives and fractions rejected"
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F8: push_ack.acked_watermark is a non-negative integer — 0 accepted, negatives and fractions rejected"
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F8: push.events must be valid domain EventEnvelopes (envelope minus lamport_seq rejects)"
+      - "packages/sync-client/src/__acceptance__/crash-resume.test.ts#01-F8/20 §2.6: the unacked tail re-drains identically after reopen — same events, same order, checkpoint intact"
+      - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F8: nextBatch returns unacked events oldest-first in lamport order and respects max"
+      - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F8/19 §5: advanceTo acks everything at or below the watermark — partial ack is legal"
+      - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F8: advanceTo is idempotent and a lower watermark never regresses the checkpoint"
+      - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F8/18 §4: advanceTo beyond own_high_water throws AckBeyondAppendedError and changes nothing"
+      - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F8/19 §5: advanceTo rejects NaN, negative, and fractional watermarks — the checkpoint never silently regresses"
+      - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F8: advanceTo on an empty store throws AckBeyondAppendedError for any watermark"
+      - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F8: acked events remain readable — the events table is the ledger copy, not a delivery buffer"
+      - "packages/sync-client/src/__acceptance__/properties.test.ts#01-F3/01-F8: for any interleaving of appends and legal acks, lamport stays gap-free and the unacked set matches the checkpoint model"
+      - "packages/sync-client/src/__acceptance__/properties.test.ts#01-F8: drain content is independent of batch size — chunked drains concatenate to the full tail"
+      - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F8: re-append of an already-stored id returns the stored envelope unchanged and assigns no new lamport"
+      - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F8/18 §4: re-append of a stored id with divergent content throws and changes nothing — idempotency is for identical retries only"
   - fr: 01-F9
     status: green
     tests:
@@ -44,7 +69,9 @@ rows:
   - fr: 01-F10
     status: unmapped
   - fr: 01-F11
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F11: status is null/zero before any activity and reflects appends, acks, and pull position"
   - fr: 01-F12
     status: unmapped
   - fr: 01-F13
