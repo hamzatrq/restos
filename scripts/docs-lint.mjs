@@ -18,7 +18,7 @@ const zero = read("specs/00-platform-overview.md");
 // C1 — routing completeness: every numbered spec (except 00) referenced in AGENTS.md; every spec + DECISIONS in 00 §1 index.
 for (const f of specFiles) {
   const nn = f.slice(0, 2);
-  if (nn !== "00" && !new RegExp("`" + nn + "( §[^`]*)?`").test(agents))
+  if (nn !== "00" && !new RegExp(`\`${nn}( §[^\`]*)?\``).test(agents))
     err(`AGENTS.md routing: spec ${f} (\`${nn}\`) not referenced`);
   if (nn !== "00" && !zero.includes(f)) err(`00 §1 index: ${f} missing`);
 }
@@ -30,7 +30,7 @@ const defs = new Map(); // id -> file:line
 const defRe = /^\s*-\s+\*{0,2}(\d{2}-[FN]\d+[a-z]?)\b/;
 for (const f of specFiles) {
   const nn = f.slice(0, 2);
-  read("specs/" + f)
+  read(`specs/${f}`)
     .split("\n")
     .forEach((line, i) => {
       const m = line.match(defRe);
@@ -39,7 +39,7 @@ for (const f of specFiles) {
       if (defs.has(id))
         err(`duplicate FR definition ${id}: ${defs.get(id)} and specs/${f}:${i + 1}`);
       else defs.set(id, `specs/${f}:${i + 1}`);
-      if (!id.startsWith(nn + "-"))
+      if (!id.startsWith(`${nn}-`))
         err(`FR ${id} defined in specs/${f}:${i + 1} — prefix does not match owning doc`);
     });
 }
@@ -49,7 +49,7 @@ const refRe = /\b(\d{2}-[FN]\d+[a-z]?)\b/g;
 const corpus = [
   ["AGENTS.md", agents],
   ["restaurant-os.md", master],
-  ...specFiles.map((f) => ["specs/" + f, read("specs/" + f)]),
+  ...specFiles.map((f) => [`specs/${f}`, read(`specs/${f}`)]),
 ];
 for (const [name, text] of corpus) {
   text.split("\n").forEach((line, i) => {
@@ -72,7 +72,7 @@ if (block(master, "restaurant-os.md") !== block(zero, "specs/00"))
 
 // C5 — size caps (23-F3): specs ≤ 360 lines; AGENTS.md ≤ 120.
 for (const f of specFiles) {
-  const n = read("specs/" + f).split("\n").length;
+  const n = read(`specs/${f}`).split("\n").length;
   if (n > 360)
     err(`specs/${f}: ${n} lines exceeds the 23-F3 cap (360) — split by ownership boundary`);
 }
@@ -81,7 +81,7 @@ if (agents.split("\n").length > 120)
 
 if (errors.length) {
   console.error(
-    `docs-lint: ${errors.length} finding(s)\n` + errors.map((e) => "  ✗ " + e).join("\n"),
+    `docs-lint: ${errors.length} finding(s)\n${errors.map((e) => `  ✗ ${e}`).join("\n")}`,
   );
   process.exit(1);
 }
