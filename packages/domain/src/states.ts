@@ -39,7 +39,8 @@ export type LineStateResult = {
 
 /** Pure fold step (01-F34/F35): terminals never regress; illegal jumps never apply. */
 export const applyLineState = (current: OrderLineState, next: OrderLineState): LineStateResult => {
-  if (TERMINAL.has(current)) return { state: current, applied: false, anomaly: "terminal_regression" };
+  if (TERMINAL.has(current))
+    return { state: current, applied: false, anomaly: "terminal_regression" };
   if (LEGAL_NEXT[current].includes(next)) return { state: next, applied: true };
   return { state: current, applied: false, anomaly: "illegal_transition" };
 };

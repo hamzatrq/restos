@@ -53,7 +53,9 @@ export const messageSchemas = {
   pong: z.object({ v, kind: z.literal("pong"), t: z.number().int() }),
 } as const;
 
-export const MESSAGE_KINDS = Object.keys(messageSchemas) as readonly (keyof typeof messageSchemas)[];
+export const MESSAGE_KINDS = Object.keys(
+  messageSchemas,
+) as readonly (keyof typeof messageSchemas)[];
 export type MessageKind = keyof typeof messageSchemas;
 
 const union = z.discriminatedUnion("kind", [
@@ -82,7 +84,8 @@ export class UnknownMessageKindError extends Error {
 export const parseMessage = (value: unknown): ProtocolMessage => {
   if (typeof value === "object" && value !== null && "kind" in value) {
     const kind = (value as { kind: unknown }).kind;
-    if (typeof kind !== "string" || !(kind in messageSchemas)) throw new UnknownMessageKindError(kind);
+    if (typeof kind !== "string" || !(kind in messageSchemas))
+      throw new UnknownMessageKindError(kind);
   }
   return union.parse(value);
 };

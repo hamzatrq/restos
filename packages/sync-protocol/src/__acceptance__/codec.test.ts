@@ -1,8 +1,9 @@
 // Acceptance tests — T-01-02 codec law (kernel-tasks contract, 20 §2.3):
 // decodeMessage(encodeMessage(m)) deep-equals m for every valid message.
-import { describe, it, expect } from "vitest";
+
 import fc from "fast-check";
-import { parseMessage, encodeMessage, decodeMessage } from "../index.js";
+import { describe, expect, it } from "vitest";
+import { decodeMessage, encodeMessage, parseMessage } from "../index.js";
 import { builders } from "./builders.js";
 
 describe("codec round-trip (20 §2.3)", () => {

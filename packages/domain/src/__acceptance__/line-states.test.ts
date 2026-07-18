@@ -1,8 +1,9 @@
 // Acceptance tests — T-01-01 (authored from spec text only; see plans/wave-0/kernel-tasks.md).
 // Canonical line-state chain per 01 §4; terminal monotonicity per 01-F35.
-import { describe, it, expect } from "vitest";
+
 import fc from "fast-check";
-import { ORDER_LINE_STATES, TERMINAL_LINE_STATES, applyLineState } from "../index.js";
+import { describe, expect, it } from "vitest";
+import { applyLineState, ORDER_LINE_STATES, TERMINAL_LINE_STATES } from "../index.js";
 
 const ALL = ORDER_LINE_STATES as readonly string[];
 const TERMINAL = TERMINAL_LINE_STATES as readonly string[];

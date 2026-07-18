@@ -1,7 +1,8 @@
 // Acceptance tests — T-01-02 domain addition (01-F39), authored from the
 // kernel-tasks binding contract + specs/01-kernel-sync.md §3 only.
-import { describe, it, expect } from "vitest";
+
 import { DEVICE_CLASSES, HUB_ELIGIBLE_CLASSES } from "@restos/domain";
+import { describe, expect, it } from "vitest";
 
 describe("device classes (01-F39)", () => {
   it("01-F39: DEVICE_CLASSES is exactly the six device classes", () => {

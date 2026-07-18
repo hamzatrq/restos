@@ -1,8 +1,9 @@
 // Acceptance tests — T-01-01 (authored from spec text only; see plans/wave-0/kernel-tasks.md).
 // Conventions under test: 00 §6 (UUIDv7 ids, integer paisas/mg/ml/units, no floats in ledgers).
-import { describe, it, expect } from "vitest";
+
 import fc from "fast-check";
-import { newId, paisa, mg, ml, units, addPaisa, subPaisa, sumPaisa } from "../index.js";
+import { describe, expect, it } from "vitest";
+import { addPaisa, mg, ml, newId, paisa, subPaisa, sumPaisa, units } from "../index.js";
 
 describe("ids (00 §6)", () => {
   it("00 §6: newId returns UUIDv7-format strings", () => {
@@ -39,10 +40,13 @@ describe("money and quantity brands (00 §6)", () => {
 
   it("00 §6: sumPaisa equals the bigint-exact sum for any integer array (no float drift)", () => {
     fc.assert(
-      fc.property(fc.array(fc.integer({ min: 0, max: 1_000_000_000 }), { maxLength: 200 }), (ns) => {
-        const exact = ns.reduce((acc, n) => acc + BigInt(n), 0n);
-        expect(BigInt(sumPaisa(ns.map((n) => paisa(n))))).toBe(exact);
-      }),
+      fc.property(
+        fc.array(fc.integer({ min: 0, max: 1_000_000_000 }), { maxLength: 200 }),
+        (ns) => {
+          const exact = ns.reduce((acc, n) => acc + BigInt(n), 0n);
+          expect(BigInt(sumPaisa(ns.map((n) => paisa(n))))).toBe(exact);
+        },
+      ),
     );
   });
 

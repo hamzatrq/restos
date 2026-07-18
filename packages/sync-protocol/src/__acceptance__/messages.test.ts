@@ -1,8 +1,9 @@
 // Acceptance tests — T-01-02 (authored from PROTOCOL.md + kernel-tasks contract only).
 // Message vocabulary and per-kind body validation. FRs: 01-F8, 01-F9, 01-F37, 01-F39, 01-F40.
-import { describe, it, expect } from "vitest";
-import { MESSAGE_KINDS, parseMessage, UnknownMessageKindError } from "../index.js";
+
 import { DEVICE_CLASSES } from "@restos/domain";
+import { describe, expect, it } from "vitest";
+import { MESSAGE_KINDS, parseMessage, UnknownMessageKindError } from "../index.js";
 import { builders, without } from "./builders.js";
 
 const KINDS_PER_PROTOCOL_MD = [

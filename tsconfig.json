@@ -1,14 +1,7 @@
 {
   "extends": "./packages/config/tsconfig.base.json",
-  "include": [
-    "apps/*/src",
-    "services/*/src",
-    "packages/*/src",
-    "scripts"
-  ],
+  "include": ["apps/*/src", "services/*/src", "packages/*/src", "scripts"],
   "compilerOptions": {
-    "types": [
-      "node"
-    ]
+    "types": ["node"]
   }
 }

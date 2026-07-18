@@ -1,14 +1,14 @@
 // @restos/sync-protocol — wire types shared by sync-client and sync-gateway
 // (PROTECTED PATH, 20 §4.4). Owning spec: 01 §8; design: PROTOCOL.md.
 export {
-  PROTOCOL_VERSION,
+  decodeMessage,
+  encodeMessage,
   MESSAGE_KINDS,
   type MessageKind,
-  type ProtocolMessage,
   messageSchemas,
-  WireEnvelope,
+  PROTOCOL_VERSION,
+  type ProtocolMessage,
   parseMessage,
-  encodeMessage,
-  decodeMessage,
   UnknownMessageKindError,
+  WireEnvelope,
 } from "./messages.js";

@@ -1,6 +1,6 @@
 // Acceptance tests — T-01-01 (authored from spec text only; see plans/wave-0/kernel-tasks.md).
 // Envelope shape per 00 §6; ordering fields (lamport_seq, server_received_at) per 01-F3.
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { newId, parseEnvelope } from "../index.js";
 
 const validEnvelope = () => ({
@@ -29,7 +29,9 @@ describe("event envelope (01-F3, 00 §6)", () => {
   });
 
   it("01-F3: server_received_at is null before cloud merge and an integer after", () => {
-    expect(parseEnvelope({ ...validEnvelope(), server_received_at: null }).server_received_at).toBeNull();
+    expect(
+      parseEnvelope({ ...validEnvelope(), server_received_at: null }).server_received_at,
+    ).toBeNull();
     const merged = { ...validEnvelope(), server_received_at: 1752800001234 };
     expect(parseEnvelope(merged).server_received_at).toBe(merged.server_received_at);
   });
@@ -48,8 +50,12 @@ describe("event envelope (01-F3, 00 §6)", () => {
     const base = validEnvelope();
     expect(parseEnvelope(base).lamport_seq).toBe(base.lamport_seq); // anchors the rejections below
     expect(() => parseEnvelope({ ...validEnvelope(), lamport_seq: 1.5 })).toThrow();
-    expect(() => parseEnvelope({ ...validEnvelope(), device_created_at: 1752800000000.5 })).toThrow();
-    expect(() => parseEnvelope({ ...validEnvelope(), server_received_at: 1752800000000.5 })).toThrow();
+    expect(() =>
+      parseEnvelope({ ...validEnvelope(), device_created_at: 1752800000000.5 }),
+    ).toThrow();
+    expect(() =>
+      parseEnvelope({ ...validEnvelope(), server_received_at: 1752800000000.5 }),
+    ).toThrow();
   });
 
   it("00 §6: rejects a missing schema_version and a schema_version below 1", () => {

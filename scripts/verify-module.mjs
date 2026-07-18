@@ -33,7 +33,7 @@ const defRe = /^\s*-\s+\*{0,2}(\d{2}-[FN]\d+[a-z]?)\b/;
 const universe = [];
 for (const line of readFileSync(join(ROOT, "specs", specFile), "utf8").split("\n")) {
   const m = line.match(defRe);
-  if (m && m[1].startsWith(`${nn}-`)) universe.push(m[1]);
+  if (m?.[1].startsWith(`${nn}-`)) universe.push(m[1]);
 }
 
 // Run each workspace's suite with the JSON reporter; derive even when red.

@@ -1,7 +1,7 @@
 // Acceptance tests — T-01-01 (authored from spec text only; see plans/wave-0/kernel-tasks.md).
 // Typed event registry per 01-F4; payment payload contracts per 01-F29 / 01-F31.
-import { describe, it, expect } from "vitest";
-import { newId, eventRegistry, parseEvent, UnknownEventTypeError } from "../index.js";
+import { describe, expect, it } from "vitest";
+import { eventRegistry, newId, parseEvent, UnknownEventTypeError } from "../index.js";
 
 const envelope = (type: string, payload: unknown) => ({
   id: newId(),
@@ -61,7 +61,9 @@ describe("typed event registry (01-F4)", () => {
 
   it("01-F4: a malformed payload for a known type is a parse failure, not silent acceptance", () => {
     // Anchor: the same known type parses when the payload is well-formed.
-    expect(parseEvent(envelope("payment.recorded", recordedPayload())).type).toBe("payment.recorded");
+    expect(parseEvent(envelope("payment.recorded", recordedPayload())).type).toBe(
+      "payment.recorded",
+    );
     expect(() => parseEvent(envelope("order.line_state_changed", {}))).toThrow();
     expect(() =>
       parseEvent(envelope("payment.recorded", { ...recordedPayload(), amount_paisa: 450.5 })),

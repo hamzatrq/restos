@@ -6,9 +6,9 @@
 // specs/01-kernel-sync.md §8 / PROTOCOL.md (20 §2.7) — never regenerate casually.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, it, expect } from "vitest";
-import { decodeMessage, encodeMessage } from "../index.js";
 import { DEVICE_CLASSES } from "@restos/domain";
+import { describe, expect, it } from "vitest";
+import { decodeMessage, encodeMessage } from "../index.js";
 
 const fixtureText = (name: string): string =>
   readFileSync(fileURLToPath(new URL(`./fixtures/${name}.json`, import.meta.url)), "utf8");
