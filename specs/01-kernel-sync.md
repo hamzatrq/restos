@@ -56,7 +56,7 @@ All tiers and profiles run the identical kernel. A T1 single-terminal restaurant
 
 **Identity & auth**
 - 01-F25 Org → Branch (type: branch | prep_kitchen | storage) → Device (registered, class-typed, revocable token). Registration is a one-time pairing via back office code; a revoked device loses cloud+LAN participation on next contact and is flagged branch-wide.
-- 01-F26 User × Role × per-location assignment; permission overrides per user; PIN (Argon2id) unlock on shared devices; idle auto-lock (device-layer setting). The permission matrix from v1 spec §2.2 is the seed; roles are permission sets, not apps.
+- 01-F26 User × Role × per-location assignment; permission overrides per user; PIN (Argon2id) unlock on shared devices; idle auto-lock (device-layer setting). The permission matrix from `restaurant-os.md` Appendix A is the seed; roles are permission sets, not apps.
 - 01-F27 Server-side authorization on every API/sync operation; device tokens carry device identity only — user identity comes from the PIN session; both are validated server-side (and hub-side on LAN, with cloud reconciliation).
 - 01-F28 Offline auth: PIN verification works on-device against synced credential hashes; role changes propagate as reference data.
 

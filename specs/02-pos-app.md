@@ -1,6 +1,6 @@
 # 02 — POS / Counter App
 
-**Module spec — Draft 1, July 2026** · Parent: `00-platform-overview.md` (conventions §5–§7 inherited), `01-kernel-sync.md` (events, sync, auth). Mines v1 spec Module A (§3.1) for behavior detail. Wave 1.
+**Module spec — Draft 1, July 2026** · Parent: `00-platform-overview.md` (conventions §5–§7 inherited), `01-kernel-sync.md` (events, sync, auth). Seed detail: `restaurant-os.md` Appendix B. Wave 1.
 
 ## 1. Purpose & scope
 
@@ -68,7 +68,7 @@ All tiers run it. In **T1 the POS is the entire restaurant** — one device, pri
 - 02-F23 Shift close per cashier (`shift.closed`):
   - system-expected cash (by method) vs counted cash; over/short recorded and attributed;
   - the cashier sees their own reconciliation on-screen at close ("I'm clean") — the staff-protection framing;
-  - cashiers see only their own shifts (v1 §2.2); cross-cashier views belong to manager/owner surfaces (docs 05/12).
+  - cashiers see only their own shifts (`restaurant-os.md` Appendix A); cross-cashier views belong to manager/owner surfaces (docs 05/12).
 - 02-F24 Day close: manager cash count + deposit record → `day.closed`, `cash.deposit_recorded`; a day-summary ticket (sales by channel, voids/comps/discounts, over/short) can be printed via doc 03. Day close triggers the owner nightly summary (doc 12).
 - 02-F25 Manager-attributed day/cash flows are also executable from the manager console — the ownership boundary is defined in doc 05 §3; the POS retains the full fallback so a branch without a manager phone loses nothing.
 - 02-F26 Paid-outs/petty cash: reason + receipt photo (object storage ref) → `cash.paid_out`; approval above threshold per doc 05.
@@ -138,7 +138,7 @@ All tiers run it. In **T1 the POS is the entire restaurant** — one device, pri
 - 02-N1 Inherited targets apply unchanged (00 §5.3): line add < 100 ms, confirm → KOT start < 2 s, cold start < 6 s — on the PKR 25k reference tablet and the old-Windows-10 reference PC.
 - 02-N2 Menu grid stays within the 100 ms line-add budget at 300 menu items × 5 variants; search results < 150 ms keystroke-to-render.
 - 02-N3 Phone entry (02-F28) and quick entry (02-F30) each ≤ 30 s, measured in release builds.
-- 02-N4 ≥ 5 concurrent POS devices per branch stay LAN-coherent (v1 §7) within kernel propagation targets (01-F15).
+- 02-N4 ≥ 5 concurrent POS devices per branch stay LAN-coherent (`restaurant-os.md` Appendix G) within kernel propagation targets (01-F15).
 - 02-N5 A parked order is plug-pull safe the moment the park action returns (00 §5.2).
 - 02-N6 Any core cashier flow learnable in < 15 min (00 §5.6) — validated with real staff at dev-pilots before Wave 1 sign-off.
 

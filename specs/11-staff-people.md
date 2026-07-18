@@ -10,7 +10,7 @@ The people plane: attendance, the advances/baqaya ledger, basic shift scheduling
 - **Who uses it:** every staff member (clock-in/out, own record self-view), branch manager (schedules, checklist oversight, handovers), owner (ledger, exports, completion visibility via docs 12/14), external accountant (CSV exports).
 - **Runs on:** cloud service + surfaces embedded in existing branch devices (POS doc 02, pass/KDS doc 03, manager console doc 05 — no separate staff app) + back office (doc 14) + owner app (doc 12).
 - **Tiers/profiles:** all tiers, all profiles.
-- **Framing (v1 §2, binding):** every feature doubles as protection *for* the staff member — attendance provable, advance balance provable, "I completed my checklist" provable. This is the adoption unlock.
+- **Framing (`restaurant-os.md` Appendix A, binding):** every feature doubles as protection *for* the staff member — attendance provable, advance balance provable, "I completed my checklist" provable. This is the adoption unlock.
 
 ## 2. Position in platform
 
@@ -145,7 +145,7 @@ Cross-cutting NFRs inherited from 00 §5. Module-specific:
 ## 9. Open questions
 
 1. Staff personal-phone access (view schedule/balance via WhatsApp doc 07 or a thin PWA) — policy, privacy, and template-message cost; branch-device-only is the shipped baseline.
-2. Whether wage rates ever enter the system to power labor-cost % on branch comparison (v1 §3.2 B4 mentions it) — tension with the no-salary-computation stance; decide together with a future accountant workspace.
+2. Whether wage rates ever enter the system to power labor-cost % on branch comparison (the original dashboard seed mentioned it) — tension with the no-salary-computation stance; decide together with a future accountant workspace.
 3. Advance dispute flow depth — is a two-party correction event enough, or is an owner-mediated resolution screen needed?
 4. Selfie retention period — evidence value vs privacy and storage (default proposal: 90 days, then thumbnail only).
 5. Schedule-change notifications to staff personal numbers (WhatsApp template cost) vs on-device-only.

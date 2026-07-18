@@ -1,6 +1,6 @@
 # 10 — Inventory & Supply
 
-**Module spec — Draft 1, July 2026** · Parent: `00-platform-overview.md` (conventions §5–§7 inherited), `01-kernel-sync.md` (ledger, catalog, sync contracts). v1 reference detail: `../restaurant-os-spec.md` §3.3 (Module C) — carried over wholesale unless amended here. Wave 3; prep planning and forecasting thicken into Wave 4.
+**Module spec — Draft 1, July 2026** · Parent: `00-platform-overview.md` (conventions §5–§7 inherited), `01-kernel-sync.md` (ledger, catalog, sync contracts). Seed: `restaurant-os.md` Appendix D — carried over wholesale unless amended here. Wave 3; prep planning and forecasting thicken into Wave 4.
 
 ## 1. Purpose & scope
 
@@ -9,7 +9,7 @@ The supply plane: theoretical stock maintained by recipe-chain deduction from th
 - **Who uses it:** storekeeper/purchaser (photo invoices, counts, transfers), chef/prep staff (prep suggestions, production entry), branch manager (alerts, discrepancies), owner (variance/purchase/wastage views via doc 12). Recipes and par levels are set up by the vendor onboarding team via doc 15 tooling — **owners never do recipe data entry**.
 - **Runs on:** cloud service (deduction, variance, forecasting) + back office UI (doc 14) + mobile flows on branch devices (docs 02/05 host the count, invoice, wastage, production surfaces).
 - **Tiers/profiles:** all tiers. Value is gated by tracked-item onboarding, not hardware tier. Multi-branch orgs additionally get transfers between branch/prep_kitchen/storage locations.
-- **Discipline (v1 §3.3 C2, binding):** track only the top 10–20 high-cost ingredients (~70% of food cost). Staff gain at most two new habits: photographing purchase invoices and the periodic guided count. Everything else is a side-effect or derived.
+- **Discipline (`restaurant-os.md` Appendix D, binding):** track only the top 10–20 high-cost ingredients (~70% of food cost). Staff gain at most two new habits: photographing purchase invoices and the periodic guided count. Everything else is a side-effect or derived.
 
 ## 2. Position in platform
 
@@ -50,7 +50,7 @@ The supply plane: theoretical stock maintained by recipe-chain deduction from th
 - 10-F17 Guided count on a phone/tablet: tracked items only, presented in per-location storage-layout order, tap-to-enter quantities; target ≤ 15 min; resumable within the same business day → `stock.count_recorded`. *(Scheduled verified ritual.)*
 - 10-F18 Variance per item for the period since last count: opening + purchases + transfers-in − theoretical consumption − wastage − transfers-out = expected closing; vs counted. Gap valued in PKR at moving-average cost.
 - 10-F19 Attribution hints, never accusation: "gap concentrated on days X, Y", "gap exceeds all voids+wastage logged", transfer-discrepancy correlation, steady-small-gap over-portioning signature. The count writes an adjustment movement referencing the count event, resetting the theoretical baseline.
-- 10-F20 Count schedule per org (2–3×/week presets). An overdue count raises `stock.count_overdue_flagged` to manager/owner — the "count skipped" nag of v1 §10.2.
+- 10-F20 Count schedule per org (2–3×/week presets). An overdue count raises `stock.count_overdue_flagged` to manager/owner — the count-skipped nag backing risk §9.4 (`restaurant-os.md`).
 
 **Alerts**
 - 10-F21 Low stock: theoretical level below par (per item per location) → `stock.low_level_flagged`, deduped per item per business day, surfaced docs 05/12. Automatic 86-ing is doc 13's autonomy ladder, not this module.
@@ -149,7 +149,7 @@ Cross-cutting NFRs inherited from 00 §5. Module-specific:
 - Deduction is a deterministic fold keyed by (order line id, recipe version) — idempotent, replayable, property-tested alongside 01-N1.
 - Moving-average cost arithmetic: integer paisas, round half-up at movement granularity; property test proves no cumulative drift vs exact rational computation.
 - Statistics are pure TS (no ML dependencies): trailing means + same-weekday seasonality; every suggestion/forecast stores its input points as JSON for UI evidence and doc 13 citations.
-- OCR for invoices deliberately deferred (see §9); the prefill + fast-confirm form is the shipped baseline (v1 §3.3 C4).
+- OCR for invoices deliberately deferred (see §9); the prefill + fast-confirm form is the shipped baseline (`restaurant-os.md` Appendix D).
 - Count and invoice flows get Maestro tests; the rush-simulation replay (00 §4) is extended with an inventory-fold determinism assertion.
 
 ## 9. Open questions
@@ -157,5 +157,5 @@ Cross-cutting NFRs inherited from 00 §5. Module-specific:
 1. Invoice OCR assist — when to add, and on-device vs cloud (cost/latency vs privacy of supplier pricing).
 2. Daypart boundaries: platform-wide preset (lunch / evening / late) vs org-adjustable — bias to preset.
 3. Prepared-item shelf-life/expiry tracking — currently out; revisit if pilot wastage patterns demand it.
-4. Central-kitchen indenting and production planning at multi-branch scale (v1 Phase 3) — this module's transfer + forecast primitives are the substrate; where the workflow lands is undecided.
+4. Central-kitchen indenting and production planning at multi-branch scale (year-2+ scope) — this module's transfer + forecast primitives are the substrate; where the workflow lands is undecided.
 5. Whether derived deduction rows should be periodically checkpointed as events for external audit export, or remain projection-only.

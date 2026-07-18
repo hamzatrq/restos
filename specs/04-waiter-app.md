@@ -1,6 +1,6 @@
 # 04 — Waiter Handheld
 
-**Module spec — Draft 1, July 2026** · Parent: `00-platform-overview.md` (conventions §5–§7 inherited), `01-kernel-sync.md`. T3 surface, Wave 4. Mines v1 spec Phase 2 (waiter/captain handheld) for scope discipline.
+**Module spec — Draft 1, July 2026** · Parent: `00-platform-overview.md` (conventions §5–§7 inherited), `01-kernel-sync.md`. T3 surface, Wave 4.
 
 ## 1. Purpose & scope
 

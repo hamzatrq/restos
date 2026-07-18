@@ -1,12 +1,12 @@
 # 08 — Aggregator Ingestion (foodpanda first)
 
-**Module spec — Draft 1, July 2026** · Status: draft for review · Parent: `00-platform-overview.md` (conventions §5–§7 inherited), `01-kernel-sync.md`. Concept refs: v2 concept §4.2 (foodpanda), §9 risk 2; v1 spec §3.4 (Module D detail). Wave 1 (manual mode) / Wave 4 (API mode).
+**Module spec — Draft 1, July 2026** · Status: draft for review · Parent: `00-platform-overview.md` (conventions §5–§7 inherited), `01-kernel-sync.md`. Concept refs: `restaurant-os.md` §4.2 (foodpanda), §9 risk 2, Appendix E (ingestion seed). Wave 1 (manual mode) / Wave 4 (API mode).
 
 ## 1. Purpose & scope
 
 Aggregator orders must land in the same kernel queue as every other channel — channel-tagged, KOT-printed, inventory-deducted — without staff re-keying. Two modes, both permanent:
 
-- **Mode 1 — manual quick-entry (Wave 1, always available):** a 30-second channel-tagged order entry on POS. The UI lives in doc 02; **this doc owns the mapping model and channel semantics** the UI implements. Mode 1 is the standing fallback for any org without API access, and the risk hedge if API access tightens market-wide (v1 spec §10.1).
+- **Mode 1 — manual quick-entry (Wave 1, always available):** a 30-second channel-tagged order entry on POS. The UI lives in doc 02; **this doc owns the mapping model and channel semantics** the UI implements. Mode 1 is the standing fallback for any org without API access, and the risk hedge if API access tightens market-wide (`restaurant-os.md` Appendix E).
 - **Mode 2 — Delivery Hero POS API (Wave 4):** direct order ingestion for Pakistan, menu mapping, availability push, and store pause — behind a **generic aggregator-driver interface** of which foodpanda is the first implementation. Careem Now and others are later drivers, never later systems (design law 4 applied to third-party doors).
 
 Used by: counter staff (Mode 1), the kitchen and downstream modules (both modes), the onboarding team (menu mapping via doc 15 tooling). Runs as `services/foodpanda` (driver host) plus the POS quick-entry surface.
@@ -132,7 +132,7 @@ Failure path: duplicate webhook delivery → deduped on aggregator order id, sin
 ## 8. Tech notes
 
 - `services/foodpanda` hosts the driver runtime: Fastify webhook endpoints, BullMQ for pushes/retries, Drizzle read models — per 00 §3. Drivers are in-process TS modules implementing 08-F15; no plugin sandboxing needed (first-party code only).
-- DH POS API access: **apply at project start** — partnership lead time is a schedule risk (v1 spec §10.1); Mode 1 is a permanent tier, not a stopgap, so no org is ever blocked on the partnership.
+- DH POS API access: **apply at project start** — partnership lead time is a schedule risk (`restaurant-os.md` §9.2); Mode 1 is a permanent tier, not a stopgap, so no org is ever blocked on the partnership.
 - Menu-mapping tooling (doc 15) imports the foodpanda menu via API where available, else CSV/manual; the mapping validator runs on every catalog publish and on foodpanda menu-change webhooks.
 - Vendor-id ↔ branch binding is per branch: multi-branch orgs have one DH vendor id per outlet.
 - Careem Now (and any future aggregator) enters only through 08-F15/F16; its spec addendum is a capability-flag table + mapping quirks appended to this doc — not a new document.

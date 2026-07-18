@@ -143,7 +143,7 @@ Works in-branch over LAN and remotely over cloud; remote views always carry sync
 
 ## 8. Tech notes
 
-- Expo RN, Android + iOS; APNs matters — many owners/managers carry iPhones (v1 §6.1). Same `packages/sync-client`; the manager device holds a normal full branch slice (trusted role — doc 04's scoped-slice mechanism is not used here).
+- Expo RN, Android + iOS; APNs matters — many owners/managers carry iPhones. Same `packages/sync-client`; the manager device holds a normal full branch slice (trusted role — doc 04's scoped-slice mechanism is not used here).
 - iOS LAN participation needs the local-network permission prompt and falls back to cloud relay when the OS parks the socket; approvals must be correct, not LAN-dependent (05-F8 covers the gap).
 - Channel-pulse windows are computed on-device from the branch stream — no cloud dependency in-branch.
 - Approval interrupts use high-priority push categories (FCM high priority / APNs time-sensitive) so a pocketed phone still buzzes during rush.

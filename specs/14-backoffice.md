@@ -1,6 +1,6 @@
 # 14 — Restaurant Back Office (Web)
 
-**Module spec — Draft 1, July 2026** · Parent: `00-platform-overview.md` (conventions §5–§7 inherited; this module **is** the layer-2 configuration surface of 00 §7). References: `01-kernel-sync.md` (catalog model 01-F21, devices 01-F25, conflict rules), `02/03` (routing targets), `10-inventory-supply.md` (recipes, tracked items), `12-owner-app.md` (report parity), `13-intelligence.md` (autonomy config surface 13-F28), `15-platform-admin.md` (layer-1 boundary), `16-tax-module.md` (tax posture), v1 spec §2.2 (permission matrix seed). **Wave 1+, grows with modules.**
+**Module spec — Draft 1, July 2026** · Parent: `00-platform-overview.md` (conventions §5–§7 inherited; this module **is** the layer-2 configuration surface of 00 §7). References: `01-kernel-sync.md` (catalog model 01-F21, devices 01-F25, conflict rules), `02/03` (routing targets), `10-inventory-supply.md` (recipes, tracked items), `12-owner-app.md` (report parity), `13-intelligence.md` (autonomy config surface 13-F28), `15-platform-admin.md` (layer-1 boundary), `16-tax-module.md` (tax posture), `restaurant-os.md` Appendix A (permission matrix seed). **Wave 1+, grows with modules.**
 
 ## 1. Purpose & scope
 
@@ -19,7 +19,7 @@ Everything here follows **presets, not knobs** (00 §7): a profile + tier choice
 ## 3. Functional requirements
 
 **Shell, scope, audit**
-- 14-F1 Org-scoped: a session sees exactly one org. Role-gated per the permission matrix (v1 §2.2 seed via 01-F26) — e.g. recipe editing only for owner/vendor-onboarding roles; menu/price edit per matrix; managers see only what their role grants.
+- 14-F1 Org-scoped: a session sees exactly one org. Role-gated per the permission matrix (Appendix A seed via 01-F26) — e.g. recipe editing only for owner/vendor-onboarding roles; menu/price edit per matrix; managers see only what their role grants.
 - 14-F2 **Every settings change emits `config.changed`** with actor, entity, before/after values, and a config version bump. No silent edits exist (00 §5.5).
 - 14-F3 The change history of any entity is browsable in place ("price changed by Ali, 2 Jul, 450 → 480") — the audit trail is a first-class UI element, not a hidden log.
 - 14-F4 Changed reference data propagates to devices via kernel sync (01-F21); each config screen shows distribution state ("live on 4 of 5 devices") from sync status (01-F11), honestly aged per 00 §5.7.
@@ -34,7 +34,7 @@ Everything here follows **presets, not knobs** (00 §7): a profile + tier choice
 - 14-F8 Bulk edit: multi-select price adjustment (absolute or %) with preview and a single confirmation, emitted as individual `catalog.changed` events so history stays per-item.
 
 **Recipes (with doc 10)**
-- 14-F9 Two recipe editors, editable by the vendor onboarding team and permitted org users only (v1 §2.2):
+- 14-F9 Two recipe editors, editable by the vendor onboarding team and permitted org users only (Appendix A):
   - **menu recipe:** sold item/variant → ingredient lines (raw or prepared, integer mg/ml/units per 00 §6);
   - **prep recipe:** inputs → prepared output with yield % ("18 kg raw → 15 kg marinated boti").
 - 14-F10 Tracked-item discipline surfaced: the editor shows which ingredients are `is_tracked`, the recipe-coverage % of trailing revenue (feeds the 13-F5 margin precondition), and par levels per location.
@@ -57,7 +57,7 @@ Everything here follows **presets, not knobs** (00 §7): a profile + tier choice
 **Approvals, thresholds, channels, alerts, tax**
 - 14-F18 Approval thresholds, adjustable within platform-designed bounds only:
   - discount % ceiling before manager PIN is required;
-  - void-after-KOT rules (always PIN + reason per v1 §2.2);
+  - void-after-KOT rules (always PIN + reason per Appendix A);
   - comp rules and per-shift comp value ceiling.
 - 14-F19 Channel configuration, gated by layer-1 channel flags (doc 15):
   - enable/disable storefront modes — QR dine-in / pickup / delivery (doc 06);
@@ -133,7 +133,7 @@ This module is the layer-2 surface — §3 enumerates exactly which settings exi
 - **Layer 1 (doc 15):** which modules/tiers/channels are even visible here (feature gates); take-rate % (read-only here, 14-F20).
 - **Layer 2:** everything in §3 — that is this module's purpose.
 - **Layer 3 (device):** not set here, except the device detail page delegates device-layer settings (float, idle-lock) for convenience — recorded as that device's own config events.
-- **Deliberately not configurable:** anything declared platform law in 01 §7; the permission matrix's hard rules (no role edits history — v1 §2.2); signal-ownership options beyond the designed role list; free-form roles, workflow states, or report builders; thresholds outside designed bounds.
+- **Deliberately not configurable:** anything declared platform law in 01 §7; the permission matrix's hard rules (no role edits history — `restaurant-os.md` Appendix A); signal-ownership options beyond the designed role list; free-form roles, workflow states, or report builders; thresholds outside designed bounds.
 
 ## 8. Tech notes
 

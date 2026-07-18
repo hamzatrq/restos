@@ -1,6 +1,6 @@
 # 03 — Kitchen & Fulfillment: Printing Service, Pass Screen, KDS, Timing Pipeline
 
-**Module spec — Draft 1, July 2026** · Parent: `00-platform-overview.md` (conventions §5–§7 inherited), `01-kernel-sync.md`. Mines v1 spec §6.3 (printing) and §3.1 A2 (KOT). Wave 1 (printing + pass screen); KDS station routing ships with the T3 mesh (Wave 4).
+**Module spec — Draft 1, July 2026** · Parent: `00-platform-overview.md` (conventions §5–§7 inherited), `01-kernel-sync.md`. Seed detail: `restaurant-os.md` Appendix G (printing) and Appendix B (KOT). Wave 1 (printing + pass screen); KDS station routing ships with the T3 mesh (Wave 4).
 
 ## 1. Purpose & scope
 

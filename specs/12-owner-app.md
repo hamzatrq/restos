@@ -1,6 +1,6 @@
 # 12 — Owner App
 
-**Module spec — Draft 1, July 2026** · Parent: `00-platform-overview.md` (conventions §5–§7 inherited). References: `01-kernel-sync.md` (events, auth), `13-intelligence.md` (brief/alerts/analyst brains), `07-whatsapp-channel.md` (companion surface), `10-inventory-supply.md` (stock variance source), `14-backoffice.md` (where all thresholds are configured), v1 spec §3.2 (Module B detail). **Wave 1 basic · Wave 4 full.**
+**Module spec — Draft 1, July 2026** · Parent: `00-platform-overview.md` (conventions §5–§7 inherited). References: `01-kernel-sync.md` (events, auth), `13-intelligence.md` (brief/alerts/analyst brains), `07-whatsapp-channel.md` (companion surface), `10-inventory-supply.md` (stock variance source), `14-backoffice.md` (where all thresholds are configured), `restaurant-os.md` Appendix C (dashboard seed). **Wave 1 basic · Wave 4 full.**
 
 ## 1. Purpose & scope
 
@@ -40,7 +40,7 @@ Wave 1 slice: nightly auto-summary + live view. Wave 4: exception alerts, report
 
 **Nightly auto-summary (W1)**
 - 12-F9 A push notification is delivered per business day per branch (plus org roll-up when >1 branch), triggered by `day.closed`, or at a hard deadline (org-configurable, default 23:30) with an explicit "day not closed yet — figures provisional" banner.
-- 12-F10 Summary content (v1 §3.2 B1), each block independently renderable and testable:
+- 12-F10 Summary content (`restaurant-os.md` Appendix C), each block independently renderable and testable:
   - sales total & order count by channel;
   - cash expected vs counted per cashier, with over/short highlighted;
   - voids, comps, discounts — count, value, and by whom;
@@ -66,7 +66,7 @@ Wave 1 slice: nightly auto-summary + live view. Wave 4: exception alerts, report
 - 12-F18 Alerts respect org quiet hours (doc 14 setting) except classes marked critical (e.g. cash variance above the critical threshold); deferred alerts deliver at quiet-hours end. An alert inbox lists open and acknowledged alerts with filters by class and branch.
 
 **Reports & exports (W4)**
-- 12-F19 Reports are deliberately few (v1 §3.2 B4) — exactly three at launch:
+- 12-F19 Reports are deliberately few (`restaurant-os.md` Appendix C) — exactly three at launch:
   - **item profitability** — revenue, theoretical food cost, margin per item; items without recipe data show "no recipe" rather than a fabricated cost;
   - **branch comparison** — branches side by side, identical columns (sales, food cost %, variance, voids/comps);
   - **channel economics** — per channel, net of commission % and own-channel take-rate, using the org's configured rates (docs 14/15).

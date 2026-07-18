@@ -57,9 +57,9 @@ No other states exist; surfaces may not invent intermediate ones (e.g. "arriving
 - 09-F13 Offline tolerance: every status tap persists locally first (01-F2) and queues in the outbox; the app pushes on any connectivity — riders lose signal constantly. The UI marks each event "synced / waiting for signal" honestly. Events carry `device_created_at`, so timing analytics use true action time, not sync time.
 - 09-F14 English-only UI (00 §5.6); the entire rider flow is learnable < 15 min — three screens total: order list, order detail, my cash/history.
 
-**COD settlement (mirror of cashier shift close, v1 spec A5)**
+**COD settlement (mirror of cashier shift close, `restaurant-os.md` Appendix B)**
 - 09-F15 Settlement is initiated at the counter/manager surface when the rider returns: the system shows expected cash = Σ COD of the rider's delivered-unsettled orders. Counted cash is entered; `rider.settled` records `{ order_ids, expected_paisas, returned_paisas, over_short_paisas, settled_by }`. Orders still out (assigned/picked-up) are excluded and carry forward. Partial settlement of the delivered set is not allowed — it is all delivered-unsettled orders at that moment.
-- 09-F16 Over/short is recorded and **attributed to the rider**, mirroring cashier over/short: visible to the rider in their app ("I'm clean" protection framing, v1 spec §2), on the manager day view (doc 05), in owner reporting (doc 12), and on the staff ledger (doc 11). Over/short beyond an org threshold requires manager-PIN approval to close (approval-interrupt pattern, doc 05).
+- 09-F16 Over/short is recorded and **attributed to the rider**, mirroring cashier over/short: visible to the rider in their app ("I'm clean" protection framing, `restaurant-os.md` Appendix A), on the manager day view (doc 05), in owner reporting (doc 12), and on the staff ledger (doc 11). Over/short beyond an org threshold requires manager-PIN approval to close (approval-interrupt pattern, doc 05).
 - 09-F17 Settlement cash entering the drawer emits `cash.deposit_recorded` referencing the `rider.settled` event — drawer math (doc 02 shift close) stays whole with no manual re-entry.
 - 09-F18 `delivery_failed` orders return to the dispatch pool flagged for a decision: re-dispatch, convert to pickup, or void under normal approval rules (docs 02/05). Their COD never enters the rider's expected cash. Day close (doc 05) blocks while any rider has delivered-unsettled orders or any failed order is undecided — nothing dangles overnight silently.
 
@@ -136,7 +136,7 @@ No other states exist; surfaces may not invent intermediate ones (e.g. "arriving
 - Dispatch logic ships as a shared package consumed by the doc 02 and doc 05 surfaces (one fold, two hosts); the dispatch read model materializes identically branch-side (works WAN-down) and cloud-side (owner visibility).
 - Tap-to-call uses the OS dialer intent — the rider's own SIM carries the call; no telephony infrastructure. Number masking/proxying is out of scope (§9 Q1).
 - FCM push nudges the rider app to sync on new assignment; the app never depends on push for correctness — pull-on-open and periodic background fetch cover it (Doze-mode-safe).
-- EAS build channel for the rider app follows staged rollout (00 §3); BYOD implies old devices — minimum SDK Android 10 per v1 spec §3.1 A7.
+- EAS build channel for the rider app follows staged rollout (00 §3); BYOD implies old devices — minimum SDK Android 10 per `restaurant-os.md` Appendix G.
 - Maestro flow tests (00 §4) cover the three-screen rider journey including an airplane-mode segment; the rush simulator gains a delivery-order profile to exercise dispatch under load.
 
 ## 9. Open questions

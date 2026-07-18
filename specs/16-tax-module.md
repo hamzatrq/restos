@@ -1,6 +1,6 @@
 # 16 — Tax Module (FBR/PRA Compliance Add-on)
 
-**Module spec — Draft 1, July 2026** · Parent: `00-platform-overview.md` (conventions §5–§7 inherited), `01-kernel-sync.md` (event contracts). v1 reference detail: `../restaurant-os-spec.md` §3.5 (Module E) — carried over unchanged unless amended here. Wave: on demand (built when the first documented customer commits; posture engine ships earlier with doc 02).
+**Module spec — Draft 1, July 2026** · Parent: `00-platform-overview.md` (conventions §5–§7 inherited), `01-kernel-sync.md` (event contracts). Seed: `restaurant-os.md` Appendix F — carried over unchanged unless amended here. Wave: on demand (built when the first documented customer commits; posture engine ships earlier with doc 02).
 
 ## 1. Purpose & scope
 
@@ -13,7 +13,7 @@ Two distinct jobs on one module boundary:
 - **Runs on:** `services/tax` (cloud) + a POS-side fiscal queue component inside doc 02 hosts + receipt-pipeline integration in doc 03.
 - **Tiers/profiles:** all; orthogonal to hardware tier.
 
-**Legal red line (v1 §3.5, verbatim and binding):** "the product never implements sales suppression, dual-billing, or under-reporting mechanics in the compliant path, and never markets concealment as a feature." Tax-optional means the owner controls what the system charges and reports; the compliant module, when on, is honest end-to-end.
+**Legal red line (`restaurant-os.md` Appendix F, verbatim and binding):** "the product never implements sales suppression, dual-billing, or under-reporting mechanics in the compliant path, and never markets concealment as a feature." Tax-optional means the owner controls what the system charges and reports; the compliant module, when on, is honest end-to-end.
 
 ## 2. Position in platform
 
@@ -133,7 +133,7 @@ Cross-cutting NFRs inherited from 00 §5. Module-specific:
 
 ## 8. Tech notes
 
-- `services/tax` in the modular Node backend; REST clients for FBR IMS/PRA generated from their current specs with a build-time "regulation verification" checklist gate before first org enablement (v1 §10.4 — rates changed 5%→8% for cards in 2025; assume drift).
+- `services/tax` in the modular Node backend; REST clients for FBR IMS/PRA generated from their current specs with a build-time "regulation verification" checklist gate before first org enablement (rates have drifted before; assume drift).
 - POS-side queue reuses the sync-client outbox pattern (01 §5) — same durability discipline, same tests (plug-pull mid-settlement is a required case in 00 §4 durability suite).
 - QR rendering through `packages/escpos` (doc 03 print path); QR payload format per FBR spec.
 - Submission topology decision: POS submits directly when online (to get the number onto the first printed receipt), cloud service is the drain path and fallback; final call after sandbox latency measurement (§9.2).
