@@ -95,6 +95,9 @@ Every PR: (1) adversarial AI review in a fresh context — prompted to find why 
 ### 4.5 Reality gates
 No code path counts as "done" until it has run in the containerized sim-branch (for sync/ops features) or against the integration fakes (for drivers), and — per release train — on the office rig and a dev-pilot restaurant behind a flag. Weekly: doc-10 theoretical-vs-counted variance and Auditor reports from dev-pilots reviewed as *engineering* signal (unexplained variance may be our bug before it is their thief).
 
+### 4.5b Relationship to the development harness
+Doc `24-development-harness.md` operationalizes this system at the task level: the DoD ladder, per-module conformance matrices and `verify:<nn>` commands, the session loop protocol (tests read-only to implementers, Stop-gate finality, evidence over assertion), and the drift/slop trend gates. Where this document defines *what is tested*, doc 24 defines *when a session may claim done*.
+
 ### 4.6 Release gate checklist (per train, mechanical)
 Green: PR suite · nightly simulation (zero failing seeds) · chaos E2E · mutation gates · migration suite · cross-version matrix · device perf non-regression · rig protocol (plug-pull + printers) · Auditor clean on staging and dev-pilots for 7 consecutive days. Any red = the train doesn't leave. No exceptions by seniority or schedule.
 

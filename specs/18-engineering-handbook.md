@@ -80,6 +80,7 @@ restos/
 - **Cloud DB:** PostgreSQL, **Drizzle ORM + drizzle-kit** migrations. One database; one Postgres schema per module (`kernel`, `inventory`, `staff`, `intel`, `tax`, `marketing`). Rules: migrations are append-only (never edit an applied migration); read models are rebuildable projections — destructive read-model migrations are fine, event-table migrations are additive-only; every table owns exactly one writer service.
 - **Device DB:** SQLite, WAL mode, foreign keys on. Electron: `better-sqlite3`; RN: `@op-engineering/op-sqlite`. Apps NEVER run SQL directly — all device data access goes through `sync-client`'s storage adapter and query API (§7). Migration of device schemas ships inside `sync-client` (versioned, forward-only, tested against fixture DBs).
 - **Redis:** BullMQ queues + ephemeral cache only. Redis is NEVER a source of truth; anything in Redis must be reconstructible from Postgres.
+- **Durable local queues (canonical pattern):** the sync outbox (01-F8), the print spooler (03-F4), and the fiscal store-and-forward queue (16-F11) are the same machine — row persisted in device SQLite (WAL) *before* the first attempt, explicit state machine, retry with backoff, idempotent delivery, loud terminal failure. One shared implementation (extracted from `sync-client`'s outbox core when the second consumer is built); a module specifying a persist-before-attempt queue MUST consume it, not reinvent it. Its property tests (never-lose, crash-resume, idempotent-drain) run once and cover all consumers.
 
 ## 5. Backend service rules
 

@@ -31,7 +31,7 @@ Users: chefs, pass staff, and whichever role owns the ready signal (03-F24). Dev
   - item notes visually emphasized;
   - reprints carry a "REPRINT" band;
   - course grouping (starters/mains) optional, off by default.
-- 03-F4 Durable spooler: every print job is persisted (SQLite, WAL) with an explicit state machine (`queued → transmitting → printed | failed`) before the first transmit attempt; a crash or power loss mid-print resumes or reprints the job on restart — never drops it. Retry with backoff (default 3 attempts over 30 s) on transport failure.
+- 03-F4 Durable spooler: every print job is persisted (SQLite, WAL) with an explicit state machine (`queued → transmitting → printed | failed`) before the first transmit attempt; a crash or power loss mid-print resumes or reprints the job on restart — never drops it. Retry with backoff (default 3 attempts over 30 s) on transport failure. (Instance of the canonical durable-local-queue pattern, 18 §4 — one implementation shared with the sync outbox 01-F8 and fiscal queue 16-F11.)
 - 03-F5 **Silent KOT failure is forbidden.** When retries exhaust:
   - the host device raises a loud alert — full-screen banner + repeating sound — naming the printer and order ("KOT #142 did not print — grill printer offline"), repeating until acknowledged;
   - acknowledgment is logged (`audit.*`);

@@ -2,6 +2,8 @@
 
 Restaurant OS for Pakistani restaurants. TypeScript monorepo (planned per `specs/18`), offline-first, event-sourced. **The specs are the contract: never code or edit from memory of a spec — open the owning doc first, per the routing table below.** Full context rules: `specs/23-ai-context.md`.
 
+**Repo state (update this line when it changes):** specification phase — no code exists yet. The monorepo, hooks, `verify:*` commands, and conformance matrices described in `18`/`23`/`24` are specified, not built; they arrive with the Wave 0 scaffold. Build order: waves in `restaurant-os.md` §8; implementation tasks come from `plans/` (24 §9) once created.
+
 ## Commandments (always binding; each is also machine-enforced — violating code fails CI regardless of what you read)
 
 1. **Append-only ledger.** Never mutate or delete history; corrections are new linked events (`01`).
@@ -41,12 +43,15 @@ All docs in `specs/` (`NN-name.md`). `restaurant-os.md` = product vision + seed 
 | Backup/DR, retention, erasure, export | `22` | — |
 | Cross-cutting open/undecided questions | `DECISIONS.md` | — |
 | This file's governance, agent context rules | `23` | — |
+| Any build task: what "done" means, loop protocol, DoD, verify commands | `24` | `20` |
 
 Cross-cutting laws (offline, performance, security, language, config layers): `00 §5–§7`. Doc conflicts: authority order in `00` header. Find an FR by grepping its ID (`grep -rn "02-F9" specs/`); unsure which doc owns a topic → search, don't guess.
 
 ## Working rules
 
 - One module per session; load only the routed docs (a task needs ~2–4 specs, not the corpus).
+- Build tasks follow the `24 §3` loop: approved plan → acceptance tests exist first (written by a different session; read-only to you) → implement → the named check passes → evidence (captured command output) in your final message. **"Done" is the check passing — never your own judgment.**
+- Craft rules (`24 §3b`): **surface assumptions in the plan** (ambiguous task → state interpretations, name the simpler alternative — don't silently pick); **minimum code that closes the FR** (no speculative features, flexibility, or error handling for implausible cases); **surgical diffs** (touch only the task's files; never "improve" adjacent code — cleanup is scheduled consolidation work, not a drive-by).
 - Editing a spec: follow the template in `00 §8`; new FRs continue the doc's numbering; never renumber or delete existing IDs.
 - New event types / states / config keys: spec PR to the owning doc **and** `01 §4` / `00 §7` first, code second.
 - Anything here that seems to conflict with a spec: the spec wins — and flag the drift so this file gets fixed.
