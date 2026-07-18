@@ -67,8 +67,12 @@ Works in-branch over LAN and remotely over cloud; remote views always carry sync
 - 05-F19 Paid-out approvals: `cash.paid_out` above the org threshold requires approval → arrives as an interrupt with the receipt photo inline → approve/deny per 05-F6/F7 (`approval_type: paid_out`).
 - 05-F20 Shift-close visibility: cashier over/short results (02-F23) appear on the console as they land; variance beyond threshold is highlighted. The cashier-sees-own-reconciliation framing (02-F23) is unchanged — the console adds the manager's cross-cashier view, nothing about it replaces the cashier's own screen.
 
+**Support inbox (Wave 2, with doc 07)**
+- 05-F22 The console is the default target for WhatsApp support routing (07-F9): inbound customer support messages render as a threaded inbox (customer, order context if linkable, message history); replies send through doc 07 as attributed session messages. POS (doc 02) may be the org's configured alternative/additional target — same thread state, synced.
+- 05-F23 Unanswered-support alerting: a thread with no staff reply past the org threshold (07 layer-2 setting) raises a console alarm — a support message silently ignored is a lost customer.
+
 **Console home**
-- 05-F21 The home screen is a glance, not a dashboard: active alarms, pending approvals, open-order count with aging summary, shift/day status, channel-pulse tile (Wave 4). Deep analytics stay in doc 12 — the console exists for acting in the next sixty seconds.
+- 05-F21 The home screen is a glance, not a dashboard: active alarms, pending approvals, open-order count with aging summary, shift/day status, channel-pulse tile (Wave 4), support-inbox badge (Wave 2). Deep analytics stay in doc 12 — the console exists for acting in the next sixty seconds.
 
 **Remote mode**
 - 05-F22 The full console works over cloud from anywhere. Every screen shows last-synced age; when the branch is unreachable, the console says so plainly ("branch offline — last seen 12 min ago") and never renders stale state as live (00 §5.7).
@@ -134,7 +138,7 @@ Works in-branch over LAN and remotely over cloud; remote views always carry sync
   - variance highlight threshold;
   - which roles may pause/throttle channels;
   - auto-resume defaults.
-- **Layer 3 (device):** language, alarm tone, on-duty routing (approvals routed to a designated on-duty manager rather than broadcast).
+- **Layer 3 (device):** alarm tone, on-duty routing (approvals routed to a designated on-duty manager rather than broadcast).
 - **Deliberately not configurable:** disabling late-order or print-failure alarms while a business day is open; unlogged or PIN-less approvals; pausing staff-operated channels (05-F16); editing any recorded decision (append-only, 00 §5.5).
 
 ## 8. Tech notes

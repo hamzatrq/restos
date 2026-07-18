@@ -44,6 +44,7 @@ restos/
     whatsapp/          # Doc 07 driver (webhook in, Graph API out)
     foodpanda/         # Doc 08 driver (AggregatorDriver #1)
     intelligence/      # Doc 13: semantic layer, brief generator, analyst, LLM gateway
+    tax/               # Doc 16: fiscalization state machine, rule packs, FBR/PRA clients
   packages/
     domain/            # THE source of truth: Zod event/entity schemas, event catalog,
                        # permission matrix, config schemas, money/qty/id utilities
@@ -169,7 +170,7 @@ Anything not listed (or not added via §15) is not allowed. Grouped; exact pins 
 - **Core/shared:** `typescript`, `zod`, `uuidv7`, `date-fns` + `@date-fns/tz`, `superjson`, `tsx` (dev), `@biomejs/biome`, `turbo`
 - **Backend:** `fastify`, `@fastify/websocket|cors|rate-limit`, `@trpc/server`, `drizzle-orm`, `drizzle-kit`, `postgres` (driver), `bullmq`, `ioredis`, `pino`, `pino-pretty` (dev), `jose`, `argon2`, `@anthropic-ai/sdk`, `@sentry/node`, OpenTelemetry SDK packages, `ws`
 - **Web:** `next`, `react`, `react-dom`, `tailwindcss`, shadcn/ui (vendored components + `radix-ui` primitives), `lucide-react`, `@tanstack/react-query`, `@trpc/client` + `@trpc/tanstack-react-query`, `@tanstack/react-table`, `recharts`, `react-hook-form`, `@hookform/resolvers`, `zustand`, `@sentry/nextjs`
-- **React Native:** `expo` + official `expo-*` modules (router, notifications, camera, secure-store, updates), `@op-engineering/op-sqlite`, `nativewind`, `@shopify/flash-list`, `react-native-reanimated`, `react-native-ble-plx`, `@sentry/react-native`
+- **React Native:** `expo` + official `expo-*` modules (router, notifications, camera, secure-store, updates), `@op-engineering/op-sqlite`, `nativewind`, `@shopify/flash-list`, `react-native-reanimated`, `react-native-ble-plx`, `victory-native` (charts), `@sentry/react-native`
 - **Electron:** `electron`, `electron-vite`, `electron-builder`, `better-sqlite3`, `serialport`, `usb`
 - **Printing:** `pngjs` (virtual printer, logo/QR raster)
 - **Testing:** `vitest`, `fast-check`, `@playwright/test`, `msw`, `testcontainers`, Maestro (CLI)

@@ -42,7 +42,7 @@ Budgets are checkable by script, story metadata, or Maestro step-count — immun
 | Primary action targets | ≥64dp | POS menu grid, KDS bump targets, rider status buttons |
 | Touch feedback latency | <100 ms on reference hardware | All operational surfaces (00 §5.3 restated as perceptual threshold) |
 | Simple order → KOT | ≤2 taps | POS (existing law, now Maestro-counted per release) |
-| Named-task tap/time budgets | Declared per flow in module docs | Settlement ≤4 taps; rider settlement ≤3; count entry ≤2/item; violations = merge blockers |
+| Named-task tap/time budgets | Declared per flow in module docs | Settlement ≤4 taps; rider settlement ≤3; count entry ≤3/item (10-N2); violations = merge blockers |
 | Glance budget | Key message in 1–2 s (research: >70% of dashboard sessions are ~5 s) | Owner tiles, KDS tickets, manager alarms — one emphasized number per view |
 | New-cashier learnability | <15 min to first clean order | Release-train check with a staff member who's never seen the build |
 
@@ -57,7 +57,7 @@ The direct answer to "how relevant is the system for each role": every screen be
 - **Waiter (04):** one-hand thumb-reach zones; sunlight-legible contrast; the app is a remote control, not a browser — one primary action per screen state.
 - **Rider (09):** big targets, outdoor contrast, offline-honest status; numerals-first (COD amounts).
 - **Owner (12):** one emphasized number per tile; comparison-to-baseline framing ("↑ 12% vs last Friday"); progressive disclosure; 1–2 s glance budget.
-- **Language law (all surfaces):** **English only** (00 §5.6, v1 decision). The load this puts on partially-literate staff is carried visually, not linguistically: labels are short and paired with icons, numerals carry the operational information (digits are readable by many who can't read words — Medhi), and **visual position is the real interface** — staff memorize where things are, which is why the stable-layout law above is a hard rule, not a preference. The Nastaliq/Naskh research (§9) stays on record for the day a second language is added.
+- **Language law (all surfaces):** **English only** (00 §5.6, v1 decision). The load this puts on partially-literate staff is carried visually, not linguistically: labels are short and paired with icons, numerals carry the operational information (digits are readable by many who can't read words — Medhi), and **visual position is the real interface** — staff memorize where things are, which is why the stable-layout law above is a hard rule, not a preference. The Nastaliq/Naskh research (§9) stays on record for the day a second language is added. Sole exception: customer chat (WhatsApp/social DM) understands roman-Urdu and voice input from day one and replies in English; bilingual replies are a later, eval-gated stage (07-F22..F24).
 - 21-F10 **Relevance instrumentation:** every screen emits per-role usage analytics (screen, role, task completion, taps, duration). Quarterly review: screens with near-zero use by their role are candidates for removal — relevance is measured, not assumed. Time-on-task and taps-per-task are release-over-release regression metrics (a user who still succeeds but 3× slower is a regression success-rate hides).
 
 ## 6. Layer 5 — Real-staff testing (the human gate)

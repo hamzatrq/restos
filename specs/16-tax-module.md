@@ -34,7 +34,7 @@ Two distinct jobs on one module boundary:
 | Storefront/WhatsApp | none | exclusive @ PRA-card | — |
 | Foodpanda | per aggregator invoicing | per aggregator invoicing | — |
 - 16-F3 Internal true numbers always complete: every order records full value, channel, and payment method regardless of posture; reports and intelligence (docs 12/13) always operate on the complete ledger.
-- 16-F4 All rates and rules live in vendor-maintained, versioned **rule packs** with effective dates (e.g. Punjab pack: PRA 16% cash / 8% card-digital under the Punjab Finance Act 2025). All rates/rules are configuration, verified against current notifications at build time; rule-pack updates are `config.changed` events and never rewrite past invoices.
+- 16-F4 All rates and rules live in vendor-maintained, versioned **rule packs** with effective dates (e.g. Punjab pack: PRA 16% cash / 8% card-digital under current Punjab finance legislation — statute year and rates verified against notifications at build time, never cited from this spec). Enablement scope per org (PRA-only / FBR-only / both) is set at onboarding after legal verification. All rates/rules are configuration; rule-pack updates are `config.changed` events and never rewrite past invoices.
 - 16-F5 Tax is computed per line at settlement and snapshotted on the order (01-F18 discipline — never re-derived); integer paisas; rounding rules per authority spec, fixed at build-time verification.
 - 16-F6 Split payments across differently-rated methods: tax apportioned by payment share per method. Provisional rule pending authority guidance (§9.1).
 

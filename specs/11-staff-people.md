@@ -131,13 +131,13 @@ Cross-cutting NFRs inherited from 00 §5. Module-specific:
 
 - **Layer 1 (platform admin):** module feature flag (Wave 3 staged rollout).
 - **Layer 2 (org):** shift presets and lengths; overtime threshold; selfie on/off; advance-granting roles and per-role advance cap without owner approval; default repayment fraction; checklist templates incl. photo-required items; handover and stock quick-tag sets.
-- **Layer 3 (branch/device):** preferred attendance surface per branch; language (00 §5.6); checklist template assignment per branch.
+- **Layer 3 (branch/device):** preferred attendance surface per branch; checklist template assignment per branch.
 - **Deliberately not configurable:** staff self-view of own attendance and balance (always on); the dual-PIN requirement on advances; append-only ledger; absence of salary computation; schedules never auto-create attendance facts.
 
 ## 8. Tech notes
 
 - Backend `people` module in the modular Node backend; read models Postgres/Drizzle; no new apps — surfaces are screens inside docs 02/03/05 hosts, reusing the existing PIN session identity (01-F26), so there is no second login system.
-- Camera: RN vision-camera on Android hosts, `getUserMedia` on Electron; photos through the same deferred upload queue as doc 10 invoices.
+- Camera: `expo-camera` on Android hosts (18 §14 registry), `getUserMedia` on Electron; photos through the same deferred upload queue as doc 10 invoices.
 - Voice notes: Opus, 30 s cap, object storage; playback on manager/owner surfaces.
 - Schedules/checklist templates ship as reference-data snapshots + deltas (01 §8) — no bespoke sync.
 - Exports produced by the jobs service; delivered as signed URLs; CSV schema versioned in `packages/domain`.

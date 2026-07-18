@@ -29,6 +29,7 @@ Users: internal staff only — roles: support, onboarding, fleet-ops, platform-a
   - module flags: tax add-on (doc 16), marketing/loyalty (doc 17);
   - channel enablement: storefront, WhatsApp, foodpanda (docs 06/07/08);
   - intelligence max-rung cap (13-F28).
+- 15-F5a Plan shape is a single structure — `{ base_subscription, take_rate (0–5%), add_ons: [tax, …] }` — one plan, no tier SKUs (the v1 spec's Starter/Growth tiers are superseded; see its banner).
 - 15-F6 **The own-channel take-rate % per org lives here and only here** (bounded 0–5% by platform constants): the metering configuration consumed by doc 06 for storefront/WhatsApp/QR order-value metering. Changes take effect from a stated date, never retroactively, and are read-only visible in doc 14 (14-F20).
 - 15-F7 Suspension: reversible; gates cloud services (storefront down with an honest notice, sync still accepted, new cloud-originated orders blocked) — **in-branch POS billing never stops** (00 §5.1 is not a business lever). Suspended orgs' devices show a status banner; reactivation restores service within minutes.
 

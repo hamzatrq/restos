@@ -79,7 +79,7 @@ All tiers run it. In **T1 the POS is the entire restaurant** — one device, pri
   - customer file lookup by normalized phone → name, saved addresses, order history, "repeat last order" shortcut;
   - unknown number → inline customer creation (`customer.created`, `customer.address_added`).
 - 02-F28 Target: a repeat customer's order entered and confirmed in ≤ 30 s from number entry (tested with a rehearsed operator on reference hardware).
-- 02-F29 Multi-branch orgs: call-center mode routes the order to the nearest branch by address zone (zone→branch mapping maintained in doc 14); the order lands in that branch's queue as channel `phone` and prints there. If the target branch is unreachable, the operator is told immediately and may pick another branch — never a silent drop.
+- 02-F29 (Multi-branch profile only, Wave 4) Call-center mode routes the order to the nearest branch by address zone (zone→branch mapping maintained in doc 14); the order lands in that branch's queue as channel `phone` and prints there. If the target branch is unreachable, the operator is told immediately and may pick another branch — never a silent drop.
 
 **Foodpanda manual quick entry**
 - 02-F30 Dedicated quick-entry mode: channel pre-tagged `foodpanda`, item picker restricted to the mapped menu (mapping owned by doc 08), no settlement step (aggregator-collected; economics handled by doc 08). Target ≤ 30 s per order. Quick-entry orders behave identically downstream: KOT print, inventory deduction, channel reporting.
@@ -88,8 +88,9 @@ All tiers run it. In **T1 the POS is the entire restaurant** — one device, pri
 - 02-F31 T1 mode — the entire restaurant runs on this one device:
   - detection: the branch device registry contains no pass/KDS/waiter device;
   - the POS shows a compact order-queue panel with aging timers (doc 03 thresholds);
-  - line statuses auto-advance where no device exists to signal them: `kot.printed` → lines `in_prep`; settlement → lines `served` (or `dispatched` for delivery);
-  - no `ready` state is fabricated — the timing pipeline honestly receives no ready samples in T1 (03-F26).
+  - line statuses auto-advance where no device exists to signal them: `kot.printed` → lines `in_prep`; settlement → lines `served` — **dine-in/takeaway/pickup only**. Delivery lines are NEVER advanced by settlement (COD settles at the door or on rider return): they advance only via `rider.picked_up / delivered` or the counter's on-behalf dispatch entries (09) — canonical rule in 01 §4;
+  - no `ready` state is fabricated — the timing pipeline honestly receives no ready samples in T1 (03-F26), and T1 restaurants therefore never get learned ETAs (aging timers only).
+- 02-F33 Ready-marking on POS (T2/T3): when the org's ready-signal ownership (03-F24) is assigned to **counter**, the POS queue panel exposes per-order ready marking (marks all remaining lines ready, one tap); otherwise the panel is read-only for states.
 - 02-F32 Sync honesty on-device (00 §5.7): a persistent, non-blocking indicator shows outbox depth and last cloud ack (01-F11). Local operation is never gated on it.
 
 ## 4. Key flows
@@ -144,7 +145,7 @@ All tiers run it. In **T1 the POS is the entire restaurant** — one device, pri
 ## 7. Customizability
 
 - **Layer 2 (org):** enabled order types and payment methods; khata on/off; discount threshold % and void/comp approval rules (01-F26); receipt header/footer/logo/QR; kitchen quick-tags; call-center zone→branch routing; channel chime behavior; remote-vs-local approval preference.
-- **Layer 3 (branch/device):** language, printer assignments, idle-lock timeout, default opening float, quick-entry shortcut visibility.
+- **Layer 3 (branch/device):** printer assignments, idle-lock timeout, default opening float, quick-entry shortcut visibility.
 - **Deliberately not configurable:** attribution (no shared/anonymous logins), append-only corrections, escalation bypass below org thresholds, drawer-open logging, channel tag on ingested orders, the sync-honesty indicator.
 
 ## 8. Tech notes

@@ -1,5 +1,7 @@
 # Restaurant Operating System — Product & Technical Specification
 
+> **⚠️ SUPERSEDED (July 2026).** `restaurant-os-v2-concept.md` and `specs/00–21` are the active authority. This document remains reference **only** for POS/printing/tax/cash behavioral detail explicitly cited by the specs. In particular, the following are **obsolete here**: Urdu+English UI (now English-only), Flutter (now TypeScript/React Native/Electron), phase plan (now Waves 0–4), Starter/Growth pricing tiers (now single plan + take-rate), riders in Phase 2–3 (now Wave 2), 3-branch cap (now 5 soft), manager-as-POS-role (now dedicated console). Never resolve a conflict in this document's favor.
+
 **Product codename:** RestOS (working name)
 **Version:** Draft 1.0 — July 2026
 **Market:** Small/independent restaurants and brands with up to 3 branches — Lahore, Pakistan (initial)

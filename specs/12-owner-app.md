@@ -51,7 +51,8 @@ Wave 1 slice: nightly auto-summary + live view. Wave 4: exception alerts, report
 - 12-F12 The narrative text of the summary is the doc 13 nightly brief; all numbers rendered in-app come from the same semantic-layer metrics the brief cites, so brief and screen can never disagree.
 - 12-F13 Summary history is browsable by calendar date; past summaries render from stored values, never recomputed, so history is stable even after read-model rebuilds.
 
-**Exception alerts (W4)**
+**Exception alerts (in-app inbox W4; delivery from W1 per 13-F14a)**
+- 12-F14a Before the Wave 4 inbox ships, `alert.raised` events still reach the owner: every class appears in the nightly summary's "what's odd" block from Wave 1, and critical classes push immediately via WhatsApp utility templates from Wave 2 (13-F14a). No alert class ever fires with no delivery surface.
 - 12-F14 The app receives and displays pushes for doc 13 `alert.raised` events, covering at minimum these classes:
   - void/comp spike in a shift;
   - discount anomaly vs the cashier's own baseline;
@@ -74,6 +75,11 @@ Wave 1 slice: nightly auto-summary + live view. Wave 4: exception alerts, report
 
 **Multi-branch (roll-up W1 · full W4)**
 - 12-F22 Org roll-up totals with drill-in per branch; the branch view inside the roll-up is identical to the single-branch view (structure never changes with org size).
+
+**People & staff (W3, read-only — the doc 11 owner surface)**
+- 12-F27 Advances/baqaya: per-staff running balance list with drill-in to full advance/repayment history (doc 11 ledger). Read-only — advances and acknowledgments happen on branch devices (11); the app renders, never records.
+- 12-F28 Attendance glance: today's clock-ins/absences, overtime flags, and a month view per staff member; payroll-export trigger deep-links to doc 14.
+- 12-F29 Checklist & handover visibility: opening/closing completion state on the live view; the nightly summary gains a people block at W3 (checklist completion, attendance exceptions, advances issued today — extends 12-F10).
 
 **Analyst chat (W4)**
 - 12-F23 Embedded chat surface: free-text questions (English or roman-Urdu mix accepted as input; answers always English — doc 13); brains entirely in doc 13 — this module specs only the UI: message list, streaming answer display, cited metric values rendered as tappable chips deep-linking to report views.
@@ -139,7 +145,7 @@ Wave 1 slice: nightly auto-summary + live view. Wave 4: exception alerts, report
 
 - Expo + EAS builds (00 §3); `op-sqlite` cache; FCM (Android) + APNs (iOS).
 - Push payloads carry only ids + headline text — content is fetched on open, so a stale push can never show outdated figures.
-- Charts: lightweight SVG (victory-native or hand-rolled) for the hourly curve and sparklines; no heavy charting dependency on low-end devices.
+- Charts: `victory-native` (18 §14 registry) for the hourly curve and sparklines; no heavier charting dependency.
 - Deep-link scheme `restos-owner://` shared with WhatsApp brief links (doc 07) and analyst citation chips.
 - Exports rendered server-side — one renderer serves this app and doc 14's desk views; the app only downloads.
 - Maestro flows in CI: summary open, alert ack, offline-cache render, org switch, export share.

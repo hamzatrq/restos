@@ -50,6 +50,7 @@ In scope: menu browsing, cart, checkout in three modes, customer identity captur
 - 06-F16 Card payments sit behind a `PaymentGatewayProvider` interface (create intent, confirm, webhook verify, refund) with no live implementation at launch; enabling a gateway later must not change checkout flow structure or order events.
 
 **Order lifecycle & honesty (00 §5.1)**
+- 06-F17a **Confirm policy (canonical for all storefront-door orders, including WhatsApp/Instagram handoffs):** a cloud order is confirmed by an explicit **counter accept on POS** (notification + one-tap accept, doc 02) emitting `order.confirmed`; layer-2 config may enable **auto-accept** during open hours (immediately or after N minutes unattended). KOT prints only after `order.confirmed` (03) — never before, on any path.
 - 06-F17 Placing an order persists `order.created` cloud-side and enqueues it for the branch. The confirmation screen and status page show, truthfully:
   - **received** — the cloud has the order (this is all "order placed" ever claims);
   - **confirmed** — the branch emitted `order.confirmed` (with ETA if provided);
@@ -109,7 +110,7 @@ Failure path: reference never verifies → branch calls the customer; order sett
 ## 5. Data
 
 - **Owned (cloud Postgres, module tables + read models):**
-  - `storefront_settings` per org/branch — modes enabled, delivery fee/minimum, RAAST account details, brand assets, default language, confirmation window.
+  - `storefront_settings` per org/branch — modes enabled, delivery fee/minimum, RAAST account details, brand assets, confirmation window.
   - `carts` — server-side, session-keyed, TTL-expired; never kernel events (a cart is not a fact).
   - `otp_verifications` — phone, channel used, attempts, outcome.
   - `qr_table_links` — org/branch/table → static URL token.
@@ -130,7 +131,7 @@ Failure path: reference never verifies → branch calls the customer; order sett
 ## 7. Customizability
 
 - **Layer 1 (platform admin, doc 15):** take-rate `rate_bps` per org, custom domain enablement, anti-abuse limit overrides.
-- **Layer 2 (org, doc 14):** modes enabled per branch, delivery fee + minimum order, RAAST/bank account details, brand logo/color/photos, default language, dine-in phone-required toggle, confirmation-window minutes, first-order COD cap.
+- **Layer 2 (org, doc 14):** modes enabled per branch, delivery fee + minimum order, RAAST/bank account details, brand logo/color/photos, dine-in phone-required toggle, confirmation-window minutes, first-order COD cap.
 - **Layer 3 (branch/device):** none — this is a cloud surface.
 - **Deliberately not configurable:** checkout step structure, honesty states (06-F18 cannot be disabled and its threshold has a platform floor), metering emission, OTP requirement for delivery/pickup first orders, one-customer-file-per-phone rule.
 

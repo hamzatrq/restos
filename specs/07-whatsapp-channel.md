@@ -38,7 +38,7 @@ Used by: customers (their own WhatsApp), restaurant staff (support surfaces in d
 - 07-F5 Orders placed in-conversation (07-F4) emit `metering.usage_recorded` `{ kind: 'own_channel_order', … }` exactly as 06-F22 — once per order, idempotent on order id. Storefront-checkout orders that started from a WhatsApp link are metered by doc 06; the shared idempotency key (order id) makes double-counting structurally impossible.
 
 **Function 2 — transactional notifications**
-- 07-F6 On `order.confirmed` (with ETA if present), all-lines-ready, and `rider.picked_up` for the customer's order, the service sends the matching pre-approved template in the customer's language. Delivered orders get a closing message. Triggers are kernel events only — no notification without a ledger fact (automation law, 00 §5.8).
+- 07-F6 On `order.confirmed` (with ETA if present), all-lines-ready, and `rider.picked_up` for the customer's order, the service sends the matching pre-approved English template (07-F21). Delivered orders get a closing message. Triggers are kernel events only — no notification without a ledger fact (automation law, 00 §5.8).
 - 07-F7 Notifications require opt-in: recorded (`whatsapp.optin_recorded`) at first order per org — checkout checkbox (doc 06) or in-conversation consent. No opt-in, no proactive message, ever.
 - 07-F8 Template messages are sent only when the 24 h customer-service window is closed; inside an open window, free-form session messages are used (cheaper, no template constraints). Window state is tracked per (org number, customer) from the last inbound timestamp.
 
@@ -54,7 +54,7 @@ Used by: customers (their own WhatsApp), restaurant staff (support surfaces in d
 - 07-F15 Analyst access is role-checked server-side per message (00 §5.4); a number removed from verification loses analyst routing on the next message, not the next session.
 
 **Template lifecycle**
-- 07-F16 A platform-standard template library — `order_confirmed`, `order_ready`, `order_dispatched`, `order_delivered`, `otp_code`, `reorder_prompt`, `nightly_brief`, `marketing_*` (reserved for doc 17) — is maintained centrally in both languages and instantiated per org WABA with brand tokens at onboarding. Per-org custom templates are not offered at launch.
+- 07-F16 A platform-standard template library — `order_confirmed`, `order_ready`, `order_dispatched`, `order_delivered`, `otp_code`, `reorder_prompt`, `nightly_brief`, `marketing_*` (reserved for doc 17) — is maintained centrally in English (00 §5.6) and instantiated per org WABA with brand tokens at onboarding. Per-org custom templates are not offered at launch.
 - 07-F17 Template states (submitted / approved / rejected / paused / disabled by Meta) are tracked from webhooks as `whatsapp.template_status_changed`. A template becoming unusable triggers: fallback to an approved alternate if defined; else suppression of that notification class plus a fleet-health alert (doc 15) and an org-visible degradation notice (doc 14). The service never silently drops sends.
 
 **Compliance & metering**
@@ -62,6 +62,12 @@ Used by: customers (their own WhatsApp), restaurant staff (support surfaces in d
 - 07-F19 Every outbound send emits `metering.usage_recorded` `{ kind: 'whatsapp_message', class: authentication | utility | marketing | service, template_id?, conversation_id, org_id }` for platform metering visibility (rates and rollup owned by doc 15).
 - 07-F20 Webhook ingestion is idempotent on Meta message id; all inbound/outbound/status events land in the kernel ledger so the conversation trail is auditable and org-scoped (00 §5.4 — numbers never cross orgs).
 - 07-F21 All outbound templates are English (00 §5.6) — one template set per org, no per-conversation language selection. Inbound customer text is uncontrolled and handled as-is (e.g., opt-out recognition, doc 17).
+
+**Language & voice (customer conversational layer — founder decision, July 2026)**
+- 07-F22 **Input understanding is multilingual; output is English.** The intent router/LLM layer understands English, roman-Urdu, and mixed-code input (understanding roman-Urdu is tractable today; generating it accurately is not). All bot replies are English at launch. Understanding is broad, action is narrow: free text maps only onto the defined intent classes (order entry, status, support, opt-out, analyst for verified owners) — never free-form action.
+- 07-F23 **Bilingual output is a planned later stage, deliberately deferred and eval-gated.** Current LLM roman-Urdu generation is unreliable; a roman-Urdu reply mode ships only when a native-speaker-scored golden reply set passes an agreed accuracy bar (evals run through the doc 13 LLM gateway). It never ships silently; until then, English replies to roman-Urdu input are the designed behavior, not a gap.
+- 07-F24 **Voice notes are first-class input** (customers routinely send audio). Staged pipeline: (a) Wave 2 — inbound audio is persisted (org-scoped object storage), acknowledged, and routed to the support surface (05-F22) with inline playback; routing NEVER waits on transcription. (b) Transcription via an `SttProvider` interface (provider chosen at build time; the selection criterion is spoken Urdu/Punjabi/mixed-code accuracy) feeds the transcript into the same intent router as typed text — including the owner analyst surface (doc 13) at Wave 4. Low-confidence transcripts never trigger automated action; they fall through to human support with the audio attached. Original audio is always retained and staff-playable.
+- 07-F25 The bot never replies with generated audio (no TTS at launch); replies are English text. Staff support replies are text, attributed per 07-F9.
 
 ## 4. Key flows
 
@@ -127,7 +133,7 @@ Failure path: doc 13 timeout (> 20 s) → honest "analyst is not responding, try
 ## 7. Customizability
 
 - **Layer 1 (platform admin, doc 15):** WABA/number provisioning, own-number vs provisioned-number choice, message metering rates, template library management.
-- **Layer 2 (org, doc 14):** notification classes on/off (within opt-in), support routing target (POS, manager console, both), auto-reply content values (hours, location text), verified analyst numbers, default language, unanswered-support alert threshold.
+- **Layer 2 (org, doc 14):** notification classes on/off (within opt-in), support routing target (POS, manager console, both), auto-reply content values (hours, location text), verified analyst numbers, unanswered-support alert threshold.
 - **Layer 3 (branch/device):** none — cloud service.
 - **Deliberately not configurable:** opt-in requirement, opt-out honoring, 24 h window rules, template-only-outside-window rule, metering emission, analyst role checks. These are compliance and platform law.
 

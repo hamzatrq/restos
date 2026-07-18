@@ -21,7 +21,7 @@ Users: owners (brief, alerts, analyst), managers (suggestions, approvals, announ
 
 **Semantic layer / metric registry**
 - 13-F1 A versioned registry of metrics. Each metric defines:
-  - id (e.g. `sales.total`, `voids.count`, `cash.variance`, `stock.variance_value`, `margin.gross_estimate`) and human name (ur/en);
+  - id (e.g. `sales.total`, `voids.count`, `cash.variance`, `stock.variance_value`, `margin.gross_estimate`) and human name (English);
   - definition text (what an owner is told it means);
   - computation: SQL over read models or a deterministic fold over events — nothing else;
   - dimensions (org/branch/channel/cashier/item/daypart/date range) and valid parameter ranges;
@@ -50,6 +50,7 @@ Users: owners (brief, alerts, analyst), managers (suggestions, approvals, announ
 - 13-F12 A baseline activates only with sufficient history: ≥ 20 completed shifts for a cashier baseline, ≥ 28 business days for branch/item baselines. Until then only threshold rules fire, and alert copy never claims a baseline comparison.
 - 13-F13 Learned models (seasonality-aware baselines, theft-pattern sequences) may replace baseline math later behind the same detector interface; the `alert.raised` output schema does not change.
 - 13-F14 `alert.raised` payload: alert class, severity, entities, time window, evidence (metric ids + values + thresholds/baselines that fired), dedupe key (the same condition is not re-raised within its window). Consumed by docs 12 and 07; `alert.acknowledged` is cross-surface.
+- 13-F14a **Delivery path per wave (no alert fires without a surface):** W1 — all classes appear in the nightly summary's "what's odd" block (the summary push exists from W1, 12-F9). W2 — classes marked critical (critical cash variance, stock variance) additionally push immediately as WhatsApp utility templates (07). W4 — the full in-app alert inbox (12-F14..F18). The `alert.raised` schema is identical across waves; only delivery grows.
 
 **Conversational analyst**
 - 13-F15 Pull-mode Q&A on both surfaces (WhatsApp doc 07, in-app doc 12) — same brain, one conversation memory per owner (13-F19). Questions may arrive in English or roman-Urdu mix (input is uncontrolled); answers are always English (00 §5.6).
@@ -61,7 +62,7 @@ Users: owners (brief, alerts, analyst), managers (suggestions, approvals, announ
   Answers carry citations: metric id, version, parameters, value.
 - 13-F17 When preconditions fail or the question needs unregistered data, the answer is an honest refusal: "not enough data yet" with what's missing, or "I can't compute that" — optionally suggesting the nearest registered metric. The analyst never estimates from world knowledge.
 - 13-F18 **Guardrails:** org id and user scope come from the authenticated session, never from model output — cross-org data access is structurally impossible at the gateway. Out-of-scope requests (general knowledge, other businesses, actions the ladder hasn't unlocked) are refused with a one-line explanation. User text is treated as data: it is never concatenated into SQL, shell, or metric definitions — prompt injection cannot alter metric execution by construction, and this is tested (13-F31).
-- 13-F19 Conversation memory per owner: recent turns + pinned facts (branches, preferred language), shared across surfaces, org-scoped, erasable on request from doc 14.
+- 13-F19 Conversation memory per owner: recent turns + pinned facts (branches, recurring concerns), shared across surfaces, org-scoped, erasable on request from doc 14.
 
 **Autonomy ladder**
 - 13-F20 Four rungs per **capability track**, unlocked independently **per branch** (org-level for org-scoped tracks): R1 describe (briefs + alerts) → R2 prescribe (suggestions) → R3 act-with-approval → R4 act-autonomously. Tracks at launch: **stock** (86/reorder/PO), **prep** (prep quantities), **staffing** (shift-level suggestions), **load** (channel pause on kitchen overload).
@@ -71,7 +72,7 @@ Users: owners (brief, alerts, analyst), managers (suggestions, approvals, announ
   - *stock (reorder):* item `is_tracked` with par levels set; count adherence ≥ 3 counts / 14 days sustained for 4 weeks; theoretical-vs-counted variance ≤ 10% at each of the last 3 counts.
   - *staffing:* ≥ 8 weeks of attendance (doc 11) + hourly sales history.
   - *load:* ≥ 4 weeks of order-aging data (doc 03 pipeline) for the branch.
-- 13-F23 R2 output is `suggestion.issued` (e.g. "last 4 Fridays you sold 43 karahis — marinate 25 kg tonight"), displayed on doc 05/10 surfaces and in the brief; acceptance/edits are recorded to measure R3 eligibility.
+- 13-F23 R2 output is `suggestion.issued`, displayed in the brief and on doc 05 surfaces; acceptance/edits are recorded to measure R3 eligibility. **Ownership boundary with doc 10:** doc 10's in-app prep/purchase suggestion lists (10-F22/F23) are always-on from Wave 3 and are NOT gated by this ladder — the prep/stock R2 rungs gate only the *push* of those suggestions into the brief/WhatsApp/console and everything above (R3/R4 acting). One computation (doc 10's), two exposure levels.
 - 13-F24 **R3 unlock criteria:**
   - *draft POs:* ≥ 70% of the trailing 20 reorder suggestions accepted with ≤ 20% quantity edit.
   - *suggest-86 (one-tap approve):* theoretical stock level within 5% of counted at each of the last 5 counts for the item.
@@ -89,7 +90,7 @@ Users: owners (brief, alerts, analyst), managers (suggestions, approvals, announ
 - 13-F29 All LLM calls (brief, analyst, any future use platform-wide) pass through one internal gateway; no other module may call the Claude API directly (lint-enforced import boundary).
 - 13-F30 The gateway logs every call: org, task type, prompt id + version, model, token counts, latency, cost. Per-org cost metering aggregates feed doc 15. Per-org monthly budget with soft-cap alerting to platform staff; at hard cap, graceful degradation — the brief falls back to templated text from the same metric values, the analyst queues with an honest "busy" reply. Numbers are never sacrificed; only narration degrades.
 - 13-F31 Model tiering per task (brief narration vs analyst planning vs classification) is a gateway routing table — decided at build time against the then-current Claude model lineup and revisited each release; task code names a tier, never a model id.
-- 13-F32 **Eval suites, run on every prompt or model change:** golden Q→A sets per language (expected metric selections + parameters, expected refusals); an injection corpus (hostile user text attempting SQL/scope/instruction escape — must never alter metric execution or scope); brief structure lint (three sections present, every number traceable per 13-F7). A score drop blocks deploy.
+- 13-F32 **Eval suites, run on every prompt or model change:** golden Q→A sets including roman-Urdu input variants (expected metric selections + parameters, expected refusals); an injection corpus (hostile user text attempting SQL/scope/instruction escape — must never alter metric execution or scope); brief structure lint (three sections present, every number traceable per 13-F7). A score drop blocks deploy.
 
 ## 4. Key flows
 
@@ -135,7 +136,7 @@ Users: owners (brief, alerts, analyst), managers (suggestions, approvals, announ
 ## 7. Customizability
 
 - **Layer 1 (platform admin, doc 15):** model-tier routing table; per-org LLM budget; max-rung cap per org; detector rollout flags.
-- **Layer 2 (back office, doc 14):** alert thresholds within designed bounds; brief language + deadline; R4 enablement per capability + spend caps; analyst memory erasure.
+- **Layer 2 (back office, doc 14):** alert thresholds within designed bounds; brief deadline; R4 enablement per capability + spend caps; analyst memory erasure.
 - **Layer 3 (device):** none.
 - **Deliberately not configurable:** the honesty guardrails — semantic-layer-only answers, refusal behavior, citations, announcement + reversibility of autonomous actions; rung unlock criteria (platform constants, changed only by revising this spec); the append-only `action.*` audit chain.
 
@@ -149,7 +150,7 @@ Users: owners (brief, alerts, analyst), managers (suggestions, approvals, announ
 ## 9. Open questions
 
 1. Brief tone calibration for the Lahore beachhead — decide from pilot feedback.
-2. Whether WhatsApp voice-note questions (doc 07 transcription) reach the analyst in Wave 4 or fast-follow.
+2. ~~Voice-note questions~~ **Settled (July 2026):** owner voice notes are transcribed by doc 07's pipeline (07-F24) and reach the analyst as text in Wave 4; low-confidence transcripts get a clarifying English reply, never a guessed answer.
 3. Exact demotion hysteresis (13-F27) to prevent rung flapping around a criterion boundary — tune at pilots.
 4. Whether the staffing track should ever climb past R2 (auto-scheduling proposals), or cap there permanently.
 5. Conversation-memory cost model (context growth): summarize-and-pin vs sliding window — decide at build with measured token costs.

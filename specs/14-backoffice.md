@@ -132,7 +132,7 @@ Everything here follows **presets, not knobs** (00 §7): a profile + tier choice
 This module is the layer-2 surface — §3 enumerates exactly which settings exist. Its own placement in the layers:
 - **Layer 1 (doc 15):** which modules/tiers/channels are even visible here (feature gates); take-rate % (read-only here, 14-F20).
 - **Layer 2:** everything in §3 — that is this module's purpose.
-- **Layer 3 (device):** not set here, except the device detail page delegates device-layer settings (language, float, idle-lock) for convenience — recorded as that device's own config events.
+- **Layer 3 (device):** not set here, except the device detail page delegates device-layer settings (float, idle-lock) for convenience — recorded as that device's own config events.
 - **Deliberately not configurable:** anything declared platform law in 01 §7; the permission matrix's hard rules (no role edits history — v1 §2.2); signal-ownership options beyond the designed role list; free-form roles, workflow states, or report builders; thresholds outside designed bounds.
 
 ## 8. Tech notes

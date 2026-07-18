@@ -22,7 +22,7 @@ RestOS is a **complete operating system for Pakistani restaurants** — not an o
 4. **One storefront, many doors.** Every own channel (web, WhatsApp, Instagram, QR, phone) is a door into one commerce core — one menu, one customer file, one order queue. A new channel is a new driver, never a new system.
 5. **LAN-first real-time.** In-branch coordination (sub-second state propagation across devices) works with the internet dead; cloud is the exhaust and cross-branch path. This is the hardest engineering problem and the technical moat.
 6. **AI honesty.** The analyst answers only from the event ledger through a semantic layer of computable, citable metrics; it says "not enough data yet" when true. Autonomy is earned by data maturity, never shipped on day one of a restaurant's history.
-7. **Visual-first, low-training.** Any staff-facing flow learnable in under 15 minutes; works on PKR 25k Android hardware. UI language is **English only** (v1 decision — English is the operating language of this market; staff who read little navigate by memorized visual position, which the stable-layout and icon+number laws in `specs/21-ux-system.md` serve directly).
+7. **Visual-first, low-training.** Any staff-facing flow learnable in under 15 minutes; works on PKR 25k Android hardware. UI language is **English only** (a v2 launch decision that **reverses** the v1 spec's Urdu+English plan — English is the operating language of this market; staff who read little navigate by memorized visual position, which the stable-layout and icon+number laws in `specs/21-ux-system.md` serve directly).
 
 ## 3. Architecture — the OS metaphor, taken literally
 
@@ -46,7 +46,7 @@ RestOS is a **complete operating system for Pakistani restaurants** — not an o
 
 ### 4.2 Commerce core (one storefront, many doors)
 - **Hosted storefront** per restaurant: menu → cart → order; modes: QR dine-in, pickup, delivery; payments COD + RAAST/bank transfer (cards when available). Their domain or ours.
-- **WhatsApp**: ordering door (conversation → storefront link → cart), order-status notifications, and support rail. WhatsApp Business API.
+- **WhatsApp**: ordering door (conversation → storefront link → cart), order-status notifications, and support rail with a conversational assistant that understands English/roman-Urdu text **and voice notes**, replying in English at launch (bilingual roman-Urdu output deferred until generation quality passes native-speaker evals — 07-F23). WhatsApp Business API.
 - **Instagram**: link-in-bio/story links into the storefront; DM automation as API allows.
 - **Phone/call center**: counter/call-center entry surface — caller ID → customer file → address & order history → 30-second entry; multi-branch routing to nearest branch.
 - **Foodpanda**: manual quick-entry from day one; Delivery Hero POS API ingestion when partnership lands (v1 spec Module D). Same queue, channel-tagged, commission tracked for channel economics.
@@ -70,7 +70,7 @@ RestOS is a **complete operating system for Pakistani restaurants** — not an o
 ### 4.6 Intelligence plane (the brain)
 - **Nightly brief** (push): AI-written plain English — what happened, what's odd, what to check tomorrow.
 - **Anomaly alerts:** voids/discount abuse, cash variance, stock variance, wastage spikes, price spikes, dead hours, channel drop-off.
-- **Conversational analyst** (pull): owner asks "aj Tuesday se kam kyun?" and gets a cited, ledger-grounded answer. Lives on **both surfaces from day one**: WhatsApp (where the owner lives) and the owner app (deep-dive with charts). Same brain, two surfaces. Semantic-layer guardrails per design law 6.
+- **Conversational analyst** (pull): owner asks "aj Tuesday se kam kyun?" and gets a cited, ledger-grounded answer. Ships in Wave 4 on **both surfaces together**: WhatsApp (where the owner lives) and the owner app (deep-dive with charts) — never one before the other, and never before its semantic-layer guardrails. Same brain, two surfaces. Semantic-layer guardrails per design law 6.
 - **Autonomy ladder** (earned by data maturity per restaurant): describe (alerts/brief) → prescribe (prep/reorder/staffing suggestions) → act with approval (draft POs, suggest 86) → act autonomously (auto-86 on stockout, auto-pause channel on kitchen overload, auto-reorder). Each rung unlocks when the layer below has proven accurate for that restaurant.
 
 ### 4.7 Owner layer
@@ -113,8 +113,8 @@ Profile = channel mix × hardware tier × org size, chosen at onboarding. Same k
 Build proceeds in dependency waves (overlapping across the team), each validated live in real dev-pilot restaurants from Wave 1 onward — **dev-pilots are development instruments, not launches**:
 
 - **Wave 0 — Foundation:** kernel (ledger, catalog, customer file), LAN-first sync mesh, printing layer, auth/roles. *The hardest engineering; hire for this.*
-- **Wave 1 — Service:** ops fabric T1/T2, payments/shifts, aging timers, availability, manager alarms+approvals, nightly owner summary. *A restaurant can run on it.*
-- **Wave 2 — Commerce + delivery:** storefront + all doors (QR/WhatsApp/Instagram-link/phone), customer file surfaces, rider app + COD settlement, manual foodpanda. *A restaurant can sell everywhere on it.*
+- **Wave 1 — Service:** ops fabric T1/T2, payments/shifts, aging timers, availability, manager alarms+approvals, nightly owner summary, **plus POS quick-entry for phone and foodpanda orders** (channel-tagged, ≤30 s — so the "one queue, all channels" law holds from the first pilot day). *A restaurant can run on it.*
+- **Wave 2 — Commerce + delivery:** storefront + all doors (QR/WhatsApp/Instagram-link), full phone/call-center surfaces with customer file, rider app + COD settlement. *A restaurant can sell everywhere on it.*
 - **Wave 3 — Supply + people:** inventory/recipes/counts/variance, purchasing, wastage, prep planning, staff ledger, restaurant memory. *The restaurant's back-of-house runs on it.*
 - **Wave 4 — Intelligence + scale:** conversational analyst (both surfaces), forecasting, autonomy ladder rungs 2+, T3 mesh, foodpanda API, multi-branch, marketing/loyalty. *The OS thinks.*
 

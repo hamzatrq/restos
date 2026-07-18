@@ -14,9 +14,9 @@ Used by: counter staff (Mode 1), the kitchen and downstream modules (both modes)
 ## 2. Position in platform
 
 - **Consumes:** `availability.changed` (01-F22 → push to aggregator), `channel.paused / resumed` commands (from doc 05 channel pulse), catalog reference data + menu mapping, `order.line_state_changed` (optional status push where the API supports it), org channel config (doc 14), onboarding mapping tooling (doc 15).
-- **Emits:** `aggregator.order_received / order_accepted / order_rejected / availability_pushed / push_failed`, `order.created`, `order.channel_tagged`, `channel.paused / resumed` result events.
+- **Emits:** `aggregator.order_received / order_accepted / order_rejected / availability_pushed / push_failed / pause_applied / pause_failed`, `order.created`, `order.channel_tagged`. (`channel.paused / resumed` commands are owned and emitted by doc 05 only; this module emits the `aggregator.pause_*` results.)
 - **Downstream consumers:** docs 02/03 (queue + KOT), doc 10 (recipe deduction), docs 12/13 (channel-economics reporting from the commission config), doc 15 (mapping-debt and push-failure fleet health).
-- **Extends 01 §4 catalog** (spec PR): the `aggregator.*` family and `channel.paused / resumed`.
+- **Extends 01 §4 catalog** (spec PR): the `aggregator.*` family (`channel.paused / resumed / throttled` are doc 05's extension).
 
 ## 3. Functional requirements
 
@@ -32,7 +32,7 @@ Used by: counter staff (Mode 1), the kitchen and downstream modules (both modes)
 - 08-F7 Editing/void of aggregator-tagged orders follows normal POS rules (void with approver post-KOT); the `aggregator_order_ref` makes end-of-day reconciliation against the foodpanda partner portal possible (doc 12 report).
 
 **Mode 2 — Delivery Hero POS API**
-- 08-F8 Webhook order ingestion: verify signature → persist raw payload (`aggregator.order_received`) → normalize via the driver → `order.created` + `order.channel_tagged` into the kernel queue → auto-KOT and deduction downstream. Idempotent on aggregator order id under webhook redelivery.
+- 08-F8 Webhook order ingestion: verify signature → persist raw payload (`aggregator.order_received`) → normalize via the driver → `order.created` + `order.channel_tagged` into the kernel queue. **Confirm policy: aggregator API orders auto-confirm on ingest** (`order.confirmed` emitted with creation — acceptance already happened upstream on the aggregator side, per the indirect-flow reality); manual quick-entry orders are confirmed by the act of entry (02-F30). KOT follows `order.confirmed` (03), never precedes it. Idempotent on aggregator order id under webhook redelivery.
 - 08-F9 **Menu mapping:** foodpanda item/variant/topping ↔ catalog MenuItem/Variant/Modifier, built at onboarding with doc 15 tooling, versioned, validated (every active foodpanda item maps or is explicitly excluded). An incoming line with no mapping still ingests via the 08-F6 placeholder — an order is never dropped for mapping debt — and raises a mapping alert.
 - 08-F10 **Availability push:** on `availability.changed` for a mapped item, the driver pushes item availability to foodpanda ≤ 60 s. Push failures emit `aggregator.push_failed` and retry (BullMQ); persistent failure raises a manager-console + fleet-health alert — the 86 is never assumed delivered (00 §5.7 honesty).
 - 08-F11 **Accept/reject — the honest contract:** the default integration is the **indirect flow**: order acceptance stays on the foodpanda tablet; we ingest in parallel and eliminate re-keying — the tablet may remain on the counter. Where DH enables the direct flow for an org, the driver auto-accepts within the DH deadline using the org's configured default prep time (aggregators cancel unaccepted orders; a branch tap cannot be the gate). `aggregator.order_accepted / order_rejected` record whichever path occurred, including tablet-side acceptance where the API makes it observable. This spec makes no promise that the tablet disappears.

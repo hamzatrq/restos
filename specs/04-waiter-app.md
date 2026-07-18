@@ -134,7 +134,7 @@ Expo React Native, sharing `packages/domain` + `packages/sync-client` with the f
   - scoped-vs-full slice for restaurant-owned handhelds;
   - ready ownership (defined in doc 03);
   - quick-tag list (shared with doc 02).
-- **Layer 3 (device):** language, grid density (compact/large), notification tone.
+- **Layer 3 (device):** grid density (compact/large), notification tone.
 - **Deliberately not configurable:** widening a BYOD scoped slice to include payment/cash/customer data (never); waiter-side settlement or approval powers; attribution; the table state set (fixed vocabulary — presets, not knobs).
 
 ## 8. Tech notes

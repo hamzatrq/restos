@@ -3,6 +3,8 @@
 **Module spec — Draft 1, July 2026**
 Parent documents: `../restaurant-os-v2-concept.md` (vision), `../restaurant-os-spec.md` (v1 reference detail). This document is the anchor for every module spec in `specs/`: shared architecture, tech stack, cross-cutting requirements, data conventions, configuration model, and the template every module document follows. Module docs do not repeat what is stated here — they reference it.
 
+**Authority order (when documents conflict):** (1) `restaurant-os-v2-concept.md` for vision, waves, and settled product laws; (2) this document §5 + `21-ux-system.md` for cross-cutting UX/offline/performance; (3) the owning module doc for its normative behavior (03 for kitchen states, 09 for delivery/COD, 05 for approvals); (4) the v1 spec **only** for POS/print/tax/cash detail — never for language, phasing, pricing, stack, or surfaces (see its superseded banner).
+
 ---
 
 ## 1. Module map & document index
@@ -15,7 +17,7 @@ Parent documents: `../restaurant-os-v2-concept.md` (vision), `../restaurant-os-s
 | 04 | `04-waiter-app.md` | Waiter handheld (T3) | App | Android incl. BYOD | 4 |
 | 05 | `05-manager-console.md` | Manager console (alarms, approvals, floor state, channel pulse, day open/close) | App | Manager's Android/iOS phone | 1 core / 4 full |
 | 06 | `06-storefront.md` | Hosted storefront (QR dine-in, pickup, delivery; all own-channel doors land here) | Driver | Cloud web (Next.js) | 2 |
-| 07 | `07-whatsapp-channel.md` | WhatsApp service (ordering door, notifications, support, analyst surface) | Driver | Cloud service | 2 |
+| 07 | `07-whatsapp-channel.md` | WhatsApp service (ordering door, notifications, support; analyst surface in Wave 4 with doc 13) | Driver | Cloud service | 2 (analyst 4) |
 | 08 | `08-foodpanda-ingestion.md` | Aggregator ingestion (manual entry mode + Delivery Hero POS API) | Driver | Cloud service (+ POS quick-entry) | 1 manual / 4 API |
 | 09 | `09-rider-dispatch.md` | Rider app + dispatch + COD settlement | App | Rider Android (RN) + counter surface | 2 |
 | 10 | `10-inventory-supply.md` | Inventory, recipes, purchasing, wastage, counts, variance, prep planning, forecasting | Service + UI | Cloud + back office + mobile flows | 3 |
@@ -138,7 +140,7 @@ restos/
 3. **Performance targets** (reference hardware): order line add → UI feedback < 100 ms; confirm → KOT printing starts < 2 s; POS cold start < 6 s; LAN event propagation (device → device) < 1 s p95; sync catch-up after 8h offline with ~500 orders < 60 s on 4G; owner dashboard cached load < 2 s.
 4. **Security:** TLS everywhere; per-device registration tokens, revocable; PINs Argon2id-hashed, lockout on repeated failure; server-side role authorization (never trust client role claims); org data isolation absolute (customer phone numbers never cross orgs); audit log immutable, hash-chained per device.
 5. **Append-only:** no silent edit/delete of historical transactions by any role; corrections are new linked records (concept doc law 2).
-6. **Language & learnability:** UI is **English only** (v1 language decision — no i18n layer, no RTL). Staff who read little navigate by memorized visual position, so the doc-21 stable-layout and icon+number laws carry the low-literacy load. Numerals everywhere they can (prices, tables, quantities); PKR with thousands separators. All staff-facing flows learnable < 15 min. String hygiene: user-facing strings live in per-app `strings.ts` catalogs (lint-banned inline) — not i18n, just a mechanical migration path if a second language is ever added.
+6. **Language & learnability:** UI is **English only** (v1 language decision — no i18n layer, no RTL). Staff who read little navigate by memorized visual position, so the doc-21 stable-layout and icon+number laws carry the low-literacy load. Numerals everywhere they can (prices, tables, quantities); PKR with thousands separators. All staff-facing flows learnable < 15 min. String hygiene: user-facing strings live in per-app `strings.ts` catalogs (lint-banned inline) — not i18n, just a mechanical migration path if a second language is ever added. **Sole exception — customer conversational surfaces (WhatsApp/social DM):** input understanding is multilingual by nature (English, roman-Urdu, voice notes — 07-F22/F24); replies are English at launch, and bilingual roman-Urdu replies are a later, eval-gated stage (07-F23). Staff and owner UI have no exception.
 7. **Sync honesty:** every screen showing remote data displays last-synced age; stale is never presented as live.
 8. **Automation law** (concept doc law 1): every fact is a side-effect, an ingestion, or a scheduled verified ritual. Module specs must not introduce discretionary data entry.
 
@@ -157,7 +159,7 @@ Three layers, strictly ordered; lower layers cannot override higher ones:
 
 1. **Platform admin (vendor):** org provisioning, feature flags/tier enablement, own-channel take-rate %, rollout channels.
 2. **Organization (back office):** operating profile, hardware tier (T1/T2/T3), channels enabled, menu/catalog/recipes, roles & users, **signal ownership** (which role advances which order state — e.g. who marks "ready"), approval thresholds (discount %, void rules), tax posture, printer routing rules, alert thresholds.
-3. **Branch/device:** language, printer assignments, station identity (this screen is "grill"), float amounts, idle-lock timeout.
+3. **Branch/device:** printer assignments, station identity (this screen is "grill"), float amounts, idle-lock timeout.
 
 **Presets, not knobs:** restaurants pick a profile + tier which sets sane defaults for everything in layer 2; individual settings are adjustable within designed bounds, but modules must not introduce free-form configuration. Every module doc's Customizability section lists exactly which settings it exposes at which layer — and states what is deliberately NOT configurable.
 

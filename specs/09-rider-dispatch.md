@@ -51,7 +51,7 @@ Out of scope, explicitly:
 No other states exist; surfaces may not invent intermediate ones (e.g. "arriving") — the model only claims what an event proves.
 
 **Rider app**
-- 09-F10 Assigned-order list, oldest first: customer name, address text, order contents summary, COD due (or "PAID — collect nothing" for prepaid/RAAST orders), delivery notes. Tap-to-call the customer via the OS dialer; the number is never copyable to clipboard.
+- 09-F10 Assigned-order list, oldest first: customer name, address text, order contents summary, COD due (or "COLLECT NOTHING" for prepaid/RAAST **and khata-credit** orders — a khata delivery creates a receivable on the customer file via doc 02's khata ledger, and the rider collects zero), delivery notes. Tap-to-call the customer via the OS dialer; the number is never copyable to clipboard.
 - 09-F11 Status progression per order, two taps: `picked_up` → `delivered`. `delivery_failed` requires a reason from a fixed list (customer unreachable, wrong address, refused, other + note). No other states, no skipping — `delivered` requires `picked_up`.
 - 09-F12 Cash header, always visible: running total the rider owes = COD of delivered-unsettled orders + COD being carried (picked-up, not yet delivered), itemized on tap. PKR display per 00 §5.6; integer paisas underneath (00 §6).
 - 09-F13 Offline tolerance: every status tap persists locally first (01-F2) and queues in the outbox; the app pushes on any connectivity — riders lose signal constantly. The UI marks each event "synced / waiting for signal" honestly. Events carry `device_created_at`, so timing analytics use true action time, not sync time.
@@ -127,7 +127,7 @@ No other states exist; surfaces may not invent intermediate ones (e.g. "arriving
 
 - **Layer 1 (platform admin, doc 15):** rider device-class registration limits per org tier.
 - **Layer 2 (org, doc 14):** over/short manager-approval threshold, failed-delivery reason list (from platform presets), on-duty via clock-in vs manual toggle, advisory max load per rider (soft warning only — dispatch is never blocked by it), delivery-order COD cap.
-- **Layer 3 (branch/device):** rider app language, dispatch-surface default sort.
+- **Layer 3 (branch/device):** dispatch-surface default sort.
 - **Deliberately not configurable:** the status state machine and its ordering, settlement covering all delivered-unsettled orders (no cherry-picking), over/short attribution, append-only settlement corrections, customer-detail purge on unassign/settle, the absence of GPS tracking.
 
 ## 8. Tech notes

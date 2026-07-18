@@ -70,7 +70,7 @@ Users: chefs, pass staff, and whichever role owns the ready signal (03-F24). Dev
 - 03-F23 Sequencing is **visibility only**. The system never dictates cook order: no auto-prioritization, no reordering of the queue, no "cook this next" prompts — at any tier, ever. Chronological order + aging color is the entire sequencing UI; the chef decides.
 
 **Ready-signal ownership**
-- 03-F24 Who marks `ready` is a role assignment at layer 2 (00 §7): chef (KDS bump), pass person (pass screen), counter (POS), or waiter-on-pickup (doc 04). The emitted event is identical regardless of owner; every surface capable of ready-marking respects the assignment (others render read-only).
+- 03-F24 Who marks `ready` is a role assignment at layer 2 (00 §7): chef (KDS bump), pass person (pass screen), counter (POS, 02-F33), or waiter-on-pickup (doc 04). The emitted event is identical regardless of owner; every surface capable of ready-marking respects the assignment (others render read-only). **Canonical (01 §4): station bump = those lines `ready`; order-level ready = the fold of all lines ready; an owner's "order ready" mark simply marks all remaining lines at once. There is no separate order-ready state.**
 
 **Timing pipeline (stages defined here; ETA display belongs to docs 04/06/13)**
 - 03-F25 **Stage 1 — aging timers, day one:** timers from `order.confirmed` on every queue surface (pass, KDS, POS T1 panel, manager console). No learning required; this alone is the Wave 1 deliverable.
