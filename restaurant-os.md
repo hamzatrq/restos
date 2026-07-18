@@ -1,6 +1,6 @@
 # RestOS — The Restaurant Operating System (Master Document)
 
-**Status:** Single authority document, July 2026 — merged from the original draft spec (v1, early 2026) and the v2 platform vision. **Part I** is the platform vision and settled product laws. **Part II** preserves the product-seed detail the module specs cite (roles matrix, module behavioral seeds, field hardware reality). Normative software behavior lives in `specs/00–21`; when this document and a module spec conflict on module behavior, the module spec wins (authority order: `specs/00-platform-overview.md`).
+**Status:** Single authority document, July 2026 — merged from the original draft spec (v1, early 2026) and the v2 platform vision. **Part I** is the platform vision and settled product laws. **Part II** preserves the product-seed detail the module specs cite (roles matrix, module behavioral seeds, field hardware reality). Normative software behavior lives in `specs/`. **Authority order (this exact block also appears in `specs/00-platform-overview.md` — the two must never diverge):** (1) Part I of this document for vision, waves, and settled product laws; (2) `specs/00` §5 + `specs/21-ux-system.md` for cross-cutting UX/offline/performance; (3) the owning module spec for its normative behavior (03 kitchen states, 09 delivery/COD, 05 approvals); (4) Part II appendices are seeds the specs refine — a module spec that amends its seed wins.
 
 ---
 
@@ -38,7 +38,7 @@ RestOS is a **complete operating system for Pakistani restaurants** — not an o
 ## 4. Subsystem catalog (full scope)
 
 ### 4.1 Ops fabric (the nervous system)
-- Order state machine: placed → cooking → ready → served/dispatched → settled (canonical state names: `specs/01` §4). **Status lives at the order line** (cross-station assembly: "2 of 3 ready, waiting on naan").
+- Order state machine: placed → confirmed → in_prep → ready → served (or picked_up → delivered for delivery), with settlement closing the money side (canonical vocabulary: `specs/01` §4 — customer-facing words like "preparing"/"dispatched" are display labels, never states). **Status lives at the order line** (cross-station assembly: "2 of 3 ready, waiting on naan").
 - One queue, all channels, channel-tagged. Sequencing = visibility only (aging colors, chronological); the chef decides, the system never commands.
 - Timing pipeline: aging timers day one → ready-marks silently train per-item prep times (rush/quiet segmented) → learned ETAs surface when confident ("quote 25 min").
 - Item availability toggle propagating to every channel instantly (auto-86 from stock levels once inventory matures — the autonomy ladder §4.6).
@@ -128,7 +128,7 @@ Public launch when Wave 4 is pilot-proven. Per-module software specifications li
 2. **Foodpanda API access** — apply at project start; manual entry is the standing fallback (Appendix E).
 3. **Analyst trust** — one confident wrong answer to an owner kills the brain's credibility; semantic-layer guardrails are non-negotiable, and the brief ships before free-form chat is promoted.
 4. **Count adherence** still gates variance value; prep planning and low-stock value soften the ask by making counts useful to staff, not just to the owner. Owner-visible count-skipped nags back it up.
-5. **Pilot coverage gap** — dev-pilot restaurants cover the small-dine-in profile. Cloud kitchen, large single-branch, and multi-branch profiles need pilots recruited deliberately, or their subsystems (channel pulse, T3 mesh, multi-branch roll-up, call center) reach market launch untested in the field.
+5. **Pilot coverage gap** — dev-pilot restaurants cover the small-dine-in profile. Cloud kitchen, large single-branch, and multi-branch profiles need pilots recruited deliberately, or their subsystems (channel pulse, T3 mesh, multi-branch roll-up, call center) reach market launch untested in the field. **Launch gate:** a public operating profile (§6) is marketed only after at least one pilot of that profile has field evidence for its defining workflows.
 
 ## 10. Module documentation set
 

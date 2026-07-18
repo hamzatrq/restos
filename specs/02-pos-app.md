@@ -34,7 +34,7 @@ All tiers run it. In **T1 the POS is the entire restaurant** — one device, pri
 - 02-F6 Item notes to kitchen: free text + org-configurable quick-tags ("less spicy") → `order.note_added`, printed prominently on the KOT (doc 03).
 - 02-F7 Availability toggle ("karahi finished") from any POS screen → `availability.changed`, fast-path to all devices and channel drivers (01-F22); toggled-off items grey out on the grid within the LAN budget (01-F15).
 - 02-F8 Confirm boundary: confirming an order emits `order.confirmed` and hands KOT jobs to the print service (doc 03). Line removal pre-confirm is `order.line_removed`; post-confirm it must be `void.recorded` with an approver (01 §4).
-- 02-F9 Incoming channel orders (docs 06/07/08) appear in the same queue channel-tagged, raise an audible chime, and auto-print KOT per channel config. Acceptance semantics belong to the owning channel doc.
+- 02-F9 **Cloud-order inbox (the accept/reject surface for 06-F17a).** Incoming cloud orders (docs 06/07) land in a POS inbox pane, channel-tagged, with an S2 chime (21 interrupt law): one-tap **Accept** → `order.confirmed` (idempotent — at most one confirm per order id; KOT jobs created exactly once, after confirm, never before); **Reject** with a reason from the 06-F20 list → `order.rejected`. When org auto-accept is on, the inbox shows a visible countdown, cancellable with one tap. Items gone unavailable since placement must be resolved before accept: remove the line (customer notified via the channel doc) or reject the order — this explicit line-removal path is the only partial-confirmation mechanism. Aggregator API orders bypass the inbox (accepted upstream, auto-confirmed on ingest per 08-F8) and appear directly in the queue. An unaccepted order past half its confirmation window escalates to S1 per the interrupt law.
 - 02-F10 Order queue and recall: open orders searchable by order number, table, or customer phone; settled orders of the current day recallable read-only (receipt reprint per 02-F16). Aging colors follow doc 03 thresholds.
 - 02-F11 Multi-terminal coherence: an order started on one terminal can be parked there and resumed, extended, or settled on another; concurrent line-adds from two terminals merge (01-F16).
 
@@ -64,7 +64,7 @@ All tiers run it. In **T1 the POS is the entire restaurant** — one device, pri
 - 02-F21 No-sale drawer opens: `cash.drawer_opened` with `reason=no_sale`, logged and counted (classic theft vector); surfaced in doc 12 alerts.
 
 **Shifts & cash**
-- 02-F22 Day open: opening float entry → `day.opened`. Shift open per cashier → `shift.opened`. A shift binds subsequent cash settlements and drawer events to that cashier.
+- 02-F22 Day open: opening float entry → `day.opened`. Shift open per cashier → `shift.opened`. A shift binds subsequent cash settlements and drawer events to that cashier. **Role guard:** day open/close and float entry require manager/owner permission (`restaurant-os.md` Appendix A) — a cashier session cannot execute them; where no manager device exists, the local manager-PIN path satisfies the guard.
 - 02-F23 Shift close per cashier (`shift.closed`):
   - system-expected cash (by method) vs counted cash; over/short recorded and attributed;
   - the cashier sees their own reconciliation on-screen at close ("I'm clean") — the staff-protection framing;
@@ -92,6 +92,13 @@ All tiers run it. In **T1 the POS is the entire restaurant** — one device, pri
   - no `ready` state is fabricated — the timing pipeline honestly receives no ready samples in T1 (03-F26), and T1 restaurants therefore never get learned ETAs (aging timers only).
 - 02-F33 Ready-marking on POS (T2/T3): when the org's ready-signal ownership (03-F24) is assigned to **counter**, the POS queue panel exposes per-order ready marking (marks all remaining lines ready, one tap); otherwise the panel is read-only for states.
 - 02-F32 Sync honesty on-device (00 §5.7): a persistent, non-blocking indicator shows outbox depth and last cloud ack (01-F11). Local operation is never gated on it.
+
+**Delivery dispatch surface (Wave 2 — logic owned by doc 09, hosted here and on doc 05)**
+- 02-F34 Dispatch panel: delivery orders with all lines ready listed oldest-first; assign or batch-assign to a rider (staff registry), or record on-behalf status entries for app-less riders (09); COD due shown per order; rider rows show last-event age so stale state is visible, never assumed fresh (09-F13).
+- 02-F35 Rider COD settlement runs here per doc 09 (expected vs returned, over/short attributed, manager-PIN above threshold); failed deliveries surface for resolution (return to pool, or void via the normal approval path) per 09-F18.
+
+**Refunds & post-settlement corrections (01 money contract, Wave 1)**
+- 02-F36 From any recallable settled order (02-F10): full or partial refund (by line or amount) → `payment.refunded` per 01-F29 — manager approval always (remote interrupt or local PIN), method cash-out / RAAST-reversal reference / khata credit, linked `void.recorded`/`comp.recorded` when food is returned or remade, `settlement_attempt_id` idempotency (01-F31). When the tax add-on is active, the refund triggers the linked fiscal credit note automatically (16-F12). The refund prints a refund slip (doc 03) and lands in doc 12 exception reporting.
 
 ## 4. Key flows
 
@@ -161,5 +168,5 @@ All tiers run it. In **T1 the POS is the entire restaurant** — one device, pri
 1. Caller-ID capture on Windows (TAPI/USB modem) and Android (call-log permission policy) — manual number entry is the committed baseline.
 2. Card payments: manual record only at launch; terminal integration (which acquirer, if any) deferred.
 3. Khata statement/settlement UX depth here vs the customer-facing surfaces (docs 06/07) — receivable events are shared either way.
-4. Refund of a settled order (customer returns food after payment): modeled as a correction event pair or a negative payment — needs a kernel-conformant design before Wave 1 code.
+4. ~~Refunds~~ **Resolved (July 2026):** the canonical money contract lives in 01-F29..F33; the POS flow is 02-F36.
 5. Quoted-ETA display at phone entry once doc 03 publishes confident estimates — display ownership currently sits with docs 04/06/13; extending it to phone entry needs a spec PR here.

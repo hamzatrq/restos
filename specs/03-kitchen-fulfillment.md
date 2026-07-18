@@ -39,7 +39,7 @@ Users: chefs, pass staff, and whichever role owns the ready signal (03-F24). Dev
   Testable: kill a printer mid-rush; the alert shows within 45 s of confirm.
 - 03-F6 One-tap reroute: from the failure alert, the operator can resend the failed job to any other registered printer; the reroute is logged.
 - 03-F7 Reprint and KOT-void always logged with actor + reason (`kot.reprint_requested`; post-KOT void per 01 §4 requires approver).
-- 03-F8 Text prints via printer fonts (English + numerals — 00 §5.6); the bitmap raster path is used for logos and QR codes only; numerals Western.
+- 03-F8 Text prints via printer fonts (English + numerals — 00 §5.6); the bitmap raster path serves logos, QR codes, and **user-content fields containing non-Latin text** (customer names, addresses, order notes may arrive in Urdu script — 00 §5.6 user-content rule): such fields render to bitmap per-field, never dropped or transliterated. Numerals Western.
 - 03-F9 Cash drawer kick via receipt-printer RJ11. The POS emits `cash.drawer_opened` (with reason) as the authoritative record; this service executes the kick. Drawer opens without a sale still require the event first — no kick without a ledger entry.
 - 03-F10 Printer test harness — scripted suite runnable from device settings and on the office rig (00 §4):
   - charset page and logo/QR bitmap page;
@@ -57,7 +57,7 @@ Users: chefs, pass staff, and whichever role owns the ready signal (03-F24). Dev
   - timer basis is `order.confirmed`, so a failed print never hides a late order.
 - 03-F15 Line-level assembly view per order: "2 of 3 items ready, waiting on naan" — folded from `order.line_state_changed` across stations.
 - 03-F16 Ready-marking: per line and whole-order, one tap → `order.line_state_changed` to `ready` with actor. Item availability is also toggleable from the pass (01-F22).
-- 03-F17 An order leaves the queue when all lines are `served`/`dispatched`; a recall strip keeps the last 20 cleared orders one tap away (wrong-bump recovery).
+- 03-F17 An order leaves the queue when all its lines reach a terminal service state — `served`, or `picked_up` for delivery (canonical vocabulary, 01 §4); a recall strip keeps the last 20 cleared orders one tap away (wrong-bump recovery).
 
 **KDS (T3)**
 - 03-F18 Per-station screens: a station map (station → categories/items, layer-2 config, mirroring or refining printer routing) filters each screen to its own lines only. A device knows its station identity (layer 3: "this screen is grill").

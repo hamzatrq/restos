@@ -14,7 +14,7 @@ WhatsApp broadcast campaigns, promo/discount campaigns, simple count-based loyal
 ## 2. Position in platform
 
 - **Events consumed:** `customer.created / merged / address_added`, `order.created / channel_tagged` and settlement (`payment.recorded`), `discount.recorded`; WhatsApp delivery/read receipts and opt-out messages ingested via doc 07 webhooks.
-- **Events emitted:** `campaign.*`, `loyalty.*`, `customer.opted_out / opted_in` — added to the 01 §4 catalog by this spec (§5). `discount.recorded` gains an optional `campaign_id` payload field (additive change under the same schema version, 00 §6).
+- **Events emitted:** `campaign.*`, `loyalty.*` — added to the 01 §4 catalog by this spec (§5). `customer.opted_out / opted_in` are **owned and emitted solely by doc 07** (07-F18); this module only consumes the shared suppression read model. `discount.recorded` gains an optional `campaign_id` payload field (additive change under the same schema version, 00 §6).
 - **Integrates:** doc 07 (template registry, send infrastructure, metering, opt-out ingestion), doc 02 + doc 06 (coupon/deal validation and application; campaign definitions arrive as reference data over the kernel channel, 01 §8), doc 12/14 (lift views), doc 13 (may narrate lift in the brief — this module owns the numbers, doc 13 owns the words).
 
 ## 3. Functional requirements
@@ -109,7 +109,7 @@ No discretionary data entry is introduced; no staff member enters marketing data
 ## 5. Data
 
 - **Entities owned (cloud read models, rebuildable per 01-F7):** `campaigns`, `segment_definitions` (+ evaluation log), `coupon_codes` (+ per-code state), `loyalty_program` + `loyalty_progress`, `send_log`, `lift_reports`. The opt-out registry is owned by doc 07; this module is a consumer and never writes around it.
-- **Events added to the 01 §4 catalog by this spec:** `campaign.created / activated / paused / completed`, `campaign.message_sent`, `campaign.message_status_ingested`, `customer.opted_out / opted_in`, `loyalty.reward_earned / reward_redeemed`.
+- **Events added to the 01 §4 catalog by this spec:** `campaign.created / activated / paused / completed`, `campaign.message_sent`, `campaign.message_status_ingested`, `loyalty.reward_earned / reward_redeemed`. (`customer.opted_out / opted_in`: doc 07's, consumed here.)
 - **Extended payloads:** `discount.recorded` + optional `campaign_id` (additive, 00 §6).
 - **Events consumed:** listed in §2.
 - **Retention:** send logs and evaluation logs kept ≥ 12 months for lift baselines and dispute resolution; message *content* is not stored beyond the template id + parameters (the customer's phone number is already org-scoped data, 00 §5.4).

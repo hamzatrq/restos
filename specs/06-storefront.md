@@ -54,7 +54,7 @@ In scope: menu browsing, cart, checkout in three modes, customer identity captur
 - 06-F17 Placing an order persists `order.created` cloud-side and enqueues it for the branch. The confirmation screen and status page show, truthfully:
   - **received** — the cloud has the order (this is all "order placed" ever claims);
   - **confirmed** — the branch emitted `order.confirmed` (with ETA if provided);
-  - **preparing** — first `kot.printed` or any line state cooking;
+  - **preparing** — first `kot.printed` or any line `in_prep` (display label, not a state — 01 §4);
   - **ready** — all lines ready (pickup/dine-in terminal-facing state);
   - **dispatched** — `rider.picked_up` (delivery), then **delivered** on `rider.delivered`.
 - 06-F18 If the branch's last sync contact exceeds a staleness threshold (default 120 s), the customer sees "the restaurant hasn't seen your order yet — it is queued and will reach them the moment they're back online", with the option to cancel. Stale is never shown as confirmed.
@@ -69,7 +69,15 @@ In scope: menu browsing, cart, checkout in three modes, customer identity captur
 - 06-F23 Rate limits: per-IP request throttling; per-phone OTP issuance ≤ 3/hour and ≤ 6/day; per-phone order placement ≤ 5/hour (limits are platform defaults, doc 15 adjustable).
 - 06-F24 Org-level customer flags: a customer file marked `cod_blocked` (set from POS/back office after no-shows) cannot place COD delivery orders — storefront offers RAAST-reference prepayment instead. First-order COD value cap per org config (layer 2, default off).
 
-**Discoverability & page basics**
+**Backpressure & unconfirmed-order hygiene (Wave 2 — channel pulse arrives Wave 4)**
+- 06-F27 Per-branch cap on unconfirmed cloud orders (default 10, doc 15 adjustable): beyond it, the storefront pauses intake with an honest "restaurant is at capacity — try again shortly." An order unconfirmed past the 06-F20 window auto-closes (`order.cancelled`, customer notified) — never lingers. Auto-accept (06-F17a) suspends while the branch is sync-stale (06-F18) or the unconfirmed queue exceeds the cap — auto-accept must never fire into a branch that isn't seeing orders. On reconnect, queued orders drain oldest-first with availability re-validated before confirm; items gone unavailable route through the 02-F9 line-resolution path.
+
+**QR dine-in settlement handoff (canonical — closes the eat-and-leave gap)**
+- 06-F28 Per-org QR settlement policy (layer 2), one of:
+  - **Pay-at-counter (default):** the status page shows "pay at the counter when you're done" throughout; a "request bill" tap raises an S2 prompt on the POS with table id (21 interrupt law); settlement at the counter (02) settles the order and releases the table.
+  - **Prepay:** RAAST-reference/card (when available) before the order enters the queue — cloud-kitchen/QSR profiles.
+  - **Waiter handoff (T3):** the bill request routes to the table's waiter (04), who closes out per the normal table flow.
+  In every mode: who settles and who releases the table is explicit above; an unsettled QR table stays visible in the POS open-orders view — walk-out exposure is always on a screen, never silent.
 - 06-F25 Each org storefront exposes correct per-org metadata: page titles, OpenGraph tags, and a share preview (logo + name) so links shared on WhatsApp/Instagram render as the restaurant, not the platform. Search indexing is on for the menu landing page, off for cart/checkout/status URLs.
 - 06-F26 A hosted order summary is viewable from the status page after completion (items, totals, payment method stated as recorded); it mirrors branch receipt data but is not a fiscal receipt — the printed receipt (docs 02/16) remains authoritative.
 
@@ -79,7 +87,7 @@ In scope: menu browsing, cart, checkout in three modes, customer identity captur
 1. Customer scans the table QR → branch menu opens in dine-in mode, table pinned.
 2. Builds cart; confirms; phone optionally captured (06-F13).
 3. `order.created` persisted (channel storefront, mode qr_dinein, table id) → branch queue.
-4. POS/pass show it with channel badge (docs 02/03); KOT prints; status page tracks received → confirmed → preparing → ready → served.
+4. POS cloud-order inbox accepts it (02-F9; or org auto-accept, 06-F17a) → `order.confirmed` → KOT prints; status page tracks received → confirmed → preparing → ready → served → bill requested → settled (06-F28).
 Failure path: branch offline → 06-F18 honesty state on the customer's phone; staff at the physical table remain the fallback; order enters the queue on reconnect.
 
 **Pickup (happy path)**

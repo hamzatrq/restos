@@ -20,7 +20,7 @@ Two distinct jobs on one module boundary:
 - **Events consumed:** `payment.recorded / split_recorded`, `order.created / channel_tagged`, `void.recorded`, `comp.recorded`, `discount.recorded` (credit-note triggers), `config.changed` (posture/rule-pack changes).
 - **Events emitted:** `fiscal.*` family — added to the 01 §4 catalog by this spec (§5).
 - **Integrates:** doc 02 (settlement path hosts the synchronous attempt + local queue), doc 03 (receipt blocks: FBR invoice number + QR render), doc 12 (tax summaries for the owner), doc 14 (posture matrix UI, needs-review queue), doc 15 (add-on enablement, credential provisioning, fiscal fleet health).
-- **External:** FBR IMS API, PRA e-invoicing API (REST — permitted third-party exception per 00 §3). Infra: BullMQ store-and-forward queue (00 §3) + local SQLite queue on POS.
+- **External:** tax authority APIs (FBR IMS, PRA e-IMS, SRB, KPRA RIMS, ICT — REST/local-utility, permitted third-party exception per 00 §3), one per certified adapter (§3 Authority adapter model). Infra: BullMQ store-and-forward queue (00 §3) + local SQLite queue on POS.
 
 ## 3. Functional requirements
 
@@ -62,6 +62,30 @@ Two distinct jobs on one module boundary:
 - 16-F15 `needs_review` queue surfaced in back office (doc 14): resolution actions are retry and annotate; resolutions are audit events; deletion does not exist.
 - 16-F16 Credit (khata) orders: the fiscal invoice is issued at receipt issuance (order completion), not at eventual khata settlement; the applicable rate for method-differentiated regimes follows the rule pack's mapping for credit sales (§9.6).
 - 16-F17 Owner visibility: doc 12 shows a per-day fiscal health tile when the add-on is on — invoices fiscalized / pending / needs_review — with the same sync-honesty rules as every remote view (00 §5.7).
+
+**Authority adapter model (add-on architecture)**
+
+Pakistani authorities differ materially — rates, digital-payment differentials, branch-level dispensations, integration topology, offline rules (external audit, verified July 2026). The add-on therefore treats each authority as a separately certified **adapter** behind one interface; everything authority-specific lives in the adapter and its rule packs, and the fiscal pipeline (16-F7…F15) stays adapter-agnostic.
+
+- 16-F18 One adapter interface: every authority integration implements the same contract (16-F19…F24). The state machine (16-F8), queue (16-F11), and reconciliation (16-F13) never branch on authority identity outside the adapter.
+- 16-F19 Applicability resolution: the adapter and rate for an invoice resolve from org province **plus branch registration/approval status with the authority** — never province alone. SRB's special-dispensation list (approved integrated branches charge 15% on digital payments with input adjustment — verified July 2026) makes the applicable rate branch-status-dependent; rule packs MUST support branch-status-conditional rate rows.
+- 16-F20 Rule-pack binding: each adapter binds versioned, effective-dated rule packs (16-F4). Rates verified July 2026 — PRA 16% cash / 8% eligible digital (effective 1 July 2026); SRB 15% standard / 8% eligible digital plus dispensation — exist only as effective-dated pack entries, never as prose or code constants.
+- 16-F21 Certification status: sandbox certification is tracked per adapter × org/branch (doc 15). "Certified" = sandbox round-trip passed + legal-verification checklist signed off; both recorded as audit events.
+- 16-F22 Capability declaration: each adapter declares its online/offline capabilities, including whether offline receipt issuance with the pending marker (16-F10) is legally permitted for that authority. This is an adapter capability flag certified before enablement — never a product-wide promise. Where the flag is false, the adapter defines the compliant offline behavior.
+- 16-F23 Per-adapter ownership: receipt/QR format (16-F9, doc 03 blocks), correction/credit-note rules (16-F12), and reconciliation/returns export formats (16-F13/F14) are defined by the adapter, not the core module.
+- 16-F24 Credentials + deployment topology: each adapter declares its topology — cloud REST client, or a local branch utility (KPRA RIMS: a local Windows utility that receives POS invoice JSON and queues while offline, or a direct public API requiring connectivity — verified July 2026). The local-utility topology is explicitly supported: a small vendor-managed Windows service deployed beside the counter POS with its own store-and-forward, monitored in doc 15 fleet health. Credential rules (16-N4) apply to both topologies.
+- 16-F25 Enablement gate: the compliance add-on can be enabled for an org/branch only when the applicable authority adapter is certified for it (16-F21). Uncertified authority = add-on unavailable there, stated plainly at sale; the posture engine and core POS are unaffected.
+- 16-F26 Named adapters at spec time, each separately certified:
+
+| Adapter | Known distinctive (verified July 2026) |
+|---|---|
+| PRA / e-IMS (Punjab) | 16% cash / 8% eligible digital (current as of 1 Jul 2026); e-IMS invoice reporting |
+| SRB (Sindh) | 15% standard / 8% eligible digital + branch special-dispensation list (15% digital with input adjustment) |
+| KPRA / RIMS (KP) | dual topology: local Windows utility with offline queue, or direct public API requiring connectivity |
+| ICT (Islamabad) | distinct scope and rates — pack verified at build time |
+| FBR (where applicable) | federal IMS scope alongside/instead of provincial, per org registration |
+
+**Sources (external audit, July 2026):** PRA POS Component & e-IMS manual — e.pra.punjab.gov.pk · SRB restaurant services — srb.gos.pk · KPRA RIMS technical implementation guide — kpra.gov.pk.
 
 **Automation-law register (00 §5.8):** tax computation — side-effect of settlement; fiscal submissions — side-effect of the same; authority acknowledgments — ingestion; rule packs and posture — configuration, not facts. This module asks staff to enter nothing.
 
@@ -107,7 +131,7 @@ Two distinct jobs on one module boundary:
 
 ## 5. Data
 
-- **Entities owned:** `fiscal_invoices` (org, branch, order ref, USIN, state, attempts[] with request/response digests, authority invoice number, QR payload, rule-pack version), `fiscal_queue` (POS-local SQLite + cloud BullMQ mirror), `rule_packs` (versioned, effective-dated), `return_exports`, `credentials` (per-org authority registration, encrypted).
+- **Entities owned:** `fiscal_invoices` (org, branch, order ref, USIN, state, attempts[] with request/response digests, authority invoice number, QR payload, rule-pack version), `fiscal_queue` (POS-local SQLite + cloud BullMQ mirror), `rule_packs` (versioned, effective-dated), `return_exports`, `credentials` (per-org authority registration, encrypted), `adapter_certifications` (authority adapter × org/branch: sandbox + legal-verification status, 16-F21/F25).
 - **Events added to the 01 §4 catalog by this spec:** `fiscal.invoice_queued / invoice_submitted / invoice_acknowledged / submission_failed / credit_note_issued / reconciliation_gap_flagged`.
 - **Events consumed:** listed in §2.
 - Read models rebuildable (01-F7) except `fiscal_invoices`, which additionally mirrors authority-issued facts (numbers, timestamps) that must be retained as received.
@@ -133,7 +157,8 @@ Cross-cutting NFRs inherited from 00 §5. Module-specific:
 
 ## 8. Tech notes
 
-- `services/tax` in the modular Node backend; REST clients for FBR IMS/PRA generated from their current specs with a build-time "regulation verification" checklist gate before first org enablement (rates have drifted before; assume drift).
+- `services/tax` in the modular Node backend; one authority-adapter interface (16-F18) with per-authority REST clients generated from current specs, each gated by the build-time "regulation verification" checklist before first org enablement (rates have drifted before; assume drift).
+- KPRA local-utility topology (16-F24): the branch utility ships as a vendor-managed Windows service packaged with `pos-electron` deployment, reusing the outbox durability pattern (01 §5) for its own queue; heartbeat into doc 15 fleet health.
 - POS-side queue reuses the sync-client outbox pattern (01 §5) — same durability discipline, same tests (plug-pull mid-settlement is a required case in 00 §4 durability suite).
 - QR rendering through `packages/escpos` (doc 03 print path); QR payload format per FBR spec.
 - Submission topology decision: POS submits directly when online (to get the number onto the first printed receipt), cloud service is the drain path and fallback; final call after sandbox latency measurement (§9.2).
@@ -144,7 +169,7 @@ Cross-cutting NFRs inherited from 00 §5. Module-specific:
 
 1. Split-payment rate apportionment (16-F6): confirm against PRA guidance; fall back to highest-rate-applies if apportionment is disallowed.
 2. Submission topology (POS-direct vs cloud-relay) — decide on sandbox latency data.
-3. Legal acceptability of the "fiscal submission pending" receipt marker during offline periods — verify against FBR technical spec and inspection practice before first enablement.
-4. Additional authority rule packs (SRB, KPRA, ICT) — trigger and timing; the rule-pack mechanism is designed for them.
+3. *Resolved (adapter model):* offline receipt marker acceptability is a per-adapter certified capability flag (16-F22), verified per authority before enablement — no longer a product-wide question.
+4. *Resolved (adapter model):* additional authorities are the adapter roadmap (16-F26 named adapters); each ships when its certification gate passes (16-F25), demand-driven.
 5. Whether late-arriving FBR numbers should be proactively delivered to customers via WhatsApp (doc 07) as standard behavior, or only on reprint/digital receipt.
 6. Rate treatment of khata (credit) sales under the cash/card-differentiated PRA regime (16-F16) — verify the correct mapping in current notifications.

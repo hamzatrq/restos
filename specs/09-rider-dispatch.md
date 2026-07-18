@@ -87,7 +87,7 @@ No other states exist; surfaces may not invent intermediate ones (e.g. "arriving
 1. Imran loses signal after pickup; taps `delivered` at the door → persisted locally, marked "waiting for signal" (09-F13).
 2. Dispatch shows "picked up · 40 min ago · device unreachable 35 min" — stale, labeled stale (09-F9).
 3. Signal returns → events push with true `device_created_at` → dispatch catches up.
-4. Variant: the counter had already recorded delivered on his behalf (09-F8) → both events merge to the same terminal state, both attributed — no conflict (01-F16 semantics).
+4. Variant: the counter had already recorded delivered on his behalf (09-F8) → both events retained, both attributed; the fold lands on the terminal state once via terminal-state monotonicity (01-F35) — the duplicate is a logged no-op, not a conflict.
 
 **Short settlement**
 1. Expected 6,200; counted 5,700 → over/short −500 recorded, attributed to the rider.

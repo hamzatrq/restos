@@ -40,10 +40,15 @@ Used by: counter staff (Mode 1), the kitchen and downstream modules (both modes)
 - 08-F13 Optional status push (preparing/ready) to DH where the API version supports it, driven by `order.line_state_changed` — enabled per org, best-effort, never blocking the kernel flow.
 
 **Channel pause/throttle contract (invoked from doc 05 channel pulse)**
-- 08-F14 Doc 05 emits `channel.paused { channel, branch_id, scope: 'pause' | 'throttle', minutes?, reason }` / `channel.resumed`. This module maps the command to driver capability:
+- 08-F14 Doc 05 owns and emits the canonical commands — `channel.paused { channel, reason, auto_resume_at? }`, `channel.throttled { channel, added_eta_minutes?, max_orders_per_15min? }`, `channel.resumed` (05-F13/F14 payloads are the single definition). This module consumes them and maps to driver capability, answering with `aggregator.pause_applied / pause_failed`:
   - API mode with `pauseStore` → store-pause, or prep-time increase for `throttle`;
   - manual mode (or missing capability) → **advisory only**: a banner on the quick-entry surface ("kitchen overloaded — pause foodpanda on the tablet?"), because we control nothing upstream.
   - The result event always states which of the two happened, so doc 05 shows the truthful effect, never an assumed one.
+
+**Money closure & payout reconciliation (01 money contract)**
+- 08-F17 Every aggregator order (both modes) settles at creation/entry with `payment.recorded { method: aggregator_receivable }` (01-F32) — the order closes operationally; the money owed by the aggregator becomes a tracked receivable. Money conservation (01-F30) holds without a counter settlement step.
+- 08-F18 Payout reconciliation: imported payout statements (CSV/portal export at launch; API if available) emit `aggregator.payout_recorded { period, gross, commission, adjustments, net }` and match against receivable orders in the period; unmatched orders and amount variances are flagged to docs 12/15. Commission from statements supersedes the configured estimate in channel-economics reporting once available.
+- 08-F19 **Assisted-mode honesty & metrics:** Mode 1 remains dependent on the foodpanda tablet for acceptance and upstream pause — it removes re-keying, nothing more. The platform measures per org: quick-entry time, mapping-debt count, advisory-pause compliance, and missed/unentered orders surfaced by 08-F18 reconciliation gaps — visible in doc 15, so assisted-mode drift is seen, not assumed away.
 
 **Generic aggregator-driver interface (defined here; foodpanda is driver #1)**
 - 08-F15 Every aggregator integrates via `AggregatorDriver` (lives in `packages/domain`):
@@ -111,7 +116,7 @@ Failure path: duplicate webhook delivery → deduped on aggregator order id, sin
   - `aggregator_orders` — raw payloads + normalization result + accept/reject trail.
   - `channel_config` — commission bps per channel, default prep-time, direct-flow flag, per-branch vendor-id bindings, offline fail-safe threshold.
   - Driver registry (channel id → driver + capabilities) and push job records (BullMQ).
-- **Events emitted:** `aggregator.order_received / order_accepted / order_rejected / availability_pushed / push_failed`, `order.created`, `order.channel_tagged`, `channel.paused / resumed` results.
+- **Events emitted:** `aggregator.order_received / order_accepted / order_rejected / availability_pushed / push_failed / pause_applied / pause_failed / payout_recorded`, `payment.recorded (method: aggregator_receivable)`, `order.created`, `order.channel_tagged`.
 - **Events consumed:** `availability.changed`, `channel.paused / resumed` commands, `order.line_state_changed`, `config.changed`.
 
 ## 6. Non-functional requirements (module-specific)

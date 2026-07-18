@@ -123,7 +123,7 @@ Wave 1 slice: nightly auto-summary + live view. Wave 4: exception alerts, report
 
 ## 5. Data
 
-- **Device (SQLite, op-sqlite):** cached read-model snapshots per screen (with as-of timestamp powering 12-F8); summary history; alert list + ack state; chat transcript cache; pending `alert.acknowledged` outbox (syncs like any kernel event, 01-F8).
+- **Device (SQLite, op-sqlite):** cached read-model snapshots per screen (with as-of timestamp powering 12-F8); summary history; alert list + ack state; chat transcript cache; pending acknowledgements as an **offline request queue against an idempotent tRPC endpoint** (keyed by alert id — retries harmless). The owner app stays on the cloud plane (18 §6): it does NOT run `sync-client` and has no kernel outbox; the server emits `alert.acknowledged` into the ledger on the owner's behalf.
 - **Cloud:** no entities owned. Alert and brief read models are owned by doc 13; report aggregates by doc 01 read models; export job records by the jobs service.
 - **Events emitted:** `alert.acknowledged`, `audit.login`, `audit.export_requested`.
 - **Events consumed:** listed in §2 (via read models, not raw stream subscription).
