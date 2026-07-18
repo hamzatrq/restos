@@ -42,15 +42,21 @@ describe("golden fixtures (20 §2.7)", () => {
       watermark: number;
     };
     expect(push.events).toHaveLength(1);
-    expect(push.watermark).toBe(push.events[0].lamport_seq);
+    const [pushedEvent] = push.events;
+    expect(pushedEvent).toBeDefined();
+    if (pushedEvent === undefined) throw new Error("unreachable: length asserted above");
+    expect(push.watermark).toBe(pushedEvent.lamport_seq);
   });
 
   it("01-F3/01-F9: the event_batch fixture carries a cloud-assigned non-negative integer global_seq", () => {
     const batch = decodeMessage(fixtureText("event_batch")) as {
       events: Array<{ global_seq?: number; server_received_at: number | null }>;
     };
-    expect(Number.isInteger(batch.events[0].global_seq)).toBe(true);
-    expect(batch.events[0].global_seq).toBeGreaterThanOrEqual(0);
-    expect(batch.events[0].server_received_at).not.toBeNull(); // cloud-merged before global_seq exists
+    const [batchEvent] = batch.events;
+    expect(batchEvent).toBeDefined();
+    if (batchEvent === undefined) throw new Error("unreachable: asserted defined above");
+    expect(Number.isInteger(batchEvent.global_seq)).toBe(true);
+    expect(batchEvent.global_seq).toBeGreaterThanOrEqual(0);
+    expect(batchEvent.server_received_at).not.toBeNull(); // cloud-merged before global_seq exists
   });
 });

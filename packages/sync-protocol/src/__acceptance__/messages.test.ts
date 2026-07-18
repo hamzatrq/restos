@@ -107,7 +107,10 @@ describe("watermarks and range cursors (01-F8, 01-F9)", () => {
   it("01-F8: push.events must be valid domain EventEnvelopes (envelope minus lamport_seq rejects)", () => {
     const full = builders.push();
     expect(parseMessage(full)).toEqual(full); // anchor
-    const broken = { ...full, events: [without(full.events[0], "lamport_seq")] };
+    const [pushedEnvelope] = full.events;
+    expect(pushedEnvelope).toBeDefined();
+    if (pushedEnvelope === undefined) throw new Error("unreachable: builder pushes one envelope");
+    const broken = { ...full, events: [without(pushedEnvelope, "lamport_seq")] };
     expect(() => parseMessage(broken)).toThrow();
   });
 
@@ -122,13 +125,16 @@ describe("watermarks and range cursors (01-F8, 01-F9)", () => {
   it("01-F3/PROTOCOL.md: event_batch events allow an optional non-negative integer global_seq", () => {
     const withSeq = builders.event_batch();
     expect(parseMessage(withSeq)).toEqual(withSeq);
-    const withoutSeq = { ...withSeq, events: [without(withSeq.events[0], "global_seq")] };
+    const [batchEvent] = withSeq.events;
+    expect(batchEvent).toBeDefined();
+    if (batchEvent === undefined) throw new Error("unreachable: builder batches one event");
+    const withoutSeq = { ...withSeq, events: [without(batchEvent, "global_seq")] };
     expect(parseMessage(withoutSeq)).toEqual(withoutSeq); // pre-cloud-assignment is legal
     expect(() =>
-      parseMessage({ ...withSeq, events: [{ ...withSeq.events[0], global_seq: -1 }] }),
+      parseMessage({ ...withSeq, events: [{ ...batchEvent, global_seq: -1 }] }),
     ).toThrow();
     expect(() =>
-      parseMessage({ ...withSeq, events: [{ ...withSeq.events[0], global_seq: 1.5 }] }),
+      parseMessage({ ...withSeq, events: [{ ...batchEvent, global_seq: 1.5 }] }),
     ).toThrow();
   });
 });
