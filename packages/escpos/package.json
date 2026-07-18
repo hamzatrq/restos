@@ -1,0 +1,10 @@
+{
+  "name": "@restos/escpos",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "echo 'no tests yet — acceptance tests arrive with first FRs (24 §3)'",
+    "build": "echo 'no build yet — scaffold stub'"
+  }
+}

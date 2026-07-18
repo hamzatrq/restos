@@ -137,7 +137,7 @@ Wave 1 slice: nightly auto-summary + live view. Wave 4: exception alerts, report
 
 ## 7. Customizability
 
-- **Layer 2 (back office, doc 14):** summary deadline time; alert thresholds and baseline sensitivity; quiet hours + critical-class exemptions; which users hold owner-scope; commission % per channel (feeds 12-F19c).
+- **Layer 2 (back office, doc 14):** summary deadline time; alert thresholds and baseline sensitivity; quiet hours + critical-class exemptions; which users hold owner-scope; commission % per channel (feeds the channel-economics report, 12-F19).
 - **Layer 3 (device):** biometric lock; notification granularity (headline numbers on lock screen: on/off).
 - **Deliberately not configurable:** sync-age honesty display (12-F8); read-only design (12-F26); the report set — no custom report builder, no owner-defined metrics (metrics change only via the doc 13 registry); append-only history.
 

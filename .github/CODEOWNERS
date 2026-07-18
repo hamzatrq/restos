@@ -1,0 +1,17 @@
+# Protected paths require senior review (20 §4.4, 24-F20 Tier A).
+# TODO(founder): replace the placeholder handles with real GitHub usernames
+# before the first code PR — CODEOWNERS is inert until then.
+
+/specs/                    @REPLACE-WITH-SENIOR
+/AGENTS.md                 @REPLACE-WITH-SENIOR
+/restaurant-os.md          @REPLACE-WITH-SENIOR
+/packages/domain/          @REPLACE-WITH-SENIOR
+/packages/sync-client/     @REPLACE-WITH-SENIOR
+/packages/sync-protocol/   @REPLACE-WITH-SENIOR
+/packages/escpos/          @REPLACE-WITH-SENIOR
+/services/tax/             @REPLACE-WITH-SENIOR
+/services/sync-gateway/    @REPLACE-WITH-SENIOR
+/packages/ui/              @REPLACE-WITH-DESIGN-OWNER
+/.github/                  @REPLACE-WITH-SENIOR
+/scripts/                  @REPLACE-WITH-SENIOR
+/.claude/                  @REPLACE-WITH-SENIOR

@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      # The ratchet order (24-F3): docs contract first, then code gates.
+      - name: docs-lint (23-F8)
+        run: pnpm docs:lint
+      - name: typecheck
+        run: pnpm typecheck
+      - name: lint
+        run: pnpm lint
+      - name: test
+        run: pnpm test
+      - name: build
+        run: pnpm build
+
+  # Spec-before-behavior (commandment 9, 20 §4.1): a PR touching behavior paths
+  # must cite an FR ID in its body or carry a spec diff in the same PR.
+  fr-citation:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      PR_BODY: ${{ github.event.pull_request.body }}
+      BASE_REF: ${{ github.base_ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: check FR citation
+        run: |
+          set -euo pipefail
+          BASE="origin/${BASE_REF}"
+          git fetch origin "${BASE_REF}" --depth=1
+          CHANGED=$(git diff --name-only "$BASE"...HEAD)
+          echo "$CHANGED"
+          if echo "$CHANGED" | grep -qE '^(apps|services|packages)/.*\.(ts|tsx)$'; then
+            if echo "$CHANGED" | grep -q '^specs/'; then
+              echo "spec diff present in same PR — ok"
+            elif echo "${PR_BODY:-}" | grep -qE '\b[0-9]{2}-[FN][0-9]+[a-z]?\b'; then
+              echo "FR citation found in PR body — ok"
+            else
+              echo "::error::Behavior-path changes with no FR citation and no spec diff (commandment 9, 20 §4.1). Cite the FR IDs this PR closes in the PR body, or include the spec change."
+              exit 1
+            fi
+          else
+            echo "no behavior paths touched — ok"
+          fi

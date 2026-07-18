@@ -2,7 +2,7 @@
 
 Restaurant OS for Pakistani restaurants. TypeScript monorepo (planned per `specs/18`), offline-first, event-sourced. **The specs are the contract: never code or edit from memory of a spec — open the owning doc first, per the routing table below.** Full context rules: `specs/23-ai-context.md`.
 
-**Repo state (update this line when it changes):** specification phase — no code exists yet. The monorepo, hooks, `verify:*` commands, and conformance matrices described in `18`/`23`/`24` are specified, not built; they arrive with the Wave 0 scaffold. Build order: waves in `restaurant-os.md` §8; implementation tasks come from `plans/` (24 §9) once created.
+**Repo state (update this line when it changes):** Wave 0 scaffold complete — monorepo skeleton (18 §2), hooks + path rules (`.claude/`), doc linter (`pnpm docs:lint`), CI, and per-package CLAUDE.md stubs are live; all workspaces are empty stubs with **zero product code**. `pnpm verify` = docs-lint + typecheck + lint. Conformance derivation and `verify:<nn>` commands are the first `plans/wave-0` harness tasks; the kernel spike (01 §8) is the first implementation task. Pre-implementation artifacts gate every module (24-F8).
 
 ## Commandments (always binding; each is also machine-enforced — violating code fails CI regardless of what you read)
 

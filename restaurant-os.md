@@ -1,6 +1,8 @@
 # RestOS — The Restaurant Operating System (Master Document)
 
-**Status:** Single authority document, July 2026 — merged from the original draft spec (v1, early 2026) and the v2 platform vision. **Part I** is the platform vision and settled product laws. **Part II** preserves the product-seed detail the module specs cite (roles matrix, module behavioral seeds, field hardware reality). Normative software behavior lives in `specs/`. **Authority order (this exact block also appears in `specs/00-platform-overview.md` — the two must never diverge):** (1) Part I of this document for vision, waves, and settled product laws; (2) `specs/00` §5 + `specs/21-ux-system.md` for cross-cutting UX/offline/performance; (3) the owning module spec for its normative behavior (03 kitchen states, 09 delivery/COD, 05 approvals); (4) Part II appendices are seeds the specs refine — a module spec that amends its seed wins.
+**Status:** Single authority document, July 2026 — merged from the original draft spec (v1, early 2026) and the v2 platform vision. **Part I** is the platform vision and settled product laws. **Part II** preserves the product-seed detail the module specs cite (roles matrix, module behavioral seeds, field hardware reality). Normative software behavior lives in `specs/`.
+
+**Authority order (byte-identical in `restaurant-os.md` and `specs/00-platform-overview.md`; `pnpm docs:lint` enforces it):** (1) `restaurant-os.md` Part I for vision, waves, and settled product laws; (2) `specs/00` §5 + `specs/21-ux-system.md` for cross-cutting UX/offline/performance; (3) the owning module spec for its normative behavior (03 kitchen states, 09 delivery/COD, 05 approvals); (4) `restaurant-os.md` Part II appendices are seeds the specs refine — a module spec that amends its seed wins.
 
 ---
 

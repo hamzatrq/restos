@@ -3,7 +3,7 @@
 **Module spec — Draft 1, July 2026**
 Parent document: `../restaurant-os.md` (Part I: platform vision and settled product laws · Part II: product reference seeds). This document is the anchor for every module spec in `specs/`: shared architecture, tech stack, cross-cutting requirements, data conventions, configuration model, and the template every module document follows. Module docs do not repeat what is stated here — they reference it.
 
-**Authority order (this exact block also appears in `restaurant-os.md` — the two must never diverge):** (1) `restaurant-os.md` Part I for vision, waves, and settled product laws; (2) this document §5 + `21-ux-system.md` for cross-cutting UX/offline/performance; (3) the owning module spec for its normative behavior (03 kitchen states, 09 delivery/COD, 05 approvals); (4) `restaurant-os.md` Part II appendices are seeds the specs refine — a module spec that amends its seed wins.
+**Authority order (byte-identical in `restaurant-os.md` and `specs/00-platform-overview.md`; `pnpm docs:lint` enforces it):** (1) `restaurant-os.md` Part I for vision, waves, and settled product laws; (2) `specs/00` §5 + `specs/21-ux-system.md` for cross-cutting UX/offline/performance; (3) the owning module spec for its normative behavior (03 kitchen states, 09 delivery/COD, 05 approvals); (4) `restaurant-os.md` Part II appendices are seeds the specs refine — a module spec that amends its seed wins.
 
 ---
 

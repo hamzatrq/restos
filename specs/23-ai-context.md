@@ -68,7 +68,7 @@
 
 ## 7. Rollout
 
-Now (docs repo): `/AGENTS.md` router + `/CLAUDE.md` bridge live. Repo setup (Wave 0): per-package stubs, `.claude/rules` path-triggered rules, hooks (SessionStart/PreToolUse/PostToolUse), skills, CI doc linter. Standing: router reviewed whenever a doc is added/split (23-F8 enforces).
+Live since Wave 0 scaffold (July 2026): `/AGENTS.md` router + `/CLAUDE.md` bridge; per-package CLAUDE.md stubs; `.claude/rules` path-triggered rules; PreToolUse (protected-path/oracle reminders — hard-deny on oracle paths activates with the first acceptance tests) + PostToolUse (biome per edit; docs-lint per spec edit) hooks; CI doc linter (`scripts/docs-lint.mjs`). Deferred: SessionStart routing injection (redundant until subdirectory launches are common), repo skills (arrive with the procedures they encode, 23-F7). Standing: router reviewed whenever a doc is added/split (23-F8 enforces).
 
 ## 8. Open questions
 

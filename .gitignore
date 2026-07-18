@@ -1,1 +1,8 @@
 graphify-out
+# monorepo
+node_modules/
+dist/
+.turbo/
+coverage/
+*.tsbuildinfo
+.DS_Store
