@@ -6,8 +6,25 @@
 // device's ledger copy (01 §5): acked events stay readable, and no API path updates
 // or deletes an event row (01-F1). Append validates through the domain registry —
 // an unknown type or invalid payload persists nothing (01-F4).
+//
+// Folds v1 (T-01-04): always-on materialized state tables per FOLDS.md, rebuilt by
+// canonical replay (src/folds/replay.ts) inside every mutating transaction, so fold
+// state commits atomically with its ledger write and reopen self-heals to
+// refold()-equivalence (01-F6). `ingest` is the branch-stream entry point — peer
+// envelopes persist to `peer_events`, dedupe by event id (01-F8), and park at the
+// fold layer when a typed parent is unseen (01-F10); append never fails or blocks
+// for fold reasons — a sale is never blocked (01-F17). Cloud ordering lands via the
+// `global_seq_map` sidecar (`assignGlobalSeq`) so no event row is ever updated
+// (01-F1) and devices converge to cloud ordering on ack (01-F34).
 import { type EventEnvelopeT, parseEnvelope, parseEvent } from "@restos/domain";
 import Database from "better-sqlite3";
+import {
+  type FoldInput,
+  type KitchenQueueRow,
+  type OpenOrderRow,
+  type ParkedRow,
+  replay,
+} from "./folds/replay.js";
 
 export class AckBeyondAppendedError extends Error {
   constructor(watermark: number, ownHighWater: number | null) {
@@ -35,11 +52,19 @@ export type SyncStatus = {
   last_global_seq: number | null;
 };
 
+export type IngestResult = { stored: boolean };
+
 export type DeviceStore = {
   append(input: AppendInput): EventEnvelopeT;
+  ingest(envelope: unknown, opts?: { global_seq?: number }): IngestResult;
+  assignGlobalSeq(event_id: string, global_seq: number): void;
   nextBatch(max: number): EventEnvelopeT[];
   advanceTo(watermark: number): void;
   readOwnEvents(fromLamport?: number): EventEnvelopeT[];
+  openOrders(): OpenOrderRow[];
+  kitchenQueue(): KitchenQueueRow[];
+  parked(): ParkedRow[];
+  refold(): void;
   status(): SyncStatus;
   setLastGlobalSeq(n: number): void;
   close(): void;
@@ -60,6 +85,45 @@ CREATE TABLE IF NOT EXISTS sync_state (
   last_global_seq INTEGER
 ) STRICT;
 INSERT OR IGNORE INTO sync_state (id, acked_watermark, last_global_seq) VALUES (0, NULL, NULL);
+-- Branch-stream ingest (T-01-04): peer envelopes, dedupe by id (01-F8); a
+-- (device, lamport) collision under a different id is corruption (01-F3). Cloud
+-- order lives ONLY in the global_seq_map sidecar — a mirror column here was cut
+-- in review as write-only dead data that silently goes stale.
+CREATE TABLE IF NOT EXISTS peer_events (
+  id TEXT PRIMARY KEY,
+  device_id TEXT NOT NULL,
+  lamport_seq INTEGER NOT NULL,
+  envelope TEXT NOT NULL,
+  UNIQUE (device_id, lamport_seq)
+) STRICT;
+-- Cloud-order sidecar keyed by event id — event rows are never updated (01-F1/01-F34).
+CREATE TABLE IF NOT EXISTS global_seq_map (
+  event_id TEXT PRIMARY KEY,
+  global_seq INTEGER NOT NULL UNIQUE
+) STRICT;
+-- Fold state tables — exactly FOLDS.md (01-F6, 01-F10).
+CREATE TABLE IF NOT EXISTS orders (
+  order_id TEXT PRIMARY KEY,
+  channel TEXT NOT NULL,
+  order_type TEXT,
+  table_id TEXT,
+  confirmed_at INTEGER,
+  settled INTEGER NOT NULL,
+  json_lines TEXT NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS queue (
+  order_id TEXT PRIMARY KEY,
+  confirm_at INTEGER NOT NULL,
+  channel TEXT NOT NULL,
+  age_basis INTEGER NOT NULL,
+  lines_ready INTEGER NOT NULL,
+  lines_total INTEGER NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS parked (
+  event_id TEXT PRIMARY KEY,
+  waiting_for TEXT NOT NULL,
+  envelope_json TEXT NOT NULL
+) STRICT;
 `;
 
 /** Canonical JSON (sorted object keys) — structural divergence detection for re-appends (01-F8). */
@@ -107,10 +171,95 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   const setAck = db.prepare<[number]>("UPDATE sync_state SET acked_watermark = ? WHERE id = 0");
   const setPull = db.prepare<[number]>("UPDATE sync_state SET last_global_seq = ? WHERE id = 0");
 
+  // T-01-04 fold surfaces: peer ingest, global_seq sidecar, fold-state rebuild.
+  const allOwnEnvelopes = db.prepare<[], { envelope: string }>("SELECT envelope FROM events");
+  const peerById = db.prepare<[string], { id: string }>("SELECT id FROM peer_events WHERE id = ?");
+  const peerByDeviceLamport = db.prepare<[string, number], { id: string }>(
+    "SELECT id FROM peer_events WHERE device_id = ? AND lamport_seq = ?",
+  );
+  const insertPeer = db.prepare<[string, string, number, string]>(
+    "INSERT INTO peer_events (id, device_id, lamport_seq, envelope) VALUES (?, ?, ?, ?)",
+  );
+  const allPeerEnvelopes = db.prepare<[], { envelope: string }>("SELECT envelope FROM peer_events");
+  const gseqByEvent = db.prepare<[string], { global_seq: number }>(
+    "SELECT global_seq FROM global_seq_map WHERE event_id = ?",
+  );
+  const gseqByValue = db.prepare<[number], { event_id: string }>(
+    "SELECT event_id FROM global_seq_map WHERE global_seq = ?",
+  );
+  const insertGseq = db.prepare<[string, number]>(
+    "INSERT INTO global_seq_map (event_id, global_seq) VALUES (?, ?)",
+  );
+  const allGseq = db.prepare<[], { event_id: string; global_seq: number }>(
+    "SELECT event_id, global_seq FROM global_seq_map",
+  );
+  const clearOrders = db.prepare("DELETE FROM orders");
+  const clearQueue = db.prepare("DELETE FROM queue");
+  const clearParked = db.prepare("DELETE FROM parked");
+  const insertOrderRow = db.prepare<
+    [string, string, string | null, string | null, number | null, number, string]
+  >(
+    "INSERT INTO orders (order_id, channel, order_type, table_id, confirmed_at, settled, json_lines) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  );
+  const insertQueueRow = db.prepare<[string, number, string, number, number, number]>(
+    "INSERT INTO queue (order_id, confirm_at, channel, age_basis, lines_ready, lines_total) VALUES (?, ?, ?, ?, ?, ?)",
+  );
+  const insertParkedRow = db.prepare<[string, string, string]>(
+    "INSERT INTO parked (event_id, waiting_for, envelope_json) VALUES (?, ?, ?)",
+  );
+  const selectOrders = db.prepare<[], OpenOrderRow>(
+    "SELECT order_id, channel, order_type, table_id, confirmed_at, settled, json_lines FROM orders ORDER BY order_id",
+  );
+  const selectQueue = db.prepare<[], KitchenQueueRow>(
+    "SELECT order_id, confirm_at, channel, age_basis, lines_ready, lines_total FROM queue ORDER BY order_id",
+  );
+  const selectParked = db.prepare<[], ParkedRow>(
+    "SELECT event_id, waiting_for, envelope_json FROM parked ORDER BY event_id",
+  );
+
   const rowToEnvelope = (row: { envelope: string }): EventEnvelopeT =>
     parseEnvelope(JSON.parse(row.envelope));
   const ownHighWater = (): number | null => highWater.get()?.high ?? null;
   const ackedWatermark = (): number | null => readState.get()?.acked_watermark ?? null;
+
+  // Drop-and-rebuild all fold tables from events ∪ peer_events + the sidecar — the
+  // fold law is equivalence with canonical replay (01-F6), and running this inside
+  // every mutating transaction keeps fold state atomic with the ledger write.
+  const recomputeFolds = (): void => {
+    const gseqOf = new Map(allGseq.all().map((row) => [row.event_id, row.global_seq]));
+    const inputs: FoldInput[] = [...allOwnEnvelopes.all(), ...allPeerEnvelopes.all()].map((row) => {
+      const envelope = rowToEnvelope(row);
+      return { envelope, global_seq: gseqOf.get(envelope.id) ?? null };
+    });
+    const state = replay(inputs);
+    clearOrders.run();
+    clearQueue.run();
+    clearParked.run();
+    for (const row of state.orders) {
+      insertOrderRow.run(
+        row.order_id,
+        row.channel,
+        row.order_type,
+        row.table_id,
+        row.confirmed_at,
+        row.settled,
+        row.json_lines,
+      );
+    }
+    for (const row of state.queue) {
+      insertQueueRow.run(
+        row.order_id,
+        row.confirm_at,
+        row.channel,
+        row.age_basis,
+        row.lines_ready,
+        row.lines_total,
+      );
+    }
+    for (const row of state.parked) {
+      insertParkedRow.run(row.event_id, row.waiting_for, row.envelope_json);
+    }
+  };
 
   // Lamport assignment and the durable insert are one transaction (01-F3): a
   // validation failure rolls back with nothing persisted (01-F4). Re-append of a
@@ -136,8 +285,107 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     const next = (ownHighWater() ?? -1) + 1;
     const { envelope } = parseEvent({ ...input, lamport_seq: next, server_received_at: null });
     insertEvent.run(envelope.id, envelope.lamport_seq, JSON.stringify(envelope));
+    // Folds apply in the same transaction; an unmet dependency parks at the fold
+    // layer — append never fails or blocks for fold reasons (01-F17, 01-F10).
+    recomputeFolds();
     return envelope;
   });
+
+  // Branch-stream entry point (T-01-04): validates through the domain registry —
+  // nothing persists on failure (01-F4); dedupes by event id (01-F8); own events
+  // enter only via append (18 §4 loud failure); folds apply in the same transaction.
+  const ingestTx = db.transaction((value: unknown, opts?: { global_seq?: number }) => {
+    const { envelope } = parseEvent(value);
+    if (envelope.org_id !== identity.org_id || envelope.branch_id !== identity.branch_id) {
+      throw new Error(
+        `ingest of event ${envelope.id} from ${envelope.org_id}/${envelope.branch_id} does not ` +
+          "match the store identity (01-F9 — the branch stream is identity-scoped; nothing persisted)",
+      );
+    }
+    if (byId.get(envelope.id) || peerById.get(envelope.id)) {
+      // Duplicate id: no new row ever, but a CARRIED global_seq is adopted exactly
+      // as assignGlobalSeq would — the LAN-first-then-cloud-catchup path converges
+      // (01-F34); without opts this is a pure idempotent no-op (01-F8).
+      const carried = opts?.global_seq;
+      if (carried !== undefined && adoptGlobalSeq(envelope.id, carried)) recomputeFolds();
+      return { stored: false };
+    }
+    if (envelope.device_id === identity.device_id) {
+      throw new Error(
+        `ingest of unknown own event ${envelope.id} ` +
+          "(18 §4 — own events enter only via append; nothing persisted)",
+      );
+    }
+    const globalSeq = opts?.global_seq;
+    if (globalSeq !== undefined && (!Number.isInteger(globalSeq) || globalSeq < 0)) {
+      throw new Error(
+        `ingest global_seq must be a non-negative integer, got ${globalSeq} ` +
+          "(01-F3 — cloud order is corrupt; nothing persisted)",
+      );
+    }
+    if (peerByDeviceLamport.get(envelope.device_id, envelope.lamport_seq)) {
+      throw new Error(
+        `ingest (device ${envelope.device_id}, lamport ${envelope.lamport_seq}) collides with a ` +
+          "different stored event (01-F3 — per-device lamport is gap-free monotonic; a collision " +
+          "is corruption; nothing persisted)",
+      );
+    }
+    insertPeer.run(envelope.id, envelope.device_id, envelope.lamport_seq, JSON.stringify(envelope));
+    if (globalSeq !== undefined) insertGseq.run(envelope.id, globalSeq); // UNIQUE clash throws, rolls back
+    recomputeFolds();
+    return { stored: true };
+  });
+
+  // Cloud-order adoption core for an already-stored event (01-F34): sidecar insert
+  // only — no event row is ever updated (01-F1). Idempotent on the same value
+  // (returns false, nothing changed); a divergent value, unknown event id, or a
+  // seq already held by another event is protocol corruption and throws loud
+  // (18 §4). Shared by assignGlobalSeq and duplicate-id ingest carrying a seq, so
+  // both paths adopt identically.
+  const adoptGlobalSeq = (eventId: string, globalSeq: number): boolean => {
+    if (!Number.isInteger(globalSeq) || globalSeq < 0) {
+      throw new Error(
+        `global_seq must be a non-negative integer, got ${globalSeq} ` +
+          "(01-F3 — cloud order is corrupt; nothing changed)",
+      );
+    }
+    if (!byId.get(eventId) && !peerById.get(eventId)) {
+      throw new Error(
+        `assignGlobalSeq for unknown event ${eventId} ` +
+          "(18 §4 — an ack for an unseen event means protocol corruption; nothing changed)",
+      );
+    }
+    const current = gseqByEvent.get(eventId);
+    if (current) {
+      if (current.global_seq === globalSeq) return false; // idempotent re-ack (01-F8)
+      throw new Error(
+        `event ${eventId} already holds global_seq ${current.global_seq}, got ${globalSeq} ` +
+          "(01-F3 — cloud order is immutable; nothing changed)",
+      );
+    }
+    const holder = gseqByValue.get(globalSeq);
+    if (holder) {
+      throw new Error(
+        `global_seq ${globalSeq} is already held by event ${holder.event_id} ` +
+          "(01-F3 — the global org sequence is unique; nothing changed)",
+      );
+    }
+    insertGseq.run(eventId, globalSeq);
+    return true;
+  };
+
+  const assignGlobalSeqTx = db.transaction((eventId: string, globalSeq: number) => {
+    // devices converge to cloud ordering on ack (01-F34)
+    if (adoptGlobalSeq(eventId, globalSeq)) recomputeFolds();
+  });
+
+  const refoldTx = db.transaction(() => {
+    recomputeFolds();
+  });
+
+  // Self-heal on open (01-F6): state tables ≡ refold() of the surviving ledger,
+  // even after an abrupt handle abandon (20 §2.6 fold-durability seed).
+  refoldTx();
 
   return {
     append(input) {
@@ -152,6 +400,30 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
         );
       }
       return appendTx(input);
+    },
+
+    ingest(envelope, opts) {
+      return ingestTx(envelope, opts);
+    },
+
+    assignGlobalSeq(eventId, globalSeq) {
+      assignGlobalSeqTx(eventId, globalSeq);
+    },
+
+    openOrders() {
+      return selectOrders.all();
+    },
+
+    kitchenQueue() {
+      return selectQueue.all();
+    },
+
+    parked() {
+      return selectParked.all();
+    },
+
+    refold() {
+      refoldTx();
     },
 
     nextBatch(max) {

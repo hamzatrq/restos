@@ -18,6 +18,26 @@ const payloadSchemas = {
   "order.created": z.looseObject({
     order_id: z.string().min(1),
     channel: z.string().min(1),
+    // Optional declared fields, additive under schema_version 1 (00 §6; T-01-04).
+    order_type: z.string().min(1).optional(),
+    table_id: z.string().min(1).optional(),
+  }),
+  "order.confirmed": z.looseObject({
+    order_id: z.string().min(1),
+  }),
+  "order.line_added": z.looseObject({
+    order_id: z.string().min(1),
+    line_id: z.string().min(1),
+    item_id: z.string().min(1),
+    qty: z.number().int().positive(), // integer units (00 §6)
+    unit_price_paisa: z.number().int().nonnegative(), // snapshotted at line-add, never re-derived (01-F18)
+  }),
+  "order.table_assigned": z.looseObject({
+    order_id: z.string().min(1),
+    table_id: z.string().min(1),
+  }),
+  "kot.printed": z.looseObject({
+    order_id: z.string().min(1),
   }),
   "order.line_state_changed": z.looseObject({
     order_id: z.string().min(1),

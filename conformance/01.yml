@@ -9,6 +9,7 @@ rows:
     tests:
       - "packages/sync-client/src/__acceptance__/crash-resume.test.ts#01-F2/20 §2.6: every event confirmed before an abrupt abandon survives reopen, gap-free"
       - "packages/sync-client/src/__acceptance__/crash-resume.test.ts#01-F2/01-F3/20 §2.6: a seeded run of append/ack cycles across abrupt reopens never loses a confirmed event nor leaves a gap"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F2/01-F6: after abrupt abandon, reopen yields state tables ≡ pre-crash tables ≡ refold()"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F2: append returns the confirmed envelope — store-assigned gap-free lamport, null server_received_at, fields preserved"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F2/20 §2.6: at append return the event is visible to an independent handle on the same file — persisted, not buffered"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F2: append with an identity not matching the store throws and persists nothing"
@@ -24,6 +25,9 @@ rows:
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F3/PROTOCOL.md: event_batch events allow an optional non-negative integer global_seq"
       - "packages/sync-client/src/__acceptance__/crash-resume.test.ts#01-F3: after reopen the next append continues the lamport sequence — no gap, no reuse"
       - "packages/sync-client/src/__acceptance__/crash-resume.test.ts#01-F2/01-F3/20 §2.6: a seeded run of append/ack cycles across abrupt reopens never loses a confirmed event nor leaves a gap"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F3/18 §4: a (device_id, lamport_seq) collision under a different event id throws — per-device lamport is gap-free monotonic"
+      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34/01-F3/18 §4: a global_seq already held by another event throws and rolls back the whole ingest"
+      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34/01-F3: ingest-with-global_seq ≡ ingest-then-assignGlobalSeq — byte-identical tables"
       - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F3: lamport_seq starts at 0 and increments gap-free across appends"
       - "packages/sync-client/src/__acceptance__/properties.test.ts#01-F3/01-F8: for any interleaving of appends and legal acks, lamport stays gap-free and the unacked set matches the checkpoint model"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F3: readOwnEvents(fromLamport) is inclusive and stays in lamport order"
@@ -34,12 +38,27 @@ rows:
       - "packages/domain/src/__acceptance__/registry.test.ts#01-F4: parseEvent returns a typed event for a valid order.created envelope, preserving its payload"
       - "packages/domain/src/__acceptance__/registry.test.ts#01-F4: an unknown event type throws UnknownEventTypeError, never silent acceptance"
       - "packages/domain/src/__acceptance__/registry.test.ts#01-F4: a malformed payload for a known type is a parse failure, not silent acceptance"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F4: ingest of an unknown event type throws and persists nothing"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F4: ingest of a known type with an invalid payload throws and persists nothing"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F4: an unknown event type throws and persists nothing"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F4: an invalid payload for a known type throws and persists nothing"
   - fr: 01-F5
     status: unmapped
   - fr: 01-F6
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: order.created materializes a row with FOLDS.md defaults and empty canonical json_lines"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: optional order_type/table_id on order.created land in the row (additive under schema_version 1, 00 §6)"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: a second order.created for the same order_id is a no-op — canonically-first wins"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: confirmed_at is the device_created_at of the canonically-first confirm; later confirms are no-ops"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: a duplicate line_id keeps the canonically-first line"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: no queue row exists before a canonically-applied order.confirmed"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: confirm creates the row — confirm_at from the first confirm, channel from order.created, age_basis defaults to confirm_at"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: age_basis moves to the canonically-first kot.printed when one exists"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F2/01-F6: after abrupt abandon, reopen yields state tables ≡ pre-crash tables ≡ refold()"
+      - "packages/sync-client/src/__acceptance__/folds-properties.test.ts#01-F6: after any delivery sequence, refold() reproduces the incrementally-maintained tables exactly — before and after cloud global_seq assignment (01-F34)"
+      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F6: lines_ready counts picked_up and delivered lines"
+      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F6: json_lines keys sort by UTF-16 code unit — an astral-plane line_id precedes U+FF5E"
   - fr: 01-F7
     status: unmapped
   - fr: 01-F8
@@ -50,6 +69,9 @@ rows:
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F8: push_ack.acked_watermark is a non-negative integer — 0 accepted, negatives and fractions rejected"
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F8: push.events must be valid domain EventEnvelopes (envelope minus lamport_seq rejects)"
       - "packages/sync-client/src/__acceptance__/crash-resume.test.ts#01-F8/20 §2.6: the unacked tail re-drains identically after reopen — same events, same order, checkpoint intact"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F8/18 §4: an own-device envelope not already stored throws — own events enter only via append"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F8: first delivery stores ({ stored: true }); re-ingest of the same peer id is { stored: false } with zero state change"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F8: ingest of an own envelope already appended returns { stored: false } and changes nothing"
       - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F8: nextBatch returns unacked events oldest-first in lamport order and respects max"
       - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F8/19 §5: advanceTo acks everything at or below the watermark — partial ack is legal"
       - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F8: advanceTo is idempotent and a lower watermark never regresses the checkpoint"
@@ -66,8 +88,15 @@ rows:
     tests:
       - "packages/sync-protocol/src/__acceptance__/fixtures.test.ts#01-F3/01-F9: the event_batch fixture carries a cloud-assigned non-negative integer global_seq"
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F9: catchup_request.from_global_seq is a non-negative integer — 0 accepted, negatives/fractions/strings rejected"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F9/18 §4: ingest rejects an envelope from another org or branch — the stream is identity-scoped"
   - fr: 01-F10
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F10: a child before its parent parks — no state effect — then drains identically to parent-first delivery"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F10: the refund→payment→order chain delivered fully reversed drains to fixpoint"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F10: waiting_for is the first unmet id and re-parks deterministically as parents arrive"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F10: nothing is dropped — applied ∪ parked = stored; duplicate ingest of a parked id is a no-op"
+      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F10: parked envelope_json is byte-identical canonical JSON of the envelope — keys sorted by UTF-16 code unit at every depth"
   - fr: 01-F11
     status: green
     tests:
@@ -81,7 +110,9 @@ rows:
   - fr: 01-F15
     status: unmapped
   - fr: 01-F16
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F16: line adds from two devices both stand — json_lines is canonical JSON, byte-for-byte"
   - fr: 01-F17
     status: unmapped
   - fr: 01-F18
@@ -111,8 +142,14 @@ rows:
     tests:
       - "packages/domain/src/__acceptance__/registry.test.ts#01-F29: payment.refunded requires the reference to the original payment id"
       - "packages/domain/src/__acceptance__/registry.test.ts#01-F29: payment.refunded accepts only cash_out | raast_reversal_ref | khata_credit methods"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F29/01-F30: a refund unsettles the order until re-covered — settled is recomputed from the set"
   - fr: 01-F30
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F30: a partial payment leaves the order unsettled; exact cover settles it"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F29/01-F30: a refund unsettles the order until re-covered — settled is recomputed from the set"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F30: voided lines leave billed_effective — exact cover over surviving lines settles"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F30: billed_effective must be positive — a lineless order never settles"
   - fr: 01-F31
     status: green
     tests:
@@ -122,13 +159,34 @@ rows:
   - fr: 01-F33
     status: unmapped
   - fr: 01-F34
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F34: table_id resolves to the canonically-last assignment on every delivery order"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F34: re-assigning the same global_seq to the same event is an idempotent no-op — tables ≡ refold()"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F34/18 §4: a divergent global_seq for an already-mapped event throws"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F34/18 §4: assigning to an unknown event_id throws and changes no state"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F34/18 §4: a global_seq already held by another event throws"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F34: cloud order reversing the provisional table_id winner converges — highest global_seq wins, tables ≡ refold()"
+      - "packages/sync-client/src/__acceptance__/folds-properties.test.ts#01-F34: swapping two adjacent deliveries from different devices yields identical final tables"
+      - "packages/sync-client/src/__acceptance__/folds-properties.test.ts#01-F34: re-delivering any already-stored subset in any order changes nothing — tables byte-identical before/after"
+      - "packages/sync-client/src/__acceptance__/folds-properties.test.ts#01-F6: after any delivery sequence, refold() reproduces the incrementally-maintained tables exactly — before and after cloud global_seq assignment (01-F34)"
+      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34: re-ingest with global_seqs that reverse the provisional order flips table_id to the cloud winner — tables ≡ refold()"
+      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34: same-value re-ingest with global_seq is an idempotent adoption — the carried seq is really held afterwards"
+      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34/18 §4: duplicate-id ingest with a divergent or already-held global_seq throws, state unchanged"
+      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34: a global_seq carried at first ingest participates in canonical fold order"
+      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34/18 §4: a negative, fractional, or non-integer global_seq at ingest throws with nothing persisted"
+      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34/01-F3/18 §4: a global_seq already held by another event throws and rolls back the whole ingest"
+      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34/01-F3: ingest-with-global_seq ≡ ingest-then-assignGlobalSeq — byte-identical tables"
   - fr: 01-F35
     status: green
     tests:
       - "packages/domain/src/__acceptance__/line-states.test.ts#01-F35: a delivered line ignores a later in_prep transition"
       - "packages/domain/src/__acceptance__/line-states.test.ts#01-F35: every terminal state ignores every later transition with terminal_regression"
       - "packages/domain/src/__acceptance__/line-states.test.ts#01-F35: folding any sequence never leaves a terminal state once entered, and applied:false never mutates state"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F35: line_state_changed routes every line in line_ids through applyLineState — legal transitions apply"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F35: an illegal transition never applies — state kept, illegal_transition anomaly recorded on the line"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F35: a terminal line ignores a later non-terminal transition — state kept, one terminal_regression anomaly, ledger intact"
+      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F35: duplicate line_ids within one line_state_changed are deduped — the event applies cleanly with no anomaly"
   - fr: 01-F36
     status: unmapped
   - fr: 01-F37
@@ -155,7 +213,11 @@ rows:
   - fr: 01-F42
     status: unmapped
   - fr: 01-N1
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/folds-properties.test.ts#01-N1: any two delivery interleavings respecting per-device lamport order fold to identical orders/queue/parked tables — json_lines byte-identical"
+      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-N1: identical device_created_at across devices — ascending device_id breaks the tie on every arrival order"
+      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-N1: identical device_created_at on one device — ascending lamport_seq breaks the tie regardless of arrival order"
   - fr: 01-N2
     status: unmapped
   - fr: 01-N3
