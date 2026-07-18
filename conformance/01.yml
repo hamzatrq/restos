@@ -1,0 +1,118 @@
+# DERIVED by scripts/verify-module.mjs — do not hand-edit (24-F5).
+module: "01"
+derived_from: 1 suite run(s)
+rows:
+  - fr: 01-F1
+    status: unmapped
+  - fr: 01-F2
+    status: unmapped
+  - fr: 01-F3
+    status: green
+    tests:
+      - "packages/domain/src/__acceptance__/envelope.test.ts#01-F3/00 §6: accepts a valid envelope and preserves every field"
+      - "packages/domain/src/__acceptance__/envelope.test.ts#01-F3: server_received_at is null before cloud merge and an integer after"
+      - "packages/domain/src/__acceptance__/envelope.test.ts#01-F3: rejects a missing lamport_seq"
+      - "packages/domain/src/__acceptance__/envelope.test.ts#01-F3: accepts lamport_seq 0 but rejects a negative lamport_seq"
+      - "packages/domain/src/__acceptance__/envelope.test.ts#01-F3: rejects non-integer sequence and timestamp fields"
+  - fr: 01-F4
+    status: green
+    tests:
+      - "packages/domain/src/__acceptance__/registry.test.ts#01-F4: the registry is seeded with the four kernel event types and rejects unknown names"
+      - "packages/domain/src/__acceptance__/registry.test.ts#01-F4: parseEvent returns a typed event for a valid order.created envelope, preserving its payload"
+      - "packages/domain/src/__acceptance__/registry.test.ts#01-F4: an unknown event type throws UnknownEventTypeError, never silent acceptance"
+      - "packages/domain/src/__acceptance__/registry.test.ts#01-F4: a malformed payload for a known type is a parse failure, not silent acceptance"
+  - fr: 01-F5
+    status: unmapped
+  - fr: 01-F6
+    status: unmapped
+  - fr: 01-F7
+    status: unmapped
+  - fr: 01-F8
+    status: unmapped
+  - fr: 01-F9
+    status: unmapped
+  - fr: 01-F10
+    status: unmapped
+  - fr: 01-F11
+    status: unmapped
+  - fr: 01-F12
+    status: unmapped
+  - fr: 01-F13
+    status: unmapped
+  - fr: 01-F14
+    status: unmapped
+  - fr: 01-F15
+    status: unmapped
+  - fr: 01-F16
+    status: unmapped
+  - fr: 01-F17
+    status: unmapped
+  - fr: 01-F18
+    status: unmapped
+  - fr: 01-F19
+    status: unmapped
+  - fr: 01-F20
+    status: unmapped
+  - fr: 01-F21
+    status: unmapped
+  - fr: 01-F22
+    status: unmapped
+  - fr: 01-F23
+    status: unmapped
+  - fr: 01-F24
+    status: unmapped
+  - fr: 01-F25
+    status: unmapped
+  - fr: 01-F26
+    status: unmapped
+  - fr: 01-F27
+    status: unmapped
+  - fr: 01-F28
+    status: unmapped
+  - fr: 01-F29
+    status: green
+    tests:
+      - "packages/domain/src/__acceptance__/registry.test.ts#01-F29: payment.refunded requires the reference to the original payment id"
+      - "packages/domain/src/__acceptance__/registry.test.ts#01-F29: payment.refunded accepts only cash_out | raast_reversal_ref | khata_credit methods"
+  - fr: 01-F30
+    status: unmapped
+  - fr: 01-F31
+    status: green
+    tests:
+      - "packages/domain/src/__acceptance__/registry.test.ts#01-F31: payment.recorded parses with settlement_attempt_id and fails without it — double-taps cannot double-record"
+  - fr: 01-F32
+    status: unmapped
+  - fr: 01-F33
+    status: unmapped
+  - fr: 01-F34
+    status: unmapped
+  - fr: 01-F35
+    status: green
+    tests:
+      - "packages/domain/src/__acceptance__/line-states.test.ts#01-F35: a delivered line ignores a later in_prep transition"
+      - "packages/domain/src/__acceptance__/line-states.test.ts#01-F35: every terminal state ignores every later transition with terminal_regression"
+      - "packages/domain/src/__acceptance__/line-states.test.ts#01-F35: folding any sequence never leaves a terminal state once entered, and applied:false never mutates state"
+  - fr: 01-F36
+    status: unmapped
+  - fr: 01-F37
+    status: unmapped
+  - fr: 01-F38
+    status: unmapped
+  - fr: 01-F39
+    status: unmapped
+  - fr: 01-F40
+    status: unmapped
+  - fr: 01-F41
+    status: unmapped
+  - fr: 01-F42
+    status: unmapped
+  - fr: 01-N1
+    status: unmapped
+  - fr: 01-N2
+    status: unmapped
+  - fr: 01-N3
+    status: unmapped
+  - fr: 01-N4
+    status: unmapped
+  - fr: 01-N5
+    status: unmapped

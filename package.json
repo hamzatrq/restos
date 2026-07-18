@@ -14,7 +14,8 @@
     "test": "turbo run test",
     "build": "turbo run build",
     "docs:lint": "node scripts/docs-lint.mjs",
-    "verify": "pnpm docs:lint && pnpm typecheck && pnpm lint"
+    "verify": "pnpm docs:lint && pnpm typecheck && pnpm lint",
+    "verify:01": "node scripts/verify-module.mjs 01"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.4",
