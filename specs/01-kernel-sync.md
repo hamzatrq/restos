@@ -35,8 +35,8 @@ All tiers and profiles run the identical kernel. A T1 single-terminal restaurant
 
 **Sync — branch LAN mesh**
 - 01-F12 Devices in a branch discover each other on the LAN (mDNS; manual IP fallback) and exchange events directly while WAN is down.
-- 01-F13 One device acts as **branch hub** (deterministic election: highest-capability class wins — counter Electron > counter RN > pass screen > handheld; ties broken by lowest device id; re-election on hub loss < 10 s). Non-hub devices connect to the hub (star); the hub relays events branch-wide and is the preferred cloud uplink.
-- 01-F14 Every **hub-eligible** in-branch device (01-F39 classes) retains the full branch event stream for the rolling operational window (current business day + configurable N days); any device can therefore become hub or serve a cold-started peer.
+- 01-F13 One device acts as **branch hub** (deterministic election among the hub-eligible classes of 01-F39: `counter_electron` > `counter_rn` > `kitchen`; ties broken by lowest device id, compared lexicographically; re-election on hub loss < 10 s). Non-hub devices connect to the hub (star); the hub relays events branch-wide and is the preferred cloud uplink.
+- 01-F14 Every **hub-eligible** in-branch device (the hub-eligible classes of 01-F39) retains the full branch event stream for the rolling operational window (current business day + configurable N days); any device can therefore become hub or serve a cold-started peer.
 - 01-F15 LAN propagation is fast-path: an event reaches all connected branch devices < 1 s p95 (00 §5.3). Availability toggles and order state changes ride this path.
 
 **Conflict rules (explicit, closed list)**
@@ -75,7 +75,7 @@ All tiers and profiles run the identical kernel. A T1 single-terminal restaurant
 - 01-F38 Split/merge races while partitioned: both results stand on merge (01-F19 pattern) with a conflict badge; staff resolve via new events; nothing auto-discards.
 
 **Device classes & sync slices (formalizes scoped sync)**
-- 01-F39 Device classes with fixed slice + hub rules: `counter` (full branch window, hub-eligible), `kitchen` (full branch window, hub-eligible), `manager` (full slice, never hub — personal phone), `waiter` (scoped: own-table orders, availability, own events; LAN member, never hub), `rider` (cloud-only scoped: assigned orders + own events; never joins the branch LAN). 01-F14's full-window retention applies to hub-eligible classes.
+- 01-F39 Device classes (canonical identifiers — the `DEVICE_CLASSES` vocabulary declared once in `packages/domain`) with fixed slice + hub rules: `counter_electron` (counter POS, Electron host — full branch window, hub-eligible), `counter_rn` (counter POS, React Native host — full branch window, hub-eligible), `kitchen` (pass screen / KDS station, doc 03 — full branch window, hub-eligible), `manager` (full slice, never hub — personal phone), `waiter` (scoped: own-table orders, availability, own events; LAN member, never hub), `rider` (cloud-only scoped: assigned orders + own events; never joins the branch LAN). Hub-eligible is exactly {`counter_electron`, `counter_rn`, `kitchen`}, listed here in 01-F13 election-priority order. 01-F14's full-window retention applies to hub-eligible classes.
 - 01-F40 Slice predicates are enforced server-side and hub-side from device class + role — never client-declared. A scoped device requesting outside its slice is denied and flagged.
 - 01-F41 Reassignment backfill: reassigning an entity (table to another waiter, order to another rider) triggers targeted backfill to the new device and halts delivery to the old one.
 - 01-F42 Revocation & purge: a revoked device or role receives a local-purge command on next contact (cloud or LAN); scoped devices cold-start from slice backfill only (< 2 min on 4G).

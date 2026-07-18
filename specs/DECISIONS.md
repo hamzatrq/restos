@@ -9,7 +9,7 @@
 | DEC-MONEY-003 | Khata fiscalization timing | proposed | 16-F16 / §9.6 | Fiscalize at receipt issuance, rate per rule-pack credit mapping | Legal verify per adapter | Tax enablement |
 | DEC-MONEY-004 | Tips (capture, pooling, payout) | proposed | — (02/09/11 candidates) | Unmodeled; cash tips invisible today | Founder product call | W2 |
 | DEC-SYNC-001 | Convergence contract | **accepted** | 01-F34..F38 | Commutative folds + global-seq tiebreak; quarantine model | — | W0 |
-| DEC-SYNC-002 | Device classes & slices | **accepted** | 01-F39..F42 | Five classes; server/hub-enforced predicates | — | W0 |
+| DEC-SYNC-002 | Device classes & slices | **accepted** | 01-F39..F42 | Six classes (counter split by host runtime: electron/rn); server/hub-enforced predicates | — | W0 |
 | DEC-SYNC-003 | Event archive tier at scale | proposed | 01 §9.4, 22 | S3 parquet archive vs keep-hot | Year-2 volume data | Post-launch |
 | DEC-ORDER-001 | Pre-orders / scheduled orders (`fire_at`) | proposed | — (01/03/06 candidates) | Unmodeled; storefront "order for 8pm" not supported | Founder product call | W2 |
 | DEC-SUPPLY-001 | Purchase-order events (auto-PO from suggestions) | proposed | — (10/13 R3) | `action.proposed` draft-PO exists in ladder; PO entity undefined | Design with 10 forecasting maturity | W4 |
