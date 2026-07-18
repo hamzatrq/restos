@@ -18,7 +18,7 @@ Defines: recovery objectives (RPO/RTO), backup mechanics and ownership, restore 
 
 **Recovery objectives & backups**
 - 22-F1 Cloud Postgres: **RPO ≤ 5 min** via continuous WAL archiving with point-in-time recovery; **RTO ≤ 4 h** for a full cloud restore (database restored, services redeployed, sync gateway accepting devices). Measured in every drill (22-F8), not assumed.
-- 22-F2 Automated base backups + continuous WAL, PITR window **≥ 30 days**. Backups MUST be vendor-portable: standard Postgres base-backup + WAL formats restorable to self-managed Postgres — no backup path that only the managed vendor can read (see 22-F19).
+- 22-F2 Automated base backups + continuous WAL, PITR window **≥ 30 days**. Backups MUST be vendor-portable: standard Postgres base-backup + WAL formats restorable to self-managed Postgres — no backup path that only the managed vendor can read (see 22-F17).
 - 22-F3 Object storage: versioning ON for all buckets; lifecycle rules per the retention matrix (22-F13); delete operations are soft (version-retained) for ≥ 30 days.
 - 22-F4 Redis is explicitly **NOT backed up** — 18 §4 law: never a source of truth, everything reconstructible from Postgres. Warm-up runbook after Redis loss: restart workers against empty Redis; re-register BullMQ repeatables from code; re-enqueue pending work by scanning Postgres state (fiscal queue drains, undelivered webhooks, unsent notifications) — every producer module MUST document its re-enqueue scan in that runbook before shipping a queue-writing feature.
 - 22-F5 Backup ownership: the platform engineering lead owns the backup/restore runbook — named in `docs/runbooks/OWNERS`, reassignment is a PR. An unowned runbook fails CI.

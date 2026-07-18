@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // PreToolUse hook (23-F6): protected-path and oracle-protection reminders.
-// Scaffold posture: allow + reason (23 §8 bias). Hard-deny on test/conformance
-// paths activates when the first acceptance tests land (24 §3 step 2).
+// conformance/ is hard-denied (24-F5: CI-derived, read-only to humans and
+// agents). Test files stay allow + warn — session role is unknowable here.
 let input = "";
 process.stdin.on("data", (d) => (input += d));
 process.stdin.on("end", () => {
@@ -11,18 +11,20 @@ process.stdin.on("end", () => {
   } catch {
     /* no JSON — allow */
   }
-  const allow = (reason) => {
+  const decide = (permissionDecision, reason) => {
     process.stdout.write(
       JSON.stringify({
         hookSpecificOutput: {
           hookEventName: "PreToolUse",
-          permissionDecision: "allow",
+          permissionDecision,
           permissionDecisionReason: reason,
         },
       }),
     );
     process.exit(0);
   };
+  const allow = (reason) => decide("allow", reason);
+  const deny = (reason) => decide("deny", reason);
   const protectedPaths = [
     "packages/domain/",
     "packages/sync-client/",
@@ -31,11 +33,12 @@ process.stdin.on("end", () => {
     "services/tax/",
     "services/sync-gateway/",
   ];
-  if (
-    /\.(test|spec)\.tsx?$/.test(filePath) ||
-    filePath.includes("/conformance/") ||
-    filePath.startsWith("conformance/")
-  ) {
+  if (filePath.includes("/conformance/") || filePath.startsWith("conformance/")) {
+    deny(
+      "conformance/ is CI-derived (24-F5): hand-editing is falsifying the ledger. Run pnpm verify:<nn> to re-derive.",
+    );
+  }
+  if (/\.(test|spec)\.tsx?$/.test(filePath)) {
     allow(
       "⚠ ORACLE PATH (24 §3): acceptance tests and conformance are read-only to implementing sessions. If you are the implementer of the FRs these tests cover, STOP — a different session owns them.",
     );
