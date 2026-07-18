@@ -1,0 +1,6 @@
+{
+  "v": 1,
+  "kind": "quarantine_notice",
+  "event_id": "01980000-0000-7000-8000-00000000e001",
+  "reason": "invariant: refund exceeds un-refunded remainder"
+}

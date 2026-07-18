@@ -1,6 +1,6 @@
 # DERIVED by scripts/verify-module.mjs — do not hand-edit (24-F5).
 module: "01"
-derived_from: 1 suite run(s)
+derived_from: 2 suite run(s)
 rows:
   - fr: 01-F1
     status: unmapped
@@ -14,6 +14,8 @@ rows:
       - "packages/domain/src/__acceptance__/envelope.test.ts#01-F3: rejects a missing lamport_seq"
       - "packages/domain/src/__acceptance__/envelope.test.ts#01-F3: accepts lamport_seq 0 but rejects a negative lamport_seq"
       - "packages/domain/src/__acceptance__/envelope.test.ts#01-F3: rejects non-integer sequence and timestamp fields"
+      - "packages/sync-protocol/src/__acceptance__/fixtures.test.ts#01-F3/01-F9: the event_batch fixture carries a cloud-assigned non-negative integer global_seq"
+      - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F3/PROTOCOL.md: event_batch events allow an optional non-negative integer global_seq"
   - fr: 01-F4
     status: green
     tests:
@@ -28,9 +30,17 @@ rows:
   - fr: 01-F7
     status: unmapped
   - fr: 01-F8
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-protocol/src/__acceptance__/fixtures.test.ts#01-F8: the push fixture's watermark equals its highest event lamport_seq (fixture self-consistency)"
+      - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F8: push.watermark is a non-negative integer — 0 accepted, negatives and fractions rejected"
+      - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F8: push_ack.acked_watermark is a non-negative integer — 0 accepted, negatives and fractions rejected"
+      - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F8: push.events must be valid domain EventEnvelopes (envelope minus lamport_seq rejects)"
   - fr: 01-F9
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-protocol/src/__acceptance__/fixtures.test.ts#01-F3/01-F9: the event_batch fixture carries a cloud-assigned non-negative integer global_seq"
+      - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F9: catchup_request.from_global_seq is a non-negative integer — 0 accepted, negatives/fractions/strings rejected"
   - fr: 01-F10
     status: unmapped
   - fr: 01-F11
@@ -95,13 +105,24 @@ rows:
   - fr: 01-F36
     status: unmapped
   - fr: 01-F37
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F37: quarantine_notice requires both event_id and reason"
   - fr: 01-F38
     status: unmapped
   - fr: 01-F39
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-protocol/src/__acceptance__/device-classes.test.ts#01-F39: DEVICE_CLASSES is exactly the six device classes"
+      - "packages/sync-protocol/src/__acceptance__/device-classes.test.ts#01-F39: HUB_ELIGIBLE_CLASSES is counter_electron, counter_rn, kitchen in hub-priority order"
+      - "packages/sync-protocol/src/__acceptance__/device-classes.test.ts#01-F39: HUB_ELIGIBLE_CLASSES is a strict subset of DEVICE_CLASSES"
+      - "packages/sync-protocol/src/__acceptance__/device-classes.test.ts#01-F39: manager, waiter, and rider are never hub-eligible"
+      - "packages/sync-protocol/src/__acceptance__/fixtures.test.ts#01-F39: the hello fixture's device_class is a member of DEVICE_CLASSES"
+      - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F39: hello.device_class accepts each of DEVICE_CLASSES and nothing else ('toaster' rejects)"
   - fr: 01-F40
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F40: hello carries no slice — a client-declared slice field is rejected or dropped, never kept"
   - fr: 01-F41
     status: unmapped
   - fr: 01-F42

@@ -30,3 +30,4 @@ export {
   type KnownEventType,
   type ParsedEvent,
 } from "./registry.js";
+export { DEVICE_CLASSES, HUB_ELIGIBLE_CLASSES, type DeviceClass } from "./device-classes.js";

@@ -60,7 +60,21 @@ importers:
 
   packages/sync-client: {}
 
-  packages/sync-protocol: {}
+  packages/sync-protocol:
+    dependencies:
+      '@restos/domain':
+        specifier: workspace:*
+        version: link:../domain
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+    devDependencies:
+      fast-check:
+        specifier: 4.9.0
+        version: 4.9.0
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(vite@8.1.5)
 
   packages/testing: {}
 

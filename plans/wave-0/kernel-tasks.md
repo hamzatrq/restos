@@ -19,6 +19,15 @@ Sessions are sized to 1–4 FRs (24-F4). Acceptance tests per task are authored 
 - Vitest reporter → `conformance/01.yml` status derivation (24 §11.1); `verify:01` script. After T-01-01 (needs real test results to derive).
 
 ### T-01-02  sync-protocol wire messages (PROTOCOL.md → zod schemas + codec round-trip property tests, 20 §2.3)
+- **Status of T-01-01/T-01-00: DONE** (commits 8eb4a1a, f8826e9).
+- **FRs:** 01-F8 (push/ack watermark semantics), 01-F9 (catchup range fetch), 01-F37 (quarantine notice), 01-F39/01-F40 (device classes on `hello`; slices are sender-enforced — the protocol carries class, never client-declared slices). Contract-fixture law: 20 §2.7.
+- **Files touchable:** `packages/sync-protocol/src/**` (impl session); `packages/sync-protocol/src/__acceptance__/**` incl. `fixtures/` (test session only); `packages/domain/src/**` for the DEVICE_CLASSES addition below (impl session; protected-path review applies).
+- **Check:** `pnpm --filter @restos/sync-protocol test` + `pnpm verify:01`.
+- **API contract (binding for the test session):**
+  - Added to `@restos/domain` (cite 01-F39): `DEVICE_CLASSES = ["counter_electron","counter_rn","kitchen","manager","waiter","rider"] as const`; `type DeviceClass`; `HUB_ELIGIBLE_CLASSES = ["counter_electron","counter_rn","kitchen"] as const` (a strict subset of DEVICE_CLASSES, in hub-priority order per HUB-ELECTION.md).
+  - `@restos/sync-protocol` exports: `PROTOCOL_VERSION = 1`; `MESSAGE_KINDS` (the 11 kinds per PROTOCOL.md table: hello, hello_ack, push, push_ack, event_batch, catchup_request, catchup_response, quarantine_notice, purge_command, ping, pong); per-kind zod schemas with the PROTOCOL.md bodies (`push.events` = domain `EventEnvelope[]`; `event_batch` events additionally allow optional integer `global_seq ≥ 0`); `type ProtocolMessage` (discriminated union on `kind`); `parseMessage(value)` — throws `UnknownMessageKindError` on unknown kind, zod error on bad body or `v !== 1`; `encodeMessage(msg): string` (JSON); `decodeMessage(text): ProtocolMessage`; law: `decodeMessage(encodeMessage(m))` deep-equals `m` for every valid message (fast-check property).
+  - Golden fixtures (20 §2.7): 3+ canonical message JSON files checked in under `__acceptance__/fixtures/`; tests decode each fixture and re-encode to a semantically equal message — the wire contract cannot drift silently.
+- **Assumptions stated:** watermarks/global_seq are non-negative safe integers; `push_ack.acked_watermark` may lag the pushed watermark (partial ack is legal — outbox advances only to the ack, 19 §5); `purge_command.scope` is `"all"` at v1 (finer scopes when doc 22 erasure lands).
 ### T-01-03  sync-client storage adapter + outbox core (the canonical durable queue, 18 §4) + kill-test harness seed
 ### T-01-04  Folds v1 per FOLDS.md (`open_orders`, `kitchen_queue`) + fold determinism/commutativity properties (01-N1, 01-F34)
 ### T-01-05  LAN mesh + hub election per HUB-ELECTION.md + in-process sim scheduler seed (20 §2.4)

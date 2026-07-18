@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "kind": "hello",
+  "device_id": "01980000-0000-7000-8000-00000000d001",
+  "device_class": "counter_electron",
+  "branch_id": "01980000-0000-7000-8000-00000000b001",
+  "token": "fixture-token-t0102",
+  "last_global_seq": 41,
+  "own_high_water": 17
+}
