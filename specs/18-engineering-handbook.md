@@ -2,7 +2,7 @@
 
 **Engineering standards — Draft 1, July 2026** · Parent: `00-platform-overview.md`. This document turns 00 §3–§4 into enforceable rules: the exact monorepo layout, the libraries we build on, and the strategy for every layer. It is the law of the codebase.
 
-**How rules work:** MUST/NEVER rules are enforced by lint/CI where possible and by review otherwise. Changing a rule = a PR editing this document first. This document seeds the repo's `CLAUDE.md` — every AI coding session loads it; code that violates it is rejected in review regardless of whether it works.
+**How rules work:** MUST/NEVER rules are enforced by lint/CI where possible and by review otherwise. Changing a rule = a PR editing this document first. AI sessions reach this document through the `/AGENTS.md` router (governed by `23-ai-context.md`) — it is routed to on demand, never embedded in always-loaded context; code that violates it is rejected in review regardless of whether it works.
 
 **Version policy:** major versions named here are current at time of writing; exact versions are pinned (see §2) and live in the lockfile. Verify majors when adopting; never downgrade to match this doc.
 
