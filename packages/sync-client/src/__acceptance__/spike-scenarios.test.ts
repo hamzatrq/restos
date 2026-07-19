@@ -84,6 +84,160 @@ describe("X1 — rush baseline (01-N1 / 01-F34): fold identity ≡ refold() ≡ 
   });
 });
 
+// X1b — the reorder oracle. X1's rush generator is single-writer and emits no
+// order.table_assigned, so "device fold ≡ cloud-order replay" never has to DISTINGUISH a
+// store that honours adopted global_seq from one that ignores it (the provisional order
+// already equals cloud order). This scenario forces a genuine reversal: two DIFFERENT
+// devices assign the SAME order to different tables LAN-first (no global_seq — the
+// provisional winner is the canonical key: later device_created_at, then device_id), then
+// the cloud merges them in an order that REVERSES it (the provisional loser draws the
+// higher global_seq). The store-level reversal is T-01-04 law 7 (folds-review.test.ts);
+// this pins it end-to-end across 3 devices + the sim-cloud (contract (g) X1 / 01-N1).
+const ASSIGN_A_DCA = 1_752_800_002_000; // A's assign: LATER device_created_at → provisional winner
+const ASSIGN_B_DCA = 1_752_800_001_000; // B's assign: EARLIER → provisional loser (cloud reverses it)
+
+/** table_id the device's open_orders holds for `order_id` (null if no row / unassigned). */
+const tableIdOf = (d: SpikeDevice, order_id: string): string | null =>
+  d.store.openOrders().find((r) => r.order_id === order_id)?.table_id ?? null;
+
+type ReorderRun = {
+  cloud: ReturnType<typeof createSimCloud>;
+  devices: SpikeDevice[];
+  appended: AppendedEvent[];
+  provisional: (string | null)[]; // per-device table_id at LAN quiescence (pre-cloud)
+  final: (string | null)[]; // per-device table_id at full convergence (post-cloud)
+  assignAId: string;
+  assignBId: string;
+};
+
+/**
+ * One X1b run: LAN-first provisional convergence, then a staged cloud merge that reverses
+ * it. WAN is cut per-device (heal() clears only the GLOBAL cut, not per-device cuts — the
+ * sim-cloud contract), so healFor A→B→C admits them one at a time: A's events merge first
+ * (global_seq 1, 2), then B's assign draws global_seq 3 — the highest, so cloud order wins.
+ */
+const runReorder = (seed: number): ReorderRun => {
+  const sim = createSim({ seed });
+  sim.lan.policy(LOSSLESS);
+  const cloud = createSimCloud({ sim });
+  const { a, b, all } = trio(sim, cloud);
+  sim.runFor(CONVERGE_MS);
+
+  // LAN-only: cut every device's WAN individually so the two assigns settle provisionally.
+  for (const d of all) cloud.cutFor(d.device_id);
+  sim.runFor(CONVERGE_MS);
+
+  const order = `x1b-order-${seed}`;
+  const appended: AppendedEvent[] = [];
+  const record = (id: string, origin: string) => appended.push({ id, origin, at: sim.now() });
+
+  // order.created on A → propagates over LAN so the assigns fold (not park).
+  const created = appendOn(
+    a,
+    eventInput("dev-a", `x1b-created-${seed}`, "order.created", {
+      order_id: order,
+      channel: "dine_in",
+    }),
+  );
+  record(created.id, "dev-a");
+  sim.runFor(SETTLE_MS);
+
+  // Two competing table_assigns from DIFFERENT devices; A's LATER device_created_at wins
+  // the provisional canonical key (device_created_at, then device_id).
+  const assignA = appendOn(
+    a,
+    eventInput(
+      "dev-a",
+      `x1b-assignA-${seed}`,
+      "order.table_assigned",
+      { order_id: order, table_id: "table-A" },
+      ASSIGN_A_DCA,
+    ),
+  );
+  record(assignA.id, "dev-a");
+  const assignB = appendOn(
+    b,
+    eventInput(
+      "dev-b",
+      `x1b-assignB-${seed}`,
+      "order.table_assigned",
+      { order_id: order, table_id: "table-B" },
+      ASSIGN_B_DCA,
+    ),
+  );
+  record(assignB.id, "dev-b");
+  sim.runFor(SETTLE_MS);
+
+  const provisional = all.map((d) => tableIdOf(d, order));
+
+  // Cloud reversal, staged: A merges first (order.created + assignA → global_seq 1, 2),
+  // then B (assignB → global_seq 3, the highest — reverses the provisional winner), then
+  // C catches the full merged stream.
+  cloud.healFor("dev-a");
+  sim.runFor(SETTLE_MS);
+  cloud.healFor("dev-b");
+  sim.runFor(SETTLE_MS);
+  cloud.healFor("dev-c");
+  sim.runFor(SETTLE_MS);
+
+  const final = all.map((d) => tableIdOf(d, order));
+  return {
+    cloud,
+    devices: all,
+    appended,
+    provisional,
+    final,
+    assignAId: assignA.id,
+    assignBId: assignB.id,
+  };
+};
+
+describe("X1b — cross-device table_assigned reversal (01-N1 / 01-F34 system-level)", () => {
+  it("X1b/01-N1/01-F34: LAN-first provisional winner (canonical key) is reversed by cloud order — every device adopts the higher-global_seq table, fold ≡ refold() ≡ cloud-order replay", () => {
+    const run = runReorder(6011);
+
+    // Pre-convergence (LAN-only, no global_seq): the provisional canonical key decides —
+    // A's later device_created_at wins the table on EVERY device (the reversal is not vacuous).
+    expect(run.provisional).toEqual(["table-A", "table-A", "table-A"]);
+
+    // The reversal driver: the cloud gave assignB (the provisional LOSER) the higher global_seq.
+    const merged = run.cloud.mergedStream();
+    const seqA = merged.find((m) => m.id === run.assignAId)?.global_seq ?? -1;
+    const seqB = merged.find((m) => m.id === run.assignBId)?.global_seq ?? -1;
+    expect(seqA).toBeGreaterThan(0); // both assigns merged
+    expect(seqB).toBeGreaterThan(seqA); // provisional loser sorts LAST in cloud order
+
+    // Post-convergence: the higher-global_seq winner replaces the provisional winner on
+    // every device — a store that ignored adopted global_seq would still read "table-A".
+    expect(run.final).toEqual(["table-B", "table-B", "table-B"]);
+    expect(run.final).not.toEqual(run.provisional); // reversal genuinely observed
+
+    // Full X1 oracle: fold tables byte-identical across devices ≡ each device's own
+    // refold() ≡ a fresh store replaying mergedStream() in global_seq order.
+    assertConverged(run.devices, run.cloud, run.appended);
+    for (const d of run.devices) {
+      stopBoth(d);
+      d.store.close();
+    }
+  });
+
+  it("X1b/20 §2.4: same seed ⇒ deep-equal outcome (determinism — the reorder path on a re-run)", () => {
+    const first = runReorder(6011);
+    const firstOut = outcomeOf(first.devices, first.cloud);
+    for (const d of first.devices) {
+      stopBoth(d);
+      d.store.close();
+    }
+    const second = runReorder(6011);
+    const secondOut = outcomeOf(second.devices, second.cloud);
+    for (const d of second.devices) {
+      stopBoth(d);
+      d.store.close();
+    }
+    expect(secondOut).toEqual(firstOut);
+  });
+});
+
 describe("X2 — WAN cut mid-rush (01-F8 / 19 §5): LAN keeps flowing, heal resumes convergence", () => {
   it("X2/01-F8/19 §5: with the WAN cut, new orders still reach all 3 over LAN (p95 < 1000 virtual ms); heal → push/catchup resume → full X1 identity", () => {
     const seed = 6002;
