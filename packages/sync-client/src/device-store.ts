@@ -7,10 +7,14 @@
 // or deletes an event row (01-F1). Append validates through the domain registry —
 // an unknown type or invalid payload persists nothing (01-F4).
 //
-// Folds v1 (T-01-04): always-on materialized state tables per FOLDS.md, rebuilt by
-// canonical replay (src/folds/replay.ts) inside every mutating transaction, so fold
-// state commits atomically with its ledger write and reopen self-heals to
-// refold()-equivalence (01-F6). `ingest` is the branch-stream entry point — peer
+// Folds v1 (T-01-04) + incremental maintenance (T-01-04b): always-on materialized
+// state tables per FOLDS.md, kept by an in-memory fold accumulator (src/folds/
+// replay.ts) whose writes commit in the same transaction as the ledger row, so fold
+// state stays atomic with its ledger write and reopen self-heals to refold()-
+// equivalence (01-F6). The common in-order arrival fast-paths to a targeted upsert;
+// any event that would reorder canonical history falls back to a full recompute —
+// the law is equivalence with canonical replay, never "never recompute". `ingest`
+// is the branch-stream entry point — peer
 // envelopes persist to `peer_events`, dedupe by event id (01-F8), and park at the
 // fold layer when a typed parent is unseen (01-F10); append never fails or blocks
 // for fold reasons — a sale is never blocked (01-F17). Cloud ordering lands via the
@@ -19,11 +23,13 @@
 import { type EventEnvelopeT, parseEnvelope, parseEvent } from "@restos/domain";
 import Database from "better-sqlite3";
 import {
+  createFoldEngine,
   type FoldInput,
+  type FoldState,
   type KitchenQueueRow,
   type OpenOrderRow,
   type ParkedRow,
-  replay,
+  type ProjectedOrder,
 } from "./folds/replay.js";
 
 export class AckBeyondAppendedError extends Error {
@@ -214,6 +220,10 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   const insertParkedRow = db.prepare<[string, string, string]>(
     "INSERT INTO parked (event_id, waiting_for, envelope_json) VALUES (?, ?, ?)",
   );
+  // Targeted deletes for the incremental fast-path upsert (T-01-04b) — one order's
+  // two rows, replaced in place; the full-rebuild fallback uses the clears above.
+  const deleteOrderRow = db.prepare<[string]>("DELETE FROM orders WHERE order_id = ?");
+  const deleteQueueRow = db.prepare<[string]>("DELETE FROM queue WHERE order_id = ?");
   const selectOrders = db.prepare<[], OpenOrderRow>(
     "SELECT order_id, channel, order_type, table_id, confirmed_at, settled, json_lines FROM orders ORDER BY order_id",
   );
@@ -229,16 +239,19 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   const ownHighWater = (): number | null => highWater.get()?.high ?? null;
   const ackedWatermark = (): number | null => readState.get()?.acked_watermark ?? null;
 
-  // Drop-and-rebuild all fold tables from events ∪ peer_events + the sidecar — the
-  // fold law is equivalence with canonical replay (01-F6), and running this inside
-  // every mutating transaction keeps fold state atomic with the ledger write.
-  const recomputeFolds = (): void => {
+  // The live fold accumulator (T-01-04b) — persists across writes so an in-order
+  // append is O(1), not a full canonical replay. `refoldTx()` on open seeds it.
+  const engine = createFoldEngine();
+
+  const readAllInputs = (): FoldInput[] => {
     const gseqOf = new Map(allGseq.all().map((row) => [row.event_id, row.global_seq]));
-    const inputs: FoldInput[] = [...allOwnEnvelopes.all(), ...allPeerEnvelopes.all()].map((row) => {
+    return [...allOwnEnvelopes.all(), ...allPeerEnvelopes.all()].map((row) => {
       const envelope = rowToEnvelope(row);
       return { envelope, global_seq: gseqOf.get(envelope.id) ?? null };
     });
-    const state = replay(inputs);
+  };
+
+  const writeFullTables = (state: FoldState): void => {
     clearOrders.run();
     clearQueue.run();
     clearParked.run();
@@ -268,6 +281,60 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     }
   };
 
+  // Drop-and-rebuild all fold tables (and the live accumulator) from events ∪
+  // peer_events + the sidecar — the always-correct fallback (01-F6) and the reopen
+  // self-heal, run inside the mutating transaction so fold state stays atomic.
+  const recomputeFolds = (): void => {
+    engine.rebuild(readAllInputs());
+    writeFullTables(engine.snapshot());
+  };
+
+  // Replace one order's two rows in place (the fast-path delta); the queue row is
+  // written only when the order has confirmed (FOLDS.md — no queue row otherwise).
+  const upsertOrder = (p: ProjectedOrder): void => {
+    deleteOrderRow.run(p.order.order_id);
+    insertOrderRow.run(
+      p.order.order_id,
+      p.order.channel,
+      p.order.order_type,
+      p.order.table_id,
+      p.order.confirmed_at,
+      p.order.settled,
+      p.order.json_lines,
+    );
+    deleteQueueRow.run(p.order.order_id);
+    if (p.queue) {
+      insertQueueRow.run(
+        p.queue.order_id,
+        p.queue.confirm_at,
+        p.queue.channel,
+        p.queue.age_basis,
+        p.queue.lines_ready,
+        p.queue.lines_total,
+      );
+    }
+  };
+
+  const rewriteParked = (): void => {
+    clearParked.run();
+    for (const row of engine.parkedRows()) {
+      insertParkedRow.run(row.event_id, row.waiting_for, row.envelope_json);
+    }
+  };
+
+  // Incremental fold maintenance for a newly-stored event (T-01-04b): fast-path an
+  // in-order tail arrival to a targeted upsert of the touched orders + the parked
+  // table; an out-of-order arrival falls back to a full recompute. Both stay
+  // byte-equivalent to refold() — the T-01-04 fold properties are the oracle.
+  const applyFold = (input: FoldInput): void => {
+    if (engine.apply(input)) {
+      for (const p of engine.takeDirty()) upsertOrder(p);
+      rewriteParked();
+    } else {
+      recomputeFolds();
+    }
+  };
+
   // Lamport assignment and the durable insert are one transaction (01-F3): a
   // validation failure rolls back with nothing persisted (01-F4). Re-append of a
   // stored id is idempotent for identical retries only — divergent content throws,
@@ -294,7 +361,7 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     insertEvent.run(envelope.id, envelope.lamport_seq, JSON.stringify(envelope));
     // Folds apply in the same transaction; an unmet dependency parks at the fold
     // layer — append never fails or blocks for fold reasons (01-F17, 01-F10).
-    recomputeFolds();
+    applyFold({ envelope, global_seq: null });
     return envelope;
   });
 
@@ -339,7 +406,7 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     }
     insertPeer.run(envelope.id, envelope.device_id, envelope.lamport_seq, JSON.stringify(envelope));
     if (globalSeq !== undefined) insertGseq.run(envelope.id, globalSeq); // UNIQUE clash throws, rolls back
-    recomputeFolds();
+    applyFold({ envelope, global_seq: globalSeq ?? null });
     return { stored: true };
   });
 

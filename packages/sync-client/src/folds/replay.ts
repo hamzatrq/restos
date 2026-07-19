@@ -1,15 +1,23 @@
-// Fold engine v1 (T-01-04): the two FOLDS.md folds — `open_orders` and
-// `kitchen_queue` — computed as a pure function of the stored event set (01-F6).
-// Fold state is DEFINED as replay of the set in the canonical total order
-// key(e) = (global_seq ?? +Inf, device_created_at, device_id, lamport_seq): arrival
-// order never matters (01-N1), and once every competitor carries a global_seq this
-// is exactly cloud order — devices converge on ack (01-F34). An event whose typed
-// parent is unseen parks and drains on arrival, cascading to fixpoint — never
-// crashed, never dropped (01-F10). Every line transition routes through the domain
-// `applyLineState` machine; non-applied results are retained as per-line anomalies,
-// never applied (01-F35). Recompute-per-write over incremental deltas is the
-// implementation choice the contract permits: the law is equivalence with canonical
-// replay, and `refold()` is definitionally identical to it.
+// Fold engine v1 (T-01-04) + incremental maintenance (T-01-04b): the two FOLDS.md
+// folds — `open_orders` and `kitchen_queue` — computed as a pure function of the
+// stored event set (01-F6). Fold state is DEFINED as replay of the set in the
+// canonical total order key(e) = (global_seq ?? +Inf, device_created_at, device_id,
+// lamport_seq): arrival order never matters (01-N1), and once every competitor
+// carries a global_seq this is exactly cloud order — devices converge on ack
+// (01-F34). An event whose typed parent is unseen parks and drains on arrival,
+// cascading to fixpoint — never crashed, never dropped (01-F10). Every line
+// transition routes through the domain `applyLineState` machine; non-applied
+// results are retained as per-line anomalies, never applied (01-F35).
+//
+// The engine keeps the same accumulator live across writes so a single append is
+// O(1) instead of a full canonical replay (T-01-04b). `apply()` fast-paths an event
+// whose key is >= the highest key over ALL stored events — it then appends strictly
+// at the end of canonical order, so the parked list stays canonically sorted and the
+// drain reproduces replay exactly. Anything that would land an event BEFORE the
+// current tail (an out-of-order arrival, or an `assignGlobalSeq` that moves an
+// event's key from +Inf to a finite cloud seq) returns false and the caller does a
+// full `rebuild()`. The law is equivalence with canonical replay, never "never
+// recompute": correctness first, so when in doubt the engine recomputes.
 import {
   applyLineState,
   type EventEnvelopeT,
@@ -51,6 +59,9 @@ export type FoldState = {
   queue: KitchenQueueRow[];
   parked: ParkedRow[];
 };
+
+/** A single order's two projected rows — the queue row exists iff the order confirmed. */
+export type ProjectedOrder = { order: OpenOrderRow; queue: KitchenQueueRow | null };
 
 /** Canonical JSON: object keys sorted lexicographically at every depth, no
  * insignificant whitespace — determinism assertions compare byte-for-byte. */
@@ -104,6 +115,7 @@ type OrderAcc = {
 };
 
 type Keyed = { gseq: number; event: ParsedEvent };
+type Parked = { entry: Keyed; waiting: string };
 
 const cmp = (a: number | string, b: number | string): number => (a < b ? -1 : a > b ? 1 : 0);
 
@@ -115,6 +127,11 @@ const byCanonicalOrder = (a: Keyed, b: Keyed): number =>
   cmp(a.event.envelope.device_id, b.event.envelope.device_id) ||
   cmp(a.event.envelope.lamport_seq, b.event.envelope.lamport_seq);
 
+const toKeyed = (input: FoldInput): Keyed => ({
+  gseq: input.global_seq ?? Number.POSITIVE_INFINITY,
+  event: parseEvent(input.envelope),
+});
+
 const READY_STATES: ReadonlySet<OrderLineState> = new Set([
   "ready",
   "served",
@@ -123,27 +140,86 @@ const READY_STATES: ReadonlySet<OrderLineState> = new Set([
 ]);
 const EXITED_STATES: ReadonlySet<OrderLineState> = new Set(["voided", "cancelled"]);
 
+/** An accumulator → its two FOLDS.md rows (open_orders always; kitchen_queue iff
+ * a canonically-applied confirm exists). Identical projection whether reached by a
+ * full rebuild or an incremental apply — this is the single source of row shape. */
+const projectAcc = (acc: OrderAcc): ProjectedOrder => {
+  let billed_effective = 0;
+  let lines_total = 0;
+  let lines_ready = 0;
+  const linesObject: Record<string, LineCell> = {};
+  for (const [lineId, cell] of acc.lines) {
+    linesObject[lineId] = cell;
+    if (!EXITED_STATES.has(cell.state)) {
+      billed_effective += cell.qty * cell.unit_price_paisa;
+      lines_total += 1;
+    }
+    if (READY_STATES.has(cell.state)) lines_ready += 1;
+  }
+  // v1 approximation of 01-F30: exact cover over surviving lines; void/comp/
+  // discount value terms land with their event types (contract: deferred).
+  const settled =
+    billed_effective > 0 && acc.pay_total - acc.refund_total === billed_effective ? 1 : 0;
+  const order: OpenOrderRow = {
+    order_id: acc.order_id,
+    channel: acc.channel,
+    order_type: acc.order_type,
+    table_id: acc.assigned_table_id ?? acc.created_table_id,
+    confirmed_at: acc.confirmed_at,
+    settled,
+    json_lines: canonicalJson(linesObject),
+  };
+  // A queue row exists iff a canonically-applied order.confirmed exists; kitchen
+  // age runs from the first ticket print when one exists (03-F19/F24 feed).
+  const queue: KitchenQueueRow | null =
+    acc.confirmed_at !== null
+      ? {
+          order_id: acc.order_id,
+          confirm_at: acc.confirmed_at,
+          channel: acc.channel,
+          age_basis: acc.kot_at ?? acc.confirmed_at,
+          lines_ready,
+          lines_total,
+        }
+      : null;
+  return { order, queue };
+};
+
 /**
- * Canonical replay with parking: iterate the set in canonical order; an event with
- * an unmet typed dependency parks (`waiting_for` = the first unmet id — order id,
- * then lowest missing line id, then payment event id); every application drains the
- * parked list in canonical order to fixpoint (01-F10). Events of the same type for
- * the same parent share their dependency set, so they always apply in canonical
- * relative order — first-wins and last-wins fields need no extra bookkeeping.
+ * The fold accumulator, kept live across writes (T-01-04b). `rebuild` folds the
+ * whole stored set in canonical order — the definition of fold state and the always-
+ * correct fallback (01-F6). `apply` maintains that same state incrementally for the
+ * common in-order arrival, staying byte-equivalent to `rebuild` of the grown set.
  */
-export const replay = (inputs: readonly FoldInput[]): FoldState => {
-  const sorted: Keyed[] = inputs
-    .map((input) => ({
-      gseq: input.global_seq ?? Number.POSITIVE_INFINITY,
-      event: parseEvent(input.envelope),
-    }))
-    .sort(byCanonicalOrder);
+export type FoldEngine = {
+  /** Full canonical replay into the accumulator — the fallback + reopen path. */
+  rebuild(inputs: readonly FoldInput[]): void;
+  /** Incrementally apply one newly-stored event; false ⇒ caller must `rebuild`. */
+  apply(input: FoldInput): boolean;
+  /** Every fold row, for a full table rewrite after `rebuild`. */
+  snapshot(): FoldState;
+  /** The orders touched since the last call, projected — for a targeted upsert after `apply`. */
+  takeDirty(): ProjectedOrder[];
+  /** The current parked rows — for the parked-table rewrite after `apply`. */
+  parkedRows(): ParkedRow[];
+};
 
-  const orders = new Map<string, OrderAcc>();
+export const createFoldEngine = (): FoldEngine => {
+  let orders = new Map<string, OrderAcc>();
   /** Applied payment.recorded envelope id → its order acc (refund attribution, 01-F29). */
-  const appliedPayments = new Map<string, OrderAcc>();
+  let appliedPayments = new Map<string, OrderAcc>();
+  /** Always canonically sorted: rebuild pushes in sorted order and apply appends the
+   * new tail (its key is >= every stored key), so drains re-attempt in canonical order. */
+  let parked: Parked[] = [];
+  /** Max canonical key over ALL stored events (applied ∪ parked); null when empty. */
+  let maxKey: Keyed | null = null;
+  /** Accumulators touched since the last `takeDirty` — deduped by reference. */
+  const dirty = new Set<OrderAcc>();
 
-  /** Applies the event and returns null, or returns the first unmet dependency id. */
+  // Applies the event and returns null (marking its order dirty), or returns the
+  // first unmet dependency id. Events of the same type for the same parent share a
+  // dependency set, so they apply in canonical relative order — first-wins and
+  // last-wins fields need no extra bookkeeping.
   const attempt = (event: ParsedEvent): string | null => {
     const env = event.envelope;
     const type: KnownEventType = event.type;
@@ -151,20 +227,21 @@ export const replay = (inputs: readonly FoldInput[]): FoldState => {
       case "order.created": {
         const p = event.payload as OrderCreatedP;
         // Canonically-first create wins; later duplicates are no-ops (01-F19 pattern).
-        if (!orders.has(p.order_id)) {
-          orders.set(p.order_id, {
-            order_id: p.order_id,
-            channel: p.channel,
-            order_type: p.order_type ?? null,
-            created_table_id: p.table_id ?? null,
-            assigned_table_id: null,
-            confirmed_at: null,
-            kot_at: null,
-            lines: new Map(),
-            pay_total: 0,
-            refund_total: 0,
-          });
-        }
+        const existing = orders.get(p.order_id);
+        const acc: OrderAcc = existing ?? {
+          order_id: p.order_id,
+          channel: p.channel,
+          order_type: p.order_type ?? null,
+          created_table_id: p.table_id ?? null,
+          assigned_table_id: null,
+          confirmed_at: null,
+          kot_at: null,
+          lines: new Map(),
+          pay_total: 0,
+          refund_total: 0,
+        };
+        if (existing === undefined) orders.set(p.order_id, acc);
+        dirty.add(acc);
         return null;
       }
       case "order.confirmed": {
@@ -173,6 +250,7 @@ export const replay = (inputs: readonly FoldInput[]): FoldState => {
         if (!acc) return p.order_id;
         // Canonically-first confirm anchors confirmed_at; later confirms are no-ops.
         if (acc.confirmed_at === null) acc.confirmed_at = env.device_created_at;
+        dirty.add(acc);
         return null;
       }
       case "kot.printed": {
@@ -181,6 +259,7 @@ export const replay = (inputs: readonly FoldInput[]): FoldState => {
         if (!acc) return p.order_id;
         // Canonically-first ticket print anchors kitchen age (doc 03 refines).
         if (acc.kot_at === null) acc.kot_at = env.device_created_at;
+        dirty.add(acc);
         return null;
       }
       case "order.table_assigned": {
@@ -189,6 +268,7 @@ export const replay = (inputs: readonly FoldInput[]): FoldState => {
         if (!acc) return p.order_id;
         // Canonically-LAST assignment wins — the 01-F34 order-sensitive field.
         acc.assigned_table_id = p.table_id;
+        dirty.add(acc);
         return null;
       }
       case "order.line_added": {
@@ -206,6 +286,7 @@ export const replay = (inputs: readonly FoldInput[]): FoldState => {
             anomalies: {},
           });
         }
+        dirty.add(acc);
         return null;
       }
       case "order.line_state_changed": {
@@ -231,6 +312,7 @@ export const replay = (inputs: readonly FoldInput[]): FoldState => {
           // row is untouched (01-F35 — folds never regress).
           if (result.anomaly !== undefined) cell.anomalies[env.id] = result.anomaly;
         }
+        dirty.add(acc);
         return null;
       }
       case "payment.recorded": {
@@ -239,6 +321,7 @@ export const replay = (inputs: readonly FoldInput[]): FoldState => {
         if (!acc) return p.order_id;
         acc.pay_total += p.amount_paisa; // integer paisas only (00 §6)
         appliedPayments.set(env.id, acc); // resolves this EVENT id for refunds (01-F29)
+        dirty.add(acc);
         return null;
       }
       case "payment.refunded": {
@@ -246,14 +329,11 @@ export const replay = (inputs: readonly FoldInput[]): FoldState => {
         const acc = appliedPayments.get(p.payment_id);
         if (!acc) return p.payment_id;
         acc.refund_total += p.amount_paisa;
+        dirty.add(acc);
         return null;
       }
     }
   };
-
-  /** Always in canonical order: main-loop parks append in canonical position and
-   * drain passes preserve relative order. */
-  const parked: { entry: Keyed; waiting: string }[] = [];
 
   // Re-attempt parked events in canonical order after every application; still-unmet
   // ones re-park under their new waiting_for; cascades (refund → payment → order)
@@ -262,71 +342,69 @@ export const replay = (inputs: readonly FoldInput[]): FoldState => {
     let progressed = true;
     while (progressed) {
       progressed = false;
-      const remaining: { entry: Keyed; waiting: string }[] = [];
+      const remaining: Parked[] = [];
       for (const p of parked) {
         const waiting = attempt(p.entry.event);
         if (waiting === null) progressed = true;
         else remaining.push({ entry: p.entry, waiting });
       }
-      parked.length = 0;
-      parked.push(...remaining);
+      parked = remaining;
     }
   };
 
-  for (const keyed of sorted) {
+  const rebuild = (inputs: readonly FoldInput[]): void => {
+    orders = new Map();
+    appliedPayments = new Map();
+    parked = [];
+    const sorted: Keyed[] = inputs.map(toKeyed).sort(byCanonicalOrder);
+    for (const keyed of sorted) {
+      const waiting = attempt(keyed.event);
+      if (waiting === null) drain();
+      else parked.push({ entry: keyed, waiting });
+    }
+    maxKey = sorted.at(-1) ?? null;
+    dirty.clear(); // the caller rewrites every row after a rebuild — deltas are moot
+  };
+
+  const apply = (input: FoldInput): boolean => {
+    const keyed = toKeyed(input);
+    // Sorts before the current tail ⇒ an interior insertion could flip a first/last-
+    // wins field or a drain order; recompute (correctness first, T-01-04b).
+    if (maxKey !== null && byCanonicalOrder(keyed, maxKey) < 0) return false;
+    // The new event is the strictly-highest key over all stored events, so it lands
+    // at the very end of canonical order: apply it, and any parked it unblocks drains
+    // in canonical order exactly as a full replay would.
+    maxKey = keyed;
     const waiting = attempt(keyed.event);
     if (waiting === null) drain();
     else parked.push({ entry: keyed, waiting });
-  }
+    return true;
+  };
 
-  const orderRows: OpenOrderRow[] = [];
-  const queueRows: KitchenQueueRow[] = [];
-  for (const acc of orders.values()) {
-    let billed_effective = 0;
-    let lines_total = 0;
-    let lines_ready = 0;
-    const linesObject: Record<string, LineCell> = {};
-    for (const [lineId, cell] of acc.lines) {
-      linesObject[lineId] = cell;
-      if (!EXITED_STATES.has(cell.state)) {
-        billed_effective += cell.qty * cell.unit_price_paisa;
-        lines_total += 1;
-      }
-      if (READY_STATES.has(cell.state)) lines_ready += 1;
+  const snapshot = (): FoldState => {
+    const orderRows: OpenOrderRow[] = [];
+    const queueRows: KitchenQueueRow[] = [];
+    for (const acc of orders.values()) {
+      const { order, queue } = projectAcc(acc);
+      orderRows.push(order);
+      if (queue !== null) queueRows.push(queue);
     }
-    // v1 approximation of 01-F30: exact cover over surviving lines; void/comp/
-    // discount value terms land with their event types (contract: deferred).
-    const settled =
-      billed_effective > 0 && acc.pay_total - acc.refund_total === billed_effective ? 1 : 0;
-    orderRows.push({
-      order_id: acc.order_id,
-      channel: acc.channel,
-      order_type: acc.order_type,
-      table_id: acc.assigned_table_id ?? acc.created_table_id,
-      confirmed_at: acc.confirmed_at,
-      settled,
-      json_lines: canonicalJson(linesObject),
-    });
-    // A queue row exists iff a canonically-applied order.confirmed exists; kitchen
-    // age runs from the first ticket print when one exists (03-F19/F24 feed).
-    if (acc.confirmed_at !== null) {
-      queueRows.push({
-        order_id: acc.order_id,
-        confirm_at: acc.confirmed_at,
-        channel: acc.channel,
-        age_basis: acc.kot_at ?? acc.confirmed_at,
-        lines_ready,
-        lines_total,
-      });
-    }
-  }
+    return { orders: orderRows, queue: queueRows, parked: parkedRows() };
+  };
+
+  const takeDirty = (): ProjectedOrder[] => {
+    const out = [...dirty].map(projectAcc);
+    dirty.clear();
+    return out;
+  };
 
   // Nothing is ever dropped: every stored consumed-type envelope is applied ∪ parked.
-  const parkedRows: ParkedRow[] = parked.map((p) => ({
-    event_id: p.entry.event.envelope.id,
-    waiting_for: p.waiting,
-    envelope_json: canonicalJson(p.entry.event.envelope),
-  }));
+  const parkedRows = (): ParkedRow[] =>
+    parked.map((p) => ({
+      event_id: p.entry.event.envelope.id,
+      waiting_for: p.waiting,
+      envelope_json: canonicalJson(p.entry.event.envelope),
+    }));
 
-  return { orders: orderRows, queue: queueRows, parked: parkedRows };
+  return { rebuild, apply, snapshot, takeDirty, parkedRows };
 };
