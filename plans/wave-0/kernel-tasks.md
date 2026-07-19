@@ -19,7 +19,7 @@ Sessions are sized to 1–4 FRs (24-F4). Acceptance tests per task are authored 
 - Vitest reporter → `conformance/01.yml` status derivation (24 §11.1); `verify:01` script. After T-01-01 (needs real test results to derive).
 
 ### T-01-02  sync-protocol wire messages (PROTOCOL.md → zod schemas + codec round-trip property tests, 20 §2.3)
-- **Status: T-01-01/T-01-00/T-01-02/T-01-03/T-01-04 DONE** (T-01-04 landed with adversarial-review fix round: ingest-gseq adoption, line_ids dedupe, dead column dropped; coverage gate live at 100% branches on src/folds). In flight: T-01-07 loop (gateway). Next in sync-client: T-01-05, then T-01-04b, then T-01-06.
+- **Status: T-01-01/T-01-00/T-01-02/T-01-03/T-01-04/T-01-05 DONE** (T-01-05 landed after a fix round closing two review blockers: session-cursor LAN paging, inbound-life-only hub suspicion; deterministic session ids; wallClock shipped). In flight: T-01-07 fix round (gateway — in-batch dedupe, persisted-slot uniformity, storage_reject, ack guard, per-connection serialization). Then: T-01-04b + T-01-05b perf, then T-01-06.
 - **FRs:** 01-F8 (push/ack watermark semantics), 01-F9 (catchup range fetch), 01-F37 (quarantine notice), 01-F39/01-F40 (device classes on `hello`; slices are sender-enforced — the protocol carries class, never client-declared slices). Contract-fixture law: 20 §2.7.
 - **Files touchable:** `packages/sync-protocol/src/**` (impl session); `packages/sync-protocol/src/__acceptance__/**` incl. `fixtures/` (test session only); `packages/domain/src/**` for the DEVICE_CLASSES addition below (impl session; protected-path review applies).
 - **Check:** `pnpm --filter @restos/sync-protocol test` + `pnpm verify:01`.

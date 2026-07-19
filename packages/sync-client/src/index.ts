@@ -1,14 +1,29 @@
 // @restos/sync-client — device sync engine (owning spec: specs/01-kernel-sync.md).
 // T-01-03 lands the device store + outbox core (01-F2/F3/F8/F11); T-01-04 lands
-// folds v1 per FOLDS.md (01-F6/F10/F34, 01-N1); LAN mesh and hub election arrive
-// with later kernel tasks (plans/wave-0/kernel-tasks.md).
+// folds v1 per FOLDS.md (01-F6/F10/F34, 01-N1); T-01-05 lands hub election + the
+// LAN mesh session over the injected transport seam (01-F12/F13/F15;
+// plans/wave-0/kernel-tasks.md, HUB-ELECTION.md).
 export {
   AckBeyondAppendedError,
   type AppendInput,
   type DeviceStore,
+  type IngestBatchResult,
   type IngestResult,
   openStore,
   type StoreIdentity,
   type SyncStatus,
 } from "./device-store.js";
 export type { KitchenQueueRow, OpenOrderRow, ParkedRow } from "./folds/replay.js";
+export { electHub } from "./hub-election.js";
+export {
+  createMeshSession,
+  HEARTBEAT_INTERVAL_MS,
+  HEARTBEAT_MISSED_LIMIT,
+  HELLO_TIMEOUT_MS,
+  HUB_LOSS_TIMEOUT_MS,
+  type MeshSession,
+  type MeshSessionState,
+  type MeshSessionStatus,
+  REELECTION_BUDGET_MS,
+} from "./mesh-session.js";
+export { wallClock } from "./wall-clock.js";

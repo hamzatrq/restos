@@ -7,6 +7,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { newId } from "@restos/domain";
 
+/** noUncheckedIndexedAccess-safe unwrap — a missing value is a loud test failure (T-01-05 additive). */
+export const must = <T>(value: T | undefined | null, what = "value"): T => {
+  if (value === undefined || value === null) throw new Error(`expected ${what} to be defined`);
+  return value;
+};
+
 export const identity = () => ({
   org_id: newId(),
   branch_id: newId(),

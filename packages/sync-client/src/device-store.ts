@@ -54,9 +54,16 @@ export type SyncStatus = {
 
 export type IngestResult = { stored: boolean };
 
+/** Per-event outcome counts for the batch seam — failures skip, never throw (01-F37 seed). */
+export type IngestBatchResult = { appended: number; deduped: number; rejected: number };
+
 export type DeviceStore = {
+  /** The store's org/branch/device identity — the mesh session derives hello from it (T-01-05). */
+  identity: StoreIdentity;
   append(input: AppendInput): EventEnvelopeT;
   ingest(envelope: unknown, opts?: { global_seq?: number }): IngestResult;
+  ingestBatch(events: readonly unknown[]): IngestBatchResult;
+  readAllEvents(): EventEnvelopeT[];
   assignGlobalSeq(event_id: string, global_seq: number): void;
   nextBatch(max: number): EventEnvelopeT[];
   advanceTo(watermark: number): void;
@@ -374,6 +381,23 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     return true;
   };
 
+  // Batch seam over the per-envelope ingest (T-01-05; planner reconciliation note):
+  // same validation + persistence + fold application, but per-event failures roll
+  // back to their savepoint and are counted, never thrown (01-F37 seed) — the valid
+  // remainder still lands, and the whole batch is durable before return (01-F2).
+  const ingestBatchTx = db.transaction((events: readonly unknown[]): IngestBatchResult => {
+    const counts: IngestBatchResult = { appended: 0, deduped: 0, rejected: 0 };
+    for (const event of events) {
+      try {
+        if (ingestTx(event).stored) counts.appended += 1;
+        else counts.deduped += 1; // already held (own or peer) — idempotent no-op (01-F8)
+      } catch {
+        counts.rejected += 1; // skipped and counted — quarantine machinery is a later task
+      }
+    }
+    return counts;
+  });
+
   const assignGlobalSeqTx = db.transaction((eventId: string, globalSeq: number) => {
     // devices converge to cloud ordering on ack (01-F34)
     if (adoptGlobalSeq(eventId, globalSeq)) recomputeFolds();
@@ -388,6 +412,8 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   refoldTx();
 
   return {
+    identity: { ...identity },
+
     append(input) {
       if (
         input.org_id !== identity.org_id ||
@@ -404,6 +430,21 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
 
     ingest(envelope, opts) {
       return ingestTx(envelope, opts);
+    },
+
+    ingestBatch(events) {
+      return ingestBatchTx(events);
+    },
+
+    readAllEvents() {
+      // Own ∪ ingested (01-F14 half), envelope order by (device_id, lamport_seq) —
+      // per-origin lamport order is preserved by construction at every reader.
+      return [...allOwnEnvelopes.all(), ...allPeerEnvelopes.all()]
+        .map(rowToEnvelope)
+        .sort((a, b) => {
+          if (a.device_id !== b.device_id) return a.device_id < b.device_id ? -1 : 1;
+          return a.lamport_seq - b.lamport_seq;
+        });
     },
 
     assignGlobalSeq(eventId, globalSeq) {

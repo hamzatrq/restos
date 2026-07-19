@@ -12,3 +12,10 @@ export {
   UnknownMessageKindError,
   WireEnvelope,
 } from "./messages.js";
+export type {
+  Clock,
+  MeshTransport,
+  PeerInfo,
+  TimerId,
+  TransportHandlers,
+} from "./transport.js";
