@@ -1,0 +1,285 @@
+[
+  {
+    "direction": "in",
+    "device_id": "xp-device",
+    "message": {
+      "v": 1,
+      "kind": "hello",
+      "device_id": "xp-device",
+      "device_class": "counter_electron",
+      "branch_id": "xp-branch",
+      "token": "eyJvcmdfaWQiOiJ4cC1vcmciLCJicmFuY2hfaWQiOiJ4cC1icmFuY2giLCJkZXZpY2VfaWQiOiJ4cC1kZXZpY2UifQ",
+      "last_global_seq": 0,
+      "own_high_water": 0
+    }
+  },
+  {
+    "direction": "out",
+    "device_id": "xp-device",
+    "message": {
+      "v": 1,
+      "kind": "hello_ack",
+      "session_id": "cloud:xp-device:0",
+      "hub": false,
+      "resume_from": 0
+    }
+  },
+  {
+    "direction": "in",
+    "device_id": "xp-device",
+    "message": {
+      "v": 1,
+      "kind": "push",
+      "events": [
+        {
+          "id": "xp-evt-0",
+          "org_id": "xp-org",
+          "branch_id": "xp-branch",
+          "device_id": "xp-device",
+          "actor_user_id": null,
+          "lamport_seq": 0,
+          "device_created_at": 1752800000000,
+          "server_received_at": null,
+          "type": "order.created",
+          "schema_version": 1,
+          "payload": {
+            "order_id": "xp-order-0",
+            "channel": "dine_in"
+          },
+          "refs": []
+        },
+        {
+          "id": "xp-evt-1",
+          "org_id": "xp-org",
+          "branch_id": "xp-branch",
+          "device_id": "xp-device",
+          "actor_user_id": null,
+          "lamport_seq": 1,
+          "device_created_at": 1752800000001,
+          "server_received_at": null,
+          "type": "order.created",
+          "schema_version": 1,
+          "payload": {
+            "order_id": "xp-order-1",
+            "channel": "dine_in"
+          },
+          "refs": []
+        }
+      ],
+      "watermark": 1
+    }
+  },
+  {
+    "direction": "out",
+    "device_id": "xp-device",
+    "message": {
+      "v": 1,
+      "kind": "push_ack",
+      "acked_watermark": 1
+    }
+  },
+  {
+    "direction": "out",
+    "device_id": "xp-device",
+    "message": {
+      "v": 1,
+      "kind": "event_batch",
+      "events": [
+        {
+          "id": "xp-evt-0",
+          "org_id": "xp-org",
+          "branch_id": "xp-branch",
+          "device_id": "xp-device",
+          "actor_user_id": null,
+          "lamport_seq": 0,
+          "device_created_at": 1752800000000,
+          "server_received_at": 150,
+          "type": "order.created",
+          "schema_version": 1,
+          "payload": {
+            "order_id": "xp-order-0",
+            "channel": "dine_in"
+          },
+          "refs": [],
+          "global_seq": 1
+        },
+        {
+          "id": "xp-evt-1",
+          "org_id": "xp-org",
+          "branch_id": "xp-branch",
+          "device_id": "xp-device",
+          "actor_user_id": null,
+          "lamport_seq": 1,
+          "device_created_at": 1752800000001,
+          "server_received_at": 150,
+          "type": "order.created",
+          "schema_version": 1,
+          "payload": {
+            "order_id": "xp-order-1",
+            "channel": "dine_in"
+          },
+          "refs": [],
+          "global_seq": 2
+        }
+      ]
+    }
+  },
+  {
+    "direction": "in",
+    "device_id": "xp-device",
+    "message": {
+      "v": 1,
+      "kind": "push",
+      "events": [
+        {
+          "id": "xp-evt-0",
+          "org_id": "xp-org",
+          "branch_id": "xp-branch",
+          "device_id": "xp-device",
+          "actor_user_id": null,
+          "lamport_seq": 0,
+          "device_created_at": 1752800000000,
+          "server_received_at": null,
+          "type": "order.created",
+          "schema_version": 1,
+          "payload": {
+            "order_id": "xp-order-0",
+            "channel": "dine_in"
+          },
+          "refs": []
+        },
+        {
+          "id": "xp-evt-1",
+          "org_id": "xp-org",
+          "branch_id": "xp-branch",
+          "device_id": "xp-device",
+          "actor_user_id": null,
+          "lamport_seq": 1,
+          "device_created_at": 1752800000001,
+          "server_received_at": null,
+          "type": "order.created",
+          "schema_version": 1,
+          "payload": {
+            "order_id": "xp-order-1",
+            "channel": "dine_in"
+          },
+          "refs": []
+        }
+      ],
+      "watermark": 1
+    }
+  },
+  {
+    "direction": "out",
+    "device_id": "xp-device",
+    "message": {
+      "v": 1,
+      "kind": "push_ack",
+      "acked_watermark": 1
+    }
+  },
+  {
+    "direction": "in",
+    "device_id": "xp-device",
+    "message": {
+      "v": 1,
+      "kind": "push",
+      "events": [
+        {
+          "id": "xp-evt-2",
+          "org_id": "xp-org",
+          "branch_id": "xp-branch",
+          "device_id": "xp-device",
+          "actor_user_id": null,
+          "lamport_seq": 2,
+          "device_created_at": 1752800000002,
+          "server_received_at": null,
+          "type": "order.created",
+          "schema_version": 1,
+          "payload": {
+            "order_id": "xp-order-\u0000-2",
+            "channel": "dine_in"
+          },
+          "refs": []
+        }
+      ],
+      "watermark": 2
+    }
+  },
+  {
+    "direction": "out",
+    "device_id": "xp-device",
+    "message": {
+      "v": 1,
+      "kind": "push_ack",
+      "acked_watermark": 2
+    }
+  },
+  {
+    "direction": "out",
+    "device_id": "xp-device",
+    "message": {
+      "v": 1,
+      "kind": "quarantine_notice",
+      "event_id": "xp-evt-2",
+      "reason": "storage_reject"
+    }
+  },
+  {
+    "direction": "in",
+    "device_id": "xp-device",
+    "message": {
+      "v": 1,
+      "kind": "catchup_request",
+      "from_global_seq": 0
+    }
+  },
+  {
+    "direction": "out",
+    "device_id": "xp-device",
+    "message": {
+      "v": 1,
+      "kind": "catchup_response",
+      "events": [
+        {
+          "id": "xp-evt-0",
+          "org_id": "xp-org",
+          "branch_id": "xp-branch",
+          "device_id": "xp-device",
+          "actor_user_id": null,
+          "lamport_seq": 0,
+          "device_created_at": 1752800000000,
+          "server_received_at": 150,
+          "type": "order.created",
+          "schema_version": 1,
+          "payload": {
+            "order_id": "xp-order-0",
+            "channel": "dine_in"
+          },
+          "refs": [],
+          "global_seq": 1
+        },
+        {
+          "id": "xp-evt-1",
+          "org_id": "xp-org",
+          "branch_id": "xp-branch",
+          "device_id": "xp-device",
+          "actor_user_id": null,
+          "lamport_seq": 1,
+          "device_created_at": 1752800000001,
+          "server_received_at": 150,
+          "type": "order.created",
+          "schema_version": 1,
+          "payload": {
+            "order_id": "xp-order-1",
+            "channel": "dine_in"
+          },
+          "refs": [],
+          "global_seq": 2
+        }
+      ],
+      "complete": true,
+      "next_from": 2
+    }
+  }
+]

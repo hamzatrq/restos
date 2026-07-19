@@ -19,6 +19,7 @@ rows:
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F2: append with an identity not matching the store throws and persists nothing"
       - "services/sync-gateway/src/__acceptance__/gateway-review.test.ts#01-F2/01-F8: a fresh device pushing past a gap-at-start gets NO push_ack and stores nothing; an empty push acks nothing; the first real [0] push then acks 0"
       - "services/sync-gateway/src/__acceptance__/law3-persist-before-ack.test.ts#01-F2: when push_ack reaches the sink, the sink's own independent connection already sees every acked row and the watermark"
+      - "services/sync-gateway/src/__acceptance__/spike/x10-smoke.test.ts#01-F2/F3/F8/F13/F34/F37: 3 tsx devices converge across WAN cut + hub SIGKILL-mid-print + respawn"
   - fr: 01-F3
     status: green
     tests:
@@ -45,6 +46,7 @@ rows:
       - "services/sync-gateway/src/__acceptance__/law1-global-seq.test.ts#01-F3: two orgs' global sequences are independent (one org's merges consume nothing from another's)"
       - "services/sync-gateway/src/__acceptance__/law1-global-seq.test.ts#01-F3: a rolled-back merge consumes nothing — the counter update rolls back with it"
       - "services/sync-gateway/src/__acceptance__/law7-stop-at-gap.test.ts#01-F8/01-F3: a gapped push stores and acks only the contiguous prefix; nothing beyond the gap lands in events OR quarantine; contiguous re-push completes the sequence"
+      - "services/sync-gateway/src/__acceptance__/spike/xp-transcript.test.ts#01-F3/F8/F9/F37: replaying the device→cloud messages through the REAL gateway reproduces the cloud→device stream (session_id + server_received_at aside, global_seq exact)"
   - fr: 01-F4
     status: green
     tests:
@@ -269,6 +271,7 @@ rows:
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34/01-F3/18 §4: a global_seq already held by another event throws and rolls back the whole ingest"
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34/01-F3: ingest-with-global_seq ≡ ingest-then-assignGlobalSeq — byte-identical tables"
       - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X1/01-N1/01-F34: at quiescence every device holds each event exactly once, cloud-ordered, and its fold tables ≡ refold() ≡ a fresh store replaying mergedStream()"
+      - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X1b/01-N1/01-F34: LAN-first provisional winner (canonical key) is reversed by cloud order — every device adopts the higher-global_seq table, fold ≡ refold() ≡ cloud-order replay"
       - "services/sync-gateway/src/__acceptance__/law5-fanout.test.ts#01-F9/01-F34: a push reaches every same-branch session including the origin, exactly once, as one event_batch with global_seq; other branches and other orgs get nothing"
   - fr: 01-F35
     status: green
@@ -328,6 +331,7 @@ rows:
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-N1: identical device_created_at across devices — ascending device_id breaks the tie on every arrival order"
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-N1: identical device_created_at on one device — ascending lamport_seq breaks the tie regardless of arrival order"
       - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X1/01-N1/01-F34: at quiescence every device holds each event exactly once, cloud-ordered, and its fold tables ≡ refold() ≡ a fresh store replaying mergedStream()"
+      - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X1b/01-N1/01-F34: LAN-first provisional winner (canonical key) is reversed by cloud order — every device adopts the higher-global_seq table, fold ≡ refold() ≡ cloud-order replay"
   - fr: 01-N2
     status: unmapped
   - fr: 01-N3

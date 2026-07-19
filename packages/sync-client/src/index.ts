@@ -32,4 +32,5 @@ export {
   type MeshSessionStatus,
   REELECTION_BUDGET_MS,
 } from "./mesh-session.js";
+export { createWsCloudTransport, createWsLanTransport } from "./transport-ws.js";
 export { wallClock } from "./wall-clock.js";
