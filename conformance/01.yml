@@ -13,6 +13,7 @@ rows:
       - "packages/sync-client/src/__acceptance__/crash-resume.test.ts#01-F2/01-F3/20 §2.6: a seeded run of append/ack cycles across abrupt reopens never loses a confirmed event nor leaves a gap"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F2/01-F6: after abrupt abandon, reopen yields state tables ≡ pre-crash tables ≡ refold()"
       - "packages/sync-client/src/__acceptance__/ingest-batch.test.ts#01-F2: a valid peer batch lands fully — counts {appended, deduped, rejected} and is visible to an independent handle before return"
+      - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X4/01-F2: the hub's held KOT job crashes before recording; reopen survives every confirmed event gap-free with tables ≡ refold(), no kot.printed for the held order; re-issue records once and the mesh reconverges to X1 identity"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F2: append returns the confirmed envelope — store-assigned gap-free lamport, null server_received_at, fields preserved"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F2/20 §2.6: at append return the event is visible to an independent handle on the same file — persisted, not buffered"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F2: append with an identity not matching the store throws and persists nothing"
@@ -84,6 +85,8 @@ rows:
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F8: push.watermark is a non-negative integer — 0 accepted, negatives and fractions rejected"
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F8: push_ack.acked_watermark is a non-negative integer — 0 accepted, negatives and fractions rejected"
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F8: push.events must be valid domain EventEnvelopes (envelope minus lamport_seq rejects)"
+      - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F8/19 §5: push drains own outbox to push_ack and advances the CLOUD write-checkpoint (store.advanceTo)"
+      - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F8: reconnect after a WAN cut re-hellos, resumes from the advanced cursor, and drains the tail"
       - "packages/sync-client/src/__acceptance__/crash-resume.test.ts#01-F8/20 §2.6: the unacked tail re-drains identically after reopen — same events, same order, checkpoint intact"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F8/18 §4: an own-device envelope not already stored throws — own events enter only via append"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F8: first delivery stores ({ stored: true }); re-ingest of the same peer id is { stored: false } with zero state change"
@@ -103,6 +106,8 @@ rows:
       - "packages/sync-client/src/__acceptance__/mesh-session.test.ts#01-F8/19 §5: hub acks update session last_push_ack but never move store.advanceTo — acked_watermark stays null and the outbox stays owed to the cloud"
       - "packages/sync-client/src/__acceptance__/properties.test.ts#01-F3/01-F8: for any interleaving of appends and legal acks, lamport stays gap-free and the unacked set matches the checkpoint model"
       - "packages/sync-client/src/__acceptance__/properties.test.ts#01-F8: drain content is independent of batch size — chunked drains concatenate to the full tail"
+      - "packages/sync-client/src/__acceptance__/spike-scenarios-departed.test.ts#X8/01-F8/01-F9: a 1600-event WAN-cut backlog propagates over LAN via multi-page session-cursor drain, chains cloud push pages to acked_watermark == own_high_water on heal, and a cold WAN-only joiner pulls the branch through ≥2 catchup pages"
+      - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X2/01-F8/19 §5: with the WAN cut, new orders still reach all 3 over LAN (p95 < 1000 virtual ms); heal → push/catchup resume → full X1 identity"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F8: re-append of an already-stored id returns the stored envelope unchanged and assigns no new lamport"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F8/18 §4: re-append of a stored id with divergent content throws and changes nothing — idempotency is for identical retries only"
       - "services/sync-gateway/src/__acceptance__/gateway-review.test.ts#01-F8: a repeated id with DIVERGENT content within ONE push merges the first, quarantines the repeat as id_content_divergence at its slot, acks both slots — no raw error; re-push idempotent"
@@ -122,7 +127,10 @@ rows:
     tests:
       - "packages/sync-protocol/src/__acceptance__/fixtures.test.ts#01-F3/01-F9: the event_batch fixture carries a cloud-assigned non-negative integer global_seq"
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F9: catchup_request.from_global_seq is a non-negative integer — 0 accepted, negatives/fractions/strings rejected"
+      - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F9: a cold cloud session catches up pre-existing cloud events from the exclusive cursor"
+      - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F9/01-F34: a live event_batch fan-out from a peer is applied via store.ingest with its global_seq"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F9/18 §4: ingest rejects an envelope from another org or branch — the stream is identity-scoped"
+      - "packages/sync-client/src/__acceptance__/spike-scenarios-departed.test.ts#X8/01-F8/01-F9: a 1600-event WAN-cut backlog propagates over LAN via multi-page session-cursor drain, chains cloud push pages to acked_watermark == own_high_water on heal, and a cold WAN-only joiner pulls the branch through ≥2 catchup pages"
       - "services/sync-gateway/src/__acceptance__/law4-catchup.test.ts#01-F9: CATCHUP_PAGE_SIZE is the exported binding constant 500"
       - "services/sync-gateway/src/__acceptance__/law4-catchup.test.ts#01-F9: paging from 0 yields every branch event exactly once, ascending, page cap enforced, complete/next_from per contract"
       - "services/sync-gateway/src/__acceptance__/law4-catchup.test.ts#01-F9: an empty page returns events: [], complete: true, next_from = from_global_seq"
@@ -169,11 +177,13 @@ rows:
       - "packages/sync-client/src/__acceptance__/mesh-session.test.ts#(c)/01-F13: a joining higher-rank device takes hub — the solo counter_rn becomes its follower"
       - "packages/sync-client/src/__acceptance__/mesh-session.test.ts#(c)/01-F13: the hub sends wire ping to a connected follower every HEARTBEAT_INTERVAL_MS while pongs keep it alive"
       - "packages/sync-client/src/__acceptance__/mesh-session.test.ts#(c)/01-F13: no wire ping for HUB_LOSS_TIMEOUT_MS → hub loss; the eligible survivor re-elects and adopts the new result within REELECTION_BUDGET_MS"
+      - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X5/01-F13/01-F14: killing the hub re-elects a new one < 10 000 virtual ms with zero loss, and a cold joiner attached after the kill is served the full branch window over LAN by the NEW hub"
   - fr: 01-F14
     status: green
     tests:
       - "packages/sync-client/src/__acceptance__/ingest-batch.test.ts#01-F14: readAllEvents = own ∪ ingested — every event exactly once, from any number of origin devices"
       - "packages/sync-client/src/__acceptance__/mesh-scenarios.test.ts#S3/01-F8/01-F14: each side elects its own hub and propagates internally; heal → one hub and every ledger = the exact union, once per id, per-origin lamport order intact"
+      - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X5/01-F13/01-F14: killing the hub re-elects a new one < 10 000 virtual ms with zero loss, and a cold joiner attached after the kill is served the full branch window over LAN by the NEW hub"
   - fr: 01-F15
     status: green
     tests:
@@ -181,12 +191,15 @@ rows:
       - "packages/sync-client/src/__acceptance__/mesh-review.test.ts#01-F15: a follower append + notifyAppended reaches the hub strictly inside one heartbeat interval (runFor(500) < HEARTBEAT_INTERVAL_MS)"
       - "packages/sync-client/src/__acceptance__/mesh-review.test.ts#01-F15: an append ON the hub + notifyAppended reaches every follower inside the same sub-heartbeat window"
       - "packages/sync-client/src/__acceptance__/mesh-scenarios.test.ts#S4/01-F15/01-F8: appended events reach every device exactly once with per-origin order intact; the hub wire shows push → push_ack → fan-out"
+      - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X6/01-F15: with the WAN cut so only the LAN fast-path carries traffic, per-event time-to-last-connected-device p95 < 1000 virtual ms under latency [5,150]/drop 1%/dup 0.5%, and every event still lands exactly once"
   - fr: 01-F16
     status: green
     tests:
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F16: line adds from two devices both stand — json_lines is canonical JSON, byte-for-byte"
   - fr: 01-F17
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X3/01-F17/01-F38: WAN cut AND LAN split {A}|{B,C}, both sides keep appending, each side runs its own hub; heal LAN then WAN → zero lost, zero duplicated, one hub, fold identity ≡ cloud-order replay"
   - fr: 01-F18
     status: unmapped
   - fr: 01-F19
@@ -237,6 +250,8 @@ rows:
   - fr: 01-F34
     status: green
     tests:
+      - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F9/01-F34: a live event_batch fan-out from a peer is applied via store.ingest with its global_seq"
+      - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F34: origin-inclusive fan-out — the device learns its own events' global_seq and stays ≡ refold()"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F34: table_id resolves to the canonically-last assignment on every delivery order"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F34: re-assigning the same global_seq to the same event is an idempotent no-op — tables ≡ refold()"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F34/18 §4: a divergent global_seq for an already-mapped event throws"
@@ -253,6 +268,7 @@ rows:
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34/18 §4: a negative, fractional, or non-integer global_seq at ingest throws with nothing persisted"
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34/01-F3/18 §4: a global_seq already held by another event throws and rolls back the whole ingest"
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34/01-F3: ingest-with-global_seq ≡ ingest-then-assignGlobalSeq — byte-identical tables"
+      - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X1/01-N1/01-F34: at quiescence every device holds each event exactly once, cloud-ordered, and its fold tables ≡ refold() ≡ a fresh store replaying mergedStream()"
       - "services/sync-gateway/src/__acceptance__/law5-fanout.test.ts#01-F9/01-F34: a push reaches every same-branch session including the origin, exactly once, as one event_batch with global_seq; other branches and other orgs get nothing"
   - fr: 01-F35
     status: green
@@ -270,7 +286,9 @@ rows:
     status: green
     tests:
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F37: quarantine_notice requires both event_id and reason"
+      - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F37: a quarantine_notice surfaces in status().quarantined and the ack advances over the poisoned slot"
       - "packages/sync-client/src/__acceptance__/ingest-batch.test.ts#01-F37/01-F4: invalid envelopes are skipped and counted, never thrown — the valid remainder still lands"
+      - "packages/sync-client/src/__acceptance__/spike-scenarios-departed.test.ts#X9/01-F37/DEC-SYNC-005: a registry-valid U+0000 event is storage_rejected at the cloud; the notice lands in the origin's status().quarantined, the ack advances OVER the poisoned slot so the outbox never wedges, later sales are unaffected, and the honest divergence (local fold has it, mergedStream does not) is observable"
       - "services/sync-gateway/src/__acceptance__/gateway-review.test.ts#01-F37: a registry-valid envelope jsonb cannot hold (U+0000 in a payload string) quarantines as storage_reject stored verbatim as TEXT; siblings merge, the ack advances, a notice is emitted"
       - "services/sync-gateway/src/__acceptance__/law6-quarantine.test.ts#01-F37/01-F4: a registry-invalid event is quarantined verbatim, excluded from events/fan-out/catchup, noticed to the pusher, and the watermark advances over it"
       - "services/sync-gateway/src/__acceptance__/law6-quarantine.test.ts#01-F37/01-F4: a KNOWN type with a registry-invalid payload quarantines as schema_invalid too"
@@ -279,7 +297,10 @@ rows:
       - "services/sync-gateway/src/__acceptance__/law6-quarantine.test.ts#01-F37: identity checks precede registry parse — an event that is BOTH org-mismatched and registry-invalid quarantines as org_mismatch (contract step 1 before step 2)"
       - "services/sync-gateway/src/__acceptance__/law7-stop-at-gap.test.ts#01-F8/01-F37: per-device lamport contiguity is gap-free MODULO quarantine rows — a quarantined slot counts as filled"
   - fr: 01-F38
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/spike-scenarios-departed.test.ts#X7/01-F38/DEC-SYNC-006: after the origin departs both planes, LAN heal alone provably does NOT converge its events onto the far device (followers push own events only); cloud catchup then delivers them and fold identity ≡ cloud-order replay across both survivors"
+      - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X3/01-F17/01-F38: WAN cut AND LAN split {A}|{B,C}, both sides keep appending, each side runs its own hub; heal LAN then WAN → zero lost, zero duplicated, one hub, fold identity ≡ cloud-order replay"
   - fr: 01-F39
     status: green
     tests:
@@ -306,6 +327,7 @@ rows:
       - "packages/sync-client/src/__acceptance__/folds-properties.test.ts#01-N1: any two delivery interleavings respecting per-device lamport order fold to identical orders/queue/parked tables — json_lines byte-identical"
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-N1: identical device_created_at across devices — ascending device_id breaks the tie on every arrival order"
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-N1: identical device_created_at on one device — ascending lamport_seq breaks the tie regardless of arrival order"
+      - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X1/01-N1/01-F34: at quiescence every device holds each event exactly once, cloud-ordered, and its fold tables ≡ refold() ≡ a fresh store replaying mergedStream()"
   - fr: 01-N2
     status: unmapped
   - fr: 01-N3

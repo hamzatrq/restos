@@ -1,0 +1,348 @@
+// Acceptance tests — T-01-06 spike exit run, SIM LEG scenarios X1–X6 (contract (g)).
+// Authored from the kernel-tasks binding contract + PROTOCOL.md + HUB-ELECTION.md +
+// FOLDS.md only (24 §3 step 2: read-only to the implementing session). The full fleet
+// composes the LANDED mesh (createMeshSession over the sim LAN) + the NOT-YET-BUILT
+// createCloudSession (over the landed sim-cloud double) under one createSim virtual
+// clock — 3 devices counter_electron/counter_rn/kitchen ("Electron + 2 RN" read as host
+// CLASSES, contract assumption 1). RED until createCloudSession exists is the point.
+// X7–X9 (departed-origin, >500 backlog, quarantine) live in spike-scenarios-departed.
+
+import { describe, expect, it } from "vitest";
+import { HUB_LOSS_TIMEOUT_MS, REELECTION_BUDGET_MS } from "../index.js";
+import { tempDbPath } from "./builders.js";
+import { LOSSLESS } from "./mesh-builders.js";
+import {
+  type AppendedEvent,
+  appendOn,
+  assertConverged,
+  createSim,
+  createSimCloud,
+  deviceMap,
+  driveRush,
+  eventInput,
+  foldDigest,
+  generateSpikeRush,
+  idSet,
+  p95,
+  propagationTimes,
+  type SpikeDevice,
+  spikeDevice,
+  startBoth,
+  stopBoth,
+  trio,
+} from "./spike-builders.js";
+
+const CONVERGE_MS = 2_000;
+const SETTLE_MS = 20_000;
+
+/** Serialisable outcome snapshot — the determinism oracle (same seed ⇒ deep-equal). */
+const outcomeOf = (devices: readonly SpikeDevice[], cloud: ReturnType<typeof createSimCloud>) => ({
+  digests: devices.map((d) => foldDigest(d.store)),
+  merged: cloud.mergedStream().map((m) => [m.id, m.global_seq] as const),
+});
+
+/** WAN-up 3-device rush from a canonical seed, run to full settle. */
+const runRush = (seed: number, orders: number) => {
+  const sim = createSim({ seed });
+  sim.lan.policy(LOSSLESS);
+  const cloud = createSimCloud({ sim });
+  const { all } = trio(sim, cloud);
+  sim.runFor(CONVERGE_MS);
+  const appended = driveRush(
+    sim,
+    deviceMap(all),
+    generateSpikeRush({ seed, deviceIds: all.map((d) => d.device_id), orders }),
+  );
+  sim.runFor(SETTLE_MS);
+  return { sim, cloud, devices: all, appended };
+};
+
+describe("X1 — rush baseline (01-N1 / 01-F34): fold identity ≡ refold() ≡ cloud-order replay", () => {
+  it("X1/01-N1/01-F34: at quiescence every device holds each event exactly once, cloud-ordered, and its fold tables ≡ refold() ≡ a fresh store replaying mergedStream()", () => {
+    const { cloud, devices, appended } = runRush(6001, 18);
+    assertConverged(devices, cloud, appended);
+    for (const d of devices) {
+      stopBoth(d);
+      d.store.close();
+    }
+  });
+
+  it("X1/20 §2.4: same seed ⇒ deep-equal outcome (determinism — asserted on a re-run)", () => {
+    const first = runRush(6001, 18);
+    const firstOut = outcomeOf(first.devices, first.cloud);
+    for (const d of first.devices) {
+      stopBoth(d);
+      d.store.close();
+    }
+    const second = runRush(6001, 18);
+    const secondOut = outcomeOf(second.devices, second.cloud);
+    for (const d of second.devices) {
+      stopBoth(d);
+      d.store.close();
+    }
+    expect(secondOut).toEqual(firstOut);
+  });
+});
+
+describe("X2 — WAN cut mid-rush (01-F8 / 19 §5): LAN keeps flowing, heal resumes convergence", () => {
+  it("X2/01-F8/19 §5: with the WAN cut, new orders still reach all 3 over LAN (p95 < 1000 virtual ms); heal → push/catchup resume → full X1 identity", () => {
+    const seed = 6002;
+    const sim = createSim({ seed });
+    sim.lan.policy(LOSSLESS);
+    const cloud = createSimCloud({ sim });
+    const { all } = trio(sim, cloud);
+    sim.runFor(CONVERGE_MS);
+    const ids = all.map((d) => d.device_id);
+    const steps = generateSpikeRush({ seed, deviceIds: ids, orders: 18 });
+    const half = Math.floor(steps.length / 2);
+    const before = driveRush(sim, deviceMap(all), steps.slice(0, half));
+
+    cloud.cut();
+    const cutMark = sim.now();
+    const during = driveRush(sim, deviceMap(all), steps.slice(half));
+    sim.runFor(SETTLE_MS);
+    // A sale is never blocked by sync: LAN-only orders reach every device.
+    for (const d of all) {
+      for (const e of during) expect(idSet(d.store).has(e.id)).toBe(true);
+    }
+    const cutTrace = sim.trace().filter((t) => t.at >= cutMark);
+    const times = propagationTimes(cutTrace, during, ids);
+    expect(times.length).toBe(during.length); // every cut-era event reached all 3 over LAN
+    expect(p95(times)).toBeLessThan(1_000);
+
+    cloud.heal();
+    sim.runFor(SETTLE_MS);
+    assertConverged(all, cloud, [...before, ...during]);
+    for (const d of all) {
+      stopBoth(d);
+      d.store.close();
+    }
+  });
+});
+
+describe("X3 — partition + WAN cut, doubly degraded (01-F17 / 01-F38)", () => {
+  it("X3/01-F17/01-F38: WAN cut AND LAN split {A}|{B,C}, both sides keep appending, each side runs its own hub; heal LAN then WAN → zero lost, zero duplicated, one hub, fold identity ≡ cloud-order replay", () => {
+    const seed = 6003;
+    const sim = createSim({ seed });
+    sim.lan.policy(LOSSLESS);
+    const cloud = createSimCloud({ sim });
+    const { a, b, c, all } = trio(sim, cloud);
+    sim.runFor(CONVERGE_MS);
+    expect(a.mesh.status().state).toBe("hub"); // counter_electron leads the whole mesh
+    const ids = all.map((d) => d.device_id);
+    const prefix = driveRush(
+      sim,
+      deviceMap(all),
+      generateSpikeRush({ seed, deviceIds: ids, orders: 6 }),
+    );
+    sim.runFor(SETTLE_MS);
+
+    cloud.cut();
+    sim.lan.partition(["dev-a"], ["dev-b", "dev-c"]);
+    sim.runFor(REELECTION_BUDGET_MS);
+    expect(a.mesh.status().state).toBe("solo"); // {A} alone → solo (acts as its own hub)
+    expect(b.mesh.status().state).toBe("hub"); // {B,C} → counter_rn outranks kitchen
+    expect(c.mesh.status().hub_id).toBe("dev-b");
+
+    const split = driveRush(
+      sim,
+      deviceMap(all),
+      generateSpikeRush({ seed: seed + 1, deviceIds: ids, orders: 6 }),
+    );
+    sim.runFor(SETTLE_MS);
+    // The cut isolates the two sides: side-1 events never appear on side-2 while split.
+    const sideOfA = new Set(a.store.readAllEvents().map((e) => e.id));
+    const sideOfC = new Set(c.store.readAllEvents().map((e) => e.id));
+    const aOwn = split.filter((e) => e.origin === "dev-a").map((e) => e.id);
+    const cOwn = split.filter((e) => e.origin === "dev-c").map((e) => e.id);
+    for (const id of aOwn) expect(sideOfC.has(id)).toBe(false);
+    for (const id of cOwn) expect(sideOfA.has(id)).toBe(false);
+
+    sim.lan.heal();
+    sim.runFor(REELECTION_BUDGET_MS);
+    cloud.heal();
+    sim.runFor(SETTLE_MS);
+    assertConverged(all, cloud, [...prefix, ...split]);
+    expect(a.mesh.status().state).toBe("hub"); // one hub again
+    for (const d of [b, c]) expect(d.mesh.status().hub_id).toBe("dev-a");
+    for (const d of all) {
+      stopBoth(d);
+      d.store.close();
+    }
+  });
+});
+
+describe("X4 — plug-pull mid-print (01-F2): kill-seed survival + no phantom KOT", () => {
+  it("X4/01-F2: the hub's held KOT job crashes before recording; reopen survives every confirmed event gap-free with tables ≡ refold(), no kot.printed for the held order; re-issue records once and the mesh reconverges to X1 identity", () => {
+    const seed = 6004;
+    const sim = createSim({ seed });
+    sim.lan.policy(LOSSLESS);
+    const cloud = createSimCloud({ sim });
+    const pathA = tempDbPath();
+    const a = spikeDevice(sim, cloud, "dev-a", "counter_electron", { path: pathA });
+    const b = spikeDevice(sim, cloud, "dev-b", "counter_rn");
+    const c = spikeDevice(sim, cloud, "dev-c", "kitchen");
+    for (const d of [a, b, c]) startBoth(d);
+    sim.runFor(CONVERGE_MS);
+    expect(a.mesh.status().state).toBe("hub");
+    const ids = ["dev-a", "dev-b", "dev-c"];
+    const appended: AppendedEvent[] = [];
+    const prefix = driveRush(
+      sim,
+      deviceMap([a, b, c]),
+      generateSpikeRush({ seed, deviceIds: ids, orders: 6 }),
+    );
+    appended.push(...prefix);
+    sim.runFor(SETTLE_MS);
+
+    // A held order on the hub: created → confirmed → line_added ×2, KOT print HELD
+    // (kot.printed NOT appended — the crash point is between printer-ack and append).
+    const order = `held-order-${seed}`;
+    const l1 = `held-l1-${seed}`;
+    const l2 = `held-l2-${seed}`;
+    const held: [string, Record<string, unknown>][] = [
+      ["order.created", { order_id: order, channel: "dine_in" }],
+      ["order.confirmed", { order_id: order }],
+      [
+        "order.line_added",
+        { order_id: order, line_id: l1, item_id: "x", qty: 2, unit_price_paisa: 25_000 },
+      ],
+      [
+        "order.line_added",
+        { order_id: order, line_id: l2, item_id: "y", qty: 1, unit_price_paisa: 30_000 },
+      ],
+    ];
+    held.forEach(([type, payload], i) => {
+      const env = appendOn(a, eventInput("dev-a", `held-${seed}-${i}`, type, payload));
+      appended.push({ id: env.id, origin: "dev-a", at: sim.now() });
+    });
+    sim.runFor(SETTLE_MS);
+    const preKillOwn = a.store.readAllEvents().filter((e) => e.device_id === "dev-a");
+    const preKillIds = new Set(preKillOwn.map((e) => e.id));
+
+    // Plug-pull: the process dies — sessions vanish (timers gone), the store handle is
+    // ABANDONED with no close() (the kill-seed law, 20 §2.6).
+    stopBoth(a);
+    sim.runFor(HUB_LOSS_TIMEOUT_MS + CONVERGE_MS); // B/C notice the hub loss and re-elect
+
+    // Reopen on the same path — a fresh process attaching a fresh session set.
+    const a2 = spikeDevice(sim, cloud, "dev-a", "counter_electron", { path: pathA });
+    const reopenedOwn = a2.store.readAllEvents().filter((e) => e.device_id === "dev-a");
+    expect(new Set(reopenedOwn.map((e) => e.id))).toEqual(preKillIds); // zero confirmed loss
+    expect(reopenedOwn.map((e) => e.lamport_seq)).toEqual(
+      Array.from({ length: reopenedOwn.length }, (_u, i) => i),
+    ); // gap-free lamport (01-F3)
+    const kotBefore = a2.store
+      .readAllEvents()
+      .filter(
+        (e) => e.type === "kot.printed" && (e.payload as { order_id?: string }).order_id === order,
+      );
+    expect(kotBefore).toHaveLength(0); // no phantom kot.printed for the held job
+    const digest = foldDigest(a2.store);
+    a2.store.refold();
+    expect(foldDigest(a2.store)).toBe(digest); // fold state ≡ refold() of the surviving ledger
+
+    startBoth(a2);
+    sim.runFor(SETTLE_MS);
+    // Re-issue the held print on restart (a duplicate PHYSICAL print is acceptable and
+    // flagged in the run log per contract (e) / assumption 5; the LEDGER records once).
+    const reissued = appendOn(
+      a2,
+      eventInput("dev-a", `held-${seed}-kot`, "kot.printed", { order_id: order }),
+    );
+    appended.push({ id: reissued.id, origin: "dev-a", at: sim.now() });
+    sim.runFor(SETTLE_MS);
+    const kots = a2.store
+      .readAllEvents()
+      .filter(
+        (e) => e.type === "kot.printed" && (e.payload as { order_id?: string }).order_id === order,
+      );
+    expect(kots).toHaveLength(1); // exactly one — no phantom, no ledger duplicate
+
+    assertConverged([a2, b, c], cloud, appended);
+    for (const d of [a2, b, c]) {
+      stopBoth(d);
+      d.store.close();
+    }
+    a.store.close(); // release the abandoned pre-crash handle (post-assert hygiene)
+  });
+});
+
+describe("X5 — hub death + cold joiner (01-F13 / 01-F14)", () => {
+  it("X5/01-F13/01-F14: killing the hub re-elects a new one < 10 000 virtual ms with zero loss, and a cold joiner attached after the kill is served the full branch window over LAN by the NEW hub", () => {
+    const seed = 6005;
+    const sim = createSim({ seed });
+    sim.lan.policy(LOSSLESS);
+    const cloud = createSimCloud({ sim });
+    cloud.cut(); // LAN-only: the joiner must be served by the new HUB, not the cloud
+    const { a, b, c, all } = trio(sim, cloud);
+    sim.runFor(CONVERGE_MS);
+    expect(a.mesh.status().state).toBe("hub");
+    const ids = all.map((d) => d.device_id);
+    const appended = driveRush(
+      sim,
+      deviceMap(all),
+      generateSpikeRush({ seed, deviceIds: ids, orders: 8 }),
+    );
+    sim.runFor(SETTLE_MS);
+    const union = new Set(appended.map((e) => e.id));
+    for (const d of all) expect(idSet(d.store)).toEqual(union);
+
+    sim.lan.disconnect("dev-a"); // hub vanishes
+    stopBoth(a);
+    sim.runFor(REELECTION_BUDGET_MS - 1); // strictly inside the 01-F13 budget
+    expect(b.mesh.status().state).toBe("hub"); // counter_rn is the new hub
+    expect(c.mesh.status().hub_id).toBe("dev-b");
+    for (const d of [b, c]) expect(idSet(d.store)).toEqual(union); // zero loss across the kill
+
+    const joiner = spikeDevice(sim, cloud, "dev-j", "kitchen"); // cold store, WAN still cut
+    startBoth(joiner);
+    sim.runFor(SETTLE_MS);
+    expect(b.mesh.status().state).toBe("hub"); // kitchen joiner does not outrank counter_rn
+    expect(idSet(joiner.store)).toEqual(union); // full branch window served over LAN (01-F14)
+
+    for (const d of [b, c, joiner]) {
+      stopBoth(d);
+      d.store.close();
+    }
+    a.store.close();
+  });
+});
+
+describe("X6 — propagation p95 (01-F15): LAN fast-path under a seeded adversarial policy", () => {
+  it("X6/01-F15: with the WAN cut so only the LAN fast-path carries traffic, per-event time-to-last-connected-device p95 < 1000 virtual ms under latency [5,150]/drop 1%/dup 0.5%, and every event still lands exactly once", () => {
+    const seed = 6006;
+    const sim = createSim({ seed });
+    const cloud = createSimCloud({ sim });
+    cloud.cut(); // the metric must reflect one push→fan-out round, not the cloud plane
+    sim.lan.policy(LOSSLESS);
+    const { all } = trio(sim, cloud);
+    sim.runFor(CONVERGE_MS);
+
+    sim.lan.policy({ latency: [5, 150], dropRate: 0.01, duplicateRate: 0.005 });
+    const ids = all.map((d) => d.device_id);
+    const appended = driveRush(
+      sim,
+      deviceMap(all),
+      generateSpikeRush({ seed, deviceIds: ids, orders: 40 }),
+    );
+    sim.runFor(30_000); // adversarial window — re-push + heartbeat re-fan recover dropped hops
+    sim.lan.policy(LOSSLESS);
+    sim.runFor(8_000); // lossless tail → deterministic eventual exactly-once
+
+    const union = new Set(appended.map((e) => e.id));
+    for (const d of all) {
+      const held = d.store.readAllEvents().map((e) => e.id);
+      expect(new Set(held)).toEqual(union); // reached every device
+      expect(held.length).toBe(union.size); // exactly once per id per receiver (01-F8)
+    }
+    const times = propagationTimes(sim.trace(), appended, ids);
+    expect(times.length).toBe(appended.length); // every event's last-device time measured
+    expect(p95(times)).toBeLessThan(1_000);
+
+    for (const d of all) {
+      stopBoth(d);
+      d.store.close();
+    }
+  });
+});

@@ -14,6 +14,8 @@ export {
 } from "./messages.js";
 export type {
   Clock,
+  CloudTransport,
+  CloudTransportHandlers,
   MeshTransport,
   PeerInfo,
   TimerId,

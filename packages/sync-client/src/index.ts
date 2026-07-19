@@ -4,6 +4,12 @@
 // LAN mesh session over the injected transport seam (01-F12/F13/F15;
 // plans/wave-0/kernel-tasks.md, HUB-ELECTION.md).
 export {
+  CLOUD_PUSH_BATCH_MAX,
+  type CloudSession,
+  type CloudSessionStatus,
+  createCloudSession,
+} from "./cloud-session.js";
+export {
   AckBeyondAppendedError,
   type AppendInput,
   type DeviceStore,

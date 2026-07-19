@@ -40,3 +40,24 @@ export interface MeshTransport {
   stop(): void;
   send(to: string, message: ProtocolMessage): void;
 }
+
+/** The connection edges + inbound stream a CloudTransport drives (T-01-06 contract (a)). */
+export interface CloudTransportHandlers {
+  onUp(): void;
+  onDown(): void;
+  onMessage(message: ProtocolMessage): void;
+}
+
+/**
+ * Injected cloud uplink (T-01-06 contract (a)): the device↔gateway channel the cloud
+ * session drives. `send` is fire-and-forget while up; sends while down are dropped
+ * (re-push on `onUp` + id-dedupe absorb, same law as the LAN seam). `onUp`/`onDown` are
+ * the connection edges (socket open/close in the real WS adapter; the sim-cloud double
+ * fires them on cut/heal). Declared once here — consumed by the cloud session, the
+ * @restos/testing sim-cloud double, and the real WebSocket adapter — never redeclared.
+ */
+export interface CloudTransport {
+  start(handlers: CloudTransportHandlers): void;
+  stop(): void;
+  send(message: ProtocolMessage): void;
+}
