@@ -8,6 +8,7 @@
     "build": "echo 'no build yet — scaffold stub'"
   },
   "dependencies": {
+    "@noble/hashes": "2.2.0",
     "uuidv7": "1.2.1",
     "zod": "4.4.3"
   },

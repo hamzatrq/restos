@@ -59,6 +59,44 @@ const payloadSchemas = {
 
 export type KnownEventType = keyof typeof payloadSchemas;
 
+// Audit family (01-F5; 01 §4 admin-family `audit.*` wildcard). These five concrete
+// subtypes are ordinary kernel events, hash-chained per device. The chain link lives in
+// the PAYLOAD as `prev_audit_hash: string | null` (store-owned platform law, 01 §7) —
+// NOT the envelope, because `EventEnvelope` is a strict z.object that strips unknown keys
+// (DEC-AUDIT-001 decision 2). At v1 the chain field is the whole payload contract; the
+// business fields (who/what) land additively with the emitting modules (docs 05/14/15),
+// and `actor_user_id` already carries "who". Kept OUT of `payloadSchemas`/`KnownEventType`
+// on purpose: audit events fold to nothing (the fold engine consumes KnownEventType only),
+// so the fold layer never needs an audit case.
+const auditPayloadSchema = z.looseObject({
+  prev_audit_hash: z.union([z.string().min(1), z.null()]),
+});
+
+const auditPayloadSchemas = {
+  "audit.login": auditPayloadSchema,
+  "audit.drawer_opened": auditPayloadSchema,
+  "audit.reprint": auditPayloadSchema,
+  "audit.threshold_override": auditPayloadSchema,
+  "audit.settings_changed": auditPayloadSchema,
+} as const;
+
+/** The closed set of audit.* subtypes (01-F5). Iterable — `[...AUDIT_EVENT_TYPES]`. */
+export const AUDIT_EVENT_TYPES = Object.keys(auditPayloadSchemas) as readonly AuditEventType[];
+
+export type AuditEventType = keyof typeof auditPayloadSchemas;
+
+const AUDIT_TYPE_SET: ReadonlySet<string> = new Set(AUDIT_EVENT_TYPES);
+
+/** True for exactly the five audit.* subtypes — the store stamps the chain for these only. */
+export const isAuditEvent = (type: string): boolean => AUDIT_TYPE_SET.has(type);
+
+// Combined lookup for parse-time payload validation (01-F4) across both families — the
+// fold-consumed `payloadSchemas` and the fold-inert `auditPayloadSchemas`.
+const ALL_PAYLOAD_SCHEMAS: Record<string, z.ZodType> = {
+  ...payloadSchemas,
+  ...auditPayloadSchemas,
+};
+
 export const eventRegistry = {
   has: (type: string): type is KnownEventType => type in payloadSchemas,
   types: (): readonly KnownEventType[] => Object.keys(payloadSchemas) as KnownEventType[],
@@ -70,10 +108,11 @@ export type ParsedEvent = {
   envelope: EventEnvelopeT;
 };
 
-/** Validates envelope + payload against the catalog (01-F4). */
+/** Validates envelope + payload against the catalog — operational and audit (01-F4/01-F5). */
 export const parseEvent = (value: unknown): ParsedEvent => {
   const envelope = parseEnvelope(value);
-  if (!eventRegistry.has(envelope.type)) throw new UnknownEventTypeError(envelope.type);
-  const payload = payloadSchemas[envelope.type as KnownEventType].parse(envelope.payload);
+  const schema = ALL_PAYLOAD_SCHEMAS[envelope.type];
+  if (!schema) throw new UnknownEventTypeError(envelope.type);
+  const payload = schema.parse(envelope.payload);
   return { type: envelope.type as KnownEventType, payload, envelope };
 };

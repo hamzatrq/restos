@@ -20,7 +20,13 @@
 // for fold reasons — a sale is never blocked (01-F17). Cloud ordering lands via the
 // `global_seq_map` sidecar (`assignGlobalSeq`) so no event row is ever updated
 // (01-F1) and devices converge to cloud ordering on ack (01-F34).
-import { type EventEnvelopeT, parseEnvelope, parseEvent } from "@restos/domain";
+import {
+  auditEventHash,
+  type EventEnvelopeT,
+  isAuditEvent,
+  parseEnvelope,
+  parseEvent,
+} from "@restos/domain";
 import Database from "better-sqlite3";
 import {
   createFoldEngine,
@@ -80,6 +86,8 @@ export type DeviceStore = {
   refold(): void;
   status(): SyncStatus;
   setLastGlobalSeq(n: number): void;
+  /** This device's own audit-chain HEAD (01-F5); null before the first own audit append. */
+  auditChainHead(): { hash: string; event_id: string } | null;
   close(): void;
 };
 
@@ -114,6 +122,16 @@ CREATE TABLE IF NOT EXISTS global_seq_map (
   event_id TEXT PRIMARY KEY,
   global_seq INTEGER NOT NULL UNIQUE
 ) STRICT;
+-- This device's own audit-chain HEAD (01-F5, 01 §7) — a single row mirroring the
+-- sync_state pattern, maintained atomically with the audit-event insert so the store
+-- can stamp the next own audit event's prev_audit_hash in O(1). Own chain only; peer
+-- chains are verified by the Auditor from the merged log (T-01-11).
+CREATE TABLE IF NOT EXISTS audit_chain (
+  id INTEGER PRIMARY KEY CHECK (id = 0),
+  head_hash TEXT,
+  head_event_id TEXT
+) STRICT;
+INSERT OR IGNORE INTO audit_chain (id, head_hash, head_event_id) VALUES (0, NULL, NULL);
 -- Fold state tables — exactly FOLDS.md (01-F6, 01-F10).
 CREATE TABLE IF NOT EXISTS orders (
   order_id TEXT PRIMARY KEY,
@@ -184,6 +202,15 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   const setAck = db.prepare<[number]>("UPDATE sync_state SET acked_watermark = ? WHERE id = 0");
   const setPull = db.prepare<[number]>("UPDATE sync_state SET last_global_seq = ? WHERE id = 0");
 
+  // Own audit-chain HEAD (01-F5): read to stamp the next audit event, updated inside the
+  // append transaction so the HEAD is atomic with the durable ledger row (01-F2/F3).
+  const readAuditHead = db.prepare<[], { head_hash: string | null; head_event_id: string | null }>(
+    "SELECT head_hash, head_event_id FROM audit_chain WHERE id = 0",
+  );
+  const setAuditHead = db.prepare<[string, string]>(
+    "UPDATE audit_chain SET head_hash = ?, head_event_id = ? WHERE id = 0",
+  );
+
   // T-01-04 fold surfaces: peer ingest, global_seq sidecar, fold-state rebuild.
   const allOwnEnvelopes = db.prepare<[], { envelope: string }>("SELECT envelope FROM events");
   const peerById = db.prepare<[string], { id: string }>("SELECT id FROM peer_events WHERE id = ?");
@@ -239,16 +266,34 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   const ownHighWater = (): number | null => highWater.get()?.high ?? null;
   const ackedWatermark = (): number | null => readState.get()?.acked_watermark ?? null;
 
+  // Audit-chain helpers (01-F5). The HEAD is read from the table (not cached) so a second
+  // handle on the same file sees the atomically-committed chain position.
+  const auditHead = (): string | null => readAuditHead.get()?.head_hash ?? null;
+  const payloadHasPrev = (payload: unknown): boolean =>
+    typeof payload === "object" && payload !== null && "prev_audit_hash" in payload;
+  // Copy the payload with prev_audit_hash set to `prev` — used to inject the store-owned
+  // chain link at first append, and to reconstruct a retry from the STORED link on dedupe.
+  const stampPrev = (payload: unknown, prev: string | null): Record<string, unknown> => ({
+    ...(typeof payload === "object" && payload !== null
+      ? (payload as Record<string, unknown>)
+      : {}),
+    prev_audit_hash: prev,
+  });
+  const storedPrev = (envelope: EventEnvelopeT): string | null =>
+    (envelope.payload as { prev_audit_hash: string | null }).prev_audit_hash;
+
   // The live fold accumulator (T-01-04b) — persists across writes so an in-order
   // append is O(1), not a full canonical replay. `refoldTx()` on open seeds it.
   const engine = createFoldEngine();
 
   const readAllInputs = (): FoldInput[] => {
     const gseqOf = new Map(allGseq.all().map((row) => [row.event_id, row.global_seq]));
-    return [...allOwnEnvelopes.all(), ...allPeerEnvelopes.all()].map((row) => {
-      const envelope = rowToEnvelope(row);
-      return { envelope, global_seq: gseqOf.get(envelope.id) ?? null };
-    });
+    // Audit events are fold-inert (01-F5/01-F6): they carry no order/line/money state, so
+    // they never enter the fold feed — refold() stays equivalent to the incremental path.
+    return [...allOwnEnvelopes.all(), ...allPeerEnvelopes.all()]
+      .map(rowToEnvelope)
+      .filter((envelope) => !isAuditEvent(envelope.type))
+      .map((envelope) => ({ envelope, global_seq: gseqOf.get(envelope.id) ?? null }));
   };
 
   const writeFullTables = (state: FoldState): void => {
@@ -327,6 +372,9 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   // table; an out-of-order arrival falls back to a full recompute. Both stay
   // byte-equivalent to refold() — the T-01-04 fold properties are the oracle.
   const applyFold = (input: FoldInput): void => {
+    // Audit events are fold-inert (01-F5): they feed the fold engine no order/money state,
+    // so the append/ingest paths skip them here — nothing applied, nothing parked.
+    if (isAuditEvent(input.envelope.type)) return;
     if (engine.apply(input)) {
       for (const p of engine.takeDirty()) upsertOrder(p);
       rewriteParked();
@@ -340,11 +388,18 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   // stored id is idempotent for identical retries only — divergent content throws,
   // the ledger row stays untouched (01-F8, 18 §4).
   const appendTx = db.transaction((input: AppendInput): EventEnvelopeT => {
+    const isAudit = isAuditEvent(input.type);
     const stored = byId.get(input.id);
     if (stored) {
       const envelope = rowToEnvelope(stored);
+      // Reconstruct the retry against the STORED chain link (never the live HEAD) so an
+      // identical audit retry compares equal and divergent business content still throws —
+      // the 01-F8 idempotency law extended to the store-owned chain field.
+      const retryInput = isAudit
+        ? { ...input, payload: stampPrev(input.payload, storedPrev(envelope)) }
+        : input;
       const retry = parseEvent({
-        ...input,
+        ...retryInput,
         lamport_seq: envelope.lamport_seq,
         server_received_at: envelope.server_received_at,
       }).envelope;
@@ -356,11 +411,31 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
       }
       return envelope;
     }
+    // Audit events are hash-chained per device (01-F5): the chain position is store-owned
+    // platform law (01 §7), never caller-supplied — a caller-provided prev_audit_hash is a
+    // loud failure with nothing persisted (18 §4).
+    if (isAudit && payloadHasPrev(input.payload)) {
+      throw new Error(
+        `append of audit event ${input.id} carrying a caller-supplied prev_audit_hash ` +
+          "(01 §7 — the chain position is store-owned platform law; nothing persisted)",
+      );
+    }
+    // Stamp the current HEAD (NULL ⇒ this device's first audit event ⇒ prev_audit_hash: null).
+    const payload = isAudit ? stampPrev(input.payload, auditHead()) : input.payload;
     const next = (ownHighWater() ?? -1) + 1;
-    const { envelope } = parseEvent({ ...input, lamport_seq: next, server_received_at: null });
+    const { envelope } = parseEvent({
+      ...input,
+      payload,
+      lamport_seq: next,
+      server_received_at: null,
+    });
     insertEvent.run(envelope.id, envelope.lamport_seq, JSON.stringify(envelope));
+    // The chain HEAD advances inside this one transaction, atomic with the durable ledger
+    // row (01-F2/F3); non-audit append never touches it.
+    if (isAudit) setAuditHead.run(auditEventHash(envelope), envelope.id);
     // Folds apply in the same transaction; an unmet dependency parks at the fold
-    // layer — append never fails or blocks for fold reasons (01-F17, 01-F10).
+    // layer — append never fails or blocks for fold reasons (01-F17, 01-F10). Audit
+    // events are fold-inert (applyFold skips them).
     applyFold({ envelope, global_seq: null });
     return envelope;
   });
@@ -570,6 +645,12 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
 
     setLastGlobalSeq(n) {
       setPull.run(n);
+    },
+
+    auditChainHead() {
+      const row = readAuditHead.get();
+      if (!row || row.head_hash === null || row.head_event_id === null) return null;
+      return { hash: row.head_hash, event_id: row.head_event_id };
     },
 
     close() {
