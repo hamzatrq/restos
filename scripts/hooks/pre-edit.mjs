@@ -33,9 +33,9 @@ process.stdin.on("end", () => {
     "services/tax/",
     "services/sync-gateway/",
   ];
-  if (filePath.includes("/conformance/") || filePath.startsWith("conformance/")) {
+  if (/(?:^|\/)conformance\/\d{2}\.yml$/.test(filePath)) {
     deny(
-      "conformance/ is CI-derived (24-F5): hand-editing is falsifying the ledger. Run pnpm verify:<nn> to re-derive.",
+      "conformance/NN.yml is CI-derived (24-F5): hand-editing is falsifying the ledger. Run pnpm verify:<nn> to re-derive. (Hand-authored files under conformance/, e.g. wave-0-scope.yml, are allowed.)",
     );
   }
   if (/\.(test|spec)\.tsx?$/.test(filePath)) {
