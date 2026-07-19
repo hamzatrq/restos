@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "kind": "push",
+  "kind": "catchup_response",
   "events": [
     {
       "id": "01980000-0000-7000-8000-00000000e001",
@@ -10,12 +10,14 @@
       "actor_user_id": null,
       "lamport_seq": 18,
       "device_created_at": 1752800000000,
-      "server_received_at": null,
+      "server_received_at": 1752800001234,
       "type": "order.created",
       "schema_version": 1,
-      "payload": { "order_id": "01980000-0000-7000-8000-00000000f001", "channel": "counter" },
-      "refs": []
+      "payload": { "order_id": "01980000-0000-7000-8000-00000000f001" },
+      "refs": [],
+      "global_seq": 4211
     }
   ],
-  "watermark": 18
+  "complete": true,
+  "next_from": 4211
 }

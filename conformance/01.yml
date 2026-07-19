@@ -1,18 +1,23 @@
 # DERIVED by scripts/verify-module.mjs — do not hand-edit (24-F5).
 module: "01"
-derived_from: 3 suite run(s)
+derived_from: 4 suite run(s)
 rows:
   - fr: 01-F1
-    status: unmapped
+    status: green
+    tests:
+      - "services/sync-gateway/src/__acceptance__/law2-idempotent-push.test.ts#01-F8/01-F1: same id with divergent content quarantines as id_content_divergence and NEVER mutates the stored row"
   - fr: 01-F2
     status: green
     tests:
       - "packages/sync-client/src/__acceptance__/crash-resume.test.ts#01-F2/20 §2.6: every event confirmed before an abrupt abandon survives reopen, gap-free"
       - "packages/sync-client/src/__acceptance__/crash-resume.test.ts#01-F2/01-F3/20 §2.6: a seeded run of append/ack cycles across abrupt reopens never loses a confirmed event nor leaves a gap"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F2/01-F6: after abrupt abandon, reopen yields state tables ≡ pre-crash tables ≡ refold()"
+      - "packages/sync-client/src/__acceptance__/ingest-batch.test.ts#01-F2: a valid peer batch lands fully — counts {appended, deduped, rejected} and is visible to an independent handle before return"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F2: append returns the confirmed envelope — store-assigned gap-free lamport, null server_received_at, fields preserved"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F2/20 §2.6: at append return the event is visible to an independent handle on the same file — persisted, not buffered"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F2: append with an identity not matching the store throws and persists nothing"
+      - "services/sync-gateway/src/__acceptance__/gateway-review.test.ts#01-F2/01-F8: a fresh device pushing past a gap-at-start gets NO push_ack and stores nothing; an empty push acks nothing; the first real [0] push then acks 0"
+      - "services/sync-gateway/src/__acceptance__/law3-persist-before-ack.test.ts#01-F2: when push_ack reaches the sink, the sink's own independent connection already sees every acked row and the watermark"
   - fr: 01-F3
     status: green
     tests:
@@ -28,9 +33,17 @@ rows:
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F3/18 §4: a (device_id, lamport_seq) collision under a different event id throws — per-device lamport is gap-free monotonic"
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34/01-F3/18 §4: a global_seq already held by another event throws and rolls back the whole ingest"
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34/01-F3: ingest-with-global_seq ≡ ingest-then-assignGlobalSeq — byte-identical tables"
+      - "packages/sync-client/src/__acceptance__/ingest-batch.test.ts#01-F3/18 §4: no lamport assignment and no outbox rows — origin lamport_seq preserved; queue_depth, own_high_water and nextBatch untouched"
       - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F3: lamport_seq starts at 0 and increments gap-free across appends"
+      - "packages/sync-client/src/__acceptance__/mesh-review.test.ts#01-F3/01-F8: after S3-style split-brain traffic every device holds each origin's lamports exactly 0..max, gap-free, ascending in ledger-read order"
       - "packages/sync-client/src/__acceptance__/properties.test.ts#01-F3/01-F8: for any interleaving of appends and legal acks, lamport stays gap-free and the unacked set matches the checkpoint model"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F3: readOwnEvents(fromLamport) is inclusive and stays in lamport order"
+      - "services/sync-gateway/src/__acceptance__/gateway-review.test.ts#01-F3: two devices pushing 50 events each CONCURRENTLY all merge — dense per-org global_seq, per-device lamport order preserved, catchup serves all 100 exactly once ascending"
+      - "services/sync-gateway/src/__acceptance__/law1-global-seq.test.ts#01-F3: merged events carry server_received_at from the injected clock; stored envelope jsonb stays verbatim-as-received (null inside)"
+      - "services/sync-gateway/src/__acceptance__/law1-global-seq.test.ts#01-F3: per-org global_seq is strictly monotonic and dense (gap-free) in merge order across pushes"
+      - "services/sync-gateway/src/__acceptance__/law1-global-seq.test.ts#01-F3: two orgs' global sequences are independent (one org's merges consume nothing from another's)"
+      - "services/sync-gateway/src/__acceptance__/law1-global-seq.test.ts#01-F3: a rolled-back merge consumes nothing — the counter update rolls back with it"
+      - "services/sync-gateway/src/__acceptance__/law7-stop-at-gap.test.ts#01-F8/01-F3: a gapped push stores and acks only the contiguous prefix; nothing beyond the gap lands in events OR quarantine; contiguous re-push completes the sequence"
   - fr: 01-F4
     status: green
     tests:
@@ -40,8 +53,11 @@ rows:
       - "packages/domain/src/__acceptance__/registry.test.ts#01-F4: a malformed payload for a known type is a parse failure, not silent acceptance"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F4: ingest of an unknown event type throws and persists nothing"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F4: ingest of a known type with an invalid payload throws and persists nothing"
+      - "packages/sync-client/src/__acceptance__/ingest-batch.test.ts#01-F37/01-F4: invalid envelopes are skipped and counted, never thrown — the valid remainder still lands"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F4: an unknown event type throws and persists nothing"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F4: an invalid payload for a known type throws and persists nothing"
+      - "services/sync-gateway/src/__acceptance__/law6-quarantine.test.ts#01-F37/01-F4: a registry-invalid event is quarantined verbatim, excluded from events/fan-out/catchup, noticed to the pusher, and the watermark advances over it"
+      - "services/sync-gateway/src/__acceptance__/law6-quarantine.test.ts#01-F37/01-F4: a KNOWN type with a registry-invalid payload quarantines as schema_invalid too"
   - fr: 01-F5
     status: unmapped
   - fr: 01-F6
@@ -72,6 +88,7 @@ rows:
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F8/18 §4: an own-device envelope not already stored throws — own events enter only via append"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F8: first delivery stores ({ stored: true }); re-ingest of the same peer id is { stored: false } with zero state change"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F8: ingest of an own envelope already appended returns { stored: false } and changes nothing"
+      - "packages/sync-client/src/__acceptance__/ingest-batch.test.ts#01-F8: dedupe by event id — already-held own or peer ids and in-batch repeats count as deduped, one row each"
       - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F8: nextBatch returns unacked events oldest-first in lamport order and respects max"
       - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F8/19 §5: advanceTo acks everything at or below the watermark — partial ack is legal"
       - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F8: advanceTo is idempotent and a lower watermark never regresses the checkpoint"
@@ -79,16 +96,41 @@ rows:
       - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F8/19 §5: advanceTo rejects NaN, negative, and fractional watermarks — the checkpoint never silently regresses"
       - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F8: advanceTo on an empty store throws AckBeyondAppendedError for any watermark"
       - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F8: acked events remain readable — the events table is the ledger copy, not a delivery buffer"
+      - "packages/sync-client/src/__acceptance__/mesh-review.test.ts#01-F8: a follower that pushed lamports 0..4 disconnects and re-hellos — hello_ack.resume_from === 5 (highest contiguously held + 1)"
+      - "packages/sync-client/src/__acceptance__/mesh-review.test.ts#01-F3/01-F8: after S3-style split-brain traffic every device holds each origin's lamports exactly 0..max, gap-free, ascending in ledger-read order"
+      - "packages/sync-client/src/__acceptance__/mesh-scenarios.test.ts#S3/01-F8/01-F14: each side elects its own hub and propagates internally; heal → one hub and every ledger = the exact union, once per id, per-origin lamport order intact"
+      - "packages/sync-client/src/__acceptance__/mesh-scenarios.test.ts#S4/01-F15/01-F8: appended events reach every device exactly once with per-origin order intact; the hub wire shows push → push_ack → fan-out"
+      - "packages/sync-client/src/__acceptance__/mesh-session.test.ts#01-F8/19 §5: hub acks update session last_push_ack but never move store.advanceTo — acked_watermark stays null and the outbox stays owed to the cloud"
       - "packages/sync-client/src/__acceptance__/properties.test.ts#01-F3/01-F8: for any interleaving of appends and legal acks, lamport stays gap-free and the unacked set matches the checkpoint model"
       - "packages/sync-client/src/__acceptance__/properties.test.ts#01-F8: drain content is independent of batch size — chunked drains concatenate to the full tail"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F8: re-append of an already-stored id returns the stored envelope unchanged and assigns no new lamport"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F8/18 §4: re-append of a stored id with divergent content throws and changes nothing — idempotency is for identical retries only"
+      - "services/sync-gateway/src/__acceptance__/gateway-review.test.ts#01-F8: a repeated id with DIVERGENT content within ONE push merges the first, quarantines the repeat as id_content_divergence at its slot, acks both slots — no raw error; re-push idempotent"
+      - "services/sync-gateway/src/__acceptance__/gateway-review.test.ts#01-F8: the exact same envelope repeated within ONE push merges once and counts once — ack 0, single fan-out, no crash"
+      - "services/sync-gateway/src/__acceptance__/gateway-review.test.ts#01-F8: an id_content_divergence quarantine FILLS its lamport slot — the ack advances over it and a following contiguous event in the same push merges"
+      - "services/sync-gateway/src/__acceptance__/gateway-review.test.ts#01-F2/01-F8: a fresh device pushing past a gap-at-start gets NO push_ack and stores nothing; an empty push acks nothing; the first real [0] push then acks 0"
+      - "services/sync-gateway/src/__acceptance__/law2-idempotent-push.test.ts#01-F8: re-pushing the whole batch produces the same acked_watermark, zero new rows, zero re-fan-out of already-merged events"
+      - "services/sync-gateway/src/__acceptance__/law2-idempotent-push.test.ts#01-F8 (fast-check): re-pushing ANY prefix of a merged batch is a no-op with the same acked_watermark"
+      - "services/sync-gateway/src/__acceptance__/law2-idempotent-push.test.ts#01-F8/01-F1: same id with divergent content quarantines as id_content_divergence and NEVER mutates the stored row"
+      - "services/sync-gateway/src/__acceptance__/law2-idempotent-push.test.ts#01-F8: a NEW id at an already-occupied (org, device, lamport) slot quarantines as lamport_conflict (T-01-03 collision-is-corruption, cloud side)"
+      - "services/sync-gateway/src/__acceptance__/law7-stop-at-gap.test.ts#01-F8/01-F3: a gapped push stores and acks only the contiguous prefix; nothing beyond the gap lands in events OR quarantine; contiguous re-push completes the sequence"
+      - "services/sync-gateway/src/__acceptance__/law7-stop-at-gap.test.ts#01-F8/01-F37: per-device lamport contiguity is gap-free MODULO quarantine rows — a quarantined slot counts as filled"
+      - "services/sync-gateway/src/__acceptance__/law7-stop-at-gap.test.ts#01-F8: a push that is ENTIRELY beyond the gap stores nothing and leaves the watermark untouched"
+      - "services/sync-gateway/src/__acceptance__/session.test.ts#01-F8: on reconnect, hello_ack.resume_from = acked_watermark + 1"
   - fr: 01-F9
     status: green
     tests:
       - "packages/sync-protocol/src/__acceptance__/fixtures.test.ts#01-F3/01-F9: the event_batch fixture carries a cloud-assigned non-negative integer global_seq"
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F9: catchup_request.from_global_seq is a non-negative integer — 0 accepted, negatives/fractions/strings rejected"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F9/18 §4: ingest rejects an envelope from another org or branch — the stream is identity-scoped"
+      - "services/sync-gateway/src/__acceptance__/law4-catchup.test.ts#01-F9: CATCHUP_PAGE_SIZE is the exported binding constant 500"
+      - "services/sync-gateway/src/__acceptance__/law4-catchup.test.ts#01-F9: paging from 0 yields every branch event exactly once, ascending, page cap enforced, complete/next_from per contract"
+      - "services/sync-gateway/src/__acceptance__/law4-catchup.test.ts#01-F9: an empty page returns events: [], complete: true, next_from = from_global_seq"
+      - "services/sync-gateway/src/__acceptance__/law4-catchup.test.ts#01-F9: paging concurrent with in-flight merges yields every branch event exactly once across pages (the org-counter lock makes a lower seq never appear after a higher one was served)"
+      - "services/sync-gateway/src/__acceptance__/law4-catchup.test.ts#00 §5.4/01-F9: another org NEVER leaks into catchup, even when it reuses the same branch_id string"
+      - "services/sync-gateway/src/__acceptance__/law5-fanout.test.ts#01-F9/01-F34: a push reaches every same-branch session including the origin, exactly once, as one event_batch with global_seq; other branches and other orgs get nothing"
+      - "services/sync-gateway/src/__acceptance__/law5-fanout.test.ts#01-F9: one event_batch per push — a second push produces exactly one more batch on every same-branch session"
+      - "services/sync-gateway/src/__acceptance__/law5-fanout.test.ts#01-F9: a closed connection is removed from the fan-out set — no send after close"
   - fr: 01-F10
     status: green
     tests:
@@ -102,13 +144,43 @@ rows:
     tests:
       - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F11: status is null/zero before any activity and reflects appends, acks, and pull position"
   - fr: 01-F12
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/mesh-scenarios.test.ts#S1/01-F13/01-F12: N devices attaching at staggered virtual times all converge on electHub(all peers), traffic forming a star on the hub"
   - fr: 01-F13
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/hub-election.test.ts#01-F13: rank = HUB_ELIGIBLE_CLASSES index — counter_electron > counter_rn > kitchen"
+      - "packages/sync-client/src/__acceptance__/hub-election.test.ts#01-F13: tie on class rank → lexicographically lowest device_id wins"
+      - "packages/sync-client/src/__acceptance__/hub-election.test.ts#01-F13/01-F39: classes outside HUB_ELIGIBLE_CLASSES never win — even with a lower device_id"
+      - "packages/sync-client/src/__acceptance__/hub-election.test.ts#01-F13: null when no hub-eligible peer is visible"
+      - "packages/sync-client/src/__acceptance__/hub-election.test.ts#01-F13 property: permutation-invariant — electHub(shuffle(p)) === electHub(p) for any peer set"
+      - "packages/sync-client/src/__acceptance__/hub-election.test.ts#01-F13 property: the winner is exactly the (class-rank, device_id)-minimal eligible peer — null iff none eligible"
+      - "packages/sync-client/src/__acceptance__/hub-election.test.ts#01-F13/01-F39 property: scoped-class peers are inert — adding them never changes the winner"
+      - "packages/sync-client/src/__acceptance__/mesh-review.test.ts#01-F13: after hub loss the replacement hub STAYS hub for 60 000 virtual ms while the dead-but-visible old hub stays silent — suspicion clears only on inbound traffic, never by timer"
+      - "packages/sync-client/src/__acceptance__/mesh-review.test.ts#01-F13: cold start with a visible-but-never-answering top-ranked device — the live eligible devices converge to a live hub within HELLO_TIMEOUT_MS + REELECTION_BUDGET_MS"
+      - "packages/sync-client/src/__acceptance__/mesh-review.test.ts#01-F13: a suspect that shows life re-enters candidacy and wins the next peer-set recompute"
+      - "packages/sync-client/src/__acceptance__/mesh-review.test.ts#01-F13/20 §2.4: HELLO_TIMEOUT_MS = 4000 is exported from the package surface (fix-round 2's contracted constant)"
+      - "packages/sync-client/src/__acceptance__/mesh-review.test.ts#01-F13: a peer that left the LAN while the session was stopped is no ghost after restart — status().peers must not contain it"
+      - "packages/sync-client/src/__acceptance__/mesh-scenarios.test.ts#S1/01-F13/01-F12: N devices attaching at staggered virtual times all converge on electHub(all peers), traffic forming a star on the hub"
+      - "packages/sync-client/src/__acceptance__/mesh-scenarios.test.ts#S2/01-F13: disconnect(hub) → every remaining device converges on the same new hub strictly inside REELECTION_BUDGET_MS"
+      - "packages/sync-client/src/__acceptance__/mesh-session.test.ts#01-F13: heartbeat/loss/re-election constants carry the contracted values"
+      - "packages/sync-client/src/__acceptance__/mesh-session.test.ts#(c)/01-F13: alone + hub-eligible → solo, empty peer set (acts as hub for later joiners)"
+      - "packages/sync-client/src/__acceptance__/mesh-session.test.ts#(c)/01-F13: a joining higher-rank device takes hub — the solo counter_rn becomes its follower"
+      - "packages/sync-client/src/__acceptance__/mesh-session.test.ts#(c)/01-F13: the hub sends wire ping to a connected follower every HEARTBEAT_INTERVAL_MS while pongs keep it alive"
+      - "packages/sync-client/src/__acceptance__/mesh-session.test.ts#(c)/01-F13: no wire ping for HUB_LOSS_TIMEOUT_MS → hub loss; the eligible survivor re-elects and adopts the new result within REELECTION_BUDGET_MS"
   - fr: 01-F14
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/ingest-batch.test.ts#01-F14: readAllEvents = own ∪ ingested — every event exactly once, from any number of origin devices"
+      - "packages/sync-client/src/__acceptance__/mesh-scenarios.test.ts#S3/01-F8/01-F14: each side elects its own hub and propagates internally; heal → one hub and every ledger = the exact union, once per id, per-origin lamport order intact"
   - fr: 01-F15
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/mesh-review.test.ts#01-F15: WAN down (no cloud ack ever), a 510-event follower backlog fully reaches the hub — the LAN drain pages own events from the session cursor, never the cloud-outbox page"
+      - "packages/sync-client/src/__acceptance__/mesh-review.test.ts#01-F15: a follower append + notifyAppended reaches the hub strictly inside one heartbeat interval (runFor(500) < HEARTBEAT_INTERVAL_MS)"
+      - "packages/sync-client/src/__acceptance__/mesh-review.test.ts#01-F15: an append ON the hub + notifyAppended reaches every follower inside the same sub-heartbeat window"
+      - "packages/sync-client/src/__acceptance__/mesh-scenarios.test.ts#S4/01-F15/01-F8: appended events reach every device exactly once with per-origin order intact; the hub wire shows push → push_ack → fan-out"
   - fr: 01-F16
     status: green
     tests:
@@ -134,7 +206,11 @@ rows:
   - fr: 01-F26
     status: unmapped
   - fr: 01-F27
-    status: unmapped
+    status: green
+    tests:
+      - "services/sync-gateway/src/__acceptance__/session.test.ts#01-F27 (Wave-0 stub): a well-formed dev token opens a session — hello_ack { session_id, hub: false, resume_from: 0 } for a fresh device"
+      - "services/sync-gateway/src/__acceptance__/session.test.ts#01-F27: malformed token shapes → AuthRejectedError, no session opened"
+      - "services/sync-gateway/src/__acceptance__/session.test.ts#01-F27/DEC-SYNC-004: token claims mismatching hello.device_id or hello.branch_id → AuthRejectedError"
   - fr: 01-F28
     status: unmapped
   - fr: 01-F29
@@ -177,6 +253,7 @@ rows:
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34/18 §4: a negative, fractional, or non-integer global_seq at ingest throws with nothing persisted"
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34/01-F3/18 §4: a global_seq already held by another event throws and rolls back the whole ingest"
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34/01-F3: ingest-with-global_seq ≡ ingest-then-assignGlobalSeq — byte-identical tables"
+      - "services/sync-gateway/src/__acceptance__/law5-fanout.test.ts#01-F9/01-F34: a push reaches every same-branch session including the origin, exactly once, as one event_batch with global_seq; other branches and other orgs get nothing"
   - fr: 01-F35
     status: green
     tests:
@@ -193,6 +270,14 @@ rows:
     status: green
     tests:
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F37: quarantine_notice requires both event_id and reason"
+      - "packages/sync-client/src/__acceptance__/ingest-batch.test.ts#01-F37/01-F4: invalid envelopes are skipped and counted, never thrown — the valid remainder still lands"
+      - "services/sync-gateway/src/__acceptance__/gateway-review.test.ts#01-F37: a registry-valid envelope jsonb cannot hold (U+0000 in a payload string) quarantines as storage_reject stored verbatim as TEXT; siblings merge, the ack advances, a notice is emitted"
+      - "services/sync-gateway/src/__acceptance__/law6-quarantine.test.ts#01-F37/01-F4: a registry-invalid event is quarantined verbatim, excluded from events/fan-out/catchup, noticed to the pusher, and the watermark advances over it"
+      - "services/sync-gateway/src/__acceptance__/law6-quarantine.test.ts#01-F37/01-F4: a KNOWN type with a registry-invalid payload quarantines as schema_invalid too"
+      - "services/sync-gateway/src/__acceptance__/law6-quarantine.test.ts#01-F37: re-pushing the same bad event is an idempotent no-op — first stored wins, one row forever"
+      - "services/sync-gateway/src/__acceptance__/law6-quarantine.test.ts#01-F37/DEC-SYNC-004: each identity-mismatch reason class quarantines — org_mismatch, branch_mismatch, device_mismatch"
+      - "services/sync-gateway/src/__acceptance__/law6-quarantine.test.ts#01-F37: identity checks precede registry parse — an event that is BOTH org-mismatched and registry-invalid quarantines as org_mismatch (contract step 1 before step 2)"
+      - "services/sync-gateway/src/__acceptance__/law7-stop-at-gap.test.ts#01-F8/01-F37: per-device lamport contiguity is gap-free MODULO quarantine rows — a quarantined slot counts as filled"
   - fr: 01-F38
     status: unmapped
   - fr: 01-F39
@@ -204,6 +289,9 @@ rows:
       - "packages/sync-protocol/src/__acceptance__/device-classes.test.ts#01-F39: manager, waiter, and rider are never hub-eligible"
       - "packages/sync-protocol/src/__acceptance__/fixtures.test.ts#01-F39: the hello fixture's device_class is a member of DEVICE_CLASSES"
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F39: hello.device_class accepts each of DEVICE_CLASSES and nothing else ('toaster' rejects)"
+      - "packages/sync-client/src/__acceptance__/hub-election.test.ts#01-F13/01-F39: classes outside HUB_ELIGIBLE_CLASSES never win — even with a lower device_id"
+      - "packages/sync-client/src/__acceptance__/hub-election.test.ts#01-F13/01-F39 property: scoped-class peers are inert — adding them never changes the winner"
+      - "packages/sync-client/src/__acceptance__/mesh-session.test.ts#(c)/01-F39: alone + non-eligible class → follower with hub_id null (waits; never candidate)"
   - fr: 01-F40
     status: green
     tests:

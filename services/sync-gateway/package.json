@@ -4,7 +4,22 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "test": "echo 'no tests yet — acceptance tests arrive with first FRs (24 §3)'",
+    "test": "vitest run",
     "build": "echo 'no build yet — scaffold stub'"
+  },
+  "dependencies": {
+    "@fastify/websocket": "11.3.0",
+    "@restos/config": "workspace:*",
+    "@restos/domain": "workspace:*",
+    "@restos/sync-protocol": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "fastify": "5.10.0",
+    "postgres": "3.4.9"
+  },
+  "devDependencies": {
+    "drizzle-kit": "0.31.10",
+    "fast-check": "4.9.0",
+    "testcontainers": "12.0.4",
+    "vitest": "4.1.10"
   }
 }

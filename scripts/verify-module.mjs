@@ -19,7 +19,11 @@ if (!/^\d{2}$/.test(nn ?? "")) {
 
 // Module → workspaces hosting its tests (grows as modules gain code).
 const MODULE_WORKSPACES = {
-  "01": ["@restos/domain", "@restos/sync-protocol", "@restos/sync-client"],
+  "01": ["@restos/domain", "@restos/sync-protocol", "@restos/sync-client", "@restos/sync-gateway"],
+};
+// Workspaces living outside packages/ (explicit dir map — T-01-07).
+const WORKSPACE_DIRS = {
+  "@restos/sync-gateway": "services/sync-gateway",
 };
 const workspaces = MODULE_WORKSPACES[nn];
 if (!workspaces) {
@@ -42,7 +46,7 @@ const byFr = new Map(); // fr -> { tests: [], statuses: [] }
 let suitesRan = 0;
 let anyRed = false;
 for (const ws of workspaces) {
-  const dir = join(ROOT, ws.replace("@restos/", "packages/"));
+  const dir = join(ROOT, WORKSPACE_DIRS[ws] ?? ws.replace("@restos/", "packages/"));
   const hasTests =
     existsSync(join(dir, "src")) &&
     execFileSync("find", [join(dir, "src"), "-name", "*.test.ts"])

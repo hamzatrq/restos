@@ -1,0 +1,76 @@
+// T-01-07 Postgres data contract (binding — plans/wave-0/kernel-tasks.md T-01-07;
+// owning spec 01 §3/§5): the four kernel-schema tables. sync-gateway is the sole
+// writer of all four (18 §4). No UPDATE or DELETE statement exists anywhere in
+// this package for kernel.events (01-F1 append-only ledger). Ids are text, not
+// uuid — the storage layer must not tighten the wire contract (assumption 11).
+// envelope jsonb is verbatim-as-received; the two cloud-stamped values live in
+// their own columns and are merged into the envelope at serve time (assumption 12).
+import { bigint, index, jsonb, pgSchema, primaryKey, text, unique } from "drizzle-orm/pg-core";
+
+export const kernel = pgSchema("kernel");
+
+/** Merged org log (01-F3/01-F7): retained forever (01 §5); no partitioning at v1 (assumption 1). */
+export const events = kernel.table(
+  "events",
+  {
+    id: text("id").primaryKey(),
+    org_id: text("org_id").notNull(),
+    branch_id: text("branch_id").notNull(),
+    device_id: text("device_id").notNull(),
+    lamport_seq: bigint("lamport_seq", { mode: "number" }).notNull(),
+    global_seq: bigint("global_seq", { mode: "number" }).notNull(),
+    server_received_at: bigint("server_received_at", { mode: "number" }).notNull(),
+    envelope: jsonb("envelope").notNull(),
+  },
+  (t) => [
+    unique("events_org_global_seq_uq").on(t.org_id, t.global_seq),
+    // The T-01-03 lamport-collision-is-corruption law, cloud side.
+    unique("events_org_device_lamport_uq").on(t.org_id, t.device_id, t.lamport_seq),
+    // Catchup paging (01-F9): the session's branch stream in global_seq order.
+    index("events_org_branch_global_seq_idx").on(t.org_id, t.branch_id, t.global_seq),
+  ],
+);
+
+/**
+ * Per-org counter row (01-F3, assumption 2): locked FOR UPDATE inside the merge
+ * transaction and held to commit — this serialization is what makes catchup
+ * paging unable to skip a not-yet-visible lower seq (law 4).
+ */
+export const orgSequences = kernel.table("org_sequences", {
+  org_id: text("org_id").primaryKey(),
+  next_global_seq: bigint("next_global_seq", { mode: "number" }).notNull(),
+});
+
+/** Per-device high-water mark (01-F8): the source of hello_ack.resume_from. */
+export const deviceWatermarks = kernel.table(
+  "device_watermarks",
+  {
+    org_id: text("org_id").notNull(),
+    device_id: text("device_id").notNull(),
+    acked_watermark: bigint("acked_watermark", { mode: "number" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.org_id, t.device_id] })],
+);
+
+/**
+ * Quarantine storage (01-F37): invalid events verbatim, no global_seq, never in
+ * kernel.events / fan-out / catchup. Re-quarantine of the same claimed id is an
+ * idempotent no-op — first stored wins (UNIQUE below + ON CONFLICT DO NOTHING).
+ * envelope is `text` (verbatim JSON string), NOT jsonb — bytes jsonb cannot
+ * faithfully hold (e.g. U+0000 in any string) must still be quarantinable as
+ * storage_reject (fix-round amendment 3).
+ */
+export const quarantine = kernel.table(
+  "quarantine",
+  {
+    id: text("id").primaryKey(),
+    org_id: text("org_id").notNull(),
+    branch_id: text("branch_id").notNull(),
+    device_id: text("device_id").notNull(),
+    claimed_event_id: text("claimed_event_id").notNull(),
+    reason: text("reason").notNull(),
+    envelope: text("envelope").notNull(),
+    received_at: bigint("received_at", { mode: "number" }).notNull(),
+  },
+  (t) => [unique("quarantine_org_claimed_event_uq").on(t.org_id, t.claimed_event_id)],
+);

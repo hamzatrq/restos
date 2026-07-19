@@ -6,5 +6,8 @@
   "scripts": {
     "test": "echo 'no tests yet — acceptance tests arrive with first FRs (24 §3)'",
     "build": "echo 'no build yet — scaffold stub'"
+  },
+  "exports": {
+    ".": "./src/index.ts"
   }
 }

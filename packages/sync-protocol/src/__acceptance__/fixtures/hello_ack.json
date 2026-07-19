@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "kind": "hello_ack",
+  "session_id": "01980000-0000-7000-8000-00000000c001",
+  "hub": false,
+  "resume_from": 19
+}
