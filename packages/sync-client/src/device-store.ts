@@ -22,6 +22,7 @@
 // (01-F1) and devices converge to cloud ordering on ack (01-F34).
 import {
   auditEventHash,
+  canonicalJson,
   type EventEnvelopeT,
   isAuditEvent,
   parseEnvelope,
@@ -45,6 +46,25 @@ export class AckBeyondAppendedError extends Error {
         "(18 §4 — an impossible ack means protocol corruption; fail loud, change nothing)",
     );
     this.name = "AckBeyondAppendedError";
+  }
+}
+
+/**
+ * A peer/cloud event reuses a stored event id but carries DIFFERENT device-authored
+ * content. Dedupe-by-id alone would accept it as a benign no-op and leave two devices
+ * permanently disagreeing under one id (01-F34). The ledger row is never overwritten
+ * (01-F1) — this is raised so the caller surfaces it instead of diverging silently.
+ * The gateway's merge path already quarantines the same class (id_content_divergence).
+ */
+export class DivergentDuplicateError extends Error {
+  readonly eventId: string;
+  constructor(eventId: string) {
+    super(
+      `ingest of event ${eventId} reuses a stored id with divergent content ` +
+        "(01-F34 — same id must mean same event; the stored row is untouched)",
+    );
+    this.name = "DivergentDuplicateError";
+    this.eventId = eventId;
   }
 }
 
@@ -214,6 +234,10 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   // T-01-04 fold surfaces: peer ingest, global_seq sidecar, fold-state rebuild.
   const allOwnEnvelopes = db.prepare<[], { envelope: string }>("SELECT envelope FROM events");
   const peerById = db.prepare<[string], { id: string }>("SELECT id FROM peer_events WHERE id = ?");
+  // Stored peer envelope, for the duplicate-id content comparison (01-F34).
+  const peerEnvelopeById = db.prepare<[string], { envelope: string }>(
+    "SELECT envelope FROM peer_events WHERE id = ?",
+  );
   const peerByDeviceLamport = db.prepare<[string, number], { id: string }>(
     "SELECT id FROM peer_events WHERE device_id = ? AND lamport_seq = ?",
   );
@@ -263,6 +287,14 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
 
   const rowToEnvelope = (row: { envelope: string }): EventEnvelopeT =>
     parseEnvelope(JSON.parse(row.envelope));
+  /**
+   * Canonical form of an envelope's DEVICE-AUTHORED content — everything except the
+   * cloud-assigned `server_received_at`, which the same event legitimately carries as
+   * null on-device and stamped from the cloud. Two events sharing an id must agree on
+   * this (01-F34); canonicalJson omits the undefined key exactly as JSON.stringify does.
+   */
+  const authoredContent = (env: EventEnvelopeT): string =>
+    canonicalJson({ ...env, server_received_at: undefined });
   const ownHighWater = (): number | null => highWater.get()?.high ?? null;
   const ackedWatermark = (): number | null => readState.get()?.acked_watermark ?? null;
 
@@ -451,10 +483,21 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
           "match the store identity (01-F9 — the branch stream is identity-scoped; nothing persisted)",
       );
     }
-    if (byId.get(envelope.id) || peerById.get(envelope.id)) {
-      // Duplicate id: no new row ever, but a CARRIED global_seq is adopted exactly
-      // as assignGlobalSeq would — the LAN-first-then-cloud-catchup path converges
-      // (01-F34); without opts this is a pure idempotent no-op (01-F8).
+    const storedOwn = byId.get(envelope.id);
+    const storedPeer = storedOwn ? undefined : peerEnvelopeById.get(envelope.id);
+    if (storedOwn || storedPeer) {
+      // Duplicate id: the content MUST match what is already stored. Dedupe-by-id
+      // alone would silently accept a divergent same-id event and leave two devices
+      // disagreeing forever (01-F34) — the append path already compares content, so
+      // ingest must too. `server_received_at` is excluded: it is cloud-assigned, so
+      // the same event legitimately reads null locally and stamped from the cloud.
+      const stored = rowToEnvelope(storedOwn ?? (storedPeer as { envelope: string }));
+      if (authoredContent(stored) !== authoredContent(envelope)) {
+        throw new DivergentDuplicateError(envelope.id);
+      }
+      // Identical duplicate: no new row ever, but a CARRIED global_seq is adopted
+      // exactly as assignGlobalSeq would — the LAN-first-then-cloud-catchup path
+      // converges (01-F34); without opts this is a pure idempotent no-op (01-F8).
       const carried = opts?.global_seq;
       if (carried !== undefined && adoptGlobalSeq(envelope.id, carried)) recomputeFolds();
       return { stored: false };

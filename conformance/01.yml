@@ -87,10 +87,13 @@ rows:
       - "packages/sync-client/src/__acceptance__/audit-store.test.ts#01-F5/01-F8: identical crash-retry is a no-op and divergent content throws — HEAD unmoved in both cases"
       - "packages/sync-client/src/__acceptance__/audit-store.test.ts#01-F5/01-F6: interleaving audit.* appends leaves open_orders/kitchen_queue/parked byte-identical, and refold() agrees"
       - "packages/sync-client/src/__acceptance__/audit-store.test.ts#01-F5: an ingested peer audit event keeps the prev_audit_hash its origin set and never touches this device's chain HEAD"
+      - "packages/sync-client/src/__acceptance__/audit1-regression.test.ts#01-F5: an audit.login carrying note:undefined leaves the device's readOwnEvents() chain verifiable after the JSON round-trip"
   - fr: 01-F6
     status: green
     tests:
       - "packages/sync-client/src/__acceptance__/audit-store.test.ts#01-F5/01-F6: interleaving audit.* appends leaves open_orders/kitchen_queue/parked byte-identical, and refold() agrees"
+      - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F6/01-F34: a parked event's envelope_json is byte-identical before and after refold + reopen, even with JSON-omitted payload values"
+      - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F6/01-F34: folds' canonicalJson IS the domain serializer, and both mirror JSON.stringify on omitted values"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: order.created materializes a row with FOLDS.md defaults and empty canonical json_lines"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: optional order_type/table_id on order.created land in the row (additive under schema_version 1, 00 §6)"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: a second order.created for the same order_id is a no-op — canonically-first wins"
@@ -113,6 +116,7 @@ rows:
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F8: push_ack.acked_watermark is a non-negative integer — 0 accepted, negatives and fractions rejected"
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F8: push.events must be valid domain EventEnvelopes (envelope minus lamport_seq rejects)"
       - "packages/sync-client/src/__acceptance__/audit-store.test.ts#01-F5/01-F8: identical crash-retry is a no-op and divergent content throws — HEAD unmoved in both cases"
+      - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F8/01-F34: an IDENTICAL re-ingest is still a benign no-op — the divergence check must not over-trigger"
       - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F8/19 §5: push drains own outbox to push_ack and advances the CLOUD write-checkpoint (store.advanceTo)"
       - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F8: reconnect after a WAN cut re-hellos, resumes from the advanced cursor, and drains the tail"
       - "packages/sync-client/src/__acceptance__/crash-resume.test.ts#01-F8/20 §2.6: the unacked tail re-drains identically after reopen — same events, same order, checkpoint intact"
@@ -155,10 +159,13 @@ rows:
     tests:
       - "packages/sync-protocol/src/__acceptance__/fixtures.test.ts#01-F3/01-F9: the event_batch fixture carries a cloud-assigned non-negative integer global_seq"
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F9: catchup_request.from_global_seq is a non-negative integer — 0 accepted, negatives/fractions/strings rejected"
+      - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F9/01-F34: an event that FAILS to ingest halts the pull cursor, so catchup re-delivers it instead of skipping it forever"
       - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F9: a cold cloud session catches up pre-existing cloud events from the exclusive cursor"
       - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F9/01-F34: a live event_batch fan-out from a peer is applied via store.ingest with its global_seq"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F9/18 §4: ingest rejects an envelope from another org or branch — the stream is identity-scoped"
       - "packages/sync-client/src/__acceptance__/spike-scenarios-departed.test.ts#X8/01-F8/01-F9: a 1600-event WAN-cut backlog propagates over LAN via multi-page session-cursor drain, chains cloud push pages to acked_watermark == own_high_water on heal, and a cold WAN-only joiner pulls the branch through ≥2 catchup pages"
+      - "services/sync-gateway/src/__acceptance__/isolation-regression.test.ts#01-F9: services/sync-gateway/src/gateway.ts contains zero 0x00 bytes"
+      - "services/sync-gateway/src/__acceptance__/isolation-regression.test.ts#01-F9: (org 'ab', branch 'c') and (org 'a', branch 'bc') stay isolated — a push from one is never fanned to the other"
       - "services/sync-gateway/src/__acceptance__/law4-catchup.test.ts#01-F9: CATCHUP_PAGE_SIZE is the exported binding constant 500"
       - "services/sync-gateway/src/__acceptance__/law4-catchup.test.ts#01-F9: paging from 0 yields every branch event exactly once, ascending, page cap enforced, complete/next_from per contract"
       - "services/sync-gateway/src/__acceptance__/law4-catchup.test.ts#01-F9: an empty page returns events: [], complete: true, next_from = from_global_seq"
@@ -183,6 +190,7 @@ rows:
     status: green
     tests:
       - "packages/sync-client/src/__acceptance__/mesh-scenarios.test.ts#S1/01-F13/01-F12: N devices attaching at staggered virtual times all converge on electHub(all peers), traffic forming a star on the hub"
+      - "packages/sync-client/src/__acceptance__/transport-ws-fuzz.test.ts#01-F12: null/array/number/discriminant-less/bad-peer frames are dropped without onPeerVisible, and a subsequent valid announce still registers"
   - fr: 01-F13
     status: green
     tests:
@@ -215,6 +223,7 @@ rows:
   - fr: 01-F15
     status: green
     tests:
+      - "packages/sync-client/src/__acceptance__/mesh-fastpath-regression.test.ts#01-F15: after advanceTo() empties nextBatch, an append-on-hub + notifyAppended reaches the follower strictly inside one heartbeat interval"
       - "packages/sync-client/src/__acceptance__/mesh-review.test.ts#01-F15: WAN down (no cloud ack ever), a 510-event follower backlog fully reaches the hub — the LAN drain pages own events from the session cursor, never the cloud-outbox page"
       - "packages/sync-client/src/__acceptance__/mesh-review.test.ts#01-F15: a follower append + notifyAppended reaches the hub strictly inside one heartbeat interval (runFor(500) < HEARTBEAT_INTERVAL_MS)"
       - "packages/sync-client/src/__acceptance__/mesh-review.test.ts#01-F15: an append ON the hub + notifyAppended reaches every follower inside the same sub-heartbeat window"
@@ -227,6 +236,7 @@ rows:
   - fr: 01-F17
     status: green
     tests:
+      - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F17/01-F34: a divergent duplicate inside a cloud batch is surfaced as quarantined AND the pull cursor advances past it (it must not wedge the pull)"
       - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X3/01-F17/01-F38: WAN cut AND LAN split {A}|{B,C}, both sides keep appending, each side runs its own hub; heal LAN then WAN → zero lost, zero duplicated, one hub, fold identity ≡ cloud-order replay"
   - fr: 01-F18
     status: unmapped
@@ -278,6 +288,13 @@ rows:
   - fr: 01-F34
     status: green
     tests:
+      - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F9/01-F34: an event that FAILS to ingest halts the pull cursor, so catchup re-delivers it instead of skipping it forever"
+      - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F34: ingesting a stored id with DIFFERENT content throws DivergentDuplicateError and leaves the stored row untouched"
+      - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F8/01-F34: an IDENTICAL re-ingest is still a benign no-op — the divergence check must not over-trigger"
+      - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F34: an identical re-ingest CARRYING a global_seq still adopts the cloud ordering (the LAN-first-then-cloud path keeps working)"
+      - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F17/01-F34: a divergent duplicate inside a cloud batch is surfaced as quarantined AND the pull cursor advances past it (it must not wedge the pull)"
+      - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F6/01-F34: a parked event's envelope_json is byte-identical before and after refold + reopen, even with JSON-omitted payload values"
+      - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F6/01-F34: folds' canonicalJson IS the domain serializer, and both mirror JSON.stringify on omitted values"
       - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F9/01-F34: a live event_batch fan-out from a peer is applied via store.ingest with its global_seq"
       - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F34: origin-inclusive fan-out — the device learns its own events' global_seq and stays ≡ refold()"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F34: table_id resolves to the canonically-last assignment on every delivery order"

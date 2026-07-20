@@ -20,6 +20,7 @@
 // recompute": correctness first, so when in doubt the engine recomputes.
 import {
   applyLineState,
+  canonicalJson,
   type EventEnvelopeT,
   type KnownEventType,
   type OrderLineState,
@@ -63,18 +64,12 @@ export type FoldState = {
 /** A single order's two projected rows — the queue row exists iff the order confirmed. */
 export type ProjectedOrder = { order: OpenOrderRow; queue: KitchenQueueRow | null };
 
-/** Canonical JSON: object keys sorted lexicographically at every depth, no
- * insignificant whitespace — determinism assertions compare byte-for-byte. */
-export const canonicalJson = (value: unknown): string => {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .sort(([a], [b]) => (a < b ? -1 : 1))
-      .map(([key, val]) => `${JSON.stringify(key)}:${canonicalJson(val)}`);
-    return `{${entries.join(",")}}`;
-  }
-  return JSON.stringify(value);
-};
+// Canonical JSON now comes from @restos/domain — the single declared-once
+// serializer (18 §2, W0-CONS consolidation). The former local copy diverged from it
+// on JSON-omitted values (`[undefined]` serialized to `[]` here but round-trips from
+// storage as `[null]`), so a parked event's json differed before vs after reopen.
+// sync-client already depends on domain, so there was never a direction problem.
+export { canonicalJson } from "@restos/domain";
 
 // Typed read-side views of registry-validated payloads. The schemas live ONLY in
 // @restos/domain (18 §2) and `parseEvent` has already enforced them before an

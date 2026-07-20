@@ -13,6 +13,7 @@ export {
   AckBeyondAppendedError,
   type AppendInput,
   type DeviceStore,
+  DivergentDuplicateError,
   type IngestBatchResult,
   type IngestResult,
   openStore,

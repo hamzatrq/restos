@@ -18,7 +18,7 @@ import type {
   CloudTransportHandlers,
   ProtocolMessage,
 } from "@restos/sync-protocol";
-import type { DeviceStore } from "./device-store.js";
+import { type DeviceStore, DivergentDuplicateError } from "./device-store.js";
 
 /** Cloud outbox drain page per push (contract (b)); id-dedupe makes overlap free (01-F8). */
 export const CLOUD_PUSH_BATCH_MAX = 500;
@@ -96,24 +96,37 @@ export const createCloudSession = (options: {
   /**
    * Apply a merged batch (live fan-out or a catchup page): split the two cloud stamps
    * off each wire event and ingest it. Own events return via origin-inclusive fan-out
-   * and take the store's duplicate-id adoption path (01-F34); a per-event failure is
-   * counted-not-thrown (01-F37 posture — the valid remainder still lands). The pull
-   * cursor advances only forward (setLastGlobalSeq is a raw write — monotonicity is here).
+   * and take the store's duplicate-id adoption path (01-F34).
+   *
+   * The pull cursor advances ONLY through a contiguous prefix of events that actually
+   * landed. A transient ingest failure stops the advance, so catchup re-delivers that
+   * event; previously the cursor moved to the batch maximum regardless and the failed
+   * event was skipped forever (01-F9/01-F34 convergence hole). A divergent duplicate is
+   * the one failure that is permanently known-bad — its id is already stored, so
+   * re-fetching cannot help; it is surfaced in status() and the cursor passes it rather
+   * than wedging the pull (01-F17). setLastGlobalSeq is a raw write — monotonicity here.
    */
   const applyEvents = (events: readonly WireEvent[]): void => {
-    let maxSeen = -1;
+    let advanceTo = -1;
+    let blocked = false;
     for (const e of events) {
       const { global_seq, ...envelope } = e;
+      let landed = true;
       try {
         store.ingest(envelope, global_seq === undefined ? undefined : { global_seq });
-      } catch {
-        // per-event failure skipped and counted (never thrown) — 01-F37 seed posture
+      } catch (err) {
+        if (err instanceof DivergentDuplicateError) {
+          quarantined.push({ event_id: err.eventId, reason: "divergent_duplicate" });
+        } else {
+          landed = false; // did not land — the cursor must not pass it
+        }
       }
-      if (global_seq !== undefined && global_seq > maxSeen) maxSeen = global_seq;
+      if (!landed) blocked = true;
+      if (!blocked && global_seq !== undefined && global_seq > advanceTo) advanceTo = global_seq;
     }
-    if (maxSeen >= 0) {
+    if (advanceTo >= 0) {
       const current = store.status().last_global_seq ?? 0;
-      if (maxSeen > current) store.setLastGlobalSeq(maxSeen);
+      if (advanceTo > current) store.setLastGlobalSeq(advanceTo);
     }
   };
 

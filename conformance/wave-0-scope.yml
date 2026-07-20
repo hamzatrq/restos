@@ -29,8 +29,18 @@ in_scope:
     - 01-F15  # LAN fast-path propagation (logic; wall-clock is D3)
     - 01-F16  # concurrent line-adds merge
     - 01-F27  # server-side authz on every op (dev-token stub in W0)
-    - 01-F29  # payment.refunded shape + manager approval
-    - 01-F30  # money conservation invariants
+  # OVERSTATED in the derived matrix — 01.yml shows these green because tests carry
+  # the FR tag, but the tags cover only part of the FR. Recorded honestly here rather
+  # than hand-editing the CI-derived matrix (24-F5). External audit-2 F3 / audit-1 K-05.
+  partial:
+    - fr: 01-F29
+      covered: "payload shape (payment_id required, method enum) + 'a refund unsettles the order' fold behaviour"
+      NOT_covered: "the two load-bearing clauses — amount <= the un-refunded remainder, and manager approval. Neither is implemented anywhere in source (a 101-paisa refund against a 100-paisa payment is currently accepted by the client)."
+      owner: T-01-08 (gateway refund-remainder check per DEC-SYNC-007); approval modelling rides the 05 approval.* wave
+    - fr: 01-F30
+      covered: "the v1 exact-cover settle equality over surviving lines"
+      NOT_covered: "void/comp/discount value terms and till conservation — the fold documents itself as a v1 approximation"
+      owner: T-01-08 (cheap provable invariants) + T-01-11 Auditor (fold-requiring conservation)
     - 01-F31  # settlement_attempt_id idempotency
     - 01-F34  # commutative/idempotent folds, global_seq tiebreak
     - 01-F35  # terminal-state monotonicity
