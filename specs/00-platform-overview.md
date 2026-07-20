@@ -152,7 +152,7 @@ restos/
 
 - **IDs:** UUIDv7, client-generated (offline creation never collides; time-ordered for index locality).
 - **Event envelope (canonical):** `{ id, org_id, branch_id, device_id, actor_user_id, lamport_seq (per device), device_created_at, server_received_at, type, schema_version, payload, refs[] }`. Server time is authoritative for reporting; device lamport sequence is authoritative for ordering a device's own events.
-- **Money:** integer paisas. **Quantities:** integer milligrams / millilitres / units. No floats in ledgers, ever.
+- **Money:** integer paisas. **Quantities:** integer milligrams / millilitres / units. No floats in ledgers, ever. JS has no integer type, so "integer paisas" means integers held in a double — addition/subtraction are exact, and the danger is **division and rates**. Therefore: percentages and tax rates are expressed as integer **basis points** (1700 = 17%), never a float literal; and any operation that divides money (split bills, rate application, apportionment) goes through a `domain` helper with an explicit stated rounding policy whose parts provably sum back to the original total. No module may divide or scale money inline (DEC-MONEY-005).
 - **Soft references:** consumers tolerate out-of-order arrival (an order may sync before its shift record).
 - **Event schema evolution:** additive-only payload changes under the same `schema_version`; breaking changes bump the version and ship a reader for N−1. Old events are never rewritten.
 - **Naming:** event types are `noun.verb_past` (`order.created`, `order.line_state_changed`, `stock.movement_recorded`, `cash.paid_out`). The full catalog lives in doc 01 §4 and `packages/domain`.

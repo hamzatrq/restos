@@ -6,7 +6,7 @@ Transport: WebSocket (cloud + LAN, one framing), JSON messages, permessage-defla
 |---|---|---|---|
 | `hello` | device → hub/cloud | `{ device_id, device_class, branch_id, token, last_global_seq, own_high_water }` | auth + resume point; server validates class/slice (01-F40) |
 | `hello_ack` | ← | `{ session_id, hub: bool, resume_from }` | |
-| `push` | device → | `{ events: Envelope[], watermark: lamport_seq }` | own events only, lamport order (01-F8) |
+| `push` | device → | `{ events: Envelope[], watermark: lamport_seq }` | own events, lamport order (01-F8). **Pending (DEC-SYNC-009):** a session authenticated as branch hub may also push events whose `device_id` is a WAN-less peer's — relayed verbatim, attested not re-authored; the cloud then tracks lamport contiguity per ORIGIN device and `watermark` becomes per-origin rather than per-session. Additive under `v:1`. NOT YET IMPLEMENTED — the gateway currently quarantines a device mismatch |
 | `push_ack` | ← | `{ acked_watermark }` | device advances outbox only on ack (write-checkpoint, 19 §5) |
 | `event_batch` | hub/cloud → device | `{ events: (Envelope & { global_seq?: int })[] }` | merged stream, slice-filtered per class (01-F39/F40); `global_seq` present once cloud-assigned (01-F3) |
 | `catchup_request` | device → | `{ from_global_seq }` | range fetch (01-F9) |
