@@ -20,6 +20,7 @@ import {
   type MeshTransport,
   type PeerInfo,
   type ProtocolMessage,
+  parseMessage,
   type TransportHandlers,
 } from "@restos/sync-protocol";
 import { type RawData, WebSocket, WebSocketServer } from "ws";
@@ -69,20 +70,44 @@ export const createWsLanTransport = (config: {
   const wireSocket = (ws: WebSocket, redial: (() => void) | null): void => {
     liveSockets.add(ws);
     ws.on("message", (raw: RawData) => {
-      let frame: LanFrame;
+      let frame: unknown;
       try {
-        frame = JSON.parse(rawToText(raw)) as LanFrame;
+        frame = JSON.parse(rawToText(raw));
       } catch {
         return; // an unparseable frame never crashes the transport
       }
-      if (frame.t === "announce") {
-        socketDevice.set(ws, frame.peer.device_id);
-        peerSockets.set(frame.peer.device_id, ws);
-        handlers?.onPeerVisible(frame.peer);
+      // A parseable non-object (null, array, number) or a discriminant-less frame is
+      // dropped, never dereferenced — a malformed LAN frame must never crash (K-02, 01-F12).
+      if (frame === null || typeof frame !== "object" || Array.isArray(frame) || !("t" in frame)) {
         return;
       }
+      const kind = (frame as { t: unknown }).t;
+      if (kind === "announce") {
+        const peer = (frame as { peer?: unknown }).peer;
+        if (
+          peer === null ||
+          typeof peer !== "object" ||
+          typeof (peer as { device_id?: unknown }).device_id !== "string" ||
+          typeof (peer as { device_class?: unknown }).device_class !== "string"
+        ) {
+          return; // an unvalidated PeerInfo announce is dropped, never trusted
+        }
+        const info = peer as PeerInfo;
+        socketDevice.set(ws, info.device_id);
+        peerSockets.set(info.device_id, ws);
+        handlers?.onPeerVisible(info);
+        return;
+      }
+      if (kind !== "wire") return;
       const from = socketDevice.get(ws);
-      if (from !== undefined) handlers?.onMessage(from, frame.message);
+      if (from === undefined) return;
+      let message: ProtocolMessage;
+      try {
+        message = parseMessage((frame as { message?: unknown }).message);
+      } catch {
+        return; // a malformed wire message is dropped, never handed up (K-02)
+      }
+      handlers?.onMessage(from, message);
     });
     // 'error' is always followed by 'close' for ws — swallow so Node doesn't throw.
     ws.on("error", () => undefined);

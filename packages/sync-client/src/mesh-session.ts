@@ -80,6 +80,10 @@ export const createMeshSession = (options: {
   let connected = false;
   let resumeFrom = 0;
   let lastPushAck: number | null = null;
+  // Highest own lamport already fanned to followers while acting as hub. Cloud-
+  // independent (never the outbox checkpoint) so hub-origin fast-path survives a
+  // cloud ack (K-04, 01-F15). Window replay on join/heartbeat covers any gap.
+  let hubFanCursor = 0;
   let lastHubAliveAt = 0;
   let followerTick: TimerId | null = null;
   let lossTimer: TimerId | null = null;
@@ -413,12 +417,18 @@ export const createMeshSession = (options: {
         drainPush();
         return;
       }
-      // Acting hub: own appends fan directly to connected followers (01-F15).
-      const events = store.nextBatch(PUSH_BATCH_MAX);
+      // Acting hub: fan the hub's OWN newly-appended events to followers on the fast
+      // path (01-F15). Reads via the hub fan cursor over readOwnEvents — NEVER
+      // store.nextBatch, which pages from the cloud write-checkpoint and goes empty
+      // after a cloud ack, silently dropping hub-origin events to the ~2s heartbeat
+      // replay (K-04; the same leftover the follower drainPush already fixed).
+      const events = store.readOwnEvents(hubFanCursor).slice(0, PUSH_BATCH_MAX);
       if (events.length === 0) return;
       for (const device_id of followers.keys()) {
         send(device_id, { v: 1, kind: "event_batch", events });
       }
+      const last = events.at(-1);
+      if (last) hubFanCursor = last.lamport_seq + 1;
     },
 
     status() {
