@@ -35,6 +35,7 @@ Parent document: `../restaurant-os.md` (Part I: platform vision and settled prod
 | 22 | `22-operations-recovery.md` | Backup/DR (RPO/RTO, restore drills via the Auditor), data residency, retention/erasure, org export, vendor exit | Standards | Cloud | Pre-pilot |
 | 23 | `23-ai-context.md` | AI context engineering: the AGENTS.md router, tiered loading, enforcement map, hooks/skills/rules scaffolding | Standards | — | 0 |
 | 24 | `24-development-harness.md` | Development harness: task contract, DoD ladder, conformance matrices, loop protocol, test-authorship law, drift rails | Standards | — | 0 |
+| 25 | `25-fold-performance.md` | Decision record: incremental fold maintenance under retroactive reordering — the measured O(N²) re-fold, options, and the open ordering-authority decision | Decision | Device | 0 |
 | — | `DECISIONS.md` | Cross-cutting decision register: proposed/accepted platform decisions not yet owned by a single doc | Register | — | — |
 
 Waves are the dependency order from the concept doc §8: 0 Foundation → 1 Service → 2 Commerce+Delivery → 3 Supply+People → 4 Intelligence+Scale. A module's wave is when its first production slice ships to a dev-pilot restaurant; most modules keep growing afterward.

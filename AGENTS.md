@@ -45,6 +45,7 @@ All docs in `specs/` (`NN-name.md`). `restaurant-os.md` = product vision + seed 
 | Testing, environments, Auditor, release gates | `20` | — |
 | Any UI/UX work (budgets, role laws, components) | `21` | — |
 | Backup/DR, retention, erasure, export | `22` | — |
+| Fold performance, incremental maintenance, retroactive reordering | `25` | `01`, `19` |
 | Cross-cutting open/undecided questions | `DECISIONS.md` | — |
 | This file's governance, agent context rules | `23` | — |
 | Any build task: what "done" means, loop protocol, DoD, verify commands | `24` | `20` |
