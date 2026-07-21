@@ -424,3 +424,19 @@ Sessions are sized to 1–4 FRs (24-F4). Acceptance tests per task are authored 
 - **Deliver:** rates as integer **basis points** (1700 = 17%); `splitPaisa(total, n)` and `applyRateBps(amount, bps)` in `packages/domain` with an explicit, documented rounding policy; a property test proving parts **exactly** sum back to the total (no rounding leak) over generated inputs; a **lint rule** banning raw arithmetic on money values (18 §4 currently says "banned by convention + review" — convention is not enforcement); folds migrated to branded types so the brand actually protects the fold path.
 - **Blocks:** doc 16 (tax), doc 17 (discounts/loyalty), 02 split-bill. Any of those starting before this lands is a commandment-9 style violation of 00 §6.
 - **Backstop:** the Auditor's 01-F30 conservation check is the runtime net — it should fail loudly if a rounding leak ever reaches production.
+
+### T-01-14  Fold performance: entity-scoped recompute + no-op adoption skip
+- **Status: contracted, unbuilt.** Closes the *solved half* of the `25 §17` ablation — the skewed-clock / offline profile. The cloud-reordering profile stays open under `DEC-PERF-001` and is **out of scope here**.
+- **FRs:** no new FR. Serves the `00 §5` performance target ("sync catch-up after 8h offline with ~500 orders < 60 s on 4G"), and must **preserve** `01-N1` (replay determinism) and `01-F6` (fold correctness) exactly — this is a mechanism change with zero observable fold-state change.
+- **Files touchable:** `packages/sync-client/src/**` (implementation session); `packages/sync-client/src/__acceptance__/**` (test session only).
+- **Check:** `pnpm --filter @restos/sync-client test` + `pnpm verify:01` + root `pnpm verify`.
+- **DoD rung:** D2 (tests green + measured evidence in the final message: the `25 §17` P2 profile re-run showing O(1)/append).
+- **Contract (binding for the test session):**
+  - **(A) Skip no-op adoption.** `assignGlobalSeq` currently calls `recomputeFolds()` whenever a sidecar row is newly inserted, never reaching the fast-path guard. Adopting a sequence that cannot change canonical order must do no fold work.
+  - **(B) Entity-scoped recompute.** When a rebuild *is* required, recompute only the affected entity, not the whole ledger. Target: rebuild work independent of ledger size N.
+  - Both must hold refold-equivalence: incremental fold state === clean canonical replay, byte-for-byte, for every profile and every N.
+- **Assumptions stated (see `25 §17`):**
+  - **The entity index is itself order-dependent.** `payment.refunded` names a payment *event id*, so its entity is knowable only through an event that may not have arrived yet (parking is normal). A single insert-time-classified index is therefore **provably insufficient** — the ablation measured a real `01-F6`/`01-N1` divergence in 30–50 % of runs from exactly this. Expect a second, back-filled index for events whose entity resolves late. This is the task's main risk and its main review surface.
+  - **Entity-less events force a full rebuild.** Accepted for now: the only entity-less types with payload schemas today are `audit.*`, which are fold-inert and therefore skippable. Real branch-global types (`availability.changed`, `table.state_changed`, …) are fold-consuming but **have no payload schema in `domain` at all**, so they cannot be handled or measured yet — tracked separately.
+  - **Option C (batch per catch-up page) is deferred.** It contributes nothing to this profile; it only improves the constant on the unsolved cloud-reordering profile.
+  - A working prototype exists at `.claude/worktrees/agent-a126162be98be18de` (uncommitted). It is **reference for the implementation session only** — the test session must not read it (24 §3 step 2: tests are authored from spec + contract, never from an implementation).
