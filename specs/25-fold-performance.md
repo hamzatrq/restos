@@ -16,24 +16,50 @@ Canonical order is the tuple `(global_seq ?? +∞, device_created_at, device_id,
 
 Assigning a `global_seq` moves an event **out of the `+∞` tail and earlier** into the finite range. It therefore *always* misses the fast path. The fallback, `recomputeFolds()`, is `engine.rebuild(readAllInputs())` — it re-reads every stored event, re-parses each through Zod, re-sorts, and re-folds from scratch.
 
-Two call sites trigger it: duplicate-id ingest carrying a `global_seq`, and `assignGlobalSeq`. Because cloud fan-out is **origin-inclusive** (a device's own events come back stamped), essentially **every event a device ever appends triggers one full rebuild**.
+**Three call sites trigger it**, not two:
 
-> Cost per adopted event: **O(N)**. Cost across N events: **O(N²)** — on the ordinary cloud-sync path that runs continuously in production, not in a synthetic test.
+1. **`assignGlobalSeq`** — and this one never consults the fast path at all. `assignGlobalSeqTx` is `if (adoptGlobalSeq(...)) recomputeFolds()`, and `adoptGlobalSeq` returns true on *any* newly-inserted sidecar row, so `engine.apply()` and the `maxKey` comparison are never reached. **The rebuild is unconditional.** Because cloud fan-out is **origin-inclusive**, essentially every event a device appends triggers one full rebuild.
+2. **Duplicate-id ingest** carrying a `global_seq`.
+3. **`applyFold` on the ordinary `append`/`ingest` path** — whenever an arriving event sorts below the current tail. **This reaches O(N²) with no cloud, no `global_seq` and no WAN at all** (measured, §3 B2). A device whose clock is merely *behind* stamps every local append below the peer events already in the unsequenced tail, so every one of its appends rebuilds the whole ledger. Skew magnitude is irrelevant — the guard is a comparison, not a threshold, so **a few minutes of skew triggers it as reliably as ten years**. `01-N2` explicitly tolerates skew (health flag, "never blocks operation"), which makes this an *accepted operating state* that silently makes every local append O(N).
+
+> Cost per adopted event: **O(N)**. Cost across N events: **O(N²)** — on the ordinary cloud-sync path **and**, independently, on a purely offline device with a skewed clock.
 
 ## 3. Measured evidence
 
-Method: `openStore(":memory:")`, append N `order.created` events, then call `assignGlobalSeq` once per event (simulating origin-inclusive fan-out), timing only the adoption loop. Apple-silicon laptop, in-memory SQLite — i.e. **the most favourable possible conditions**.
+Method: `openStore({ path: ":memory:", identity })` — *not* `openStore(":memory:")`; append N `order.created` events, then call `assignGlobalSeq` once per event (simulating origin-inclusive fan-out), timing only the adoption loop. Apple-silicon laptop, in-memory SQLite, load average 1.4–2.9 — i.e. **the most favourable possible conditions**.
+
+### B1 — offline-day reconnection storm (the T5 worst case)
 
 | Ledger size (N) | Total adoption | Per event |
 |---|---|---|
-| 200 | 173 ms | 0.86 ms |
-| 400 | 618 ms | 1.55 ms |
-| 800 | 2,510 ms | 3.14 ms |
-| 1,600 | 10,573 ms | **6.61 ms** |
+| 100 | 55 ms | 0.55 ms |
+| 200 | 155 ms | 0.78 ms |
+| 500 | 1,012 ms | 2.02 ms |
+| 1,000 | 4,032 ms | 4.03 ms |
+| 2,000 | 17,497 ms | 8.75 ms |
+| **10,000** | **548,111 ms (9 min 8 s)** | **54.81 ms** |
 
-Per-event cost doubles as N doubles; total quadruples. Textbook quadratic, confirmed rather than inferred.
+Appends themselves stay flat (~0.02 ms/event) — the fast path works. **All the cost is adoption.**
 
-**Extrapolation.** A busy day ≈ 500 orders × ~10 events ≈ **5,000 events** → ~20 ms/event → **~100 s of pure CPU** just adopting sequence numbers. The rolling operational window (`01-N3`) is "current business day + configurable N days", so realistic N is **10,000+** → ~40 ms/event → **~7 minutes of CPU**. Target hardware is a 2 GB Android tablet, plausibly **5–10× slower** than the measurement rig.
+Fitted exponent between consecutive points: 1.99 → 2.12 → **2.14**. Quadratic, drifting *super*-quadratic at scale (GC pressure re-parsing a 10 k-envelope ledger). A pure-quadratic extrapolation from N=2,000 predicted 437 s; actual was 548 s — **25 % worse than quadratic**, so the earlier extrapolations in this section were conservative, not alarmist.
+
+> **All 10,000 rebuilds in this run were provable no-ops.** The assigned order was identical to the provisional order, so every rebuild produced byte-identical fold state — and ran anyway. This is direct evidence for §7 option A, and it reclassifies A: the no-op check is *absent by construction*, not mistuned. It is a ~3-line guard.
+
+### B2 — skewed clock, fully offline (no `global_seq` assigned at all)
+
+Interleaved peer ingest (stamps ≈ now) with local appends stamped 10 years in the past; control arm stamps 1 ms *after* the peer's.
+
+| N | control ms/append | **skew ms/append** | ratio |
+|---|---|---|---|
+| 250 | 0.028 | 0.985 | 35× |
+| 500 | 0.015 | 2.001 | 133× |
+| 1,000 | 0.014 | **3.896** | **289×** |
+
+Control is flat O(1) (cost *decreases* with N — JIT warmup). Skew doubles as N doubles: quadratic. Peer ingest stays cheap in both arms — **only the skewed device's own appends rebuild**, exactly as the §2 mechanism predicts. Hypothesis **confirmed**.
+
+**Extrapolation to target hardware.** The measured 548 s for T5 is on an Apple-silicon laptop; a 2 GB Android tablet is plausibly **5–10× slower** → **45–90 minutes**. Against the §11 budget of 60 s, that is **~2 orders of magnitude over**.
+
+**Caveats — both benchmarks are lower bounds.** Every event is a dependency-free `order.created`, so nothing ever parks; a realistic ledger with `order.confirmed` / `line_added` chains adds parked-list drain cost on top. The fast-path guard is `>= maxKey` over applied **∪ parked** (ties pass), slightly wider than "highest applied". B2 measured only the 10-year variant — skew magnitude and interleave ratio were not swept.
 
 > ⚠️ An earlier note in the wave-0 plan claimed ~57 s for the X8 scenario and a coverage-gate timeout. **Both readings were contaminated by concurrent load** and have been corrected: re-measured on a quiet machine the file runs ~23–24 s and the coverage gate passes. The quadratic above is the real finding; that timing was not.
 
@@ -67,7 +93,7 @@ A verified-source research pass (106 agents; sources: VLDB/OSDI/PODS/SIGMOD prim
 
 | # | Option | Effect | Effort / risk | Spec impact |
 |---|---|---|---|---|
-| **A** | **Skip no-op adoptions** — cloud order usually *matches* provisional order, so the rebuild changes nothing. Detect and skip. | Removes most rebuilds outright | Low / low | none |
+| **A** | **Skip no-op adoptions** — cloud order usually *matches* provisional order, so the rebuild changes nothing. Detect and skip. **Measured: all 10,000 rebuilds in §3 B1 were no-ops.** The check is absent by construction (§2 site 1 never reaches the guard), so this is a ~3-line addition that alone should take the 548 s reconnect storm to near-zero. Does **not** help the §3 B2 skew case, where the fold state genuinely changes. | Removes most rebuilds outright | **Low / low — do this now** | none |
 | **B** | **Entity-scoped recompute** — rebuild only the affected order (~5–50 events), not the whole ledger. The engine already has per-order projections. | O(N²) → O(N·k) | Low-med / low | none |
 | **C** | **Batch per catch-up page** — one rebuild per page instead of one per event. | Large win on catch-up specifically | Low / low | none |
 | **D** | **Keyed LWW/FWW registers** — store the deciding canonical key beside each order-sensitive field (`table_id`, `confirmed_at`). Adoption becomes an O(1) key comparison; no replay ever. | Structurally removes replay | Medium / medium | fold contract |
@@ -179,11 +205,15 @@ The original design error was conflating "what order did these happen in" with "
 
 ## 16. Worst-case budget (T5: 10,000 offline events)
 
-**Status quo.** The offline day accumulates 10,000 unsequenced events; on reconnect the cloud sequences all of them, and each adoption triggers a full rebuild. Extrapolating the §3 curve (per-event cost ∝ N; 6.61 ms/event at N=1600) gives ≈ 41 ms/event at N=10,000 → **≈ 7 minutes of pure CPU on a laptop**, and **≈ 35–70 minutes on a 2 GB tablet**. Against a 60 s budget that is roughly two orders of magnitude over.
+**Status quo — measured, not projected.** The offline day accumulates 10,000 unsequenced events; on reconnect the cloud sequences all of them and each adoption rebuilds unconditionally. §3 B1 measures **548 s (9 min 8 s) on a laptop**, → **≈ 45–90 min on a 2 GB tablet**. Against the §11 budget of 60 s: **~2 orders of magnitude over**.
+
+And that is only the reconnect path. §3 B2 shows a **fully offline** device with a skewed clock hits the same quadratic on ordinary appends — 289× slower per append at N=1,000, with no cloud involved. A branch can therefore blow the budget *without ever getting internet at all*, which is precisely the T5 scenario.
 
 **Proposed.** 10,000 fast-path applications plus a bounded number of entity-scoped recomputes at O(k≈10) — O(N) with a small constant, projected **well under one second**.
 
-> Both figures are projections. The status-quo number is being measured directly (a dedicated N=10,000 reconnection-storm benchmark); the proposed number requires the §8 Phase-1 work to exist before it can be measured. **Neither should be quoted as measured until §3's table carries them.**
+**Why the causal order closes both paths.** Adoption stops reordering (site 1 and 2 disappear). For site 3, a local append's `causal_seq` is by construction the maximum the device has seen, so it can never sort below the tail — **the skew pathology is not mitigated, it is unreachable**. What remains at site 3 is peer events arriving out of order, bounded by the delivery window rather than by ledger size, and handled at O(k) by entity-scoped recompute.
+
+> The status-quo figures are **measured** (§3). The proposed figure is a **projection** — it requires the §8 Phase-1 work to exist before it can be measured, and must not be quoted as measured until §3 carries it.
 
 ## 17. Sources
 
