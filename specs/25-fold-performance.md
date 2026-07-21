@@ -14,7 +14,7 @@
 > - **§13 makes residency strictly worse.** `rebuild()` assigns fresh accumulator Maps and is currently **the only thing that ever resets them** — removing rebuilds removes the accidental garbage collector (**F07**).
 > - **The evidence base is incomplete.** No ablation exists for what options A+B+C alone buy (**F69**), the benchmark N counted only order events while `readAllInputs()` parses *every* row (**F71**), and the "bounded by the delivery window" claim was never measured against the real transport (**F70**). *"Quadratic, therefore migrate" without "here is what three lines buys" is not a sufficient basis for a one-way-door decision.*
 >
-> **What survives unchanged:** the measured defect (§2, §3) and §7 option A — a ~3-line guard, decision-free, which the measurement shows would eliminate all 10,000 no-op rebuilds in the reconnect storm.
+> **Now also refuted by the §17 ablation:** option A alone is worthless when cloud order genuinely differs and inert on the skew profile. **A+B+C solves the offline-skew profile (O(1) per append) but leaves the cloud-reordering profile quadratic**, 2–4× over budget on target hardware. Option B is *incorrect* as naively conceived — its entity index is itself order-dependent. **So neither path is clean: the cheap fixes do not close it, and the structural alternative in §13 carries the P0 refutations above.** That is the real decision state.
 
 ---
 
@@ -107,7 +107,7 @@ A verified-source research pass (106 agents; sources: VLDB/OSDI/PODS/SIGMOD prim
 
 | # | Option | Effect | Effort / risk | Spec impact |
 |---|---|---|---|---|
-| **A** | **Skip no-op adoptions** — cloud order usually *matches* provisional order, so the rebuild changes nothing. Detect and skip. **Measured: all 10,000 rebuilds in §3 B1 were no-ops.** The check is absent by construction (§2 site 1 never reaches the guard), so this is a ~3-line addition that alone should take the 548 s reconnect storm to near-zero. Does **not** help the §3 B2 skew case, where the fold state genuinely changes. | Removes most rebuilds outright | **Low / low — do this now** | none |
+| **A** | **Skip no-op adoptions.** ~~Alone takes the 548 s reconnect storm to near-zero.~~ **REFUTED by the §17 ablation.** A is near-perfect only when cloud order *matches* provisional order — the artifact of the original fixture. When cloud order genuinely differs it is **worthless** (2,297 → 2,292 rebuilds), and on the skew profile it is **completely inert** (identical to arm 0 to the millisecond). | Only on the matching-order case | Low / low, but low value alone | none |
 | **B** | **Entity-scoped recompute** — rebuild only the affected order (~5–50 events), not the whole ledger. The engine already has per-order projections. | O(N²) → O(N·k) | Low-med / low | none |
 | **C** | **Batch per catch-up page** — one rebuild per page instead of one per event. | Large win on catch-up specifically | Low / low | none |
 | **D** | **Keyed LWW/FWW registers** — store the deciding canonical key beside each order-sensitive field (`table_id`, `confirmed_at`). Adoption becomes an O(1) key comparison; no replay ever. | Structurally removes replay | Medium / medium | fold contract |
@@ -229,6 +229,34 @@ And that is only the reconnect path. §3 B2 shows a **fully offline** device wit
 
 > The status-quo figures are **measured** (§3). The proposed figure is a **projection** — it requires the §8 Phase-1 work to exist before it can be measured, and must not be quoted as measured until §3 carries it.
 
-## 17. Sources
+## 17. The F69 ablation — measured, July 2026
+
+Four cumulative arms (0 / A / A+B / A+B+C) × profiles × N, file-backed SQLite with the shipped pragmas, realistic dependent chains, integer counters primary. Prototype preserved in the worktree `.claude/worktrees/agent-a126162be98be18de` (uncommitted).
+
+| profile | N | arm 0 | +A | +A+B | +A+B+C |
+|---|---|---|---|---|---|
+| P1 cloud order **matches** | 10,000 | 614.07 s | 1.01 s | 0.59 s | 0.06 s |
+| P1 cloud order **differs** | 10,000 | ≈7,970 s *(extrap.)* | — | 1,061 s | **25.81 s** |
+| P2 skewed offline appends | 10,000 | 123.60 s | 123.25 s | **1.35 s** | **1.34 s** |
+
+**The decision-relevant integer — P2 under A+B+C: O(1) per append.** Exactly one scoped rebuild per skewed append; `scoped_rows_read / rebuild` = **3.50 at every N**; zero full rebuilds; total work growth **2.0 per doubling (linear)** vs 4.0 for arms 0 and A. **The offline-skew profile is solved by the cheap fixes.**
+
+**Verdict: A+B+C does NOT close the problem.** P1-differ stays **quadratic in every arm** (growth ratio ≈4.0 per doubling, including ABC at 4.00/4.00). A+B+C divides the constant by ~191× but does not change the curve. At N=10,000 it is 25.8 s on the measurement laptop — inside 60 s, but only **2.3× margin**, and §3 puts target hardware at 5–10× slower: **129–258 s, a 2–4× breach.**
+
+**Cause of the residual: entity-less events.** Under A+B the leftover full rebuilds equal the entity-less event count *exactly*. Under A+B+C a single entity-less event in a page collapses that page's scope to a full rebuild. Today's instance (`audit.*`) is fold-inert and therefore skippable — but **real branch-global events are fold-consuming** (`01-F6` names the table map and availability), so for those the full rebuild is **not** removable by that trick. This is the unfixed residual.
+
+**Option B is incorrect as naively conceived, not merely slow.** Two genuine correctness failures surfaced and were fixed during the ablation, *both of which would have shipped green-on-performance and red-on-correctness*: a parked-table PK violation, and an intermittent `01-F6`/`01-N1` divergence in **30–50 % of runs** where refunds arriving before their payment were never indexed and scoped replay silently omitted them. Further, a correct index needs **two tables and a back-fill write path** (`event_entity` + `pending_refund`), because `payment.refunded` names a payment *event id* whose entity is knowable only through an event that may not have arrived yet. **The entity index is itself order-dependent — the same retroactive-reordering pathology, one level down.** Un-indexed full-scan B was also measured: still quadratic, and it does not linearise P2 at all.
+
+**Two of this document's own assumptions were refuted.**
+- **`:memory:` did not materially flatter the earlier numbers** — file-backed costs only **1.5–14 %** more. The workload is CPU-bound on Zod parsing and fold replay, not on WAL/fsync.
+- **Integer counters UNDERSTATE the harm.** The realistic fixture reaches **peak parked ≈ 2,038 (~18 % of the ledger)** where the old fixture parked *nothing*; `drain()` is O(parked²), so A+B/P1-differ/N=10,000 took **1,061 s against a 168 s parse-count extrapolation**. Wall clock degrades faster than any counter predicts.
+
+**Blocking gap found:** `availability.changed`, `shift.*`, `day.*`, `cash.drawer_opened`, `table.state_changed`, `printer.status_changed` are in the `01 §4` catalog but have **no payload schema in `packages/domain`** — `parseEvent` throws `UnknownEventTypeError` for all of them. Only 8 fold-consumed + 5 `audit.*` types exist. The branch-global stream — the case that decides the residual above — **cannot currently be measured at all**, and the ablation substituted `audit.*` as a fold-inert stand-in.
+
+**Correctness:** 152/152 on every arm, 12/12 repeated property-stress runs per arm, 18/18 on an added per-profile refold-equivalence gate across 6 arms × 3 N × 4 profiles.
+
+**Caveats.** The fixture contains no `payment.refunded`, so the `pending_refund` back-fill cost is exercised for correctness but **not timed**. The `parseEvent` counter excludes `readAllInputs`' own parsing. Load average was 2.4–6.0 on some rows; the N=10,000 runs and the full correctness sweep ran at 1.7–2.3.
+
+## 18. Sources
 
 Research pass (July 2026), verified claims only: McSherry et al., *Shared Arrangements* (PVLDB 13(10)); Budiu et al., *DBSP* (VLDB 2025); Battiston/Kathuria/Boncz, *OpenIVM* (SIGMOD 2024); Gjengset et al., *Noria* (OSDI 2018). Refuted/unverified material is deliberately excluded — see §6.
