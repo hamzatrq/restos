@@ -78,7 +78,49 @@ A second external review (July 2026) accepted the this design and then pointed o
 
 **Do not claim the target is met** until the complete path — compressed 4G transfer, batched SQLite persistence, zero-work sequence adoption, incremental projection — passes on the reference 2–3 GB Android tablet.
 
-## 7. Status
+## 7. The matrix — result
+
+Full artifact: **`plans/wave-0/merge-semantics-matrix.md`** (5 domain drafts → 4 adversarial critic lenses, 41 findings / 18 P0 → revision → synthesis; all claims verified against `registry.ts`, `states.ts`, `replay.ts`, `FOLDS.md`).
+
+**The design works.** The "still requires an ordering mechanism" list has **four entries, and only one touches a device fold**:
+
+| # | Field | Mechanism | Runs at |
+|---|---|---|---|
+| 1 | Naming *which* refund busted the `01-F29` remainder | gateway `global_seq` (DEC-SYNC-007) | cloud |
+| 2 | Naming which member of a divergent `settlement_attempt_id` is the impostor | gateway merge order + `01-F37` | cloud |
+| 3 | The compaction / snapshot boundary for a rebuild over a pruned log | `global_seq` as a **prune watermark only** | **device** |
+| 4 | Migration cutover for pre-`line_context` line events | one-off cutover boundary | device — **deletable** (no production data; make `line_context` required) |
+
+Everything else across all six folds converges with **zero ordering metadata** — no `global_seq` read, no `lamport_seq` read, no clock read. §3's "zero fold work on adoption" is met **structurally**, not by optimisation.
+
+**`01-F29`'s parenthetical "(fold-enforced)" is unimplementable as written and needs a spec correction.** The *set* predicate `Σ refunds > cap` is order-free and converges everywhere; *"which refund was later"* is definitionally a function of sequence, not of the set. No join over an unordered set produces it, and implementing it fold-side would reinstate the universal order §2 removes.
+
+### Things that look like ordering problems and are not
+
+Conflating *order* with *time*, *bucket* and *completeness* produced most of the defects the matrix corrects:
+
+| Looks like ordering | Actually needs |
+|---|---|
+| shift/day/drawer bucketing of a payment | a **carried key** |
+| `shifts.open_at`, `confirmed_at`, `day.business_date` | a **time source** (`DEC-TIME-001`) |
+| `01-F30` conservation | a **closure** mechanism (Auditor over the merged log) |
+| `orders.settled` | an **event** — a derived predicate over an append-only log cannot be both monotone and a pure function of the set |
+| duplicate shift/day open, table anchor chains | a **carried causal link** (`prev_shift_id`, `supersedes[]`) |
+| over/short, COD due | a **carried fact** |
+
+### The highest-leverage additions
+
+`order.settlement_closed` as a new `01 §4` event type gates the money, table **and** line domains at once. `payment.refunded` needs `order_id` **and** `settlement_attempt_id` (both already spec-mandated). `supersedes[]` on `order.table_assigned` is *the only thing that makes the table anchor converge at all*. `table.state_changed`, `availability.changed`, `order.merged`, `shift.*`, `cash.*`, `void/comp/discount.recorded` and `payment.split_recorded` have **no payload schema at all** — three of the four RHS terms of `01-F30` therefore evaluate to zero today.
+
+Two unstated laws the whole algebra rests on: **`settlement_attempt_id` uniqueness scope** (must be org-global, UI-minted, UUID-class — if any device mints a per-device counter, two distinct payments collapse and cash vanishes silently), and **`01-F40` slicing must be order-granular** for line events.
+
+`min(envelope.id)` is **banned as a value tiebreak**: `00 §6` pins ids to UUIDv7 whose leading 48 bits are the minting device's wall clock, so id-min is min-wall-clock wearing a disguise. Use `payloadHash` — a clock-neutral primitive to add in `domain`.
+
+### Unresolved — do not treat the matrix as complete
+
+The fix **created** one problem: entitlement-union routing (grow-only, which is what makes it monotone) contradicts `04-F17`'s privacy law once an order moves between waiter sections — either it violates the privacy rule permanently, or it is trimmed on move and stops being monotone, which is the defect it was written to remove. **Genuinely open, needs an architecture ruling.** Also open: hub-as-business-emitter has no failure story and no owner (`01-F13` can elect a *kitchen* tablet as the authority for table states, which `FOLDS.md` does not even register for that class). And two hazards are provably unfixable by any algebra — availability subset-blindness and slice-blind conflict invisibility are **missing-data** problems requiring a delivery-completeness mechanism nobody has specced.
+
+## 8. Status
 
 **No ordering design is selected.** `DEC-PERF-001` remains open, `causal_seq` is not to be implemented, and **T-01-14 is paused** — not because its work is wasted (the projection-key sidecar is needed under every candidate) but because it was scoped to an *entity* index and a back-filled workaround for a trap that a one-field schema fix removes.
 
