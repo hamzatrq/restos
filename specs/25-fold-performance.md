@@ -155,6 +155,8 @@ The ordering design must hold under **all** of the following simultaneously:
 
 **Budget:** folding the T5 worst case must complete in **< 60 s** on a 2 GB tablet.
 
+> ⚠️ **Target definition (added later, see §18).** The *contracted* figure in `00 §5` is **~500 orders after 8 h offline, < 60 s on 4G — end-to-end, transfer included**. The 10,000-event figure below is **branch-wide full-day stress**, and every measurement in this document is **fold CPU only**. Both distinctions matter when quoting these numbers.
+
 **On T4 — timezone is a non-issue for ordering, by existing rule.** `18 §4` already mandates epoch-millisecond integers in events and storage, with timezone applied only at UI edges. Epoch ms denotes an absolute instant; a device in Karachi and a cloud in another region reading the same instant produce the same integer. Mobile OSes store UTC internally, so a *misconfigured timezone* does not corrupt epoch ms — only a wrong clock does, which is T1–T3. Timezone survives as a real concern in exactly one place: the **business-day boundary** (day-close, "today's sales", the `01-N3` rolling window) must be anchored to Asia/Karachi regardless of cloud region. That is a reporting-correctness matter, tracked in §14, not an ordering matter.
 
 ## 12. The three candidate orders under that model
@@ -320,6 +322,33 @@ Then each fold declares its own merge rule instead of inheriting the comparator:
 ### Prior art
 
 Monotonic / semilattice operations converge without delivery ordering (CALM; Conway et al., *Logic and Lattices for Distributed Programming*, Bloom^L). Non-commutative operations can use a **partially ordered** operation log rather than a total one (*Pure Operation-Based CRDTs*, arXiv:1710.04469). Multi-value registers can retain concurrent values while presenting a deterministic default (Automerge conflict model). **Borrow the patterns; do not adopt a general CRDT framework** — the machinery is not the hard part, the restaurant-specific merge semantics are.
+
+### Completing the path — what the ordering fix does NOT cover
+
+A second external review (July 2026) accepted the §18 direction and then pointed out that it is **necessary but not sufficient** for the headline target. Verified against the code:
+
+**1. The budget is END-TO-END, and every measurement in this document is CPU-only.** `00 §5` reads *"sync catch-up after 8h offline with ~500 orders **< 60 s on 4G**"* — the 60 s includes **network transfer**. §3, §17 and every figure here measure fold CPU in isolation. A perfect fold fix therefore does **not** demonstrate the budget is met.
+
+**2. Target definition.** The contracted figure is **~500 orders after 8 h offline**. The **10,000-event** figure used throughout §11–§17 is *branch-wide full-day stress* — legitimate as a safety target (an order genuinely produces ~8–15 events across create/lines/confirm/kitchen/print/pay, so 1,000 orders exceeds 10,000 events), but it is **not** the contract and must be labelled as such wherever it is quoted. Note also that 10,000 is a **branch** total: `01-F39`/`01-F14` mean counter, kitchen and manager retain the full stream and may hold all of it, while waiter and rider hold scoped slices and hold far less.
+
+**3. Why §18 nonetheless dissolves the headline case.** On the normal outage — **WAN down, LAN healthy** — every device has already folded those events incrementally as they arrived over the LAN. Reconnect is then *purely* the cloud attaching delivery metadata to events the device already has. Under the current code that harmless acknowledgement of 10,000 already-known events is what detonates into quadratic replay (`device-store.ts` adoption path). With `global_seq` as a zero-fold-work delivery cursor, that cost **goes to nothing** rather than merely getting smaller. This is the single strongest argument for the §18 direction.
+
+**4. Two transport-layer bottlenecks that remain, both verified:**
+
+- **Cloud catch-up persists one event per transaction.** `cloud-session.ts:116` calls `store.ingest()` **per event**, while the LAN path uses `store.ingestBatch()` (`mesh-session.ts:260,353`). With `synchronous = FULL` (`device-store.ts:196`) that is **one fsync per event** — 10,000 fsyncs for a full catch-up. Each ~500-event page should persist and project in one transaction.
+  > ⚠️ **Do not naively wrap the loop in a transaction.** The per-event structure is load-bearing: the pull cursor advances only through a *contiguous prefix of events that actually landed*, and a `DivergentDuplicateError` must be **passed** rather than wedge the pull (`01-F9`/`01-F34`/`01-F17`). Both behaviours were previous convergence-hole fixes. Batching must preserve per-event failure granularity — or it re-opens a bug that has already been fixed once.
+- **zstd batch compression is specced but not implemented.** `01 §5` states *"JSON + zstd batch compression is sufficient at this event volume"*; `grep` finds no compression anywhere in `packages/` or `services/`. On 4G this is part of the 60 s, not an optimisation.
+
+**5. Acceptance scenarios** (these, not a single number, are what "solved" means):
+
+| scenario | expected device work |
+|---|---|
+| WAN down, LAN healthy | events already folded; reconnect = upload + dedupe + sequence adoption, **zero refolding** |
+| full-stream device wholly offline | download and project all events **exactly once**, in transactional pages |
+| waiter / rider reconnects | download **only its authorised slice** (`01-F40`) |
+| crash mid-catch-up | resume from the committed page cursor **without repeating completed projection work** |
+
+**Do not claim the target is met** until the complete path — compressed 4G transfer, batched SQLite persistence, zero-work sequence adoption, incremental projection — passes on the reference 2–3 GB Android tablet.
 
 ### Status
 
