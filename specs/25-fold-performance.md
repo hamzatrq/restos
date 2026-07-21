@@ -1,14 +1,16 @@
 # 25 — Fold Performance: Retroactive Reordering and the O(N²) Re-fold
 
-**Decision record — Draft 1, July 2026** · Parent: `00-platform-overview.md`. Owns the analysis behind how device folds (`01-F6`, `01-F34`) are maintained as the cloud assigns ordering. Written after a measured defect on the live cloud-sync path; **the structural decision in §9 is still open.**
+**Decision record — Draft 1, July 2026** · Parent: `00-platform-overview.md`. Owns the analysis behind how device folds (`01-F6`, `01-F34`) are maintained as the cloud assigns ordering. Written after a measured defect on the live cloud-sync path. **§18 is the live position; §8/§9/§13 are superseded.**
 
-> ## ⚠️ STATUS: §13's recommendation is NOT settled — read this first
+> ## ⚠️ STATUS: NO ORDERING DESIGN IS SELECTED — read §18 first
+>
+> §18 (the live position) reframes the problem: deterministic folds need **deterministic merge semantics, not a universal total order**. §8/§9 are superseded, §13 is refuted, and the D-vs-E framing was itself the wrong question. The refutations of §13 below still stand and are why it must not be implemented.
 >
 > A 74-scenario adversarial review (`plans/wave-0/fold-scenario-catalog.md`) found **multiple P0 refutations** of the clock-free causal order recommended in §13. Do not implement against §13. In particular:
 >
 > - **§13 claim 3 (causality) is provably false under partial observation.** A Lamport clock bumps only on what it *observes*; a waiter on a hub-enforced `01-F40` slice sees ~15 % of branch traffic, so its clock is **structurally and permanently deflated** — it loses races because it is *permitted to see less*, not because it acted later. Worse for the rider (`09-F2`), which never joins the branch LAN. The claim silently assumed total observation (catalog **F60**).
 > - **§12's argument for rejecting HLC rebounds on §13.** `causal_seq` is unbounded, unverifiable and forgeable: one peer event carrying `MAX_SAFE_INTEGER` makes the mandatory `max+1` unrepresentable, `append` throws, **the till stops mid-service** — and `01-F1` forbids deleting the poison, which then fans out branch-wide. That is the HLC poisoning hazard **inherited in a harsher form** (HLC drags the clock forward but keeps working) (catalog **F62**).
-> - **§16's O(N) budget rests on option B being O(k≈10). It is not.** There is **no `CREATE INDEX` anywhere in `packages/sync-client`** and `order_id` exists only inside JSON text, so scoping one entity costs a full scan + parse: O(N). And the highest-frequency rush events (`availability.changed`, `shift.*`, `cash.*`, `table.state_changed`) are **branch-global — there is no entity to scope to** (catalog **F65**).
+> - **§16's O(N) budget rests on option B being O(k≈10). It is not.** There is **no `CREATE INDEX` anywhere in `packages/sync-client`** and `order_id` exists only inside JSON text, so scoping one entity costs a full scan + parse: O(N). The rush-event half of F65 — *"branch-global, so there is no entity to scope to"* — is **itself now corrected** (see §17's correction and §18): those events are branch-wide for *delivery* but **row-keyed for projection** (`item_id`, `table_id`, `shift_id` per `FOLDS.md`). The index-cost half of F65 stands.
 > - **The migration has no sound backfill.** Rank-in-my-set is not subset-independent, so devices holding legitimately different subsets stamp *different* `causal_seq` on the same immutable event — breaking the very property §13 relies on, permanently, since `causal_seq` is never revised (catalog **F103-class**).
 > - **§13 does not fix as much as claimed.** Window replay sorts by `(device_id, lamport_seq)`, so origin-block boundaries step the key backwards and the miss count is **essentially unchanged** (catalog **F34**); park-and-drain is **identical** under both keys (**F22**); concurrent-append ties are unchanged (**F19/F20**).
 > - **§13 makes residency strictly worse.** `rebuild()` assigns fresh accumulator Maps and is currently **the only thing that ever resets them** — removing rebuilds removes the accidental garbage collector (**F07**).
@@ -120,6 +122,8 @@ A verified-source research pass (106 agents; sources: VLDB/OSDI/PODS/SIGMOD prim
 > ⚠️ **§7(E) is superseded by §11–§16.** Under the founder's stated clock threat model (every device may be arbitrarily wrong, in either direction), **HLC is the wrong instrument** — it inherits a physical-time term it cannot defend. The recommendation is now a *clock-free* causal order (§13). The framing of E's cost above is also too generous to the status quo: see §12.
 
 ## 8. Recommendation
+
+> ⚠️ **SUPERSEDED — §8 and §9 below are the July-2026 state and are retained for history only.** They recommend A+B+C then a D-vs-E choice, and §9 asserts the causal order as answering the open question. **Both are withdrawn**: §17 measured A+B+C failing the cloud-reordering profile, the STATUS banner records the P0 refutations of the causal order, and §18 reframes the problem such that the D-vs-E framing is itself the wrong question. **No ordering design is currently selected.** Read §18 for the live state.
 
 **Phase 1 — measurable, low-risk, no spec change:** implement **A + B + C** and re-run the §3 benchmark. Expectation: quadratic → roughly linear. The existing refold-equivalence property test is the correctness oracle, so the mechanism swap is gated by tests already written.
 
@@ -243,7 +247,21 @@ Four cumulative arms (0 / A / A+B / A+B+C) × profiles × N, file-backed SQLite 
 
 **Verdict: A+B+C does NOT close the problem.** P1-differ stays **quadratic in every arm** (growth ratio ≈4.0 per doubling, including ABC at 4.00/4.00). A+B+C divides the constant by ~191× but does not change the curve. At N=10,000 it is 25.8 s on the measurement laptop — inside 60 s, but only **2.3× margin**, and §3 puts target hardware at 5–10× slower: **129–258 s, a 2–4× breach.**
 
-**Cause of the residual: entity-less events.** Under A+B the leftover full rebuilds equal the entity-less event count *exactly*. Under A+B+C a single entity-less event in a page collapses that page's scope to a full rebuild. Today's instance (`audit.*`) is fold-inert and therefore skippable — but **real branch-global events are fold-consuming** (`01-F6` names the table map and availability), so for those the full rebuild is **not** removable by that trick. This is the unfixed residual.
+**Cause of the residual: entity-less events.** Under A+B the leftover full rebuilds equal the entity-less event count *exactly*. Under A+B+C a single entity-less event in a page collapses that page's scope to a full rebuild. Today's instance (`audit.*`) is fold-inert and therefore skippable.
+
+> ### ❌ CORRECTION — the generalisation from that measurement was WRONG
+>
+> This section originally concluded that *"real branch-global events are fold-consuming, so for those the full rebuild is not removable"*, and that conclusion drove the "neither path is clean" verdict. **It is false.** An external review checked `packages/sync-client/FOLDS.md` and found the supposedly entity-less events are all **row-keyed for projection**:
+>
+> | fold | state table | key |
+> |---|---|---|
+> | `availability` | `availability(item_id PK, …)` | `item_id` |
+> | `table_state` | `tables(table_id PK, …)` | `table_id` |
+> | `shift_cash` | `shifts(shift_id PK, …)` | `shift_id` |
+>
+> **Sync scope and fold scope were conflated.** These events are branch-wide for *delivery* and row-scoped for *projection* — exactly the property scoped recompute needs. The measurement itself was sound: `audit.*` genuinely is entity-less and fold-inert, and that is what was measured. The error was **extrapolating from the stand-in to the real types** — which the ablation could not test only because they still have no payload schema in `domain`.
+>
+> Consequence: **the residual that made A+B+C fail the cloud-reordering profile is probably not structural.** The correct abstraction is not an *entity* index but a **projection-key** index — an event maps to the set of keys it affects (`order:O1`, `item:I4`, `table:T2`, `shift:S8`). The missing payload schemas must be designed *before* these event families are used to argue that scoped maintenance is impossible.
 
 **Option B is incorrect as naively conceived, not merely slow.** Two genuine correctness failures surfaced and were fixed during the ablation, *both of which would have shipped green-on-performance and red-on-correctness*: a parked-table PK violation, and an intermittent `01-F6`/`01-N1` divergence in **30–50 % of runs** where refunds arriving before their payment were never indexed and scoped replay silently omitted them. Further, a correct index needs **two tables and a back-fill write path** (`event_entity` + `pending_refund`), because `payment.refunded` names a payment *event id* whose entity is knowable only through an event that may not have arrived yet. **The entity index is itself order-dependent — the same retroactive-reordering pathology, one level down.** Un-indexed full-scan B was also measured: still quadratic, and it does not linearise P2 at all.
 
@@ -257,6 +275,58 @@ Four cumulative arms (0 / A / A+B / A+B+C) × profiles × N, file-backed SQLite 
 
 **Caveats.** The fixture contains no `payment.refunded`, so the `pending_refund` back-fill cost is exercised for correctness but **not timed**. The `parseEvent` counter excludes `readAllInputs`' own parsing. Load average was 2.4–6.0 on some rows; the N=10,000 runs and the full correctness sweep ran at 1.7–2.3.
 
-## 18. Sources
+## 18. The reframing — merge semantics, not a universal order (live state)
+
+An external review (July 2026) argued this document has been solving the wrong problem, and the argument holds. **This section supersedes §8, §9 and §13 as the live position.**
+
+### The framing error
+
+`§1` and the external problem statement both assert that deterministic folds require a **total order**. **They do not.** They require *deterministic merge semantics*: operations that are commutative, state that is monotonic, or concurrency that is represented explicitly rather than silently arbitrated. `01-F34` already gestures at this ("every fold is commutative and idempotent") — the universal comparator in `replay.ts:117` then quietly does the opposite, arbitrating *everything* through one order.
+
+### The consequence we had not named
+
+**Sync metadata currently decides business outcomes.** Cloud receipt order is an artifact of *who reconnected first*. Today it determines which table assignment wins (`replay.ts:260`), which confirm/KOT timestamp anchors (`:242`, and from an untrusted device clock), and potentially which of two competing state transitions applies (`:287`). Cloud arrival order is a legitimate **delivery cursor**; it is not a reliable expression of staff intent, and it should never have been load-bearing for either.
+
+That reframing dissolves the §9 question. "Cloud authority vs stable append-time order" is a choice between two ways of arbitrating a global order — when the fix is for most projections not to need one.
+
+### The model
+
+Roles become narrow and non-overlapping:
+
+| field | sole role |
+|---|---|
+| `global_seq` | cloud delivery / catch-up cursor. **Zero fold work on adoption.** |
+| `lamport_seq` | gap-free per-origin transport + audit counter |
+| `device_created_at` | forensic hint. Not order, not business time |
+
+Plus a **projection-key sidecar**: the domain registry deterministically returns every key an event affects (`order:O1`, `item:I4`, `table:T2`, `shift:S8`), indexed in SQLite and derived from validated payloads. This is the generalisation of §17's entity index — and per §17's correction, the real branch-global events *are* row-keyed, so they fit it.
+
+Then each fold declares its own merge rule instead of inheriting the comparator:
+
+| data | merge rule |
+|---|---|
+| lines keyed by `line_id` | map/set union |
+| payments & refunds | unique attempt/event map, then sum |
+| confirmed / printed facts | monotonic boolean or set |
+| table assignment, availability | multi-value register, or a product-defined concurrent policy |
+| line workflow | predecessor-linked transition DAG; concurrent heads surface as a visible conflict |
+| timing | the separate branch/server time layer (`DEC-TIME-001`) |
+
+### Two concrete defects this exposes
+
+1. **`payment.refunded` should carry `order_id` directly**, alongside `payment_id`, validated against the parent when it arrives. Verified: `payment.recorded` *has* `order_id`; `payment.refunded` has only `payment_id` (`registry.ts:53`). That asymmetry is the entire source of the late-resolving-entity trap that made the naive index diverge in 30–50 % of runs (§17). **A one-field schema addition removes the recursive problem** that a two-table back-filled index was being designed to work around. No production data exists, so it is free now.
+2. **The parked-list drain is an independent quadratic.** `replay.ts:333` re-attempts the whole parked list on every applied event. Indexing parked events by `waiting_for` and retrying only those waiting on the newly-arrived reference removes it. §17 measured this biting hard: one arm took 1,061 s against a 168 s counter-based prediction because `drain()` is O(parked²).
+
+### Prior art
+
+Monotonic / semilattice operations converge without delivery ordering (CALM; Conway et al., *Logic and Lattices for Distributed Programming*, Bloom^L). Non-commutative operations can use a **partially ordered** operation log rather than a total one (*Pure Operation-Based CRDTs*, arXiv:1710.04469). Multi-value registers can retain concurrent values while presenting a deterministic default (Automerge conflict model). **Borrow the patterns; do not adopt a general CRDT framework** — the machinery is not the hard part, the restaurant-specific merge semantics are.
+
+### Status
+
+**No ordering design is selected.** `DEC-PERF-001` remains open, `causal_seq` is not to be implemented, and **T-01-14 is paused** — not because its work is wasted (the projection-key sidecar is needed under every candidate) but because it was scoped to an *entity* index and a back-filled workaround for a trap that a one-field schema fix removes.
+
+Next: a merge-semantics matrix for the eight implemented events plus availability/table/shift/cash — *affected keys · dependencies · merge algebra · concurrent UX · time source* — then prototype only the three hard cases (payment/refund totals, concurrent table assignment, competing line-state transitions). **The acceptance oracle changes shape too:** fold-specific convergence, not equality to one universal canonical replay.
+
+## 19. Sources
 
 Research pass (July 2026), verified claims only: McSherry et al., *Shared Arrangements* (PVLDB 13(10)); Budiu et al., *DBSP* (VLDB 2025); Battiston/Kathuria/Boncz, *OpenIVM* (SIGMOD 2024); Gjengset et al., *Noria* (OSDI 2018). Refuted/unverified material is deliberately excluded — see §6.
