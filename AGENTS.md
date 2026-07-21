@@ -7,7 +7,7 @@ Restaurant OS for Pakistani restaurants. TypeScript monorepo (planned per `specs
 **Two standing constraints every session must know (from the founder's kernel review):**
 1. **`DEC-SYNC-004` is SUPERSEDED by `DEC-SYNC-009`.** The hub must relay WAN-less devices' events to the cloud. The shipped code still enforces the old no-proxy rule, so a LAN-only device (the normal case when only the counter terminal has internet) is **cloud-stranded** — its events never reach the merged log. Launch blocker, scheduled **T-01-12**. Code/comments citing DEC-SYNC-004 describe the superseded behaviour; don't patch them piecemeal, implement T-01-12.
 2. **Money is integers-in-a-double.** Division and rates are where floats enter, and no divide/scale helper exists yet. The `DEC-MONEY-005` helpers (integer basis points, `splitPaisa`/`applyRateBps`, lint rule) must land (**T-01-13**) **before** any tax (16), discount (17) or split-bill (02) code is written.
-3. **No ordering design is selected — and folds do not need a universal total order.** `spec 25 §18` is the live position: deterministic folds need deterministic *merge semantics* (commutative ops, monotonic state, explicit concurrency), not one global order. Today the universal comparator lets **sync metadata decide business outcomes** — cloud arrival order picks the winning table assignment and the anchoring timestamp. It is a delivery cursor, not staff intent. `causal_seq` is **refuted, do not implement** (`DEC-PERF-001` open). Until this resolves: **do not add new reads of `device_created_at`** — it is a raw untrusted clock read, not time and not order. `lamport_seq` is a per-device **gap-free** transport/audit counter and must not be repurposed as a causal clock.
+3. **No ordering design is selected — and folds do not need a universal total order.** `spec 26` is the live position: deterministic folds need deterministic *merge semantics* (commutative ops, monotonic state, explicit concurrency), not one global order. Today the universal comparator lets **sync metadata decide business outcomes** — cloud arrival order picks the winning table assignment and the anchoring timestamp. It is a delivery cursor, not staff intent. `causal_seq` is **refuted, do not implement** (`DEC-PERF-001` open). Until this resolves: **do not add new reads of `device_created_at`** — it is a raw untrusted clock read, not time and not order. `lamport_seq` is a per-device **gap-free** transport/audit counter and must not be repurposed as a causal clock.
 
 ## Commandments (always binding; each is also machine-enforced — violating code fails CI regardless of what you read)
 
@@ -47,6 +47,7 @@ All docs in `specs/` (`NN-name.md`). `restaurant-os.md` = product vision + seed 
 | Any UI/UX work (budgets, role laws, components) | `21` | — |
 | Backup/DR, retention, erasure, export | `22` | — |
 | Fold performance, incremental maintenance, retroactive reordering | `25` | `01`, `19` |
+| Fold merge semantics, convergence without a total order (**live design**) | `26` | `25`, `01` |
 | Cross-cutting open/undecided questions | `DECISIONS.md` | — |
 | This file's governance, agent context rules | `23` | — |
 | Any build task: what "done" means, loop protocol, DoD, verify commands | `24` | `20` |

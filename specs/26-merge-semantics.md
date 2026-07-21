@@ -1,0 +1,85 @@
+# 26 — Merge Semantics: per-fold convergence without a universal order
+
+**Design record — Draft 1, July 2026** · Parent: `00-platform-overview.md`. Owns how device folds (`01-F6`, `01-F34`) converge **without** a universal total order. Split out of `25-fold-performance.md` (which retains the measured O(N²) defect and the refuted proposals) when that document hit the `23-F3` size cap.
+
+> **This is the live position.** `25 §8/§9/§13` are superseded and `causal_seq` is refuted — see `25`'s STATUS banner for why. Read `25 §2`, `§3` and `§17` for the measured evidence this design responds to.
+
+---
+
+## 1. The framing error
+
+An external review (July 2026) argued this document has been solving the wrong problem, and the argument holds. **This section supersedes §8, §9 and §13 as the live position.**
+
+
+`§1` and the external problem statement both assert that deterministic folds require a **total order**. **They do not.** They require *deterministic merge semantics*: operations that are commutative, state that is monotonic, or concurrency that is represented explicitly rather than silently arbitrated. `01-F34` already gestures at this ("every fold is commutative and idempotent") — the universal comparator in `replay.ts:117` then quietly does the opposite, arbitrating *everything* through one order.
+
+## 2. Sync metadata decides business outcomes
+
+**Sync metadata currently decides business outcomes.** Cloud receipt order is an artifact of *who reconnected first*. Today it determines which table assignment wins (`replay.ts:260`), which confirm/KOT timestamp anchors (`:242`, and from an untrusted device clock), and potentially which of two competing state transitions applies (`:287`). Cloud arrival order is a legitimate **delivery cursor**; it is not a reliable expression of staff intent, and it should never have been load-bearing for either.
+
+That reframing dissolves the §9 question. "Cloud authority vs stable append-time order" is a choice between two ways of arbitrating a global order — when the fix is for most projections not to need one.
+
+## 3. The model
+
+Roles become narrow and non-overlapping:
+
+| field | sole role |
+|---|---|
+| `global_seq` | cloud delivery / catch-up cursor. **Zero fold work on adoption.** |
+| `lamport_seq` | gap-free per-origin transport + audit counter |
+| `device_created_at` | forensic hint. Not order, not business time |
+
+Plus a **projection-key sidecar**: the domain registry deterministically returns every key an event affects (`order:O1`, `item:I4`, `table:T2`, `shift:S8`), indexed in SQLite and derived from validated payloads. This is the generalisation of §17's entity index — and per `25 §17`'s correction, the real branch-global events *are* row-keyed, so they fit it.
+
+Then each fold declares its own merge rule instead of inheriting the comparator:
+
+| data | merge rule |
+|---|---|
+| lines keyed by `line_id` | map/set union |
+| payments & refunds | unique attempt/event map, then sum |
+| confirmed / printed facts | monotonic boolean or set |
+| table assignment, availability | multi-value register, or a product-defined concurrent policy |
+| line workflow | predecessor-linked transition DAG; concurrent heads surface as a visible conflict |
+| timing | the separate branch/server time layer (`DEC-TIME-001`) |
+
+## 4. Two concrete defects this exposes
+
+1. **`payment.refunded` should carry `order_id` directly**, alongside `payment_id`, validated against the parent when it arrives. Verified: `payment.recorded` *has* `order_id`; `payment.refunded` has only `payment_id` (`registry.ts:53`). That asymmetry is the entire source of the late-resolving-entity trap that made the naive index diverge in 30–50 % of runs (`25 §17`). **A one-field schema addition removes the recursive problem** that a two-table back-filled index was being designed to work around. No production data exists, so it is free now.
+2. **The parked-list drain is an independent quadratic.** `replay.ts:333` re-attempts the whole parked list on every applied event. Indexing parked events by `waiting_for` and retrying only those waiting on the newly-arrived reference removes it. §17 measured this biting hard: one arm took 1,061 s against a 168 s counter-based prediction because `drain()` is O(parked²).
+
+## 5. Prior art
+
+Monotonic / semilattice operations converge without delivery ordering (CALM; Conway et al., *Logic and Lattices for Distributed Programming*, Bloom^L). Non-commutative operations can use a **partially ordered** operation log rather than a total one (*Pure Operation-Based CRDTs*, arXiv:1710.04469). Multi-value registers can retain concurrent values while presenting a deterministic default (Automerge conflict model). **Borrow the patterns; do not adopt a general CRDT framework** — the machinery is not the hard part, the restaurant-specific merge semantics are.
+
+## 6. Completing the path — what the ordering fix does NOT cover
+
+A second external review (July 2026) accepted the this design and then pointed out that it is **necessary but not sufficient** for the headline target. Verified against the code:
+
+**1. The budget is END-TO-END, and every measurement in this document is CPU-only.** `00 §5` reads *"sync catch-up after 8h offline with ~500 orders **< 60 s on 4G**"* — the 60 s includes **network transfer**. `25 §3`, `25 §17` and every figure here measure fold CPU in isolation. A perfect fold fix therefore does **not** demonstrate the budget is met.
+
+**2. Target definition.** The contracted figure is **~500 orders after 8 h offline**. The **10,000-event** figure used throughout `25 §11–§17` is *branch-wide full-day stress* — legitimate as a safety target (an order genuinely produces ~8–15 events across create/lines/confirm/kitchen/print/pay, so 1,000 orders exceeds 10,000 events), but it is **not** the contract and must be labelled as such wherever it is quoted. Note also that 10,000 is a **branch** total: `01-F39`/`01-F14` mean counter, kitchen and manager retain the full stream and may hold all of it, while waiter and rider hold scoped slices and hold far less.
+
+**3. Why §18 nonetheless dissolves the headline case.** On the normal outage — **WAN down, LAN healthy** — every device has already folded those events incrementally as they arrived over the LAN. Reconnect is then *purely* the cloud attaching delivery metadata to events the device already has. Under the current code that harmless acknowledgement of 10,000 already-known events is what detonates into quadratic replay (`device-store.ts` adoption path). With `global_seq` as a zero-fold-work delivery cursor, that cost **goes to nothing** rather than merely getting smaller. This is the single strongest argument for the this design.
+
+**4. Two transport-layer bottlenecks that remain, both verified:**
+
+- **Cloud catch-up persists one event per transaction.** `cloud-session.ts:116` calls `store.ingest()` **per event**, while the LAN path uses `store.ingestBatch()` (`mesh-session.ts:260,353`). With `synchronous = FULL` (`device-store.ts:196`) that is **one fsync per event** — 10,000 fsyncs for a full catch-up. Each ~500-event page should persist and project in one transaction.
+  > ⚠️ **Do not naively wrap the loop in a transaction.** The per-event structure is load-bearing: the pull cursor advances only through a *contiguous prefix of events that actually landed*, and a `DivergentDuplicateError` must be **passed** rather than wedge the pull (`01-F9`/`01-F34`/`01-F17`). Both behaviours were previous convergence-hole fixes. Batching must preserve per-event failure granularity — or it re-opens a bug that has already been fixed once.
+- **zstd batch compression is specced but not implemented.** `01 §5` states *"JSON + zstd batch compression is sufficient at this event volume"*; `grep` finds no compression anywhere in `packages/` or `services/`. On 4G this is part of the 60 s, not an optimisation.
+
+**5. Acceptance scenarios** (these, not a single number, are what "solved" means):
+
+| scenario | expected device work |
+|---|---|
+| WAN down, LAN healthy | events already folded; reconnect = upload + dedupe + sequence adoption, **zero refolding** |
+| full-stream device wholly offline | download and project all events **exactly once**, in transactional pages |
+| waiter / rider reconnects | download **only its authorised slice** (`01-F40`) |
+| crash mid-catch-up | resume from the committed page cursor **without repeating completed projection work** |
+
+**Do not claim the target is met** until the complete path — compressed 4G transfer, batched SQLite persistence, zero-work sequence adoption, incremental projection — passes on the reference 2–3 GB Android tablet.
+
+## 7. Status
+
+**No ordering design is selected.** `DEC-PERF-001` remains open, `causal_seq` is not to be implemented, and **T-01-14 is paused** — not because its work is wasted (the projection-key sidecar is needed under every candidate) but because it was scoped to an *entity* index and a back-filled workaround for a trap that a one-field schema fix removes.
+
+Next: a merge-semantics matrix for the eight implemented events plus availability/table/shift/cash — *affected keys · dependencies · merge algebra · concurrent UX · time source* — then prototype only the three hard cases (payment/refund totals, concurrent table assignment, competing line-state transitions). **The acceptance oracle changes shape too:** fold-specific convergence, not equality to one universal canonical replay.
