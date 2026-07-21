@@ -2,6 +2,20 @@
 
 **Decision record — Draft 1, July 2026** · Parent: `00-platform-overview.md`. Owns the analysis behind how device folds (`01-F6`, `01-F34`) are maintained as the cloud assigns ordering. Written after a measured defect on the live cloud-sync path; **the structural decision in §9 is still open.**
 
+> ## ⚠️ STATUS: §13's recommendation is NOT settled — read this first
+>
+> A 74-scenario adversarial review (`plans/wave-0/fold-scenario-catalog.md`) found **multiple P0 refutations** of the clock-free causal order recommended in §13. Do not implement against §13. In particular:
+>
+> - **§13 claim 3 (causality) is provably false under partial observation.** A Lamport clock bumps only on what it *observes*; a waiter on a hub-enforced `01-F40` slice sees ~15 % of branch traffic, so its clock is **structurally and permanently deflated** — it loses races because it is *permitted to see less*, not because it acted later. Worse for the rider (`09-F2`), which never joins the branch LAN. The claim silently assumed total observation (catalog **F60**).
+> - **§12's argument for rejecting HLC rebounds on §13.** `causal_seq` is unbounded, unverifiable and forgeable: one peer event carrying `MAX_SAFE_INTEGER` makes the mandatory `max+1` unrepresentable, `append` throws, **the till stops mid-service** — and `01-F1` forbids deleting the poison, which then fans out branch-wide. That is the HLC poisoning hazard **inherited in a harsher form** (HLC drags the clock forward but keeps working) (catalog **F62**).
+> - **§16's O(N) budget rests on option B being O(k≈10). It is not.** There is **no `CREATE INDEX` anywhere in `packages/sync-client`** and `order_id` exists only inside JSON text, so scoping one entity costs a full scan + parse: O(N). And the highest-frequency rush events (`availability.changed`, `shift.*`, `cash.*`, `table.state_changed`) are **branch-global — there is no entity to scope to** (catalog **F65**).
+> - **The migration has no sound backfill.** Rank-in-my-set is not subset-independent, so devices holding legitimately different subsets stamp *different* `causal_seq` on the same immutable event — breaking the very property §13 relies on, permanently, since `causal_seq` is never revised (catalog **F103-class**).
+> - **§13 does not fix as much as claimed.** Window replay sorts by `(device_id, lamport_seq)`, so origin-block boundaries step the key backwards and the miss count is **essentially unchanged** (catalog **F34**); park-and-drain is **identical** under both keys (**F22**); concurrent-append ties are unchanged (**F19/F20**).
+> - **§13 makes residency strictly worse.** `rebuild()` assigns fresh accumulator Maps and is currently **the only thing that ever resets them** — removing rebuilds removes the accidental garbage collector (**F07**).
+> - **The evidence base is incomplete.** No ablation exists for what options A+B+C alone buy (**F69**), the benchmark N counted only order events while `readAllInputs()` parses *every* row (**F71**), and the "bounded by the delivery window" claim was never measured against the real transport (**F70**). *"Quadratic, therefore migrate" without "here is what three lines buys" is not a sufficient basis for a one-way-door decision.*
+>
+> **What survives unchanged:** the measured defect (§2, §3) and §7 option A — a ~3-line guard, decision-free, which the measurement shows would eliminate all 10,000 no-op rebuilds in the reconnect storm.
+
 ---
 
 ## 1. The question
