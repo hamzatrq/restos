@@ -75,7 +75,9 @@ A verified-source research pass (106 agents; sources: VLDB/OSDI/PODS/SIGMOD prim
 | **F** | **Snapshots/checkpoints** — periodic fold snapshots so replay starts from the last snapshot. | Bounds cold-start replay only | Medium / low | none |
 | **G** | ~~General IVM engine (DBSP/Materialize)~~ | **Not recommended** — see §5 | — | — |
 
-**On (E).** This is what the research points at without having covered it. Devices already agree on a deterministic provisional order; an HLC makes that order *permanent* and *causally sound*, so no device ever has to re-decide. Cost: `01-N2` already declares device clocks untrusted (skew > 5 min raises a health flag but never blocks) — an HLC bounds skew's effect via causality tracking, but ordering would no longer be arbitrated by a trusted central clock. That is a genuine architectural trade, not a refactor.
+**On (E).** This is what the research points at without having covered it. Devices already agree on a deterministic provisional order; an HLC makes that order *permanent* and *causally sound*, so no device ever has to re-decide. Cost: `01-N2` already declares device clocks untrusted (skew > 5 min raises a health flag but never blocks) — an HLC bounds skew's effect via causality tracking, but ordering would no longer be arbitrated by a trusted central clock.
+
+> ⚠️ **§7(E) is superseded by §11–§16.** Under the founder's stated clock threat model (every device may be arbitrarily wrong, in either direction), **HLC is the wrong instrument** — it inherits a physical-time term it cannot defend. The recommendation is now a *clock-free* causal order (§13). The framing of E's cost above is also too generous to the status quo: see §12.
 
 ## 8. Recommendation
 
@@ -87,8 +89,9 @@ Phase 1 does not foreclose either Phase 2 path.
 
 ## 9. Open decisions (founder)
 
-1. **Does the cloud remain the ordering authority?** Keeping cloud-assigned `global_seq` authoritative (status quo, + option D) vs moving to a stable append-time order (option E). This is the load-bearing call — it changes `01-F34`'s tiebreak and `01-F18`'s LWW-by-`server_received_at`.
-2. **Is a second, narrow research pass warranted** on the three uncovered areas (CRDT registers, snapshotting, HLC vs central sequencer) before deciding (1)?
+1. **Does the cloud remain the ordering authority?** Keeping cloud-assigned `global_seq` authoritative (status quo, + option D) vs moving to a stable append-time order. **§11–§16 answer this: no.** Under the founder's clock threat model the recommendation is a clock-free causal order (`causal_seq`, `device_id`) with `global_seq` demoted to a delivery cursor. `01-F34`'s tiebreak is rewritten; `01-F18` is **unaffected** (cloud-plane, server time trustworthy). Awaiting founder ratification — tracked as `DEC-PERF-001`.
+2. **The time layer** (§14) — branch-consensus time anchored on the hub, provisional-until-reconciled absolute stamps, `01-N2` un-deferred. Separable from (1) and needed under **any** ordering choice. Tracked as `DEC-TIME-001`.
+3. **Is a second, narrow research pass warranted** on the remaining uncovered areas (CRDT registers, snapshotting)? §11–§16 close the HLC/stable-order question on first-principles grounds, so that third area no longer needs a pass.
 
 ## 10. Tripwires
 
@@ -96,6 +99,92 @@ Phase 1 does not foreclose either Phase 2 path.
 - Re-run the §3 benchmark after each phase; a regression in the per-event curve is a release blocker, not a note.
 - Do not benchmark on a loaded machine (see the §3 warning).
 
-## 11. Sources
+## 11. Clock threat model (founder-stated, July 2026)
+
+The ordering design must hold under **all** of the following simultaneously:
+
+- **T1** A device's clock may be wrong by *years*, in **either** direction (10 years behind; 3 years ahead).
+- **T2** Wrongness is not a smooth offset — a device may read `1 Jun 2029 00:00` while true time is `21 Jul 2026 18:43`. Arbitrary, not skew.
+- **T3** **Every** device in a branch may be wrong, simultaneously and differently. There is no "majority of good clocks" to appeal to.
+- **T4** The cloud runs in a different timezone from the restaurant.
+- **T5** The branch may be fully offline for a whole business day — **~1,000 orders ≈ 10,000 events** with no `global_seq` assigned to any of them.
+
+**Budget:** folding the T5 worst case must complete in **< 60 s** on a 2 GB tablet.
+
+**On T4 — timezone is a non-issue for ordering, by existing rule.** `18 §4` already mandates epoch-millisecond integers in events and storage, with timezone applied only at UI edges. Epoch ms denotes an absolute instant; a device in Karachi and a cloud in another region reading the same instant produce the same integer. Mobile OSes store UTC internally, so a *misconfigured timezone* does not corrupt epoch ms — only a wrong clock does, which is T1–T3. Timezone survives as a real concern in exactly one place: the **business-day boundary** (day-close, "today's sales", the `01-N3` rolling window) must be anchored to Asia/Karachi regardless of cloud region. That is a reporting-correctness matter, tracked in §14, not an ordering matter.
+
+## 12. The three candidate orders under that model
+
+| | **Status quo** — cloud `global_seq`, `device_created_at` tiebreak | **HLC** | **Pure causal (Lamport)** |
+|---|---|---|---|
+| Device 10 y **behind** | **Breaks.** Sorts to the front of the unsequenced tail forever; the raw clock is re-read every event, so it never heals | Self-heals: `l` jumps forward on first contact and is persisted | **Immune** |
+| Device 3 y **ahead** | **Breaks** | **Poisons the org.** `l = max(...)` is monotone, so a fast clock drags every device to 2029 and it can never come back | **Immune** |
+| **All** devices wrong (T3) | **Breaks** | **Breaks** — max of wrong values is still wrong; there is no good clock to heal against | **Immune** |
+| Arbitrary wrongness (T2) | Breaks | Breaks | **Immune** |
+| Timezone (T4) | non-issue (epoch ms) | non-issue | non-issue |
+| Order **stable**? | **No** — revised on cloud ack. This is the O(N²) source | Yes | Yes |
+| Offline day, 10 k events (T5) | **Reconnection storm** — see §16 | Fine | Fine |
+| Requires cloud to order? | **Yes** | No | No |
+| Order carries wall-clock meaning | Approximate, via cloud arrival | Approximate, via device clocks | **None** — by design |
+
+**The status-quo column is worse than §7 implied.** `global_seq` is trusted and is key #1 — but every event spends time in the unsequenced tail, and folds run *continuously* against that tail using `device_created_at` — a raw, untrusted, never-healing clock read — as the deciding key (`packages/sync-client/src/folds/replay.ts:121`). The trusted-order property therefore holds only **retroactively**. We are paying quadratic cost to retroactively repair an order that untrusted clocks got wrong in the first place.
+
+**HLC fails T3 specifically.** HLC's guarantee is "tracks physical time *provided* some clock is roughly right." T3 removes that premise. What remains is a monotone counter plus an unbounded poisoning hazard from the fastest clock in the fleet — strictly worse than a counter with no physical term at all.
+
+## 13. Recommendation — clock-free causal order
+
+Order events by
+
+> **`key(e) = (causal_seq, device_id)`**
+
+where `causal_seq` is a **true Lamport clock**: `causal_seq = max(all causal_seq observed) + 1`, bumped on local append **and on receipt of any peer or cloud event**, persisted with the event, never revised.
+
+**Why this is correct rather than merely better.** Four properties, each provable and none dependent on a clock:
+
+1. **Total order.** `causal_seq` strictly increases per device, so it is unique within a device; `device_id` is unique across devices. The pair therefore has no ties — a total order on any event set, with no third term needed.
+2. **Convergence.** The key is a pure function of the event's own immutable fields. Every device sorting the same set produces the same sequence, with no coordination and no authority. (`01-N1` holds by construction.)
+3. **Causality.** By Lamport's theorem, if A happened-before B then `causal_seq(A) < causal_seq(B)`. Bumping on receive is what carries causality *across* devices — this is exactly what today's per-device counter does not do.
+4. **Clock-independence.** There is **no physical-time term in the key.** A device 10 years off, 3 years ahead, or reading a hand-typed 2029 is bit-for-bit as correct as one with perfect NTP. T1–T3 are not mitigated — they are rendered structurally incapable of affecting order.
+
+**Why it dissolves the performance problem.** A locally appended event's `causal_seq` is by definition greater than every key that device has observed — so it is always ≥ the highest applied key, and **always hits the incremental fast path**. `global_seq` no longer participates in ordering, so adoption stops triggering rebuilds. The offline day (T5) never sequences anything at all, so the reconnection storm has nothing to storm about.
+
+The only residual out-of-order insert is **LAN delivery reordering** — a peer event arriving after a concurrent event that sorts above it. That is bounded by the delivery window, *not* by ledger size, and combined with entity-scoped recompute (§7 option B) costs O(k) where k ≈ events-per-order ≈ 10. Total work for T5 is O(N) with a small constant. See §16.
+
+**`causal_seq` must be a NEW envelope field — it cannot reuse `lamport_seq`.** `01-F3` requires `lamport_seq` to be per-device **gap-free**, and the gateway's per-origin contiguity tracking, the push watermark/ack (`01-F8`), the outbox-never-wedges rule (`DEC-SYNC-005`) and the Auditor's gap check all depend on that. A causal clock *jumps* on receive and is therefore inherently gappy. The two roles are mutually exclusive; both are needed, side by side.
+
+## 14. The time layer — separate from the ordering layer
+
+The original design error was conflating "what order did these happen in" with "what time did they happen at." §13 answers the first and deliberately answers *nothing* about the second. The second needs its own mechanism:
+
+- **Durations need a consistent clock, not a correct one.** Kitchen age and ETA (doc 03) are *differences* — `now − kot_at` — and a uniform offset cancels in a difference. So a branch whose clocks all agree is sufficient for every duration in the product, even if that shared time is collectively wrong.
+- **Branch-consensus time.** The elected hub (`01-F13`) is the branch time authority; devices carry an offset to hub time and stamp durations in it. This composes with `DEC-SYNC-009`: the hub is *also* the branch's WAN uplink, so in the common deployment the hub is the device that has internet — hence real NTP time. **Branch time is therefore genuinely correct in the normal case and merely self-consistent in the fully-offline case**, which is exactly the guarantee each case needs.
+- **Absolute business timestamps** — tax and fiscal instants (doc 16), audit chronology (`01-F5`), the day boundary — use `server_received_at` when available, and are stamped in branch time and **marked provisional** when offline, reconciled at contact. `16-N3` already anticipates precisely this ("skew > 5 min is flagged (01-N2) and `server_received_at` is stored alongside for reconciliation").
+- **`device_created_at` is demoted** to an untrusted display/forensic hint. It leaves the ordering key entirely.
+- **Live defect to fix regardless of this decision:** `replay.ts:247,256` set `confirmed_at` and `kot_at` from raw `env.device_created_at`, so a wrong clock writes wrong values straight into timing read models that doc 03 consumes. No ordering scheme repairs this — it is a time-layer bug.
+- **`01-N2` is specced but unimplemented** (no skew detection exists in `packages/` or `services/`) and is deferred out of Wave 0 (`conformance/wave-0-scope.yml:75`). That deferral should be revisited: it is the detection half of this layer.
+- **Day boundary** anchored to Asia/Karachi irrespective of cloud region (T4).
+
+## 15. Blast radius
+
+| Change | Impact |
+|---|---|
+| New `causal_seq` envelope field, bumped on append **and receive** | `01-F3` amendment; envelope schema; append + ingest paths |
+| Ordering key → `(causal_seq, device_id)` | `replay.ts:117-123`; `01-F34` tiebreak rewritten |
+| `global_seq` demoted to **delivery/catch-up cursor** + cloud storage order | Retains its transport role; loses its ordering role |
+| `lamport_seq` | **Unchanged** — keeps its gap-free transport/audit role |
+| `device_created_at` | Removed from ordering key; retained as untrusted hint |
+| `01-F18` catalog/price LWW by `server_received_at` | **Unchanged.** Catalog editing is a cloud-plane back-office action (`14-F6`) where server time *is* trustworthy and there is no offline requirement — the two-plane law (`18 §6`) lets the planes order by different rules. This is a materially narrower blast radius than §7(E) claimed |
+
+**Timing.** Wave 0 has no production data and no migration to write. This change is close to free now and expensive after the first pilot ships — which is itself an argument for deciding it now rather than after Phase 1.
+
+## 16. Worst-case budget (T5: 10,000 offline events)
+
+**Status quo.** The offline day accumulates 10,000 unsequenced events; on reconnect the cloud sequences all of them, and each adoption triggers a full rebuild. Extrapolating the §3 curve (per-event cost ∝ N; 6.61 ms/event at N=1600) gives ≈ 41 ms/event at N=10,000 → **≈ 7 minutes of pure CPU on a laptop**, and **≈ 35–70 minutes on a 2 GB tablet**. Against a 60 s budget that is roughly two orders of magnitude over.
+
+**Proposed.** 10,000 fast-path applications plus a bounded number of entity-scoped recomputes at O(k≈10) — O(N) with a small constant, projected **well under one second**.
+
+> Both figures are projections. The status-quo number is being measured directly (a dedicated N=10,000 reconnection-storm benchmark); the proposed number requires the §8 Phase-1 work to exist before it can be measured. **Neither should be quoted as measured until §3's table carries them.**
+
+## 17. Sources
 
 Research pass (July 2026), verified claims only: McSherry et al., *Shared Arrangements* (PVLDB 13(10)); Budiu et al., *DBSP* (VLDB 2025); Battiston/Kathuria/Boncz, *OpenIVM* (SIGMOD 2024); Gjengset et al., *Noria* (OSDI 2018). Refuted/unverified material is deliberately excluded — see §6.
