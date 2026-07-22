@@ -12,8 +12,9 @@ rows:
       - "packages/sync-client/src/__acceptance__/audit-store.test.ts#01-F5/01-F2: the chain HEAD is committed atomically with the durable ledger row — a second handle on the same file sees both"
       - "packages/sync-client/src/__acceptance__/crash-resume.test.ts#01-F2/20 §2.6: every event confirmed before an abrupt abandon survives reopen, gap-free"
       - "packages/sync-client/src/__acceptance__/crash-resume.test.ts#01-F2/01-F3/20 §2.6: a seeded run of append/ack cycles across abrupt reopens never loses a confirmed event nor leaves a gap"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F2/01-F6: after abrupt abandon, reopen yields state tables ≡ pre-crash tables ≡ refold()"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F2/01-F6: after abrupt abandon, reopen yields state tables ≡ pre-crash tables"
       - "packages/sync-client/src/__acceptance__/ingest-batch.test.ts#01-F2: a valid peer batch lands fully — counts {appended, deduped, rejected} and is visible to an independent handle before return"
+      - "packages/sync-client/src/__acceptance__/merge-convergence.test.ts#01-F2/01-F6: after abrupt handle abandon, reopen yields a byte-identical projection (no refold oracle — the projection itself is compared)"
       - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X4/01-F2: the hub's held KOT job crashes before recording; reopen survives every confirmed event gap-free with tables ≡ refold(), no kot.printed for the held order; re-issue records once and the mesh reconverges to X1 identity"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F2: append returns the confirmed envelope — store-assigned gap-free lamport, null server_received_at, fields preserved"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F2/20 §2.6: at append return the event is visible to an independent handle on the same file — persisted, not buffered"
@@ -39,6 +40,7 @@ rows:
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34/01-F3: ingest-with-global_seq ≡ ingest-then-assignGlobalSeq — byte-identical tables"
       - "packages/sync-client/src/__acceptance__/ingest-batch.test.ts#01-F3/18 §4: no lamport assignment and no outbox rows — origin lamport_seq preserved; queue_depth, own_high_water and nextBatch untouched"
       - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F3: lamport_seq starts at 0 and increments gap-free across appends"
+      - "packages/sync-client/src/__acceptance__/merge-invariance.test.ts#01-F34/01-F3: assigning arbitrary global_seq values to every event changes NOTHING — the full projection (time columns included) is bit-identical across the adoption boundary"
       - "packages/sync-client/src/__acceptance__/mesh-review.test.ts#01-F3/01-F8: after S3-style split-brain traffic every device holds each origin's lamports exactly 0..max, gap-free, ascending in ledger-read order"
       - "packages/sync-client/src/__acceptance__/properties.test.ts#01-F3/01-F8: for any interleaving of appends and legal acks, lamport stays gap-free and the unacked set matches the checkpoint model"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F3: readOwnEvents(fromLamport) is inclusive and stays in lamport order"
@@ -85,27 +87,31 @@ rows:
       - "packages/sync-client/src/__acceptance__/audit-store.test.ts#01-F5/01-F2: the chain HEAD is committed atomically with the durable ledger row — a second handle on the same file sees both"
       - "packages/sync-client/src/__acceptance__/audit-store.test.ts#01-F5: append of an audit event whose payload already carries prev_audit_hash throws and persists nothing — HEAD unmoved"
       - "packages/sync-client/src/__acceptance__/audit-store.test.ts#01-F5/01-F8: identical crash-retry is a no-op and divergent content throws — HEAD unmoved in both cases"
-      - "packages/sync-client/src/__acceptance__/audit-store.test.ts#01-F5/01-F6: interleaving audit.* appends leaves open_orders/kitchen_queue/parked byte-identical, and refold() agrees"
+      - "packages/sync-client/src/__acceptance__/audit-store.test.ts#01-F5/01-F6: interleaving audit.* appends leaves open_orders/kitchen_queue/parked byte-identical"
       - "packages/sync-client/src/__acceptance__/audit-store.test.ts#01-F5: an ingested peer audit event keeps the prev_audit_hash its origin set and never touches this device's chain HEAD"
       - "packages/sync-client/src/__acceptance__/audit1-regression.test.ts#01-F5: an audit.login carrying note:undefined leaves the device's readOwnEvents() chain verifiable after the JSON round-trip"
   - fr: 01-F6
     status: green
     tests:
-      - "packages/sync-client/src/__acceptance__/audit-store.test.ts#01-F5/01-F6: interleaving audit.* appends leaves open_orders/kitchen_queue/parked byte-identical, and refold() agrees"
-      - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F6/01-F34: a parked event's envelope_json is byte-identical before and after refold + reopen, even with JSON-omitted payload values"
+      - "packages/sync-client/src/__acceptance__/audit-store.test.ts#01-F5/01-F6: interleaving audit.* appends leaves open_orders/kitchen_queue/parked byte-identical"
+      - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F6/01-F34: a parked event's envelope_json is byte-identical across reopen, even with JSON-omitted payload values"
       - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F6/01-F34: folds' canonicalJson IS the domain serializer, and both mirror JSON.stringify on omitted values"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: order.created materializes a row with FOLDS.md defaults and empty canonical json_lines"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: optional order_type/table_id on order.created land in the row (additive under schema_version 1, 00 §6)"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: a second order.created for the same order_id is a no-op — canonically-first wins"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: confirmed_at is the device_created_at of the canonically-first confirm; later confirms are no-ops"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: a duplicate line_id keeps the canonically-first line"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: no queue row exists before a canonically-applied order.confirmed"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: confirm creates the row — confirm_at from the first confirm, channel from order.created, age_basis defaults to confirm_at"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: age_basis moves to the canonically-first kot.printed when one exists"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F2/01-F6: after abrupt abandon, reopen yields state tables ≡ pre-crash tables ≡ refold()"
-      - "packages/sync-client/src/__acceptance__/folds-properties.test.ts#01-F6: after any delivery sequence, refold() reproduces the incrementally-maintained tables exactly — before and after cloud global_seq assignment (01-F34)"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: order.created materializes a row with the T-01-15 defaults and empty canonical json_lines"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: optional order_type/table_id on order.created land in the row — the birth table is the assignment DAG's root head (additive under schema_version 1, 00 §6)"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6/01-N1: with two confirms the anchor is delivery-order independent and its value is one of the delivered stamps"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: no queue row exists before the confirmed fact holds"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: confirm creates the row — confirm_at from the anchor confirm, channel from order.created, age_basis = the confirm anchor"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F2/01-F6: after abrupt abandon, reopen yields state tables ≡ pre-crash tables"
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F6: lines_ready counts picked_up and delivered lines"
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F6: json_lines keys sort by UTF-16 code unit — an astral-plane line_id precedes U+FF5E"
+      - "packages/sync-client/src/__acceptance__/merge-convergence.test.ts#01-F2/01-F6: after abrupt handle abandon, reopen yields a byte-identical projection (no refold oracle — the projection itself is compared)"
+      - "packages/sync-client/src/__acceptance__/merge-convergence.test.ts#01-F6: a single confirm stamps confirmed_at/confirm_at from its own device_created_at (value law unchanged; rank law is clock-free)"
+      - "packages/sync-client/src/__acceptance__/merge-convergence.test.ts#01-F6/01-N1: with two confirms the anchor is delivery-order independent, and its value is one of the delivered confirms' stamps"
+      - "packages/sync-client/src/__acceptance__/merge-convergence.test.ts#01-F6: a kitchen_queue row exists iff the confirmed fact holds — channel carried from order.created"
+      - "packages/sync-client/src/__acceptance__/merge-workcounter.test.ts#01-F6: foldStats() exposes { full_rebuilds, scoped_rebuilds, events_folded } and counts real fold work on delivery"
+      - "packages/sync-client/src/__acceptance__/merge-workcounter.test.ts#01-F6/00 §5: one arriving payment folds the same events_folded on a 40-order ledger as on a 160-order ledger"
+      - "packages/sync-client/src/__acceptance__/merge-workcounter.test.ts#01-F6/00 §5: one arriving line edge folds the same events_folded on a 40-order ledger as on a 160-order ledger"
+      - "packages/sync-client/src/__acceptance__/merge-workcounter.test.ts#01-F10/01-F6: draining one arrived key does work independent of the UNRELATED parked population (5 vs 50 orphans)"
   - fr: 01-F7
     status: unmapped
   - fr: 01-F8
@@ -131,6 +137,8 @@ rows:
       - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F8/19 §5: advanceTo rejects NaN, negative, and fractional watermarks — the checkpoint never silently regresses"
       - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F8: advanceTo on an empty store throws AckBeyondAppendedError for any watermark"
       - "packages/sync-client/src/__acceptance__/lamport-outbox.test.ts#01-F8: acked events remain readable — the events table is the ledger copy, not a delivery buffer"
+      - "packages/sync-client/src/__acceptance__/merge-convergence.test.ts#01-F34/01-F8: the same set via per-event ingest, via ingestBatch chunks, and with own events appended before vs after peers, projects byte-identically"
+      - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F31/01-F8: the ingestBatch seam collapses the same intent identically to per-event ingest"
       - "packages/sync-client/src/__acceptance__/mesh-review.test.ts#01-F8: a follower that pushed lamports 0..4 disconnects and re-hellos — hello_ack.resume_from === 5 (highest contiguously held + 1)"
       - "packages/sync-client/src/__acceptance__/mesh-review.test.ts#01-F3/01-F8: after S3-style split-brain traffic every device holds each origin's lamports exactly 0..max, gap-free, ascending in ledger-read order"
       - "packages/sync-client/src/__acceptance__/mesh-scenarios.test.ts#S3/01-F8/01-F14: each side elects its own hub and propagates internally; heal → one hub and every ledger = the exact union, once per id, per-origin lamport order intact"
@@ -178,10 +186,15 @@ rows:
     status: green
     tests:
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F10: a child before its parent parks — no state effect — then drains identically to parent-first delivery"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F10: the refund→payment→order chain delivered fully reversed drains to fixpoint"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F10: waiting_for is the first unmet id and re-parks deterministically as parents arrive"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F29/01-F10: payments and refunds never park — the fully-reversed chain converges to the forward delivery"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F34/01-F10: line-state edges never park — delivered before the order and its lines, they converge to the forward delivery"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F10: nothing is dropped — applied ∪ parked = stored; duplicate ingest of a parked id is a no-op"
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F10: parked envelope_json is byte-identical canonical JSON of the envelope — keys sorted by UTF-16 code unit at every depth"
+      - "packages/sync-client/src/__acceptance__/merge-convergence.test.ts#01-F31/01-F10: a payment for an unseen order never parks — the order row materializes its total when order.created arrives, identically in both orders"
+      - "packages/sync-client/src/__acceptance__/merge-convergence.test.ts#01-F29/01-F10: a refund delivered before its parent payment and before the order never parks, and the fully-reversed chain converges to the forward delivery"
+      - "packages/sync-client/src/__acceptance__/merge-convergence.test.ts#01-F34/01-F10: line-state edges are stored unconditionally — an edge before its line_added (and before the order) never parks and converges to the forward order"
+      - "packages/sync-client/src/__acceptance__/merge-convergence.test.ts#01-F10: an orphan confirm (create never delivered) is held, not dropped — state tables unaffected, membership visible, drained by the late parent"
+      - "packages/sync-client/src/__acceptance__/merge-workcounter.test.ts#01-F10/01-F6: draining one arrived key does work independent of the UNRELATED parked population (5 vs 50 orphans)"
   - fr: 01-F11
     status: green
     tests:
@@ -233,17 +246,32 @@ rows:
     status: green
     tests:
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F16: line adds from two devices both stand — json_lines is canonical JSON, byte-for-byte"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F16/01-F34: a duplicate line_id with divergent values resolves to one deterministic member — byte-identical in both delivery orders"
   - fr: 01-F17
     status: green
     tests:
       - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F17/01-F34: a divergent duplicate inside a cloud batch is surfaced as quarantined AND the pull cursor advances past it (it must not wedge the pull)"
+      - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F29/01-F17: violated is MONOTONE and never blocks — later deliveries and duplications cannot clear it, a later sale still appends, the settle act stands"
+      - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F42/01-F17: the open-bill guard — dropping an order with no settlement_closed throws and changes nothing (prune only ever removes closed entities)"
       - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X3/01-F17/01-F38: WAN cut AND LAN split {A}|{B,C}, both sides keep appending, each side runs its own hub; heal LAN then WAN → zero lost, zero duplicated, one hub, fold identity ≡ cloud-order replay"
   - fr: 01-F18
     status: unmapped
   - fr: 01-F19
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F19/01-F34: a supersedes chain yields one head; concurrent assignments render the conflict set — identically in every delivery order"
+      - "packages/sync-client/src/__acceptance__/merge-lines.test.ts#01-F35/01-F19: two distinct terminal heads project THE SET, in ORDER_LINE_STATES index order, byte-identically in every delivery order"
+      - "packages/sync-client/src/__acceptance__/merge-lines.test.ts#01-F19: a resolution edge naming BOTH terminal heads adopts one — |from_states| > 1 ∧ to ∈ from_states is a choice among emitted terminals, not a transition"
+      - "packages/sync-client/src/__acceptance__/merge-lines.test.ts#01-F19/01-F38: two DIFFERING resolutions re-contest — the algebra reports that two humans disagreed rather than diverging"
+      - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F19/01-F38: three CONCURRENT moves (each superseding only the creation) yield three heads and a conflict — set-theoretically distinguishable from the chain"
+      - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F19: a resolution assignment naming BOTH concurrent heads collapses the conflict to one head"
+      - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F42/01-F19: dropping an order key is WHOLESALE and atomic — no fragment survives to resurrect a retired head or strand a ghost row; other orders untouched"
   - fr: 01-F20
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F20/01-F34: a second divergent order.created keeps both members — register defaults to the min-payloadHash payload and order_identity_conflict is raised"
+      - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F20/01-F34: two creates with divergent payloads keep both, flag order_identity_conflict, and default the register to the min-payloadHash member — never a sequence pick"
+      - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F20: duplicate creates with IDENTICAL payloads are one value — no conflict raised"
   - fr: 01-F21
     status: unmapped
   - fr: 01-F22
@@ -267,54 +295,127 @@ rows:
   - fr: 01-F29
     status: green
     tests:
-      - "packages/domain/src/__acceptance__/registry.test.ts#01-F29: payment.refunded requires the reference to the original payment id"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F29: payment.refunded parses with order_id + its own settlement_attempt_id + the parent payment_attempt_id, and no payment_id"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F29: payment.refunded without order_id is a parse failure — the order key is carried, never resolved through the parent"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F29: payment.refunded without the parent payment_attempt_id is a parse failure — the cap resolves parents by attempt id, not envelope id"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F29: payment_id (envelope-id parent ref) is superseded — not required, but tolerated as a loose extra"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F29: the refund method enum stays closed — cash_out | raast_reversal_ref | khata_credit (retained law)"
+      - "packages/domain/src/__acceptance__/registry.test.ts#01-F29/01-F31: payment.refunded requires the {order_id, settlement_attempt_id, payment_attempt_id} trio — payment_id is superseded, tolerated as an extra"
       - "packages/domain/src/__acceptance__/registry.test.ts#01-F29: payment.refunded accepts only cash_out | raast_reversal_ref | khata_credit methods"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F29/01-F30: a refund unsettles the order until re-covered — settled is recomputed from the set"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F29/01-F33: a refund after the close never un-settles — refund_total records it, settled stays 1"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F29/01-F10: payments and refunds never park — the fully-reversed chain converges to the forward delivery"
+      - "packages/sync-client/src/__acceptance__/merge-convergence.test.ts#01-F29/01-F10: a refund delivered before its parent payment and before the order never parks, and the fully-reversed chain converges to the forward delivery"
+      - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F29/01-F31: divergent members of one REFUND attempt key dispute it — refund_total contributes 0"
+      - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F29: a refund whose parent attempt was never delivered still converges — order-keyed total counts it, the cap rests at unknown (not violated), nothing parks"
+      - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F29: cumulative refunds beyond the parent attempt's agreed amount flip cap_violated to 1, identically in every delivery order"
+      - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F29: exact cover is not a violation — refunds of 400 + 600 against 1000 leave cap_violated 0"
+      - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F29/01-F17: violated is MONOTONE and never blocks — later deliveries and duplications cannot clear it, a later sale still appends, the settle act stands"
+      - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F29: the cap resolves parents by settlement_attempt_id, not envelope id — an intent duplicated under two envelope ids cannot fragment the cap (Addendum-A)"
+      - "packages/sync-client/src/__acceptance__/merge-settlement.test.ts#01-F33/01-F29: a refund after the close never un-settles — post-settlement corrections are linked event pairs, reopening does not exist"
   - fr: 01-F30
     status: green
     tests:
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F30: a partial payment leaves the order unsettled; exact cover settles it"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F29/01-F30: a refund unsettles the order until re-covered — settled is recomputed from the set"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F30: voided lines leave billed_effective — exact cover over surviving lines settles"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F30: billed_effective must be positive — a lineless order never settles"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F30/01-F32: payment.recorded without purpose is a parse failure — an unpurposed payment is neither tendering nor repayment"
   - fr: 01-F31
     status: green
     tests:
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F31: payment.recorded still requires settlement_attempt_id (retained law — green today)"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F31: payment.refunded without its own settlement_attempt_id is a parse failure — a double-tapped manager approval must dedupe"
       - "packages/domain/src/__acceptance__/registry.test.ts#01-F31: payment.recorded parses with settlement_attempt_id and fails without it — double-taps cannot double-record"
+      - "packages/domain/src/__acceptance__/registry.test.ts#01-F29/01-F31: payment.refunded requires the {order_id, settlement_attempt_id, payment_attempt_id} trio — payment_id is superseded, tolerated as an extra"
+      - "packages/sync-client/src/__acceptance__/merge-convergence.test.ts#01-F31/01-F10: a payment for an unseen order never parks — the order row materializes its total when order.created arrives, identically in both orders"
+      - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F31/01-F34: divergent members of one attempt key mark it disputed and contribute ZERO — the fold never picks, in either delivery order"
+      - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F31: whole-payload immutability — members differing ONLY in purpose dispute the key and contribute 0 to BOTH totals (Addendum-A)"
+      - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F29/01-F31: divergent members of one REFUND attempt key dispute it — refund_total contributes 0"
+      - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F31: two envelopes with distinct ids and one settlement_attempt_id (identical intent) contribute ONCE — append-then-ingest and ingest-then-append agree, both rows retained"
+      - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F31/01-F8: the ingestBatch seam collapses the same intent identically to per-event ingest"
+      - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F31: billed never enters the money fold — the openOrders row is EXACTLY the pinned key set, with no derived signed column to hang a refund affordance on"
   - fr: 01-F32
-    status: unmapped
+    status: green
+    tests:
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F32: payment.recorded parses with purpose settles_order and with purpose repays_receivable"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F30/01-F32: payment.recorded without purpose is a parse failure — an unpurposed payment is neither tendering nor repayment"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F32: purpose outside the closed enum is a parse failure"
+      - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F32: a repays_receivable payment never enters pay_total — a repaid tab can never read as overpaid; the receivable decrement is repaid_total"
   - fr: 01-F33
-    status: unmapped
+    status: green
+    tests:
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F33: order.settlement_closed is a registered event type"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F33: settlement_closed parses with the carried snapshot payload"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F33: settlement_closed without order_id is a parse failure"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F33: exact arithmetic cover leaves settled 0 — only the settlement_closed act settles"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F29/01-F33: a refund after the close never un-settles — refund_total records it, settled stays 1"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F33: a lineless order with a zero payment stays unsettled until the act — and the act alone settles it"
+      - "packages/sync-client/src/__acceptance__/merge-settlement.test.ts#01-F33: exact arithmetic cover WITHOUT a settlement_closed leaves settled 0 — nothing arithmetic settles an order"
+      - "packages/sync-client/src/__acceptance__/merge-settlement.test.ts#01-F33: the settlement_closed act settles — offline-legal, even with zero payments and zero lines (the fold judges no arithmetic)"
+      - "packages/sync-client/src/__acceptance__/merge-settlement.test.ts#01-F33/01-F29: a refund after the close never un-settles — post-settlement corrections are linked event pairs, reopening does not exist"
+      - "packages/sync-client/src/__acceptance__/merge-settlement.test.ts#01-F33: a late line-add does not reopen — settled stays 1 and the order raises uncovered_addition"
+      - "packages/sync-client/src/__acceptance__/merge-settlement.test.ts#01-F33/01-F35: two concurrent closes collapse to one settled fact — monotone OR, no conflict raised, any delivery order"
+      - "packages/sync-client/src/__acceptance__/merge-settlement.test.ts#01-F33: C1 voids L3 while C2 serves L3 and settles — at heal the order STAYS settled with the contest rendered; contested never gates settle (the AND-guard wedge is the refuted design)"
   - fr: 01-F34
     status: green
     tests:
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F34: table_assigned parses with supersedes [] and from_table_id null (both required, both may be empty/null)"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F34: table_assigned parses with a populated supersedes chain and a from_table_id"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F34: table_assigned without supersedes is a parse failure — the causal link is the only thing that makes the anchor converge"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F34: table_assigned without from_table_id is a parse failure — the origin table must be nameable (null when none)"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F34: line_state_changed without line_context is a parse failure — a value is not an edge"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F34: payloadHash(payload) = sha256 hex over canonicalJson(payload)"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F34: payloadHash is key-order independent — same value, any insertion order, one hash"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F34: distinct payloads hash differently"
       - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F9/01-F34: an event that FAILS to ingest halts the pull cursor, so catchup re-delivers it instead of skipping it forever"
       - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F34: ingesting a stored id with DIFFERENT content throws DivergentDuplicateError and leaves the stored row untouched"
       - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F8/01-F34: an IDENTICAL re-ingest is still a benign no-op — the divergence check must not over-trigger"
       - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F34: an identical re-ingest CARRYING a global_seq still adopts the cloud ordering (the LAN-first-then-cloud path keeps working)"
       - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F17/01-F34: a divergent duplicate inside a cloud batch is surfaced as quarantined AND the pull cursor advances past it (it must not wedge the pull)"
-      - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F6/01-F34: a parked event's envelope_json is byte-identical before and after refold + reopen, even with JSON-omitted payload values"
+      - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F6/01-F34: a parked event's envelope_json is byte-identical across reopen, even with JSON-omitted payload values"
       - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F6/01-F34: folds' canonicalJson IS the domain serializer, and both mirror JSON.stringify on omitted values"
       - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F9/01-F34: a live event_batch fan-out from a peer is applied via store.ingest with its global_seq"
-      - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F34: origin-inclusive fan-out — the device learns its own events' global_seq and stays ≡ refold()"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F34: table_id resolves to the canonically-last assignment on every delivery order"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F34: re-assigning the same global_seq to the same event is an idempotent no-op — tables ≡ refold()"
+      - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F34: origin-inclusive fan-out — the device learns its own events' global_seq with zero fold-state change"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F20/01-F34: a second divergent order.created keeps both members — register defaults to the min-payloadHash payload and order_identity_conflict is raised"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F16/01-F34: a duplicate line_id with divergent values resolves to one deterministic member — byte-identical in both delivery orders"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F19/01-F34: a supersedes chain yields one head; concurrent assignments render the conflict set — identically in every delivery order"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F34/01-F10: line-state edges never park — delivered before the order and its lines, they converge to the forward delivery"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F34: re-assigning the same global_seq to the same event is an idempotent no-op — tables unchanged"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F34/18 §4: a divergent global_seq for an already-mapped event throws"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F34/18 §4: assigning to an unknown event_id throws and changes no state"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F34/18 §4: a global_seq already held by another event throws"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F34: cloud order reversing the provisional table_id winner converges — highest global_seq wins, tables ≡ refold()"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F34: concurrent table assignments render the conflict set, and adopting reversing global_seqs changes nothing"
       - "packages/sync-client/src/__acceptance__/folds-properties.test.ts#01-F34: swapping two adjacent deliveries from different devices yields identical final tables"
       - "packages/sync-client/src/__acceptance__/folds-properties.test.ts#01-F34: re-delivering any already-stored subset in any order changes nothing — tables byte-identical before/after"
-      - "packages/sync-client/src/__acceptance__/folds-properties.test.ts#01-F6: after any delivery sequence, refold() reproduces the incrementally-maintained tables exactly — before and after cloud global_seq assignment (01-F34)"
-      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34: re-ingest with global_seqs that reverse the provisional order flips table_id to the cloud winner — tables ≡ refold()"
+      - "packages/sync-client/src/__acceptance__/folds-properties.test.ts#01-F34: assigning cloud global_seq over any stored subset, in any order, changes the fold tables not at all"
+      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34: re-ingest carrying global_seqs that would have reversed the old comparator changes NOTHING — the projection is bit-identical across adoption"
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34: same-value re-ingest with global_seq is an idempotent adoption — the carried seq is really held afterwards"
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34/18 §4: duplicate-id ingest with a divergent or already-held global_seq throws, state unchanged"
-      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34: a global_seq carried at first ingest participates in canonical fold order"
+      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34: a global_seq carried at first ingest is sidecar-only — the projection equals the seq-free delivery byte-for-byte"
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34/18 §4: a negative, fractional, or non-integer global_seq at ingest throws with nothing persisted"
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34/01-F3/18 §4: a global_seq already held by another event throws and rolls back the whole ingest"
       - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34/01-F3: ingest-with-global_seq ≡ ingest-then-assignGlobalSeq — byte-identical tables"
+      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34: identical device_created_at across devices — NO device-id tiebreak; both heads render, in every arrival order"
+      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F34: identical device_created_at on one device — NO lamport tiebreak; without a carried supersedes link both assignments stand as heads"
+      - "packages/sync-client/src/__acceptance__/merge-convergence.test.ts#01-F34/01-N1: every permutation of a 6-event mixed set (create, line, edge, assign, payment, close) projects byte-identically"
+      - "packages/sync-client/src/__acceptance__/merge-convergence.test.ts#01-F34/01-N1: equal delivered set ⇒ byte-equal projection over seeded shuffles with duplicated deliveries"
+      - "packages/sync-client/src/__acceptance__/merge-convergence.test.ts#01-F34: delivering the whole set twice, then a shuffled subset a third time, changes nothing — duplication is invisible"
+      - "packages/sync-client/src/__acceptance__/merge-convergence.test.ts#01-F34/01-F8: the same set via per-event ingest, via ingestBatch chunks, and with own events appended before vs after peers, projects byte-identically"
+      - "packages/sync-client/src/__acceptance__/merge-convergence.test.ts#01-F34/01-F10: line-state edges are stored unconditionally — an edge before its line_added (and before the order) never parks and converges to the forward order"
+      - "packages/sync-client/src/__acceptance__/merge-invariance.test.ts#01-F34: garbage device_created_at + lamport_seq on the identical event set produce a bit-identical merge projection"
+      - "packages/sync-client/src/__acceptance__/merge-invariance.test.ts#01-F34/01-F3: assigning arbitrary global_seq values to every event changes NOTHING — the full projection (time columns included) is bit-identical across the adoption boundary"
+      - "packages/sync-client/src/__acceptance__/merge-invariance.test.ts#01-F34: a duplicate-id ingest CARRYING global_seq (the LAN-first-then-cloud-catchup path) adopts the seq with zero projection change"
+      - "packages/sync-client/src/__acceptance__/merge-invariance.test.ts#01-F34: an ORDER-REVERSING id bijection, applied consistently to ids and to id references (supersedes, preds), maps the projection through φ exactly"
+      - "packages/sync-client/src/__acceptance__/merge-invariance.test.ts#01-F34: relabeling + garbage stamps + arbitrary global_seq + a shuffled delivery order — all at once — still maps the projection through φ exactly"
+      - "packages/sync-client/src/__acceptance__/merge-invariance.test.ts#01-F34: property — generated sets under order-reversing relabel + garbage stamps + shuffled delivery project identically (φ-mapped), for every seed"
+      - "packages/sync-client/src/__acceptance__/merge-lines.test.ts#01-F34: a legal edge chain projects its maximum in every delivery order — no tie rule is ever invoked on the non-terminal total chain"
+      - "packages/sync-client/src/__acceptance__/merge-lines.test.ts#matrix-C CE — 400ms preds:[] liveness (01-F34/01-F35): a second rapid tap that read a pre-append head and emitted preds [] still participates — no grounding gate, no anomaly"
+      - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F31/01-F34: divergent members of one attempt key mark it disputed and contribute ZERO — the fold never picks, in either delivery order"
+      - "packages/sync-client/src/__acceptance__/merge-settlement.test.ts#01-F34: concurrent →voided and →served on a paid, closed line render the SAME contested pair before and after global_seq assignment — settled invariant, bit-identical projection from the identical event set"
+      - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F34: a 3-move chain T7→T12→T4 with correct supersedes yields ONE head (T4) and no conflict, in every delivery order and under duplication"
+      - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F34: two concurrent heads naming the SAME table show one value and NO conflict — same destination twice is not a dispute"
+      - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F34: a creation-carried table is the root head — no assignments means table_ids [birth], and no birth table means []"
+      - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F20/01-F34: two creates with divergent payloads keep both, flag order_identity_conflict, and default the register to the min-payloadHash member — never a sequence pick"
+      - "packages/sync-client/src/__acceptance__/merge-workcounter.test.ts#01-F34: assignGlobalSeq over an entire ledger folds nothing, rebuilds nothing, and leaves the projection bit-identical"
+      - "packages/sync-client/src/__acceptance__/merge-workcounter.test.ts#01-F34: the duplicate-id ingest-with-global_seq adoption seam (LAN-first-then-cloud-catchup) also folds nothing"
       - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X1/01-N1/01-F34: at quiescence every device holds each event exactly once, cloud-ordered, and its fold tables ≡ refold() ≡ a fresh store replaying mergedStream()"
-      - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X1b/01-N1/01-F34: LAN-first provisional winner (canonical key) is reversed by cloud order — every device adopts the higher-global_seq table, fold ≡ refold() ≡ cloud-order replay"
+      - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X1b/01-N1/01-F34: LAN-first concurrent assignment renders the two-head conflict on every device, and the staged cloud merge changes NOTHING across the ack boundary"
       - "services/sync-gateway/src/__acceptance__/law5-fanout.test.ts#01-F9/01-F34: a push reaches every same-branch session including the origin, exactly once, as one event_batch with global_seq; other branches and other orgs get nothing"
   - fr: 01-F35
     status: green
@@ -322,10 +423,25 @@ rows:
       - "packages/domain/src/__acceptance__/line-states.test.ts#01-F35: a delivered line ignores a later in_prep transition"
       - "packages/domain/src/__acceptance__/line-states.test.ts#01-F35: every terminal state ignores every later transition with terminal_regression"
       - "packages/domain/src/__acceptance__/line-states.test.ts#01-F35: folding any sequence never leaves a terminal state once entered, and applied:false never mutates state"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F35: line_state_changed routes every line in line_ids through applyLineState — legal transitions apply"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F35: an illegal transition never applies — state kept, illegal_transition anomaly recorded on the line"
-      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F35: a terminal line ignores a later non-terminal transition — state kept, one terminal_regression anomaly, ledger intact"
-      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F35: duplicate line_ids within one line_state_changed are deduped — the event applies cleanly with no anomaly"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F35: line_state_changed parses with a per-line {to, from_states, preds} context"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F35: from_states: [] is a parse failure — ∀ over ∅ is vacuously legal, so the schema pins min 1"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F35: a to state outside the canonical vocabulary is a parse failure"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F35: a from_states member outside the canonical vocabulary is a parse failure"
+      - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F35: LEGAL_NEXT is exported and pins the canonical transition table — terminals map to []"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F35: line_state_changed applies each line_context edge — legal transitions project"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F35: a payload-illegal edge never applies — state kept, illegal_transition anomaly recorded on the line"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F35/03-F24: a decidedly-voided line leaves lines_total — the exclusion survives on the kitchen plane"
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F35: a terminal head absorbs a later non-terminal edge — terminal state kept, one terminal_regression anomaly, ledger intact"
+      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-F35: repeated line_ids collapse to one line_context entry — the event applies cleanly with no anomaly"
+      - "packages/sync-client/src/__acceptance__/merge-lines.test.ts#01-F35 (Addendum-C): a legal edge that RETIRES a higher head never lowers the projection — the max ranges over all legal edges, not over heads"
+      - "packages/sync-client/src/__acceptance__/merge-lines.test.ts#matrix-C CE — 400ms preds:[] liveness (01-F34/01-F35): a second rapid tap that read a pre-append head and emitted preds [] still participates — no grounding gate, no anomaly"
+      - "packages/sync-client/src/__acceptance__/merge-lines.test.ts#01-F35/01-F19: two distinct terminal heads project THE SET, in ORDER_LINE_STATES index order, byte-identically in every delivery order"
+      - "packages/sync-client/src/__acceptance__/merge-lines.test.ts#01-F35: one terminal head absorbs a concurrent NON-terminal head — projected state is the terminal, the non-terminal head's edge gains terminal_regression"
+      - "packages/sync-client/src/__acceptance__/merge-lines.test.ts#01-F35: a CHAINED non-terminal edge into a terminal carries no anomaly — ready→picked_up→delivered is the normal delivery walk (09-F8 pattern)"
+      - "packages/sync-client/src/__acceptance__/merge-lines.test.ts#01-F35: illegal_transition is a pure function of the edge's own payload — it survives every delivery order AND full global_seq adoption"
+      - "packages/sync-client/src/__acceptance__/merge-lines.test.ts#01-F35 (matrix row 66): post-serve void is NOT EXPRESSIBLE — an edge from a terminal is payload-illegal (terminals map to []), and illegal outranks terminal_regression"
+      - "packages/sync-client/src/__acceptance__/merge-settlement.test.ts#01-F33/01-F35: two concurrent closes collapse to one settled fact — monotone OR, no conflict raised, any delivery order"
+      - "packages/sync-client/src/__acceptance__/merge-settlement.test.ts#01-F35: an edge claiming placed→ready is payload-illegal — flagged, never applied, and (unlike the comparator engine) the verdict is a pure function of the edge's own payload"
   - fr: 01-F36
     status: unmapped
   - fr: 01-F37
@@ -345,6 +461,8 @@ rows:
   - fr: 01-F38
     status: green
     tests:
+      - "packages/sync-client/src/__acceptance__/merge-lines.test.ts#01-F19/01-F38: two DIFFERING resolutions re-contest — the algebra reports that two humans disagreed rather than diverging"
+      - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F19/01-F38: three CONCURRENT moves (each superseding only the creation) yield three heads and a conflict — set-theoretically distinguishable from the chain"
       - "packages/sync-client/src/__acceptance__/spike-scenarios-departed.test.ts#X7/01-F38/DEC-SYNC-006: after the origin departs both planes, LAN heal alone provably does NOT converge its events onto the far device (followers push own events only); cloud catchup then delivers them and fold identity ≡ cloud-order replay across both survivors"
       - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X3/01-F17/01-F38: WAN cut AND LAN split {A}|{B,C}, both sides keep appending, each side runs its own hub; heal LAN then WAN → zero lost, zero duplicated, one hub, fold identity ≡ cloud-order replay"
   - fr: 01-F39
@@ -363,18 +481,25 @@ rows:
     status: green
     tests:
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F40: hello carries no slice — a client-declared slice field is rejected or dropped, never kept"
+      - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F40/01-F42: dropping a line key removes the line WHOLESALE — the device asserts nothing about it, never a fragment (matrix-C predicate 7)"
   - fr: 01-F41
     status: unmapped
   - fr: 01-F42
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F42/01-F19: dropping an order key is WHOLESALE and atomic — no fragment survives to resurrect a retired head or strand a ghost row; other orders untouched"
+      - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F42/01-F17: the open-bill guard — dropping an order with no settlement_closed throws and changes nothing (prune only ever removes closed entities)"
+      - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F40/01-F42: dropping a line key removes the line WHOLESALE — the device asserts nothing about it, never a fragment (matrix-C predicate 7)"
   - fr: 01-N1
     status: green
     tests:
+      - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6/01-N1: with two confirms the anchor is delivery-order independent and its value is one of the delivered stamps"
       - "packages/sync-client/src/__acceptance__/folds-properties.test.ts#01-N1: any two delivery interleavings respecting per-device lamport order fold to identical orders/queue/parked tables — json_lines byte-identical"
-      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-N1: identical device_created_at across devices — ascending device_id breaks the tie on every arrival order"
-      - "packages/sync-client/src/__acceptance__/folds-review.test.ts#01-N1: identical device_created_at on one device — ascending lamport_seq breaks the tie regardless of arrival order"
+      - "packages/sync-client/src/__acceptance__/merge-convergence.test.ts#01-F34/01-N1: every permutation of a 6-event mixed set (create, line, edge, assign, payment, close) projects byte-identically"
+      - "packages/sync-client/src/__acceptance__/merge-convergence.test.ts#01-F34/01-N1: equal delivered set ⇒ byte-equal projection over seeded shuffles with duplicated deliveries"
+      - "packages/sync-client/src/__acceptance__/merge-convergence.test.ts#01-F6/01-N1: with two confirms the anchor is delivery-order independent, and its value is one of the delivered confirms' stamps"
       - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X1/01-N1/01-F34: at quiescence every device holds each event exactly once, cloud-ordered, and its fold tables ≡ refold() ≡ a fresh store replaying mergedStream()"
-      - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X1b/01-N1/01-F34: LAN-first provisional winner (canonical key) is reversed by cloud order — every device adopts the higher-global_seq table, fold ≡ refold() ≡ cloud-order replay"
+      - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X1b/01-N1/01-F34: LAN-first concurrent assignment renders the two-head conflict on every device, and the staged cloud merge changes NOTHING across the ack boundary"
   - fr: 01-N2
     status: unmapped
   - fr: 01-N3
