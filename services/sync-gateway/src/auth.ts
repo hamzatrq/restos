@@ -1,10 +1,18 @@
 // verifyDeviceToken — the NAMED auth seam (01-F27; T-01-07 assumption 7). At
 // Wave 0 it accepts exactly the unsigned base64url-JSON dev-token shape with
-// claims { org_id, branch_id, device_id }. This validates SHAPE and CONSISTENCY
-// only — it is not authentication. T-01-09 swaps these internals for jose
+// claims { org_id, branch_id, device_id } plus the optional hub-relay
+// capability claim `hub_relay: true` (DEC-SYNC-009, T-01-12 — licenses pushing
+// same-org/branch peers' events). This validates SHAPE and CONSISTENCY only —
+// it is not authentication. T-01-09 swaps these internals for jose
 // verification + device-registry/revocation checks with the same claims
 // contract; nothing else changes.
-export type DeviceTokenClaims = { org_id: string; branch_id: string; device_id: string };
+export type DeviceTokenClaims = {
+  org_id: string;
+  branch_id: string;
+  device_id: string;
+  /** Hub-relay capability (DEC-SYNC-009): the session may push same-org/branch peers' events. */
+  hub_relay: boolean;
+};
 
 const claim = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
@@ -22,5 +30,5 @@ export const verifyDeviceToken = (token: string): DeviceTokenClaims | null => {
   const branch_id = claim(record.branch_id);
   const device_id = claim(record.device_id);
   if (org_id === null || branch_id === null || device_id === null) return null;
-  return { org_id, branch_id, device_id };
+  return { org_id, branch_id, device_id, hub_relay: record.hub_relay === true };
 };

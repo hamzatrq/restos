@@ -5,8 +5,15 @@
 // design (both hubs relay append-only events; heal merges by set-union + id-dedupe,
 // 01-F8/F38). Delivery is fire-and-forget: correctness never depends on any single
 // send — follower re-push, per-heartbeat window re-fan, and event-id dedupe absorb
-// loss. The hub ack is session-local and volatile: it NEVER moves store.advanceTo —
-// that watermark is the cloud write-checkpoint (19 §5).
+// loss. The PLAIN hub ack is session-local and volatile: it NEVER moves
+// store.advanceTo — that watermark is the cloud write-checkpoint (19 §5). The one
+// exception (DEC-SYNC-009, T-01-12): a push_ack carrying origin_device_id ==
+// self is the hub-relayed CLOUD ack for this device's stream — the ORIGIN's own
+// act of advancing its checkpoint on learning its events were cloud-persisted.
+// Acting as hub, this session also (a) signals the cloud session over the store
+// relay seam after ingesting follower events (the hub is the branch's cloud
+// uplink for WAN-less peers) and (b) forwards each origin's recorded cloud ack
+// over LAN on the heartbeat.
 import type { DeviceClass, EventEnvelopeT } from "@restos/domain";
 import type {
   Clock,
@@ -50,7 +57,12 @@ export type MeshSession = {
   status(): MeshSessionStatus;
 };
 
-type FollowerSession = { missed: number; timer: TimerId | null };
+type FollowerSession = {
+  missed: number;
+  timer: TimerId | null;
+  /** Last relayed CLOUD ack forwarded to this follower over LAN (DEC-SYNC-009). */
+  forwardedCloudAck: number | null;
+};
 
 export const createMeshSession = (options: {
   store: DeviceStore;
@@ -219,6 +231,25 @@ export const createMeshSession = (options: {
     send(device_id, { v: 1, kind: "event_batch", events });
   };
 
+  /**
+   * DEC-SYNC-009 (T-01-12): forward the recorded per-ORIGIN cloud ack to a
+   * connected follower — push_ack{origin_device_id: follower} is the relayed
+   * CLOUD ack, distinct from the volatile LAN ack. The origin acts on it
+   * (store.advanceTo at the receiver); the hub never writes its checkpoint.
+   */
+  const forwardCloudAck = (device_id: string, session: FollowerSession): void => {
+    const cloudAck = store.relayedCloudAck(device_id);
+    if (cloudAck === null) return;
+    if (session.forwardedCloudAck !== null && cloudAck <= session.forwardedCloudAck) return;
+    send(device_id, {
+      v: 1,
+      kind: "push_ack",
+      acked_watermark: cloudAck,
+      origin_device_id: device_id,
+    });
+    session.forwardedCloudAck = cloudAck;
+  };
+
   const scheduleHeartbeat = (device_id: string): void => {
     const session = followers.get(device_id);
     if (session === undefined) return;
@@ -233,13 +264,14 @@ export const createMeshSession = (options: {
       live.missed += 1;
       send(device_id, { v: 1, kind: "ping", t: clock.now() });
       replayWindowTo(device_id); // idempotent loss recovery for fan-out (01-F8)
+      forwardCloudAck(device_id, live); // relayed cloud ack propagation (DEC-SYNC-009)
       scheduleHeartbeat(device_id);
     }, HEARTBEAT_INTERVAL_MS);
   };
 
   const admitFollower = (device_id: string): void => {
     dropFollower(device_id); // re-hello = fresh session
-    followers.set(device_id, { missed: 0, timer: null });
+    followers.set(device_id, { missed: 0, timer: null, forwardedCloudAck: null });
     scheduleHeartbeat(device_id);
     send(device_id, {
       v: 1,
@@ -264,6 +296,11 @@ export const createMeshSession = (options: {
     // acked < 0 means nothing contiguously held — the wire watermark is a
     // nonnegative seq, so stay silent and let the origin's retry re-push.
     if (acked >= 0) send(from, { v: 1, kind: "push_ack", acked_watermark: acked });
+    // DEC-SYNC-009 (T-01-12): the hub is the branch's cloud uplink for WAN-less
+    // peers — signal the cloud session (store relay seam) to relay the held
+    // branch window upward. Fires only while acting hub/solo (this handler's
+    // guard), so followers never relay third-party events (DEC-SYNC-006).
+    store.requestRelayDrain();
     if (fresh.length === 0) return;
     for (const device_id of followers.keys()) {
       if (device_id === from) continue;
@@ -343,6 +380,19 @@ export const createMeshSession = (options: {
       }
       case "push_ack": {
         if (state !== "follower" || !connected || from !== hubTarget) return;
+        if (message.origin_device_id !== undefined) {
+          // DEC-SYNC-009 (T-01-12): a push_ack naming an origin is the hub-
+          // relayed CLOUD ack for that origin's stream — never the volatile LAN
+          // cursor. When it names THIS device, advancing the cloud
+          // write-checkpoint is the ORIGIN's own act (19 §5): the outbox drains
+          // without this device ever having WAN of its own.
+          if (message.origin_device_id !== self.device_id) return;
+          const current = store.status().acked_watermark;
+          if (current === null || message.acked_watermark > current) {
+            store.advanceTo(message.acked_watermark);
+          }
+          return;
+        }
         if (lastPushAck === null || message.acked_watermark > lastPushAck) {
           lastPushAck = message.acked_watermark; // session-local; NEVER store.advanceTo (19 §5)
           drainPush(); // continue past the ack if more remains

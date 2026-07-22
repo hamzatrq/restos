@@ -6,7 +6,10 @@ rows:
     status: green
     tests:
       - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F42/01-F1 (fix-round F2): after a successful order drop, a never-seen straggler for the dropped key is ledger-retained, never folded, never projected — and counts no fold work"
+      - "packages/sync-client/src/__acceptance__/relay-scenarios.test.ts#R1/01-F13/01-F9/01-F1/DEC-SYNC-009: a device with NO cloud transport reaches the merged cloud log via the hub — origin device_id/lamport_seq/payload verbatim — and its outbox drains on the LAN-propagated cloud ack (01-F8)"
       - "services/sync-gateway/src/__acceptance__/law2-idempotent-push.test.ts#01-F8/01-F1: same id with divergent content quarantines as id_content_divergence and NEVER mutates the stored row"
+      - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#01-F13/DEC-SYNC-009/01-F1: a branch-hub session pushes another device's events — merged under the ORIGIN's device_id/lamport_seq with the envelope verbatim, per-origin watermark acked, fanned out with global_seq, and the origin's own next hello resumes past the relayed prefix (01-F8)"
+      - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#01-F1/DEC-SYNC-009: a hub relay diverging from the origin's stored content quarantines id_content_divergence with the stored row untouched; a fresh id at an occupied origin slot quarantines lamport_conflict — the capability licenses relay, never re-authoring"
   - fr: 01-F2
     status: green
     tests:
@@ -148,6 +151,10 @@ rows:
       - "packages/sync-client/src/__acceptance__/mesh-session.test.ts#01-F8/19 §5: hub acks update session last_push_ack but never move store.advanceTo — acked_watermark stays null and the outbox stays owed to the cloud"
       - "packages/sync-client/src/__acceptance__/properties.test.ts#01-F3/01-F8: for any interleaving of appends and legal acks, lamport stays gap-free and the unacked set matches the checkpoint model"
       - "packages/sync-client/src/__acceptance__/properties.test.ts#01-F8: drain content is independent of batch size — chunked drains concatenate to the full tail"
+      - "packages/sync-client/src/__acceptance__/relay-scenarios.test.ts#R1/01-F13/01-F9/01-F1/DEC-SYNC-009: a device with NO cloud transport reaches the merged cloud log via the hub — origin device_id/lamport_seq/payload verbatim — and its outbox drains on the LAN-propagated cloud ack (01-F8)"
+      - "packages/sync-client/src/__acceptance__/relay-scenarios.test.ts#R2/01-F13/01-F8/DEC-SYNC-009: the hub dies mid-relay; the re-elected hub completes the origin's relay from its ack watermark — merged exactly once, gap-free, no duplicates; the origin's outbox drains fully"
+      - "packages/sync-client/src/__acceptance__/relay-scenarios.test.ts#R4/01-F8/DEC-SYNC-009: a device WITH WAN still pushes its own events over its own cloud session; hub relay must never double-merge them — the merged log holds each event exactly once"
+      - "packages/sync-client/src/__acceptance__/relay-scenarios.test.ts#R6/01-F8/19 §5/DEC-SYNC-009: with WAN down, LAN propagation alone NEVER advances the origin's cloud write-checkpoint (green half); after heal the hub's relay + the propagated CLOUD ack drain it (red half)"
       - "packages/sync-client/src/__acceptance__/spike-scenarios-departed.test.ts#X8/01-F8/01-F9: a 1600-event WAN-cut backlog propagates over LAN via multi-page session-cursor drain, chains cloud push pages to acked_watermark == own_high_water on heal, and a cold WAN-only joiner pulls the branch through ≥2 catchup pages"
       - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X2/01-F8/19 §5: with the WAN cut, new orders still reach all 3 over LAN (p95 < 1000 virtual ms); heal → push/catchup resume → full X1 identity"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F8: re-append of an already-stored id returns the stored envelope unchanged and assigns no new lamport"
@@ -163,6 +170,9 @@ rows:
       - "services/sync-gateway/src/__acceptance__/law7-stop-at-gap.test.ts#01-F8/01-F3: a gapped push stores and acks only the contiguous prefix; nothing beyond the gap lands in events OR quarantine; contiguous re-push completes the sequence"
       - "services/sync-gateway/src/__acceptance__/law7-stop-at-gap.test.ts#01-F8/01-F37: per-device lamport contiguity is gap-free MODULO quarantine rows — a quarantined slot counts as filled"
       - "services/sync-gateway/src/__acceptance__/law7-stop-at-gap.test.ts#01-F8: a push that is ENTIRELY beyond the gap stores nothing and leaves the watermark untouched"
+      - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#01-F13/DEC-SYNC-009/01-F1: a branch-hub session pushes another device's events — merged under the ORIGIN's device_id/lamport_seq with the envelope verbatim, per-origin watermark acked, fanned out with global_seq, and the origin's own next hello resumes past the relayed prefix (01-F8)"
+      - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#01-F8/DEC-SYNC-009: interleaved own and relayed pushes hold independent per-origin watermarks; a relayed gap holds (stop-at-gap) until the origin's contiguous re-relay completes it"
+      - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#01-F8/DEC-SYNC-009: events delivered by BOTH the origin's own session and the hub relay merge exactly once (id dedupe), fan exactly once, and the origin's resume_from reflects the union — per-device sessions remain the default"
       - "services/sync-gateway/src/__acceptance__/session.test.ts#01-F8: on reconnect, hello_ack.resume_from = acked_watermark + 1"
   - fr: 01-F9
     status: green
@@ -173,6 +183,7 @@ rows:
       - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F9: a cold cloud session catches up pre-existing cloud events from the exclusive cursor"
       - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F9/01-F34: a live event_batch fan-out from a peer is applied via store.ingest with its global_seq"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F9/18 §4: ingest rejects an envelope from another org or branch — the stream is identity-scoped"
+      - "packages/sync-client/src/__acceptance__/relay-scenarios.test.ts#R1/01-F13/01-F9/01-F1/DEC-SYNC-009: a device with NO cloud transport reaches the merged cloud log via the hub — origin device_id/lamport_seq/payload verbatim — and its outbox drains on the LAN-propagated cloud ack (01-F8)"
       - "packages/sync-client/src/__acceptance__/spike-scenarios-departed.test.ts#X8/01-F8/01-F9: a 1600-event WAN-cut backlog propagates over LAN via multi-page session-cursor drain, chains cloud push pages to acked_watermark == own_high_water on heal, and a cold WAN-only joiner pulls the branch through ≥2 catchup pages"
       - "services/sync-gateway/src/__acceptance__/isolation-regression.test.ts#01-F9: services/sync-gateway/src/gateway.ts contains zero 0x00 bytes"
       - "services/sync-gateway/src/__acceptance__/isolation-regression.test.ts#01-F9: (org 'ab', branch 'c') and (org 'a', branch 'bc') stay isolated — a push from one is never fanned to the other"
@@ -228,7 +239,10 @@ rows:
       - "packages/sync-client/src/__acceptance__/mesh-session.test.ts#(c)/01-F13: a joining higher-rank device takes hub — the solo counter_rn becomes its follower"
       - "packages/sync-client/src/__acceptance__/mesh-session.test.ts#(c)/01-F13: the hub sends wire ping to a connected follower every HEARTBEAT_INTERVAL_MS while pongs keep it alive"
       - "packages/sync-client/src/__acceptance__/mesh-session.test.ts#(c)/01-F13: no wire ping for HUB_LOSS_TIMEOUT_MS → hub loss; the eligible survivor re-elects and adopts the new result within REELECTION_BUDGET_MS"
+      - "packages/sync-client/src/__acceptance__/relay-scenarios.test.ts#R1/01-F13/01-F9/01-F1/DEC-SYNC-009: a device with NO cloud transport reaches the merged cloud log via the hub — origin device_id/lamport_seq/payload verbatim — and its outbox drains on the LAN-propagated cloud ack (01-F8)"
+      - "packages/sync-client/src/__acceptance__/relay-scenarios.test.ts#R2/01-F13/01-F8/DEC-SYNC-009: the hub dies mid-relay; the re-elected hub completes the origin's relay from its ack watermark — merged exactly once, gap-free, no duplicates; the origin's outbox drains fully"
       - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X5/01-F13/01-F14: killing the hub re-elects a new one < 10 000 virtual ms with zero loss, and a cold joiner attached after the kill is served the full branch window over LAN by the NEW hub"
+      - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#01-F13/DEC-SYNC-009/01-F1: a branch-hub session pushes another device's events — merged under the ORIGIN's device_id/lamport_seq with the envelope verbatim, per-origin watermark acked, fanned out with global_seq, and the origin's own next hello resumes past the relayed prefix (01-F8)"
   - fr: 01-F14
     status: green
     tests:
@@ -255,7 +269,9 @@ rows:
       - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F17/01-F34: a divergent duplicate inside a cloud batch is surfaced as quarantined AND the pull cursor advances past it (it must not wedge the pull)"
       - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F29/01-F17: violated is MONOTONE and never blocks — later deliveries and duplications cannot clear it, a later sale still appends, the settle act stands"
       - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F42/01-F17: the open-bill guard — dropping an order with no settlement_closed throws and changes nothing (prune only ever removes closed entities)"
+      - "packages/sync-client/src/__acceptance__/relay-scenarios.test.ts#R3/DEC-SYNC-005/01-F37/01-F17: a U+0000 poison event relayed by the hub is quarantined at the cloud with its ORIGIN's lamport slot filled — the origin's outbox never wedges and later sales still merge"
       - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X3/01-F17/01-F38: WAN cut AND LAN split {A}|{B,C}, both sides keep appending, each side runs its own hub; heal LAN then WAN → zero lost, zero duplicated, one hub, fold identity ≡ cloud-order replay"
+      - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#DEC-SYNC-005/01-F37/DEC-SYNC-009: a poison event inside a relayed stream quarantines verbatim, fills the ORIGIN's lamport slot, and the per-origin ack advances over it — the origin's stream stays gap-free modulo quarantine and its outbox never wedges (01-F17)"
   - fr: 01-F18
     status: unmapped
   - fr: 01-F19
@@ -292,6 +308,7 @@ rows:
   - fr: 01-F27
     status: green
     tests:
+      - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#01-F27/DEC-SYNC-009 (T-01-09 capability seam): a session WITHOUT the hub-relay capability pushing another device's events is rejected — device_mismatch quarantine, nothing merged for the foreign device; its OWN events still merge"
       - "services/sync-gateway/src/__acceptance__/session.test.ts#01-F27 (Wave-0 stub): a well-formed dev token opens a session — hello_ack { session_id, hub: false, resume_from: 0 } for a fresh device"
       - "services/sync-gateway/src/__acceptance__/session.test.ts#01-F27: malformed token shapes → AuthRejectedError, no session opened"
       - "services/sync-gateway/src/__acceptance__/session.test.ts#01-F27/DEC-SYNC-004: token claims mismatching hello.device_id or hello.branch_id → AuthRejectedError"
@@ -426,6 +443,7 @@ rows:
       - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F20/01-F34: two creates with divergent payloads keep both, flag order_identity_conflict, and default the register to the min-payloadHash member — never a sequence pick"
       - "packages/sync-client/src/__acceptance__/merge-workcounter.test.ts#01-F34: assignGlobalSeq over an entire ledger folds nothing, rebuilds nothing, and leaves the projection bit-identical"
       - "packages/sync-client/src/__acceptance__/merge-workcounter.test.ts#01-F34: the duplicate-id ingest-with-global_seq adoption seam (LAN-first-then-cloud-catchup) also folds nothing"
+      - "packages/sync-client/src/__acceptance__/relay-scenarios.test.ts#R5/01-F34/DEC-SYNC-009: relayed events return to the pushing hub with global_seq via origin-inclusive fan-out; the hub adopts them as a pure sidecar write — ZERO fold work (landed foldStats observable)"
       - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X1/01-N1/01-F34: at quiescence every device holds each event exactly once, cloud-ordered, and its fold tables ≡ a fresh store replaying mergedStream()"
       - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X1b/01-N1/01-F34: LAN-first concurrent assignment renders the two-head conflict on every device, and the staged cloud merge changes NOTHING across the ack boundary"
       - "services/sync-gateway/src/__acceptance__/law5-fanout.test.ts#01-F9/01-F34: a push reaches every same-branch session including the origin, exactly once, as one event_batch with global_seq; other branches and other orgs get nothing"
@@ -465,6 +483,7 @@ rows:
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F37: quarantine_notice requires both event_id and reason"
       - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F37: a quarantine_notice surfaces in status().quarantined and the ack advances over the poisoned slot"
       - "packages/sync-client/src/__acceptance__/ingest-batch.test.ts#01-F37/01-F4: invalid envelopes are skipped and counted, never thrown — the valid remainder still lands"
+      - "packages/sync-client/src/__acceptance__/relay-scenarios.test.ts#R3/DEC-SYNC-005/01-F37/01-F17: a U+0000 poison event relayed by the hub is quarantined at the cloud with its ORIGIN's lamport slot filled — the origin's outbox never wedges and later sales still merge"
       - "packages/sync-client/src/__acceptance__/spike-scenarios-departed.test.ts#X9/01-F37/DEC-SYNC-005: a registry-valid U+0000 event is storage_rejected at the cloud; the notice lands in the origin's status().quarantined, the ack advances OVER the poisoned slot so the outbox never wedges, later sales are unaffected, and the honest divergence (local fold has it, mergedStream does not) is observable"
       - "services/sync-gateway/src/__acceptance__/gateway-review.test.ts#01-F37: a registry-valid envelope jsonb cannot hold (U+0000 in a payload string) quarantines as storage_reject stored verbatim as TEXT; siblings merge, the ack advances, a notice is emitted"
       - "services/sync-gateway/src/__acceptance__/law6-quarantine.test.ts#01-F37/01-F4: a registry-invalid event is quarantined verbatim, excluded from events/fan-out/catchup, noticed to the pusher, and the watermark advances over it"
@@ -473,6 +492,8 @@ rows:
       - "services/sync-gateway/src/__acceptance__/law6-quarantine.test.ts#01-F37/DEC-SYNC-004: each identity-mismatch reason class quarantines — org_mismatch, branch_mismatch, device_mismatch"
       - "services/sync-gateway/src/__acceptance__/law6-quarantine.test.ts#01-F37: identity checks precede registry parse — an event that is BOTH org-mismatched and registry-invalid quarantines as org_mismatch (contract step 1 before step 2)"
       - "services/sync-gateway/src/__acceptance__/law7-stop-at-gap.test.ts#01-F8/01-F37: per-device lamport contiguity is gap-free MODULO quarantine rows — a quarantined slot counts as filled"
+      - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#DEC-SYNC-005/01-F37/DEC-SYNC-009: a poison event inside a relayed stream quarantines verbatim, fills the ORIGIN's lamport slot, and the per-origin ack advances over it — the origin's stream stays gap-free modulo quarantine and its outbox never wedges (01-F17)"
+      - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#DEC-SYNC-009/01-F37: a relay-capable hub pushing events for a foreign-BRANCH or foreign-ORG origin is rejected — branch_mismatch / org_mismatch quarantine, nothing merged (the origin must belong to the hub's own org+branch)"
   - fr: 01-F38
     status: green
     tests:

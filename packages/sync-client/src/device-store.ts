@@ -113,6 +113,20 @@ export type DeviceStore = {
   retentionDrop(keys: readonly string[]): void;
   status(): SyncStatus;
   setLastGlobalSeq(n: number): void;
+  // ── DEC-SYNC-009 hub-relay seam (T-01-12) ─────────────────────────────────
+  // VOLATILE cross-plane signals between the mesh session (LAN) and the cloud
+  // session (WAN) of ONE device, carried by the store handle because it is the
+  // only object both sessions share. Never persisted: after a restart the hub
+  // re-relays from zero and re-learns per-origin acks (id-dedupe + per-origin
+  // acks absorb the overlap, 01-F8).
+  /** Mesh (acting hub) → cloud session: peer events were ingested — relay them upward. */
+  requestRelayDrain(): void;
+  /** Cloud session subscribes to relay-drain requests; returns unsubscribe. */
+  onRelayDrainRequested(listener: () => void): () => void;
+  /** Cloud session records a per-ORIGIN cloud ack learned from a relay push_ack. */
+  noteRelayedCloudAck(device_id: string, acked_watermark: number): void;
+  /** Highest known relayed cloud ack for an origin (mesh reads it to forward over LAN). */
+  relayedCloudAck(device_id: string): number | null;
   /** This device's own audit-chain HEAD (01-F5); null before the first own audit append. */
   auditChainHead(): { hash: string; event_id: string } | null;
   close(): void;
@@ -708,6 +722,11 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   // even after an abrupt handle abandon (20 §2.6 fold-durability seed).
   refoldTx();
 
+  // DEC-SYNC-009 hub-relay seam (T-01-12): volatile, in-memory on the handle —
+  // see the DeviceStore type doc. Listeners fire synchronously.
+  const relayDrainListeners = new Set<() => void>();
+  const relayedCloudAcks = new Map<string, number>();
+
   return {
     identity: { ...identity },
 
@@ -817,6 +836,28 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
       setPull.run(n);
     },
 
+    requestRelayDrain() {
+      for (const listener of [...relayDrainListeners]) listener();
+    },
+
+    onRelayDrainRequested(listener) {
+      relayDrainListeners.add(listener);
+      return () => {
+        relayDrainListeners.delete(listener);
+      };
+    },
+
+    noteRelayedCloudAck(device_id, acked_watermark) {
+      const current = relayedCloudAcks.get(device_id);
+      if (current === undefined || acked_watermark > current) {
+        relayedCloudAcks.set(device_id, acked_watermark); // monotone, never regresses
+      }
+    },
+
+    relayedCloudAck(device_id) {
+      return relayedCloudAcks.get(device_id) ?? null;
+    },
+
     auditChainHead() {
       const row = readAuditHead.get();
       if (!row || row.head_hash === null || row.head_event_id === null) return null;
@@ -824,6 +865,8 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     },
 
     close() {
+      relayDrainListeners.clear();
+      relayedCloudAcks.clear();
       db.close();
     },
   };

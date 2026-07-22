@@ -30,9 +30,22 @@ export const messageSchemas = {
     session_id: z.string().min(1),
     hub: z.boolean(),
     resume_from: seq,
+    // Additive under v:1 (DEC-SYNC-009, T-01-12): true iff the session's token
+    // carries the hub-relay capability — the client-side gate for relaying.
+    relay_authorized: z.boolean().optional(),
   }),
   push: z.object({ v, kind: z.literal("push"), events: z.array(EventEnvelope), watermark: seq }),
-  push_ack: z.object({ v, kind: z.literal("push_ack"), acked_watermark: seq }),
+  push_ack: z.object({
+    v,
+    kind: z.literal("push_ack"),
+    acked_watermark: seq,
+    // Additive under v:1 (DEC-SYNC-009, T-01-12): present iff the ack answers a
+    // relay push — names the ORIGIN device whose stream acked_watermark
+    // describes. Hub→origin over LAN, the same shape carries the relayed CLOUD
+    // ack (origin_device_id = the receiving origin), the only LAN push_ack that
+    // may move the cloud write-checkpoint (19 §5).
+    origin_device_id: z.string().min(1).optional(),
+  }),
   event_batch: z.object({ v, kind: z.literal("event_batch"), events: z.array(WireEnvelope) }),
   catchup_request: z.object({ v, kind: z.literal("catchup_request"), from_global_seq: seq }),
   catchup_response: z.object({

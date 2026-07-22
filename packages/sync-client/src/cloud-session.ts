@@ -6,12 +6,18 @@
 // EXCLUSIVE global_seq cursor (global_seq starts at 1, so 0 = everything), applies live
 // event_batch fan-out — origin-inclusive, so a device learns its own events' global_seq
 // and converges to cloud order (01-F34) — and surfaces quarantine notices in status().
-// Every device runs its own cloud session (DEC-SYNC-004: per-device sessions, no
-// hub-proxy). Deterministic: no Date.now/newId and no self-scheduled timers — it acts
-// only in response to transport edges (onUp/onDown) and inbound wire messages;
-// reconnect/backoff is the transport's job (the sim-cloud double fires onUp/onDown, the
-// real WS adapter schedules reconnect through its own clock).
-import type { DeviceClass } from "@restos/domain";
+// Per-device cloud sessions remain the default; ADDITIONALLY, when the mesh session
+// signals it is acting hub (store relay seam) AND the gateway advertised
+// relay_authorized on hello_ack, this session relays held same-branch peers' events
+// upward verbatim, one origin per push, and records the per-origin cloud acks for the
+// mesh to propagate back over LAN (DEC-SYNC-009, T-01-12 — supersedes DEC-SYNC-004's
+// no-proxy rule; the hub never advances the ORIGIN's checkpoint, only the origin does).
+// Deterministic: no Date.now/newId and no self-scheduled timers — it acts
+// only in response to transport edges (onUp/onDown), inbound wire messages and the
+// store's relay-drain signal; reconnect/backoff is the transport's job (the sim-cloud
+// double fires onUp/onDown, the real WS adapter schedules reconnect through its own
+// clock).
+import type { DeviceClass, EventEnvelopeT } from "@restos/domain";
 import type {
   Clock,
   CloudTransport,
@@ -56,6 +62,19 @@ export const createCloudSession = (options: {
   let connected = false;
   let lastPushAck: number | null = null;
   const quarantined: { event_id: string; reason: string }[] = [];
+  // ---- hub-relay state (DEC-SYNC-009, T-01-12; all volatile) ---------------
+  // relayAuthorized: the gateway's hello_ack advertisement — without it this
+  // session NEVER pushes third-party events (an unadvertised attempt would
+  // quarantine device_mismatch and poison the session's own watermark).
+  let relayAuthorized = false;
+  // relayRequested: latched by the mesh's relay-drain signal even while the WAN
+  // is down, so a reconnect (hello_ack) resumes the relay (R5/R6 heal shape).
+  let relayRequested = false;
+  // Per-origin relay cursor: last cloud-acked watermark per origin, from
+  // per-origin push_acks. Session-local; a fresh session re-relays from zero
+  // and id-dedupe absorbs the overlap (01-F8).
+  const relayAcked = new Map<string, number>();
+  let unsubscribeRelay: (() => void) | null = null;
 
   // ---- device → cloud ------------------------------------------------------
 
@@ -89,6 +108,42 @@ export const createCloudSession = (options: {
     const last = events.at(-1);
     if (last === undefined) return;
     transport.send({ v: 1, kind: "push", events, watermark: last.lamport_seq });
+  };
+
+  /**
+   * Relay one origin's pending tail upward: its held events past the per-origin
+   * relay cursor, lamport order, ONE origin per push (T-01-12 ruling — the
+   * scalar push_ack answers that origin). Verbatim envelopes from the held
+   * branch window — attested, never re-authored (01-F1).
+   */
+  const relayPushFor = (origin: string, held: readonly EventEnvelopeT[]): void => {
+    const from = (relayAcked.get(origin) ?? -1) + 1;
+    const pending = held.filter((e) => e.lamport_seq >= from).slice(0, CLOUD_PUSH_BATCH_MAX);
+    const last = pending.at(-1);
+    if (last === undefined) return;
+    transport.send({ v: 1, kind: "push", events: [...pending], watermark: last.lamport_seq });
+  };
+
+  /**
+   * Relay drain (DEC-SYNC-009): candidate rule (T-01-12, implementer-proposed —
+   * flagged for oracle review): EVERY same-branch peer origin present in the
+   * held branch window with events past its relay cursor. A device with its own
+   * WAN session may be relayed too — gateway id-dedupe keeps the merged log
+   * exactly-once (R4 green pin), and the per-origin ack is idempotent.
+   */
+  const relayDrain = (originFilter?: string): void => {
+    if (!connected || !relayAuthorized || !relayRequested) return;
+    const own = store.identity.device_id;
+    const byOrigin = new Map<string, EventEnvelopeT[]>();
+    for (const e of store.readAllEvents()) {
+      // readAllEvents is (device_id, lamport_seq)-sorted — per-origin order holds.
+      if (e.device_id === own) continue;
+      if (originFilter !== undefined && e.device_id !== originFilter) continue;
+      const held = byOrigin.get(e.device_id);
+      if (held === undefined) byOrigin.set(e.device_id, [e]);
+      else held.push(e);
+    }
+    for (const [origin, held] of byOrigin) relayPushFor(origin, held);
   };
 
   // ---- cloud → device ------------------------------------------------------
@@ -134,13 +189,29 @@ export const createCloudSession = (options: {
     switch (message.kind) {
       case "hello_ack": {
         connected = true;
+        // The gateway's relay advertisement (DEC-SYNC-009): absent = never relay.
+        relayAuthorized = message.relay_authorized === true;
         drainPush(); // drain the outbox tail (paged from the cloud checkpoint)
         // Exclusive cursor: global_seq starts at 1, so last_global_seq ?? 0 = "send
         // everything"; catchup_response pages via next_from while complete === false.
         sendCatchup(store.status().last_global_seq ?? 0);
+        relayDrain(); // resume any latched relay work across a reconnect (DEC-SYNC-009)
         return;
       }
       case "push_ack": {
+        const origin = message.origin_device_id;
+        if (origin !== undefined && origin !== store.identity.device_id) {
+          // Per-ORIGIN relay ack (DEC-SYNC-009): record it for the mesh to
+          // propagate over LAN — NEVER this session's own write-checkpoint
+          // (the hub only guarantees delivery; the origin owns its outbox).
+          const prev = relayAcked.get(origin) ?? -1;
+          if (message.acked_watermark > prev) {
+            relayAcked.set(origin, message.acked_watermark);
+            store.noteRelayedCloudAck(origin, message.acked_watermark);
+            relayDrain(origin); // chain the next relay page for this origin
+          }
+          return;
+        }
         if (lastPushAck === null || message.acked_watermark > lastPushAck) {
           lastPushAck = message.acked_watermark;
           store.advanceTo(message.acked_watermark); // THE cloud write-checkpoint (19 §5)
@@ -182,6 +253,14 @@ export const createCloudSession = (options: {
     start() {
       if (running) return;
       running = true;
+      // The mesh (acting hub) signals over the store seam when it ingests
+      // follower events (DEC-SYNC-009): latch the request — the flag survives a
+      // WAN-down window so hello_ack resumes the relay — and drain if possible.
+      unsubscribeRelay = store.onRelayDrainRequested(() => {
+        if (!running) return;
+        relayRequested = true;
+        relayDrain();
+      });
       transport.start(handlers);
     },
 
@@ -189,6 +268,10 @@ export const createCloudSession = (options: {
       if (!running) return;
       running = false;
       connected = false;
+      if (unsubscribeRelay !== null) {
+        unsubscribeRelay();
+        unsubscribeRelay = null;
+      }
       transport.stop();
     },
 
