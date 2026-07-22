@@ -1,7 +1,8 @@
 // T-01-07 Postgres data contract (binding — plans/wave-0/kernel-tasks.md T-01-07;
-// owning spec 01 §3/§5): the four kernel-schema tables. sync-gateway is the sole
-// writer of all four (18 §4). No UPDATE or DELETE statement exists anywhere in
-// this package for kernel.events (01-F1 append-only ledger). Ids are text, not
+// owning spec 01 §3/§5): the four kernel-schema tables, plus the T-01-08
+// quarantine-notice outbox (DEC-SYNC-008). sync-gateway is the sole writer of
+// all five (18 §4). No UPDATE or DELETE statement exists anywhere in this
+// package for kernel.events (01-F1 append-only ledger). Ids are text, not
 // uuid — the storage layer must not tighten the wire contract (assumption 11).
 // envelope jsonb is verbatim-as-received; the two cloud-stamped values live in
 // their own columns and are merged into the envelope at serve time (assumption 12).
@@ -73,4 +74,31 @@ export const quarantine = kernel.table(
     received_at: bigint("received_at", { mode: "number" }).notNull(),
   },
   (t) => [unique("quarantine_org_claimed_event_uq").on(t.org_id, t.claimed_event_id)],
+);
+
+/**
+ * Durable quarantine-notice outbox (T-01-08 binding data contract; DEC-SYNC-008
+ * accepted: at-least-once, keyed by ORIGIN device, live-sent + redelivered on
+ * next hello, mark-on-send). One notice per claimed id, first wins (UNIQUE +
+ * ON CONFLICT DO NOTHING — idempotent with the quarantine row). The ONLY column
+ * ever updated is delivered_at: this is delivery bookkeeping, not event history,
+ * so 01-F1's no-update law does not reach it (stated explicitly in the contract).
+ */
+export const quarantineNotices = kernel.table(
+  "quarantine_notices",
+  {
+    id: text("id").primaryKey(),
+    org_id: text("org_id").notNull(),
+    branch_id: text("branch_id").notNull(),
+    device_id: text("device_id").notNull(),
+    claimed_event_id: text("claimed_event_id").notNull(),
+    reason: text("reason").notNull(),
+    created_at: bigint("created_at", { mode: "number" }).notNull(),
+    delivered_at: bigint("delivered_at", { mode: "number" }),
+  },
+  (t) => [
+    unique("quarantine_notices_org_claimed_event_uq").on(t.org_id, t.claimed_event_id),
+    // The hello-time drain query (undelivered notices for one device).
+    index("quarantine_notices_org_device_delivered_idx").on(t.org_id, t.device_id, t.delivered_at),
+  ],
 );

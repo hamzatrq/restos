@@ -1,6 +1,6 @@
 // T-01-07 error taxonomy (18 §3/§5): typed errors over string matching. The
-// quarantine reasons are the CLOSED set below (01-F37) — invariant-class
-// reasons arrive with T-01-08, not here.
+// quarantine reasons are the CLOSED set below (01-F37); `invariant_violation`
+// is the taxonomy slot T-01-07 reserved for T-01-08 (DEC-SYNC-007).
 export class GatewayError extends Error {
   constructor(message: string) {
     super(message);
@@ -35,4 +35,5 @@ export type QuarantineReason =
   | "device_mismatch"
   | "id_content_divergence"
   | "lamport_conflict"
-  | "storage_reject";
+  | "storage_reject"
+  | "invariant_violation";

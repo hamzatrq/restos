@@ -11,7 +11,7 @@ Transport: WebSocket (cloud + LAN, one framing), JSON messages, permessage-defla
 | `event_batch` | hub/cloud → device | `{ events: (Envelope & { global_seq?: int })[] }` | merged stream, slice-filtered per class (01-F39/F40); `global_seq` present once cloud-assigned (01-F3) |
 | `catchup_request` | device → | `{ from_global_seq }` | range fetch (01-F9) |
 | `catchup_response` | ← | `{ events, complete: bool, next_from }` | paged |
-| `quarantine_notice` | → origin device | `{ event_id, reason }` | 01-F37 — event excluded from folds; correction flow is operator-side |
+| `quarantine_notice` | → origin device | `{ event_id, reason }` | 01-F37 — event excluded from folds; correction flow is operator-side. **Clarified (T-01-08, DEC-SYNC-008/DEC-SYNC-009):** the cloud live-sends to the PUSHING session and durably redelivers on the origin's next own `hello`; when the pusher was a relaying hub, the hub forwards the notice over the LAN to the WAN-less origin (same body, at-least-once — duplicates legal). No new kind or field; additive under `v: 1` |
 | `purge_command` | → device | `{ scope }` | revocation (01-F42); device wipes local DB, acks, re-registers |
 | `ping` / `pong` | both | `{ t }` | liveness for hub election (HUB-ELECTION.md) |
 

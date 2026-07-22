@@ -9,7 +9,7 @@
 // DEC-SYNC-004's blanket no-proxy rule). Transport-free: the socket adapter
 // (server.ts) owns the wire codec; every outbound message is a decoded
 // ProtocolMessage through the sink.
-import { type EventEnvelopeT, newId, parseEvent } from "@restos/domain";
+import { type EventEnvelopeT, newId, parseEvent, refundRemainderExceeded } from "@restos/domain";
 import { type ProtocolMessage, parseMessage } from "@restos/sync-protocol";
 import { sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -85,6 +85,86 @@ const registryValid = (envelope: EventEnvelopeT): boolean => {
   }
 };
 
+/** The transaction/database read surface the invariant seam needs (tx and db both satisfy it). */
+type SqlExecutor = Pick<GatewayDb, "execute">;
+
+/**
+ * T-01-08 invariant seam — the merge pipeline's step 3.5 (DEC-SYNC-007 accepted):
+ * the gateway enforces only fold-FREE, PROVABLE invariants inline at merge. v1
+ * implements exactly one rule — the refund cap (01-F29 as amended July 2026:
+ * parents resolve by ATTEMPT id, never envelope id — one intent may legitimately
+ * exist under two envelope ids, which fragments any id-keyed cap; T-01-08
+ * oracle-round ruling 1) — and returns null for every non-refund type: sale-path
+ * events are never invariant-checked (01-F17). Runs only for events that
+ * survived identity + registry + dedupe + the contiguity gate, i.e. events about
+ * to merge. Reads run inside the merge transaction, so rows merged earlier in
+ * THIS batch are visible — the in-batch case resolves identically to the
+ * multi-push case (01-F31); the org-counter FOR UPDATE lock serializes merges,
+ * so a concurrent refund on another session sees this one committed.
+ */
+const checkInvariants = async (
+  tx: SqlExecutor,
+  session: SessionState,
+  envelope: EventEnvelopeT,
+): Promise<QuarantineReason | null> => {
+  if (envelope.type !== "payment.refunded") return null;
+  // Registry parse already succeeded (step 2): the amended 01-F29 payload carries
+  // amount_paisa, its OWN settlement_attempt_id (01-F31) and payment_attempt_id.
+  const payload = envelope.payload as {
+    amount_paisa: number;
+    settlement_attempt_id: string;
+    payment_attempt_id: string;
+  };
+  // The parent: the merged payment.recorded whose settlement_attempt_id equals
+  // the refund's payment_attempt_id. Not (yet) merged — never seen, or itself
+  // quarantined — is UNPROVABLE: the refund passes through (DEC-SYNC-007; a sale
+  // is never blocked, 01-F17; the Auditor's refold owns the rest, T-01-11).
+  const parentRows = await tx.execute(
+    sql`select envelope from kernel.events
+        where org_id = ${session.orgId}
+          and envelope->>'type' = 'payment.recorded'
+          and envelope->'payload'->>'settlement_attempt_id' = ${payload.payment_attempt_id}
+        order by global_seq asc limit 1`,
+  );
+  const parentRow = [...parentRows][0];
+  if (parentRow === undefined) return null;
+  const parentPayload = (parentRow.envelope as { payload: { amount_paisa: number } }).payload;
+  // Prior refunds naming the same parent, totalled over UNIQUE refund attempt
+  // keys (01-F31 unique-keyed sums — an envelope-keyed Σ would double-count
+  // exactly the way 01-F29's parenthetical warns). First merged wins per key.
+  const priorRows = await tx.execute(
+    sql`select envelope from kernel.events
+        where org_id = ${session.orgId}
+          and envelope->>'type' = 'payment.refunded'
+          and envelope->'payload'->>'payment_attempt_id' = ${payload.payment_attempt_id}
+        order by global_seq asc`,
+  );
+  const uniquePriors = new Map<string, number>();
+  for (const row of [...priorRows]) {
+    const prior = (
+      row.envelope as { payload: { amount_paisa: number; settlement_attempt_id: string } }
+    ).payload;
+    if (!uniquePriors.has(prior.settlement_attempt_id)) {
+      uniquePriors.set(prior.settlement_attempt_id, Number(prior.amount_paisa));
+    }
+  }
+  // A refund whose OWN attempt key is already merged is the same intent
+  // re-expressed under a second envelope id — it adds no new money and merges
+  // without a cap check (its key already counted once, 01-F31/01-F29).
+  if (uniquePriors.has(payload.settlement_attempt_id)) return null;
+  let priorTotal = 0;
+  for (const amount of uniquePriors.values()) priorTotal += amount;
+  // The decision is exactly the domain rule's output — no re-implemented
+  // arithmetic at the call site (01-F30, T-01-08 law 7).
+  return refundRemainderExceeded({
+    payment_amount_paisa: Number(parentPayload.amount_paisa),
+    prior_refunds_total_paisa: priorTotal,
+    this_refund_paisa: Number(payload.amount_paisa),
+  })
+    ? "invariant_violation"
+    : null;
+};
+
 type MergedEvent = { envelope: EventEnvelopeT; globalSeq: number; serverReceivedAt: number };
 /** deviceId = the quarantine row's attribution (fix round F2): identity-mismatch
  * rows carry the SESSION device — the only authenticated identity; content-class
@@ -146,6 +226,35 @@ export const createGateway = ({ db, clock }: { db: GatewayDb; clock: Clock }): G
         ...(claims.hub_relay ? { relay_authorized: true } : {}),
       }),
     );
+    // T-01-08 hello-time notice drain (DEC-SYNC-008): AFTER hello_ack, this
+    // device's undelivered notice rows are sent and then marked — the "origin
+    // offline at notice time" path (a WAN-less origin's first own hello, or the
+    // crash-before-mark window). At-least-once: duplicates at the client are
+    // legal; a marked row is never redelivered on a later hello.
+    const pendingNotices = [
+      ...(await db.execute(
+        sql`select id, claimed_event_id, reason from kernel.quarantine_notices
+            where org_id = ${session.orgId} and device_id = ${session.deviceId}
+              and delivered_at is null
+            order by created_at asc, claimed_event_id asc`,
+      )),
+    ];
+    for (const row of pendingNotices) {
+      record.sink(
+        parseMessage({
+          v: 1,
+          kind: "quarantine_notice",
+          event_id: String(row.claimed_event_id),
+          reason: String(row.reason),
+        }),
+      );
+    }
+    if (pendingNotices.length > 0) {
+      await db.execute(
+        sql`update kernel.quarantine_notices set delivered_at = ${clock.now()}
+            where id in ${pendingNotices.map((row) => String(row.id))}`,
+      );
+    }
   };
 
   /** Per-origin contiguity state within one push transaction (DEC-SYNC-009). */
@@ -300,6 +409,17 @@ export const createGateway = ({ db, clock }: { db: GatewayDb; clock: Clock }): G
           continue;
         }
         if (envelope.lamport_seq !== stream.through + 1) break;
+        // 3.5 (T-01-08, DEC-SYNC-007): fold-free invariant validation — placed
+        // after the contiguity gate per the contract's sequencing note (it never
+        // fires on a stop-at-gap-skipped or already-deduped event; only on
+        // events about to merge). A violator quarantines with its ORIGIN's slot
+        // filled (DEC-SYNC-005) so the ack advances and the outbox never wedges
+        // (01-F17); following contiguous events in the same push still merge.
+        const invariantReason = await checkInvariants(tx, session, envelope);
+        if (invariantReason !== null) {
+          quarantine(stream, envelope, invariantReason, envelope.device_id);
+          continue;
+        }
         // 5. Merge (01-F3): cloud stamps assigned in array order under the org
         // lock. clock.now() runs OUTSIDE the savepoint scope: an infra failure
         // there aborts the whole merge (law 1 rollback — a crashed merge is not
@@ -344,6 +464,21 @@ export const createGateway = ({ db, clock }: { db: GatewayDb; clock: Clock }): G
                 (id, org_id, branch_id, device_id, claimed_event_id, reason, envelope, received_at)
               values (${newId()}, ${session.orgId}, ${session.branchId}, ${q.deviceId},
                 ${q.envelope.id}, ${q.reason}, ${JSON.stringify(q.envelope)}, ${clock.now()})
+              on conflict (org_id, claimed_event_id) do nothing`,
+        );
+        // T-01-08 (DEC-SYNC-008): EVERY quarantine class writes a notice-outbox
+        // row committed atomically with the quarantine row (persist-before-
+        // notify, 01-F2). device_id follows the QUARANTINE row's attribution
+        // (fix-round F2): identity-mismatch rows key to the SESSION device — the
+        // only authenticated identity (keying to an unauthenticated claimed id
+        // would let a forger spam another device's notice stream). First stored
+        // wins — idempotent with the quarantine row; a delivered row is never
+        // re-flagged by a re-push (ON CONFLICT DO NOTHING).
+        await tx.execute(
+          sql`insert into kernel.quarantine_notices
+                (id, org_id, branch_id, device_id, claimed_event_id, reason, created_at, delivered_at)
+              values (${newId()}, ${session.orgId}, ${session.branchId}, ${q.deviceId},
+                ${q.envelope.id}, ${q.reason}, ${clock.now()}, null)
               on conflict (org_id, claimed_event_id) do nothing`,
         );
       }
@@ -406,6 +541,25 @@ export const createGateway = ({ db, clock }: { db: GatewayDb; clock: Clock }): G
           event_id: q.envelope.id,
           reason: q.reason,
         }),
+      );
+    }
+    // T-01-08 mark-on-send (DEC-SYNC-008; oracle-round ruling 3): a notice row
+    // is marked delivered ONLY when the send went to a session authenticated AS
+    // the row's device — the live send above went to the PUSHER, so only rows
+    // attributed to the pusher's own device mark. A live send to a RELAYING hub
+    // never marks the ORIGIN's row (marking there would degrade the WAN-less
+    // origin — the exact deployment T-01-08 serves — to at-most-once via one
+    // best-effort LAN forward). Post-commit best-effort: a crash before this
+    // UPDATE leaves the row undelivered → redelivered on the device's next
+    // hello (at-least-once, never lost). Only delivered_at ever updates.
+    const sentToOwnDevice = outcome.quarantined
+      .filter((q) => q.deviceId === session.deviceId)
+      .map((q) => q.envelope.id);
+    if (sentToOwnDevice.length > 0) {
+      await db.execute(
+        sql`update kernel.quarantine_notices set delivered_at = ${clock.now()}
+            where org_id = ${session.orgId} and device_id = ${session.deviceId}
+              and claimed_event_id in ${sentToOwnDevice} and delivered_at is null`,
       );
     }
     // Post-commit fan-out (01-F9/01-F34): one event_batch per push to every

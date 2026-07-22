@@ -136,6 +136,16 @@ export type DeviceStore = {
   noteRelayedCloudAck(device_id: string, acked_watermark: number): void;
   /** Highest known relayed cloud ack for an origin (mesh reads it to forward over LAN). */
   relayedCloudAck(device_id: string): number | null;
+  /** Cloud session records a cloud quarantine_notice whose event belongs to a
+   * relayed ORIGIN (T-01-08; 01-F37 "originating device notified" — a WAN-less
+   * origin's only path is the hub's LAN forward). Deduped by event id. */
+  noteRelayedQuarantineNotice(
+    device_id: string,
+    notice: { event_id: string; reason: string },
+  ): void;
+  /** Recorded notices for an origin (mesh reads them to forward over LAN,
+   * at-least-once — re-sent per heartbeat, duplicates legal per DEC-SYNC-008). */
+  relayedQuarantineNotices(device_id: string): readonly { event_id: string; reason: string }[];
   /** This device's own audit-chain HEAD (01-F5); null before the first own audit append. */
   auditChainHead(): { hash: string; event_id: string } | null;
   close(): void;
@@ -736,6 +746,11 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   const relayDrainListeners = new Set<() => void>();
   const relayCancelListeners = new Set<() => void>();
   const relayedCloudAcks = new Map<string, number>();
+  // Per-origin cloud quarantine notices awaiting LAN forward (T-01-08): volatile
+  // like the rest of the seam — the durable at-least-once guarantee lives in the
+  // GATEWAY's kernel.quarantine_notices outbox (DEC-SYNC-008); this map only
+  // carries the live LAN forward. Keyed origin → (event_id → reason).
+  const relayedNotices = new Map<string, Map<string, string>>();
 
   return {
     identity: { ...identity },
@@ -879,6 +894,18 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
       return relayedCloudAcks.get(device_id) ?? null;
     },
 
+    noteRelayedQuarantineNotice(device_id, notice) {
+      const held = relayedNotices.get(device_id) ?? new Map<string, string>();
+      if (!held.has(notice.event_id)) held.set(notice.event_id, notice.reason); // first wins
+      relayedNotices.set(device_id, held);
+    },
+
+    relayedQuarantineNotices(device_id) {
+      const held = relayedNotices.get(device_id);
+      if (held === undefined) return [];
+      return [...held].map(([event_id, reason]) => ({ event_id, reason }));
+    },
+
     auditChainHead() {
       const row = readAuditHead.get();
       if (!row || row.head_hash === null || row.head_event_id === null) return null;
@@ -889,6 +916,7 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
       relayDrainListeners.clear();
       relayCancelListeners.clear();
       relayedCloudAcks.clear();
+      relayedNotices.clear();
       db.close();
     },
   };

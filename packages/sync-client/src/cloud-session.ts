@@ -216,6 +216,16 @@ export const createCloudSession = (options: {
           }
           return;
         }
+        // T-01-08 owed pin F3-ext (mesh F3's shape, 19 §5): an own-stream cloud
+        // ack beyond own appended high water — the wiped-device DR rejoin, where
+        // quarantine slots from the pre-wipe life keep the cloud watermark high
+        // (lamport_conflict fills, DEC-SYNC-005) while the reborn store holds
+        // almost nothing — is IGNORED, never thrown out of the transport
+        // dispatch: the checkpoint never claims unappended slots, the poison
+        // value never touches the ack bookkeeping, and the session keeps
+        // processing later genuine acks.
+        const ownHigh = store.status().own_high_water;
+        if (ownHigh === null || message.acked_watermark > ownHigh) return;
         if (lastPushAck === null || message.acked_watermark > lastPushAck) {
           lastPushAck = message.acked_watermark;
           store.advanceTo(message.acked_watermark); // THE cloud write-checkpoint (19 §5)
@@ -234,6 +244,21 @@ export const createCloudSession = (options: {
       }
       case "quarantine_notice": {
         quarantined.push({ event_id: message.event_id, reason: message.reason });
+        // T-01-08 (01-F37 "originating device notified" / PROTOCOL.md:
+        // quarantine_notice → origin device): when the quarantined event is a
+        // HELD PEER's — the relay shape, where the live cloud notice terminates
+        // at this pushing hub session — record it on the store seam for the
+        // mesh to forward over the LAN. The WAN-less origin has no cloud
+        // session; the hub's LAN forward is its only notification path
+        // (at-least-once — the gateway's durable outbox redelivers on the
+        // origin's next own hello, DEC-SYNC-008).
+        const held = store.readAllEvents().find((e) => e.id === message.event_id);
+        if (held !== undefined && held.device_id !== store.identity.device_id) {
+          store.noteRelayedQuarantineNotice(held.device_id, {
+            event_id: message.event_id,
+            reason: message.reason,
+          });
+        }
         return;
       }
       default:

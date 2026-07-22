@@ -255,6 +255,25 @@ export const createMeshSession = (options: {
     });
   };
 
+  /**
+   * T-01-08 (01-F37 / DEC-SYNC-008): forward the cloud's quarantine notices for
+   * this ORIGIN's events over the LAN — the only notification path a WAN-less
+   * origin has (PROTOCOL.md: quarantine_notice → origin device). Re-sent per
+   * heartbeat like forwardCloudAck (the F5 rationale: a send-time latch would
+   * let one lost LAN frame lose the notice); duplicates are legal at the
+   * receiver (DEC-SYNC-008 at-least-once).
+   */
+  const forwardQuarantineNotices = (device_id: string): void => {
+    for (const notice of store.relayedQuarantineNotices(device_id)) {
+      send(device_id, {
+        v: 1,
+        kind: "quarantine_notice",
+        event_id: notice.event_id,
+        reason: notice.reason,
+      });
+    }
+  };
+
   const scheduleHeartbeat = (device_id: string): void => {
     const session = followers.get(device_id);
     if (session === undefined) return;
@@ -270,6 +289,7 @@ export const createMeshSession = (options: {
       send(device_id, { v: 1, kind: "ping", t: clock.now() });
       replayWindowTo(device_id); // idempotent loss recovery for fan-out (01-F8)
       forwardCloudAck(device_id); // relayed cloud ack propagation (DEC-SYNC-009, F5 re-forward)
+      forwardQuarantineNotices(device_id); // origin notification via relay (T-01-08, 01-F37)
       scheduleHeartbeat(device_id);
     }, HEARTBEAT_INTERVAL_MS);
   };

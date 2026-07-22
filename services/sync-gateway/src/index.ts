@@ -18,3 +18,9 @@ export {
   type GatewayDb,
 } from "./gateway.js";
 export { applyMigrations } from "./migrate.js";
+export {
+  listQuarantine,
+  QUARANTINE_PAGE_SIZE,
+  type QuarantineEntry,
+  type QuarantineFilter,
+} from "./quarantine-query.js";
