@@ -60,8 +60,6 @@ export type MeshSession = {
 type FollowerSession = {
   missed: number;
   timer: TimerId | null;
-  /** Last relayed CLOUD ack forwarded to this follower over LAN (DEC-SYNC-009). */
-  forwardedCloudAck: number | null;
 };
 
 export const createMeshSession = (options: {
@@ -222,6 +220,11 @@ export const createMeshSession = (options: {
 
   const teardownHub = (): void => {
     for (const device_id of [...followers.keys()]) dropFollower(device_id);
+    // Fix round F4 (DEC-SYNC-006): leaving hub duty (demotion or stop) clears
+    // the cloud session's latched relay request over the store seam — a demoted
+    // follower must never relay third-party events, even after a WAN bounce
+    // whose hello_ack would otherwise resume a stale latch.
+    store.cancelRelayDrain();
   };
 
   /** Full-window event_batch — joiner catchup and per-heartbeat re-fan; id-dedupe absorbs (assumption 6). */
@@ -234,20 +237,22 @@ export const createMeshSession = (options: {
   /**
    * DEC-SYNC-009 (T-01-12): forward the recorded per-ORIGIN cloud ack to a
    * connected follower — push_ack{origin_device_id: follower} is the relayed
-   * CLOUD ack, distinct from the volatile LAN ack. The origin acts on it
-   * (store.advanceTo at the receiver); the hub never writes its checkpoint.
+   * CLOUD ack, distinct from the volatile LAN ack. Re-sent on EVERY heartbeat
+   * like replayWindowTo (fix round F5): a marked-forwarded-at-SEND-time latch
+   * would let a single lost LAN frame stall the origin's checkpoint forever;
+   * the receiver's advanceTo is idempotent/monotone, so re-forwarding is free.
+   * The origin acts on it (store.advanceTo at the receiver); the hub never
+   * writes its checkpoint.
    */
-  const forwardCloudAck = (device_id: string, session: FollowerSession): void => {
+  const forwardCloudAck = (device_id: string): void => {
     const cloudAck = store.relayedCloudAck(device_id);
     if (cloudAck === null) return;
-    if (session.forwardedCloudAck !== null && cloudAck <= session.forwardedCloudAck) return;
     send(device_id, {
       v: 1,
       kind: "push_ack",
       acked_watermark: cloudAck,
       origin_device_id: device_id,
     });
-    session.forwardedCloudAck = cloudAck;
   };
 
   const scheduleHeartbeat = (device_id: string): void => {
@@ -264,14 +269,14 @@ export const createMeshSession = (options: {
       live.missed += 1;
       send(device_id, { v: 1, kind: "ping", t: clock.now() });
       replayWindowTo(device_id); // idempotent loss recovery for fan-out (01-F8)
-      forwardCloudAck(device_id, live); // relayed cloud ack propagation (DEC-SYNC-009)
+      forwardCloudAck(device_id); // relayed cloud ack propagation (DEC-SYNC-009, F5 re-forward)
       scheduleHeartbeat(device_id);
     }, HEARTBEAT_INTERVAL_MS);
   };
 
   const admitFollower = (device_id: string): void => {
     dropFollower(device_id); // re-hello = fresh session
-    followers.set(device_id, { missed: 0, timer: null, forwardedCloudAck: null });
+    followers.set(device_id, { missed: 0, timer: null });
     scheduleHeartbeat(device_id);
     send(device_id, {
       v: 1,
@@ -350,9 +355,16 @@ export const createMeshSession = (options: {
 
   const dispatch = (from: string, message: ProtocolMessage): void => {
     // Inbound traffic is the ONLY thing that clears suspicion (fix-round 2): the
-    // sender is provably alive; it re-enters candidacy on the next peer-set
-    // recompute — never by an immediate re-election here.
-    suspects.delete(from);
+    // sender is provably alive. Clearing a REAL suspect recomputes immediately
+    // (T-01-12 fix round, F5 rider): a false hub-loss fired at a lossy-window
+    // heal boundary (heartbeat period divides HUB_LOSS_TIMEOUT_MS, so idle hits
+    // the limit at the exact instant the first healed ping lands) parks this
+    // device in state hub with the true hub still visible — and with no future
+    // visibility event there IS no "next peer-set recompute", so the split-brain
+    // (and every relayed-cloud-ack forward with it) would wedge forever. The
+    // recompute runs before the message body so the frame is handled under the
+    // re-adopted state (a hub ping immediately refreshes liveness and pongs).
+    if (suspects.delete(from)) recompute();
     switch (message.kind) {
       case "hello": {
         if (state === "hub" || state === "solo") admitFollower(from);
@@ -387,8 +399,14 @@ export const createMeshSession = (options: {
           // write-checkpoint is the ORIGIN's own act (19 §5): the outbox drains
           // without this device ever having WAN of its own.
           if (message.origin_device_id !== self.device_id) return;
-          const current = store.status().acked_watermark;
-          if (current === null || message.acked_watermark > current) {
+          // Fix round F3 (19 §5): an ack beyond own appended high — a forged
+          // peer, or the wiped-store DR rejoin where the hub remembers a larger
+          // stream than the reborn store holds — is IGNORED, never thrown out
+          // of the transport dispatch: the checkpoint never claims unappended
+          // slots and the session keeps processing later genuine acks.
+          const { own_high_water, acked_watermark } = store.status();
+          if (own_high_water === null || message.acked_watermark > own_high_water) return;
+          if (acked_watermark === null || message.acked_watermark > acked_watermark) {
             store.advanceTo(message.acked_watermark);
           }
           return;

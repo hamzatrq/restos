@@ -69,12 +69,16 @@ export const createCloudSession = (options: {
   let relayAuthorized = false;
   // relayRequested: latched by the mesh's relay-drain signal even while the WAN
   // is down, so a reconnect (hello_ack) resumes the relay (R5/R6 heal shape).
+  // Cleared when the mesh leaves hub duty (fix round F4, DEC-SYNC-006):
+  // followers never relay, even across a WAN bounce whose hello_ack would
+  // otherwise resume a stale latch.
   let relayRequested = false;
   // Per-origin relay cursor: last cloud-acked watermark per origin, from
   // per-origin push_acks. Session-local; a fresh session re-relays from zero
   // and id-dedupe absorbs the overlap (01-F8).
   const relayAcked = new Map<string, number>();
   let unsubscribeRelay: (() => void) | null = null;
+  let unsubscribeRelayCancel: (() => void) | null = null;
 
   // ---- device → cloud ------------------------------------------------------
 
@@ -261,6 +265,12 @@ export const createCloudSession = (options: {
         relayRequested = true;
         relayDrain();
       });
+      // Fix round F4 (DEC-SYNC-006): the mesh signals over the same seam when
+      // it leaves hub duty (hub→follower demotion, or stop) — clear the latch
+      // so no later hello_ack resumes relaying from a demoted device.
+      unsubscribeRelayCancel = store.onRelayDrainCancelled(() => {
+        relayRequested = false;
+      });
       transport.start(handlers);
     },
 
@@ -271,6 +281,10 @@ export const createCloudSession = (options: {
       if (unsubscribeRelay !== null) {
         unsubscribeRelay();
         unsubscribeRelay = null;
+      }
+      if (unsubscribeRelayCancel !== null) {
+        unsubscribeRelayCancel();
+        unsubscribeRelayCancel = null;
       }
       transport.stop();
     },

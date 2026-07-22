@@ -5,7 +5,12 @@
 // same-org/branch peers' events). This validates SHAPE and CONSISTENCY only —
 // it is not authentication. T-01-09 swaps these internals for jose
 // verification + device-registry/revocation checks with the same claims
-// contract; nothing else changes.
+// contract; nothing else changes. Relayed ORIGIN devices are likewise
+// unvalidated here (fix round F6, document-don't-build): the capability
+// licenses relaying same-org/branch peers' events, but whether a claimed
+// origin device EXISTS in the branch registry is checked nowhere until the
+// T-01-09 registry lands — until then a relay-capable session can name
+// origins the registry has never seen.
 export type DeviceTokenClaims = {
   org_id: string;
   branch_id: string;

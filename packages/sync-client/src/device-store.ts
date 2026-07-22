@@ -118,11 +118,20 @@ export type DeviceStore = {
   // session (WAN) of ONE device, carried by the store handle because it is the
   // only object both sessions share. Never persisted: after a restart the hub
   // re-relays from zero and re-learns per-origin acks (id-dedupe + per-origin
-  // acks absorb the overlap, 01-F8).
+  // acks absorb the overlap, 01-F8). Future skip signal (fix round F7,
+  // accepted as designed): once held peer events carry an adopted global_seq
+  // sidecar (01-F34 delivery cursor), a restarted hub can skip
+  // already-cloud-merged events instead of re-relaying from zero — an
+  // optimization over the same dedupe-safe baseline, not a correctness need.
   /** Mesh (acting hub) → cloud session: peer events were ingested — relay them upward. */
   requestRelayDrain(): void;
   /** Cloud session subscribes to relay-drain requests; returns unsubscribe. */
   onRelayDrainRequested(listener: () => void): () => void;
+  /** Mesh (leaving hub duty — demotion or stop) → cloud session: clear any latched
+   * relay request; followers never relay (DEC-SYNC-006, fix round F4). */
+  cancelRelayDrain(): void;
+  /** Cloud session subscribes to relay-cancel signals; returns unsubscribe. */
+  onRelayDrainCancelled(listener: () => void): () => void;
   /** Cloud session records a per-ORIGIN cloud ack learned from a relay push_ack. */
   noteRelayedCloudAck(device_id: string, acked_watermark: number): void;
   /** Highest known relayed cloud ack for an origin (mesh reads it to forward over LAN). */
@@ -725,6 +734,7 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   // DEC-SYNC-009 hub-relay seam (T-01-12): volatile, in-memory on the handle —
   // see the DeviceStore type doc. Listeners fire synchronously.
   const relayDrainListeners = new Set<() => void>();
+  const relayCancelListeners = new Set<() => void>();
   const relayedCloudAcks = new Map<string, number>();
 
   return {
@@ -847,6 +857,17 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
       };
     },
 
+    cancelRelayDrain() {
+      for (const listener of [...relayCancelListeners]) listener();
+    },
+
+    onRelayDrainCancelled(listener) {
+      relayCancelListeners.add(listener);
+      return () => {
+        relayCancelListeners.delete(listener);
+      };
+    },
+
     noteRelayedCloudAck(device_id, acked_watermark) {
       const current = relayedCloudAcks.get(device_id);
       if (current === undefined || acked_watermark > current) {
@@ -866,6 +887,7 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
 
     close() {
       relayDrainListeners.clear();
+      relayCancelListeners.clear();
       relayedCloudAcks.clear();
       db.close();
     },

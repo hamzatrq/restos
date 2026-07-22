@@ -86,7 +86,10 @@ const registryValid = (envelope: EventEnvelopeT): boolean => {
 };
 
 type MergedEvent = { envelope: EventEnvelopeT; globalSeq: number; serverReceivedAt: number };
-type QuarantinedEvent = { envelope: EventEnvelopeT; reason: QuarantineReason };
+/** deviceId = the quarantine row's attribution (fix round F2): identity-mismatch
+ * rows carry the SESSION device — the only authenticated identity; content-class
+ * rows of identity-valid envelopes carry the ORIGIN (DEC-SYNC-005). */
+type QuarantinedEvent = { envelope: EventEnvelopeT; reason: QuarantineReason; deviceId: string };
 
 export const createGateway = ({ db, clock }: { db: GatewayDb; clock: Clock }): Gateway => {
   const branchSets = new Map<string, Set<ConnectionRecord>>();
@@ -217,20 +220,27 @@ export const createGateway = ({ db, clock }: { db: GatewayDb; clock: Clock }): G
 
       const merged: MergedEvent[] = [];
       const quarantined: QuarantinedEvent[] = [];
-      // EVERY quarantine class fills its lamport slot — the slot is durably
-      // held by the quarantine row, so the watermark advances over it and the
-      // origin's outbox never wedges (fix-round amendment 2, DEC-SYNC-005). An
-      // identity-valid envelope fills its ORIGIN's stream; an identity-MISMATCH
-      // envelope has no validated origin stream and fills the pushing session's
-      // own stream (the pre-relay law: the pusher's own outbox must not wedge
-      // on its own garbage — law 6 identity-mismatch pin).
+      // EVERY quarantine class of an identity-VALID envelope fills its ORIGIN's
+      // lamport slot — the slot is durably held by the quarantine row, so the
+      // watermark advances over it and the origin's outbox never wedges
+      // (fix-round amendment 2, DEC-SYNC-005). Identity-MISMATCH envelopes
+      // split by session kind (fix round F1): a PLAIN session keeps the law-6
+      // fill of its OWN stream (pusher==author — the mismatch slot IS its own
+      // outbox slot, which must not wedge on its own garbage); a RELAY-capable
+      // session fills NO stream (stream = null) — a relayed mismatch's
+      // lamport_seq belongs to the claimed ORIGIN's numbering, and filling the
+      // hub's own slot at that number would displace the hub's genuine future
+      // event there (watermark advance → lamport_conflict → durable merged-log
+      // loss). Nothing wedges by not filling: the garbage was never in the
+      // hub's outbox. The row is stored verbatim either way (01-F37).
       const quarantine = (
-        stream: StreamState,
+        stream: StreamState | null,
         envelope: EventEnvelopeT,
         reason: QuarantineReason,
+        deviceId: string,
       ): void => {
-        quarantined.push({ envelope, reason });
-        fill(stream, envelope.lamport_seq);
+        quarantined.push({ envelope, reason, deviceId });
+        if (stream !== null) fill(stream, envelope.lamport_seq);
       };
 
       // The push's origin: ONE origin per relay push message (T-01-12 ruling) —
@@ -253,14 +263,21 @@ export const createGateway = ({ db, clock }: { db: GatewayDb; clock: Clock }): G
                 ? "device_mismatch"
                 : null;
         if (identityReason !== null) {
-          quarantine(ownStream, envelope, identityReason);
+          // F2 (ruled): the row attributes to session.deviceId — the claimed
+          // origin ids are unauthenticated garbage a forger controls.
+          quarantine(
+            session.hubRelay ? null : ownStream,
+            envelope,
+            identityReason,
+            session.deviceId,
+          );
           continue;
         }
         const stream = await streamOf(envelope.device_id);
         if (origin === null) origin = envelope.device_id;
         // 2. Registry parse (01-F4): unknown type or invalid payload → quarantine.
         if (!registryValid(envelope)) {
-          quarantine(stream, envelope, "schema_invalid");
+          quarantine(stream, envelope, "schema_invalid", envelope.device_id);
           continue;
         }
         // 3. Dedupe (01-F8): known id + identical content → skip (counts toward
@@ -272,14 +289,14 @@ export const createGateway = ({ db, clock }: { db: GatewayDb; clock: Clock }): G
             fill(stream, envelope.lamport_seq);
             continue;
           }
-          quarantine(stream, envelope, "id_content_divergence");
+          quarantine(stream, envelope, "id_content_divergence", envelope.device_id);
           continue;
         }
         // 4. Contiguity (per origin): a new id at an already-persisted slot is a
         // conflict; past the first gap nothing is stored (stop-at-gap,
         // assumption 4).
         if (envelope.lamport_seq <= stream.through) {
-          quarantine(stream, envelope, "lamport_conflict");
+          quarantine(stream, envelope, "lamport_conflict", envelope.device_id);
           continue;
         }
         if (envelope.lamport_seq !== stream.through + 1) break;
@@ -305,7 +322,7 @@ export const createGateway = ({ db, clock }: { db: GatewayDb; clock: Clock }): G
           // Bytes Postgres cannot faithfully hold (e.g. U+0000 in any string —
           // passes Zod, aborts the jsonb insert): the savepoint rolled back, so
           // siblings are isolated; quarantine verbatim, consume no global_seq.
-          quarantine(stream, envelope, "storage_reject");
+          quarantine(stream, envelope, "storage_reject", envelope.device_id);
           continue;
         }
         merged.push({ envelope, globalSeq: nextSeq, serverReceivedAt });
@@ -317,13 +334,15 @@ export const createGateway = ({ db, clock }: { db: GatewayDb; clock: Clock }): G
       for (const q of quarantined) {
         // First stored wins (01-F37): re-quarantine is an idempotent no-op.
         // envelope column is TEXT — the verbatim JSON string (amendment 3).
-        // device_id attribution is the ORIGIN the envelope claims (T-01-12
-        // planner ruling; DEC-SYNC-005 — slot-filling and the Auditor gap
-        // check are per-origin; identical to the session for own pushes).
+        // device_id attribution follows the stream semantics (fix round F2):
+        // identity-mismatch rows carry the SESSION device — the only
+        // authenticated identity; content-class rows of identity-valid
+        // envelopes carry the ORIGIN (DEC-SYNC-005 — slot-filling and the
+        // T-01-11 Auditor gap check are per-origin).
         await tx.execute(
           sql`insert into kernel.quarantine
                 (id, org_id, branch_id, device_id, claimed_event_id, reason, envelope, received_at)
-              values (${newId()}, ${session.orgId}, ${session.branchId}, ${q.envelope.device_id},
+              values (${newId()}, ${session.orgId}, ${session.branchId}, ${q.deviceId},
                 ${q.envelope.id}, ${q.reason}, ${JSON.stringify(q.envelope)}, ${clock.now()})
               on conflict (org_id, claimed_event_id) do nothing`,
         );
@@ -351,6 +370,12 @@ export const createGateway = ({ db, clock }: { db: GatewayDb; clock: Clock }): G
       return {
         acked: ackStream.through,
         ackOrigin: ackDevice === session.deviceId ? null : ackDevice,
+        // Fix round F1 / ratified interpretation 2: a relay-capable push with
+        // NOTHING identity-valid names no origin and filled no stream — it is
+        // answered with NO push_ack (for a fresh hub an ack of 0 would claim
+        // slot 0 held; for an established hub an ack would answer a question
+        // about slots the push never asked about).
+        mismatchOnlyRelay: session.hubRelay && origin === null && message.events.length > 0,
         merged,
         quarantined,
       };
@@ -359,10 +384,11 @@ export const createGateway = ({ db, clock }: { db: GatewayDb; clock: Clock }): G
     // Commit precedes everything below (01-F2 cloud side — law 3). No push_ack
     // when nothing is contiguously persisted for the push's origin (through <
     // 0): an ack of 0 would claim slot 0 is held (fix-round amendment 4;
-    // mirrors the LAN hub's acked ≥ 0 guard). A relay push is answered with
-    // THAT origin's contiguous high, named by origin_device_id (per-origin
-    // ack — DEC-SYNC-009; one origin per relay push message).
-    if (outcome.acked >= 0) {
+    // mirrors the LAN hub's acked ≥ 0 guard) — nor for a mismatch-only relay
+    // push (fix round F1). A relay push is answered with THAT origin's
+    // contiguous high, named by origin_device_id (per-origin ack —
+    // DEC-SYNC-009; one origin per relay push message).
+    if (outcome.acked >= 0 && !outcome.mismatchOnlyRelay) {
       record.sink(
         parseMessage({
           v: 1,
