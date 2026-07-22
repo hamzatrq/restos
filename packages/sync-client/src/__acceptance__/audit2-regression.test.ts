@@ -26,7 +26,9 @@ import type {
   ProtocolMessage,
 } from "@restos/sync-protocol";
 import { describe, expect, it } from "vitest";
-import { canonicalJson as foldsCanonicalJson } from "../folds/replay.js";
+// T-01-15 enumeration entry 27 (M): the fold module is now folds/merge.ts — the
+// consolidation law itself (one declared-once serializer, 18 §2) is unchanged.
+import { canonicalJson as foldsCanonicalJson } from "../folds/merge.js";
 import { createCloudSession, DivergentDuplicateError, openStore } from "../index.js";
 import {
   identity,
@@ -259,7 +261,9 @@ describe("F2 divergent duplicate ingest (01-F34)", () => {
 });
 
 describe("F4 canonical JSON consolidation (01-F6/01-F34)", () => {
-  it("01-F6/01-F34: a parked event's envelope_json is byte-identical before and after refold + reopen, even with JSON-omitted payload values", () => {
+  // T-01-15 enumeration entry 27 (R): the reopen byte-equality survives; the
+  // refold leg is dropped (the banned oracle is not ported).
+  it("01-F6/01-F34: a parked event's envelope_json is byte-identical across reopen, even with JSON-omitted payload values", () => {
     const path = tempDbPath();
     const id = identity();
     const peer = peerIdentity(id);
@@ -282,10 +286,6 @@ describe("F4 canonical JSON consolidation (01-F6/01-F34)", () => {
     const before = store.parked();
     expect(before).toHaveLength(1);
     const beforeJson = must(before[0], "the parked row").envelope_json;
-
-    // Same handle, recomputed from the SQLite rows (the JSON.stringify round-trip).
-    store.refold();
-    expect(must(store.parked()[0], "the refolded parked row").envelope_json).toBe(beforeJson);
 
     // A second handle on the same FILE — the reopen self-heal path (01-F6).
     store.close();

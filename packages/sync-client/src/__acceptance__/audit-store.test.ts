@@ -141,7 +141,9 @@ describe("idempotent re-append preserves the chain (01-F5, 01-F8)", () => {
 });
 
 describe("audit events are fold-inert (01-F5, 01-F6/F34)", () => {
-  it("01-F5/01-F6: interleaving audit.* appends leaves open_orders/kitchen_queue/parked byte-identical, and refold() agrees", () => {
+  // T-01-15 enumeration entry 26 (R): the fold-inertness law survives; the
+  // refold-equivalence leg is dropped (the banned oracle is not ported).
+  it("01-F5/01-F6: interleaving audit.* appends leaves open_orders/kitchen_queue/parked byte-identical", () => {
     const id = identity();
     // Store B: the operational lifecycle alone — distinct device_created_at fully orders it.
     const plain = openStore({ path: ":memory:", identity: id }) as AuditStore;
@@ -176,9 +178,6 @@ describe("audit events are fold-inert (01-F5, 01-F6/F34)", () => {
     for (const input of interleaved) withAudit.append(input);
     expect(foldSnapshot(withAudit)).toBe(expected);
     expect(withAudit.parked()).toEqual(plain.parked()); // audit events park nothing
-    // Refold from the ledger (audit rows included) reproduces the same fold tables (01-F6).
-    withAudit.refold();
-    expect(foldSnapshot(withAudit)).toBe(expected);
     plain.close();
     withAudit.close();
   });

@@ -63,9 +63,20 @@ export const orderLineAdded = (
   payload: { order_id, line_id, item_id: "item-karahi", qty: 1, unit_price_paisa: 50000, ...extra },
 });
 
-export const orderTableAssigned = (order_id: string, table_id: string) => ({
+/** T-01-15 M (oracle enumeration, cross-cutting): payload carries the amended
+ * required fields — supersedes ([] = root assignment) + from_table_id (01-F34). */
+export const orderTableAssigned = (
+  order_id: string,
+  table_id: string,
+  opts: { from?: string | null; supersedes?: readonly string[] } = {},
+) => ({
   type: "order.table_assigned",
-  payload: { order_id, table_id },
+  payload: {
+    order_id,
+    table_id,
+    from_table_id: opts.from ?? null,
+    supersedes: [...(opts.supersedes ?? [])],
+  },
 });
 
 export const kotPrinted = (order_id: string) => ({
@@ -73,20 +84,81 @@ export const kotPrinted = (order_id: string) => ({
   payload: { order_id },
 });
 
-export const lineStateChanged = (order_id: string, line_ids: string[], state: string) => ({
+/** The canonical predecessor per target state — the default `from_states` witness
+ * for legacy single-step transitions (exits claim a from-birth witness). */
+const DEFAULT_FROM: Record<string, string> = {
+  confirmed: "placed",
+  in_prep: "confirmed",
+  ready: "in_prep",
+  served: "ready",
+  picked_up: "ready",
+  delivered: "picked_up",
+  voided: "placed",
+  cancelled: "placed",
+};
+
+/** T-01-15 M (oracle enumeration, cross-cutting): carries the amended required
+ * per-line `line_context` — an edge, not a value (01-F34/01-F35). Callers pinning
+ * a specific claimed origin pass `from_states` explicitly. */
+export const lineStateChanged = (
+  order_id: string,
+  line_ids: string[],
+  state: string,
+  from_states?: readonly string[],
+) => ({
   type: "order.line_state_changed",
-  payload: { order_id, line_ids, state },
+  payload: {
+    order_id,
+    line_ids,
+    state,
+    line_context: Object.fromEntries(
+      [...new Set(line_ids)].map((lineId) => [
+        lineId,
+        {
+          to: state,
+          from_states: [...(from_states ?? [DEFAULT_FROM[state] ?? "placed"])],
+          preds: [],
+        },
+      ]),
+    ),
+  },
 });
 
+/** T-01-15 M (oracle enumeration, cross-cutting): carries the required `purpose`
+ * discriminator (01-F30/01-F32). */
 export const paymentRecorded = (order_id: string, amount_paisa: number) => ({
   type: "payment.recorded",
-  payload: { order_id, amount_paisa, method: "cash", settlement_attempt_id: newId() },
+  payload: {
+    order_id,
+    amount_paisa,
+    method: "cash",
+    purpose: "settles_order",
+    settlement_attempt_id: newId(),
+  },
 });
 
-/** `payment_id` is the parent payment.recorded EVENT id (01-F29; parking contract). */
-export const paymentRefunded = (payment_id: string, amount_paisa: number) => ({
+/** T-01-15 M (oracle enumeration, cross-cutting): the amended 01-F29 shape — the
+ * order key is carried; the parent ref is the parent's settlement_attempt_id
+ * (envelope-id refs superseded); the refund carries its OWN attempt key (01-F31). */
+export const paymentRefunded = (
+  order_id: string,
+  amount_paisa: number,
+  opts: { parent: string; attempt?: string },
+) => ({
   type: "payment.refunded",
-  payload: { payment_id, amount_paisa, method: "cash_out" },
+  payload: {
+    order_id,
+    amount_paisa,
+    method: "cash_out",
+    settlement_attempt_id: opts.attempt ?? newId(),
+    payment_attempt_id: opts.parent,
+  },
+});
+
+/** T-01-15 (01-F33): the settlement ACT — the only thing that settles an order. */
+export const settlementClosed = (order_id: string) => ({
+  type: "order.settlement_closed",
+  payload: { order_id },
 });
 
 /** A peer device in the same org/branch — its envelopes enter via store.ingest. */

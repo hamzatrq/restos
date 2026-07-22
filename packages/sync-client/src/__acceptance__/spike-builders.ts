@@ -225,13 +225,28 @@ export const generateSpikeRush = (params: {
       unit_price_paisa: LINE2_PRICE,
     });
     push(owner, "kot.printed", { order_id });
-    push(owner, "order.line_state_changed", { order_id, line_ids: [l1, l2], state: "confirmed" });
-    push(owner, "order.line_state_changed", { order_id, line_ids: [l1, l2], state: "in_prep" });
-    push(owner, "order.line_state_changed", { order_id, line_ids: [l1, l2], state: "ready" });
+    // T-01-15 M (oracle enumeration, cross-cutting): amended payloads — per-line
+    // line_context edges (01-F34/01-F35) and the payment purpose discriminator
+    // (01-F30/01-F32).
+    const walk = (state: string, from: string) => {
+      push(owner, "order.line_state_changed", {
+        order_id,
+        line_ids: [l1, l2],
+        state,
+        line_context: {
+          [l1]: { to: state, from_states: [from], preds: [] },
+          [l2]: { to: state, from_states: [from], preds: [] },
+        },
+      });
+    };
+    walk("confirmed", "placed");
+    walk("in_prep", "confirmed");
+    walk("ready", "in_prep");
     push(owner, "payment.recorded", {
       order_id,
       amount_paisa: ORDER_BILLED,
       method: "cash",
+      purpose: "settles_order",
       settlement_attempt_id: `pay-${params.seed}-${o}`,
     });
   }
@@ -364,8 +379,10 @@ const rangeArray = (n: number): number[] => Array.from({ length: n }, (_unused, 
  * The full X1 convergence oracle over a fully-merged run (every appended event has a
  * global_seq): id-set equality + exactly-once, gap-free per-origin lamport at every
  * receiver, dense global_seq for every event, outbox drained to own_high_water, fold
- * tables byte-identical across devices ≡ each device's own refold() ≡ cloud-order
- * replay of the merged stream (01-N1 / 01-F34 / 01-F6 / 01-F8 / 19 §5).
+ * tables byte-identical across devices ≡ a fresh store replaying the merged stream
+ * (01-N1 / 01-F34 / 01-F6 / 01-F8 / 19 §5). T-01-15 enumeration entry 29 (R):
+ * digest equality + merged-stream replay survive; the refold legs are dropped
+ * (the banned oracle is not ported — the projection is order-free by law).
  */
 export const assertConverged = (
   devices: readonly SpikeDevice[],
@@ -404,9 +421,7 @@ export const assertConverged = (
     const digest = foldDigest(device.store);
     if (sharedDigest === null) sharedDigest = digest;
     else expect(digest).toBe(sharedDigest); // fold tables byte-identical across devices
-    device.store.refold();
-    expect(foldDigest(device.store)).toBe(digest); // ≡ its own refold() (01-F6)
-    expect(digest).toBe(replay); // ≡ cloud-order replay of mergedStream (01-N1)
+    expect(digest).toBe(replay); // ≡ merged-stream replay into a fresh store (01-N1)
   }
 };
 

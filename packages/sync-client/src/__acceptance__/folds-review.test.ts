@@ -1,11 +1,12 @@
-// Acceptance tests — T-01-04 adversarial-review round, authored from the AMENDED
-// kernel-tasks binding contract (duplicate-id ingest carrying global_seq; in-event
-// line_ids dedupe; UTF-16 code-unit canonical JSON) + packages/sync-client/FOLDS.md
-// + specs/01-kernel-sync.md §3/§4 only (24 §3 step 2: read-only to the implementing
-// session). Groups "amended contract" pin newly amended lines (red until the impl
-// fix lands); the rest pin existing-but-untested behavior.
+// Acceptance tests — T-01-04 adversarial-review round, re-expressed for the
+// T-01-15 merge engine per the oracle's superseded-law enumeration (entries
+// 17–25): adoption seams survive as sidecar bookkeeping (the fold never reads
+// the sequence — rewritten 01-F34); the canonical-order tiebreak laws are now
+// the NEGATION of 01-F34 (no device-id or lamport arbitration — concurrency
+// renders as the conflict set); line_ids dedupe is superseded by the
+// line_context Record; lines_ready and canonical-JSON UTF-16 survive with
+// mechanical payload/shape updates.
 
-import { newId } from "@restos/domain";
 import { describe, expect, it } from "vitest";
 import { type DeviceStore, openStore } from "../index.js";
 import {
@@ -22,16 +23,23 @@ import {
   peerIdentity,
 } from "./builders.js";
 
-// T-01-04 store surface per the binding contract — mirrored from
-// folds-directed.test.ts so each oracle file compiles standalone against the
-// contract; a missing method fails the red run at runtime.
+// T-01-15 store surface — mirrored from folds-directed.test.ts so each oracle
+// file compiles standalone; a missing method fails the red run at runtime.
 type OpenOrderRow = {
   order_id: string;
   channel: string;
   order_type: string | null;
-  table_id: string | null;
   confirmed_at: number | null;
   settled: number;
+  table_ids_json: string;
+  table_conflict: number;
+  pay_total: number;
+  repaid_total: number;
+  refund_total: number;
+  pay_attempts_json: string;
+  refund_attempts_json: string;
+  cap_violated: number;
+  exceptions_json: string;
   json_lines: string;
 };
 
@@ -58,7 +66,7 @@ type FoldStore = DeviceStore & {
 const foldStore = (id: Identity) => openStore({ path: ":memory:", identity: id }) as FoldStore;
 
 const T0 = 1752800000000;
-/** Envelope-level timestamp override — canonical order is (global_seq, ts, device, lamport). */
+/** Envelope-level timestamp override — time VALUES only (C1); rank is clock-free. */
 const at = (offsetMs: number) => ({ device_created_at: T0 + offsetMs });
 
 const tables = (store: FoldStore) => ({
@@ -87,7 +95,7 @@ type LineCell = {
   item_id: string;
   qty: number;
   unit_price_paisa: number;
-  state: string;
+  states: string[];
   anomalies: Record<string, string>;
 };
 
@@ -97,39 +105,41 @@ const line = (over: Partial<LineCell> = {}): LineCell => ({
   anomalies: {},
   item_id: "item-karahi",
   qty: 1,
-  state: "placed",
+  states: ["placed"],
   unit_price_paisa: 50000,
   ...over,
 });
 
-describe("duplicate-id ingest carrying global_seq (01-F34 — amended contract)", () => {
-  it("01-F34: re-ingest with global_seqs that reverse the provisional order flips table_id to the cloud winner — tables ≡ refold()", () => {
+describe("duplicate-id ingest carrying global_seq (01-F34 — adoption is sidecar-only)", () => {
+  // Enumeration entry 17 (S): "re-ingest with global_seqs flips the table winner"
+  // is superseded — the LAN-first-then-cloud-catchup re-ingest adopts the seq
+  // with ZERO projection change (merge-invariance is the full oracle).
+  it("01-F34: re-ingest carrying global_seqs that would have reversed the old comparator changes NOTHING — the projection is bit-identical across adoption", () => {
     const id = identity();
     const store = foldStore(id);
-    store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
+    const created = store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
     const assignA = peerEnvelope(peerIdentity(id), 0, {
-      ...orderTableAssigned("O1", "T-A"),
+      ...orderTableAssigned("O1", "T-A", { supersedes: [created.id] }),
       ...at(2000),
     });
     const assignB = peerEnvelope(peerIdentity(id), 0, {
-      ...orderTableAssigned("O1", "T-B"),
+      ...orderTableAssigned("O1", "T-B", { supersedes: [created.id] }),
       ...at(1000),
     });
     store.ingest(assignA);
     store.ingest(assignB);
-    expect(onlyOrder(store).table_id).toBe("T-A"); // provisional key: later device_created_at
-    // LAN-first-then-cloud-catchup: the same envelopes re-arrive from the cloud
-    // carrying global_seq — cloud order reverses the provisional winner. (The
-    // return value on this path is contract-unpinned; only the adoption is law.)
+    const row = onlyOrder(store);
+    expect(JSON.parse(row.table_ids_json)).toEqual(["T-A", "T-B"]); // concurrent heads render
+    expect(row.table_conflict).toBe(1);
+    const before = tables(store);
+    // The same envelopes re-arrive from the cloud carrying global_seq.
     store.ingest(assignA, { global_seq: 5 });
     store.ingest(assignB, { global_seq: 10 });
-    expect(onlyOrder(store).table_id).toBe("T-B"); // highest global_seq wins (01-F34)
-    const converged = tables(store);
-    store.refold();
-    expect(tables(store)).toEqual(converged);
+    expect(tables(store)).toEqual(before); // adoption is a sidecar write only
     store.close();
   });
 
+  // Enumeration entry 18 (R): adoption honesty — the carried seq is really held.
   it("01-F34: same-value re-ingest with global_seq is an idempotent adoption — the carried seq is really held afterwards", () => {
     const id = identity();
     const store = foldStore(id);
@@ -144,7 +154,7 @@ describe("duplicate-id ingest carrying global_seq (01-F34 — amended contract)"
     store.ingest(assign, { global_seq: 7 }); // same value again — idempotent no-op
     expect(tables(store)).toEqual(before);
     // Divergence probe: had the carried seq been silently dropped, this would assign
-    // fresh and succeed — the amended contract requires 7 to be genuinely held.
+    // fresh and succeed — the contract requires 7 to be genuinely held.
     expect(() => store.assignGlobalSeq(assign.id, 8)).toThrow();
     store.assignGlobalSeq(assign.id, 7); // and identical to what assignGlobalSeq records — no-op
     expect(tables(store)).toEqual(before);
@@ -169,8 +179,11 @@ describe("duplicate-id ingest carrying global_seq (01-F34 — amended contract)"
   });
 });
 
-describe("in-event line_ids dedupe (01-F35 — amended contract)", () => {
-  it("01-F35: duplicate line_ids within one line_state_changed are deduped — the event applies cleanly with no anomaly", () => {
+describe("per-line context (01-F35 — enumeration entry 23)", () => {
+  // Entry 23 (S): "duplicate line_ids within one event are deduped in the fold
+  // loop" is superseded — line_context is a RECORD, so a duplicate per-line entry
+  // is unrepresentable; the event still applies cleanly with no self-anomaly.
+  it("01-F35: repeated line_ids collapse to one line_context entry — the event applies cleanly with no anomaly", () => {
     const id = identity();
     const store = foldStore(id);
     store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
@@ -179,18 +192,20 @@ describe("in-event line_ids dedupe (01-F35 — amended contract)", () => {
       appendInput(id, { ...lineStateChanged("O1", ["L1", "L1"], "confirmed"), ...at(200) }),
     );
     const cell = lines(onlyOrder(store)).L1;
-    expect(cell?.state).toBe("confirmed");
-    // An applied event must never self-flag an anomaly (amended contract line).
+    expect(cell?.states).toEqual(["confirmed"]);
+    // An applied event must never self-flag an anomaly.
     expect(cell?.anomalies).toEqual({});
     store.close();
   });
 });
 
 describe("ingest-time global_seq (01-F34/01-F3)", () => {
-  it("01-F34: a global_seq carried at first ingest participates in canonical fold order", () => {
+  // Enumeration entry 20 (S): "a global_seq carried at first ingest participates
+  // in canonical fold order" is the negation of rewritten 01-F34 — the carried
+  // seq is sidecar-only: the projection is identical with and without it.
+  it("01-F34: a global_seq carried at first ingest is sidecar-only — the projection equals the seq-free delivery byte-for-byte", () => {
     const id = identity();
-    const store = foldStore(id);
-    store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
+    const created = appendInput(id, { ...orderCreated("O1"), ...at(0) });
     const assignA = peerEnvelope(peerIdentity(id), 0, {
       ...orderTableAssigned("O1", "T-A"),
       ...at(2000),
@@ -199,13 +214,20 @@ describe("ingest-time global_seq (01-F34/01-F3)", () => {
       ...orderTableAssigned("O1", "T-B"),
       ...at(1000),
     });
-    expect(store.ingest(assignA, { global_seq: 5 })).toEqual({ stored: true });
-    expect(store.ingest(assignB, { global_seq: 10 })).toEqual({ stored: true });
-    // Without the seqs the later device_created_at (T-A) would win; cloud order says B is last.
-    expect(onlyOrder(store).table_id).toBe("T-B");
-    store.close();
+    const withSeqs = foldStore(id);
+    withSeqs.append(created);
+    expect(withSeqs.ingest(assignA, { global_seq: 5 })).toEqual({ stored: true });
+    expect(withSeqs.ingest(assignB, { global_seq: 10 })).toEqual({ stored: true });
+    const without = foldStore(id);
+    without.append(created);
+    without.ingest(assignA);
+    without.ingest(assignB);
+    expect(tables(withSeqs)).toEqual(tables(without));
+    withSeqs.close();
+    without.close();
   });
 
+  // Enumeration entry 19 (R): gseq validation stays loud.
   it("01-F34/18 §4: a negative, fractional, or non-integer global_seq at ingest throws with nothing persisted", () => {
     const id = identity();
     const store = foldStore(id);
@@ -237,6 +259,8 @@ describe("ingest-time global_seq (01-F34/01-F3)", () => {
     store.close();
   });
 
+  // Enumeration entry 21 (R): the seam equivalence survives; the inner
+  // winner-expectation (highest seq wins) is superseded and dropped.
   it("01-F34/01-F3: ingest-with-global_seq ≡ ingest-then-assignGlobalSeq — byte-identical tables", () => {
     const id = identity();
     const created = appendInput(id, { ...orderCreated("O1"), ...at(0) });
@@ -258,44 +282,44 @@ describe("ingest-time global_seq (01-F34/01-F3)", () => {
     two.ingest(assignB);
     two.assignGlobalSeq(assignA.id, 10);
     two.assignGlobalSeq(assignB.id, 5);
-    // The seqs took effect on both paths: highest global_seq wins over later timestamp.
-    expect(onlyOrder(one).table_id).toBe("T-A");
     expect(tables(two)).toEqual(tables(one));
     one.close();
     two.close();
   });
 });
 
-describe("canonical-order tiebreaks (01-N1)", () => {
-  it("01-N1: identical device_created_at across devices — ascending device_id breaks the tie on every arrival order", () => {
+describe("no ordering-metadata tiebreaks (the negation of the old 01-N1 laws — enumeration entry 22)", () => {
+  // Entry 22 (S, both): the device-id and lamport tiebreaks are now the NEGATION
+  // of 01-F34 — concurrency is rendered as the conflict set, never arbitrated by
+  // sync metadata.
+  it("01-F34: identical device_created_at across devices — NO device-id tiebreak; both heads render, in every arrival order", () => {
     const id = identity();
-    const a = newId();
-    const b = newId();
-    const [lowDev, highDev] = (a < b ? [a, b] : [b, a]) as [string, string];
     const created = appendInput(id, { ...orderCreated("O1"), ...at(0) });
-    const assignLow = peerEnvelope({ ...id, device_id: lowDev }, 0, {
+    const assignLow = peerEnvelope(peerIdentity(id), 0, {
       ...orderTableAssigned("O1", "T-low"),
       ...at(500),
     });
-    const assignHigh = peerEnvelope({ ...id, device_id: highDev }, 0, {
+    const assignHigh = peerEnvelope(peerIdentity(id), 0, {
       ...orderTableAssigned("O1", "T-high"),
       ...at(500),
     });
     const one = foldStore(id);
     one.append(created);
-    one.ingest(assignHigh); // canonically-last arrives first — arrival order must not decide
+    one.ingest(assignHigh);
     one.ingest(assignLow);
     const two = foldStore(id);
     two.append(created);
     two.ingest(assignLow);
     two.ingest(assignHigh);
-    expect(onlyOrder(one).table_id).toBe("T-high"); // higher device_id sorts last → wins table_assigned
+    const row = onlyOrder(one);
+    expect(JSON.parse(row.table_ids_json)).toEqual(["T-high", "T-low"]); // the SET — no pick
+    expect(row.table_conflict).toBe(1);
     expect(tables(two)).toEqual(tables(one));
     one.close();
     two.close();
   });
 
-  it("01-N1: identical device_created_at on one device — ascending lamport_seq breaks the tie regardless of arrival order", () => {
+  it("01-F34: identical device_created_at on one device — NO lamport tiebreak; without a carried supersedes link both assignments stand as heads", () => {
     const id = identity();
     const peer = peerIdentity(id);
     const created = appendInput(id, { ...orderCreated("O1"), ...at(0) });
@@ -309,20 +333,22 @@ describe("canonical-order tiebreaks (01-N1)", () => {
     });
     const one = foldStore(id);
     one.append(created);
-    one.ingest(secondAssign); // higher lamport arrives first — arrival order must not decide
+    one.ingest(secondAssign);
     one.ingest(firstAssign);
     const two = foldStore(id);
     two.append(created);
     two.ingest(firstAssign);
     two.ingest(secondAssign);
-    expect(onlyOrder(one).table_id).toBe("T-second"); // higher lamport_seq sorts last → wins
+    const row = onlyOrder(one);
+    expect(JSON.parse(row.table_ids_json)).toEqual(["T-first", "T-second"]); // lamport is transport, not order
+    expect(row.table_conflict).toBe(1);
     expect(tables(two)).toEqual(tables(one));
     one.close();
     two.close();
   });
 });
 
-describe("kitchen_queue lines_ready — delivery flow (01-F6)", () => {
+describe("kitchen_queue lines_ready — delivery flow (01-F6 — enumeration entry 24)", () => {
   it("01-F6: lines_ready counts picked_up and delivered lines", () => {
     const id = identity();
     const store = foldStore(id);
@@ -349,11 +375,11 @@ describe("kitchen_queue lines_ready — delivery flow (01-F6)", () => {
   });
 });
 
-describe("canonical JSON — UTF-16 code-unit key order (01-F10/01-F6, 20 §4.2)", () => {
+describe("canonical JSON — UTF-16 code-unit key order (01-F10/01-F6, 20 §4.2 — enumeration entry 25)", () => {
   // U+1F600 ("😀") encodes as the surrogate pair D83D DE00: by UTF-16 code unit it
   // sorts BEFORE U+FF5E ("～"), while code-point order would reverse them — the
-  // amended contract pins code-unit order so a future non-JS refold-and-diff
-  // implementation cannot byte-mismatch (20 §4.2).
+  // pinned code-unit order means a future non-JS refold-and-diff implementation
+  // cannot byte-mismatch (20 §4.2).
   it("01-F10: parked envelope_json is byte-identical canonical JSON of the envelope — keys sorted by UTF-16 code unit at every depth", () => {
     const id = identity();
     const store = foldStore(id);

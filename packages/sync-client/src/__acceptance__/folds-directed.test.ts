@@ -1,11 +1,15 @@
-// Acceptance tests — T-01-04 folds v1 directed laws, authored from the kernel-tasks
-// binding contract + packages/sync-client/FOLDS.md + specs/01-kernel-sync.md §3/§4
-// only (24 §3 step 2: read-only to the implementing session).
+// Acceptance tests — T-01-04 fold directed laws, re-expressed for the T-01-15
+// merge-semantics engine per the oracle's superseded-law enumeration (S entries
+// replaced in place by their named ratified laws; R entries re-expressed; M
+// entries mechanically updated to the amended payloads + the C8-pinned row
+// shapes). Superseded comparator laws (canonical-order winners, derived settled,
+// first-wins registers) now live as their merge-model replacements; the full
+// merge-model oracle is the merge-*.test.ts suite.
 // Ingest seam (01-F4/01-F8/18 §4), open_orders + kitchen_queue folds (01-F6),
-// parking (01-F10), terminal anomalies (01-F35 regression guard), global_seq
-// convergence (01-F34), fold durability (extends the T-01-03 kill-seed, 20 §2.6).
+// key-presence parking (01-F10), terminal anomalies (01-F35), sidecar
+// global_seq bookkeeping (01-F34), fold durability (20 §2.6 seed).
 
-import { newId } from "@restos/domain";
+import { newId, payloadHash } from "@restos/domain";
 import { describe, expect, it } from "vitest";
 import { type DeviceStore, openStore } from "../index.js";
 import {
@@ -23,18 +27,27 @@ import {
   paymentRefunded,
   peerEnvelope,
   peerIdentity,
+  settlementClosed,
   tempDbPath,
 } from "./builders.js";
 
-// T-01-04 store surface per the binding contract — typed here so the oracle
-// compiles against the contract; a missing method fails the red run at runtime.
+// T-01-15 store surface — the C8-pinned projection row shapes; a missing member
+// fails at runtime.
 type OpenOrderRow = {
   order_id: string;
   channel: string;
   order_type: string | null;
-  table_id: string | null;
   confirmed_at: number | null;
   settled: number;
+  table_ids_json: string;
+  table_conflict: number;
+  pay_total: number;
+  repaid_total: number;
+  refund_total: number;
+  pay_attempts_json: string;
+  refund_attempts_json: string;
+  cap_violated: number;
+  exceptions_json: string;
   json_lines: string;
 };
 
@@ -62,7 +75,7 @@ const foldStore = (id: Identity, path = ":memory:") =>
   openStore({ path, identity: id }) as FoldStore;
 
 const T0 = 1752800000000;
-/** Envelope-level timestamp override — canonical order is (global_seq, ts, device, lamport). */
+/** Envelope-level timestamp override — time VALUES only (C1); rank is clock-free. */
 const at = (offsetMs: number) => ({ device_created_at: T0 + offsetMs });
 
 const tables = (store: FoldStore) => ({
@@ -73,10 +86,6 @@ const tables = (store: FoldStore) => ({
 
 const parkedPairs = (store: FoldStore) =>
   store.parked().map((r): [string, string] => [r.event_id, r.waiting_for]);
-
-/** parked() is sorted by event_id asc — ids are random, so sort expectations too. */
-const sortedPairs = (pairs: [string, string][]) =>
-  [...pairs].sort((a, b) => (a[0] < b[0] ? -1 : 1));
 
 const onlyOrder = (store: FoldStore): OpenOrderRow => {
   const rows = store.openOrders();
@@ -98,7 +107,7 @@ type LineCell = {
   item_id: string;
   qty: number;
   unit_price_paisa: number;
-  state: string;
+  states: string[];
   anomalies: Record<string, string>;
 };
 
@@ -108,7 +117,7 @@ const line = (over: Partial<LineCell> = {}): LineCell => ({
   anomalies: {},
   item_id: "item-karahi",
   qty: 1,
-  state: "placed",
+  states: ["placed"],
   unit_price_paisa: 50000,
   ...over,
 });
@@ -188,7 +197,7 @@ describe("store.ingest — branch-stream entry point (01-F4/01-F8/18 §4)", () =
 });
 
 describe("open_orders fold (01-F6)", () => {
-  it("01-F6: order.created materializes a row with FOLDS.md defaults and empty canonical json_lines", () => {
+  it("01-F6: order.created materializes a row with the T-01-15 defaults and empty canonical json_lines", () => {
     const id = identity();
     const store = foldStore(id);
     store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
@@ -197,16 +206,24 @@ describe("open_orders fold (01-F6)", () => {
         order_id: "O1",
         channel: "dine_in",
         order_type: null,
-        table_id: null,
         confirmed_at: null,
         settled: 0,
+        table_ids_json: "[]",
+        table_conflict: 0,
+        pay_total: 0,
+        repaid_total: 0,
+        refund_total: 0,
+        pay_attempts_json: "{}",
+        refund_attempts_json: "{}",
+        cap_violated: 0,
+        exceptions_json: "[]",
         json_lines: "{}",
       },
     ]);
     store.close();
   });
 
-  it("01-F6: optional order_type/table_id on order.created land in the row (additive under schema_version 1, 00 §6)", () => {
+  it("01-F6: optional order_type/table_id on order.created land in the row — the birth table is the assignment DAG's root head (additive under schema_version 1, 00 §6)", () => {
     const id = identity();
     const store = foldStore(id);
     store.append(
@@ -217,34 +234,53 @@ describe("open_orders fold (01-F6)", () => {
     );
     const row = onlyOrder(store);
     expect(row.order_type).toBe("takeaway");
-    expect(row.table_id).toBe("T5");
+    expect(JSON.parse(row.table_ids_json)).toEqual(["T5"]);
+    expect(row.table_conflict).toBe(0);
     store.close();
   });
 
-  it("01-F6: a second order.created for the same order_id is a no-op — canonically-first wins", () => {
+  // Enumeration entry 7 (S): "canonically-first create wins" is superseded — a
+  // duplicate create is an MVR defaulting to the min-payloadHash member plus the
+  // order_identity_conflict exception (matrix row 52; never a sequence pick).
+  it("01-F20/01-F34: a second divergent order.created keeps both members — register defaults to the min-payloadHash payload and order_identity_conflict is raised", () => {
     const id = identity();
     const store = foldStore(id);
-    store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
-    store.append(
-      appendInput(id, {
-        ...orderCreated("O1", { channel: "takeaway", order_type: "delivery" }),
-        ...at(5000),
-      }),
-    );
+    const payloadA = { order_id: "O1", channel: "dine_in" };
+    const payloadB = { order_id: "O1", channel: "takeaway", order_type: "delivery" };
+    store.append(appendInput(id, { type: "order.created", payload: payloadA, ...at(0) }));
+    store.append(appendInput(id, { type: "order.created", payload: payloadB, ...at(5000) }));
+    const expected = payloadHash(payloadA) < payloadHash(payloadB) ? payloadA : payloadB;
     const row = onlyOrder(store);
-    expect(row.channel).toBe("dine_in");
-    expect(row.order_type).toBeNull();
+    expect(row.channel).toBe(expected.channel);
+    expect(row.order_type).toBe("order_type" in expected ? expected.order_type : null);
+    expect(JSON.parse(row.exceptions_json)).toContain("order_identity_conflict");
     store.close();
   });
 
-  it("01-F6: confirmed_at is the device_created_at of the canonically-first confirm; later confirms are no-ops", () => {
+  // Enumeration entry 9 (S): the comparator confirmed_at anchor is superseded —
+  // the anchor is selected set-wise (clock-free rank; C1 keeps the VALUE on
+  // device_created_at) and is delivery-order independent.
+  it("01-F6/01-N1: with two confirms the anchor is delivery-order independent and its value is one of the delivered stamps", () => {
     const id = identity();
-    const store = foldStore(id);
-    store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
-    store.append(appendInput(id, { ...orderConfirmed("O1"), ...at(1000) }));
-    store.append(appendInput(id, { ...orderConfirmed("O1"), ...at(2000) }));
-    expect(onlyOrder(store).confirmed_at).toBe(T0 + 1000);
-    store.close();
+    const peerA = peerIdentity(id);
+    const peerB = peerIdentity(id);
+    const createEnv = peerEnvelope(peerA, 0, { ...orderCreated("O1"), ...at(0) });
+    const confirmA = peerEnvelope(peerA, 1, { ...orderConfirmed("O1"), ...at(1000) });
+    const confirmB = peerEnvelope(peerB, 0, { ...orderConfirmed("O1"), ...at(2000) });
+    const one = foldStore(id);
+    one.ingest(createEnv);
+    one.ingest(confirmA);
+    one.ingest(confirmB);
+    const two = foldStore(id);
+    two.ingest(createEnv);
+    two.ingest(confirmB);
+    two.ingest(confirmA);
+    const anchor = onlyOrder(one).confirmed_at;
+    expect([T0 + 1000, T0 + 2000]).toContain(anchor);
+    expect(onlyOrder(two).confirmed_at).toBe(anchor);
+    expect(tables(two)).toEqual(tables(one));
+    one.close();
+    two.close();
   });
 
   it("01-F16: line adds from two devices both stand — json_lines is canonical JSON, byte-for-byte", () => {
@@ -264,17 +300,35 @@ describe("open_orders fold (01-F6)", () => {
     store.close();
   });
 
-  it("01-F6: a duplicate line_id keeps the canonically-first line", () => {
+  // Enumeration entry 8 (S): "duplicate line_id keeps the canonically-first line"
+  // is superseded — interim guard: the per-line value cell resolves to ONE
+  // deterministic member, identically in every delivery order (convergence).
+  it("01-F16/01-F34: a duplicate line_id with divergent values resolves to one deterministic member — byte-identical in both delivery orders", () => {
     const id = identity();
-    const store = foldStore(id);
-    store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
-    store.append(appendInput(id, { ...orderLineAdded("O1", "L1"), ...at(100) }));
-    store.append(appendInput(id, { ...orderLineAdded("O1", "L1", { qty: 5 }), ...at(200) }));
-    expect(lines(onlyOrder(store)).L1?.qty).toBe(1);
-    store.close();
+    const peerA = peerIdentity(id);
+    const peerB = peerIdentity(id);
+    const createEnv = peerEnvelope(peerA, 0, { ...orderCreated("O1"), ...at(0) });
+    const addQty1 = peerEnvelope(peerA, 1, { ...orderLineAdded("O1", "L1"), ...at(100) });
+    const addQty5 = peerEnvelope(peerB, 0, {
+      ...orderLineAdded("O1", "L1", { qty: 5 }),
+      ...at(200),
+    });
+    const one = foldStore(id);
+    one.ingest(createEnv);
+    one.ingest(addQty1);
+    one.ingest(addQty5);
+    const two = foldStore(id);
+    two.ingest(createEnv);
+    two.ingest(addQty5);
+    two.ingest(addQty1);
+    const qty = lines(onlyOrder(one)).L1?.qty;
+    expect([1, 5]).toContain(qty);
+    expect(tables(two)).toEqual(tables(one));
+    one.close();
+    two.close();
   });
 
-  it("01-F35: line_state_changed routes every line in line_ids through applyLineState — legal transitions apply", () => {
+  it("01-F35: line_state_changed applies each line_context edge — legal transitions project", () => {
     const id = identity();
     const store = foldStore(id);
     store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
@@ -284,51 +338,69 @@ describe("open_orders fold (01-F6)", () => {
       appendInput(id, { ...lineStateChanged("O1", ["L1", "L2"], "confirmed"), ...at(300) }),
     );
     const cells = lines(onlyOrder(store));
-    expect(cells.L1?.state).toBe("confirmed");
-    expect(cells.L2?.state).toBe("confirmed");
+    expect(cells.L1?.states).toEqual(["confirmed"]);
+    expect(cells.L2?.states).toEqual(["confirmed"]);
     store.close();
   });
 
-  it("01-F35: an illegal transition never applies — state kept, illegal_transition anomaly recorded on the line", () => {
+  it("01-F35: a payload-illegal edge never applies — state kept, illegal_transition anomaly recorded on the line", () => {
     const id = identity();
     const store = foldStore(id);
     store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
     store.append(appendInput(id, { ...orderLineAdded("O1", "L1"), ...at(100) }));
+    // The edge CLAIMS placed→ready — illegal from its own witnessed origin.
     const jump = store.append(
-      appendInput(id, { ...lineStateChanged("O1", ["L1"], "ready"), ...at(200) }),
+      appendInput(id, { ...lineStateChanged("O1", ["L1"], "ready", ["placed"]), ...at(200) }),
     );
     const cell = lines(onlyOrder(store)).L1;
-    expect(cell?.state).toBe("placed");
+    expect(cell?.states).toEqual(["placed"]);
     expect(cell?.anomalies).toEqual({ [jump.id]: "illegal_transition" });
     store.close();
   });
 
-  it("01-F34: table_id resolves to the canonically-last assignment on every delivery order", () => {
+  // Enumeration entry 1 (S): "canonically-last table_assigned wins" is superseded
+  // — the table anchor is a supersedes-DAG head-set: a chain resolves to its
+  // head, concurrent assignments render the conflict SET (matrix row 53).
+  it("01-F19/01-F34: a supersedes chain yields one head; concurrent assignments render the conflict set — identically in every delivery order", () => {
     const id = identity();
-    const created = appendInput(id, { ...orderCreated("O1"), ...at(0) });
-    const assignA = peerEnvelope(peerIdentity(id), 0, {
-      ...orderTableAssigned("O1", "T-A"),
+    const chainStore = foldStore(id);
+    const created = chainStore.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
+    const move1 = peerEnvelope(peerIdentity(id), 0, {
+      ...orderTableAssigned("O1", "T-A", { supersedes: [created.id] }),
       ...at(1000),
     });
-    const assignB = peerEnvelope(peerIdentity(id), 0, {
-      ...orderTableAssigned("O1", "T-B"),
+    const move2 = peerEnvelope(peerIdentity(id), 0, {
+      ...orderTableAssigned("O1", "T-B", { from: "T-A", supersedes: [move1.id as string] }),
       ...at(2000),
     });
+    chainStore.ingest(move2); // chain delivered out of order
+    chainStore.ingest(move1);
+    const chainRow = onlyOrder(chainStore);
+    expect(JSON.parse(chainRow.table_ids_json)).toEqual(["T-B"]);
+    expect(chainRow.table_conflict).toBe(0);
+    chainStore.close();
+
     const one = foldStore(id);
-    one.append(created);
-    one.ingest(assignA);
-    one.ingest(assignB);
-    const two = foldStore(id);
-    two.append(created);
-    two.ingest(assignB);
-    two.ingest(assignA);
-    expect(onlyOrder(one).table_id).toBe("T-B");
-    expect(tables(two)).toEqual(tables(one));
+    const createdC = one.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
+    const headA = peerEnvelope(peerIdentity(id), 0, {
+      ...orderTableAssigned("O1", "T-A", { supersedes: [createdC.id] }),
+      ...at(1000),
+    });
+    const headB = peerEnvelope(peerIdentity(id), 0, {
+      ...orderTableAssigned("O1", "T-B", { supersedes: [createdC.id] }),
+      ...at(2000),
+    });
+    one.ingest(headA);
+    one.ingest(headB);
+    const row = onlyOrder(one);
+    expect(JSON.parse(row.table_ids_json)).toEqual(["T-A", "T-B"]); // the SET, UTF-16 sorted
+    expect(row.table_conflict).toBe(1);
     one.close();
-    two.close();
   });
 
-  it("01-F30: a partial payment leaves the order unsettled; exact cover settles it", () => {
+  // Enumeration entry 3 (S): "exact cover settles" is superseded — settlement is
+  // an ACT, not a derivation (01-F33): nothing arithmetic settles an order.
+  it("01-F33: exact arithmetic cover leaves settled 0 — only the settlement_closed act settles", () => {
     const id = identity();
     const store = foldStore(id);
     store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
@@ -341,11 +413,15 @@ describe("open_orders fold (01-F6)", () => {
     store.append(appendInput(id, { ...paymentRecorded("O1", 400), ...at(200) }));
     expect(onlyOrder(store).settled).toBe(0);
     store.append(appendInput(id, { ...paymentRecorded("O1", 600), ...at(300) }));
+    expect(onlyOrder(store).settled).toBe(0); // exact cover — still not settled
+    store.append(appendInput(id, { ...settlementClosed("O1"), ...at(400) }));
     expect(onlyOrder(store).settled).toBe(1);
     store.close();
   });
 
-  it("01-F29/01-F30: a refund unsettles the order until re-covered — settled is recomputed from the set", () => {
+  // Enumeration entry 4 (S): "a refund unsettles until re-covered" is superseded —
+  // a post-settlement refund is a linked correction, never a reopen (01-F33).
+  it("01-F29/01-F33: a refund after the close never un-settles — refund_total records it, settled stays 1", () => {
     const id = identity();
     const store = foldStore(id);
     store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
@@ -355,16 +431,24 @@ describe("open_orders fold (01-F6)", () => {
         ...at(100),
       }),
     );
-    const payment = store.append(appendInput(id, { ...paymentRecorded("O1", 1000), ...at(200) }));
+    const payment = paymentRecorded("O1", 1000);
+    const attempt = payment.payload.settlement_attempt_id;
+    store.append(appendInput(id, { ...payment, ...at(200) }));
+    store.append(appendInput(id, { ...settlementClosed("O1"), ...at(300) }));
     expect(onlyOrder(store).settled).toBe(1);
-    store.append(appendInput(id, { ...paymentRefunded(payment.id, 300), ...at(300) }));
-    expect(onlyOrder(store).settled).toBe(0);
-    store.append(appendInput(id, { ...paymentRecorded("O1", 300), ...at(400) }));
-    expect(onlyOrder(store).settled).toBe(1);
+    store.append(
+      appendInput(id, { ...paymentRefunded("O1", 300, { parent: attempt }), ...at(400) }),
+    );
+    const row = onlyOrder(store);
+    expect(row.settled).toBe(1); // reopening does not exist
+    expect(row.refund_total).toBe(300);
+    expect(row.cap_violated).toBe(0);
     store.close();
   });
 
-  it("01-F30: voided lines leave billed_effective — exact cover over surviving lines settles", () => {
+  // Enumeration entry 5 (S): the derived-settled voided-line law is superseded;
+  // the voided-line EXCLUSION survives in lines_total (kitchen plane).
+  it("01-F35/03-F24: a decidedly-voided line leaves lines_total — the exclusion survives on the kitchen plane", () => {
     const id = identity();
     const store = foldStore(id);
     store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
@@ -380,24 +464,30 @@ describe("open_orders fold (01-F6)", () => {
         ...at(200),
       }),
     );
+    store.append(appendInput(id, { ...orderConfirmed("O1"), ...at(250) }));
     store.append(appendInput(id, { ...lineStateChanged("O1", ["L2"], "voided"), ...at(300) }));
-    store.append(appendInput(id, { ...paymentRecorded("O1", 1000), ...at(400) }));
-    expect(onlyOrder(store).settled).toBe(1);
+    expect(lines(onlyOrder(store)).L2?.states).toEqual(["voided"]);
+    const row = onlyQueueRow(store);
+    expect(row.lines_total).toBe(1); // L2 decidedly exited
     store.close();
   });
 
-  it("01-F30: billed_effective must be positive — a lineless order never settles", () => {
+  // Enumeration entry 6 (S): "billed_effective must be positive to settle" is
+  // superseded — the act settles even a lineless, unpaid order (offline-legal).
+  it("01-F33: a lineless order with a zero payment stays unsettled until the act — and the act alone settles it", () => {
     const id = identity();
     const store = foldStore(id);
     store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
     store.append(appendInput(id, { ...paymentRecorded("O1", 0), ...at(100) }));
     expect(onlyOrder(store).settled).toBe(0);
+    store.append(appendInput(id, { ...settlementClosed("O1"), ...at(200) }));
+    expect(onlyOrder(store).settled).toBe(1);
     store.close();
   });
 });
 
 describe("kitchen_queue fold (01-F6)", () => {
-  it("01-F6: no queue row exists before a canonically-applied order.confirmed", () => {
+  it("01-F6: no queue row exists before the confirmed fact holds", () => {
     const id = identity();
     const store = foldStore(id);
     store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
@@ -406,7 +496,7 @@ describe("kitchen_queue fold (01-F6)", () => {
     store.close();
   });
 
-  it("01-F6: confirm creates the row — confirm_at from the first confirm, channel from order.created, age_basis defaults to confirm_at", () => {
+  it("01-F6: confirm creates the row — confirm_at from the anchor confirm, channel from order.created, age_basis = the confirm anchor", () => {
     const id = identity();
     const store = foldStore(id);
     store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
@@ -425,7 +515,10 @@ describe("kitchen_queue fold (01-F6)", () => {
     store.close();
   });
 
-  it("01-F6: age_basis moves to the canonically-first kot.printed when one exists", () => {
+  // Enumeration entry 10 (S): the kot.printed age_basis fallback is DELETED
+  // (matrix rows 59/60; 03-F25/F26) — a stuck-printer recovery must not re-age
+  // the ticket. age_basis = the confirm anchor, always.
+  it("03-F25/03-F26: age_basis stays at the confirm anchor — later kot.printed events never move it", () => {
     const id = identity();
     const store = foldStore(id);
     store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
@@ -433,12 +526,12 @@ describe("kitchen_queue fold (01-F6)", () => {
     store.append(appendInput(id, { ...kotPrinted("O1"), ...at(800) }));
     store.append(appendInput(id, { ...kotPrinted("O1"), ...at(900) }));
     const row = onlyQueueRow(store);
-    expect(row.age_basis).toBe(T0 + 800);
+    expect(row.age_basis).toBe(T0 + 500); // NOT T0+800
     expect(row.confirm_at).toBe(T0 + 500);
     store.close();
   });
 
-  it("03-F19/03-F24: lines_ready counts ready/served/picked_up/delivered; voided and cancelled lines leave lines_total", () => {
+  it("03-F19/03-F24: lines_ready counts cooking-done lines; voided and cancelled lines leave lines_total", () => {
     const id = identity();
     const store = foldStore(id);
     store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
@@ -461,7 +554,7 @@ describe("kitchen_queue fold (01-F6)", () => {
   });
 });
 
-describe("parking (01-F10)", () => {
+describe("parking (01-F10 — key-presence)", () => {
   it("01-F10: a child before its parent parks — no state effect — then drains identically to parent-first delivery", () => {
     const id = identity();
     const created = peerEnvelope(peerIdentity(id), 0, { ...orderCreated("O1"), ...at(0) });
@@ -481,36 +574,41 @@ describe("parking (01-F10)", () => {
     forward.close();
   });
 
-  it("01-F10: the refund→payment→order chain delivered fully reversed drains to fixpoint", () => {
+  // Enumeration entry 11 (part-S): the refund→payment→order park chain is
+  // superseded — payments and refunds carry their full projection keys and NEVER
+  // park (01-F10 amended); the fully-reversed delivery still converges.
+  it("01-F29/01-F10: payments and refunds never park — the fully-reversed chain converges to the forward delivery", () => {
     const id = identity();
     const created = peerEnvelope(peerIdentity(id), 0, { ...orderCreated("O1"), ...at(0) });
-    const payment = peerEnvelope(peerIdentity(id), 0, { ...paymentRecorded("O1", 500), ...at(10) });
-    const refund = peerEnvelope(peerIdentity(id), 0, {
-      ...paymentRefunded(payment.id, 200),
+    const payment = paymentRecorded("O1", 500);
+    const attempt = payment.payload.settlement_attempt_id;
+    const paymentEnv = peerEnvelope(peerIdentity(id), 0, { ...payment, ...at(10) });
+    const refundEnv = peerEnvelope(peerIdentity(id), 0, {
+      ...paymentRefunded("O1", 200, { parent: attempt }),
       ...at(20),
     });
     const reversed = foldStore(id);
-    reversed.ingest(refund);
-    expect(parkedPairs(reversed)).toEqual([[refund.id, payment.id]]);
-    reversed.ingest(payment);
-    expect(parkedPairs(reversed)).toEqual(
-      sortedPairs([
-        [payment.id, "O1"],
-        [refund.id, payment.id],
-      ]),
-    );
-    reversed.ingest(created);
+    reversed.ingest(refundEnv);
+    expect(reversed.parked()).toEqual([]); // order + parent keys are CARRIED
+    reversed.ingest(paymentEnv);
     expect(reversed.parked()).toEqual([]);
+    reversed.ingest(created);
     const forward = foldStore(id);
     forward.ingest(created);
-    forward.ingest(payment);
-    forward.ingest(refund);
+    forward.ingest(paymentEnv);
+    forward.ingest(refundEnv);
     expect(tables(reversed)).toEqual(tables(forward));
+    const row = onlyOrder(forward);
+    expect(row.pay_total).toBe(500);
+    expect(row.refund_total).toBe(200);
     reversed.close();
     forward.close();
   });
 
-  it("01-F10: waiting_for is the first unmet id and re-parks deterministically as parents arrive", () => {
+  // Enumeration entry 11 (part-S): the first-unmet-id re-park walk is superseded
+  // — line-state edges carry line_context and NEVER park; they are held and
+  // materialize when the line arrives, identically to the forward order.
+  it("01-F34/01-F10: line-state edges never park — delivered before the order and its lines, they converge to the forward delivery", () => {
     const id = identity();
     const parentPeer = peerIdentity(id);
     const created = peerEnvelope(parentPeer, 0, { ...orderCreated("O1"), ...at(0) });
@@ -522,17 +620,22 @@ describe("parking (01-F10)", () => {
     });
     const store = foldStore(id);
     store.ingest(change);
-    expect(parkedPairs(store)).toEqual([[change.id, "O1"]]);
+    expect(store.parked()).toEqual([]); // this type never parks (matrix row 61)
+    expect(store.openOrders()).toEqual([]);
     store.ingest(created);
-    expect(parkedPairs(store)).toEqual([[change.id, "L1"]]);
     store.ingest(addL1);
-    expect(parkedPairs(store)).toEqual([[change.id, "L2"]]);
     store.ingest(addL2);
-    expect(store.parked()).toEqual([]);
+    const forward = foldStore(id);
+    forward.ingest(created);
+    forward.ingest(addL1);
+    forward.ingest(addL2);
+    forward.ingest(change);
+    expect(tables(store)).toEqual(tables(forward));
     const cells = lines(onlyOrder(store));
-    expect(cells.L1?.state).toBe("confirmed");
-    expect(cells.L2?.state).toBe("confirmed");
+    expect(cells.L1?.states).toEqual(["confirmed"]);
+    expect(cells.L2?.states).toEqual(["confirmed"]);
     store.close();
+    forward.close();
   });
 
   it("01-F10: nothing is dropped — applied ∪ parked = stored; duplicate ingest of a parked id is a no-op", () => {
@@ -559,7 +662,7 @@ describe("parking (01-F10)", () => {
 });
 
 describe("terminal anomaly (01-F35 regression guard)", () => {
-  it("01-F35: a terminal line ignores a later non-terminal transition — state kept, one terminal_regression anomaly, ledger intact", () => {
+  it("01-F35: a terminal head absorbs a later non-terminal edge — terminal state kept, one terminal_regression anomaly, ledger intact", () => {
     const id = identity();
     const store = foldStore(id);
     store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
@@ -569,23 +672,24 @@ describe("terminal anomaly (01-F35 regression guard)", () => {
       appendInput(id, { ...lineStateChanged("O1", ["L1"], "in_prep"), ...at(300) }),
     );
     const cell = lines(onlyOrder(store)).L1;
-    expect(cell?.state).toBe("cancelled");
+    expect(cell?.states).toEqual(["cancelled"]);
     expect(cell?.anomalies).toEqual({ [regress.id]: "terminal_regression" });
     expect(store.readOwnEvents().map((e) => e.id)).toContain(regress.id);
     store.close();
   });
 });
 
-describe("assignGlobalSeq (01-F34)", () => {
-  it("01-F34: re-assigning the same global_seq to the same event is an idempotent no-op — tables ≡ refold()", () => {
+describe("assignGlobalSeq — sidecar bookkeeping only (01-F34)", () => {
+  // Enumeration entry 12 (R): the transport laws survive as sidecar bookkeeping;
+  // the refold legs are dropped (refold-equivalence encodes the superseded
+  // comparator and is not ported).
+  it("01-F34: re-assigning the same global_seq to the same event is an idempotent no-op — tables unchanged", () => {
     const id = identity();
     const store = foldStore(id);
     const created = store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
     store.assignGlobalSeq(created.id, 7);
     const before = tables(store);
     store.assignGlobalSeq(created.id, 7);
-    expect(tables(store)).toEqual(before);
-    store.refold();
     expect(tables(store)).toEqual(before);
     store.close();
   });
@@ -619,33 +723,40 @@ describe("assignGlobalSeq (01-F34)", () => {
     store.close();
   });
 
-  it("01-F34: cloud order reversing the provisional table_id winner converges — highest global_seq wins, tables ≡ refold()", () => {
+  // Enumeration entry 2 (S): "cloud order reverses the provisional winner" is now
+  // the NEGATION of 01-F34 — concurrent assignments render the conflict set and
+  // adopting any cloud order changes NOTHING (the sequence is a delivery cursor).
+  it("01-F34: concurrent table assignments render the conflict set, and adopting reversing global_seqs changes nothing", () => {
     const id = identity();
     const store = foldStore(id);
-    store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
+    const created = store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
     const assignA = peerEnvelope(peerIdentity(id), 0, {
-      ...orderTableAssigned("O1", "T-A"),
+      ...orderTableAssigned("O1", "T-A", { supersedes: [created.id] }),
       ...at(1000),
     });
     const assignB = peerEnvelope(peerIdentity(id), 0, {
-      ...orderTableAssigned("O1", "T-B"),
+      ...orderTableAssigned("O1", "T-B", { supersedes: [created.id] }),
       ...at(2000),
     });
     store.ingest(assignA);
     store.ingest(assignB);
-    expect(onlyOrder(store).table_id).toBe("T-B"); // provisional key: later device_created_at
+    const row = onlyOrder(store);
+    expect(JSON.parse(row.table_ids_json)).toEqual(["T-A", "T-B"]);
+    expect(row.table_conflict).toBe(1);
+    const before = tables(store);
+    // Cloud order arrives REVERSED relative to the provisional stamps — under the
+    // superseded engine this flipped the winner; now it is a sidecar write only.
     store.assignGlobalSeq(assignB.id, 5);
     store.assignGlobalSeq(assignA.id, 10);
-    expect(onlyOrder(store).table_id).toBe("T-A"); // cloud order reversed the winner
-    const converged = tables(store);
-    store.refold();
-    expect(tables(store)).toEqual(converged);
+    expect(tables(store)).toEqual(before);
     store.close();
   });
 });
 
 describe("fold durability (01-F2/01-F6, 20 §2.6 seed)", () => {
-  it("01-F2/01-F6: after abrupt abandon, reopen yields state tables ≡ pre-crash tables ≡ refold()", () => {
+  // Enumeration entry 14 (R): reopen byte-equality survives; the refold legs are
+  // dropped (the projection itself is the oracle).
+  it("01-F2/01-F6: after abrupt abandon, reopen yields state tables ≡ pre-crash tables", () => {
     const id = identity();
     const path = tempDbPath();
     let store = foldStore(id, path);
@@ -657,8 +768,6 @@ describe("fold durability (01-F2/01-F6, 20 §2.6 seed)", () => {
     const before = tables(store);
     // abrupt abandon: no close()
     store = foldStore(id, path);
-    expect(tables(store)).toEqual(before);
-    store.refold();
     expect(tables(store)).toEqual(before);
     store.close();
   });
