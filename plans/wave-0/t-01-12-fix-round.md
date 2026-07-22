@@ -9,3 +9,6 @@ Adversarial review of `885063b..b8d5036`: verdict **BLOCKING** (F1+F2, F3 rides 
 - **F5 (ruled):** drop the `forwardedCloudAck` one-shot latch — re-forward on heartbeat like `replayWindowTo`; receiver is idempotent. No single lost LAN frame may stall a checkpoint.
 - **F6 (ruled):** document, don't build: origin-existence/registry check is T-01-09 — one line at the auth seam + DEC-SYNC-009's open-dependency column.
 - **F7 (accepted as designed):** restart-from-zero re-relay is documented and dedupe-safe; note the adopted-`global_seq` sidecar as the future skip signal at the seam comment.
+
+## Fix-round oracle interpretations 1–6 — RATIFIED
+(1) F2 covers ALL identity-mismatch rows incl. plain sessions (attribution = authenticated `session.deviceId`; law6 fill semantics unchanged). (2) Mismatch-only push from a fresh relay hub ⇒ NO push_ack (an ack of 0 would claim slot 0 held). (3) F3 = `acked === null || acked ≤ ownHigh`; only throw/over-advance fails. (4) F5 pinned on outcome via bounded drop-window + heal. (5) **Implementer must also edit DEC-SYNC-009's open-dependency column** (origin-existence check → T-01-09) — not test-pinnable. (6) F4 observed via WAN bounce after demotion. Pins: 7 red / 3 green @ `17b9a43`.
