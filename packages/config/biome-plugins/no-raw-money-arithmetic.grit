@@ -5,20 +5,66 @@ language js
 // enter. The blessed path is the `domain` helpers: addPaisa / subPaisa / sumPaisa /
 // splitPaisa / applyRateBps (rates as integer basis points, 00 §6).
 //
-// Scope (deliberately narrow): a binary arithmetic operator where either operand is a
-// BARE identifier whose name contains `paisa`/`Paisa`. Member expressions such as
-// `payload.amount_paisa` are the plain-number fold plane — its migration to branded
-// types is the deferred DEC-MONEY-005 fold clause, not this rule.
+// Scope (deliberately narrow): an arithmetic operation — binary (+ - * / %), compound
+// assignment (+= -= *= /= %=), or update (++ / --, prefix and postfix; M2 fix round) —
+// where an operand is a BARE identifier whose name contains `paisa`/`Paisa`. Member
+// expressions such as `payload.amount_paisa` are the plain-number fold plane — its
+// migration to branded types is the deferred DEC-MONEY-005 fold clause, not this rule.
+// Plain `=` and the logical/bitwise compound assignments are not arithmetic and stay legal.
+//
+// Engine quirks (Biome 2.5.4 GritQL, all verified empirically — re-verify on upgrade):
+//   * Snippet metavariables in WRITE positions do not work: `$x += $y` fails to compile
+//     the plugin, and `$x++` compiles but never matches. Those arms therefore use Biome
+//     CST node patterns (JsAssignmentExpression / JsPost|PreUpdateExpression), which do
+//     support metavariables in their named slots.
+//   * Token slots cannot be matched: operator_token=$op and operator_token="+=" both fail
+//     to compile. Operator discrimination for the compound arm is a regex over the whole
+//     expression text instead (anchored on the bare-identifier operand, so member/computed
+//     operands and comment-split pathologies fall out of scope rather than false-positive).
+//   * `r"…"` predicates are FULL-match against the node text (an unanchored-end regex
+//     matches nothing), hence the (?s) + `.*` tails.
+//   * Regex capture groups are treated as Grit variable captures ("matched 1 variables,
+//     but expected 0") — every group must be non-capturing `(?:…)`.
+//   * `pattern as $var` works and spans the whole match — used on every arm so the
+//     diagnostic underlines the full expression, not just the left operand (L4).
 or {
-  `$x + $y`,
-  `$x - $y`,
-  `$x * $y`,
-  `$x / $y`,
-  `$x % $y`
-} where {
+  // Binary arithmetic: either operand a bare money identifier.
   or {
-    $x <: r"^[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*$",
-    $y <: r"^[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*$"
+    `$x + $y`,
+    `$x - $y`,
+    `$x * $y`,
+    `$x / $y`,
+    `$x % $y`
+  } as $bin where {
+    or {
+      $x <: r"^[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*$",
+      $y <: r"^[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*$"
+    },
+    register_diagnostic(span=$bin, message="Raw arithmetic on a money value is banned (18 §4 / DEC-MONEY-005). Use the domain helpers: addPaisa/subPaisa/sumPaisa for +/-, splitPaisa for division, applyRateBps for rates (integer basis points).")
   },
-  register_diagnostic(span=$x, message="Raw arithmetic on a money value is banned (18 §4 / DEC-MONEY-005). Use the domain helpers: addPaisa/subPaisa/sumPaisa for +/-, splitPaisa for division, applyRateBps for rates (integer basis points).")
+  // Compound assignment (M2): accumulation is the idiom the ban exists for. Either side —
+  // `total_paisa += x` mutates money in place; `total += tip_paisa` launders money into an
+  // unbranded accumulator. The $asgn regexes pin the operator to the five arithmetic
+  // compounds so plain `=` (and ??=/&&=/||=/bitwise) never match.
+  JsAssignmentExpression(left=$a, right=$b) as $asgn where {
+    or {
+      and {
+        $a <: r"^[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*$",
+        $asgn <: r"(?s)^[A-Za-z0-9_$]+\s*(?:\+=|-=|\*=|/=|%=).*$"
+      },
+      and {
+        $b <: r"^[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*$",
+        $asgn <: r"(?s)^.*(?:\+=|-=|\*=|/=|%=)\s*[A-Za-z0-9_$]+$"
+      }
+    },
+    register_diagnostic(span=$asgn, message="Raw arithmetic on a money value is banned (18 §4 / DEC-MONEY-005). Use the domain helpers: addPaisa/subPaisa/sumPaisa for +/-, splitPaisa for division, applyRateBps for rates (integer basis points).")
+  },
+  // Update expressions (M2): ++/-- on a bare money identifier, prefix and postfix.
+  or {
+    JsPostUpdateExpression(operand=$u),
+    JsPreUpdateExpression(operand=$u)
+  } as $upd where {
+    $u <: r"^[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*$",
+    register_diagnostic(span=$upd, message="Raw arithmetic on a money value is banned (18 §4 / DEC-MONEY-005). Use the domain helpers: addPaisa/subPaisa/sumPaisa for +/-, splitPaisa for division, applyRateBps for rates (integer basis points).")
+  }
 }
