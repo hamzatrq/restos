@@ -177,11 +177,6 @@ CREATE TABLE IF NOT EXISTS orders (
   exceptions_json TEXT NOT NULL,
   json_lines TEXT NOT NULL
 ) STRICT;
--- Retention-dropped projection keys (T-01-15 retentionDrop): the device asserts
--- NOTHING about a dropped key, across reopen too — never an inverse merge.
-CREATE TABLE IF NOT EXISTS dropped_keys (
-  key TEXT PRIMARY KEY
-) STRICT;
 CREATE TABLE IF NOT EXISTS queue (
   order_id TEXT PRIMARY KEY,
   confirm_at INTEGER NOT NULL,
@@ -309,10 +304,6 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   const deleteOrderRow = db.prepare<[string]>("DELETE FROM orders WHERE order_id = ?");
   const deleteQueueRow = db.prepare<[string]>("DELETE FROM queue WHERE order_id = ?");
   const deleteParkedRow = db.prepare<[string]>("DELETE FROM parked WHERE event_id = ?");
-  const insertDroppedKey = db.prepare<[string]>(
-    "INSERT OR IGNORE INTO dropped_keys (key) VALUES (?)",
-  );
-  const allDroppedKeys = db.prepare<[], { key: string }>("SELECT key FROM dropped_keys");
   const selectOrders = db.prepare<[], OpenOrderRow>(
     "SELECT order_id, channel, order_type, confirmed_at, settled, table_ids_json, table_conflict, pay_total, repaid_total, refund_total, pay_attempts_json, refund_attempts_json, cap_violated, exceptions_json, json_lines FROM orders ORDER BY order_id",
   );
@@ -407,10 +398,7 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   // peer_events — replay order irrelevant, the fold is a pure function of the
   // set. The reopen self-heal and the refold() surface (01-F6).
   const recomputeFolds = (): void => {
-    engine.rebuild(
-      readAllParsed(),
-      allDroppedKeys.all().map((row) => row.key),
-    );
+    engine.rebuild(readAllParsed());
     writeFullTables(engine.snapshot());
   };
 
@@ -652,13 +640,14 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   // Retention shrink (T-01-15; matrix conventions): an outer-layer key-set
   // operation — atomic per-entity, open-bill guarded, never an inverse merge.
   // Validation runs first so a guard violation changes nothing; the drop removes
-  // the keys from the lattice, the rows, the parked set, and (durably) marks the
-  // keys dropped so reopen cannot resurrect them. The LEDGER rows are untouched:
-  // event-row pruning is the compaction task (01 §5, global_seq prune watermark).
+  // the keys from the session lattice, the rows, and the parked set. The LEDGER
+  // rows are untouched, and so is durability across reopen: event-row pruning
+  // (which is what makes a drop durable) is the compaction task's global_seq
+  // prune watermark (01 §5; matrix §2 entry 3) — until it lands, a reopen
+  // rebuilds from the full retained ledger.
   const retentionDropTx = db.transaction((keys: readonly string[]) => {
     engine.validateDrop(keys);
     const result = engine.drop(keys);
-    for (const key of keys) insertDroppedKey.run(key);
     for (const orderId of result.removedOrders) {
       deleteOrderRow.run(orderId);
       deleteQueueRow.run(orderId);

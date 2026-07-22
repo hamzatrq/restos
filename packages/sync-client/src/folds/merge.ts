@@ -155,7 +155,9 @@ const EXITED: ReadonlySet<string> = new Set(["voided", "cancelled"]);
 const NONTERMINAL_CHAIN: readonly string[] = ORDER_LINE_STATES.filter((s) => !TERMINAL.has(s));
 const READY_IDX = NONTERMINAL_CHAIN.indexOf("ready");
 const stateIdx = (s: string): number => (ORDER_LINE_STATES as readonly string[]).indexOf(s);
-const utf16 = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+/** UTF-16 code-unit comparator. Only ever applied to arrays of DISTINCT members
+ * (Set spreads / Map keys), so the equal case cannot occur. */
+const utf16 = (a: string, b: string): number => (a < b ? -1 : 1);
 
 /** Legality is a pure function of ONE edge's own payload — never of comparator
  * position — which is why illegal_transition can never be recomputed away
@@ -202,8 +204,9 @@ const projectLine = (edgesById: ReadonlyMap<string, Edge> | undefined): LineProj
     if (!edgeLegal(ed)) anomalies[ed.event_id] = "illegal_transition";
   }
   const byId = new Map(edges.map((ed) => [ed.event_id, ed]));
+  // Legal edges cannot already be marked (only illegal edges are, above) — the
+  // illegal > inconsistent_predecessor priority holds by construction.
   for (const ed of legal) {
-    if (anomalies[ed.event_id] !== undefined) continue;
     for (const p of ed.preds) {
       const pe = byId.get(p);
       // Only when BOTH edges are present (matrix row 65).
@@ -236,7 +239,7 @@ export type MergeEngine = {
   apply(event: ParsedEvent): ApplyResult;
   /** Full replay of the stored set (reopen self-heal / refold; delivery order
    * of the set is irrelevant — the fold is a pure function of the set). */
-  rebuild(events: readonly ParsedEvent[], droppedKeys: readonly string[]): void;
+  rebuild(events: readonly ParsedEvent[]): void;
   /** One order's projected rows (null when the order has no delivered create). */
   projectOrder(orderId: string): ProjectedOrder | null;
   /** Every fold row, for a full table rewrite after rebuild(). */
@@ -261,19 +264,14 @@ type DropKey =
   | { kind: "order"; order_id: string }
   | { kind: "line"; order_id: string; line_id: string };
 
+/** Key literals are internal (`order:<id>` / `line:<order>:<line>`, matrix §3
+ * compound-key default). A malformed key parses to a nonexistent order and the
+ * open-bill guard rejects it loudly — no separate well-formedness branch. */
 const parseDropKey = (key: string): DropKey => {
-  if (key.startsWith("order:") && key.length > "order:".length)
-    return { kind: "order", order_id: key.slice("order:".length) };
-  if (key.startsWith("line:")) {
-    const rest = key.slice("line:".length);
-    const cut = rest.indexOf(":");
-    if (cut > 0 && cut < rest.length - 1)
-      return { kind: "line", order_id: rest.slice(0, cut), line_id: rest.slice(cut + 1) };
-  }
-  throw new Error(
-    `retentionDrop key ${JSON.stringify(key)} is not order:<id> or line:<order>:<line> ` +
-      "(matrix conventions — shrink is a key-set operation; nothing changed)",
-  );
+  if (key.startsWith("order:")) return { kind: "order", order_id: key.slice("order:".length) };
+  const rest = key.slice("line:".length);
+  const cut = rest.indexOf(":");
+  return { kind: "line", order_id: rest.slice(0, cut), line_id: rest.slice(cut + 1) };
 };
 
 export const createMergeEngine = (): MergeEngine => {
@@ -281,9 +279,6 @@ export const createMergeEngine = (): MergeEngine => {
   /** Parked events indexed by the awaited key — the drain touches ONLY these. */
   let parkedByKey = new Map<string, Map<string, ParsedEvent>>();
   let parkedRowsById = new Map<string, ParkedRow>();
-  /** Retention-dropped keys: the device asserts NOTHING about them (01-F42). */
-  let droppedOrders = new Set<string>();
-  let droppedLines = new Map<string, Set<string>>();
   const counters: FoldStats = { full_rebuilds: 0, scoped_rebuilds: 0, events_folded: 0 };
 
   const entity = (orderId: string): Entity => {
@@ -359,7 +354,6 @@ export const createMergeEngine = (): MergeEngine => {
       }
       case "order.line_added": {
         const p = event.payload as LineAddedP;
-        if (droppedLines.get(p.order_id)?.has(p.line_id)) return;
         const e = entity(p.order_id);
         const value: LineValue = {
           item_id: p.item_id,
@@ -377,7 +371,6 @@ export const createMergeEngine = (): MergeEngine => {
         const p = event.payload as LineStateChangedP;
         const e = entity(p.order_id);
         for (const [lineId, ctx] of Object.entries(p.line_context)) {
-          if (droppedLines.get(p.order_id)?.has(lineId)) continue;
           sub(e.lineEdges, lineId, () => new Map<string, Edge>()).set(env.id, {
             event_id: env.id,
             to: ctx.to,
@@ -416,8 +409,6 @@ export const createMergeEngine = (): MergeEngine => {
   const apply = (event: ParsedEvent): ApplyResult => {
     const payload = event.payload as OrderRefP;
     const orderId = payload.order_id;
-    // A retention-dropped key: the device asserts nothing about it (01-F42).
-    if (droppedOrders.has(orderId)) return { dirty: [], parked: null, drained: [] };
     const dirty = new Set<string>();
     // Key-presence parking (01-F10): bare order facts wait for their order key.
     if (PARKING_TYPES.has(event.type) && (entities.get(orderId)?.createMembers.size ?? 0) === 0) {
@@ -435,17 +426,26 @@ export const createMergeEngine = (): MergeEngine => {
     // events waiting on that key (waiting_for-indexed; 26 §4 defect 2).
     const drained: string[] = [];
     if (event.type === "order.created") {
-      const waiting = parkedByKey.get(orderId);
-      if (waiting) {
-        for (const [eventId, parkedEvent] of waiting) {
-          foldIn(parkedEvent, dirty);
-          parkedRowsById.delete(eventId);
-          drained.push(eventId);
-        }
-        parkedByKey.delete(orderId);
+      for (const [eventId, parkedEvent] of takeParkedFor(orderId)) {
+        foldIn(parkedEvent, dirty);
+        drained.push(eventId);
       }
     }
     return { dirty: [...dirty], parked: null, drained };
+  };
+
+  /** Remove and return the parked entries waiting on a key (shared by the create
+   * drain and the retention drop — one branch site for both). */
+  const takeParkedFor = (orderId: string): [string, ParsedEvent][] => {
+    const waiting = parkedByKey.get(orderId);
+    if (!waiting) return [];
+    parkedByKey.delete(orderId);
+    const out: [string, ParsedEvent][] = [];
+    for (const [eventId, parkedEvent] of waiting) {
+      parkedRowsById.delete(eventId);
+      out.push([eventId, parkedEvent]);
+    }
+    return out;
   };
 
   /** One order's projection — a pure function of its lattice. */
@@ -534,9 +534,7 @@ export const createMergeEngine = (): MergeEngine => {
     let billedEffective = 0;
     let linesTotal = 0;
     let linesReady = 0;
-    const dropped = droppedLines.get(e.order_id);
     for (const [lineId, values] of e.lineValues) {
-      if (dropped?.has(lineId)) continue;
       let value: LineValue | null = null;
       let valueHash: string | null = null;
       for (const member of values.values()) {
@@ -554,19 +552,23 @@ export const createMergeEngine = (): MergeEngine => {
       if (decidedExited) continue;
       linesTotal += 1;
       if (lp.cookingDone) linesReady += 1;
-      const contested = lp.terminalCount >= 2;
-      if (!contested || CONTESTED_LINE_BILLABLE) billedEffective += v.qty * v.unit_price_paisa;
+      // Branchless policy application: the DECISION PENDING constant zeroes the
+      // contribution of a contested line iff the founder flips it (matrix §5.4).
+      const billable = lp.terminalCount < 2 || CONTESTED_LINE_BILLABLE;
+      billedEffective += v.qty * v.unit_price_paisa * Number(billable);
     }
     // 01-F33: settlement is an ACT (monotone OR over the close G-Set); a late
     // line-add never reopens — it raises uncovered_addition. Implementer-proposed
     // trigger (flagged in the T-01-15 report): billed_effective exceeding the
-    // largest carried billed snapshot among the delivered closes.
+    // largest carried billed snapshot among the delivered closes (a snapshot-less
+    // close counts 0 — any close raises the ceiling to ≥ 0).
     const settled = e.closes.size > 0 ? 1 : 0;
     if (settled === 1) {
-      let ceiling = 0;
+      let ceiling = -1;
       for (const close of e.closes.values()) {
         const snap = (close as ClosedP).billed_paisa;
-        if (typeof snap === "number" && Number.isInteger(snap) && snap > ceiling) ceiling = snap;
+        const value = typeof snap === "number" ? snap : 0;
+        if (value > ceiling) ceiling = value;
       }
       if (billedEffective > ceiling) exceptions.add("uncovered_addition");
     }
@@ -602,75 +604,42 @@ export const createMergeEngine = (): MergeEngine => {
 
   const projectOrder = (orderId: string): ProjectedOrder | null => {
     counters.scoped_rebuilds += 1;
-    const e = entities.get(orderId);
-    return e ? projectEntity(e) : null;
+    // Callers pass ids from dirty sets, so the entity always exists (foldIn and
+    // drop create/keep it) — a miss would be an engine invariant violation.
+    return projectEntity(entities.get(orderId) as Entity);
   };
 
-  const rebuild = (events: readonly ParsedEvent[], droppedKeys: readonly string[]): void => {
+  const rebuild = (events: readonly ParsedEvent[]): void => {
     counters.full_rebuilds += 1;
     entities = new Map();
     parkedByKey = new Map();
     parkedRowsById = new Map();
-    droppedOrders = new Set();
-    droppedLines = new Map();
-    for (const key of droppedKeys) {
-      const parsed = parseDropKey(key);
-      if (parsed.kind === "order") droppedOrders.add(parsed.order_id);
-      else sub(droppedLines, parsed.order_id, () => new Set<string>()).add(parsed.line_id);
-    }
     // The fold is a pure function of the SET — replay order is irrelevant; the
     // key-presence park/drain machinery absorbs child-before-parent (01-F10).
-    const dirty = new Set<string>();
-    for (const event of events) {
-      const orderId = (event.payload as OrderRefP).order_id;
-      if (droppedOrders.has(orderId)) continue;
-      if (PARKING_TYPES.has(event.type) && (entities.get(orderId)?.createMembers.size ?? 0) === 0) {
-        sub(parkedByKey, orderId, () => new Map<string, ParsedEvent>()).set(
-          event.envelope.id,
-          event,
-        );
-        parkedRowsById.set(event.envelope.id, {
-          event_id: event.envelope.id,
-          waiting_for: orderId,
-          envelope_json: canonicalJson(event.envelope),
-        });
-        continue;
-      }
-      foldIn(event, dirty);
-      if (event.type === "order.created") {
-        const waiting = parkedByKey.get(orderId);
-        if (waiting) {
-          for (const [eventId, parkedEvent] of waiting) {
-            foldIn(parkedEvent, dirty);
-            parkedRowsById.delete(eventId);
-          }
-          parkedByKey.delete(orderId);
-        }
-      }
-    }
+    for (const event of events) apply(event);
   };
 
   const snapshot = (): FoldState => {
-    const orders: OpenOrderRow[] = [];
-    const queue: KitchenQueueRow[] = [];
-    for (const e of entities.values()) {
-      const projected = projectEntity(e);
-      if (projected) {
-        orders.push(projected.order);
-        if (projected.queue) queue.push(projected.queue);
-      }
-    }
-    return { orders, queue, parked: parkedRows() };
+    const projections = [...entities.values()]
+      .map(projectEntity)
+      .filter((p): p is ProjectedOrder => p !== null);
+    return {
+      orders: projections.map((p) => p.order),
+      queue: projections.map((p) => p.queue).filter((q): q is KitchenQueueRow => q !== null),
+      parked: parkedRows(),
+    };
   };
 
   const parkedRows = (): ParkedRow[] => [...parkedRowsById.values()];
 
   const validateDrop = (keys: readonly string[]): void => {
     for (const key of keys) {
-      const parsed = parseDropKey(key);
-      const e = entities.get(parsed.order_id);
+      // Resolve through the get-or-create seam: an unknown key resolves to an
+      // empty entity, whose zero closes fail the same guard (an empty entity
+      // renders nothing, so the side effect is invisible).
+      const e = entity(parseDropKey(key).order_id);
       // Open-bill guard: prune only ever removes CLOSED entities (01-F42/01-F17).
-      if (!e || e.closes.size === 0) {
+      if (e.closes.size === 0) {
         throw new Error(
           `retentionDrop of ${key}: the order has no settlement_closed — ` +
             "the open-bill guard forbids pruning an open entity (01-F42/01-F17; nothing changed)",
@@ -687,23 +656,13 @@ export const createMergeEngine = (): MergeEngine => {
       const parsed = parseDropKey(key);
       if (parsed.kind === "order") {
         entities.delete(parsed.order_id);
-        droppedOrders.add(parsed.order_id);
         removedOrders.push(parsed.order_id);
-        const waiting = parkedByKey.get(parsed.order_id);
-        if (waiting) {
-          for (const eventId of waiting.keys()) {
-            parkedRowsById.delete(eventId);
-            removedParkedIds.push(eventId);
-          }
-          parkedByKey.delete(parsed.order_id);
-        }
+        for (const [eventId] of takeParkedFor(parsed.order_id)) removedParkedIds.push(eventId);
       } else {
-        sub(droppedLines, parsed.order_id, () => new Set<string>()).add(parsed.line_id);
-        const e = entities.get(parsed.order_id);
-        if (e) {
-          e.lineValues.delete(parsed.line_id);
-          e.lineEdges.delete(parsed.line_id);
-        }
+        // validateDrop resolved the entity (get-or-create), so it exists here.
+        const e = entities.get(parsed.order_id) as Entity;
+        e.lineValues.delete(parsed.line_id);
+        e.lineEdges.delete(parsed.line_id);
         dirtyOrders.push(parsed.order_id);
       }
     }
