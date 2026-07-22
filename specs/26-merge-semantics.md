@@ -120,7 +120,17 @@ Two unstated laws the whole algebra rests on: **`settlement_attempt_id` uniquene
 
 The fix **created** one problem: entitlement-union routing (grow-only, which is what makes it monotone) contradicts `04-F17`'s privacy law once an order moves between waiter sections — either it violates the privacy rule permanently, or it is trimmed on move and stops being monotone, which is the defect it was written to remove. **Genuinely open, needs an architecture ruling.** Also open: hub-as-business-emitter has no failure story and no owner (`01-F13` can elect a *kitchen* tablet as the authority for table states, which `FOLDS.md` does not even register for that class). And two hazards are provably unfixable by any algebra — availability subset-blindness and slice-blind conflict invisibility are **missing-data** problems requiring a delivery-completeness mechanism nobody has specced.
 
-## 8. Status
+## 8. Prototype results — the three hard cases converge (July 2026)
+
+All three §7 prototypes are green (matrix Addendum has the full tables and corrections): **money** 13/13, **tables** 6/6, **lines** 13/13 — every P0/P1/P2 counterexample constructed exactly and survived, including the ack-boundary flip (identical event set, `settled` invariant across the `global_seq` boundary), the khata repayment (no "overpaid" state — overpayment is *underivable*, `billed` never enters the fold), and the partition-heal settle case that wedged permanently under the naive AND-guard.
+
+Combined algebra: **~470 non-blank lines** across all three hard cases. No comparator, no clock, no sequence — enforced **dynamically** (Proxy-poisoned envelopes that throw on ordering-metadata reads; garbage sequence/clock injection; bijective id relabeling including order-reversing).
+
+**Binding lesson for the real acceptance suite:** a min-envelope-id tiebreak **passes plain convergence** — it is convergent-and-wrong (min-id = min-wall-clock via the UUIDv7 prefix). Only bijective-relabel invariance kills it. The suite must therefore include relabel + injection invariance, and the old refold-equivalence gate — which would have blessed min-id — must not be ported.
+
+The prototypes returned ~20 corrections to the matrix (cap resolution by `settlement_attempt_id`; whole-payload immutability; `conflict_visibility` non-monotone, clears on backfill; ≼-max over all legal edges, not heads; cooking-done includes `picked_up`; and more — see the Addendum). The §6.1(a) privacy exposure is **measured**: one business day of order/line-plane visibility (Rs-hundreds scale), zero money-plane leakage, and the trim alternative demonstrably re-creates the slice-blind defect.
+
+## 9. Status
 
 **No ordering design is selected.** `DEC-PERF-001` remains open, `causal_seq` is not to be implemented, and **T-01-14 is paused** — not because its work is wasted (the projection-key sidecar is needed under every candidate) but because it was scoped to an *entity* index and a back-filled workaround for a trap that a one-field schema fix removes.
 

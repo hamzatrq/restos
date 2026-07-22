@@ -299,3 +299,38 @@ DEC-SYNC-007 relocates the 01-F29 cap check to the gateway "because the gateway 
 ---
 
 **Two live code defects closable immediately, independent of every decision above:** delete the `kot_at ?? confirmed_at` fallback at `replay.ts:175` (contradicts 03-F25 and 03-F26, and silences the aging alarm at the moment a stuck printer recovers), and index the parked list by `waiting_for` at `replay.ts:333` (26 §4 defect 2; 25 §17 measured 1,061 s against a 168 s prediction). Neither needs a schema addition, a spec PR, or a founder call.
+---
+
+# Addendum — prototype results (July 2026)
+
+All three §4 prototypes were built and run (scratchpad-only, repo untouched; each imports the real `canonicalJson` / state machine from `domain`). **All green**: A 13/13, B 6/6 (13 named checks, ~2,300 assertions), C 13/13 (13,548 folds). Every P0/P1/P2 counterexample above was constructed exactly and survived. Combined algebra size across all three hard cases: **~470 non-blank lines** (A 233 · B 117 · C ~120 core) — no comparator, no clock, no sequence.
+
+**Strength of evidence.** All three enforce "no ordering metadata" *dynamically*: folds run over Proxy-poisoned envelopes that throw on `global_seq`/`lamport_seq`/`device_created_at`/`device_id` reads (A), and all scenarios re-run under garbage sequence/clock injection plus **consistent bijective id relabeling including an order-reversing one** (A/B/C). All three mutation-tested their own oracles (planted defects go red).
+
+**The oracle lesson (binding for the real test suite).** C's mutation testing showed a min-envelope-id tiebreak **passes plain convergence** — min-id *is* convergent; it is convergent-and-wrong (min-id = min-wall-clock). Only the id-bijection perturbation kills it. So: the real acceptance suite MUST include bijective-relabel + sequence/clock-injection invariance, and the old refold-equivalence gate — which would have blessed min-id — must not be ported.
+
+## Corrections to this matrix from the prototypes
+
+**From A (money):**
+- **The 01-F29 cap must resolve refund parents by `settlement_attempt_id`, not envelope id.** As written (`refundsOf[payment=env.id][attempt]`), an intent legitimately duplicated under two envelope ids fragments the cap: ₨3,700 refunds against a ₨1,850 payment and `violated` never fires. Resolving by attempt id deletes the last envelope-id-*semantic* read from the money algebra and dissolves the cap half of DEC-MONEY-006(a).
+- **The immutability contract is the whole payload minus its key**, not `(attempt_id, amount, method)` — two members differing only in `purpose` move `pay_total` by the full amount depending on which a fold picked. Any divergence → disputed → 0. (`attempt_amount_divergence` is now a misnomer.)
+- **Cross-order attempt-id collision is fold-undetectable in principle** under nested keying — two orders sharing an attempt id never meet. The org-global uniqueness law is enforceable at mint time and gateway only; the fold cannot backstop it.
+- Byte-identity claims pin to the **projection** (id-free); fold state legitimately retains `event_ids` for forensics. CE4 ("no refund affordance") is a projection-shape constraint: `billed` never enters the fold, so overpayment is *underivable* — assert the key set, not UI behaviour.
+- 02-F14's plural "order(s)" is unrepresentable with a single `order_id`; multi-order khata repayment = N events or a customer-scoped payload. The receivable's true key is `customer:` (absent); order-keyed is a single-order stand-in.
+
+**From B (tables):**
+- **Predicate 3 as literally written is unimplementable** — `supersedes` *references* ids, so independent id scrambling severs the DAG for any implementation. The honest invariant: ids are identity-only ⇒ projections invariant under **consistent bijective relabeling** (including order-reversing). Pin "no id read" as "no id **comparison/ordering**"; identity reads (node keying, tombstones, dedupe) are necessary.
+- **`conflict_visibility` is NOT monotone.** Under union routing every device is briefly pre-entitlement, so a grow-only `withheld` marker brands every member slice-blind forever. `withheld` clears on key-complete backfill — it is a statement about delivered-vs-full *now*, maintainable only by the layer that did the withholding.
+- **Materialized tombstones prevent resurrection but do not close retention** — per-event pruning still yields `heads = ∅` (order off the floor map, bill open). The load-bearing half is **atomic per-entity prune granularity + an open-bill guard**.
+- Pin: `from_table_id` **counts** as "named" for the entitlement union (it is what entitles the origin-section owner and covers `table_id: null` creations); `order.created` **is** a legal `supersedes` target (every counterexample requires it); "creator" needs device-vs-user resolution (04-F13 is user-scoped, BYOD blurs it); the union is computed against `owner(T)` — a **mutable** layer-2 section map, so 04-F18 mid-shift reassignment requires re-evaluating owners of already-named tables.
+
+**From C (lines):**
+- **The ≼-max must range over ALL legal non-terminal edges, not over heads** — a legal edge can retire a higher head and *lower* a max-over-heads, breaking monotonicity. `heads()` answers only the terminal-contest/adoption question. (The P2 liveness counterexample's "every legal edge participates" is the only reading under which predicate 2 holds.)
+- **Rows 63 and 66 contradict** on sequential void-after-serve: the row-63 parenthetical implies preds can retire a served head into voided; row 66 correctly says post-serve void is NOT EXPRESSIBLE under strict legality. Row 66 wins; fix the row-63 text (or deliberately extend adoption to singleton-terminal supersession — a product call, not a default).
+- "Grounded terminal" is undefined in a design that forbids grounding gates — define as *payload-legal terminal head* or rename.
+- **Cooking-done must include `picked_up`**: 03-F17's exit set is "served or picked_up", and `picked_up` is non-terminal — any-terminal-head alone strands delivery lines on the pass until `delivered`. Exit = any-terminal-head ∨ watermark ≥ `picked_up`.
+- `from_states: []` must be `illegal_transition` (∀ over ∅ is vacuously legal) — real schema needs `.min(1)`. Anomaly G-Map needs a stated priority (illegal > inconsistent_predecessor > terminal_regression). `LEGAL_NEXT` needs exporting from `domain/states.ts` (scheduled small change).
+
+## §6.1(a) privacy exposure — measured (the founder number)
+
+After an order moves fully from waiter W's section to X's, under grow-only union routing with order-granular slicing: **W continues to receive 8 events** (1 assignment, 3 `line_added`, 4 `line_state_changed`) including **3 lines of item+price detail = Rs 670**, and **0 payment/cash/shift events** — 04-F17's categorical money exclusion is orthogonal and held. Bounded by the 04-F16 business-day window, not permanent. Reverse direction (required for correctness): X's backfill exposes 7 W-era events = Rs 1,640 of line detail. **The trim alternative was built and shown to re-create the slice-blind defect on the privacy fix itself** (trimmed W projects "T3, no conflict" against branch truth {T3,T9}+conflict). The ruling is therefore concretely: *one business day of order/line-plane visibility on moved orders* vs *a losing device silently deciding conflicts*.
