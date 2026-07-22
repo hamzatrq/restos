@@ -36,10 +36,12 @@
 //   • Quarantined relayed events fill the ORIGIN's lamport slot (DEC-SYNC-005):
 //     the per-origin ack advances over them; the live quarantine_notice goes to
 //     the pushing hub session (durable redelivery to the origin is T-01-08).
-//   • Deliberately UNPINNED (implementer proposes; oracle pins in a follow-up):
-//     the kernel.quarantine.device_id COLUMN attribution for relayed
-//     quarantines (session vs origin — the envelope carries the origin either
-//     way), and mixed-origin relay batches.
+//   • The kernel.quarantine.device_id COLUMN attribution — formerly
+//     deliberately unpinned — is now RULED (fix round F2, plans/wave-0/
+//     t-01-12-fix-round.md): identity-mismatch rows attribute to the SESSION
+//     device (pinned in relay-fix-round.test.ts); content-class rows of
+//     identity-VALID envelopes stay ORIGIN-attributed (pinned in relay 5
+//     below). Mixed-origin relay batches remain unpinned.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Gateway } from "../index.js";
 import { createGateway } from "../index.js";
@@ -322,6 +324,10 @@ describe("relay 5 — a quarantined relayed event fills its ORIGIN's slot (DEC-S
       [poison1.id, "schema_invalid"],
     ]);
     expect(must(quarantined[0], "row").envelope).toEqual(poison1); // verbatim, origin identity inside
+    // Fix round F2 (ruled): a content-class quarantine of an identity-VALID
+    // relayed envelope keeps ORIGIN attribution — the T-01-11 Auditor counts
+    // slot-fills per origin (DEC-SYNC-005), never against the relaying hub.
+    expect(must(quarantined[0], "row").device_id).toBe(origin.device_id);
 
     // The ORIGIN's slot is durably filled (DEC-SYNC-005): the per-origin
     // watermark advances over the poisoned slot — union gap-free 0..2.
