@@ -9,12 +9,14 @@ export { EventEnvelope, type EventEnvelopeT, parseEnvelope } from "./envelope.js
 export { newId } from "./ids.js";
 export {
   addPaisa,
+  applyRateBps,
   type Milligrams,
   type Millilitres,
   mg,
   ml,
   type Paisa,
   paisa,
+  splitPaisa,
   subPaisa,
   sumPaisa,
   type Units,

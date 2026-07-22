@@ -1,0 +1,24 @@
+language js
+
+// DEC-MONEY-005 / 18 §4 (T-01-13): raw `number` arithmetic on money is banned.
+// Money values are integer paisas held in a double; division and rates are where floats
+// enter. The blessed path is the `domain` helpers: addPaisa / subPaisa / sumPaisa /
+// splitPaisa / applyRateBps (rates as integer basis points, 00 §6).
+//
+// Scope (deliberately narrow): a binary arithmetic operator where either operand is a
+// BARE identifier whose name contains `paisa`/`Paisa`. Member expressions such as
+// `payload.amount_paisa` are the plain-number fold plane — its migration to branded
+// types is the deferred DEC-MONEY-005 fold clause, not this rule.
+or {
+  `$x + $y`,
+  `$x - $y`,
+  `$x * $y`,
+  `$x / $y`,
+  `$x % $y`
+} where {
+  or {
+    $x <: r"^[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*$",
+    $y <: r"^[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*$"
+  },
+  register_diagnostic(span=$x, message="Raw arithmetic on a money value is banned (18 §4 / DEC-MONEY-005). Use the domain helpers: addPaisa/subPaisa/sumPaisa for +/-, splitPaisa for division, applyRateBps for rates (integer basis points).")
+}

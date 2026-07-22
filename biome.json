@@ -1,3 +1,4 @@
 {
-  "extends": ["./packages/config/biome.json"]
+  "extends": ["./packages/config/biome.json"],
+  "plugins": ["./packages/config/biome-plugins/no-raw-money-arithmetic.grit"]
 }
