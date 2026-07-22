@@ -35,6 +35,12 @@ const payloadSchemas = {
   "order.table_assigned": z.looseObject({
     order_id: z.string().min(1),
     table_id: z.string().min(1),
+    // T-01-15 (01-F34 rewritten): the carried causal link — the ONLY thing that makes
+    // the table anchor converge (matrix §3). Required; [] legal (a root assignment).
+    supersedes: z.array(z.string().min(1)),
+    // Names the origin table (null when none) so `table:<from>` is nameable — no ghost
+    // chip, and the hub can compute the 01-F41 delivery halt (matrix §3).
+    from_table_id: z.union([z.string().min(1), z.null()]),
   }),
   "kot.printed": z.looseObject({
     order_id: z.string().min(1),
@@ -43,17 +49,51 @@ const payloadSchemas = {
     order_id: z.string().min(1),
     line_ids: z.array(z.string().min(1)).min(1),
     state: z.enum(ORDER_LINE_STATES),
+    // T-01-15 (01-F34/01-F35): per-line edge context — without `from_states` the event
+    // is a value, not an edge (legality judgeable only from comparator position);
+    // without `preds` concurrency is undetectable. Required, per-line, because a
+    // multi-line event's lines sit at different heads (matrix §3). `from_states` pins
+    // min 1: ∀ over ∅ is vacuously legal (Addendum-C).
+    line_context: z.record(
+      z.string().min(1),
+      z.looseObject({
+        to: z.enum(ORDER_LINE_STATES),
+        from_states: z.array(z.enum(ORDER_LINE_STATES)).min(1),
+        preds: z.array(z.string().min(1)),
+      }),
+    ),
   }),
   "payment.recorded": z.looseObject({
     order_id: z.string().min(1),
     amount_paisa: z.number().int().nonnegative(),
     method: z.string().min(1),
     settlement_attempt_id: z.string().min(1), // 01-F31: double-taps cannot double-record
+    // T-01-15 (01-F30/01-F32, DEC-MONEY-007): the khata discriminator — without it the
+    // settlement and its later repayment double-count under full observation (matrix §3).
+    // Required: an unpurposed payment is neither tendering nor repayment.
+    purpose: z.enum(["settles_order", "repays_receivable"]),
   }),
   "payment.refunded": z.looseObject({
-    payment_id: z.string().min(1), // 01-F29: always references the original payment
+    // T-01-15 (01-F29 amended): the order key is CARRIED, never resolved through the
+    // parent — the late-resolving-entity trap's one-field fix (26 §4).
+    order_id: z.string().min(1),
     amount_paisa: z.number().int().nonnegative(),
     method: z.enum(["cash_out", "raast_reversal_ref", "khata_credit"]),
+    // 01-F31: the refund's OWN idempotency key — a double-tapped manager approval
+    // must dedupe.
+    settlement_attempt_id: z.string().min(1),
+    // 01-F29: the parent payment's settlement_attempt_id — the cap resolves parents by
+    // attempt id, never envelope id (an intent under two envelope ids fragments an
+    // id-keyed cap, 26 §8). `payment_id` (envelope-id ref) is superseded: no longer
+    // required, tolerated as a loose extra.
+    payment_attempt_id: z.string().min(1),
+  }),
+  // T-01-15 (01-F33): settlement is an ACT, not a derivation — the cashier-emitted,
+  // offline-legal closing fact `settled` folds as a monotone OR over. Snapshot fields
+  // beyond order_id are additive loose extras until the oracle pins them (T-01-15
+  // addendum: proposed in the implementer's report, pinned in a follow-up).
+  "order.settlement_closed": z.looseObject({
+    order_id: z.string().min(1),
   }),
 } as const;
 

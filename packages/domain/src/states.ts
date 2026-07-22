@@ -19,7 +19,13 @@ export const TERMINAL_LINE_STATES = ["served", "delivered", "voided", "cancelled
 const TERMINAL: ReadonlySet<OrderLineState> = new Set(TERMINAL_LINE_STATES);
 
 const EXITS = ["voided", "cancelled"] as const;
-const LEGAL_NEXT: Record<OrderLineState, readonly OrderLineState[]> = {
+/**
+ * The canonical transition table (01 §4), exported as the legality predicate the
+ * merge-model fold consumes (T-01-15; 01-F34/01-F35): an edge's legality is a pure
+ * function of its own payload (`from_states` → `to`), judged against this table —
+ * never against comparator position. Terminals map to [] (01-F35).
+ */
+export const LEGAL_NEXT: Record<OrderLineState, readonly OrderLineState[]> = {
   placed: ["confirmed", ...EXITS],
   confirmed: ["in_prep", ...EXITS],
   in_prep: ["ready", ...EXITS],

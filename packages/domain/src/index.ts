@@ -20,6 +20,13 @@ export {
   type Units,
   units,
 } from "./money.js";
+export { payloadHash } from "./payload-hash.js";
+export {
+  AVAILABILITY_FALSE_WINS,
+  CONTESTED_LINE_BILLABLE,
+  EXCESS_TENDER_IS_EXCEPTION,
+  KOT_TWO_HEAD_TABLE_HEADER,
+} from "./product-constants.js";
 export {
   AUDIT_EVENT_TYPES,
   type AuditEventType,
@@ -32,6 +39,7 @@ export {
 } from "./registry.js";
 export {
   applyLineState,
+  LEGAL_NEXT,
   type LineStateResult,
   ORDER_LINE_STATES,
   type OrderLineState,

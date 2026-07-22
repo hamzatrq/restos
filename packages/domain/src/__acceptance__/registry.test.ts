@@ -18,17 +18,23 @@ const envelope = (type: string, payload: unknown) => ({
   refs: [] as string[],
 });
 
+// T-01-15 enumeration entry 33 (M): payloads carry the amended required fields —
+// payment.recorded.purpose (01-F32) and the refund's {order_id,
+// settlement_attempt_id, payment_attempt_id} trio (01-F29/01-F31).
 const recordedPayload = () => ({
   order_id: newId(),
   amount_paisa: 45000,
   method: "cash",
   settlement_attempt_id: newId(),
+  purpose: "settles_order",
 });
 
 const refundedPayload = () => ({
-  payment_id: newId(),
+  order_id: newId(),
   amount_paisa: 45000,
   method: "cash_out",
+  settlement_attempt_id: newId(),
+  payment_attempt_id: newId(),
   reason: "customer returned item",
   actor_user_id: newId(),
   approved_by: newId(),
@@ -79,11 +85,19 @@ describe("payment payload contracts (01-F29, 01-F31)", () => {
     expect(() => parseEvent(envelope("payment.recorded", missing))).toThrow();
   });
 
-  it("01-F29: payment.refunded requires the reference to the original payment id", () => {
+  // T-01-15 enumeration entry 32 (S): "refunded requires payment_id" is superseded —
+  // 01-F29 (amended) makes the parent ref the parent's ATTEMPT id, plus the carried
+  // order key and the refund's own attempt key. payment_id is a tolerated loose extra.
+  it("01-F29/01-F31: payment.refunded requires the {order_id, settlement_attempt_id, payment_attempt_id} trio — payment_id is superseded, tolerated as an extra", () => {
     const full = refundedPayload();
     expect(parseEvent(envelope("payment.refunded", full)).type).toBe("payment.refunded");
-    const { payment_id: _drop, ...missing } = full;
-    expect(() => parseEvent(envelope("payment.refunded", missing))).toThrow();
+    expect(parseEvent(envelope("payment.refunded", { ...full, payment_id: newId() })).type).toBe(
+      "payment.refunded",
+    );
+    for (const key of ["order_id", "settlement_attempt_id", "payment_attempt_id"] as const) {
+      const { [key]: _drop, ...missing } = full;
+      expect(() => parseEvent(envelope("payment.refunded", missing)), `missing ${key}`).toThrow();
+    }
   });
 
   it("01-F29: payment.refunded accepts only cash_out | raast_reversal_ref | khata_credit methods", () => {
