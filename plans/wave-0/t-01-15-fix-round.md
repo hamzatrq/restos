@@ -24,3 +24,6 @@ Two read-only reviews of `feat/t-01-15-merge-engine` (test-faithfulness; engine 
 
 ## Implementer proposals awaiting oracle pins (from the T-01-15 report §4)
 `inconsistent_predecessor` trigger (both-edges-present, first pred, one per edge, never on illegal); `line_value_conflict` rendering (min-payloadHash member wholesale + order-level exception); `order.settlement_closed` snapshot fields (`billed_paisa` ceiling — amended by F4's ruling above). `CONTESTED_LINE_BILLABLE = true` is an implementer pick on a §5.4 constant with no matrix default — **founder should ratify with F4.**
+
+## Delta re-review (final machine pass) — READY FOR SENIOR REVIEW
+All six attack items CLEAN (F6 tx story incl. F2-memory-survives-refold; F3 order-free + monotone in every delivery order; F1 set-plan key-order independence; F2 guards before counters; no smuggled behaviour; both uncovered statements benign). Three P3 observations recorded for the human reviewer: (O1) a rejected planDrop leaves a projection-invisible phantom empty entity (docstring literalism, pre-existing seam); (O2) retention drops no longer increment scoped_rebuilds (unpinned counter, informational); (O3) the U+0000 line-key separator could collide ids that embed NUL (internal keys, contrived). Branch feat/t-01-15-merge-engine @ b6fc3df: 234/234 + 72/72, verify:01 32 green, branches 100%, root verify exit 0.
