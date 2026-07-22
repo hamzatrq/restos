@@ -7,37 +7,38 @@
 // or deletes an event row (01-F1). Append validates through the domain registry —
 // an unknown type or invalid payload persists nothing (01-F4).
 //
-// Folds v1 (T-01-04) + incremental maintenance (T-01-04b): always-on materialized
-// state tables per FOLDS.md, kept by an in-memory fold accumulator (src/folds/
-// replay.ts) whose writes commit in the same transaction as the ledger row, so fold
-// state stays atomic with its ledger write and reopen self-heals to refold()-
-// equivalence (01-F6). The common in-order arrival fast-paths to a targeted upsert;
-// any event that would reorder canonical history falls back to a full recompute —
-// the law is equivalence with canonical replay, never "never recompute". `ingest`
-// is the branch-stream entry point — peer
-// envelopes persist to `peer_events`, dedupe by event id (01-F8), and park at the
-// fold layer when a typed parent is unseen (01-F10); append never fails or blocks
-// for fold reasons — a sale is never blocked (01-F17). Cloud ordering lands via the
-// `global_seq_map` sidecar (`assignGlobalSeq`) so no event row is ever updated
-// (01-F1) and devices converge to cloud ordering on ack (01-F34).
+// Folds (T-01-15): the merge-semantics engine (src/folds/merge.ts) — every
+// projected field carries its own merge rule (rewritten 01-F34; specs/26), state
+// is a pure function of the stored event SET, and `global_seq` adoption is a
+// sidecar write with ZERO fold work. Fold writes commit in the same transaction
+// as the ledger row, so fold state stays atomic with its ledger write and reopen
+// self-heals by full replay of the surviving set (01-F6; replay order is
+// irrelevant — the fold is order-free). `ingest` is the branch-stream entry
+// point — peer envelopes persist to `peer_events`, dedupe by event id (01-F8);
+// parking is by key-presence (01-F10 amended): only the bare order-fact types
+// wait for their order key, indexed by `waiting_for`. Append never fails or
+// blocks for fold reasons — a sale is never blocked (01-F17). Cloud ordering
+// lands via the `global_seq_map` sidecar (`assignGlobalSeq`) so no event row is
+// ever updated (01-F1); adoption changes NO fold state (01-F34).
 import {
   auditEventHash,
   canonicalJson,
   type EventEnvelopeT,
   isAuditEvent,
+  type ParsedEvent,
   parseEnvelope,
   parseEvent,
 } from "@restos/domain";
 import Database from "better-sqlite3";
 import {
-  createFoldEngine,
-  type FoldInput,
+  createMergeEngine,
   type FoldState,
+  type FoldStats,
   type KitchenQueueRow,
   type OpenOrderRow,
   type ParkedRow,
   type ProjectedOrder,
-} from "./folds/replay.js";
+} from "./folds/merge.js";
 
 export class AckBeyondAppendedError extends Error {
   constructor(watermark: number, ownHighWater: number | null) {
@@ -104,6 +105,11 @@ export type DeviceStore = {
   kitchenQueue(): KitchenQueueRow[];
   parked(): ParkedRow[];
   refold(): void;
+  /** Fold work counters (T-01-15 contract; events_folded is the real quantity). */
+  foldStats(): FoldStats;
+  /** Retention shrink: atomic per-entity key drop with the open-bill guard
+   * (matrix conventions; keys `order:<id>` / `line:<order>:<line>`). */
+  retentionDrop(keys: readonly string[]): void;
   status(): SyncStatus;
   setLastGlobalSeq(n: number): void;
   /** This device's own audit-chain HEAD (01-F5); null before the first own audit append. */
@@ -152,15 +158,29 @@ CREATE TABLE IF NOT EXISTS audit_chain (
   head_event_id TEXT
 ) STRICT;
 INSERT OR IGNORE INTO audit_chain (id, head_hash, head_event_id) VALUES (0, NULL, NULL);
--- Fold state tables — exactly FOLDS.md (01-F6, 01-F10).
+-- Fold state tables — the T-01-15 merge-model projections (01-F6, 01-F10; the
+-- openOrders row shape is oracle-pinned, contract ruling C8).
 CREATE TABLE IF NOT EXISTS orders (
   order_id TEXT PRIMARY KEY,
   channel TEXT NOT NULL,
   order_type TEXT,
-  table_id TEXT,
   confirmed_at INTEGER,
   settled INTEGER NOT NULL,
+  table_ids_json TEXT NOT NULL,
+  table_conflict INTEGER NOT NULL,
+  pay_total INTEGER NOT NULL,
+  repaid_total INTEGER NOT NULL,
+  refund_total INTEGER NOT NULL,
+  pay_attempts_json TEXT NOT NULL,
+  refund_attempts_json TEXT NOT NULL,
+  cap_violated INTEGER NOT NULL,
+  exceptions_json TEXT NOT NULL,
   json_lines TEXT NOT NULL
+) STRICT;
+-- Retention-dropped projection keys (T-01-15 retentionDrop): the device asserts
+-- NOTHING about a dropped key, across reopen too — never an inverse merge.
+CREATE TABLE IF NOT EXISTS dropped_keys (
+  key TEXT PRIMARY KEY
 ) STRICT;
 CREATE TABLE IF NOT EXISTS queue (
   order_id TEXT PRIMARY KEY,
@@ -254,16 +274,29 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   const insertGseq = db.prepare<[string, number]>(
     "INSERT INTO global_seq_map (event_id, global_seq) VALUES (?, ?)",
   );
-  const allGseq = db.prepare<[], { event_id: string; global_seq: number }>(
-    "SELECT event_id, global_seq FROM global_seq_map",
-  );
   const clearOrders = db.prepare("DELETE FROM orders");
   const clearQueue = db.prepare("DELETE FROM queue");
   const clearParked = db.prepare("DELETE FROM parked");
   const insertOrderRow = db.prepare<
-    [string, string, string | null, string | null, number | null, number, string]
+    [
+      string,
+      string,
+      string | null,
+      number | null,
+      number,
+      string,
+      number,
+      number,
+      number,
+      number,
+      string,
+      string,
+      number,
+      string,
+      string,
+    ]
   >(
-    "INSERT INTO orders (order_id, channel, order_type, table_id, confirmed_at, settled, json_lines) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO orders (order_id, channel, order_type, confirmed_at, settled, table_ids_json, table_conflict, pay_total, repaid_total, refund_total, pay_attempts_json, refund_attempts_json, cap_violated, exceptions_json, json_lines) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const insertQueueRow = db.prepare<[string, number, string, number, number, number]>(
     "INSERT INTO queue (order_id, confirm_at, channel, age_basis, lines_ready, lines_total) VALUES (?, ?, ?, ?, ?, ?)",
@@ -271,12 +304,17 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   const insertParkedRow = db.prepare<[string, string, string]>(
     "INSERT INTO parked (event_id, waiting_for, envelope_json) VALUES (?, ?, ?)",
   );
-  // Targeted deletes for the incremental fast-path upsert (T-01-04b) — one order's
-  // two rows, replaced in place; the full-rebuild fallback uses the clears above.
+  // Targeted writes: one order's rows replaced in place; one parked row removed
+  // per drained event (the waiting_for-indexed drain, 01-F10).
   const deleteOrderRow = db.prepare<[string]>("DELETE FROM orders WHERE order_id = ?");
   const deleteQueueRow = db.prepare<[string]>("DELETE FROM queue WHERE order_id = ?");
+  const deleteParkedRow = db.prepare<[string]>("DELETE FROM parked WHERE event_id = ?");
+  const insertDroppedKey = db.prepare<[string]>(
+    "INSERT OR IGNORE INTO dropped_keys (key) VALUES (?)",
+  );
+  const allDroppedKeys = db.prepare<[], { key: string }>("SELECT key FROM dropped_keys");
   const selectOrders = db.prepare<[], OpenOrderRow>(
-    "SELECT order_id, channel, order_type, table_id, confirmed_at, settled, json_lines FROM orders ORDER BY order_id",
+    "SELECT order_id, channel, order_type, confirmed_at, settled, table_ids_json, table_conflict, pay_total, repaid_total, refund_total, pay_attempts_json, refund_attempts_json, cap_violated, exceptions_json, json_lines FROM orders ORDER BY order_id",
   );
   const selectQueue = db.prepare<[], KitchenQueueRow>(
     "SELECT order_id, confirm_at, channel, age_basis, lines_ready, lines_total FROM queue ORDER BY order_id",
@@ -314,19 +352,18 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   const storedPrev = (envelope: EventEnvelopeT): string | null =>
     (envelope.payload as { prev_audit_hash: string | null }).prev_audit_hash;
 
-  // The live fold accumulator (T-01-04b) — persists across writes so an in-order
-  // append is O(1), not a full canonical replay. `refoldTx()` on open seeds it.
-  const engine = createFoldEngine();
+  // The live merge lattice (T-01-15) — kept across writes; every mutation is a
+  // targeted per-key update (fold work independent of ledger size). Seeded on
+  // open by full replay of the surviving set (order-free, 01-F6).
+  const engine = createMergeEngine();
 
-  const readAllInputs = (): FoldInput[] => {
-    const gseqOf = new Map(allGseq.all().map((row) => [row.event_id, row.global_seq]));
-    // Audit events are fold-inert (01-F5/01-F6): they carry no order/line/money state, so
-    // they never enter the fold feed — refold() stays equivalent to the incremental path.
-    return [...allOwnEnvelopes.all(), ...allPeerEnvelopes.all()]
+  const readAllParsed = (): ParsedEvent[] =>
+    // Audit events are fold-inert (01-F5/01-F6): they carry no order/line/money
+    // state, so they never enter the fold feed.
+    [...allOwnEnvelopes.all(), ...allPeerEnvelopes.all()]
       .map(rowToEnvelope)
       .filter((envelope) => !isAuditEvent(envelope.type))
-      .map((envelope) => ({ envelope, global_seq: gseqOf.get(envelope.id) ?? null }));
-  };
+      .map((envelope) => parseEvent(envelope));
 
   const writeFullTables = (state: FoldState): void => {
     clearOrders.run();
@@ -337,9 +374,17 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
         row.order_id,
         row.channel,
         row.order_type,
-        row.table_id,
         row.confirmed_at,
         row.settled,
+        row.table_ids_json,
+        row.table_conflict,
+        row.pay_total,
+        row.repaid_total,
+        row.refund_total,
+        row.pay_attempts_json,
+        row.refund_attempts_json,
+        row.cap_violated,
+        row.exceptions_json,
         row.json_lines,
       );
     }
@@ -358,28 +403,40 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     }
   };
 
-  // Drop-and-rebuild all fold tables (and the live accumulator) from events ∪
-  // peer_events + the sidecar — the always-correct fallback (01-F6) and the reopen
-  // self-heal, run inside the mutating transaction so fold state stays atomic.
+  // Drop-and-rebuild all fold tables (and the live lattice) from events ∪
+  // peer_events — replay order irrelevant, the fold is a pure function of the
+  // set. The reopen self-heal and the refold() surface (01-F6).
   const recomputeFolds = (): void => {
-    engine.rebuild(readAllInputs());
+    engine.rebuild(
+      readAllParsed(),
+      allDroppedKeys.all().map((row) => row.key),
+    );
     writeFullTables(engine.snapshot());
   };
 
-  // Replace one order's two rows in place (the fast-path delta); the queue row is
-  // written only when the order has confirmed (FOLDS.md — no queue row otherwise).
-  const upsertOrder = (p: ProjectedOrder): void => {
-    deleteOrderRow.run(p.order.order_id);
+  // Replace one order's rows in place (the targeted delta); the queue row exists
+  // iff the confirmed fact holds; a null projection means no delivered create.
+  const upsertOrder = (orderId: string, p: ProjectedOrder | null): void => {
+    deleteOrderRow.run(orderId);
+    deleteQueueRow.run(orderId);
+    if (!p) return;
     insertOrderRow.run(
       p.order.order_id,
       p.order.channel,
       p.order.order_type,
-      p.order.table_id,
       p.order.confirmed_at,
       p.order.settled,
+      p.order.table_ids_json,
+      p.order.table_conflict,
+      p.order.pay_total,
+      p.order.repaid_total,
+      p.order.refund_total,
+      p.order.pay_attempts_json,
+      p.order.refund_attempts_json,
+      p.order.cap_violated,
+      p.order.exceptions_json,
       p.order.json_lines,
     );
-    deleteQueueRow.run(p.order.order_id);
     if (p.queue) {
       insertQueueRow.run(
         p.queue.order_id,
@@ -392,27 +449,21 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     }
   };
 
-  const rewriteParked = (): void => {
-    clearParked.run();
-    for (const row of engine.parkedRows()) {
-      insertParkedRow.run(row.event_id, row.waiting_for, row.envelope_json);
+  // Fold maintenance for a newly-stored event (T-01-15): every write is targeted
+  // — the touched orders' rows and the parked-row delta only. Never a replay.
+  const applyFold = (parsed: ParsedEvent): void => {
+    // Audit events are fold-inert (01-F5): nothing applied, nothing parked.
+    if (isAuditEvent(parsed.envelope.type)) return;
+    const result = engine.apply(parsed);
+    if (result.parked) {
+      insertParkedRow.run(
+        result.parked.event_id,
+        result.parked.waiting_for,
+        result.parked.envelope_json,
+      );
     }
-  };
-
-  // Incremental fold maintenance for a newly-stored event (T-01-04b): fast-path an
-  // in-order tail arrival to a targeted upsert of the touched orders + the parked
-  // table; an out-of-order arrival falls back to a full recompute. Both stay
-  // byte-equivalent to refold() — the T-01-04 fold properties are the oracle.
-  const applyFold = (input: FoldInput): void => {
-    // Audit events are fold-inert (01-F5): they feed the fold engine no order/money state,
-    // so the append/ingest paths skip them here — nothing applied, nothing parked.
-    if (isAuditEvent(input.envelope.type)) return;
-    if (engine.apply(input)) {
-      for (const p of engine.takeDirty()) upsertOrder(p);
-      rewriteParked();
-    } else {
-      recomputeFolds();
-    }
+    for (const eventId of result.drained) deleteParkedRow.run(eventId);
+    for (const orderId of result.dirty) upsertOrder(orderId, engine.projectOrder(orderId));
   };
 
   // Lamport assignment and the durable insert are one transaction (01-F3): a
@@ -455,20 +506,21 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     // Stamp the current HEAD (NULL ⇒ this device's first audit event ⇒ prev_audit_hash: null).
     const payload = isAudit ? stampPrev(input.payload, auditHead()) : input.payload;
     const next = (ownHighWater() ?? -1) + 1;
-    const { envelope } = parseEvent({
+    const parsed = parseEvent({
       ...input,
       payload,
       lamport_seq: next,
       server_received_at: null,
     });
+    const envelope = parsed.envelope;
     insertEvent.run(envelope.id, envelope.lamport_seq, JSON.stringify(envelope));
     // The chain HEAD advances inside this one transaction, atomic with the durable ledger
     // row (01-F2/F3); non-audit append never touches it.
     if (isAudit) setAuditHead.run(auditEventHash(envelope), envelope.id);
-    // Folds apply in the same transaction; an unmet dependency parks at the fold
-    // layer — append never fails or blocks for fold reasons (01-F17, 01-F10). Audit
-    // events are fold-inert (applyFold skips them).
-    applyFold({ envelope, global_seq: null });
+    // Folds apply in the same transaction; an absent order key parks the bare
+    // order facts at the fold layer — append never fails or blocks for fold
+    // reasons (01-F17, 01-F10). Audit events are fold-inert (applyFold skips them).
+    applyFold(parsed);
     return envelope;
   });
 
@@ -476,7 +528,8 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   // nothing persists on failure (01-F4); dedupes by event id (01-F8); own events
   // enter only via append (18 §4 loud failure); folds apply in the same transaction.
   const ingestTx = db.transaction((value: unknown, opts?: { global_seq?: number }) => {
-    const { envelope } = parseEvent(value);
+    const parsed = parseEvent(value);
+    const envelope = parsed.envelope;
     if (envelope.org_id !== identity.org_id || envelope.branch_id !== identity.branch_id) {
       throw new Error(
         `ingest of event ${envelope.id} from ${envelope.org_id}/${envelope.branch_id} does not ` +
@@ -498,8 +551,11 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
       // Identical duplicate: no new row ever, but a CARRIED global_seq is adopted
       // exactly as assignGlobalSeq would — the LAN-first-then-cloud-catchup path
       // converges (01-F34); without opts this is a pure idempotent no-op (01-F8).
+      // Adoption is a SIDECAR write only: zero fold work, zero state change
+      // (rewritten 01-F34 — global_seq is a delivery cursor, never a business
+      // arbiter).
       const carried = opts?.global_seq;
-      if (carried !== undefined && adoptGlobalSeq(envelope.id, carried)) recomputeFolds();
+      if (carried !== undefined) adoptGlobalSeq(envelope.id, carried);
       return { stored: false };
     }
     if (envelope.device_id === identity.device_id) {
@@ -524,7 +580,7 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     }
     insertPeer.run(envelope.id, envelope.device_id, envelope.lamport_seq, JSON.stringify(envelope));
     if (globalSeq !== undefined) insertGseq.run(envelope.id, globalSeq); // UNIQUE clash throws, rolls back
-    applyFold({ envelope, global_seq: globalSeq ?? null });
+    applyFold(parsed); // the carried seq is sidecar-only — the fold never reads it (01-F34)
     return { stored: true };
   });
 
@@ -584,12 +640,31 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   });
 
   const assignGlobalSeqTx = db.transaction((eventId: string, globalSeq: number) => {
-    // devices converge to cloud ordering on ack (01-F34)
-    if (adoptGlobalSeq(eventId, globalSeq)) recomputeFolds();
+    // Rewritten 01-F34: adoption is sidecar bookkeeping ONLY — the delivery
+    // cursor is never a business arbiter, so the fold does ZERO work here.
+    adoptGlobalSeq(eventId, globalSeq);
   });
 
   const refoldTx = db.transaction(() => {
     recomputeFolds();
+  });
+
+  // Retention shrink (T-01-15; matrix conventions): an outer-layer key-set
+  // operation — atomic per-entity, open-bill guarded, never an inverse merge.
+  // Validation runs first so a guard violation changes nothing; the drop removes
+  // the keys from the lattice, the rows, the parked set, and (durably) marks the
+  // keys dropped so reopen cannot resurrect them. The LEDGER rows are untouched:
+  // event-row pruning is the compaction task (01 §5, global_seq prune watermark).
+  const retentionDropTx = db.transaction((keys: readonly string[]) => {
+    engine.validateDrop(keys);
+    const result = engine.drop(keys);
+    for (const key of keys) insertDroppedKey.run(key);
+    for (const orderId of result.removedOrders) {
+      deleteOrderRow.run(orderId);
+      deleteQueueRow.run(orderId);
+    }
+    for (const eventId of result.removedParkedIds) deleteParkedRow.run(eventId);
+    for (const orderId of result.dirtyOrders) upsertOrder(orderId, engine.projectOrder(orderId));
   });
 
   // Self-heal on open (01-F6): state tables ≡ refold() of the surviving ledger,
@@ -650,6 +725,14 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
 
     refold() {
       refoldTx();
+    },
+
+    foldStats() {
+      return engine.stats();
+    },
+
+    retentionDrop(keys) {
+      retentionDropTx(keys);
     },
 
     nextBatch(max) {

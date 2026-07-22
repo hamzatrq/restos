@@ -20,7 +20,7 @@ export {
   type StoreIdentity,
   type SyncStatus,
 } from "./device-store.js";
-export type { KitchenQueueRow, OpenOrderRow, ParkedRow } from "./folds/replay.js";
+export type { FoldStats, KitchenQueueRow, OpenOrderRow, ParkedRow } from "./folds/merge.js";
 export { electHub } from "./hub-election.js";
 export {
   createMeshSession,
