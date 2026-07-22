@@ -262,6 +262,97 @@ describe("terminal contest — MVR, adoption, differing resolutions (01-F35/01-F
   });
 });
 
+describe("terminal heads survive non-adoption retirement (fix-round F7; 01-F35 conservative ruling)", () => {
+  // F7 ruling: only an ADOPTION edge (|from_states| > 1 ∧ to ∈ from_states) may
+  // retire a terminal head. A legal-but-inconsistent ordinary edge whose `preds`
+  // name a terminal edge LANDS (participates in the ≼-max), fires
+  // inconsistent_predecessor, and the terminal head SURVIVES — one inconsistent
+  // emitter must never un-serve a line fleet-wide.
+  const servedFixture = (id: ReturnType<typeof identity>) => {
+    const counter = peerIdentity(id);
+    const createEnv = peerEnvelope(counter, 0, { ...created("O1"), ...at(0) });
+    const add = peerEnvelope(counter, 1, { ...lineAdded("O1", "L1"), ...at(50) });
+    const head = peerEnvelope(counter, 2, {
+      ...edge("O1", "L1", "ready", ["in_prep"], []),
+      ...at(100),
+    });
+    const servedEdge = peerEnvelope(counter, 3, {
+      ...edge("O1", "L1", "served", ["ready"], [head.id as string]),
+      ...at(200),
+    });
+    return { counter, events: [createEnv, add, head, servedEdge], servedEdge };
+  };
+
+  it("01-F35 (fix-round F7): a LEGAL non-adoption edge whose preds name the served head cannot retire it — served survives, the edge lands with inconsistent_predecessor, in every delivery order", () => {
+    const id = identity();
+    const fixture = servedFixture(id);
+    const rider = peerIdentity(id);
+    // A legal ready→picked_up edge that (inconsistently) claims the SERVED edge
+    // as its predecessor.
+    const inconsistent = peerEnvelope(rider, 0, {
+      ...edge("O1", "L1", "picked_up", ["ready"], [fixture.servedEdge.id as string]),
+      ...at(300),
+    });
+    const events = [...fixture.events, inconsistent];
+    const one = mergeStore(id);
+    ingestAll(one, events);
+    const two = mergeStore(id);
+    ingestAll(two, [...events].reverse());
+    for (const store of [one, two]) {
+      const c = cell(store, "L1");
+      expect(c.states).toEqual(["served"]); // the terminal head SURVIVES (01-F35)
+      expect(c.anomalies).toEqual({ [inconsistent.id as string]: "inconsistent_predecessor" });
+    }
+    expect(projectionBytes(two)).toBe(projectionBytes(one));
+    one.close();
+    two.close();
+  });
+
+  it("01-F35/01-F19 (fix-round F7): a TERMINAL non-adoption edge naming the served head re-contests instead of replacing — the rendered set, plus inconsistent_predecessor on the incoming edge", () => {
+    const id = identity();
+    const fixture = servedFixture(id);
+    const kitchen = peerIdentity(id);
+    const voidEdge = peerEnvelope(kitchen, 0, {
+      ...edge("O1", "L1", "voided", ["ready"], [fixture.servedEdge.id as string]),
+      ...at(300),
+    });
+    const store = mergeStore(id);
+    ingestAll(store, [...fixture.events, voidEdge]);
+    const c = cell(store, "L1");
+    expect(c.states).toEqual(["served", "voided"]); // the contest set — nothing is un-served
+    expect(c.anomalies).toEqual({ [voidEdge.id as string]: "inconsistent_predecessor" });
+    store.close();
+  });
+
+  it("01-F19 (fix-round F7 boundary): an ADOPTION edge naming all heads still collapses — only the adoption clause may retire a terminal head", () => {
+    const id = identity();
+    const fixture = servedFixture(id);
+    const rider = peerIdentity(id);
+    const manager = peerIdentity(id);
+    const inconsistent = peerEnvelope(rider, 0, {
+      ...edge("O1", "L1", "picked_up", ["ready"], [fixture.servedEdge.id as string]),
+      ...at(300),
+    });
+    const adoption = peerEnvelope(manager, 0, {
+      ...edge(
+        "O1",
+        "L1",
+        "served",
+        ["served", "picked_up"],
+        [fixture.servedEdge.id as string, inconsistent.id as string],
+      ),
+      ...at(400),
+    });
+    const store = mergeStore(id);
+    ingestAll(store, [...fixture.events, inconsistent, adoption]);
+    const c = cell(store, "L1");
+    expect(c.states).toEqual(["served"]);
+    // The inconsistent edge's anomaly is a payload fact — never recomputed away.
+    expect(c.anomalies).toEqual({ [inconsistent.id as string]: "inconsistent_predecessor" });
+    store.close();
+  });
+});
+
 describe("anomalies are payload facts — never recomputed away (01-F35/01-F1)", () => {
   it("01-F35: illegal_transition is a pure function of the edge's own payload — it survives every delivery order AND full global_seq adoption", () => {
     const id = identity();
@@ -288,6 +379,36 @@ describe("anomalies are payload facts — never recomputed away (01-F35/01-F1)",
     expect(projectionBytes(two)).toBe(projectionBytes(one));
     one.close();
     two.close();
+  });
+
+  it("01-F35 (fix-round §4 ratification): inconsistent_predecessor fires only when BOTH edges are present, once per naming edge — an absent pred is normal operation, never a verdict", () => {
+    // Ratifies the implementer's proposed trigger (t-01-15-fix-round.md §4):
+    // both-edges-present, first witnessed mismatch, one code per edge, never on
+    // an illegal edge (illegal outranks — pinned by the row-66 test below).
+    const id = identity();
+    const peer = peerIdentity(id);
+    const createEnv = peerEnvelope(peer, 0, { ...created("O1"), ...at(0) });
+    const add = peerEnvelope(peer, 1, { ...lineAdded("O1", "L1"), ...at(50) });
+    const eA = peerEnvelope(peer, 2, {
+      ...edge("O1", "L1", "confirmed", ["placed"], []),
+      ...at(100),
+    });
+    // eB names eA as pred but claims a from_states that does not contain eA's `to`.
+    const eB = peerEnvelope(peer, 3, {
+      ...edge("O1", "L1", "ready", ["in_prep"], [eA.id as string]),
+      ...at(200),
+    });
+    // eC names a pred that was NEVER delivered — no verdict without the witness.
+    const eC = peerEnvelope(peer, 4, {
+      ...edge("O1", "L1", "in_prep", ["confirmed"], ["e-never-delivered"]),
+      ...at(300),
+    });
+    const store = mergeStore(id);
+    ingestAll(store, [createEnv, add, eA, eB, eC]);
+    const c = cell(store, "L1");
+    expect(c.states).toEqual(["ready"]); // every legal edge still participates in the ≼-max
+    expect(c.anomalies).toEqual({ [eB.id as string]: "inconsistent_predecessor" });
+    store.close();
   });
 
   it("01-F35 (matrix row 66): post-serve void is NOT EXPRESSIBLE — an edge from a terminal is payload-illegal (terminals map to []), and illegal outranks terminal_regression", () => {

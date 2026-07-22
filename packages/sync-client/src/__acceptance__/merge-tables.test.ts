@@ -3,18 +3,21 @@
 // duplicate-create MVR (matrix row 52; 01-F20). Authored from specs 01/26 + the
 // matrix + the T-01-15 contract ONLY (24 §3 step 2).
 // The retention describe-block pins the matrix-conventions `retentionDrop(keys)`
-// surface — FLAGGED in the oracle report as matrix-normative but absent from the
-// T-01-15 scope line (planner may confirm in-scope or move both tests).
-// RED-AWAITING-IMPLEMENTATION against the shipped comparator engine.
+// surface — ratified in scope by contract ruling C4; the fix-round F1/F2/F8 pins
+// (mixed-key atomicity, dropped-key memory, malformed-key rejection) cite
+// plans/wave-0/t-01-15-fix-round.md and are EXPECTED RED until the fix lands.
 
 import { describe, expect, it } from "vitest";
 import { identity, peerEnvelope, peerIdentity } from "./builders.js";
 import {
+  confirmed,
   created,
+  foldStats,
   ingestAll,
   lineAdded,
   type MergeLineCell,
   mergeStore,
+  payment,
   projectionBytes,
   settlementClosed,
   sha256Canonical,
@@ -275,6 +278,152 @@ describe("retention shrink — matrix-B CE (no resurrection) + matrix-C CE (slic
     mustDrop(store, ["line:O1:L2"]);
     const cellsAfter = JSON.parse(onlyOrder(store).json_lines) as Record<string, MergeLineCell>;
     expect(Object.keys(cellsAfter)).toEqual(["L1"]); // L2 gone wholesale, L1 intact
+    store.close();
+  });
+
+  it("01-F42/01-F19 (fix-round F1): a mixed order+line key drop either succeeds atomically or rejects loudly changing NOTHING — in-memory lattice included, no key-order dependence", () => {
+    const id = identity();
+    const peer = peerIdentity(id);
+    const late = peerIdentity(id);
+    const events = [
+      peerEnvelope(peer, 0, { ...created("O1"), ...at(0) }),
+      peerEnvelope(peer, 1, { ...lineAdded("O1", "L1"), ...at(100) }),
+      peerEnvelope(peer, 2, { ...settlementClosed("O1", { billed_paisa: 50000 }), ...at(200) }),
+      peerEnvelope(peer, 3, { ...created("O2"), ...at(300) }),
+    ];
+    // The reject branch must leave the engine able to keep folding O1 — a
+    // half-dropped in-memory lattice (F1's engine/DB divergence) would let this
+    // later payment overwrite the surviving row with a create-less fragment
+    // projection (the row silently VANISHES on the next O1 delivery).
+    const latePay = peerEnvelope(late, 0, {
+      ...payment("O1", 600, { attempt: "sa-late" }),
+      ...at(400),
+    });
+    const runDrop = (keys: string[]) => {
+      const store = mergeStore(id);
+      ingestAll(store, events);
+      const before = projectionBytes(store);
+      let threw = false;
+      try {
+        requireDrop(store)(keys);
+      } catch {
+        threw = true;
+      }
+      if (threw) {
+        // Rejected ⇒ NOTHING changed: projections byte-equal pre-call…
+        expect(projectionBytes(store)).toBe(before);
+        // …and a subsequent O1 delivery still folds correctly (no fragment).
+        store.ingest(latePay);
+        const row = store.openOrders().find((r) => r.order_id === "O1");
+        expect(row, "O1 must survive a rejected drop and keep folding").toBeDefined();
+        expect(row?.pay_total).toBe(600);
+        expect(row?.settled).toBe(1);
+      } else {
+        // Succeeded ⇒ wholesale and atomic: O1 gone from every projection, O2
+        // and the ledger untouched (01-F1).
+        expect(store.openOrders().map((r) => r.order_id)).toEqual(["O2"]);
+        expect(store.kitchenQueue()).toEqual([]);
+        expect(
+          store
+            .readAllEvents()
+            .map((e) => e.id)
+            .sort(),
+        ).toEqual(events.map((e) => e.id as string).sort());
+      }
+      const bytes = projectionBytes(store);
+      store.close();
+      return { threw, bytes };
+    };
+    const forward = runDrop(["order:O1", "line:O1:L1"]);
+    const reversed = runDrop(["line:O1:L1", "order:O1"]);
+    expect(reversed.threw).toBe(forward.threw); // no key-order dependence…
+    expect(reversed.bytes).toBe(forward.bytes); // …in outcome or in final state
+  });
+
+  it("01-F42/01-F1 (fix-round F2): after a successful order drop, a never-seen straggler for the dropped key is ledger-retained, never folded, never projected — and counts no fold work", () => {
+    const id = identity();
+    const peer = peerIdentity(id);
+    const store = mergeStore(id);
+    ingestAll(store, [
+      peerEnvelope(peer, 0, { ...created("O1"), ...at(0) }),
+      peerEnvelope(peer, 1, { ...lineAdded("O1", "L1"), ...at(100) }),
+      peerEnvelope(peer, 2, { ...settlementClosed("O1", { billed_paisa: 50000 }), ...at(200) }),
+      peerEnvelope(peer, 3, { ...created("O2", { table_id: "T9" }), ...at(300) }),
+    ]);
+    mustDrop(store, ["order:O1"]);
+    const afterDrop = projectionBytes(store);
+    const folded = foldStats(store).events_folded;
+    // The duplicate-create profile: a weeks-late order.created for the DROPPED
+    // key under a new envelope id — exactly F2's resurrection vector (a settled,
+    // dropped order reappearing as open on the floor).
+    const straggler = peerEnvelope(peerIdentity(id), 0, {
+      ...created("O1", { channel: "takeaway" }),
+      ...at(4000),
+    });
+    expect(store.ingest(straggler)).toEqual({ stored: true }); // the LEDGER keeps it (01-F1)
+    expect(store.openOrders().map((r) => r.order_id)).toEqual(["O2"]); // never projected
+    expect(store.kitchenQueue()).toEqual([]);
+    expect(projectionBytes(store)).toBe(afterDrop);
+    // Counter treatment (oracle-pinned per the fix-round delegation): a straggler
+    // for a dropped key is NOT folded, so the honesty counter must not claim fold
+    // work — the same principle that makes F5's silent fall-through an overcount.
+    expect(foldStats(store).events_folded).toBe(folded);
+    // A bare order-fact straggler must not PARK either — parked membership is
+    // projection surface and the key is retired for this session (01-F10).
+    const confirmStraggler = peerEnvelope(peerIdentity(id), 0, { ...confirmed("O1"), ...at(4100) });
+    expect(store.ingest(confirmStraggler)).toEqual({ stored: true });
+    expect(store.parked()).toEqual([]);
+    expect(projectionBytes(store)).toBe(afterDrop);
+    const ids = store.readAllEvents().map((e) => e.id);
+    expect(ids).toContain(straggler.id as string);
+    expect(ids).toContain(confirmStraggler.id as string);
+    store.close();
+  });
+
+  it("01-F40/01-F42 (fix-round F2): after a successful line drop, a never-seen line_added for the dropped line key never re-materializes the cell — ledger-retained only", () => {
+    const id = identity();
+    const peer = peerIdentity(id);
+    const store = mergeStore(id);
+    ingestAll(store, [
+      peerEnvelope(peer, 0, { ...created("O1"), ...at(0) }),
+      peerEnvelope(peer, 1, { ...lineAdded("O1", "L1"), ...at(100) }),
+      peerEnvelope(peer, 2, { ...lineAdded("O1", "L2", { qty: 2 }), ...at(200) }),
+      peerEnvelope(peer, 3, { ...settlementClosed("O1", { billed_paisa: 150000 }), ...at(300) }),
+    ]);
+    mustDrop(store, ["line:O1:L2"]);
+    const afterDrop = projectionBytes(store);
+    const straggler = peerEnvelope(peerIdentity(id), 0, {
+      ...lineAdded("O1", "L2", { qty: 3 }),
+      ...at(4000),
+    });
+    expect(store.ingest(straggler)).toEqual({ stored: true }); // ledger-retained (01-F1)
+    const cellsAfter = JSON.parse(onlyOrder(store).json_lines) as Record<string, MergeLineCell>;
+    expect(Object.keys(cellsAfter)).toEqual(["L1"]); // the dropped line stays dropped
+    expect(projectionBytes(store)).toBe(afterDrop);
+    expect(store.readAllEvents().map((e) => e.id)).toContain(straggler.id as string);
+    // The counter is deliberately UNPINNED for line-key stragglers: a multi-line
+    // event can be partially live (one dropped line, one live), so whether the
+    // engine counts the partially-inert fold is an implementation freedom.
+    store.close();
+  });
+
+  it("01-F42/18 §4 (fix-round F8): a malformed drop key is rejected loudly with nothing changed — `line:O1` must never silently mis-parse into (order O, line O1)", () => {
+    const id = identity();
+    const peer = peerIdentity(id);
+    const store = mergeStore(id);
+    // An order genuinely named "O" holding a line genuinely named "O1" — the
+    // exact shape a lax parser mis-targets.
+    ingestAll(store, [
+      peerEnvelope(peer, 0, { ...created("O"), ...at(0) }),
+      peerEnvelope(peer, 1, { ...lineAdded("O", "O1"), ...at(100) }),
+      peerEnvelope(peer, 2, { ...settlementClosed("O", { billed_paisa: 50000 }), ...at(200) }),
+    ]);
+    const drop = requireDrop(store);
+    const before = projectionBytes(store);
+    expect(() => drop(["line:O1"])).toThrow(); // malformed — no <line_id> part
+    expect(projectionBytes(store)).toBe(before);
+    expect(() => drop(["table:T1"])).toThrow(); // unknown prefix — same loud rejection
+    expect(projectionBytes(store)).toBe(before);
     store.close();
   });
 });

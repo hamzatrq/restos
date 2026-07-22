@@ -57,8 +57,10 @@ const runRush = (seed: number, orders: number) => {
   return { sim, cloud, devices: all, appended };
 };
 
-describe("X1 — rush baseline (01-N1 / 01-F34): fold identity ≡ refold() ≡ cloud-order replay", () => {
-  it("X1/01-N1/01-F34: at quiescence every device holds each event exactly once, cloud-ordered, and its fold tables ≡ refold() ≡ a fresh store replaying mergedStream()", () => {
+// R4 (fix-round): titles retitled — the "≡ refold()" claims were stale (the
+// refold legs were dropped per enumeration entry 29); assertions untouched.
+describe("X1 — rush baseline (01-N1 / 01-F34): fold identity ≡ merged-stream replay", () => {
+  it("X1/01-N1/01-F34: at quiescence every device holds each event exactly once, cloud-ordered, and its fold tables ≡ a fresh store replaying mergedStream()", () => {
     const { cloud, devices, appended } = runRush(6001, 18);
     assertConverged(devices, cloud, appended);
     for (const d of devices) {
@@ -335,7 +337,7 @@ describe("X3 — partition + WAN cut, doubly degraded (01-F17 / 01-F38)", () => 
 });
 
 describe("X4 — plug-pull mid-print (01-F2): kill-seed survival + no phantom KOT", () => {
-  it("X4/01-F2: the hub's held KOT job crashes before recording; reopen survives every confirmed event gap-free with tables ≡ refold(), no kot.printed for the held order; re-issue records once and the mesh reconverges to X1 identity", () => {
+  it("X4/01-F2: the hub's held KOT job crashes before recording; reopen survives every confirmed event gap-free (id-set equality, gap-free lamport), no kot.printed for the held order; re-issue records once and the mesh reconverges to X1 identity", () => {
     const seed = 6004;
     const sim = createSim({ seed });
     sim.lan.policy(LOSSLESS);

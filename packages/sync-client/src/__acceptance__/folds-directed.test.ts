@@ -9,7 +9,7 @@
 // key-presence parking (01-F10), terminal anomalies (01-F35), sidecar
 // global_seq bookkeeping (01-F34), fold durability (20 §2.6 seed).
 
-import { newId, payloadHash } from "@restos/domain";
+import { newId } from "@restos/domain";
 import { describe, expect, it } from "vitest";
 import { type DeviceStore, openStore } from "../index.js";
 import {
@@ -30,6 +30,7 @@ import {
   settlementClosed,
   tempDbPath,
 } from "./builders.js";
+import { sha256Canonical } from "./merge-builders.js";
 
 // T-01-15 store surface — the C8-pinned projection row shapes; a missing member
 // fails at runtime.
@@ -242,6 +243,9 @@ describe("open_orders fold (01-F6)", () => {
   // Enumeration entry 7 (S): "canonically-first create wins" is superseded — a
   // duplicate create is an MVR defaulting to the min-payloadHash member plus the
   // order_identity_conflict exception (matrix row 52; never a sequence pick).
+  // Fix-round R2: the expectation is computed with the oracle's own independent
+  // sha256(canonicalJson) — never the implementation's payloadHash (the domain
+  // merge-schema suite pins that the two agree).
   it("01-F20/01-F34: a second divergent order.created keeps both members — register defaults to the min-payloadHash payload and order_identity_conflict is raised", () => {
     const id = identity();
     const store = foldStore(id);
@@ -249,7 +253,7 @@ describe("open_orders fold (01-F6)", () => {
     const payloadB = { order_id: "O1", channel: "takeaway", order_type: "delivery" };
     store.append(appendInput(id, { type: "order.created", payload: payloadA, ...at(0) }));
     store.append(appendInput(id, { type: "order.created", payload: payloadB, ...at(5000) }));
-    const expected = payloadHash(payloadA) < payloadHash(payloadB) ? payloadA : payloadB;
+    const expected = sha256Canonical(payloadA) < sha256Canonical(payloadB) ? payloadA : payloadB;
     const row = onlyOrder(store);
     expect(row.channel).toBe(expected.channel);
     expect(row.order_type).toBe("order_type" in expected ? expected.order_type : null);
@@ -300,10 +304,13 @@ describe("open_orders fold (01-F6)", () => {
     store.close();
   });
 
-  // Enumeration entry 8 (S): "duplicate line_id keeps the canonically-first line"
-  // is superseded — interim guard: the per-line value cell resolves to ONE
-  // deterministic member, identically in every delivery order (convergence).
-  it("01-F16/01-F34: a duplicate line_id with divergent values resolves to one deterministic member — byte-identical in both delivery orders", () => {
+  // Enumeration entry 8 (S) — fix-round R3: the interim convergence guard is
+  // replaced by this oracle's pin of the line-value MVR rendering, ratifying the
+  // implementer's §4 proposal: the cell renders the min-payloadHash member
+  // WHOLESALE (a clock-free default mirroring the matrix row 52 create MVR —
+  // never a field mix, never a sequence pick) over the value triple
+  // {item_id, qty, unit_price_paisa}, and the order raises line_value_conflict.
+  it("01-F16/01-F34 (fix-round R3): a duplicate line_id with divergent values renders the min-payloadHash member wholesale and raises line_value_conflict — byte-identical in both delivery orders", () => {
     const id = identity();
     const peerA = peerIdentity(id);
     const peerB = peerIdentity(id);
@@ -313,6 +320,11 @@ describe("open_orders fold (01-F6)", () => {
       ...orderLineAdded("O1", "L1", { qty: 5 }),
       ...at(200),
     });
+    const valueA = { item_id: "item-karahi", qty: 1, unit_price_paisa: 50000 };
+    const valueB = { ...valueA, qty: 5 };
+    // The oracle's own independent hash (R2 discipline) over the rendered cell
+    // value — not the implementation's payloadHash.
+    const winner = sha256Canonical(valueA) < sha256Canonical(valueB) ? valueA : valueB;
     const one = foldStore(id);
     one.ingest(createEnv);
     one.ingest(addQty1);
@@ -321,8 +333,9 @@ describe("open_orders fold (01-F6)", () => {
     two.ingest(createEnv);
     two.ingest(addQty5);
     two.ingest(addQty1);
-    const qty = lines(onlyOrder(one)).L1?.qty;
-    expect([1, 5]).toContain(qty);
+    const row = onlyOrder(one);
+    expect(lines(row).L1).toEqual(line({ qty: winner.qty })); // the member, wholesale
+    expect(JSON.parse(row.exceptions_json)).toContain("line_value_conflict");
     expect(tables(two)).toEqual(tables(one));
     one.close();
     two.close();

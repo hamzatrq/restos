@@ -39,15 +39,36 @@
 //         value-deduped and sorted by their canonical bytes. A key is disputed iff
 //         it has >1 member (whole-payload immutability, Addendum-A); id-free by
 //         construction (Addendum-A: byte-identity pins to the id-free projection).
+//         Fix-round F8 amendment: SUPERSEDED-TOLERATED fields are excluded from
+//         the immutable-intent comparison AND the rendered member — for
+//         payment.refunded that set is {payment_id}, the C2-superseded envelope-id
+//         parent ref. Version skew must never manufacture a dispute.
 //       cap_violated (0|1)                  — monotone: some parent attempt on this
 //         order has Σ agreed refunds > its agreed amount (01-F29 set predicate;
 //         cap resolves parents by settlement_attempt_id, Addendum-A). Gates money
-//         rendering; never blocks anything.
+//         rendering; never blocks anything. Fix-round F3 amendment: the flag is a
+//         LATCH — once the violation is witnessable it stays 1 even when a later
+//         divergent member disputes the parent key (the totals move per
+//         Addendum-A; the flag never regresses). The latch must be an order-free
+//         monotone function of the delivered SET (∃ an agreed sub-view violating
+//         the cap), never a delivery-order memory — 01-F34 convergence still
+//         binds and this suite asserts the dispute-first order lands on 1 too.
 //       exceptions_json                     — canonical JSON sorted distinct array
 //         of exception codes; pinned codes used by this suite:
 //         "attempt_divergence" (any disputed attempt key on the order, 01-F31),
 //         "order_identity_conflict" (duplicate creates, matrix row 52),
-//         "uncovered_addition" (line added after settlement_closed, 01-F33).
+//         "uncovered_addition" (line added after settlement_closed, 01-F33 —
+//         fix-round F4: the ceiling is the largest VALID integer billed_paisa
+//         snapshot among delivered closes; a close carrying NO snapshot asserts
+//         NO ceiling — "no attestation" is not "attested zero"),
+//         "close_snapshot_invalid" (fix-round F4, oracle-pinned code: a close
+//         whose billed_paisa snapshot is non-integer or negative is
+//         ignored-with-anomaly — the ACT still settles, the bad snapshot
+//         contributes no ceiling and raises this code instead),
+//         "line_value_conflict" (divergent order.line_added values for one
+//         line_id — fix-round R3, ratifying the implementer's §4 proposal: the
+//         cell renders the min-payloadHash member wholesale, mirroring the
+//         matrix row 52 create-MVR default, plus this order-level code).
 //       json_lines                          — canonical JSON Record<line_id, cell>,
 //         cell = { item_id, qty, unit_price_paisa, states, anomalies }:
 //         states = the projected state SET in ORDER_LINE_STATES index order
@@ -70,8 +91,29 @@
 //   - foldStats(): { full_rebuilds, scoped_rebuilds, events_folded } — the
 //       T-01-14→T-01-15 work-counter mandate. events_folded is the real quantity.
 //   - retentionDrop(keys) — the matrix-conventions outer-layer key-set shrink
-//       operation (atomic per-entity, open-bill guard). FLAGGED in the oracle
-//       report: matrix-normative but absent from the T-01-15 scope line.
+//       operation (atomic per-entity, open-bill guard); ratified in scope by
+//       contract ruling C4. Fix-round F1/F2/F8 amendments: (F1) a call either
+//       succeeds ATOMICALLY or rejects loudly changing NOTHING — the in-memory
+//       lattice included — with no key-order dependence across the key array;
+//       (F2) a successful drop leaves session-scoped dropped-key memory: a
+//       straggler for a dropped key is ledger-retained (01-F1), never folded,
+//       never projected (row, queue, AND parked membership), and — oracle-pinned
+//       counter treatment — counts no fold work (events_folded unchanged; the
+//       same honesty principle that makes F5's silent fall-through an overcount);
+//       (F8) a malformed key (`line:O1`, unknown prefixes) is rejected loudly
+//       with nothing changed — never silently mis-parsed.
+//
+// ── Fix-round ratification (plans/wave-0/t-01-15-fix-round.md, R1) ──────────
+// The implementer's application of this oracle's superseded-law enumeration to
+// the legacy suites (commit d17ac45) is post-hoc RATIFIED for all 18
+// re-expressed S slots — entries 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 (part-S),
+// 16, 17, 20, 22 (both tiebreak tests), 23 and 30 — reviewer 1 verdict adopted:
+// all faithful re-expressions of their named replacement laws. This round also
+// re-anchors entry 7's expectation on an independent sha256(canonicalJson)
+// computation (R2), replaces entry 8's interim convergence guard with this
+// oracle's line-value MVR pin (R3, above), and retitles the stale "≡ refold()"
+// claims in spike-scenarios (R4 — titles only). New pins cite F1–F8 findings
+// from the fix-round file in their test names.
 import { createHash } from "node:crypto";
 import { openStore } from "../index.js";
 import { canonicalJson, type Identity, must, peerEnvelope, seededRng } from "./builders.js";

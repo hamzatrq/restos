@@ -9,6 +9,7 @@
 // Authored from specs 01/25 §17-corrections/26 + the matrix + the T-01-15 contract
 // ONLY (24 §3 step 2). RED-AWAITING-IMPLEMENTATION.
 
+import { eventRegistry, type KnownEventType } from "@restos/domain";
 import { describe, expect, it } from "vitest";
 import { type Identity, identity, peerEnvelope, peerIdentity } from "./builders.js";
 import {
@@ -76,6 +77,36 @@ describe("foldStats — the mandated work-counter observable (T-01-15 contract)"
     });
     expect(delta).toBeGreaterThan(0); // delivering new events IS fold work
     store.close();
+  });
+});
+
+describe("registry growth must fail this suite before it can silently no-op (fix-round F5; 01-F4/01-F34)", () => {
+  /** The oracle-pinned fold-consumed partition: every KnownEventType has a
+   * pinned merge rule in this suite (kot.printed: consumed, projection-inert
+   * per matrix rows 59/60; audit.* sits outside KnownEventType by
+   * construction and is pinned fold-inert elsewhere). */
+  const PINNED_FOLD_CONSUMED = [
+    "kot.printed",
+    "order.confirmed",
+    "order.created",
+    "order.line_added",
+    "order.line_state_changed",
+    "order.settlement_closed",
+    "order.table_assigned",
+    "payment.recorded",
+    "payment.refunded",
+  ] as const;
+  type PinnedType = (typeof PINNED_FOLD_CONSUMED)[number];
+  // COMPILE-LEVEL PIN (F5): if the registry grows, this assignment stops
+  // compiling — the new type has no pinned merge rule yet, and an engine switch
+  // without an exhaustiveness guard would fold nothing while still counting
+  // events_folded (the F5 honesty overcount). Red-at-compile forces the oracle
+  // pin before the code can ship a silent fall-through.
+  const registryIsCovered: [KnownEventType] extends [PinnedType] ? true : never = true;
+
+  it("01-F4 (fix-round F5): the fold-consumed registry is EXACTLY the pinned nine types — growth is a spec-PR + oracle-pin event, never a silent fall-through", () => {
+    expect(registryIsCovered).toBe(true);
+    expect([...eventRegistry.types()].sort()).toEqual([...PINNED_FOLD_CONSUMED]);
   });
 });
 

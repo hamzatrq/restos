@@ -7,7 +7,7 @@
 // RED-AWAITING-IMPLEMENTATION against the shipped comparator engine.
 
 import { describe, expect, it } from "vitest";
-import { identity, peerEnvelope, peerIdentity } from "./builders.js";
+import { identity, peerEnvelope, peerIdentity, tempDbPath } from "./builders.js";
 import {
   created,
   edge,
@@ -76,7 +76,10 @@ describe("settlement is an act, not a derivation (01-F33)", () => {
       }),
       peerEnvelope(peer, 2, { ...payment("O1", 1000, { attempt: "sa-K" }), ...at(200) }),
       peerEnvelope(peer, 3, {
-        ...settlementClosed("O1", { settlement_attempt_ids: ["sa-K"] }),
+        // Fix-round F4 re-expression: the close carries an HONEST snapshot
+        // (billed 1000 = the line) so the exception surface can be asserted
+        // empty instead of silently carried.
+        ...settlementClosed("O1", { settlement_attempt_ids: ["sa-K"], billed_paisa: 1000 }),
         ...at(300),
       }),
     ]);
@@ -87,7 +90,9 @@ describe("settlement is an act, not a derivation (01-F33)", () => {
         ...at(400),
       }),
     );
-    expect(onlyOrder(store).settled).toBe(1);
+    const row = onlyOrder(store);
+    expect(row.settled).toBe(1);
+    expect(JSON.parse(row.exceptions_json)).toEqual([]); // F4: asserted explicitly — a clean post-close refund carries NO exception
     store.close();
   });
 
@@ -134,6 +139,75 @@ describe("settlement is an act, not a derivation (01-F33)", () => {
     expect(projectionBytes(two)).toBe(projectionBytes(one));
     one.close();
     two.close();
+  });
+});
+
+describe("settlement_closed snapshot semantics (fix-round F4; 01-F33/00 §6)", () => {
+  it("01-F33 (fix-round F4): a snapshot-less close — only order_id, the schema minimum — asserts NO ceiling: 'no attestation' is not 'attested zero', so no uncovered_addition", () => {
+    const id = identity();
+    const peer = peerIdentity(id);
+    const store = mergeStore(id);
+    ingestAll(store, [
+      peerEnvelope(peer, 0, { ...created("O1"), ...at(0) }),
+      peerEnvelope(peer, 1, {
+        ...lineAdded("O1", "L1", { qty: 1, unit_price_paisa: 600 }),
+        ...at(100),
+      }),
+      // The bare close: the registry requires only order_id — every snapshot
+      // field is an additive loose extra.
+      peerEnvelope(peer, 2, {
+        type: "order.settlement_closed",
+        payload: { order_id: "O1" },
+        ...at(200),
+      }),
+    ]);
+    const row = onlyOrder(store);
+    expect(row.settled).toBe(1); // the act settles (01-F33)
+    expect(JSON.parse(row.exceptions_json)).toEqual([]); // skipped, not zero — no exception of any kind
+    store.close();
+  });
+
+  it("01-F33/00 §6 (fix-round F4): a non-integer billed_paisa snapshot is ignored-with-anomaly — close_snapshot_invalid, no ceiling from it — and the session projection byte-equals the reopen projection", () => {
+    const id = identity();
+    const peer = peerIdentity(id);
+    const path = tempDbPath();
+    let store = mergeStore(id, path);
+    ingestAll(store, [
+      peerEnvelope(peer, 0, { ...created("O1"), ...at(0) }),
+      peerEnvelope(peer, 1, {
+        ...lineAdded("O1", "L1", { qty: 1, unit_price_paisa: 600 }),
+        ...at(100),
+      }),
+      // A float is not paisa (00 §6). (Infinity — the reviewed session-vs-reopen
+      // divergence vector — is unconstructible over JSON ingest; the float pins
+      // the same guard.)
+      peerEnvelope(peer, 2, { ...settlementClosed("O1", { billed_paisa: 500.5 }), ...at(200) }),
+    ]);
+    const sessionRow = onlyOrder(store);
+    expect(sessionRow.settled).toBe(1); // the ACT stands — only its snapshot is bad
+    // Ignored-with-anomaly: the invalid snapshot contributes NO ceiling (so no
+    // uncovered_addition from a 600-paisa line vs a garbage 500.5) and raises
+    // the oracle-pinned code instead.
+    expect(JSON.parse(sessionRow.exceptions_json)).toEqual(["close_snapshot_invalid"]);
+    const sessionBytes = projectionBytes(store);
+    store.close();
+    store = mergeStore(id, path); // reopen replays the surviving ledger (01-F6)
+    expect(projectionBytes(store)).toBe(sessionBytes); // session ≡ reopen, byte-for-byte
+    store.close();
+  });
+
+  it("01-F33 (fix-round F4): a negative billed_paisa snapshot is ignored-with-anomaly and raises NO spurious uncovered_addition — not even on a lineless order", () => {
+    const id = identity();
+    const peer = peerIdentity(id);
+    const store = mergeStore(id);
+    ingestAll(store, [
+      peerEnvelope(peer, 0, { ...created("O1"), ...at(0) }),
+      peerEnvelope(peer, 1, { ...settlementClosed("O1", { billed_paisa: -100 }), ...at(100) }),
+    ]);
+    const row = onlyOrder(store);
+    expect(row.settled).toBe(1);
+    expect(JSON.parse(row.exceptions_json)).toEqual(["close_snapshot_invalid"]);
+    store.close();
   });
 });
 

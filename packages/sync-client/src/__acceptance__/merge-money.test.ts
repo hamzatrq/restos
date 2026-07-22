@@ -174,6 +174,55 @@ describe("attempt-id idempotence across the delivery seams (01-F31/01-F8/01-F1)"
     ingestFirst.close();
   });
 
+  it("01-F31/01-F29 (fix-round F8): version skew cannot manufacture a dispute — two refund members identical except the superseded `payment_id` loose extra AGREE; the tolerated field is outside the immutable intent", () => {
+    const id = identity();
+    const peerA = peerIdentity(id);
+    const peerB = peerIdentity(id);
+    const createEnv = peerEnvelope(peerA, 0, { ...created("O1"), ...at(0) });
+    const payK = peerEnvelope(peerA, 1, {
+      ...payment("O1", 100000, { attempt: "sa-K" }),
+      ...at(100),
+    });
+    // An old-build device still stamps the superseded envelope-id parent ref
+    // (C2: `payment_id` tolerated as a loose extra, never required)…
+    const oldBuild = peerEnvelope(peerA, 2, {
+      ...refund("O1", 30000, { attempt: "sa-R", parent: "sa-K" }),
+      ...at(200),
+    });
+    (oldBuild.payload as Record<string, unknown>).payment_id = payK.id;
+    // …while an upgraded device's retry of the SAME intent does not.
+    const newBuild = peerEnvelope(peerB, 0, {
+      ...refund("O1", 30000, { attempt: "sa-R", parent: "sa-K" }),
+      ...at(300),
+    });
+    const events = [createEnv, payK, oldBuild, newBuild];
+    const one = mergeStore(id);
+    ingestAll(one, events);
+    const two = mergeStore(id);
+    ingestAll(two, [...events].reverse());
+    const row = onlyOrder(one);
+    expect(row.refund_total).toBe(30000); // once — agreement, not divergence
+    expect(exceptions(row)).not.toContain("attempt_divergence");
+    const attempts = JSON.parse(row.refund_attempts_json) as Record<string, unknown[]>;
+    // ONE member: the immutable intent, superseded-tolerated fields excluded
+    // from comparison AND rendering (the F8 ruling; exclusion set pinned
+    // per-type — payment.refunded: {payment_id}).
+    expect(attempts["sa-R"]).toEqual([
+      JSON.parse(
+        canonicalJson({
+          amount_paisa: 30000,
+          method: "cash_out",
+          order_id: "O1",
+          payment_attempt_id: "sa-K",
+        }),
+      ),
+    ]);
+    expect(row.cap_violated).toBe(0);
+    expect(projectionBytes(two)).toBe(projectionBytes(one));
+    one.close();
+    two.close();
+  });
+
   it("01-F31/01-F8: the ingestBatch seam collapses the same intent identically to per-event ingest", () => {
     const id = identity();
     const peerA = peerIdentity(id);
@@ -221,7 +270,10 @@ describe("matrix-A CE2 — khata repayment (01-F30/01-F32, DEC-MONEY-007)", () =
         ...at(200),
       }),
       peerEnvelope(peer, 3, {
-        ...settlementClosed("O1", { settlement_attempt_ids: ["sa-K1"] }),
+        // Fix-round F4 re-expression: the close carries an HONEST snapshot of
+        // the khata bill (billed 185000 = the one line) so the exception surface
+        // can be asserted empty instead of silently carried.
+        ...settlementClosed("O1", { settlement_attempt_ids: ["sa-K1"], billed_paisa: 185000 }),
         ...at(300),
       }),
       peerEnvelope(peer, 4, {
@@ -242,6 +294,7 @@ describe("matrix-A CE2 — khata repayment (01-F30/01-F32, DEC-MONEY-007)", () =
     expect(row.repaid_total).toBe(185000); // the receivable decrements, observably
     expect(row.refund_total).toBe(0);
     expect(row.settled).toBe(1); // the close is monotone — day-4 arrivals change nothing
+    expect(exceptions(row)).toEqual([]); // F4: asserted explicitly — the clean khata flow carries NO exception
     expect(projectionBytes(two)).toBe(projectionBytes(one));
     one.close();
     two.close();
@@ -374,6 +427,40 @@ describe("the 01-F29 refund cap — monotone `violated`, gating, never blocking"
     store.append(appendInput(id, { ...lineAdded("O1", "L9"), ...at(400) }));
     expect(onlyOrder(store).settled).toBe(1);
     store.close();
+  });
+
+  it("01-F29/01-F31 (fix-round F3): dispute-after-violation — the cap flag is a LATCH: a later divergent member of the parent key moves the totals (Addendum-A) but can never clear violated, in any delivery order", () => {
+    const id = identity();
+    const peer = peerIdentity(id);
+    const other = peerIdentity(id);
+    const createEnv = peerEnvelope(peer, 0, { ...created("O1"), ...at(0) });
+    const payK = peerEnvelope(peer, 1, { ...payment("O1", 1000, { attempt: "sa-K" }), ...at(100) });
+    const overRefund = peerEnvelope(peer, 2, {
+      ...refund("O1", 1200, { attempt: "sa-r1", parent: "sa-K" }),
+      ...at(200),
+    });
+    const divergent = peerEnvelope(other, 0, {
+      ...payment("O1", 1500, { attempt: "sa-K" }),
+      ...at(300),
+    });
+    const one = mergeStore(id);
+    ingestAll(one, [createEnv, payK, overRefund]);
+    expect(onlyOrder(one).cap_violated).toBe(1); // the violation is witnessed
+    one.ingest(divergent); // the parent key is now disputed…
+    const row = onlyOrder(one);
+    expect(row.pay_total).toBe(0); // …totals move: a disputed key contributes 0
+    expect(row.refund_total).toBe(1200);
+    expect(exceptions(row)).toContain("attempt_divergence");
+    expect(row.cap_violated).toBe(1); // …but the flag LATCHES — it never regresses
+    // The latch must be an order-free monotone function of the delivered SET
+    // (∃ an agreed sub-view violating the cap), never a delivery-order memory —
+    // 01-F34 convergence still binds: the dispute arriving FIRST lands on 1 too.
+    const two = mergeStore(id);
+    ingestAll(two, [createEnv, divergent, payK, overRefund]);
+    expect(onlyOrder(two).cap_violated).toBe(1);
+    expect(projectionBytes(two)).toBe(projectionBytes(one));
+    one.close();
+    two.close();
   });
 
   it("01-F29: the cap resolves parents by settlement_attempt_id, not envelope id — an intent duplicated under two envelope ids cannot fragment the cap (Addendum-A)", () => {
