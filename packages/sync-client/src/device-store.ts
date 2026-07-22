@@ -32,6 +32,7 @@ import {
 import Database from "better-sqlite3";
 import {
   createMergeEngine,
+  type DropPlan,
   type FoldState,
   type FoldStats,
   type KitchenQueueRow,
@@ -437,11 +438,22 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     }
   };
 
+  // F6 (fix-round) recovery flags: `foldTouched` — the current top-level call
+  // reached the fold (reset by `guarded`); `eventFoldTouched` — the current
+  // ingestBatch element reached it (reset per element); `batchNeedsRefold` —
+  // some element's savepoint rolled back AFTER its fold, so the lattice may
+  // lead the committed batch.
+  let foldTouched = false;
+  let eventFoldTouched = false;
+  let batchNeedsRefold = false;
+
   // Fold maintenance for a newly-stored event (T-01-15): every write is targeted
   // — the touched orders' rows and the parked-row delta only. Never a replay.
   const applyFold = (parsed: ParsedEvent): void => {
     // Audit events are fold-inert (01-F5): nothing applied, nothing parked.
     if (isAuditEvent(parsed.envelope.type)) return;
+    foldTouched = true; // F6: the engine may mutate past this point
+    eventFoldTouched = true;
     const result = engine.apply(parsed);
     if (result.parked) {
       insertParkedRow.run(
@@ -617,11 +629,15 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   const ingestBatchTx = db.transaction((events: readonly unknown[]): IngestBatchResult => {
     const counts: IngestBatchResult = { appended: 0, deduped: 0, rejected: 0 };
     for (const event of events) {
+      eventFoldTouched = false;
       try {
         if (ingestTx(event).stored) counts.appended += 1;
         else counts.deduped += 1; // already held (own or peer) — idempotent no-op (01-F8)
       } catch {
         counts.rejected += 1; // skipped and counted — quarantine machinery is a later task
+        // F6: this element's savepoint rolled back AFTER its fold — the lattice
+        // may lead the batch; resync once the batch commits.
+        if (eventFoldTouched) batchNeedsRefold = true;
       }
     }
     return counts;
@@ -637,23 +653,55 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     recomputeFolds();
   });
 
-  // Retention shrink (T-01-15; matrix conventions): an outer-layer key-set
-  // operation — atomic per-entity, open-bill guarded, never an inverse merge.
-  // Validation runs first so a guard violation changes nothing; the drop removes
-  // the keys from the session lattice, the rows, and the parked set. The LEDGER
-  // rows are untouched, and so is durability across reopen: event-row pruning
-  // (which is what makes a drop durable) is the compaction task's global_seq
-  // prune watermark (01 §5; matrix §2 entry 3) — until it lands, a reopen
-  // rebuilds from the full retained ledger.
-  const retentionDropTx = db.transaction((keys: readonly string[]) => {
-    engine.validateDrop(keys);
-    const result = engine.drop(keys);
-    for (const orderId of result.removedOrders) {
+  // F6 (fix-round): the engine's in-JS lattice cannot roll back with the SQL
+  // transaction, and the projection-row writes must FOLLOW the fold that
+  // produces them — so "SQL first, engine after" is structurally impossible on
+  // the append/ingest seams (retentionDrop, whose projections are computed in
+  // the pure plan, DOES reorder — see below). Chosen shape here:
+  // REFOLD-ON-TX-FAILURE. If a transaction dies AFTER the engine folded
+  // (`foldTouched`), the lattice may lead the rolled-back ledger — rebuild it
+  // from the surviving set before rethrowing, so no phantom fold state outlives
+  // the failure (01-F6). Every tested validation failure throws BEFORE any fold
+  // and skips the rebuild, keeping the common paths byte-identical.
+  const tryRefold = (): void => {
+    try {
+      refoldTx();
+    } catch {
+      // The rebuild itself failed (persistent I/O fault): the reopen self-heal
+      // (01-F6) is the backstop; the ORIGINAL transaction error surfaces.
+    }
+  };
+  const guarded = <T>(fn: () => T): T => {
+    foldTouched = false;
+    try {
+      return fn();
+    } catch (err) {
+      if (foldTouched) tryRefold();
+      throw err;
+    }
+  };
+
+  // Retention shrink (T-01-15; matrix conventions; fix-round F1/F2/F6/F8): an
+  // outer-layer key-set operation — atomic per-entity, open-bill guarded, never
+  // an inverse merge. engine.planDrop is PURE: a malformed key (F8) or an open
+  // entity rejects the whole call with NOTHING changed anywhere, and the plan —
+  // key-order independent by construction (F1, ruling g) — carries the
+  // post-drop projections, so this transaction runs ALL the SQL first and the
+  // lattice + session dropped-key memory (F2) mutate only after durable commit:
+  // the F6 "SQL succeeds before engine mutation" ordering, exact at this seam.
+  // The LEDGER rows are untouched, and so is durability across reopen:
+  // event-row pruning (which is what makes a drop durable) is the compaction
+  // task's global_seq prune watermark (01 §5; matrix §2 entry 3) — until it
+  // lands, a reopen legitimately rebuilds from the full retained ledger
+  // (fix-round ruling b: dropped-key memory is in-session only).
+  const deleteParkedByWaiting = db.prepare<[string]>("DELETE FROM parked WHERE waiting_for = ?");
+  const retentionDropTx = db.transaction((plan: DropPlan) => {
+    for (const orderId of plan.removedOrders) {
       deleteOrderRow.run(orderId);
       deleteQueueRow.run(orderId);
+      deleteParkedByWaiting.run(orderId);
     }
-    for (const eventId of result.removedParkedIds) deleteParkedRow.run(eventId);
-    for (const orderId of result.dirtyOrders) upsertOrder(orderId, engine.projectOrder(orderId));
+    for (const dirty of plan.dirty) upsertOrder(dirty.order_id, dirty.projection);
   });
 
   // Self-heal on open (01-F6): state tables ≡ refold() of the surviving ledger,
@@ -674,15 +722,20 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
             "the store identity (01-F2 — one device, one store; nothing persisted)",
         );
       }
-      return appendTx(input);
+      return guarded(() => appendTx(input));
     },
 
     ingest(envelope, opts) {
-      return ingestTx(envelope, opts);
+      return guarded(() => ingestTx(envelope, opts));
     },
 
     ingestBatch(events) {
-      return ingestBatchTx(events);
+      batchNeedsRefold = false;
+      const counts = guarded(() => ingestBatchTx(events));
+      // F6: a mid-batch savepoint rollback after a fold — resync the lattice
+      // with the committed batch (best-effort; reopen self-heal is the backstop).
+      if (batchNeedsRefold) tryRefold();
+      return counts;
     },
 
     readAllEvents() {
@@ -721,7 +774,9 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     },
 
     retentionDrop(keys) {
-      retentionDropTx(keys);
+      const plan = engine.planDrop(keys); // pure — a reject throws with NOTHING changed (F1/F8)
+      retentionDropTx(plan); // all SQL; a failure rolls back with the engine untouched (F6)
+      engine.commitDrop(plan); // infallible in-memory work, only after durable success
     },
 
     nextBatch(max) {

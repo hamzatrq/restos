@@ -159,12 +159,16 @@ const stateIdx = (s: string): number => (ORDER_LINE_STATES as readonly string[])
  * (Set spreads / Map keys), so the equal case cannot occur. */
 const utf16 = (a: string, b: string): number => (a < b ? -1 : 1);
 
+/** Adoption clause (matrix row 64): |from_states| > 1 ∧ to ∈ from_states is a
+ * choice among already-emitted terminals, not a transition. */
+const isAdoption = (ed: Edge): boolean =>
+  ed.from_states.length > 1 && ed.from_states.includes(ed.to);
+
 /** Legality is a pure function of ONE edge's own payload — never of comparator
  * position — which is why illegal_transition can never be recomputed away
- * (matrix row 65). Adoption clause: |from_states| > 1 ∧ to ∈ from_states is a
- * choice among already-emitted terminals, not a transition (matrix row 64). */
+ * (matrix row 65). */
 const edgeLegal = (ed: Edge): boolean => {
-  if (ed.from_states.length > 1 && ed.from_states.includes(ed.to)) return true;
+  if (isAdoption(ed)) return true;
   return ed.from_states.every(
     (f) => applyLineState(f as OrderLineState, ed.to as OrderLineState).applied,
   );
@@ -184,9 +188,21 @@ type LineProjection = {
 const projectLine = (edgesById: ReadonlyMap<string, Edge> | undefined): LineProjection => {
   const edges = edgesById ? [...edgesById.values()] : [];
   const legal = edges.filter(edgeLegal);
-  // heads() by set difference over preds — retirement is the ONLY thing preds do.
+  const legalById = new Map(legal.map((ed) => [ed.event_id, ed]));
+  // heads() by set difference over preds — retirement is the ONLY thing preds do —
+  // EXCEPT (fix-round F7; 01-F35 conservative ruling): only an ADOPTION edge may
+  // retire a TERMINAL head. A legal non-adoption edge naming a terminal pred
+  // lands (participates in the ≼-max), necessarily fires inconsistent_predecessor
+  // below (a legal single-from cannot contain the terminal's `to`), and the
+  // terminal survives — one inconsistent emitter never un-serves a line fleet-wide.
   const retired = new Set<string>();
-  for (const ed of legal) for (const p of ed.preds) retired.add(p);
+  for (const ed of legal) {
+    for (const p of ed.preds) {
+      const pe = legalById.get(p);
+      if (pe !== undefined && TERMINAL.has(pe.to) && !isAdoption(ed)) continue;
+      retired.add(p);
+    }
+  }
   const heads = legal.filter((ed) => !retired.has(ed.event_id));
   // ≼-max over ALL legal non-terminal edges (a legal edge can retire a higher
   // head; max-over-heads would break monotonicity — Addendum-C).
@@ -246,14 +262,29 @@ export type MergeEngine = {
   snapshot(): FoldState;
   parkedRows(): ParkedRow[];
   stats(): FoldStats;
-  /** Throws unless every key is well-formed and droppable (open-bill guard). */
-  validateDrop(keys: readonly string[]): void;
-  /** Atomic per-entity shrink — never an inverse merge (matrix conventions). */
-  drop(keys: readonly string[]): {
-    removedOrders: readonly string[];
-    dirtyOrders: readonly string[];
-    removedParkedIds: readonly string[];
-  };
+  /** Validates every key (well-formed per fix-round F8, open-bill guard per
+   * 01-F42/01-F17) and computes the whole drop as a PURE function — throws with
+   * zero mutation anywhere (fix-round F1: a reject changes NOTHING, the
+   * in-memory lattice included). */
+  planDrop(keys: readonly string[]): DropPlan;
+  /** Applies a planned drop: lattice shrink + session dropped-key memory
+   * (fix-round F2). Pure in-memory Map/Set work — the store calls this only
+   * AFTER the SQL transaction committed (fix-round F6 ordering). */
+  commitDrop(plan: DropPlan): void;
+};
+
+/** A validated, fully-computed retention drop (fix-round F1/F6): produced purely
+ * by planDrop, applied to SQL first by the store, then to the lattice by
+ * commitDrop. Computed over key SETS, so outcome class and final projection
+ * bytes are key-order independent by construction (fix-round ruling g). */
+export type DropPlan = {
+  /** Order keys dropped wholesale. A line key under one of these is SUBSUMED —
+   * the wholesale drop already removes the line (F1 atomic-success). */
+  removedOrders: readonly string[];
+  /** Dropped line ids per SURVIVING order. */
+  lineDrops: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Post-drop projections for the surviving orders that lost lines. */
+  dirty: ReadonlyArray<{ order_id: string; projection: ProjectedOrder | null }>;
 };
 
 /** The bare order-fact types that park while their order key is absent (01-F10
@@ -265,13 +296,34 @@ type DropKey =
   | { kind: "line"; order_id: string; line_id: string };
 
 /** Key literals are internal (`order:<id>` / `line:<order>:<line>`, matrix §3
- * compound-key default). A malformed key parses to a nonexistent order and the
- * open-bill guard rejects it loudly — no separate well-formedness branch. */
+ * compound-key default). Fix-round F8: a malformed key — `line:O1` without a
+ * <line_id> part, or an unknown prefix — is rejected LOUDLY with nothing
+ * changed, never silently mis-parsed into a different target. */
 const parseDropKey = (key: string): DropKey => {
   if (key.startsWith("order:")) return { kind: "order", order_id: key.slice("order:".length) };
-  const rest = key.slice("line:".length);
-  const cut = rest.indexOf(":");
-  return { kind: "line", order_id: rest.slice(0, cut), line_id: rest.slice(cut + 1) };
+  if (key.startsWith("line:")) {
+    const rest = key.slice("line:".length);
+    const cut = rest.indexOf(":");
+    if (cut === -1) {
+      throw new Error(
+        `retentionDrop key ${JSON.stringify(key)} is malformed — a line key is ` +
+          "line:<order_id>:<line_id> (fix-round F8; nothing changed)",
+      );
+    }
+    return { kind: "line", order_id: rest.slice(0, cut), line_id: rest.slice(cut + 1) };
+  }
+  throw new Error(
+    `retentionDrop key ${JSON.stringify(key)} has an unknown prefix — keys are ` +
+      "order:<order_id> or line:<order_id>:<line_id> (fix-round F8; nothing changed)",
+  );
+};
+
+/** Compile-time exhaustiveness for the fold switch (fix-round F5): a registry
+ * type without an oracle-pinned merge rule must not compile; at runtime
+ * (unreachable — the domain parseEvent admits only registry types) it fails
+ * loud, never a silent no-op that still counts fold work. */
+const assertNever = (type: never): never => {
+  throw new Error(`foldIn: no merge rule for event type ${String(type)} (fix-round F5)`);
 };
 
 export const createMergeEngine = (): MergeEngine => {
@@ -280,6 +332,15 @@ export const createMergeEngine = (): MergeEngine => {
   let parkedByKey = new Map<string, Map<string, ParsedEvent>>();
   let parkedRowsById = new Map<string, ParkedRow>();
   const counters: FoldStats = { full_rebuilds: 0, scoped_rebuilds: 0, events_folded: 0 };
+  /** Session dropped-key memory (fix-round F2; ruling b — IN-SESSION only, a
+   * reopen's fresh engine legitimately rebuilds until the prune-watermark task):
+   * a straggler for a dropped key is ledger-retained by the caller, never
+   * folded, never parked, never projected. Deliberately NOT cleared by
+   * rebuild() — refold() replays the surviving ledger within the same session,
+   * and the retention scope is part of what the projection is a function of. */
+  const droppedOrders = new Set<string>();
+  const droppedLines = new Set<string>();
+  const lineKey = (orderId: string, lineId: string): string => `${orderId}\u0000${lineId}`;
 
   const entity = (orderId: string): Entity => {
     const existing = entities.get(orderId);
@@ -354,6 +415,13 @@ export const createMergeEngine = (): MergeEngine => {
       }
       case "order.line_added": {
         const p = event.payload as LineAddedP;
+        // Fix-round F2: a line_added for a DROPPED line key must never
+        // re-materialize the cell — the value MVR is what makes a cell render
+        // (matrix row 61), so filtering here retires the line for the session.
+        // (Edges for a dropped line stay held-but-invisible like any other
+        // valueless line; the counter is deliberately unpinned for line-key
+        // stragglers — a multi-line event can be partially live.)
+        if (droppedLines.has(lineKey(p.order_id, p.line_id))) return;
         const e = entity(p.order_id);
         const value: LineValue = {
           item_id: p.item_id,
@@ -386,8 +454,21 @@ export const createMergeEngine = (): MergeEngine => {
         const p = event.payload as PaymentP;
         const e = entity(p.order_id);
         // The member is the WHOLE payload minus its attempt key (whole-payload
-        // immutability, Addendum-A): ANY divergence disputes the key.
-        const { settlement_attempt_id: _key, ...member } = event.payload as Record<string, unknown>;
+        // immutability, Addendum-A): ANY divergence disputes the key — minus
+        // the per-type SUPERSEDED-TOLERATED set (fix-round F8, ruling f): for
+        // payment.refunded that set is {payment_id}, the C2-superseded
+        // envelope-id parent ref, excluded from the immutable-intent comparison
+        // AND the rendered member so client-version skew can never manufacture
+        // a dispute.
+        const { settlement_attempt_id: _key, ...fullMember } = event.payload as Record<
+          string,
+          unknown
+        >;
+        let member = fullMember;
+        if (type === "payment.refunded") {
+          const { payment_id: _superseded, ...rest } = fullMember;
+          member = rest;
+        }
         const cells = type === "payment.recorded" ? e.pay : e.refund;
         sub(cells, p.settlement_attempt_id, () => new Map<string, Record<string, unknown>>()).set(
           canonicalJson(member),
@@ -404,11 +485,24 @@ export const createMergeEngine = (): MergeEngine => {
         return;
       }
     }
+    // Exhaustiveness (fix-round F5): registry growth must FAIL COMPILE here —
+    // a new KnownEventType needs an oracle-pinned merge rule before the engine
+    // may consume it; a silent fall-through would still count events_folded
+    // (the honesty overcount F5 names).
+    assertNever(type);
   };
 
   const apply = (event: ParsedEvent): ApplyResult => {
     const payload = event.payload as OrderRefP;
+    // Key derivation is deliberately hardcoded to the ORDER key (fix-round F5
+    // ruling): every registry type carries `order_id`; generalising to a key
+    // sidecar is the scheduled follow-up task, not drive-by work here.
     const orderId = payload.order_id;
+    // Fix-round F2 session memory: a straggler for a DROPPED order key is
+    // ledger-retained by the caller but does ZERO fold work here — never
+    // folded, never parked, never projected, and never counted (the honesty
+    // counter must not claim work; oracle-pinned counter treatment).
+    if (droppedOrders.has(orderId)) return { dirty: [], parked: null, drained: [] };
     const dirty = new Set<string>();
     // Key-presence parking (01-F10): bare order facts wait for their order key.
     if (PARKING_TYPES.has(event.type) && (entities.get(orderId)?.createMembers.size ?? 0) === 0) {
@@ -488,7 +582,7 @@ export const createMergeEngine = (): MergeEngine => {
     let refundTotal = 0;
     const payAttempts: Record<string, Record<string, unknown>[]> = {};
     const refundAttempts: Record<string, Record<string, unknown>[]> = {};
-    const agreedRefundsByParent = new Map<string, number>();
+    const maxRefundClaimByParent = new Map<string, number>();
     for (const [attempt, cell] of e.pay) {
       const members = [...cell.keys()]
         .sort(utf16)
@@ -508,23 +602,42 @@ export const createMergeEngine = (): MergeEngine => {
       if (cell.size === 1) {
         const m = members[0] as Record<string, unknown>;
         refundTotal += m.amount_paisa as number;
-        const parent = m.payment_attempt_id as string;
-        agreedRefundsByParent.set(
-          parent,
-          (agreedRefundsByParent.get(parent) ?? 0) + (m.amount_paisa as number),
-        );
       } else exceptions.add("attempt_divergence");
-    }
-    // 01-F29 cap: a SET predicate over agreed refunds grouped by the parent's
-    // attempt id (Addendum-A — envelope-id keying fragments the cap). A missing
-    // or disputed parent rests at unknown, never violated.
-    let capViolated = 0;
-    for (const [parent, refunded] of agreedRefundsByParent) {
-      const parentCell = e.pay.get(parent);
-      if (parentCell && parentCell.size === 1) {
-        const pm = [...parentCell.values()][0] as Record<string, unknown>;
-        if (refunded > (pm.amount_paisa as number)) capViolated = 1;
+      // Cap contributions (fix-round F3): EVERY member is a witnessable
+      // sub-view choice. A sub-view keeps at most one member per attempt key,
+      // so group this key's members by the parent they name and carry the
+      // LARGEST claim per parent.
+      const claimByParent = new Map<string, number[]>();
+      for (const m of members) {
+        sub(claimByParent, m.payment_attempt_id as string, () => []).push(m.amount_paisa as number);
       }
+      for (const [parent, amounts] of claimByParent) {
+        maxRefundClaimByParent.set(
+          parent,
+          (maxRefundClaimByParent.get(parent) ?? 0) + Math.max(...amounts),
+        );
+      }
+    }
+    // 01-F29 cap (fix-round F3, ruling a): an ORDER-FREE monotone function of
+    // the delivered SET — violated iff SOME agreed sub-view busts the cap,
+    // resolving parents by settlement_attempt_id (Addendum-A — envelope-id
+    // keying fragments the cap). A sub-view keeps one member per attempt key,
+    // so the easiest witness pairs each parent's SMALLEST payment member
+    // against the largest refund claims naming it. Never a stateful latch —
+    // delivery order cannot be smuggled in (01-F34): a later divergent member
+    // moves the TOTALS above (Addendum-A) but only ever WIDENS the sub-view
+    // choice, so the flag never regresses. A parent with no delivered payment
+    // member rests at unknown, never violated.
+    let capViolated = 0;
+    for (const [attempt, cell] of e.pay) {
+      const claimed = maxRefundClaimByParent.get(attempt);
+      if (claimed === undefined) continue;
+      let floor = Number.POSITIVE_INFINITY;
+      for (const m of cell.values()) {
+        const amount = m.amount_paisa as number;
+        if (amount < floor) floor = amount;
+      }
+      if (claimed > floor) capViolated = 1;
     }
     // Lines: value MVR + edge-set workflow projection.
     const cells: Record<
@@ -558,19 +671,28 @@ export const createMergeEngine = (): MergeEngine => {
       billedEffective += v.qty * v.unit_price_paisa * Number(billable);
     }
     // 01-F33: settlement is an ACT (monotone OR over the close G-Set); a late
-    // line-add never reopens — it raises uncovered_addition. Implementer-proposed
-    // trigger (flagged in the T-01-15 report): billed_effective exceeding the
-    // largest carried billed snapshot among the delivered closes (a snapshot-less
-    // close counts 0 — any close raises the ceiling to ≥ 0).
+    // line-add never reopens — it raises uncovered_addition against the closes'
+    // attested ceiling. Fix-round F4 (ruling d): the ceiling is the LARGEST
+    // VALID integer billed_paisa snapshot among delivered closes —
+    // `billed_paisa: 0` is ATTESTED ZERO (a real ceiling), an ABSENT snapshot
+    // asserts NO ceiling ("no attestation" is not "attested zero"), and with no
+    // valid snapshot at all the check is skipped. A non-integer or negative
+    // snapshot is ignored-with-anomaly: the ACT still settles, the bad snapshot
+    // contributes no ceiling and raises close_snapshot_invalid instead — a pure
+    // function of the payload, so session ≡ reopen byte-for-byte.
     const settled = e.closes.size > 0 ? 1 : 0;
     if (settled === 1) {
-      let ceiling = -1;
+      let ceiling: number | null = null;
       for (const close of e.closes.values()) {
+        if (!("billed_paisa" in close)) continue;
         const snap = (close as ClosedP).billed_paisa;
-        const value = typeof snap === "number" ? snap : 0;
-        if (value > ceiling) ceiling = value;
+        if (!Number.isInteger(snap) || (snap as number) < 0) {
+          exceptions.add("close_snapshot_invalid");
+          continue;
+        }
+        if (ceiling === null || (snap as number) > ceiling) ceiling = snap as number;
       }
-      if (billedEffective > ceiling) exceptions.add("uncovered_addition");
+      if (ceiling !== null && billedEffective > ceiling) exceptions.add("uncovered_addition");
     }
     const order: OpenOrderRow = {
       order_id: e.order_id,
@@ -604,8 +726,8 @@ export const createMergeEngine = (): MergeEngine => {
 
   const projectOrder = (orderId: string): ProjectedOrder | null => {
     counters.scoped_rebuilds += 1;
-    // Callers pass ids from dirty sets, so the entity always exists (foldIn and
-    // drop create/keep it) — a miss would be an engine invariant violation.
+    // Callers pass ids from apply()'s dirty sets, so the entity always exists
+    // (foldIn creates it) — a miss would be an engine invariant violation.
     return projectEntity(entities.get(orderId) as Entity);
   };
 
@@ -616,6 +738,9 @@ export const createMergeEngine = (): MergeEngine => {
     parkedRowsById = new Map();
     // The fold is a pure function of the SET — replay order is irrelevant; the
     // key-presence park/drain machinery absorbs child-before-parent (01-F10).
+    // Session dropped-key memory (F2) deliberately survives: an in-session
+    // refold() must not resurrect dropped keys; only a reopen's fresh engine
+    // legitimately rebuilds them (fix-round ruling b).
     for (const event of events) apply(event);
   };
 
@@ -632,12 +757,16 @@ export const createMergeEngine = (): MergeEngine => {
 
   const parkedRows = (): ParkedRow[] => [...parkedRowsById.values()];
 
-  const validateDrop = (keys: readonly string[]): void => {
-    for (const key of keys) {
+  const planDrop = (keys: readonly string[]): DropPlan => {
+    // Fix-round F1/F8: parse and guard EVERY key before planning anything — a
+    // malformed key or an open entity rejects the whole call, and nothing has
+    // moved: not the lattice, not the memory, not a row.
+    const parsedKeys = keys.map((key) => ({ key, parsed: parseDropKey(key) }));
+    for (const { key, parsed } of parsedKeys) {
       // Resolve through the get-or-create seam: an unknown key resolves to an
       // empty entity, whose zero closes fail the same guard (an empty entity
       // renders nothing, so the side effect is invisible).
-      const e = entity(parseDropKey(key).order_id);
+      const e = entity(parsed.order_id);
       // Open-bill guard: prune only ever removes CLOSED entities (01-F42/01-F17).
       if (e.closes.size === 0) {
         throw new Error(
@@ -646,27 +775,52 @@ export const createMergeEngine = (): MergeEngine => {
         );
       }
     }
-  };
-
-  const drop = (keys: readonly string[]) => {
-    const removedOrders: string[] = [];
-    const dirtyOrders: string[] = [];
-    const removedParkedIds: string[] = [];
-    for (const key of keys) {
-      const parsed = parseDropKey(key);
-      if (parsed.kind === "order") {
-        entities.delete(parsed.order_id);
-        removedOrders.push(parsed.order_id);
-        for (const [eventId] of takeParkedFor(parsed.order_id)) removedParkedIds.push(eventId);
-      } else {
-        // validateDrop resolved the entity (get-or-create), so it exists here.
-        const e = entities.get(parsed.order_id) as Entity;
-        e.lineValues.delete(parsed.line_id);
-        e.lineEdges.delete(parsed.line_id);
-        dirtyOrders.push(parsed.order_id);
+    const removedOrders = new Set<string>();
+    for (const { parsed } of parsedKeys) {
+      if (parsed.kind === "order") removedOrders.add(parsed.order_id);
+    }
+    const lineDrops = new Map<string, Set<string>>();
+    for (const { parsed } of parsedKeys) {
+      // A line key under an order dropped in the SAME call is SUBSUMED by the
+      // wholesale order drop (F1 atomic-success, ruling g) — outcome class and
+      // final bytes are key-order independent because the plan is computed
+      // over key SETS, never in key-array order.
+      if (parsed.kind === "line" && !removedOrders.has(parsed.order_id)) {
+        sub(lineDrops, parsed.order_id, () => new Set<string>()).add(parsed.line_id);
       }
     }
-    return { removedOrders, dirtyOrders, removedParkedIds };
+    const dirty: Array<{ order_id: string; projection: ProjectedOrder | null }> = [];
+    for (const [orderId, lines] of lineDrops) {
+      const e = entities.get(orderId) as Entity; // guarded above — the entity exists
+      // The post-drop view, projected WITHOUT mutating (shrink is the
+      // outer-layer key-set drop, never an inverse merge) — which is what lets
+      // the store commit all SQL before any lattice mutation (fix-round F6).
+      dirty.push({
+        order_id: orderId,
+        projection: projectEntity({
+          ...e,
+          lineValues: new Map([...e.lineValues].filter(([lineId]) => !lines.has(lineId))),
+          lineEdges: new Map([...e.lineEdges].filter(([lineId]) => !lines.has(lineId))),
+        }),
+      });
+    }
+    return { removedOrders: [...removedOrders], lineDrops, dirty };
+  };
+
+  const commitDrop = (plan: DropPlan): void => {
+    for (const orderId of plan.removedOrders) {
+      entities.delete(orderId);
+      takeParkedFor(orderId); // rows are already gone via the store's waiting_for delete
+      droppedOrders.add(orderId);
+    }
+    for (const [orderId, lines] of plan.lineDrops) {
+      const e = entities.get(orderId) as Entity; // survived the drop by plan construction
+      for (const lineId of lines) {
+        e.lineValues.delete(lineId);
+        e.lineEdges.delete(lineId);
+        droppedLines.add(lineKey(orderId, lineId));
+      }
+    }
   };
 
   return {
@@ -676,7 +830,7 @@ export const createMergeEngine = (): MergeEngine => {
     snapshot,
     parkedRows,
     stats: () => ({ ...counters }),
-    validateDrop,
-    drop,
+    planDrop,
+    commitDrop,
   };
 };
