@@ -29,6 +29,12 @@
 // arithmetic fixtures and the config-surface pin are RED until the DEC-MONEY-005 rule lands in
 // the shared biome config (packages/config/biome.json — the config `pnpm lint` resolves).
 //
+// M2 fix round (review finding M2): compound assignment (`total_paisa += tip_paisa`) and update
+// expressions (`total_paisa++`) escape the shipped rule, which covers only the five binary
+// operators — accumulation is the idiom the ban exists for (DEC-MONEY-005 gate note). At fix-
+// round authoring time the two M2 pins (five compound operators; ++/-- prefix and postfix) are
+// RED and the non-money compound control is GREEN.
+//
 // Notes for the implementing session:
 //   * There is NO float-drift sentinel for splitPaisa: for any safe-integer total and positive
 //     safe n, Math.floor(total / n) is provably exact (q < 2^53/n implies ulp(q) ≤ 2/n, so
@@ -271,6 +277,61 @@ describe("lint enforcement — raw arithmetic on money is banned (18 §4 / DEC-M
       "export const owed = (billPaisa: number, paidPaisa: number): number => billPaisa - paidPaisa;\n",
     );
     expect(exitCode, "18 §4 bans raw number arithmetic on money categorically").not.toBe(0);
+  });
+
+  it("18 §4 / DEC-MONEY-005 (M2): COMPOUND assignment on a money value fails the lint gate — accumulation is the idiom the ban exists for", () => {
+    const cases: Array<{ op: string; params: string; statement: string }> = [
+      { op: "+=", params: "tip_paisa: number", statement: "total_paisa += tip_paisa;" },
+      { op: "-=", params: "refund_paisa: number", statement: "total_paisa -= refund_paisa;" },
+      { op: "*=", params: "", statement: "total_paisa *= 2;" },
+      { op: "/=", params: "guests: number", statement: "total_paisa /= guests;" },
+      { op: "%=", params: "", statement: "total_paisa %= 100;" },
+    ];
+    for (const { op, params, statement } of cases) {
+      const { exitCode } = lintSource(
+        [
+          `export const mutate = (${params}): number => {`,
+          "  let total_paisa = 0;",
+          `  ${statement}`,
+          "  return total_paisa;",
+          "};",
+          "",
+        ].join("\n"),
+      );
+      expect.soft(exitCode, `\`${op}\` on a money identifier must not lint (M2)`).not.toBe(0);
+    }
+  });
+
+  it("18 §4 / DEC-MONEY-005 (M2): UPDATE expressions on a money value fail the lint gate (++/--, prefix and postfix)", () => {
+    const statements = ["total_paisa++;", "total_paisa--;", "++total_paisa;", "--total_paisa;"];
+    for (const statement of statements) {
+      const { exitCode } = lintSource(
+        [
+          "export const tick = (): number => {",
+          "  let total_paisa = 0;",
+          `  ${statement}`,
+          "  return total_paisa;",
+          "};",
+          "",
+        ].join("\n"),
+      );
+      expect.soft(exitCode, `\`${statement}\` must not lint (M2)`).not.toBe(0);
+    }
+  });
+
+  it("18 §4 / DEC-MONEY-005 (M2, GREEN, must stay green): compound assignment and updates on a NON-money identifier lint clean — the new arms stay scoped to money names", () => {
+    const { exitCode } = lintSource(
+      [
+        "export const bump = (step: number): number => {",
+        "  let count = 0;",
+        "  count += step;",
+        "  count++;",
+        "  return count;",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    expect(exitCode).toBe(0);
   });
 
   it("18 §4 / DEC-MONEY-005: the biome config `pnpm lint` resolves declares a money-arithmetic lint plugin", () => {
