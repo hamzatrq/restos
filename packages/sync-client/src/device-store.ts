@@ -91,12 +91,42 @@ export type IngestResult = { stored: boolean };
 /** Per-event outcome counts for the batch seam — failures skip, never throw (01-F37 seed). */
 export type IngestBatchResult = { appended: number; deduped: number; rejected: number };
 
+/** One catch-up-page item — the same two arguments as `ingest` (T-01-16, 26 §6.4). */
+export type PageItem = { envelope: unknown; global_seq?: number };
+
+/**
+ * One ORDERED per-item outcome from `ingestPage` (T-01-16). A failure — including a
+ * `DivergentDuplicateError` — is CARRIED in `error`, never thrown out of the page, so
+ * the caller computes the contiguous landed prefix and passes/stops per event exactly
+ * as the per-event loop did (26 §6.4 warning: batching must keep per-event granularity).
+ */
+export type PageResult = { ok: true; stored: boolean } | { ok: false; error: unknown };
+
+/**
+ * Ingest-path work counters (T-01-16; the T-01-14/T-01-15 foldStats precedent —
+ * "one transaction per catch-up page" is not black-box assertable otherwise).
+ * `commits` = ingest-path write-transactions committed (one `ingest`, one whole
+ * `ingestPage`, or one `ingestBatch` each add 1). `events_ingested` = newly-persisted
+ * peer event rows.
+ */
+export type IngestStats = { commits: number; events_ingested: number };
+
 export type DeviceStore = {
   /** The store's org/branch/device identity — the mesh session derives hello from it (T-01-05). */
   identity: StoreIdentity;
   append(input: AppendInput): EventEnvelopeT;
   ingest(envelope: unknown, opts?: { global_seq?: number }): IngestResult;
   ingestBatch(events: readonly unknown[]): IngestBatchResult;
+  /**
+   * Persist + project a WHOLE catch-up page in ONE transaction (one fsync) with
+   * PER-EVENT savepoint isolation, returning one result PER item IN ORDER (T-01-16,
+   * 26 §6.4). A per-item failure rolls back only that item's savepoint — the good
+   * prefix commits, siblings after it are still attempted, and a divergent duplicate
+   * is a carried `{ ok: false }`, never a throw that wedges the page (01-F1/F9/F17).
+   */
+  ingestPage(items: readonly PageItem[]): readonly PageResult[];
+  /** Ingest-path work counters (T-01-16) — the "one transaction per page" observable. */
+  ingestStats(): IngestStats;
   readAllEvents(): EventEnvelopeT[];
   assignGlobalSeq(event_id: string, global_seq: number): void;
   nextBatch(max: number): EventEnvelopeT[];
@@ -480,6 +510,12 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   let eventFoldTouched = false;
   let batchNeedsRefold = false;
 
+  // Ingest-path work counters (T-01-16; ingestStats). Incremented at the public seam
+  // AFTER a transaction commits, so a per-event savepoint rollback inside ingestPage
+  // /ingestBatch never inflates the page's single commit (the 26 §6.4 observable).
+  let ingestCommits = 0;
+  let eventsIngested = 0;
+
   // Fold maintenance for a newly-stored event (T-01-15): every write is targeted
   // — the touched orders' rows and the parked-row delta only. Never a replay.
   const applyFold = (parsed: ParsedEvent): void => {
@@ -676,6 +712,34 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     return counts;
   });
 
+  // Batched catch-up seam (T-01-16; 26 §6.4 bottleneck 1 + its load-bearing warning):
+  // the WHOLE page persists + projects in ONE transaction (one fsync — not one per
+  // event), but each item runs through `ingestTx` as a nested savepoint, so a per-item
+  // failure rolls back ONLY that savepoint and the good prefix stays committed. The
+  // ordered per-item results let the caller compute the contiguous landed prefix and
+  // PASS a DivergentDuplicateError rather than wedge the pull (01-F9/F17) — the exact
+  // per-event granularity the pre-batch loop had, preserved (the same shape as
+  // ingestBatchTx, but surfacing each item's error instead of collapsing to counts).
+  const ingestPageTx = db.transaction((items: readonly PageItem[]): PageResult[] => {
+    const results: PageResult[] = [];
+    for (const item of items) {
+      eventFoldTouched = false;
+      try {
+        const result = ingestTx(
+          item.envelope,
+          item.global_seq === undefined ? undefined : { global_seq: item.global_seq },
+        );
+        results.push({ ok: true, stored: result.stored });
+      } catch (error) {
+        results.push({ ok: false, error });
+        // F6: this item's savepoint rolled back AFTER its fold — the lattice may lead
+        // the committed page; resync once the page commits (mirrors ingestBatchTx).
+        if (eventFoldTouched) batchNeedsRefold = true;
+      }
+    }
+    return results;
+  });
+
   const assignGlobalSeqTx = db.transaction((eventId: string, globalSeq: number) => {
     // Rewritten 01-F34: adoption is sidecar bookkeeping ONLY — the delivery
     // cursor is never a business arbiter, so the fold does ZERO work here.
@@ -770,16 +834,37 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     },
 
     ingest(envelope, opts) {
-      return guarded(() => ingestTx(envelope, opts));
+      const result = guarded(() => ingestTx(envelope, opts));
+      ingestCommits += 1; // committed (a throw rethrows above, never reaching here)
+      if (result.stored) eventsIngested += 1;
+      return result;
     },
 
     ingestBatch(events) {
       batchNeedsRefold = false;
       const counts = guarded(() => ingestBatchTx(events));
+      ingestCommits += 1; // one transaction for the whole batch
+      eventsIngested += counts.appended;
       // F6: a mid-batch savepoint rollback after a fold — resync the lattice
       // with the committed batch (best-effort; reopen self-heal is the backstop).
       if (batchNeedsRefold) tryRefold();
       return counts;
+    },
+
+    ingestPage(items) {
+      if (items.length === 0) return []; // no work, no transaction, no commit
+      batchNeedsRefold = false;
+      const results = guarded(() => ingestPageTx(items));
+      ingestCommits += 1; // ONE transaction for the whole page (26 §6.4)
+      for (const result of results) if (result.ok && result.stored) eventsIngested += 1;
+      // F6: a mid-page savepoint rollback after a fold — resync the lattice with the
+      // committed page (best-effort; reopen self-heal is the backstop).
+      if (batchNeedsRefold) tryRefold();
+      return results;
+    },
+
+    ingestStats() {
+      return { commits: ingestCommits, events_ingested: eventsIngested };
     },
 
     readAllEvents() {

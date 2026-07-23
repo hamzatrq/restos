@@ -24,7 +24,7 @@ import type {
   CloudTransportHandlers,
   ProtocolMessage,
 } from "@restos/sync-protocol";
-import { type DeviceStore, DivergentDuplicateError } from "./device-store.js";
+import { type DeviceStore, DivergentDuplicateError, type PageItem } from "./device-store.js";
 
 /** Cloud outbox drain page per push (contract (b)); id-dedupe makes overlap free (01-F8). */
 export const CLOUD_PUSH_BATCH_MAX = 500;
@@ -174,16 +174,27 @@ export const createCloudSession = (options: {
    * than wedging the pull (01-F17). setLastGlobalSeq is a raw write — monotonicity here.
    */
   const applyEvents = (events: readonly WireEvent[]): void => {
+    if (events.length === 0) return;
+    // Persist the WHOLE page in ONE ingest-path transaction (T-01-16, 26 §6.4 — one
+    // fsync, not one per event) via store.ingestPage's per-event savepoint isolation.
+    // The ordered per-item results drive the SAME contiguous-prefix cursor law the
+    // per-event loop had: a divergent duplicate is surfaced + PASSED, any other
+    // failure stops the advance, so a re-fetch re-delivers it (01-F9/F17/F34).
+    const items: PageItem[] = events.map((e) => {
+      const { global_seq, ...envelope } = e;
+      return global_seq === undefined ? { envelope } : { envelope, global_seq };
+    });
+    const results = store.ingestPage(items);
     let advanceTo = -1;
     let blocked = false;
-    for (const e of events) {
-      const { global_seq, ...envelope } = e;
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+      if (result === undefined) continue; // results is 1:1 with items — defensive only
+      const global_seq = events[i]?.global_seq;
       let landed = true;
-      try {
-        store.ingest(envelope, global_seq === undefined ? undefined : { global_seq });
-      } catch (err) {
-        if (err instanceof DivergentDuplicateError) {
-          quarantined.push({ event_id: err.eventId, reason: "divergent_duplicate" });
+      if (!result.ok) {
+        if (result.error instanceof DivergentDuplicateError) {
+          quarantined.push({ event_id: result.error.eventId, reason: "divergent_duplicate" });
         } else {
           landed = false; // did not land — the cursor must not pass it
         }

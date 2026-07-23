@@ -16,7 +16,10 @@ export {
   DivergentDuplicateError,
   type IngestBatchResult,
   type IngestResult,
+  type IngestStats,
   openStore,
+  type PageItem,
+  type PageResult,
   type StoreIdentity,
   type SyncStatus,
 } from "./device-store.js";

@@ -168,7 +168,7 @@ GitHub Actions: `turbo run lint typecheck test build` on every PR (remote cache)
 
 Anything not listed (or not added via §15) is not allowed. Grouped; exact pins in lockfile.
 
-- **Core/shared:** `typescript`, `zod`, `uuidv7`, `date-fns` + `@date-fns/tz`, `superjson`, `tsx` (dev), `@biomejs/biome`, `turbo`, `@noble/hashes` (audit hash-chain — pure-JS/sync/cross-runtime SHA-256; DEC-AUDIT-001)
+- **Core/shared:** `typescript`, `zod`, `uuidv7`, `date-fns` + `@date-fns/tz`, `superjson`, `tsx` (dev), `@biomejs/biome`, `turbo`, `@noble/hashes` (audit hash-chain — pure-JS/sync/cross-runtime SHA-256; DEC-AUDIT-001), Node built-in `node:zlib` zstd (compressed catch-up wire framing — sync, no new npm dependency per §15 rule 1; T-01-16, 01 §5, 26 §6.4, DEC-SYNC-010 candidate)
 - **Backend:** `fastify`, `@fastify/websocket|cors|rate-limit`, `@trpc/server`, `drizzle-orm`, `drizzle-kit`, `postgres` (driver), `bullmq`, `ioredis`, `pino`, `pino-pretty` (dev), `jose`, `argon2`, `@anthropic-ai/sdk`, `@sentry/node`, OpenTelemetry SDK packages, `ws`
 - **Web:** `next`, `react`, `react-dom`, `tailwindcss`, shadcn/ui (vendored components + `radix-ui` primitives), `lucide-react`, `@tanstack/react-query`, `@trpc/client` + `@trpc/tanstack-react-query`, `@tanstack/react-table`, `recharts`, `react-hook-form`, `@hookform/resolvers`, `zustand`, `@sentry/nextjs`
 - **React Native:** `expo` + official `expo-*` modules (router, notifications, camera, secure-store, updates), `@op-engineering/op-sqlite`, `nativewind`, `@shopify/flash-list`, `react-native-reanimated`, `react-native-ble-plx`, `victory-native` (charts), `@sentry/react-native`

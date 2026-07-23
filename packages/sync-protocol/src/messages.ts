@@ -2,6 +2,7 @@
 // cloud. Unknown keys are stripped (reject-or-drop, 01-F40 — slices are
 // sender-enforced; a client can never smuggle one in). Contract fixtures:
 // src/__acceptance__/fixtures (20 §2.7 — changing them is a spec-review event).
+import { zstdCompressSync, zstdDecompressSync } from "node:zlib";
 import { DEVICE_CLASSES, EventEnvelope } from "@restos/domain";
 import { z } from "zod";
 
@@ -106,3 +107,17 @@ export const parseMessage = (value: unknown): ProtocolMessage => {
 export const encodeMessage = (message: ProtocolMessage): string => JSON.stringify(message);
 
 export const decodeMessage = (text: string): ProtocolMessage => parseMessage(JSON.parse(text));
+
+// Additive compressed framing under v:1 (T-01-16; 01 §5 "JSON + zstd batch
+// compression", 26 §6.4 — the catch-up transfer is part of the <60 s/4G budget,
+// not an optimisation; DEC-SYNC-010 candidate, PROTOCOL.md compressed-framing
+// clause). zstd of the EXACT plain-codec bytes, so the compressed path is
+// transparent to every consumer: decodeCompressed(encodeCompressed(m)) deep-equals
+// m for every valid message, and the plain JSON codec above is UNTOUCHED (the
+// T-01-02 golden fixtures must not drift). zstd is Node's built-in (node:zlib,
+// synchronous; 18 §14 records the choice — 18 §15 rule 1 bias: no new dependency).
+export const encodeCompressed = (message: ProtocolMessage): Uint8Array =>
+  zstdCompressSync(Buffer.from(encodeMessage(message), "utf8"));
+
+export const decodeCompressed = (bytes: Uint8Array): ProtocolMessage =>
+  decodeMessage(zstdDecompressSync(bytes).toString("utf8"));
