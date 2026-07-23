@@ -95,7 +95,13 @@ export type AuditorCheck =
   | "conservation"
   | "state_legality"
   | "readmodel_diff"
-  | "audit_chain";
+  | "audit_chain"
+  // t-01-11 fix round F1 (ruled, plans/wave-0/t-01-11-fix-round.md): the
+  // refold's per-event parse guard emits this class — a merged envelope the
+  // CURRENT registry cannot parse is corruption (or registry drift) the report
+  // must survive and NAME, never abort on. Additive widening of the closed set
+  // (law 3 of auditor-report-contract only ever became more permissive).
+  | "unparseable_merged_event";
 
 export const AUDITOR_CHECKS: readonly AuditorCheck[] = [
   "lamport_gap",
@@ -103,6 +109,7 @@ export const AUDITOR_CHECKS: readonly AuditorCheck[] = [
   "state_legality",
   "readmodel_diff",
   "audit_chain",
+  "unparseable_merged_event",
 ];
 
 export type AuditorFinding = {
