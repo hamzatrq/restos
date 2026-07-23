@@ -40,6 +40,7 @@
 //   • Sale-path events are NEVER invariant-checked: only `payment.refunded`
 //     can quarantine `invariant_violation`.
 import { newId } from "@restos/domain";
+import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Gateway } from "../index.js";
 import { createGateway } from "../index.js";
@@ -380,5 +381,111 @@ describe("law 3 — unprovable refunds are never blocked (01-F29 / 01-F17 / DEC-
     expect(await eventRows(verify, identity.org_id)).toHaveLength(3);
     expect(await quarantineRows(verify, identity.org_id)).toHaveLength(0);
     expect(must(ofKind(pusher.rec.all, "push_ack").at(-1), "ack").acked_watermark).toBe(2);
+  });
+});
+
+// ── F-1 fix round (plans/wave-0/t-01-08-fix-round.md @e012b73, ruling BINDING) ─
+//
+// RED-AWAITING-FIX: today the domain fn's RangeError (asPaisaInt rejecting the
+// unsafe prior-Σ) escapes step 3.5 and rejects the WHOLE push — the merge tx
+// rolls back (nothing merged, no quarantine row, no watermark advance) and the
+// origin's outbox re-pushes the same refund forever: the DEC-SYNC-005 wedge
+// class. Expected red reason: the final push aborts with
+// "RangeError: prior_refunds_total_paisa must be a non-negative safe integer".
+//
+// RULED: an unrepresentable prior-Σ is a PROVABLE violation, not an unprovable
+// case — if Σ(priors) alone exceeds 2^53−1 paisa it necessarily exceeds any
+// schema-valid payment_amount_paisa (the registry's z.number().int() caps at
+// 2^53−1), so remainder < 0 by pure magnitude. The gateway catches the domain
+// fn's RangeError at the step-3.5 call site and quarantines
+// `invariant_violation` (slot filled, noticed, never wedges). The domain
+// surface stays as pinned: refundRemainderExceeded still throws on unsafe args.
+
+/** Durable notice rows (kernel.quarantine_notices — the BINDING T-01-08 data
+ * contract), reduced to the identity this pin asserts. */
+const f1NoticeRows = async (database: Db, orgId: string): Promise<Array<[string, string]>> => {
+  const rows = await database.execute(
+    sql`select claimed_event_id, reason from kernel.quarantine_notices
+        where org_id = ${orgId} order by created_at asc, claimed_event_id asc`,
+  );
+  return [...rows].map((row) => [String(row.claimed_event_id), String(row.reason)]);
+};
+
+describe("F-1 — an unrepresentable prior-refund Σ is a PROVABLE violation; the push never aborts (fix-round ruling / 01-F29 / 01-F17 / DEC-SYNC-005)", () => {
+  it("F-1/01-F29/01-F17/DEC-SYNC-005: near-2^53 refunds merged while the parent was unprovable push the prior-Σ past 2^53−1 — the NEXT refund naming that parent quarantines invariant_violation (slot filled, ack advances, notice row written), never aborting the push", async () => {
+    const identity = freshIdentity();
+    const pusher = await openSession(gateway, identity);
+    const orderId = newId();
+    const MAX_PAISA = Number.MAX_SAFE_INTEGER; // 2^53−1 — the schema's own ceiling
+
+    // Several near-2^53 refunds naming attempt att-f1-p while the parent is
+    // UNMERGED: each is individually schema-valid and passes through UNCHECKED
+    // (DEC-SYNC-007 unprovable pass-through). Distinct attempt keys, so every
+    // one counts in the unique-keyed Σ (01-F31).
+    const huge = [MAX_PAISA, MAX_PAISA - 1, MAX_PAISA - 2].map((amount, i) =>
+      refundEnv(identity, i, {
+        order: orderId,
+        amount,
+        parent: "att-f1-p",
+        attempt: `att-f1-r${i}`,
+      }),
+    );
+    await pusher.conn.handle(pushMsg(huge));
+    // Green guard: all merged — Σ over their unique attempts now exceeds 2^53−1.
+    expect((await eventRows(verify, identity.org_id)).map((r) => r.id)).toEqual(
+      huge.map((e) => e.id),
+    );
+    expect(await quarantineRows(verify, identity.org_id)).toHaveLength(0);
+
+    // Parent att-f1-p lands: the cap is now provable — and its prior-Σ is
+    // unrepresentable (necessarily > any schema-valid parent amount).
+    await pusher.conn.handle(
+      pushMsg([paymentEnv(identity, 3, { order: orderId, amount: 1_000, attempt: "att-f1-p" })]),
+    );
+
+    // One more refund naming att-f1-p forces step 3.5 to total the priors.
+    const late = refundEnv(identity, 4, {
+      order: orderId,
+      amount: 500,
+      parent: "att-f1-p",
+      attempt: "att-f1-late",
+    });
+    const abort = await pusher.conn.handle(pushMsg([late])).then(
+      () => null,
+      (e: unknown) => (e instanceof Error ? `${e.name}: ${e.message}` : String(e)),
+    );
+    if (abort !== null) {
+      // TODAY (the red path): the RangeError aborted the push and the tx rolled
+      // back whole — the wedge the ruling names: nothing merged, no quarantine
+      // row, no watermark advance. The origin re-pushes this refund forever.
+      expect((await eventRows(verify, identity.org_id)).map((r) => r.id)).not.toContain(late.id);
+      expect(await quarantineRows(verify, identity.org_id)).toHaveLength(0);
+      expect(await storedWatermark(verify, identity.org_id, identity.device_id)).toBe(3);
+    }
+    // PINNED: the push NEVER aborts (01-F17 — a sale is never blocked; the
+    // failure string above is the captured abort reason while red).
+    expect(abort).toBeNull();
+
+    // PINNED: the late refund is a provable violator — quarantined verbatim as
+    // invariant_violation, ORIGIN-attributed, never merged (01-F37).
+    const quarantined = await quarantineRows(verify, identity.org_id);
+    expect(quarantined.map((q) => [q.claimed_event_id, q.reason])).toEqual([
+      [late.id, "invariant_violation"],
+    ]);
+    expect(must(quarantined[0], "F-1 row").device_id).toBe(identity.device_id);
+    expect((await eventRows(verify, identity.org_id)).map((r) => r.id)).not.toContain(late.id);
+
+    // Slot FILLED (DEC-SYNC-005): the ack advances over the violator and the
+    // stored watermark follows — the outbox never wedges.
+    expect(must(ofKind(pusher.rec.all, "push_ack").at(-1), "final push_ack").acked_watermark).toBe(
+      4,
+    );
+    expect(await storedWatermark(verify, identity.org_id, identity.device_id)).toBe(4);
+
+    // Notice: live to the pusher AND the durable outbox row (DEC-SYNC-008).
+    expect(
+      ofKind(pusher.rec.all, "quarantine_notice").map((n) => [n.event_id, n.reason]),
+    ).toContainEqual([late.id, "invariant_violation"]);
+    expect(await f1NoticeRows(verify, identity.org_id)).toEqual([[late.id, "invariant_violation"]]);
   });
 });
