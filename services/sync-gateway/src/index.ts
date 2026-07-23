@@ -3,6 +3,14 @@
 // plans/wave-0/kernel-tasks.md T-01-07. Wire messages come from
 // @restos/sync-protocol and validation from @restos/domain — never redeclared.
 export {
+  type AuditorCheck,
+  type AuditorFinding,
+  type AuditorReport,
+  type ReadModelInput,
+  type RunAuditorArgs,
+  runAuditor,
+} from "./auditor.js";
+export {
   type DeviceTokenClaims,
   type DeviceTokenInput,
   issueDeviceToken,

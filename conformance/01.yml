@@ -7,6 +7,8 @@ rows:
     tests:
       - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F42/01-F1 (fix-round F2): after a successful order drop, a never-seen straggler for the dropped key is ledger-retained, never folded, never projected — and counts no fold work"
       - "packages/sync-client/src/__acceptance__/relay-scenarios.test.ts#R1/01-F13/01-F9/01-F1/DEC-SYNC-009: a device with NO cloud transport reaches the merged cloud log via the hub — origin device_id/lamport_seq/payload verbatim — and its outbox drains on the LAN-propagated cloud ack (01-F8)"
+      - "services/sync-gateway/src/__acceptance__/auditor-audit-chain.test.ts#01-F5/01-F1: a TAMPERED stored link (cloud-side UPDATE of payload.prev_audit_hash — corruption of the merged copy) is an audit_chain finding; the domain hash rule (canonical-JSON minus server_received_at) is what detects it"
+      - "services/sync-gateway/src/__acceptance__/auditor-report-contract.test.ts#01-F1/01-F7: a run over a violating org changes not one byte of any kernel table — events, quarantine, notices, watermarks, sequences, registry"
       - "services/sync-gateway/src/__acceptance__/law2-idempotent-push.test.ts#01-F8/01-F1: same id with divergent content quarantines as id_content_divergence and NEVER mutates the stored row"
       - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#01-F13/DEC-SYNC-009/01-F1: a branch-hub session pushes another device's events — merged under the ORIGIN's device_id/lamport_seq with the envelope verbatim, per-origin watermark acked, fanned out with global_seq, and the origin's own next hello resumes past the relayed prefix (01-F8)"
       - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#01-F1/DEC-SYNC-009: a hub relay diverging from the origin's stored content quarantines id_content_divergence with the stored row untouched; a fresh id at an occupied origin slot quarantines lamport_conflict — the capability licenses relay, never re-authoring"
@@ -49,6 +51,12 @@ rows:
       - "packages/sync-client/src/__acceptance__/mesh-review.test.ts#01-F3/01-F8: after S3-style split-brain traffic every device holds each origin's lamports exactly 0..max, gap-free, ascending in ledger-read order"
       - "packages/sync-client/src/__acceptance__/properties.test.ts#01-F3/01-F8: for any interleaving of appends and legal acks, lamport stays gap-free and the unacked set matches the checkpoint model"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F3: readOwnEvents(fromLamport) is inclusive and stays in lamport order"
+      - "services/sync-gateway/src/__acceptance__/auditor-audit-chain.test.ts#01-F5/01-F3 (the cross-check): DELETING a middle audit event from the merged log breaks BOTH legs — an audit_chain finding (the next link no longer verifies) AND a lamport_gap finding (the slot the watermark covers is empty); tail deletion is the gap leg's catch"
+      - "services/sync-gateway/src/__acceptance__/auditor-lamport-gap.test.ts#01-F37/01-F3/DEC-SYNC-005: schema_invalid, invariant_violation and id_content_divergence slots inside a plain stream + a crash-replayed prefix audit GAP-CLEAN — the watermark advanced over every quarantined slot and the Auditor counts each row as its filler"
+      - "services/sync-gateway/src/__acceptance__/auditor-lamport-gap.test.ts#01-F3/01-F8/DEC-SYNC-009: hub-relayed origin streams, an origin_unregistered burst, a revoked origin's origin_revoked rows, and a relayed identity-mismatch all audit GAP-CLEAN — no-fill quarantine rows never manufacture obligations"
+      - "services/sync-gateway/src/__acceptance__/auditor-lamport-gap.test.ts#01-F3/01-F8: deleting the slot-1 event of a 0..3 stream yields exactly one lamport_gap finding naming the device and slot 1"
+      - "services/sync-gateway/src/__acceptance__/auditor-lamport-gap.test.ts#01-F8/01-F3: bumping acked_watermark from 1 to 4 with only slots 0..1 held yields lamport_gap findings for exactly slots 2, 3 and 4 — the ack must never claim slots nothing holds"
+      - "services/sync-gateway/src/__acceptance__/auditor-report-contract.test.ts#01-F7/01-F3: a corrupted org yields ok:false and every finding carries exactly the pinned keys (check ∈ the closed set, org_id = the audited org)"
       - "services/sync-gateway/src/__acceptance__/gateway-review.test.ts#01-F3: two devices pushing 50 events each CONCURRENTLY all merge — dense per-org global_seq, per-device lamport order preserved, catchup serves all 100 exactly once ascending"
       - "services/sync-gateway/src/__acceptance__/law1-global-seq.test.ts#01-F3: merged events carry server_received_at from the injected clock; stored envelope jsonb stays verbatim-as-received (null inside)"
       - "services/sync-gateway/src/__acceptance__/law1-global-seq.test.ts#01-F3: per-org global_seq is strictly monotonic and dense (gap-free) in merge order across pushes"
@@ -70,6 +78,8 @@ rows:
       - "packages/sync-client/src/__acceptance__/merge-workcounter.test.ts#01-F4 (fix-round F5): the fold-consumed registry is EXACTLY the pinned nine types — growth is a spec-PR + oracle-pin event, never a silent fall-through"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F4: an unknown event type throws and persists nothing"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F4: an invalid payload for a known type throws and persists nothing"
+      - "services/sync-gateway/src/__acceptance__/auditor-audit-chain.test.ts#01-F5/01-F4: an audit event whose prev_audit_hash is garbage-but-string MERGES — the registry checks presence/type only; chain integrity is the Auditor's cross-check, not the gateway's gate"
+      - "services/sync-gateway/src/__acceptance__/auditor-state-legality.test.ts#01-F17/01-F4: a registry-valid but machine-ILLEGAL edge (placed→served) merges — no quarantine, global_seq assigned; the state machine is the Auditor's sweep, not the gateway's gate"
       - "services/sync-gateway/src/__acceptance__/law6-quarantine.test.ts#01-F37/01-F4: a registry-invalid event is quarantined verbatim, excluded from events/fan-out/catchup, noticed to the pusher, and the watermark advances over it"
       - "services/sync-gateway/src/__acceptance__/law6-quarantine.test.ts#01-F37/01-F4: a KNOWN type with a registry-invalid payload quarantines as schema_invalid too"
   - fr: 01-F5
@@ -96,6 +106,11 @@ rows:
       - "packages/sync-client/src/__acceptance__/audit-store.test.ts#01-F5/01-F6: interleaving audit.* appends leaves open_orders/kitchen_queue/parked byte-identical"
       - "packages/sync-client/src/__acceptance__/audit-store.test.ts#01-F5: an ingested peer audit event keeps the prev_audit_hash its origin set and never touches this device's chain HEAD"
       - "packages/sync-client/src/__acceptance__/audit1-regression.test.ts#01-F5: an audit.login carrying note:undefined leaves the device's readOwnEvents() chain verifiable after the JSON round-trip"
+      - "services/sync-gateway/src/__acceptance__/auditor-audit-chain.test.ts#01-F5/01-F4: an audit event whose prev_audit_hash is garbage-but-string MERGES — the registry checks presence/type only; chain integrity is the Auditor's cross-check, not the gateway's gate"
+      - "services/sync-gateway/src/__acceptance__/auditor-audit-chain.test.ts#01-F5: correctly-linked chains on TWO devices — one direct, one hub-RELAYED (DEC-SYNC-009), non-audit events interleaved — audit clean; each device's chain verifies independently"
+      - "services/sync-gateway/src/__acceptance__/auditor-audit-chain.test.ts#01-F5: a forged-at-emit link (device stamps garbage instead of auditEventHash(previous)) is an audit_chain finding naming the device and the broken event"
+      - "services/sync-gateway/src/__acceptance__/auditor-audit-chain.test.ts#01-F5/01-F1: a TAMPERED stored link (cloud-side UPDATE of payload.prev_audit_hash — corruption of the merged copy) is an audit_chain finding; the domain hash rule (canonical-JSON minus server_received_at) is what detects it"
+      - "services/sync-gateway/src/__acceptance__/auditor-audit-chain.test.ts#01-F5/01-F3 (the cross-check): DELETING a middle audit event from the merged log breaks BOTH legs — an audit_chain finding (the next link no longer verifies) AND a lamport_gap finding (the slot the watermark covers is empty); tail deletion is the gap leg's catch"
   - fr: 01-F6
     status: green
     tests:
@@ -118,8 +133,19 @@ rows:
       - "packages/sync-client/src/__acceptance__/merge-workcounter.test.ts#01-F6/00 §5: one arriving payment folds the same events_folded on a 40-order ledger as on a 160-order ledger"
       - "packages/sync-client/src/__acceptance__/merge-workcounter.test.ts#01-F6/00 §5: one arriving line edge folds the same events_folded on a 40-order ledger as on a 160-order ledger"
       - "packages/sync-client/src/__acceptance__/merge-workcounter.test.ts#01-F10/01-F6: draining one arrived key does work independent of the UNRELATED parked population (5 vs 50 orphans)"
+      - "services/sync-gateway/src/__acceptance__/auditor-readmodel-diff.test.ts#01-F7/01-F6: a read model folded from the real catchup stream (global_seq adopted) diffs clean against the Auditor's independent refold — zero readmodel_diff findings"
   - fr: 01-F7
-    status: unmapped
+    status: red
+    tests:
+      - "services/sync-gateway/src/__acceptance__/auditor-readmodel-diff.test.ts#01-F7/01-F6: a read model folded from the real catchup stream (global_seq adopted) diffs clean against the Auditor's independent refold — zero readmodel_diff findings"
+      - "services/sync-gateway/src/__acceptance__/auditor-readmodel-diff.test.ts#01-F7/01-F30: one tampered money cell (pay_total +1 on one order) yields a readmodel_diff finding naming that order — and only that order"
+      - "services/sync-gateway/src/__acceptance__/auditor-readmodel-diff.test.ts#01-F7: a MISSING order row and an EXTRA phantom order row are both findings naming their orders"
+      - "services/sync-gateway/src/__acceptance__/auditor-readmodel-diff.test.ts#01-F7/03-F19: kitchen-queue drift (lines_ready off by one) is a finding naming the order — the queue projection is diffed too"
+      - "services/sync-gateway/src/__acceptance__/auditor-report-contract.test.ts#01-F7: an org with no rows in any kernel table audits clean — { ok: true, findings: [] }"
+      - "services/sync-gateway/src/__acceptance__/auditor-report-contract.test.ts#01-F7/01-F37/DEC-SYNC-005/DEC-SYNC-009: plain + relay + poison-slot + crash-replay + audit chain + settled order + device-fed read model — the Auditor reports NOTHING on a state the landed pipeline legitimately produced"
+      - "services/sync-gateway/src/__acceptance__/auditor-report-contract.test.ts#01-F7/01-F3: a corrupted org yields ok:false and every finding carries exactly the pinned keys (check ∈ the closed set, org_id = the audited org)"
+      - "services/sync-gateway/src/__acceptance__/auditor-report-contract.test.ts#01-F1/01-F7: a run over a violating org changes not one byte of any kernel table — events, quarantine, notices, watermarks, sequences, registry"
+      - "services/sync-gateway/src/__acceptance__/auditor-report-contract.test.ts#01-F7/00 §5.4: corruption in org A produces zero findings for healthy org B"
   - fr: 01-F8
     status: green
     tests:
@@ -161,6 +187,9 @@ rows:
       - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X2/01-F8/19 §5: with the WAN cut, new orders still reach all 3 over LAN (p95 < 1000 virtual ms); heal → push/catchup resume → full X1 identity"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F8: re-append of an already-stored id returns the stored envelope unchanged and assigns no new lamport"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F8/18 §4: re-append of a stored id with divergent content throws and changes nothing — idempotency is for identical retries only"
+      - "services/sync-gateway/src/__acceptance__/auditor-lamport-gap.test.ts#01-F3/01-F8/DEC-SYNC-009: hub-relayed origin streams, an origin_unregistered burst, a revoked origin's origin_revoked rows, and a relayed identity-mismatch all audit GAP-CLEAN — no-fill quarantine rows never manufacture obligations"
+      - "services/sync-gateway/src/__acceptance__/auditor-lamport-gap.test.ts#01-F3/01-F8: deleting the slot-1 event of a 0..3 stream yields exactly one lamport_gap finding naming the device and slot 1"
+      - "services/sync-gateway/src/__acceptance__/auditor-lamport-gap.test.ts#01-F8/01-F3: bumping acked_watermark from 1 to 4 with only slots 0..1 held yields lamport_gap findings for exactly slots 2, 3 and 4 — the ack must never claim slots nothing holds"
       - "services/sync-gateway/src/__acceptance__/gateway-review.test.ts#01-F8: a repeated id with DIVERGENT content within ONE push merges the first, quarantines the repeat as id_content_divergence at its slot, acks both slots — no raw error; re-push idempotent"
       - "services/sync-gateway/src/__acceptance__/gateway-review.test.ts#01-F8: the exact same envelope repeated within ONE push merges once and counts once — ack 0, single fan-out, no crash"
       - "services/sync-gateway/src/__acceptance__/gateway-review.test.ts#01-F8: an id_content_divergence quarantine FILLS its lamport slot — the ack advances over it and a following contiguous event in the same push merges"
@@ -172,6 +201,7 @@ rows:
       - "services/sync-gateway/src/__acceptance__/law7-stop-at-gap.test.ts#01-F8/01-F3: a gapped push stores and acks only the contiguous prefix; nothing beyond the gap lands in events OR quarantine; contiguous re-push completes the sequence"
       - "services/sync-gateway/src/__acceptance__/law7-stop-at-gap.test.ts#01-F8/01-F37: per-device lamport contiguity is gap-free MODULO quarantine rows — a quarantined slot counts as filled"
       - "services/sync-gateway/src/__acceptance__/law7-stop-at-gap.test.ts#01-F8: a push that is ENTIRELY beyond the gap stores nothing and leaves the watermark untouched"
+      - "services/sync-gateway/src/__acceptance__/relay-crash-replay.test.ts#F1(a)/01-F8/01-F25: merge O:0..2 via relay → revoke O → a rebooted hub re-relays 0..2 — NO quarantine rows for the merged ids, the push_ack answers the origin stream (2), nothing double-merged"
       - "services/sync-gateway/src/__acceptance__/relay-fix-round.test.ts#F1/01-F8/01-F37: a relayed identity-mismatch envelope at lamport hubOwnThrough+1 leaves the hub's OWN watermark untouched and unacked, is quarantined verbatim, and the hub's GENUINE event at that slot later merges — the review's displacement scenario, end-to-end"
       - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#01-F13/DEC-SYNC-009/01-F1: a branch-hub session pushes another device's events — merged under the ORIGIN's device_id/lamport_seq with the envelope verbatim, per-origin watermark acked, fanned out with global_seq, and the origin's own next hello resumes past the relayed prefix (01-F8)"
       - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#01-F8/DEC-SYNC-009: interleaved own and relayed pushes hold independent per-origin watermarks; a relayed gap holds (stop-at-gap) until the origin's contiguous re-relay completes it"
@@ -283,6 +313,9 @@ rows:
       - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F42/01-F17: the open-bill guard — dropping an order with no settlement_closed throws and changes nothing (prune only ever removes closed entities)"
       - "packages/sync-client/src/__acceptance__/relay-scenarios.test.ts#R3/DEC-SYNC-005/01-F37/01-F17: a U+0000 poison event relayed by the hub is quarantined at the cloud with its ORIGIN's lamport slot filled — the origin's outbox never wedges and later sales still merge"
       - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X3/01-F17/01-F38: WAN cut AND LAN split {A}|{B,C}, both sides keep appending, each side runs its own hub; heal LAN then WAN → zero lost, zero duplicated, one hub, fold identity ≡ cloud-order replay"
+      - "services/sync-gateway/src/__acceptance__/auditor-conservation.test.ts#01-F30/01-F29: a refund merged while its parent was unprovable, followed by a SMALLER parent, is a cap violation over the set — the gateway passed both by design (01-F17); the Auditor flags the order"
+      - "services/sync-gateway/src/__acceptance__/auditor-conservation.test.ts#01-F30/01-F17 (C-d): an UNSETTLED short order carries no settle-equation obligation — created + line + partial payment, no close — zero conservation findings"
+      - "services/sync-gateway/src/__acceptance__/auditor-state-legality.test.ts#01-F17/01-F4: a registry-valid but machine-ILLEGAL edge (placed→served) merges — no quarantine, global_seq assigned; the state machine is the Auditor's sweep, not the gateway's gate"
       - "services/sync-gateway/src/__acceptance__/invariant-refund-cap.test.ts#01-F29/01-F37/DEC-SYNC-007: a refund exceeding its merged parent's remainder is quarantined verbatim as invariant_violation — absent from events/fan-out/catchup, notice to the pusher, slot filled, and the NEXT event in the same push still merges (01-F17/DEC-SYNC-005)"
       - "services/sync-gateway/src/__acceptance__/invariant-refund-cap.test.ts#01-F29/01-F17: a refund whose parent attempt is NOT merged (out-of-order arrival) merges normally — global_seq assigned, fanned out, no quarantine; once the parent lands, the merged-while-unprovable refund COUNTS toward the remainder for later provable checks"
       - "services/sync-gateway/src/__acceptance__/invariant-refund-cap.test.ts#01-F17/DEC-SYNC-007: a refund whose parent was QUARANTINED (not merged) is unprovable and passes through — the gateway blocks only provable violations"
@@ -321,12 +354,14 @@ rows:
   - fr: 01-F25
     status: green
     tests:
+      - "packages/sync-client/src/__acceptance__/relay-revoked-suppression.test.ts#F1(b)/DEC-SYNC-009/01-F25: after an origin_revoked quarantine_notice the hub sends NO further relay pushes for that origin within the session, while ANOTHER origin keeps relaying"
       - "services/sync-gateway/src/__acceptance__/device-auth.test.ts#01-F25/01-F27: registered device + issued token → session opens, pushes merge, reconnect resumes past the ack"
       - "services/sync-gateway/src/__acceptance__/device-auth.test.ts#01-F25: an UNREGISTERED device is rejected even with a validly-signed token — the registry, not the signature, is the authority (18 §5)"
       - "services/sync-gateway/src/__acceptance__/device-auth.test.ts#01-F25/18 §5: registry branch is authoritative — a device registered on branch A helloing (self-consistently) into branch B is rejected"
       - "services/sync-gateway/src/__acceptance__/device-auth.test.ts#01-F42/01-F25: a revoked device's next hello → purge_command { scope: 'all' } and NO session; re-sent on every hello while revoked (no purge-ack wire kind exists)"
       - "services/sync-gateway/src/__acceptance__/device-auth.test.ts#01-F25/01-F27: revocation binds on the NEXT operation of an already-open session — push and catchup_request are rejected, nothing persisted, watermark unmoved, NO quarantine row (rejection, not quarantine)"
       - "services/sync-gateway/src/__acceptance__/device-auth.test.ts#01 §5/01-F25: kernel.device_registry holds the row (branch, class, revoked_at null); revokeDevice sets revoked_at and deletes nothing"
+      - "services/sync-gateway/src/__acceptance__/relay-crash-replay.test.ts#F1(a)/01-F8/01-F25: merge O:0..2 via relay → revoke O → a rebooted hub re-relays 0..2 — NO quarantine rows for the merged ids, the push_ack answers the origin stream (2), nothing double-merged"
       - "services/sync-gateway/src/__acceptance__/relay-origin-registry.test.ts#01-F13/DEC-SYNC-009: a registered hub-eligible device with the hub_relay claim is relay-authorized — relays a registered WAITER origin verbatim, per-origin ack, origin watermark, and the origin's own hello resumes past the relayed prefix (01-F25/01-F8)"
       - "services/sync-gateway/src/__acceptance__/relay-origin-registry.test.ts#01-F25/DEC-SYNC-009: a REVOKED origin stops relaying on next contact — origin_revoked quarantine attributed to the ORIGIN, prior merged events remain (01-F1), watermark unmoved"
       - "services/sync-gateway/src/__acceptance__/relay-origin-registry.test.ts#01-F25/01-F42 + T-01-12: a REVOKED HUB loses relay with the rest of its participation — the relay push is rejected session-level, nothing persisted, no quarantine row"
@@ -372,6 +407,7 @@ rows:
       - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F29/01-F31 (fix-round F3): dispute-after-violation — the cap flag is a LATCH: a later divergent member of the parent key moves the totals (Addendum-A) but can never clear violated, in any delivery order"
       - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F29: the cap resolves parents by settlement_attempt_id, not envelope id — an intent duplicated under two envelope ids cannot fragment the cap (Addendum-A)"
       - "packages/sync-client/src/__acceptance__/merge-settlement.test.ts#01-F33/01-F29: a refund after the close never un-settles — post-settlement corrections are linked event pairs, reopening does not exist"
+      - "services/sync-gateway/src/__acceptance__/auditor-conservation.test.ts#01-F30/01-F29: a refund merged while its parent was unprovable, followed by a SMALLER parent, is a cap violation over the set — the gateway passed both by design (01-F17); the Auditor flags the order"
       - "services/sync-gateway/src/__acceptance__/invariant-refund-cap.test.ts#01-F29/01-F37/DEC-SYNC-007: a refund exceeding its merged parent's remainder is quarantined verbatim as invariant_violation — absent from events/fan-out/catchup, notice to the pusher, slot filled, and the NEXT event in the same push still merges (01-F17/DEC-SYNC-005)"
       - "services/sync-gateway/src/__acceptance__/invariant-refund-cap.test.ts#01-F29/DEC-SYNC-007: 600-then-600 against 1000 — the first merges, the SECOND quarantines (the gateway names which refund busted the cap, 26 §7); a quarantined violator shrinks NOTHING, so a later 400 still lands the exact cover (01-F37)"
       - "services/sync-gateway/src/__acceptance__/invariant-refund-cap.test.ts#01-F29/01-F30: 400-then-600 against 1000 both merge (exact cover is not a violation) — zero invariant quarantines"
@@ -387,6 +423,14 @@ rows:
       - "packages/domain/src/__acceptance__/refund-remainder.test.ts#01-F29/01-F30: ONE PAISA over the remainder IS a violation"
       - "packages/domain/src/__acceptance__/refund-remainder.test.ts#01-F29/01-F30: zero-amount boundaries — a zero refund never violates (even at a fully-consumed cap); against a zero payment any positive refund violates"
       - "packages/domain/src/__acceptance__/refund-remainder.test.ts#00 §6/01-F30: non-integer money is rejected loudly on every argument — fractional, NaN and ±Infinity throw (integer paisas, floats never; brands are compile-time only)"
+      - "services/sync-gateway/src/__acceptance__/auditor-conservation.test.ts#01-F30/01-F29: a refund merged while its parent was unprovable, followed by a SMALLER parent, is a cap violation over the set — the gateway passed both by design (01-F17); the Auditor flags the order"
+      - "services/sync-gateway/src/__acceptance__/auditor-conservation.test.ts#01-F30/01-F31: exact cover over UNIQUE attempt keys is NOT a violation — 600+400 against 1000, with the 400 re-expressed under a second envelope id (same attempt key, counted once) — zero conservation findings"
+      - "services/sync-gateway/src/__acceptance__/auditor-conservation.test.ts#01-F30/01-F32: a settlement_closed order whose tendering falls SHORT of billed (600 against 2×500) is a conservation finding naming the order"
+      - "services/sync-gateway/src/__acceptance__/auditor-conservation.test.ts#01-F30: a fully-voided settled order nets to zero — every line legally voided, no payments, settlement_closed — zero conservation findings"
+      - "services/sync-gateway/src/__acceptance__/auditor-conservation.test.ts#01-F30/01-F17 (C-d): an UNSETTLED short order carries no settle-equation obligation — created + line + partial payment, no close — zero conservation findings"
+      - "services/sync-gateway/src/__acceptance__/auditor-conservation.test.ts#01-F32/01-F30: a settled exact-cover order followed by a repays_receivable payment referencing it audits CLEAN — a repaid tab never reads as overpaid (the repay is not tender, no false alarm)"
+      - "services/sync-gateway/src/__acceptance__/auditor-conservation.test.ts#01-F30/DEC-MONEY-007: a settlement_closed order covered ONLY by a repays_receivable payment equal to billed is NOT conserved — a repayment is never tender, the finding names the order"
+      - "services/sync-gateway/src/__acceptance__/auditor-readmodel-diff.test.ts#01-F7/01-F30: one tampered money cell (pay_total +1 on one order) yields a readmodel_diff finding naming that order — and only that order"
       - "services/sync-gateway/src/__acceptance__/invariant-refund-cap.test.ts#01-F29/01-F30: 400-then-600 against 1000 both merge (exact cover is not a violation) — zero invariant quarantines"
   - fr: 01-F31
     status: green
@@ -405,6 +449,7 @@ rows:
       - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F31/01-F8: the ingestBatch seam collapses the same intent identically to per-event ingest"
       - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F31: billed never enters the money fold — the openOrders row is EXACTLY the pinned key set, with no derived signed column to hang a refund affordance on"
       - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F29/01-F31 (fix-round F3): dispute-after-violation — the cap flag is a LATCH: a later divergent member of the parent key moves the totals (Addendum-A) but can never clear violated, in any delivery order"
+      - "services/sync-gateway/src/__acceptance__/auditor-conservation.test.ts#01-F30/01-F31: exact cover over UNIQUE attempt keys is NOT a violation — 600+400 against 1000, with the 400 re-expressed under a second envelope id (same attempt key, counted once) — zero conservation findings"
       - "services/sync-gateway/src/__acceptance__/invariant-refund-cap.test.ts#01-F29/01-F31: the IN-BATCH case resolves identically to the two-push case — [pay 1000, refund 600, refund 600] in ONE push merges the first refund and quarantines the second (earlier same-batch refunds are visible to the check)"
       - "services/sync-gateway/src/__acceptance__/invariant-refund-cap.test.ts#01-F31/01-F29: prior refunds total over UNIQUE attempt keys — the same refund intent re-expressed under a SECOND envelope id merges (no new money, no violation), and the cap math counts it ONCE (an envelope-keyed sum would wrongly quarantine the exact cover)"
   - fr: 01-F32
@@ -414,6 +459,8 @@ rows:
       - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F30/01-F32: payment.recorded without purpose is a parse failure — an unpurposed payment is neither tendering nor repayment"
       - "packages/domain/src/__acceptance__/merge-schema.test.ts#01-F32: purpose outside the closed enum is a parse failure"
       - "packages/sync-client/src/__acceptance__/merge-money.test.ts#01-F32: a repays_receivable payment never enters pay_total — a repaid tab can never read as overpaid; the receivable decrement is repaid_total"
+      - "services/sync-gateway/src/__acceptance__/auditor-conservation.test.ts#01-F30/01-F32: a settlement_closed order whose tendering falls SHORT of billed (600 against 2×500) is a conservation finding naming the order"
+      - "services/sync-gateway/src/__acceptance__/auditor-conservation.test.ts#01-F32/01-F30: a settled exact-cover order followed by a repays_receivable payment referencing it audits CLEAN — a repaid tab never reads as overpaid (the repay is not tender, no false alarm)"
   - fr: 01-F33
     status: green
     tests:
@@ -497,6 +544,8 @@ rows:
       - "packages/sync-client/src/__acceptance__/relay-scenarios.test.ts#R5/01-F34/DEC-SYNC-009: relayed events return to the pushing hub with global_seq via origin-inclusive fan-out; the hub adopts them as a pure sidecar write — ZERO fold work (landed foldStats observable)"
       - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X1/01-N1/01-F34: at quiescence every device holds each event exactly once, cloud-ordered, and its fold tables ≡ a fresh store replaying mergedStream()"
       - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X1b/01-N1/01-F34: LAN-first concurrent assignment renders the two-head conflict on every device, and the staged cloud merge changes NOTHING across the ack boundary"
+      - "services/sync-gateway/src/__acceptance__/auditor-readmodel-diff.test.ts#01-F34/26 §8: a LAN-only model — SAME delivered set, REVERSED delivery, NO global_seq adoption, zero ordering metadata — diffs clean too (fold-specific convergence; a reincarnated canonical-replay comparator would false-alarm exactly here)"
+      - "services/sync-gateway/src/__acceptance__/auditor-state-legality.test.ts#01-F35/01-F34 (no false alarm): a fully LEGAL chain plus a CONTESTED terminal — voided vs served as concurrent legal edges from ready on two devices — audits clean; a contested set is a rendered MVR, never an illegality"
       - "services/sync-gateway/src/__acceptance__/law5-fanout.test.ts#01-F9/01-F34: a push reaches every same-branch session including the origin, exactly once, as one event_batch with global_seq; other branches and other orgs get nothing"
   - fr: 01-F35
     status: green
@@ -526,6 +575,9 @@ rows:
       - "packages/sync-client/src/__acceptance__/merge-lines.test.ts#01-F35 (matrix row 66): post-serve void is NOT EXPRESSIBLE — an edge from a terminal is payload-illegal (terminals map to []), and illegal outranks terminal_regression"
       - "packages/sync-client/src/__acceptance__/merge-settlement.test.ts#01-F33/01-F35: two concurrent closes collapse to one settled fact — monotone OR, no conflict raised, any delivery order"
       - "packages/sync-client/src/__acceptance__/merge-settlement.test.ts#01-F35: an edge claiming placed→ready is payload-illegal — flagged, never applied, and (unlike the comparator engine) the verdict is a pure function of the edge's own payload"
+      - "services/sync-gateway/src/__acceptance__/auditor-state-legality.test.ts#01-F35: the merged placed→served jump is a state_legality finding naming the order and the offending envelope id"
+      - "services/sync-gateway/src/__acceptance__/auditor-state-legality.test.ts#01-F35: an edge OUT of a terminal (served→in_prep, from_states [served]) violates terminal monotonicity — LEGAL_NEXT[terminal] is empty; the finding names the offending envelope"
+      - "services/sync-gateway/src/__acceptance__/auditor-state-legality.test.ts#01-F35/01-F34 (no false alarm): a fully LEGAL chain plus a CONTESTED terminal — voided vs served as concurrent legal edges from ready on two devices — audits clean; a contested set is a rendered MVR, never an illegality"
   - fr: 01-F36
     status: unmapped
   - fr: 01-F37
@@ -538,6 +590,10 @@ rows:
       - "packages/sync-client/src/__acceptance__/quarantine-notice-relay.test.ts#01-F37/DEC-SYNC-008/DEC-SYNC-009: a WAN-less origin's poison event, relayed and quarantined at the cloud, produces a quarantine_notice that reaches the ORIGIN device over the LAN — event id and reason verbatim, at-least-once — not just the pushing hub session"
       - "packages/sync-client/src/__acceptance__/relay-scenarios.test.ts#R3/DEC-SYNC-005/01-F37/01-F17: a U+0000 poison event relayed by the hub is quarantined at the cloud with its ORIGIN's lamport slot filled — the origin's outbox never wedges and later sales still merge"
       - "packages/sync-client/src/__acceptance__/spike-scenarios-departed.test.ts#X9/01-F37/DEC-SYNC-005: a registry-valid U+0000 event is storage_rejected at the cloud; the notice lands in the origin's status().quarantined, the ack advances OVER the poisoned slot so the outbox never wedges, later sales are unaffected, and the honest divergence (local fold has it, mergedStream does not) is observable"
+      - "services/sync-gateway/src/__acceptance__/auditor-lamport-gap.test.ts#01-F37/01-F3/DEC-SYNC-005: schema_invalid, invariant_violation and id_content_divergence slots inside a plain stream + a crash-replayed prefix audit GAP-CLEAN — the watermark advanced over every quarantined slot and the Auditor counts each row as its filler"
+      - "services/sync-gateway/src/__acceptance__/auditor-lamport-gap.test.ts#01-F37/DEC-SYNC-005: a PLAIN session's device_mismatch fills its OWN slot (t-01-12 F2: row attributed to the session device) — the stream audits gap-clean through the mismatch slot"
+      - "services/sync-gateway/src/__acceptance__/auditor-lamport-gap.test.ts#01-F37/DEC-SYNC-005: deleting the schema_invalid row whose slot the watermark advanced over leaves slot 1 uncovered — one lamport_gap finding (the quarantine row WAS the credited filler)"
+      - "services/sync-gateway/src/__acceptance__/auditor-report-contract.test.ts#01-F7/01-F37/DEC-SYNC-005/DEC-SYNC-009: plain + relay + poison-slot + crash-replay + audit chain + settled order + device-fed read model — the Auditor reports NOTHING on a state the landed pipeline legitimately produced"
       - "services/sync-gateway/src/__acceptance__/gateway-review.test.ts#01-F37: a registry-valid envelope jsonb cannot hold (U+0000 in a payload string) quarantines as storage_reject stored verbatim as TEXT; siblings merge, the ack advances, a notice is emitted"
       - "services/sync-gateway/src/__acceptance__/invariant-refund-cap.test.ts#01-F29/01-F37/DEC-SYNC-007: a refund exceeding its merged parent's remainder is quarantined verbatim as invariant_violation — absent from events/fan-out/catchup, notice to the pusher, slot filled, and the NEXT event in the same push still merges (01-F17/DEC-SYNC-005)"
       - "services/sync-gateway/src/__acceptance__/invariant-refund-cap.test.ts#01-F29/DEC-SYNC-007: 600-then-600 against 1000 — the first merges, the SECOND quarantines (the gateway names which refund busted the cap, 26 §7); a quarantined violator shrinks NOTHING, so a later 400 still lands the exact cover (01-F37)"

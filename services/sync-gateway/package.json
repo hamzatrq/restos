@@ -11,6 +11,7 @@
     "@fastify/websocket": "11.3.0",
     "@restos/config": "workspace:*",
     "@restos/domain": "workspace:*",
+    "@restos/sync-client": "workspace:*",
     "@restos/sync-protocol": "workspace:*",
     "drizzle-orm": "0.45.2",
     "fastify": "5.10.0",
@@ -18,7 +19,6 @@
     "postgres": "3.4.9"
   },
   "devDependencies": {
-    "@restos/sync-client": "workspace:*",
     "@restos/testing": "workspace:*",
     "drizzle-kit": "0.31.10",
     "fast-check": "4.9.0",

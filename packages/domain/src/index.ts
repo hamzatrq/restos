@@ -7,7 +7,12 @@ export { canonicalJson } from "./canonical.js";
 export { DEVICE_CLASSES, type DeviceClass, HUB_ELIGIBLE_CLASSES } from "./device-classes.js";
 export { EventEnvelope, type EventEnvelopeT, parseEnvelope } from "./envelope.js";
 export { newId } from "./ids.js";
-export { type RefundRemainderArgs, refundRemainderExceeded } from "./invariants.js";
+export {
+  type RefundRemainderArgs,
+  refundRemainderExceeded,
+  type SettledConservationArgs,
+  settledConservationResidualPaisa,
+} from "./invariants.js";
 export {
   addPaisa,
   applyRateBps,

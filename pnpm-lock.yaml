@@ -151,6 +151,9 @@ importers:
       '@restos/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@restos/sync-client':
+        specifier: workspace:*
+        version: link:../../packages/sync-client
       '@restos/sync-protocol':
         specifier: workspace:*
         version: link:../../packages/sync-protocol
@@ -167,9 +170,6 @@ importers:
         specifier: 3.4.9
         version: 3.4.9
     devDependencies:
-      '@restos/sync-client':
-        specifier: workspace:*
-        version: link:../../packages/sync-client
       '@restos/testing':
         specifier: workspace:*
         version: link:../../packages/testing
