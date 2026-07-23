@@ -434,6 +434,33 @@ export const runAuditor = async (args: RunAuditorArgs): Promise<AuditorReport> =
   const chains = new Map<string, EventEnvelopeT[]>();
   for (const row of eventRows) {
     if (!AUDIT_TYPES.has(row.envelope.type)) continue;
+    // Fix round 2 Finding 2 (ruled): audit events are fold-inert, so they `continue`
+    // in the refold BEFORE its per-event parse guard (F1b) — leaving leg 5 to feed
+    // UNPARSED audit envelopes to verifyAuditChain. A corrupt/null-payload audit-typed
+    // merged row (reachable only by corruption or registry drift — the 01-F4 gate
+    // admits none) then aborted the WHOLE org report. Guard each audit row exactly as
+    // the refold guards the rest: an unparseable audit-typed envelope becomes a
+    // structured `unparseable_merged_event` finding and is dropped from the chain, so
+    // the report survives ANY poisoned input. The row's slot is already counted covered
+    // by the gap leg (a merged row holds its slot regardless of parseability).
+    try {
+      parseEvent(row.envelope);
+    } catch {
+      findings.push({
+        check: "unparseable_merged_event",
+        org_id,
+        device_id: row.device_id,
+        order_id: null,
+        event_id: row.id,
+        lamport_seq: row.lamport_seq,
+        detail:
+          `merged audit-typed event ${row.id} (device ${row.device_id}, lamport slot ` +
+          `${row.lamport_seq}) cannot be parsed by the current registry — corruption or ` +
+          "registry drift; excluded from the audit-chain cross-check, the report survives " +
+          "(fix round 2, Finding 2)",
+      });
+      continue;
+    }
     const chain = chains.get(row.device_id);
     if (chain) chain.push(row.envelope);
     else chains.set(row.device_id, [row.envelope]);

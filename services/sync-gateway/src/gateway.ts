@@ -430,16 +430,18 @@ export const createGateway = ({
       // loss). Nothing wedges by not filling: the garbage was never in the
       // hub's outbox. The row is stored verbatim either way (01-F37).
       //
-      // T-01-11 fix round F2 (ruled): a slot is credited ONLY when the
-      // quarantine row was ACTUALLY stored — the insert runs here, inline, and
-      // an ON CONFLICT no-op (same claimed_event_id already held, first stored
-      // wins) returns nothing and fills nothing. Two quarantined envelopes
-      // sharing one claimed id at slots k and k+1 in one push therefore stop
-      // the watermark at k: the coverage law's premise ("the slot is durably
-      // held by the row") is true by construction, and the T-01-11 Auditor
-      // never sees a credited slot no row holds. A conformant outbox pushes
-      // ascending from its resume point, so a conflicting re-quarantine only
-      // ever names a slot whose credit the stored row already earned.
+      // T-01-11 fix round 2 (ruled, supersedes fix round 1's per-(org,
+      // claimed_event_id) rule): the slot fill is tracked per (ORIGIN, slot). Fix
+      // round 1 credited a slot only when THIS insert stored a row, which wedged an
+      // honest WAN-less origin whose events were relayed before it registered — a
+      // no-fill-class origin_unregistered row held the claimed id, so the later
+      // legitimate fill no-op'd forever. Corrected inline below: an ON CONFLICT no-op
+      // still credits the origin's slot UNLESS the blocking row is this same origin's
+      // own row at a DIFFERENT slot (a forged id reused across two of the origin's
+      // slots — the slot is durably held by no row of this origin; that alone stops
+      // the watermark, keeping the fix-round-1 double-claim pin green). A no-fill-class
+      // prior or a foreign pre-claim never blocks; a genuine (origin, slot) duplicate
+      // re-credits via fill()'s slot<=through guard, exactly once.
       const quarantine = async (
         stream: StreamState | null,
         envelope: EventEnvelopeT,
@@ -476,7 +478,66 @@ export const createGateway = ({
                 ${envelope.id}, ${reason}, ${clock.now()}, null)
               on conflict (org_id, claimed_event_id) do nothing`,
         );
-        if (stream !== null && [...stored].length > 0) fill(stream, envelope.lamport_seq);
+        // T-01-11 fix round 2 (corrected F2): the slot fill is tracked per (ORIGIN,
+        // slot), NOT per (org, claimed_event_id). Fix round 1 filled a slot only when
+        // THIS insert stored a row — which credited nothing when a NO-FILL-class row
+        // (origin_unregistered, stream=null) already held the claimed id, PERMANENTLY
+        // and SILENTLY wedging an honest WAN-less origin whose events were relayed
+        // BEFORE it registered: through stops, stop-at-gap strands the tail, the Auditor
+        // audits clean (DEC-SYNC-009 R3/X9 never-wedge + commandment 4 violated).
+        // Corrected: a fill-class quarantine credits the origin's slot UNLESS the
+        // blocking row is this SAME origin's own row at a DIFFERENT slot — a forged id
+        // reused across two of the origin's slots, whose slot is durably held by no row
+        // of this origin (F2's false-gap; the fix-round-1 double-claim pin). A
+        // no-fill-class prior or a FOREIGN origin's pre-claim never blocks; a genuine
+        // (origin, slot) duplicate re-credits via fill()'s slot<=through guard — once.
+        if (stream !== null) {
+          if ([...stored].length > 0) {
+            fill(stream, envelope.lamport_seq);
+          } else {
+            // The insert conflicted — inspect the blocking row for this claimed id.
+            const blocker = [
+              ...(await tx.execute(
+                sql`select device_id, reason, envelope from kernel.quarantine
+                    where org_id = ${session.orgId} and claimed_event_id = ${envelope.id}`,
+              )),
+            ][0];
+            const blockerEnvelope =
+              blocker === undefined
+                ? undefined
+                : (JSON.parse(String(blocker.envelope)) as {
+                    device_id?: unknown;
+                    lamport_seq?: unknown;
+                  });
+            const sameOriginOtherSlot =
+              blocker !== undefined &&
+              String(blocker.device_id) === deviceId &&
+              blockerEnvelope?.lamport_seq !== envelope.lamport_seq;
+            if (!sameOriginOtherSlot) {
+              // When the blocker is the PROVISIONAL origin_unregistered placeholder
+              // stored while this origin was still unregistered (the DEC-SYNC-009
+              // unregistered→registered relay race) and it holds THIS same event, heal
+              // its attribution + class to the now-registered origin so the T-01-11
+              // Auditor counts it as the slot's filler (coverage-by-attribution stays
+              // true — no gap-leg change). A FOREIGN fill-class pre-claim is left
+              // untouched (01-F1 — the relay never re-authors it): the origin's slot is
+              // still credited (un-wedged), and its uncovered slot surfaces as a LOUD
+              // lamport_gap, never a silent wedge.
+              if (
+                blocker !== undefined &&
+                blocker.reason === "origin_unregistered" &&
+                String(blockerEnvelope?.device_id) === deviceId &&
+                blockerEnvelope?.lamport_seq === envelope.lamport_seq
+              ) {
+                await tx.execute(
+                  sql`update kernel.quarantine set device_id = ${deviceId}, reason = ${reason}
+                      where org_id = ${session.orgId} and claimed_event_id = ${envelope.id}`,
+                );
+              }
+              fill(stream, envelope.lamport_seq);
+            }
+          }
+        }
       };
 
       // The push's origin: ONE origin per relay push message (T-01-12 ruling) —
