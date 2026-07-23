@@ -135,7 +135,7 @@ rows:
       - "packages/sync-client/src/__acceptance__/merge-workcounter.test.ts#01-F10/01-F6: draining one arrived key does work independent of the UNRELATED parked population (5 vs 50 orphans)"
       - "services/sync-gateway/src/__acceptance__/auditor-readmodel-diff.test.ts#01-F7/01-F6: a read model folded from the real catchup stream (global_seq adopted) diffs clean against the Auditor's independent refold — zero readmodel_diff findings"
   - fr: 01-F7
-    status: red
+    status: green
     tests:
       - "services/sync-gateway/src/__acceptance__/auditor-readmodel-diff.test.ts#01-F7/01-F6: a read model folded from the real catchup stream (global_seq adopted) diffs clean against the Auditor's independent refold — zero readmodel_diff findings"
       - "services/sync-gateway/src/__acceptance__/auditor-readmodel-diff.test.ts#01-F7/01-F30: one tampered money cell (pay_total +1 on one order) yields a readmodel_diff finding naming that order — and only that order"

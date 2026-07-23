@@ -18,6 +18,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createGateway, type Gateway } from "../index.js";
 import {
   byCheck,
+  confirmed,
   created,
   edge,
   evt,
@@ -58,7 +59,10 @@ afterAll(async () => {
 });
 
 /** Builds a two-order branch through the real gateway and returns its merged
- * wire events via the real catchup path (reader = a fresh registered device). */
+ * wire events via the real catchup path (reader = a fresh registered device).
+ * o1 carries a real order.confirmed (the queue-row anchor — a line edge to
+ * "confirmed" is not the confirm fact), so the queue projection is non-empty
+ * and the queue-drift leg genuinely drifts. */
 const buildBranch = async (): Promise<{
   org: Identity;
   o1: string;
@@ -80,6 +84,7 @@ const buildBranch = async (): Promise<{
       evt(d, 5, created(o2)),
       evt(d, 6, lineAdded(o2, "L1", 1, 500)),
       evt(d, 7, refund(o1, 100, { attempt: `R-${o1}`, parent_attempt: `P-${o1}` })),
+      evt(d, 8, confirmed(o1)),
     ]),
   );
   session.conn.close();

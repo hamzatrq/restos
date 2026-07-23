@@ -153,6 +153,14 @@ export const created = (
   },
 });
 
+/** The order-level confirm fact — the ONLY event that creates a kitchen-queue
+ * row (merge engine: queue row iff confirm anchor; a line_state_changed edge to
+ * "confirmed" is a LINE edge, not the confirm fact). */
+export const confirmed = (order_id: string): EventSpec => ({
+  type: "order.confirmed",
+  payload: { order_id },
+});
+
 export const lineAdded = (
   order_id: string,
   line_id: string,
