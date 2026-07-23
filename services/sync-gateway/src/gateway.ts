@@ -472,12 +472,29 @@ export const createGateway = ({
           );
           continue;
         }
-        // 1.5 Origin-existence (T-01-09 closes the DEC-SYNC-009 F6 hole): a
-        // relayed identity-valid envelope's origin must resolve to a registry
+        // 1.4 Dedupe-BEFORE-the-origin-gate (T-01-09 fix round F1, ruled): an
+        // id already in kernel.events with identical content acks through
+        // REGARDLESS of the origin's current registry state — its identity was
+        // authoritative at merge time. Gating it instead would mint a
+        // quarantine row for a MERGED id (the merged-AND-quarantined
+        // contradiction) and answer no ack, wedging a crash-replayed hub on
+        // the same prefix forever. The fill is the same watermark credit a
+        // same-content duplicate always earned (01-F8).
+        const storedEarly = storedById.get(envelope.id);
+        if (storedEarly !== undefined && sameContent(storedEarly, envelope)) {
+          const dedupeStream = await streamOf(envelope.device_id);
+          if (origin === null) origin = envelope.device_id;
+          fill(dedupeStream, envelope.lamport_seq);
+          continue;
+        }
+        // 1.5 Origin-existence (T-01-09 closes the DEC-SYNC-009 F6 hole; NEW
+        // ids only — merged ids acked through at 1.4): a relayed
+        // identity-valid envelope's origin must resolve to a registry
         // row for the SESSION's org AND branch (00 §5.4 — a same-id row in
         // another org, or another branch of this org, is unregistered HERE);
         // a registered-but-revoked origin stops relaying on next contact
-        // (01-F25 — relay is that device's cloud participation by proxy).
+        // (01-F25 — relay is that device's cloud participation by proxy; the
+        // hub also suppresses a noticed origin session-side, fix round F1(b)).
         // Both classes: verbatim quarantine row, NO stream filled (F1 pattern —
         // the garbage was never in the hub's outbox), no phantom watermark, no
         // ack naming the origin. Attribution (F2 pattern): unregistered → the
@@ -505,15 +522,11 @@ export const createGateway = ({
           quarantine(stream, envelope, "schema_invalid", envelope.device_id);
           continue;
         }
-        // 3. Dedupe (01-F8): known id + identical content → skip (counts toward
-        // the watermark); divergent content → quarantine, never overwrite (01-F1
-        // — the relay capability licenses relay, never re-authoring).
-        const stored = storedById.get(envelope.id);
-        if (stored !== undefined) {
-          if (sameContent(stored, envelope)) {
-            fill(stream, envelope.lamport_seq);
-            continue;
-          }
+        // 3. Dedupe divergence (01-F8): the same-content case was consumed at
+        // 1.4 (before the origin gate); a stored id reaching here carries
+        // DIVERGENT content → quarantine, never overwrite (01-F1 — the relay
+        // capability licenses relay, never re-authoring).
+        if (storedById.get(envelope.id) !== undefined) {
           quarantine(stream, envelope, "id_content_divergence", envelope.device_id);
           continue;
         }

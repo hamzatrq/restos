@@ -62,6 +62,11 @@ export const start = async (): Promise<FastifyInstance> => {
       // T-01-09: the HS256 device-token verification key (18 §5). Required —
       // the gateway cannot authenticate anyone without it (crash at boot).
       if (raw === undefined || raw === "") throw new Error("required (device-token HS256 secret)");
+      // T-01-09 fix round F2: every signature 01-F27 trusts is only as strong
+      // as this symmetric key — under 32 bytes is rejected at boot (18 §5).
+      if (Buffer.byteLength(raw, "utf8") < 32) {
+        throw new Error("must be at least 32 bytes (HS256 device-token verification key, 18 §5)");
+      }
       return raw;
     },
     PORT: (raw) => {

@@ -77,6 +77,13 @@ export const createCloudSession = (options: {
   // per-origin push_acks. Session-local; a fresh session re-relays from zero
   // and id-dedupe absorbs the overlap (01-F8).
   const relayAcked = new Map<string, number>();
+  // Volatile per-origin suppression (T-01-09 fix round F1(b), ruled): origins
+  // the gateway's origin-registry gate refused — a quarantine_notice with
+  // reason origin_unregistered|origin_revoked stops relay of THAT origin for
+  // the session's life (its events earn no ack, so re-pushing loops forever).
+  // Cleared on hello_ack: a fresh session retries once → re-noticed →
+  // re-suppressed (bounded, not livelock).
+  const suppressedOrigins = new Set<string>();
   let unsubscribeRelay: (() => void) | null = null;
   let unsubscribeRelayCancel: (() => void) | null = null;
 
@@ -142,6 +149,7 @@ export const createCloudSession = (options: {
     for (const e of store.readAllEvents()) {
       // readAllEvents is (device_id, lamport_seq)-sorted — per-origin order holds.
       if (e.device_id === own) continue;
+      if (suppressedOrigins.has(e.device_id)) continue; // gate-refused this session (F1(b))
       if (originFilter !== undefined && e.device_id !== originFilter) continue;
       const held = byOrigin.get(e.device_id);
       if (held === undefined) byOrigin.set(e.device_id, [e]);
@@ -195,6 +203,9 @@ export const createCloudSession = (options: {
         connected = true;
         // The gateway's relay advertisement (DEC-SYNC-009): absent = never relay.
         relayAuthorized = message.relay_authorized === true;
+        // A FRESH session retries suppressed origins once — re-noticed →
+        // re-suppressed; a re-registered origin resumes (F1(b), bounded).
+        suppressedOrigins.clear();
         drainPush(); // drain the outbox tail (paged from the cloud checkpoint)
         // Exclusive cursor: global_seq starts at 1, so last_global_seq ?? 0 = "send
         // everything"; catchup_response pages via next_from while complete === false.
@@ -254,6 +265,12 @@ export const createCloudSession = (options: {
         // origin's next own hello, DEC-SYNC-008).
         const held = store.readAllEvents().find((e) => e.id === message.event_id);
         if (held !== undefined && held.device_id !== store.identity.device_id) {
+          // F1(b) (T-01-09 fix round, ruled): an origin the gateway's registry
+          // gate refused stops relaying for this session's life — its events
+          // can never ack, so every re-push is a wasted loop iteration.
+          if (message.reason === "origin_unregistered" || message.reason === "origin_revoked") {
+            suppressedOrigins.add(held.device_id);
+          }
           store.noteRelayedQuarantineNotice(held.device_id, {
             event_id: message.event_id,
             reason: message.reason,
