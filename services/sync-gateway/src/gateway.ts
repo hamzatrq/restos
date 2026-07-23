@@ -156,13 +156,27 @@ const checkInvariants = async (
   for (const amount of uniquePriors.values()) priorTotal += amount;
   // The decision is exactly the domain rule's output — no re-implemented
   // arithmetic at the call site (01-F30, T-01-08 law 7).
-  return refundRemainderExceeded({
-    payment_amount_paisa: Number(parentPayload.amount_paisa),
-    prior_refunds_total_paisa: priorTotal,
-    this_refund_paisa: Number(payload.amount_paisa),
-  })
-    ? "invariant_violation"
-    : null;
+  try {
+    return refundRemainderExceeded({
+      payment_amount_paisa: Number(parentPayload.amount_paisa),
+      prior_refunds_total_paisa: priorTotal,
+      this_refund_paisa: Number(payload.amount_paisa),
+    })
+      ? "invariant_violation"
+      : null;
+  } catch (error) {
+    // Fix round F-1 (ruled, plans/wave-0/t-01-08-fix-round.md): an
+    // unrepresentable prior-Σ is a PROVABLE violation, not an unprovable case —
+    // if Σ(priors) alone exceeds 2^53−1 paisa it necessarily exceeds any
+    // schema-valid payment_amount_paisa (the registry's integer cap is 2^53−1),
+    // so the remainder is negative by pure magnitude. The domain fn's surface
+    // stays as pinned (it rightly throws on unsafe args); letting that
+    // RangeError escape here would abort the WHOLE push — tx rollback, no
+    // quarantine row, no watermark advance, the origin's outbox re-pushing the
+    // same refund forever (the DEC-SYNC-005 wedge class). Quarantine instead.
+    if (error instanceof RangeError) return "invariant_violation";
+    throw error;
+  }
 };
 
 type MergedEvent = { envelope: EventEnvelopeT; globalSeq: number; serverReceivedAt: number };
