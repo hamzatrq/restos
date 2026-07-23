@@ -3,18 +3,31 @@
 // high-water ack (01-F8), persist-before-ack (01-F2 cloud side), branch-stream
 // fan-out + catchup paging (01-F9/01-F34), quarantine storage (01-F37; registry
 // parse at the merge boundary, 01-F4). Per-device sessions remain the default;
-// additionally a session whose token carries the hub-relay capability may push
-// same-org/branch peers' events verbatim — attested, never re-authored — with
-// lamport contiguity tracked per ORIGIN device (DEC-SYNC-009, T-01-12; supersedes
-// DEC-SYNC-004's blanket no-proxy rule). Transport-free: the socket adapter
-// (server.ts) owns the wire codec; every outbound message is a decoded
+// additionally a relay-AUTHORIZED session (T-01-09: token hub_relay claim AND an
+// unrevoked hub-eligible registry row — neither alone) may push same-org/branch
+// peers' events verbatim — attested, never re-authored — with lamport contiguity
+// tracked per ORIGIN device (DEC-SYNC-009, T-01-12; supersedes DEC-SYNC-004's
+// blanket no-proxy rule). T-01-09 auth at every boundary: hello = jose signature
+// + injected-clock expiry + claims/hello consistency + registry authority
+// (01-F25/01-F27, 18 §4/§5); every later operation re-checks revocation
+// (rejection, never quarantine; 01-F42 purge on a revoked hello); relayed
+// origins are registry-checked at the merge boundary (`origin_unregistered` /
+// `origin_revoked` — the DEC-SYNC-009 F6 hole). Transport-free: the socket
+// adapter (server.ts) owns the wire codec; every outbound message is a decoded
 // ProtocolMessage through the sink.
-import { type EventEnvelopeT, newId, parseEvent, refundRemainderExceeded } from "@restos/domain";
+import {
+  type EventEnvelopeT,
+  HUB_ELIGIBLE_CLASSES,
+  newId,
+  parseEvent,
+  refundRemainderExceeded,
+} from "@restos/domain";
 import { type ProtocolMessage, parseMessage } from "@restos/sync-protocol";
 import { sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { verifyDeviceToken } from "./auth.js";
 import { AuthRejectedError, ProtocolViolationError, type QuarantineReason } from "./errors.js";
+import { type DeviceRegistryRow, readRegistryRow } from "./registry.js";
 
 /** Exported binding constant (T-01-07 catchup contract). */
 export const CATCHUP_PAGE_SIZE = 500;
@@ -36,8 +49,13 @@ type SessionState = {
   orgId: string;
   branchId: string;
   deviceId: string;
-  /** Hub-relay capability from the verified token claims (DEC-SYNC-009, T-01-12). */
-  hubRelay: boolean;
+  /**
+   * Hub-relay GRANT, composed at hello (T-01-09; DEC-SYNC-009): token claim
+   * hub_relay AND the session's unrevoked registry row has a hub-eligible class
+   * (01-F13/01-F39). The claim alone grants nothing (registry veto); registry
+   * eligibility alone grants nothing (claim required, 18 §5).
+   */
+  relayAuthorized: boolean;
 };
 type ConnectionRecord = { sink: Sink; session: SessionState | null; open: boolean };
 type WireEvent = Extract<ProtocolMessage, { kind: "event_batch" }>["events"][number];
@@ -185,7 +203,16 @@ type MergedEvent = { envelope: EventEnvelopeT; globalSeq: number; serverReceived
  * rows of identity-valid envelopes carry the ORIGIN (DEC-SYNC-005). */
 type QuarantinedEvent = { envelope: EventEnvelopeT; reason: QuarantineReason; deviceId: string };
 
-export const createGateway = ({ db, clock }: { db: GatewayDb; clock: Clock }): Gateway => {
+export const createGateway = ({
+  db,
+  clock,
+  auth,
+}: {
+  db: GatewayDb;
+  clock: Clock;
+  /** REQUIRED (T-01-09): the device-token verification key (jose HS256, 18 §5). */
+  auth: { token_secret: string };
+}): Gateway => {
   const branchSets = new Map<string, Set<ConnectionRecord>>();
   const branchKey = (orgId: string, branchId: string): string => JSON.stringify([orgId, branchId]);
 
@@ -205,13 +232,44 @@ export const createGateway = ({ db, clock }: { db: GatewayDb; clock: Clock }): G
     if (record.session !== null) {
       throw new ProtocolViolationError("second hello on an open session");
     }
-    const claims = verifyDeviceToken(message.token);
+    // T-01-09 hello law (01-F25/01-F27; 18 §4/§5), in order: (1) signature under
+    // token_secret — the unsigned dev-token shape is RETIRED and rejects here;
+    // (2) expiry against the INJECTED clock; (3) claims must match the hello
+    // identity (T-01-07 consistency law carried over); (4) the REGISTRY is the
+    // authority — an unrevoked (org, device) row whose branch equals the claim.
+    const claims = await verifyDeviceToken(message.token, auth.token_secret);
     if (claims === null) {
-      throw new AuthRejectedError("token is not the Wave-0 dev-token shape (01-F27 stub boundary)");
+      throw new AuthRejectedError("device token failed verification (01-F27, 18 §5)");
+    }
+    if (claims.expires_at !== undefined && claims.expires_at <= clock.now()) {
+      throw new AuthRejectedError("device token expired (01-F27; injected clock, 18 §4)");
     }
     if (claims.device_id !== message.device_id || claims.branch_id !== message.branch_id) {
       throw new AuthRejectedError("token claims do not match hello identity (01-F27)");
     }
+    const registry = await readRegistryRow(db, claims.org_id, claims.device_id);
+    if (registry === undefined) {
+      // Unregistered ≠ revoked: no purge — there is nothing provisioned to wipe.
+      throw new AuthRejectedError("device is not registered (01-F25; registry authority, 18 §5)");
+    }
+    if (registry.revoked_at !== null) {
+      // 01-F42/01-F25: purge_command { scope: "all" } through the sink and NO
+      // session — re-sent on EVERY hello while revoked (at-least-once; no
+      // purge-ack wire kind exists in the closed PROTOCOL.md set).
+      record.sink(parseMessage({ v: 1, kind: "purge_command", scope: "all" }));
+      throw new AuthRejectedError("device is revoked (01-F25/01-F42)");
+    }
+    if (registry.branch_id !== claims.branch_id) {
+      throw new AuthRejectedError(
+        "registry branch does not match the claimed branch (01-F25, 18 §5)",
+      );
+    }
+    // Relay grant (T-01-09; DEC-SYNC-009 "authenticated as branch hub"): claim
+    // ∧ registry hub-eligible class — the hello's client-declared device_class
+    // never grants anything (01-F39/01-F40, 18 §5).
+    const relayAuthorized =
+      claims.hub_relay &&
+      (HUB_ELIGIBLE_CLASSES as readonly string[]).includes(registry.device_class);
     const rows = await db.execute(
       sql`select acked_watermark from kernel.device_watermarks
           where org_id = ${claims.org_id} and device_id = ${claims.device_id}`,
@@ -223,7 +281,7 @@ export const createGateway = ({ db, clock }: { db: GatewayDb; clock: Clock }): G
       orgId: claims.org_id,
       branchId: claims.branch_id,
       deviceId: claims.device_id,
-      hubRelay: claims.hub_relay,
+      relayAuthorized,
     };
     record.session = session;
     joinFanout(record, session); // the session joins the fan-out set on hello_ack
@@ -234,10 +292,10 @@ export const createGateway = ({ db, clock }: { db: GatewayDb; clock: Clock }): G
         session_id: session.sessionId,
         hub: false,
         resume_from: resumeFrom,
-        // Advertised ONLY when the capability is present (DEC-SYNC-009): the
-        // client-side gate for relaying — absence keeps plain sessions (and the
-        // committed XP transcript) byte-identical to the pre-relay contract.
-        ...(claims.hub_relay ? { relay_authorized: true } : {}),
+        // Advertised ONLY when the grant holds (DEC-SYNC-009 / T-01-09): the
+        // client-side gate for relaying — absent otherwise, keeping plain
+        // sessions (and the committed XP transcript) byte-identical.
+        ...(relayAuthorized ? { relay_authorized: true } : {}),
       }),
     );
     // T-01-08 hello-time notice drain (DEC-SYNC-008): AFTER hello_ack, this
@@ -274,11 +332,26 @@ export const createGateway = ({ db, clock }: { db: GatewayDb; clock: Clock }): G
   /** Per-origin contiguity state within one push transaction (DEC-SYNC-009). */
   type StreamState = { storedThrough: number; through: number; extraFilled: Set<number> };
 
+  /**
+   * T-01-09 per-operation revocation binding (01-F25/01-F27/01-F42): revocation
+   * takes effect on the NEXT operation of an already-open session — push and
+   * catchup_request re-check the registry and REJECT (nothing persisted, no
+   * quarantine row: a revoked principal has no legitimate outbox). A revoked
+   * HUB loses everything including relay by the same gate.
+   */
+  const requireUnrevoked = async (session: SessionState): Promise<void> => {
+    const row = await readRegistryRow(db, session.orgId, session.deviceId);
+    if (row === undefined || row.revoked_at !== null) {
+      throw new AuthRejectedError("device revoked — operation rejected (01-F25/01-F27/01-F42)");
+    }
+  };
+
   const handlePush = async (
     record: ConnectionRecord,
     session: SessionState,
     message: PushMessage,
   ): Promise<void> => {
+    await requireUnrevoked(session);
     // One transaction for the whole batch (01-F3 step 5): counter lock, event
     // inserts, quarantine inserts, and the watermark updates commit atomically.
     const outcome = await db.transaction(async (tx) => {
@@ -371,30 +444,59 @@ export const createGateway = ({ db, clock }: { db: GatewayDb; clock: Clock }): G
       // answers it. Falls back to the session's own stream when nothing is
       // identity-valid (pre-relay behavior).
       let origin: string | null = null;
+      // Per-batch cache of relayed-origin registry lookups (T-01-09); null =
+      // no row for (session org, claimed device).
+      const originRows = new Map<string, DeviceRegistryRow | null>();
 
       for (const envelope of message.events) {
-        // 1. Identity checks (authz class). The capability never crosses branch
-        // or org; without it, pushing another device's events keeps the
+        // 1. Identity checks (authz class). The grant never crosses branch or
+        // org; without it, pushing another device's events keeps the
         // superseded-rule rejection (device_mismatch — a hub must not be
-        // forgeable by any session; DEC-SYNC-009 / T-01-09 seam).
+        // forgeable by any session; DEC-SYNC-009 / T-01-09).
         const identityReason: QuarantineReason | null =
           envelope.org_id !== session.orgId
             ? "org_mismatch"
             : envelope.branch_id !== session.branchId
               ? "branch_mismatch"
-              : envelope.device_id !== session.deviceId && !session.hubRelay
+              : envelope.device_id !== session.deviceId && !session.relayAuthorized
                 ? "device_mismatch"
                 : null;
         if (identityReason !== null) {
           // F2 (ruled): the row attributes to session.deviceId — the claimed
           // origin ids are unauthenticated garbage a forger controls.
           quarantine(
-            session.hubRelay ? null : ownStream,
+            session.relayAuthorized ? null : ownStream,
             envelope,
             identityReason,
             session.deviceId,
           );
           continue;
+        }
+        // 1.5 Origin-existence (T-01-09 closes the DEC-SYNC-009 F6 hole): a
+        // relayed identity-valid envelope's origin must resolve to a registry
+        // row for the SESSION's org AND branch (00 §5.4 — a same-id row in
+        // another org, or another branch of this org, is unregistered HERE);
+        // a registered-but-revoked origin stops relaying on next contact
+        // (01-F25 — relay is that device's cloud participation by proxy).
+        // Both classes: verbatim quarantine row, NO stream filled (F1 pattern —
+        // the garbage was never in the hub's outbox), no phantom watermark, no
+        // ack naming the origin. Attribution (F2 pattern): unregistered → the
+        // SESSION device (the claimed id is registry-unbacked garbage a forger
+        // controls); revoked → the ORIGIN (the identity is registry-known).
+        if (envelope.device_id !== session.deviceId) {
+          let originRow = originRows.get(envelope.device_id);
+          if (originRow === undefined) {
+            originRow = (await readRegistryRow(tx, session.orgId, envelope.device_id)) ?? null;
+            originRows.set(envelope.device_id, originRow);
+          }
+          if (originRow === null || originRow.branch_id !== session.branchId) {
+            quarantine(null, envelope, "origin_unregistered", session.deviceId);
+            continue;
+          }
+          if (originRow.revoked_at !== null) {
+            quarantine(null, envelope, "origin_revoked", envelope.device_id);
+            continue;
+          }
         }
         const stream = await streamOf(envelope.device_id);
         if (origin === null) origin = envelope.device_id;
@@ -519,12 +621,14 @@ export const createGateway = ({ db, clock }: { db: GatewayDb; clock: Clock }): G
       return {
         acked: ackStream.through,
         ackOrigin: ackDevice === session.deviceId ? null : ackDevice,
-        // Fix round F1 / ratified interpretation 2: a relay-capable push with
-        // NOTHING identity-valid names no origin and filled no stream — it is
+        // Fix round F1 / ratified interpretation 2 (extended by T-01-09 to the
+        // all-unregistered-origin relay push): a relay-authorized push where
+        // NOTHING survives the identity + origin-registry gates names no origin
+        // and filled no stream — it is
         // answered with NO push_ack (for a fresh hub an ack of 0 would claim
         // slot 0 held; for an established hub an ack would answer a question
         // about slots the push never asked about).
-        mismatchOnlyRelay: session.hubRelay && origin === null && message.events.length > 0,
+        mismatchOnlyRelay: session.relayAuthorized && origin === null && message.events.length > 0,
         merged,
         quarantined,
       };
@@ -606,6 +710,7 @@ export const createGateway = ({ db, clock }: { db: GatewayDb; clock: Clock }): G
     session: SessionState,
     message: CatchupRequest,
   ): Promise<void> => {
+    await requireUnrevoked(session);
     // Branch stream, exclusive cursor (assumption 6), ascending, page-capped.
     // Fetch one extra row to compute `complete` without a second query.
     const rows = await db.execute(

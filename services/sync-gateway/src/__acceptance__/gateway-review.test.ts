@@ -35,8 +35,10 @@ import {
   quarantineEnvelopeRaw,
   quarantineRows,
   recorder,
+  registerIdentity,
   type Session,
   storedWatermark,
+  TEST_TOKEN_SECRET,
   validEnvelope,
   validEnvelopes,
 } from "./helpers.js";
@@ -48,7 +50,7 @@ let gateway: Gateway;
 beforeAll(() => {
   db = openDb();
   verify = openDb();
-  gateway = createGateway({ db, clock: makeClock() });
+  gateway = createGateway({ db, clock: makeClock(), auth: { token_secret: TEST_TOKEN_SECRET } });
 });
 
 afterAll(async () => {
@@ -221,6 +223,10 @@ describe("amendment 5 — handle() serializes per connection (00 §5.4)", () => 
   it("00 §5.4: two un-awaited hellos on ONE connection yield exactly one hello_ack (first wins, second throws) and the connection joins only the winning org's fan-out — the losing org's traffic never arrives", async () => {
     const orgA = freshIdentity();
     const orgB = freshIdentity();
+    // T-01-09: these hellos bypass openSession (the TOCTOU probe needs raw
+    // frames), so the identities are registered explicitly.
+    await registerIdentity(db, orgA);
+    await registerIdentity(db, orgB);
     const rec = recorder();
     const conn = gateway.connect(rec.sink);
 

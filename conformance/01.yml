@@ -10,6 +10,7 @@ rows:
       - "services/sync-gateway/src/__acceptance__/law2-idempotent-push.test.ts#01-F8/01-F1: same id with divergent content quarantines as id_content_divergence and NEVER mutates the stored row"
       - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#01-F13/DEC-SYNC-009/01-F1: a branch-hub session pushes another device's events — merged under the ORIGIN's device_id/lamport_seq with the envelope verbatim, per-origin watermark acked, fanned out with global_seq, and the origin's own next hello resumes past the relayed prefix (01-F8)"
       - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#01-F1/DEC-SYNC-009: a hub relay diverging from the origin's stored content quarantines id_content_divergence with the stored row untouched; a fresh id at an occupied origin slot quarantines lamport_conflict — the capability licenses relay, never re-authoring"
+      - "services/sync-gateway/src/__acceptance__/relay-origin-registry.test.ts#01-F25/DEC-SYNC-009: a REVOKED origin stops relaying on next contact — origin_revoked quarantine attributed to the ORIGIN, prior merged events remain (01-F1), watermark unmoved"
   - fr: 01-F2
     status: green
     tests:
@@ -175,6 +176,7 @@ rows:
       - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#01-F13/DEC-SYNC-009/01-F1: a branch-hub session pushes another device's events — merged under the ORIGIN's device_id/lamport_seq with the envelope verbatim, per-origin watermark acked, fanned out with global_seq, and the origin's own next hello resumes past the relayed prefix (01-F8)"
       - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#01-F8/DEC-SYNC-009: interleaved own and relayed pushes hold independent per-origin watermarks; a relayed gap holds (stop-at-gap) until the origin's contiguous re-relay completes it"
       - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#01-F8/DEC-SYNC-009: events delivered by BOTH the origin's own session and the hub relay merge exactly once (id dedupe), fan exactly once, and the origin's resume_from reflects the union — per-device sessions remain the default"
+      - "services/sync-gateway/src/__acceptance__/relay-origin-registry.test.ts#01-F13/DEC-SYNC-009: a registered hub-eligible device with the hub_relay claim is relay-authorized — relays a registered WAITER origin verbatim, per-origin ack, origin watermark, and the origin's own hello resumes past the relayed prefix (01-F25/01-F8)"
       - "services/sync-gateway/src/__acceptance__/session.test.ts#01-F8: on reconnect, hello_ack.resume_from = acked_watermark + 1"
   - fr: 01-F9
     status: green
@@ -251,6 +253,8 @@ rows:
       - "packages/sync-client/src/__acceptance__/relay-scenarios.test.ts#R2/01-F13/01-F8/DEC-SYNC-009: the hub dies mid-relay; the re-elected hub completes the origin's relay from its ack watermark — merged exactly once, gap-free, no duplicates; the origin's outbox drains fully"
       - "packages/sync-client/src/__acceptance__/spike-scenarios.test.ts#X5/01-F13/01-F14: killing the hub re-elects a new one < 10 000 virtual ms with zero loss, and a cold joiner attached after the kill is served the full branch window over LAN by the NEW hub"
       - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#01-F13/DEC-SYNC-009/01-F1: a branch-hub session pushes another device's events — merged under the ORIGIN's device_id/lamport_seq with the envelope verbatim, per-origin watermark acked, fanned out with global_seq, and the origin's own next hello resumes past the relayed prefix (01-F8)"
+      - "services/sync-gateway/src/__acceptance__/relay-origin-registry.test.ts#01-F13/DEC-SYNC-009: a registered hub-eligible device with the hub_relay claim is relay-authorized — relays a registered WAITER origin verbatim, per-origin ack, origin watermark, and the origin's own hello resumes past the relayed prefix (01-F25/01-F8)"
+      - "services/sync-gateway/src/__acceptance__/relay-origin-registry.test.ts#18 §5/01-F13: the claim is still REQUIRED — a registered hub-eligible device without hub_relay is a plain session; third-party push stays device_mismatch (T-01-12 claims contract survives)"
   - fr: 01-F14
     status: green
     tests:
@@ -283,6 +287,7 @@ rows:
       - "services/sync-gateway/src/__acceptance__/invariant-refund-cap.test.ts#01-F29/01-F17: a refund whose parent attempt is NOT merged (out-of-order arrival) merges normally — global_seq assigned, fanned out, no quarantine; once the parent lands, the merged-while-unprovable refund COUNTS toward the remainder for later provable checks"
       - "services/sync-gateway/src/__acceptance__/invariant-refund-cap.test.ts#01-F17/DEC-SYNC-007: a refund whose parent was QUARANTINED (not merged) is unprovable and passes through — the gateway blocks only provable violations"
       - "services/sync-gateway/src/__acceptance__/invariant-refund-cap.test.ts#01-F17/DEC-SYNC-007: sale-path events are never invariant-checked — payments of any size merge; only payment.refunded can quarantine invariant_violation"
+      - "services/sync-gateway/src/__acceptance__/invariant-refund-cap.test.ts#F-1/01-F29/01-F17/DEC-SYNC-005: near-2^53 refunds merged while the parent was unprovable push the prior-Σ past 2^53−1 — the NEXT refund naming that parent quarantines invariant_violation (slot filled, ack advances, notice row written), never aborting the push"
       - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#DEC-SYNC-005/01-F37/DEC-SYNC-009: a poison event inside a relayed stream quarantines verbatim, fills the ORIGIN's lamport slot, and the per-origin ack advances over it — the origin's stream stays gap-free modulo quarantine and its outbox never wedges (01-F17)"
   - fr: 01-F18
     status: unmapped
@@ -314,14 +319,29 @@ rows:
   - fr: 01-F24
     status: unmapped
   - fr: 01-F25
-    status: unmapped
+    status: green
+    tests:
+      - "services/sync-gateway/src/__acceptance__/device-auth.test.ts#01-F25/01-F27: registered device + issued token → session opens, pushes merge, reconnect resumes past the ack"
+      - "services/sync-gateway/src/__acceptance__/device-auth.test.ts#01-F25: an UNREGISTERED device is rejected even with a validly-signed token — the registry, not the signature, is the authority (18 §5)"
+      - "services/sync-gateway/src/__acceptance__/device-auth.test.ts#01-F25/18 §5: registry branch is authoritative — a device registered on branch A helloing (self-consistently) into branch B is rejected"
+      - "services/sync-gateway/src/__acceptance__/device-auth.test.ts#01-F42/01-F25: a revoked device's next hello → purge_command { scope: 'all' } and NO session; re-sent on every hello while revoked (no purge-ack wire kind exists)"
+      - "services/sync-gateway/src/__acceptance__/device-auth.test.ts#01-F25/01-F27: revocation binds on the NEXT operation of an already-open session — push and catchup_request are rejected, nothing persisted, watermark unmoved, NO quarantine row (rejection, not quarantine)"
+      - "services/sync-gateway/src/__acceptance__/device-auth.test.ts#01 §5/01-F25: kernel.device_registry holds the row (branch, class, revoked_at null); revokeDevice sets revoked_at and deletes nothing"
+      - "services/sync-gateway/src/__acceptance__/relay-origin-registry.test.ts#01-F13/DEC-SYNC-009: a registered hub-eligible device with the hub_relay claim is relay-authorized — relays a registered WAITER origin verbatim, per-origin ack, origin watermark, and the origin's own hello resumes past the relayed prefix (01-F25/01-F8)"
+      - "services/sync-gateway/src/__acceptance__/relay-origin-registry.test.ts#01-F25/DEC-SYNC-009: a REVOKED origin stops relaying on next contact — origin_revoked quarantine attributed to the ORIGIN, prior merged events remain (01-F1), watermark unmoved"
+      - "services/sync-gateway/src/__acceptance__/relay-origin-registry.test.ts#01-F25/01-F42 + T-01-12: a REVOKED HUB loses relay with the rest of its participation — the relay push is rejected session-level, nothing persisted, no quarantine row"
   - fr: 01-F26
     status: unmapped
   - fr: 01-F27
     status: green
     tests:
+      - "services/sync-gateway/src/__acceptance__/device-auth.test.ts#01-F25/01-F27: registered device + issued token → session opens, pushes merge, reconnect resumes past the ack"
+      - "services/sync-gateway/src/__acceptance__/device-auth.test.ts#01-F27: the unsigned Wave-0 dev-token shape is RETIRED — rejected even for a registered device (the T-01-07 stub boundary this task exists to close)"
+      - "services/sync-gateway/src/__acceptance__/device-auth.test.ts#01-F27/18 §5: tampered and wrong-key tokens → AuthRejectedError (the signature is actually verified)"
+      - "services/sync-gateway/src/__acceptance__/device-auth.test.ts#01-F27/18 §4: expiry is enforced against the INJECTED clock — expires_at ≤ clock.now() rejects; a token expiring 60s past the injected now (long past for wall clock) is accepted"
+      - "services/sync-gateway/src/__acceptance__/device-auth.test.ts#01-F25/01-F27: revocation binds on the NEXT operation of an already-open session — push and catchup_request are rejected, nothing persisted, watermark unmoved, NO quarantine row (rejection, not quarantine)"
+      - "services/sync-gateway/src/__acceptance__/device-auth.test.ts#01-F27: garbage tokens are rejected with no session — before AND after the jose swap (the outcome, not the mechanism, is the pin)"
       - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#01-F27/DEC-SYNC-009 (T-01-09 capability seam): a session WITHOUT the hub-relay capability pushing another device's events is rejected — device_mismatch quarantine, nothing merged for the foreign device; its OWN events still merge"
-      - "services/sync-gateway/src/__acceptance__/session.test.ts#01-F27 (Wave-0 stub): a well-formed dev token opens a session — hello_ack { session_id, hub: false, resume_from: 0 } for a fresh device"
       - "services/sync-gateway/src/__acceptance__/session.test.ts#01-F27: malformed token shapes → AuthRejectedError, no session opened"
       - "services/sync-gateway/src/__acceptance__/session.test.ts#01-F27/DEC-SYNC-004: token claims mismatching hello.device_id or hello.branch_id → AuthRejectedError"
   - fr: 01-F28
@@ -358,6 +378,7 @@ rows:
       - "services/sync-gateway/src/__acceptance__/invariant-refund-cap.test.ts#01-F29/01-F31: the IN-BATCH case resolves identically to the two-push case — [pay 1000, refund 600, refund 600] in ONE push merges the first refund and quarantines the second (earlier same-batch refunds are visible to the check)"
       - "services/sync-gateway/src/__acceptance__/invariant-refund-cap.test.ts#01-F31/01-F29: prior refunds total over UNIQUE attempt keys — the same refund intent re-expressed under a SECOND envelope id merges (no new money, no violation), and the cap math counts it ONCE (an envelope-keyed sum would wrongly quarantine the exact cover)"
       - "services/sync-gateway/src/__acceptance__/invariant-refund-cap.test.ts#01-F29/01-F17: a refund whose parent attempt is NOT merged (out-of-order arrival) merges normally — global_seq assigned, fanned out, no quarantine; once the parent lands, the merged-while-unprovable refund COUNTS toward the remainder for later provable checks"
+      - "services/sync-gateway/src/__acceptance__/invariant-refund-cap.test.ts#F-1/01-F29/01-F17/DEC-SYNC-005: near-2^53 refunds merged while the parent was unprovable push the prior-Σ past 2^53−1 — the NEXT refund naming that parent quarantines invariant_violation (slot filled, ack advances, notice row written), never aborting the push"
   - fr: 01-F30
     status: green
     tests:
@@ -537,6 +558,7 @@ rows:
       - "services/sync-gateway/src/__acceptance__/relay-fix-round.test.ts#F1 guard (GREEN)/01-F37/DEC-SYNC-005: a PLAIN session's identity-mismatch keeps the law-6 fill — pusher==author, so the mismatch slot IS the session's own outbox slot; the watermark advances over it and its own next event continues past it"
       - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#DEC-SYNC-005/01-F37/DEC-SYNC-009: a poison event inside a relayed stream quarantines verbatim, fills the ORIGIN's lamport slot, and the per-origin ack advances over it — the origin's stream stays gap-free modulo quarantine and its outbox never wedges (01-F17)"
       - "services/sync-gateway/src/__acceptance__/relay-hub-uplink.test.ts#DEC-SYNC-009/01-F37: a relay-capable hub pushing events for a foreign-BRANCH or foreign-ORG origin is rejected — branch_mismatch / org_mismatch quarantine, nothing merged (the origin must belong to the hub's own org+branch)"
+      - "services/sync-gateway/src/__acceptance__/relay-origin-registry.test.ts#DEC-SYNC-009/01-F37: relaying for a NEVER-REGISTERED same-org/branch device_id quarantines origin_unregistered — verbatim rows attributed to the SESSION device, nothing merged, no phantom watermark row, NO push_ack, notice to the pushing hub"
   - fr: 01-F38
     status: green
     tests:
@@ -556,12 +578,15 @@ rows:
       - "packages/sync-client/src/__acceptance__/hub-election.test.ts#01-F13/01-F39: classes outside HUB_ELIGIBLE_CLASSES never win — even with a lower device_id"
       - "packages/sync-client/src/__acceptance__/hub-election.test.ts#01-F13/01-F39 property: scoped-class peers are inert — adding them never changes the winner"
       - "packages/sync-client/src/__acceptance__/mesh-session.test.ts#(c)/01-F39: alone + non-eligible class → follower with hub_id null (waits; never candidate)"
+      - "services/sync-gateway/src/__acceptance__/device-auth.test.ts#01-F39: registerDevice rejects a class outside DEVICE_CLASSES — unknown class throws, nothing written"
+      - "services/sync-gateway/src/__acceptance__/relay-origin-registry.test.ts#01-F39/01-F40/18 §5: registry-class VETO — a registered WAITER carrying hub_relay: true is NOT relay-authorized; its third-party push stays device_mismatch (the claim alone grants nothing)"
   - fr: 01-F40
     status: green
     tests:
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F40: hello carries no slice — a client-declared slice field is rejected or dropped, never kept"
       - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F40/01-F42: dropping a line key removes the line WHOLESALE — the device asserts nothing about it, never a fragment (matrix-C predicate 7)"
       - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F40/01-F42 (fix-round F2): after a successful line drop, a never-seen line_added for the dropped line key never re-materializes the cell — ledger-retained only"
+      - "services/sync-gateway/src/__acceptance__/relay-origin-registry.test.ts#01-F39/01-F40/18 §5: registry-class VETO — a registered WAITER carrying hub_relay: true is NOT relay-authorized; its third-party push stays device_mismatch (the claim alone grants nothing)"
   - fr: 01-F41
     status: unmapped
   - fr: 01-F42
@@ -574,6 +599,8 @@ rows:
       - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F42/01-F1 (fix-round F2): after a successful order drop, a never-seen straggler for the dropped key is ledger-retained, never folded, never projected — and counts no fold work"
       - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F40/01-F42 (fix-round F2): after a successful line drop, a never-seen line_added for the dropped line key never re-materializes the cell — ledger-retained only"
       - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F42/18 §4 (fix-round F8): a malformed drop key is rejected loudly with nothing changed — `line:O1` must never silently mis-parse into (order O, line O1)"
+      - "services/sync-gateway/src/__acceptance__/device-auth.test.ts#01-F42/01-F25: a revoked device's next hello → purge_command { scope: 'all' } and NO session; re-sent on every hello while revoked (no purge-ack wire kind exists)"
+      - "services/sync-gateway/src/__acceptance__/relay-origin-registry.test.ts#01-F25/01-F42 + T-01-12: a REVOKED HUB loses relay with the rest of its participation — the relay push is rejected session-level, nothing persisted, no quarantine row"
   - fr: 01-N1
     status: green
     tests:

@@ -58,20 +58,23 @@ import {
   openSession,
   pushMsg,
   quarantineRows,
+  registerIdentity,
+  signedToken,
   storedWatermark,
+  TEST_TOKEN_SECRET,
   unknownTypeEnvelope,
   validEnvelope,
   validEnvelopes,
 } from "./helpers.js";
 
 /**
- * Wave-0 hub-relay dev token (the T-01-09 capability seam, oracle-pinned):
- * the unsigned base64url-JSON claims gain `hub_relay: true`. Same org/branch/
- * device claims contract as devToken — verifyDeviceToken's successor validates
- * the capability, not a different shape.
+ * Hub-relay token (T-01-09 M3 re-ground): the SIGNED claims gain
+ * `hub_relay: true`. Same org/branch/device claims contract — the jose seam
+ * validates the capability, not a different shape. openSession registers the
+ * hub (counter_electron, hub-eligible), so the T-01-09 grant (claim ∧ registry
+ * class) holds and these T-01-12 pins keep their relay-authorized sessions.
  */
-const relayToken = (claims: Identity): string =>
-  Buffer.from(JSON.stringify({ ...claims, hub_relay: true })).toString("base64url");
+const relayToken = (claims: Identity): string => signedToken({ ...claims, hub_relay: true });
 
 /** A same-branch peer identity — the WAN-less ORIGIN a branch hub relays for. */
 const sameBranchDevice = (of: Identity): Identity => ({
@@ -86,7 +89,7 @@ let gateway: Gateway;
 beforeAll(() => {
   db = openDb();
   verify = openDb();
-  gateway = createGateway({ db, clock: makeClock() });
+  gateway = createGateway({ db, clock: makeClock(), auth: { token_secret: TEST_TOKEN_SECRET } });
 });
 
 afterAll(async () => {
@@ -99,6 +102,7 @@ describe("relay 1 — hub relays a WAN-less origin verbatim (01-F13 / DEC-SYNC-0
   it("01-F13/DEC-SYNC-009/01-F1: a branch-hub session pushes another device's events — merged under the ORIGIN's device_id/lamport_seq with the envelope verbatim, per-origin watermark acked, fanned out with global_seq, and the origin's own next hello resumes past the relayed prefix (01-F8)", async () => {
     const hub = freshIdentity();
     const origin = sameBranchDevice(hub);
+    await registerIdentity(db, origin); // T-01-09: relayed origins resolve in the registry
     const hubSession = await openSession(gateway, hub, { token: relayToken(hub) });
     const peer = await openSession(gateway, sameBranchDevice(hub)); // same-branch observer
 
@@ -156,6 +160,7 @@ describe("relay 2 — per-ORIGIN lamport contiguity, independent of the pushing 
   it("01-F8/DEC-SYNC-009: interleaved own and relayed pushes hold independent per-origin watermarks; a relayed gap holds (stop-at-gap) until the origin's contiguous re-relay completes it", async () => {
     const hub = freshIdentity();
     const origin = sameBranchDevice(hub);
+    await registerIdentity(db, origin); // T-01-09: relayed origins resolve in the registry
     const hubSession = await openSession(gateway, hub, { token: relayToken(hub) });
 
     const own = validEnvelopes(hub, 0, 3);
@@ -307,6 +312,7 @@ describe("relay 5 — a quarantined relayed event fills its ORIGIN's slot (DEC-S
   it("DEC-SYNC-005/01-F37/DEC-SYNC-009: a poison event inside a relayed stream quarantines verbatim, fills the ORIGIN's lamport slot, and the per-origin ack advances over it — the origin's stream stays gap-free modulo quarantine and its outbox never wedges (01-F17)", async () => {
     const hub = freshIdentity();
     const origin = sameBranchDevice(hub);
+    await registerIdentity(db, origin); // T-01-09: relayed origins resolve in the registry
     const hubSession = await openSession(gateway, hub, { token: relayToken(hub) });
 
     const good0 = validEnvelope(origin, 0);

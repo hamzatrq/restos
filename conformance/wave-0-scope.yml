@@ -28,7 +28,7 @@ in_scope:
     - 01-F14  # hub-eligible full-window retention + serving joiners
     - 01-F15  # LAN fast-path propagation (logic; wall-clock is D3)
     - 01-F16  # concurrent line-adds merge
-    - 01-F27  # server-side authz on every op (dev-token stub in W0)
+    - 01-F27  # server-side authz on every op (jose + registry since T-01-09; the W0 dev-token stub is retired)
   # OVERSTATED in the derived matrix — 01.yml shows these green because tests carry
   # the FR tag, but the tags cover only part of the FR. Recorded honestly here rather
   # than hand-editing the CI-derived matrix (24-F5). External audit-2 F3 / audit-1 K-05.
@@ -52,7 +52,9 @@ in_scope:
   pending:
     - { fr: 01-F5,  by: T-01-10, note: "audit hash-chain emitter (Auditor chain-check depends on it)" }
     - { fr: 01-F7,  by: T-01-11, note: "Auditor demonstrates rebuildable projections; per-module read models are later" }
+    - { fr: 01-F25, by: T-01-09, note: "device registry + jose tokens + revocation (registration pairing UX is doc 14/15)" }
     - { fr: 01-F38, by: T-01-06, note: "split/merge + departed-origin partition shape demonstrated (DEC-SYNC-006)" }
+    - { fr: 01-F42, by: T-01-09, note: "revocation + purge_command on every revoked hello (LAN-side purge needs registry distribution — follow-up)" }
 
 deferred:
   # Explicitly OUT of Wave-0 kernel scope — each belongs to a later module/wave.
@@ -64,14 +66,12 @@ deferred:
   - { fr: 01-F22, reason: "availability toggle needs the availability fold", target: "POS wave" }
   - { fr: 01-F23, reason: "customer file (phone-keyed identity)", target: "customer wave" }
   - { fr: 01-F24, reason: "customer org-scoping", target: "customer wave" }
-  - { fr: 01-F25, reason: "device registration/pairing/revocable-token", target: "Wave 1 auth" }
   - { fr: 01-F26, reason: "user x role x PIN sessions", target: "Wave 1 auth" }
   - { fr: 01-F28, reason: "offline PIN against synced hashes", target: "Wave 1 auth" }
   - { fr: 01-F32, reason: "aggregator_receivable settlement path", target: "aggregator wave (doc 08)" }
   - { fr: 01-F33, reason: "post-settlement correction pairs / refund-remainder enforcement", target: "money-fold wave (T-01-08+ / doc 02)" }
   - { fr: 01-F36, reason: "approval.* idempotency", target: "manager console wave (doc 05)" }
   - { fr: 01-F41, reason: "reassignment backfill (scoped slices)", target: "Wave 1 slices" }
-  - { fr: 01-F42, reason: "revocation & purge (purge_command emission)", target: "Wave 1 auth" }
   - { fr: 01-N2, reason: "clock-skew device health flag", target: "fleet health (doc 15)" }
   - { fr: 01-N3, reason: "storage budget on 2GB tablet", target: "D3 rig" }
   - { fr: 01-N4, reason: "cloud ingestion load (50 orders/min x 200 branches)", target: "Wave 1 load staging" }

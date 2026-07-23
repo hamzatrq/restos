@@ -53,14 +53,17 @@ import {
   openDb,
   openSession,
   pushMsg,
+  registerIdentity,
+  signedToken,
+  TEST_TOKEN_SECRET,
   type TestClock,
   unknownTypeEnvelope,
   validEnvelope,
 } from "./helpers.js";
 
-/** Wave-0 hub-relay dev token (the T-01-09 capability seam — T-01-12 oracle-pinned shape). */
-const relayToken = (claims: Identity): string =>
-  Buffer.from(JSON.stringify({ ...claims, hub_relay: true })).toString("base64url");
+/** Hub-relay token (T-01-09 M3 re-ground: signed claims carrying hub_relay; the
+ * openSession fixture registers the hub hub-eligible, so the grant holds). */
+const relayToken = (claims: Identity): string => signedToken({ ...claims, hub_relay: true });
 
 const NUL = String.fromCharCode(0); // storage_reject trigger, kept out of source bytes
 
@@ -111,7 +114,7 @@ beforeAll(() => {
   db = openDb();
   verify = openDb();
   clock = makeClock();
-  gateway = createGateway({ db, clock });
+  gateway = createGateway({ db, clock, auth: { token_secret: TEST_TOKEN_SECRET } });
 });
 
 afterAll(async () => {
@@ -124,6 +127,7 @@ describe("law 4 — durable redelivery on the origin's next hello (01-F37 / DEC-
   it("01-F37/DEC-SYNC-008/DEC-SYNC-009: a quarantine from a RELAYED push writes an ORIGIN-keyed undelivered notice row; the origin's own next hello delivers it AFTER hello_ack, marks it, and a later hello redelivers nothing", async () => {
     const hubId = freshIdentity();
     const origin: Identity = { ...hubId, device_id: freshIdentity().device_id };
+    await registerIdentity(db, origin); // T-01-09: relayed origins resolve in the registry
     const hub = await openSession(gateway, hubId, { token: relayToken(hubId) });
 
     clock.t = BASE_T + 10_000;
@@ -170,13 +174,14 @@ describe("law 4 — durable redelivery on the origin's next hello (01-F37 / DEC-
   it("01-F37/DEC-SYNC-008: the notice survives a gateway close()/rebuild — the row is durable, and the origin's first hello against the REBUILT gateway still delivers it", async () => {
     const hubId = freshIdentity();
     const origin: Identity = { ...hubId, device_id: freshIdentity().device_id };
-    const gateway1 = createGateway({ db, clock });
+    await registerIdentity(db, origin); // T-01-09: relayed origins resolve in the registry
+    const gateway1 = createGateway({ db, clock, auth: { token_secret: TEST_TOKEN_SECRET } });
     const hub = await openSession(gateway1, hubId, { token: relayToken(hubId) });
     const bad = unknownTypeEnvelope(origin, 0);
     await hub.conn.handle(pushMsg([bad]));
     await gateway1.close(); // the gateway instance dies with the notice undelivered
 
-    const gateway2 = createGateway({ db, clock }); // rebuild over the same Postgres
+    const gateway2 = createGateway({ db, clock, auth: { token_secret: TEST_TOKEN_SECRET } }); // rebuild over the same Postgres
     const originSession = await openSession(gateway2, origin);
     const drained = ofKind(originSession.rec.all, "quarantine_notice");
     expect(drained.map((n) => n.event_id)).toEqual([bad.id]);

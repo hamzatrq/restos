@@ -9,9 +9,11 @@
 // hello.json and push.json are driven VERBATIM — zero in-memory substitutions.
 // The two 20 §2.7 fixture corrections (planner-approved spec review, T-01-07
 // fix-round amendment 7) landed on disk: push.json's order.created payload
-// carries the registry-required `channel`, and hello.json's token is the
-// Wave-0 dev-token shape (unsigned base64url-JSON claims matching the
-// fixture's org/branch/device identities).
+// carries the registry-required `channel`, and hello.json's token carries the
+// fixture's org/branch/device claims. T-01-09 (planner-approved spec review)
+// re-minted that token as deterministic HS256 under the committed
+// TEST_TOKEN_SECRET — the dev-token shape it previously pinned is retired —
+// and the fixture identity is registered in beforeAll (registry authority).
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { ProtocolMessage } from "@restos/sync-protocol";
@@ -31,6 +33,8 @@ import {
   pushMsg,
   type Recorder,
   recorder,
+  registerIdentity,
+  TEST_TOKEN_SECRET,
   unknownTypeEnvelope,
   validEnvelopes,
 } from "./helpers.js";
@@ -92,10 +96,13 @@ const trackedConnect = (g: Gateway) => {
   return { conn: g.connect(rec.sink), rec };
 };
 
-beforeAll(() => {
+beforeAll(async () => {
   db = openDb();
   verify = openDb();
-  gateway = createGateway({ db, clock: makeClock() });
+  gateway = createGateway({ db, clock: makeClock(), auth: { token_secret: TEST_TOKEN_SECRET } });
+  // T-01-09: hello.json is driven VERBATIM, so its identity must hold a
+  // registry row (the fixture's declared class) before the story opens.
+  await registerIdentity(db, fixtureIdentity);
 });
 
 afterAll(async () => {

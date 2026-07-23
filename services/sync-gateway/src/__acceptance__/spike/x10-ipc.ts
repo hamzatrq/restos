@@ -178,9 +178,6 @@ export const parseArgv = (argv: readonly string[]): ChildConfig => {
   };
 };
 
-/** The base64url dev-token shape the gateway's verifyDeviceToken seam accepts (01-F27). */
-export const devToken = (claims: {
-  org_id: string;
-  branch_id: string;
-  device_id: string;
-}): string => Buffer.from(JSON.stringify(claims)).toString("base64url");
+// The Wave-0 unsigned dev-token mint that lived here is RETIRED (T-01-09): the
+// orchestrator now mints signed tokens via the acceptance helpers and registers
+// the fleet in kernel.device_registry before spawning (x10-smoke.test.ts).

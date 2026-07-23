@@ -36,13 +36,21 @@ import type { DeviceClass } from "@restos/domain";
 import type { FastifyInstance } from "fastify";
 import { afterAll, describe, expect, it } from "vitest";
 import { buildServer } from "../../server.js";
-import { closeDb, eventRows, openDb, quarantineRows, testDatabaseUrl } from "../helpers.js";
+import {
+  closeDb,
+  eventRows,
+  openDb,
+  quarantineRows,
+  registerIdentity,
+  signedToken,
+  TEST_TOKEN_SECRET,
+  testDatabaseUrl,
+} from "../helpers.js";
 import {
   type AppendInput,
   type ChildConfig,
   type ChildMessage,
   type ChildReport,
-  devToken,
   type LanPeer,
   type ParentCommand,
   toArgv,
@@ -191,7 +199,7 @@ const confirmed = (device: string, id: string, order: string): AppendInput =>
 
 let app: FastifyInstance | null = null;
 const listenGateway = async (databaseUrl: string, port: number): Promise<number> => {
-  const instance = buildServer(databaseUrl);
+  const instance = buildServer(databaseUrl, TEST_TOKEN_SECRET);
   await instance.listen({ port, host: "127.0.0.1" });
   app = instance;
   return (instance.server.address() as AddressInfo).port;
@@ -219,7 +227,7 @@ const baseConfig = (
   org: ORG,
   branch: BRANCH,
   db,
-  token: devToken({ org_id: ORG, branch_id: BRANCH, device_id: device.id }),
+  token: signedToken({ org_id: ORG, branch_id: BRANCH, device_id: device.id }),
   cloud_url: cloudUrl,
   script: "smoke",
 });
@@ -256,6 +264,20 @@ describe("X10 — real-process smoke over real WS + Testcontainers PG (01 §9-Q1
     };
 
     try {
+      // ── register the fleet (T-01-09: the registry is the session authority) ─
+      const provisioning = openDb();
+      try {
+        for (const device of [HUB, F1, F2]) {
+          await registerIdentity(
+            provisioning,
+            { org_id: ORG, branch_id: BRANCH, device_id: device.id },
+            device.cls,
+          );
+        }
+      } finally {
+        await closeDb(provisioning);
+      }
+
       // ── boot the gateway (ephemeral) ──────────────────────────────────
       const gatewayPort = await listenGateway(url, 0);
       const cloudUrl = `ws://127.0.0.1:${gatewayPort}/sync`;

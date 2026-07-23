@@ -33,6 +33,7 @@ import {
   openDb,
   openSession,
   pushMsg,
+  TEST_TOKEN_SECRET,
   type TestClock,
   unknownTypeEnvelope,
 } from "./helpers.js";
@@ -59,7 +60,7 @@ let gateway: Gateway;
 beforeAll(() => {
   db = openDb();
   clock = makeClock();
-  gateway = createGateway({ db, clock });
+  gateway = createGateway({ db, clock, auth: { token_secret: TEST_TOKEN_SECRET } });
 });
 
 afterAll(async () => {

@@ -1,27 +1,37 @@
-// T-01-07 acceptance helpers/builders (plans/wave-0/kernel-tasks.md T-01-07).
+// T-01-07 acceptance helpers/builders (plans/wave-0/kernel-tasks.md T-01-07),
+// re-grounded by the T-01-09 oracle's migration enumeration (M1: signed mint +
+// registration fixtures — the dev-token default and the two-field createGateway
+// shape are retired with T-01-09).
 //
 // ── CONTRACTED MODULE SURFACE (binding on the implementation session) ────────
 // services/sync-gateway/src/index.ts must export exactly this API-contract
-// surface (T-01-07 "API contract"):
+// surface (T-01-07 "API contract" + the T-01-09 oracle-pinned auth surface in
+// device-auth.test.ts / relay-origin-registry.test.ts):
 //
-//   createGateway({ db, clock }): Gateway
+//   createGateway({ db, clock, auth }): Gateway
 //     db    — Drizzle instance over the `postgres` driver (we build it with
 //             drizzle(url) from "drizzle-orm/postgres-js")
 //     clock — { now(): number }; `server_received_at` comes from clock.now()
 //             (18 §4: `new Date()` banned in domain logic)
+//     auth  — { token_secret } REQUIRED (T-01-09): the jose HS256 device-token
+//             verification key
 //   Gateway            — { connect(sink), close(): Promise<void> }
 //   GatewayConnection  — { handle(message: ProtocolMessage): Promise<void>, close(): void }
 //   CATCHUP_PAGE_SIZE  — exported binding constant, 500
 //   GatewayError       — error base class
 //   ProtocolViolationError, AuthRejectedError — extend GatewayError
+//   issueDeviceToken / registerDevice / revokeDevice — T-01-09 auth surface
+//     (pinned in the two T-01-09 oracle test headers)
 //
 // Wire messages come from @restos/sync-protocol and validation from
 // @restos/domain — never redeclared here or in the impl.
 // ─────────────────────────────────────────────────────────────────────────────
+import { createHmac } from "node:crypto";
 import { type EventEnvelopeT, newId, parseEvent } from "@restos/domain";
 import { type ProtocolMessage, parseMessage } from "@restos/sync-protocol";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import type { Gateway } from "../index.js";
 import { DATABASE_URL_ENV } from "./global-setup.js";
 
@@ -60,7 +70,7 @@ const num = (value: unknown): number => {
   return n;
 };
 
-// ── identities & dev tokens (01-F27 Wave-0 stub boundary) ────────────────────
+// ── identities, tokens & registration fixtures (T-01-09 M1 re-ground) ────────
 
 export type Identity = { org_id: string; branch_id: string; device_id: string };
 
@@ -72,12 +82,72 @@ export const freshIdentity = (): Identity => ({
 });
 
 /**
- * Wave-0 dev token: unsigned base64url-JSON claims { org_id, branch_id, device_id }
- * behind the verifyDeviceToken seam (T-01-07 assumption 7). T-01-09 swaps the
- * seam internals for jose verification with the same claims contract.
+ * The committed HS256 test secret (T-01-09 spec-review sign-off: deterministic
+ * signed fixtures). Same value the T-01-09 oracle suites pin; every suite
+ * gateway is created with it and every default token is minted under it.
+ */
+export const TEST_TOKEN_SECRET =
+  "t-01-09-oracle-device-token-secret-0123456789abcdef0123456789abcd";
+
+/**
+ * RETIRED Wave-0 dev token: unsigned base64url-JSON claims. Kept ONLY so suites
+ * can pin its retirement (T-01-09: it no longer opens a session for anyone).
  */
 export const devToken = (claims: Identity): string =>
   Buffer.from(JSON.stringify(claims)).toString("base64url");
+
+const b64url = (data: string): string => Buffer.from(data).toString("base64url");
+
+/**
+ * Synchronous deterministic HS256 mint under TEST_TOKEN_SECRET (M1 signed
+ * mint): the same compact-JWS bytes issueDeviceToken produces for the same
+ * claims — sync so the message builders keep their T-01-07 signatures. Verified
+ * against the real jose seam by every green session in the suite.
+ */
+export const signedToken = (
+  claims: Identity & { hub_relay?: boolean; expires_at?: number },
+): string => {
+  const header = b64url(JSON.stringify({ alg: "HS256" }));
+  const payload = b64url(
+    JSON.stringify({
+      org_id: claims.org_id,
+      branch_id: claims.branch_id,
+      device_id: claims.device_id,
+      ...(claims.hub_relay === true ? { hub_relay: true } : {}),
+      ...(claims.expires_at === undefined ? {} : { expires_at: claims.expires_at }),
+    }),
+  );
+  const signature = createHmac("sha256", TEST_TOKEN_SECRET)
+    .update(`${header}.${payload}`)
+    .digest("base64url");
+  return `${header}.${payload}.${signature}`;
+};
+
+/**
+ * Registration fixture (M1): idempotent kernel.device_registry row for a test
+ * identity — T-01-09 makes the registry the session/origin authority, so every
+ * identity that must hello or be relayed for needs a row. ON CONFLICT DO
+ * NOTHING keeps explicit registerDevice calls (the oracle suites') first-wins.
+ */
+export const registerIdentity = async (
+  db: Db,
+  identity: Identity,
+  deviceClass = "counter_electron",
+): Promise<void> => {
+  await db.execute(
+    sql`insert into kernel.device_registry (org_id, branch_id, device_id, device_class, revoked_at)
+        values (${identity.org_id}, ${identity.branch_id}, ${identity.device_id}, ${deviceClass}, null)
+        on conflict (org_id, device_id) do nothing`,
+  );
+};
+
+// Lazy helpers-owned registration pool (idle_timeout so workers exit cleanly);
+// used by openSession's auto-registration only.
+let registrationDb: Db | undefined;
+const registrationPool = (): Db => {
+  registrationDb ??= drizzle(postgres(testDatabaseUrl(), { max: 1, idle_timeout: 2 }));
+  return registrationDb;
+};
 
 // ── message builders (all self-validated through parseMessage) ───────────────
 
@@ -96,7 +166,8 @@ export const helloMsg = (identity: Identity, overrides: HelloOverrides = {}): Pr
     device_id: overrides.device_id ?? identity.device_id,
     device_class: "counter_electron",
     branch_id: overrides.branch_id ?? identity.branch_id,
-    token: overrides.token ?? devToken(identity),
+    // T-01-09 M1: the default token is the SIGNED mint (the dev token is retired).
+    token: overrides.token ?? signedToken(identity),
     last_global_seq: overrides.last_global_seq ?? 0,
     own_high_water: overrides.own_high_water ?? 0,
   });
@@ -202,6 +273,11 @@ export const openSession = async (
   identity: Identity,
   overrides: HelloOverrides = {},
 ): Promise<Session> => {
+  // T-01-09 M1 re-ground: the registry is the session authority, so the
+  // session-opening fixture registers its identity first (idempotent — an
+  // explicit prior registerDevice/registerIdentity wins). Suites pinning
+  // UNREGISTERED rejection drive hello via gateway.connect directly.
+  await registerIdentity(registrationPool(), identity);
   const rec = recorder();
   const conn = gateway.connect(rec.sink);
   await conn.handle(helloMsg(identity, overrides));

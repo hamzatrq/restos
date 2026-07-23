@@ -77,6 +77,28 @@ export const quarantine = kernel.table(
 );
 
 /**
+ * Device registry (T-01-09; 01 §5 names the cloud `device_registry` table;
+ * 01-F25 registered/class-typed/revocable, 01 §7 layer-1 provisioning). The
+ * REGISTRY — never the token, never the hello — is the authority for who may
+ * open a session and who may be a relayed origin (18 §5). Rows are provisioning
+ * bookkeeping, not event history: revocation SETS revoked_at (never deletes;
+ * 01-F1 reaches the ledger only), and re-registration mints a fresh device_id
+ * (T-01-09 ruled: wiped devices never collide with their old slots, 01-N5).
+ * revoked_at null ⇔ active.
+ */
+export const deviceRegistry = kernel.table(
+  "device_registry",
+  {
+    org_id: text("org_id").notNull(),
+    branch_id: text("branch_id").notNull(),
+    device_id: text("device_id").notNull(),
+    device_class: text("device_class").notNull(),
+    revoked_at: bigint("revoked_at", { mode: "number" }),
+  },
+  (t) => [primaryKey({ columns: [t.org_id, t.device_id] })],
+);
+
+/**
  * Durable quarantine-notice outbox (T-01-08 binding data contract; DEC-SYNC-008
  * accepted: at-least-once, keyed by ORIGIN device, live-sent + redelivered on
  * next hello, mark-on-send). One notice per claimed id, first wins (UNIQUE +

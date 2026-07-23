@@ -50,14 +50,16 @@ import {
   openSession,
   pushMsg,
   quarantineRows,
+  signedToken,
   storedWatermark,
+  TEST_TOKEN_SECRET,
   validEnvelope,
   validEnvelopes,
 } from "./helpers.js";
 
-/** Wave-0 hub-relay dev token (the T-01-09 capability seam — relay-hub-uplink pin). */
-const relayToken = (claims: Identity): string =>
-  Buffer.from(JSON.stringify({ ...claims, hub_relay: true })).toString("base64url");
+/** Hub-relay token (T-01-09 M3 re-ground: signed claims carrying hub_relay; the
+ * openSession fixture registers the hub hub-eligible, so the grant holds). */
+const relayToken = (claims: Identity): string => signedToken({ ...claims, hub_relay: true });
 
 let db: Db;
 let verify: Db;
@@ -66,7 +68,7 @@ let gateway: Gateway;
 beforeAll(() => {
   db = openDb();
   verify = openDb();
-  gateway = createGateway({ db, clock: makeClock() });
+  gateway = createGateway({ db, clock: makeClock(), auth: { token_secret: TEST_TOKEN_SECRET } });
 });
 
 afterAll(async () => {

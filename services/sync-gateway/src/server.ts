@@ -13,11 +13,16 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import Fastify, { type FastifyInstance } from "fastify";
 import { createGateway } from "./gateway.js";
 
-export const buildServer = (databaseUrl: string): FastifyInstance => {
+export const buildServer = (databaseUrl: string, tokenSecret: string): FastifyInstance => {
   const app = Fastify({ logger: true });
   const db = drizzle(databaseUrl);
-  // The real clock is injected at the composition root only (18 §4).
-  const gateway = createGateway({ db, clock: { now: () => Date.now() } });
+  // The real clock is injected at the composition root only (18 §4); the
+  // device-token verification key arrives here from env (T-01-09, 18 §5).
+  const gateway = createGateway({
+    db,
+    clock: { now: () => Date.now() },
+    auth: { token_secret: tokenSecret },
+  });
 
   void app.register(websocket);
   void app.register(async (instance) => {
@@ -53,6 +58,12 @@ export const start = async (): Promise<FastifyInstance> => {
       if (raw === undefined || raw === "") throw new Error("required (postgres connection URL)");
       return raw;
     },
+    DEVICE_TOKEN_SECRET: (raw) => {
+      // T-01-09: the HS256 device-token verification key (18 §5). Required —
+      // the gateway cannot authenticate anyone without it (crash at boot).
+      if (raw === undefined || raw === "") throw new Error("required (device-token HS256 secret)");
+      return raw;
+    },
     PORT: (raw) => {
       const port = Number(raw ?? "8080");
       if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -61,7 +72,7 @@ export const start = async (): Promise<FastifyInstance> => {
       return port;
     },
   });
-  const app = buildServer(env.DATABASE_URL);
+  const app = buildServer(env.DATABASE_URL, env.DEVICE_TOKEN_SECRET);
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
   return app;
 };

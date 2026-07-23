@@ -1,11 +1,13 @@
 // T-01-07 session boundary (binding API contract lines, plans/wave-0/kernel-tasks.md
 // T-01-07): first message MUST be hello; server→device kinds inbound, a second
-// hello, or anything-before-hello throw ProtocolViolationError. Token seam
-// (01-F27 Wave-0 stub, assumption 7): unsigned base64url-JSON claims
-// { org_id, branch_id, device_id }; malformed shape or claims mismatching the
-// hello → AuthRejectedError, no session. hello_ack.resume_from =
-// acked_watermark + 1 (0 when no watermark row). ping → pong on the same
-// connection. Error taxonomy per 18 §3/§5: both errors extend GatewayError.
+// hello, or anything-before-hello throw ProtocolViolationError. Token seam:
+// T-01-09 retired the Wave-0 unsigned dev-token stub (its opens-a-session pin
+// was S-deleted per the T-01-09 oracle enumeration; the jose + registry laws
+// live in device-auth.test.ts). The rejection pins below survive the swap:
+// malformed shapes and claims mismatching the hello → AuthRejectedError, no
+// session. hello_ack.resume_from = acked_watermark + 1 (0 when no watermark
+// row). ping → pong on the same connection. Error taxonomy per 18 §3/§5: both
+// errors extend GatewayError.
 import { parseMessage } from "@restos/sync-protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Gateway } from "../index.js";
@@ -31,6 +33,7 @@ import {
   pingMsg,
   pushMsg,
   recorder,
+  TEST_TOKEN_SECRET,
   validEnvelopes,
 } from "./helpers.js";
 
@@ -41,7 +44,7 @@ let gateway: Gateway;
 beforeAll(() => {
   db = openDb();
   verify = openDb();
-  gateway = createGateway({ db, clock: makeClock() });
+  gateway = createGateway({ db, clock: makeClock(), auth: { token_secret: TEST_TOKEN_SECRET } });
 });
 
 afterAll(async () => {
@@ -51,14 +54,6 @@ afterAll(async () => {
 });
 
 describe("session boundary (T-01-07 API contract)", () => {
-  it("01-F27 (Wave-0 stub): a well-formed dev token opens a session — hello_ack { session_id, hub: false, resume_from: 0 } for a fresh device", async () => {
-    const identity = freshIdentity();
-    const { helloAck } = await openSession(gateway, identity);
-    expect(helloAck.session_id.length).toBeGreaterThan(0);
-    expect(helloAck.hub).toBe(false);
-    expect(helloAck.resume_from).toBe(0); // no watermark row: next lamport the cloud expects
-  });
-
   it("01-F8: on reconnect, hello_ack.resume_from = acked_watermark + 1", async () => {
     const identity = freshIdentity();
     const first = await openSession(gateway, identity);

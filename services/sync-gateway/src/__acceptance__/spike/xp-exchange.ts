@@ -23,9 +23,12 @@
 // unordered set within a push — rejected as a weaker, fuzzier oracle.
 //
 // All ids/timestamps are FIXED literals (never newId()/Date.now()) so the fixture is
-// byte-stable and re-recording is deep-equal (20 §2.4 determinism). Envelopes are
-// registry-valid order.created (01 §4 seed catalog). Consumes only @restos/domain +
-// @restos/sync-protocol + @restos/testing — never sync-gateway internals.
+// byte-stable and re-recording is deep-equal (20 §2.4 determinism); the token is the
+// helpers' DETERMINISTIC HS256 mint under the committed TEST_TOKEN_SECRET (T-01-09
+// spec-review re-mint — the dev token the fixture previously carried is retired).
+// Envelopes are registry-valid order.created (01 §4 seed catalog). Consumes only
+// @restos/domain + @restos/sync-protocol + @restos/testing + the acceptance helpers'
+// token mint — never sync-gateway internals.
 import type { EventEnvelopeT } from "@restos/domain";
 import {
   type CloudTransportHandlers,
@@ -33,6 +36,7 @@ import {
   type ProtocolMessage,
 } from "@restos/sync-protocol";
 import { type CloudTranscriptEntry, createSim, createSimCloud } from "@restos/testing";
+import { signedToken } from "../helpers.js";
 
 /** Fixed fleet identity baked into the committed fixture (deterministic replay). */
 export const XP_ORG = "xp-org";
@@ -42,11 +46,10 @@ export const XP_CLASS = "counter_electron" as const;
 /** Fixed base epoch-ms; per-event offset is the lamport seq (deterministic). */
 const BASE_TS = 1_752_800_000_000;
 
-/** Wave-0 dev token: unsigned base64url-JSON claims — the verifyDeviceToken shape (01-F27). */
+/** T-01-09 device token: deterministic HS256 under TEST_TOKEN_SECRET (01-F27; no
+ * hub_relay claim, so neither core advertises relay_authorized). */
 export const xpToken = (): string =>
-  Buffer.from(
-    JSON.stringify({ org_id: XP_ORG, branch_id: XP_BRANCH, device_id: XP_DEVICE }),
-  ).toString("base64url");
+  signedToken({ org_id: XP_ORG, branch_id: XP_BRANCH, device_id: XP_DEVICE });
 
 const envelope = (lamport: number, id: string, orderId: string): EventEnvelopeT => ({
   id,

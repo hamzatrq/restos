@@ -8,7 +8,7 @@
       "device_id": "xp-device",
       "device_class": "counter_electron",
       "branch_id": "xp-branch",
-      "token": "eyJvcmdfaWQiOiJ4cC1vcmciLCJicmFuY2hfaWQiOiJ4cC1icmFuY2giLCJkZXZpY2VfaWQiOiJ4cC1kZXZpY2UifQ",
+      "token": "eyJhbGciOiJIUzI1NiJ9.eyJvcmdfaWQiOiJ4cC1vcmciLCJicmFuY2hfaWQiOiJ4cC1icmFuY2giLCJkZXZpY2VfaWQiOiJ4cC1kZXZpY2UifQ.jebEmvG-ES6fnThiPoph2gMKkPE3cCUSD0fznyo1ikk",
       "last_global_seq": 0,
       "own_high_water": 0
     }
