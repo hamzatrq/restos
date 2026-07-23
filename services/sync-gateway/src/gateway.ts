@@ -429,14 +429,54 @@ export const createGateway = ({
       // event there (watermark advance → lamport_conflict → durable merged-log
       // loss). Nothing wedges by not filling: the garbage was never in the
       // hub's outbox. The row is stored verbatim either way (01-F37).
-      const quarantine = (
+      //
+      // T-01-11 fix round F2 (ruled): a slot is credited ONLY when the
+      // quarantine row was ACTUALLY stored — the insert runs here, inline, and
+      // an ON CONFLICT no-op (same claimed_event_id already held, first stored
+      // wins) returns nothing and fills nothing. Two quarantined envelopes
+      // sharing one claimed id at slots k and k+1 in one push therefore stop
+      // the watermark at k: the coverage law's premise ("the slot is durably
+      // held by the row") is true by construction, and the T-01-11 Auditor
+      // never sees a credited slot no row holds. A conformant outbox pushes
+      // ascending from its resume point, so a conflicting re-quarantine only
+      // ever names a slot whose credit the stored row already earned.
+      const quarantine = async (
         stream: StreamState | null,
         envelope: EventEnvelopeT,
         reason: QuarantineReason,
         deviceId: string,
-      ): void => {
+      ): Promise<void> => {
         quarantined.push({ envelope, reason, deviceId });
-        if (stream !== null) fill(stream, envelope.lamport_seq);
+        // First stored wins (01-F37): re-quarantine is an idempotent no-op.
+        // envelope column is TEXT — the verbatim JSON string (amendment 3).
+        // device_id attribution follows the stream semantics (fix round F2 of
+        // t-01-12): identity-mismatch rows carry the SESSION device — the only
+        // authenticated identity; content-class rows of identity-valid
+        // envelopes carry the ORIGIN (DEC-SYNC-005 — slot-filling and the
+        // T-01-11 Auditor gap check are per-origin).
+        const stored = await tx.execute(
+          sql`insert into kernel.quarantine
+                (id, org_id, branch_id, device_id, claimed_event_id, reason, envelope, received_at)
+              values (${newId()}, ${session.orgId}, ${session.branchId}, ${deviceId},
+                ${envelope.id}, ${reason}, ${JSON.stringify(envelope)}, ${clock.now()})
+              on conflict (org_id, claimed_event_id) do nothing
+              returning claimed_event_id`,
+        );
+        // T-01-08 (DEC-SYNC-008): EVERY quarantine class writes a notice-outbox
+        // row committed atomically with the quarantine row (persist-before-
+        // notify, 01-F2). device_id follows the QUARANTINE row's attribution
+        // (keying to an unauthenticated claimed id would let a forger spam
+        // another device's notice stream). First stored wins — idempotent with
+        // the quarantine row; a delivered row is never re-flagged by a re-push
+        // (ON CONFLICT DO NOTHING).
+        await tx.execute(
+          sql`insert into kernel.quarantine_notices
+                (id, org_id, branch_id, device_id, claimed_event_id, reason, created_at, delivered_at)
+              values (${newId()}, ${session.orgId}, ${session.branchId}, ${deviceId},
+                ${envelope.id}, ${reason}, ${clock.now()}, null)
+              on conflict (org_id, claimed_event_id) do nothing`,
+        );
+        if (stream !== null && [...stored].length > 0) fill(stream, envelope.lamport_seq);
       };
 
       // The push's origin: ONE origin per relay push message (T-01-12 ruling) —
@@ -464,7 +504,7 @@ export const createGateway = ({
         if (identityReason !== null) {
           // F2 (ruled): the row attributes to session.deviceId — the claimed
           // origin ids are unauthenticated garbage a forger controls.
-          quarantine(
+          await quarantine(
             session.relayAuthorized ? null : ownStream,
             envelope,
             identityReason,
@@ -507,11 +547,11 @@ export const createGateway = ({
             originRows.set(envelope.device_id, originRow);
           }
           if (originRow === null || originRow.branch_id !== session.branchId) {
-            quarantine(null, envelope, "origin_unregistered", session.deviceId);
+            await quarantine(null, envelope, "origin_unregistered", session.deviceId);
             continue;
           }
           if (originRow.revoked_at !== null) {
-            quarantine(null, envelope, "origin_revoked", envelope.device_id);
+            await quarantine(null, envelope, "origin_revoked", envelope.device_id);
             continue;
           }
         }
@@ -519,7 +559,7 @@ export const createGateway = ({
         if (origin === null) origin = envelope.device_id;
         // 2. Registry parse (01-F4): unknown type or invalid payload → quarantine.
         if (!registryValid(envelope)) {
-          quarantine(stream, envelope, "schema_invalid", envelope.device_id);
+          await quarantine(stream, envelope, "schema_invalid", envelope.device_id);
           continue;
         }
         // 3. Dedupe divergence (01-F8): the same-content case was consumed at
@@ -527,14 +567,14 @@ export const createGateway = ({
         // DIVERGENT content → quarantine, never overwrite (01-F1 — the relay
         // capability licenses relay, never re-authoring).
         if (storedById.get(envelope.id) !== undefined) {
-          quarantine(stream, envelope, "id_content_divergence", envelope.device_id);
+          await quarantine(stream, envelope, "id_content_divergence", envelope.device_id);
           continue;
         }
         // 4. Contiguity (per origin): a new id at an already-persisted slot is a
         // conflict; past the first gap nothing is stored (stop-at-gap,
         // assumption 4).
         if (envelope.lamport_seq <= stream.through) {
-          quarantine(stream, envelope, "lamport_conflict", envelope.device_id);
+          await quarantine(stream, envelope, "lamport_conflict", envelope.device_id);
           continue;
         }
         if (envelope.lamport_seq !== stream.through + 1) break;
@@ -546,7 +586,7 @@ export const createGateway = ({
         // (01-F17); following contiguous events in the same push still merge.
         const invariantReason = await checkInvariants(tx, session, envelope);
         if (invariantReason !== null) {
-          quarantine(stream, envelope, invariantReason, envelope.device_id);
+          await quarantine(stream, envelope, invariantReason, envelope.device_id);
           continue;
         }
         // 5. Merge (01-F3): cloud stamps assigned in array order under the org
@@ -571,7 +611,7 @@ export const createGateway = ({
           // Bytes Postgres cannot faithfully hold (e.g. U+0000 in any string —
           // passes Zod, aborts the jsonb insert): the savepoint rolled back, so
           // siblings are isolated; quarantine verbatim, consume no global_seq.
-          quarantine(stream, envelope, "storage_reject", envelope.device_id);
+          await quarantine(stream, envelope, "storage_reject", envelope.device_id);
           continue;
         }
         merged.push({ envelope, globalSeq: nextSeq, serverReceivedAt });
@@ -580,37 +620,8 @@ export const createGateway = ({
         fill(stream, envelope.lamport_seq);
       }
 
-      for (const q of quarantined) {
-        // First stored wins (01-F37): re-quarantine is an idempotent no-op.
-        // envelope column is TEXT — the verbatim JSON string (amendment 3).
-        // device_id attribution follows the stream semantics (fix round F2):
-        // identity-mismatch rows carry the SESSION device — the only
-        // authenticated identity; content-class rows of identity-valid
-        // envelopes carry the ORIGIN (DEC-SYNC-005 — slot-filling and the
-        // T-01-11 Auditor gap check are per-origin).
-        await tx.execute(
-          sql`insert into kernel.quarantine
-                (id, org_id, branch_id, device_id, claimed_event_id, reason, envelope, received_at)
-              values (${newId()}, ${session.orgId}, ${session.branchId}, ${q.deviceId},
-                ${q.envelope.id}, ${q.reason}, ${JSON.stringify(q.envelope)}, ${clock.now()})
-              on conflict (org_id, claimed_event_id) do nothing`,
-        );
-        // T-01-08 (DEC-SYNC-008): EVERY quarantine class writes a notice-outbox
-        // row committed atomically with the quarantine row (persist-before-
-        // notify, 01-F2). device_id follows the QUARANTINE row's attribution
-        // (fix-round F2): identity-mismatch rows key to the SESSION device — the
-        // only authenticated identity (keying to an unauthenticated claimed id
-        // would let a forger spam another device's notice stream). First stored
-        // wins — idempotent with the quarantine row; a delivered row is never
-        // re-flagged by a re-push (ON CONFLICT DO NOTHING).
-        await tx.execute(
-          sql`insert into kernel.quarantine_notices
-                (id, org_id, branch_id, device_id, claimed_event_id, reason, created_at, delivered_at)
-              values (${newId()}, ${session.orgId}, ${session.branchId}, ${q.deviceId},
-                ${q.envelope.id}, ${q.reason}, ${clock.now()}, null)
-              on conflict (org_id, claimed_event_id) do nothing`,
-        );
-      }
+      // (Quarantine + notice rows are inserted INLINE by quarantine() above —
+      // T-01-11 fix round F2: the insert result gates the slot fill.)
       if (merged.length > 0) {
         await tx.execute(
           sql`update kernel.org_sequences set next_global_seq = ${nextSeq}

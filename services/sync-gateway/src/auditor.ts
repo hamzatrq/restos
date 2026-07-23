@@ -33,16 +33,15 @@
 //                    event (the 01-F5 cross-check).
 import {
   AUDIT_EVENT_TYPES,
-  CONTESTED_LINE_BILLABLE,
   canonicalJson,
   type EventEnvelopeT,
   isAuditEvent,
   parseEvent,
   settledConservationResidualPaisa,
-  TERMINAL_LINE_STATES,
   verifyAuditChain,
 } from "@restos/domain";
 import {
+  billedEffectiveFromJsonLines,
   createMergeEngine,
   type FoldState,
   type KitchenQueueRow,
@@ -56,7 +55,11 @@ export type AuditorCheck =
   | "conservation"
   | "state_legality"
   | "readmodel_diff"
-  | "audit_chain";
+  | "audit_chain"
+  // Fix round F1 (ruled, plans/wave-0/t-01-11-fix-round.md): the refold's
+  // per-event parse guard — a merged envelope the CURRENT registry cannot
+  // parse is corruption (or registry drift) the report names, never aborts on.
+  | "unparseable_merged_event";
 
 export type AuditorFinding = {
   check: AuditorCheck;
@@ -93,39 +96,13 @@ type MergedEventRow = {
   envelope: EventEnvelopeT;
 };
 
-const TERMINAL: ReadonlySet<string> = new Set(TERMINAL_LINE_STATES);
-const EXITED: ReadonlySet<string> = new Set(["voided", "cancelled"]);
 const AUDIT_TYPES: ReadonlySet<string> = new Set(AUDIT_EVENT_TYPES);
 
-/** The engine's json_lines cell (merge.ts projectEntity) — the value fields the
- * billed derivation reads plus the per-edge anomaly map the legality leg reads. */
-type LineCell = {
-  qty: number;
-  unit_price_paisa: number;
-  states: string[];
-  anomalies: Record<string, string>;
-};
-
-/**
- * Billed from the engine's PROJECTED lines (01-F30: "billed derives from
- * delivered lines, exited lines excluded — a fully-voided order nets to zero").
- * Reads the refold's json_lines output — decided-exited exclusion and the
- * contested-line policy constant mirror the engine's own billed_effective
- * (merge.ts): a decided single exited state contributes nothing; a contested
- * terminal set (≥2 heads) contributes per CONTESTED_LINE_BILLABLE.
- */
-const billedFromJsonLines = (jsonLines: string): number => {
-  const cells = JSON.parse(jsonLines) as Record<string, LineCell>;
-  let billed = 0;
-  for (const cell of Object.values(cells)) {
-    if (cell.states.length === 1 && EXITED.has(cell.states[0] as string)) continue;
-    const terminalCount = cell.states.filter((s) => TERMINAL.has(s)).length;
-    if (terminalCount < 2 || CONTESTED_LINE_BILLABLE) {
-      billed += cell.qty * cell.unit_price_paisa;
-    }
-  }
-  return billed;
-};
+/** The engine's json_lines cell (merge.ts projectEntity) — the legality leg
+ * reads only the per-edge anomaly map here; the billed derivation is the
+ * ENGINE's own export (billedEffectiveFromJsonLines — fix round F4: the local
+ * mirror is deleted, fold logic truly never reimplemented here). */
+type LineCell = { anomalies: Record<string, string> };
 
 /**
  * READ-ONLY audit of one org's kernel tables (20 §4.2 "nightly cloud job per
@@ -197,50 +174,106 @@ export const runAuditor = async (args: RunAuditorArgs): Promise<AuditorReport> =
       // unparseable quarantined bytes: no slot claim
     }
   }
+  // Fix round F3 (ruled): missing slots are derived as contiguous RUNS from the
+  // sorted covered set — work is O(covered · log covered), never O(hi), so the
+  // watermark-corruption class (a corrupt ack of 100000 or 2^52) produces a
+  // bounded report, never a hang. Short runs keep their per-slot findings
+  // (precise and actionable — the corruption-1/2/3 pins stand); a run longer
+  // than GAP_RUN_SLOT_FINDINGS collapses into ONE range finding whose
+  // lamport_seq is the run's first missing slot and whose detail names the
+  // extent.
+  const GAP_RUN_SLOT_FINDINGS = 8;
   const obligated = new Set<string>([...maxMerged.keys(), ...watermarks.keys()]);
   for (const deviceId of obligated) {
     const w = watermarks.get(deviceId) ?? -1;
     const hi = Math.max(w, maxMerged.get(deviceId) ?? -1);
-    const covered = coveredSlots.get(deviceId) ?? new Set<number>();
-    for (let slot = 0; slot <= hi; slot++) {
-      if (covered.has(slot)) continue;
-      findings.push({
-        check: "lamport_gap",
-        org_id,
-        device_id: deviceId,
-        order_id: null,
-        event_id: null,
-        lamport_seq: slot,
-        detail:
-          `lamport slot ${slot} of device ${deviceId} is covered by no merged event and no ` +
-          `attributed quarantine row (acked_watermark ${w}, max merged lamport ` +
-          `${maxMerged.get(deviceId) ?? -1}) — 01-F3/01-F8/DEC-SYNC-005`,
-      });
+    const covered = [...(coveredSlots.get(deviceId) ?? new Set<number>())]
+      .filter((slot) => slot <= hi)
+      .sort((a, b) => a - b);
+    const runs: [number, number][] = [];
+    let next = 0;
+    for (const slot of covered) {
+      if (slot > next) runs.push([next, slot - 1]);
+      next = slot + 1;
+    }
+    if (next <= hi) runs.push([next, hi]);
+    const gapFinding = (slot: number, detail: string): AuditorFinding => ({
+      check: "lamport_gap",
+      org_id,
+      device_id: deviceId,
+      order_id: null,
+      event_id: null,
+      lamport_seq: slot,
+      detail,
+    });
+    const sources = `(acked_watermark ${w}, max merged lamport ${maxMerged.get(deviceId) ?? -1})`;
+    for (const [first, last] of runs) {
+      if (last - first + 1 <= GAP_RUN_SLOT_FINDINGS) {
+        for (let slot = first; slot <= last; slot++) {
+          findings.push(
+            gapFinding(
+              slot,
+              `lamport slot ${slot} of device ${deviceId} is covered by no merged event and no ` +
+                `attributed quarantine row ${sources} — 01-F3/01-F8/DEC-SYNC-005`,
+            ),
+          );
+        }
+      } else {
+        findings.push(
+          gapFinding(
+            first,
+            `lamport slots ${first}..${last} of device ${deviceId} (${last - first + 1} ` +
+              "contiguous slots) are covered by no merged event and no attributed quarantine " +
+              `row ${sources} — aggregated range finding (fix round F3); 01-F3/01-F8/DEC-SYNC-005`,
+          ),
+        );
+      }
     }
   }
 
   // ── the independent per-branch refold with the REAL engine (01-F34/26 §8) ──
   // Audit events are fold-inert (01-F5) and filtered exactly as the device
   // store filters them; everything else in the merged log is registry-valid by
-  // the merge gate (01-F4) and replays as a pure function of the set.
-  const byBranch = new Map<string, EventEnvelopeT[]>();
+  // the merge gate (01-F4) — so a stored envelope the CURRENT registry cannot
+  // parse is corruption (or registry drift), and it must never abort the org's
+  // report (fix round F1, ruled: the report survives ANY poisoned input).
+  // Every envelope parses ONCE behind a per-event guard: a throw becomes a
+  // structured `unparseable_merged_event` finding and the refold proceeds
+  // without the row — whose slot the gap leg already counted as covered (a
+  // merged row holds its slot regardless of parseability; the guard must not
+  // manufacture gaps).
+  type ParsedMergedEvent = ReturnType<typeof parseEvent>;
+  const parsedByBranch = new Map<string, ParsedMergedEvent[]>();
   for (const row of eventRows) {
-    const branch = byBranch.get(row.branch_id);
-    if (branch) branch.push(row.envelope);
-    else byBranch.set(row.branch_id, [row.envelope]);
+    try {
+      if (isAuditEvent(row.envelope.type)) continue;
+      const parsed = parseEvent(row.envelope);
+      const branch = parsedByBranch.get(row.branch_id);
+      if (branch) branch.push(parsed);
+      else parsedByBranch.set(row.branch_id, [parsed]);
+    } catch {
+      findings.push({
+        check: "unparseable_merged_event",
+        org_id,
+        device_id: row.device_id,
+        order_id: null,
+        event_id: row.id,
+        lamport_seq: row.lamport_seq,
+        detail:
+          `merged event ${row.id} (device ${row.device_id}, lamport slot ${row.lamport_seq}) ` +
+          "cannot be parsed by the current registry — corruption or registry drift (the 01-F4 " +
+          "merge gate admits no such envelope); the refold proceeded without it (fix round F1)",
+      });
+    }
   }
   const refold = (branchId: string): FoldState => {
     const engine = createMergeEngine();
-    engine.rebuild(
-      (byBranch.get(branchId) ?? [])
-        .filter((envelope) => !isAuditEvent(envelope.type))
-        .map((envelope) => parseEvent(envelope)),
-    );
+    engine.rebuild(parsedByBranch.get(branchId) ?? []);
     return engine.snapshot();
   };
 
   // ── legs 2+3: conservation and state legality over every branch's refold ───
-  for (const branchId of byBranch.keys()) {
+  for (const branchId of parsedByBranch.keys()) {
     const snapshot = refold(branchId);
     for (const order of snapshot.orders) {
       // 01-F29/01-F31 refund cap — the engine's order-free SET predicate over
@@ -264,15 +297,36 @@ export const runAuditor = async (args: RunAuditorArgs): Promise<AuditorReport> =
       // delivered (an open order mid-service is unbalanced by nature, C-d).
       // Tendering purpose only (DEC-MONEY-007: repaid_total is never tender).
       // Shortfall flagged; excess tender is the OPEN product constant
-      // (EXCESS_TENDER_IS_EXCEPTION — unconsumed at v1, matrix §5.3).
+      // (EXCESS_TENDER_IS_EXCEPTION — unconsumed at v1, matrix §5.3). billed is
+      // the ENGINE's own derivation (fix round F4 — declared once in merge.ts).
       if (order.settled === 1) {
-        const billed = billedFromJsonLines(order.json_lines);
-        const residual = settledConservationResidualPaisa({
-          billed_paisa: billed,
-          tendered_paisa: order.pay_total,
-          refunded_paisa: order.refund_total,
-        });
-        if (residual > 0) {
+        try {
+          const billed = billedEffectiveFromJsonLines(order.json_lines);
+          const residual = settledConservationResidualPaisa({
+            billed_paisa: billed,
+            tendered_paisa: order.pay_total,
+            refunded_paisa: order.refund_total,
+          });
+          if (residual > 0) {
+            findings.push({
+              check: "conservation",
+              org_id,
+              device_id: null,
+              order_id: order.order_id,
+              event_id: null,
+              lamport_seq: null,
+              detail:
+                `settled order ${order.order_id} falls short of billed: tendering ` +
+                `${order.pay_total} − refunds ${order.refund_total} < billed ${billed} ` +
+                `(shortfall ${residual} paisa; 01-F30/01-F32)`,
+            });
+          }
+        } catch (error) {
+          // Fix round F1a (ruled; the t-01-08 F-1 magnitude argument on the
+          // refold path): totals outside the safe-integer range cannot satisfy
+          // any schema-valid equation — a per-ORDER conservation finding, never
+          // a whole-org abort (the report survives ANY poisoned input).
+          if (!(error instanceof RangeError)) throw error;
           findings.push({
             check: "conservation",
             org_id,
@@ -281,9 +335,9 @@ export const runAuditor = async (args: RunAuditorArgs): Promise<AuditorReport> =
             event_id: null,
             lamport_seq: null,
             detail:
-              `settled order ${order.order_id} falls short of billed: tendering ` +
-              `${order.pay_total} − refunds ${order.refund_total} < billed ${billed} ` +
-              `(shortfall ${residual} paisa; 01-F30/01-F32)`,
+              `settled order ${order.order_id} carries money totals outside the safe integer ` +
+              `range (${error.message}) — unrepresentable magnitude necessarily violates the ` +
+              "settled equation (fix round F1a; t-01-08 F-1 precedent; 01-F30/01-F32)",
           });
         }
       }
@@ -316,9 +370,7 @@ export const runAuditor = async (args: RunAuditorArgs): Promise<AuditorReport> =
   // fold-specific convergence means equal delivered set ⇒ byte-equal rows, so
   // ANY divergence — missing, extra, or cell drift — is a finding.
   if (args.read_model !== undefined) {
-    const snapshot = byBranch.has(args.read_model.branch_id)
-      ? refold(args.read_model.branch_id)
-      : { orders: [], queue: [], parked: [] };
+    const snapshot = refold(args.read_model.branch_id);
     const diffRows = (
       table: "orders" | "queue",
       supplied: readonly { order_id: string }[],
@@ -335,6 +387,21 @@ export const runAuditor = async (args: RunAuditorArgs): Promise<AuditorReport> =
           detail,
         });
       };
+      // Fix round F5 (ruled): a duplicate order_id among the supplied rows is
+      // ITSELF a finding — the projection key is unique in any faithful read
+      // model, and keying a Map would silently collapse exactly the drift this
+      // leg exists to catch.
+      const seen = new Set<string>();
+      for (const row of supplied) {
+        if (seen.has(row.order_id)) {
+          push(
+            row.order_id,
+            `${table} supplies more than one row for order ${row.order_id} — duplicate ` +
+              "projection key in the read model (01-F7; fix round F5)",
+          );
+        }
+        seen.add(row.order_id);
+      }
       const suppliedBy = new Map(supplied.map((row) => [row.order_id, row] as const));
       const refoldedBy = new Map(refolded.map((row) => [row.order_id, row] as const));
       for (const [orderId, row] of refoldedBy) {

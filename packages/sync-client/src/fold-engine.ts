@@ -9,6 +9,8 @@
 // the root entry re-exports the same symbols for device-side consumers.
 export {
   type ApplyResult,
+  type BilledLineCell,
+  billedEffectiveFromJsonLines,
   createMergeEngine,
   type DropPlan,
   type FoldState,

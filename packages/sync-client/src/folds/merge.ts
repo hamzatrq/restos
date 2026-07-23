@@ -174,6 +174,39 @@ const edgeLegal = (ed: Edge): boolean => {
   );
 };
 
+/** One projected line cell as rendered into `json_lines` — the billed
+ * derivation's input shape (line VALUE fields + projected workflow states). */
+export type BilledLineCell = { qty: number; unit_price_paisa: number; states: string[] };
+
+/** billed_effective of ONE projected cell (01-F30: billed derives from
+ * delivered lines, exited lines excluded — "a fully-voided order nets to
+ * zero"): a decided single exited state contributes nothing; a contested
+ * terminal set (≥2 heads) contributes per CONTESTED_LINE_BILLABLE (branchless
+ * policy application, matrix §5.4). Declared ONCE — projectEntity and the
+ * exported helper below both read it (T-01-11 fix round F4). */
+const billedCellPaisa = (cell: BilledLineCell): number => {
+  if (cell.states.length === 1 && EXITED.has(cell.states[0] as string)) return 0;
+  const terminalCount = cell.states.filter((s) => TERMINAL.has(s)).length;
+  return cell.qty * cell.unit_price_paisa * Number(terminalCount < 2 || CONTESTED_LINE_BILLABLE);
+};
+
+/**
+ * billed_effective from an OpenOrderRow's `json_lines` cell map — the ENGINE's
+ * own billed derivation over its own projection (T-01-11 fix round F4, ruled:
+ * the Auditor's mirror is deleted; fold logic is never reimplemented outside
+ * this module, 26 §8 / 01-F34). Same arithmetic projectEntity accumulates —
+ * per-cell equivalence holds because `states` is exactly the terminal MVR set
+ * when contested (all terminal) and the single non-terminal watermark
+ * otherwise, so counting terminal members of `states` IS `terminalCount`.
+ */
+export const billedEffectiveFromJsonLines = (jsonLines: string): number => {
+  let billed = 0;
+  for (const cell of Object.values(JSON.parse(jsonLines) as Record<string, BilledLineCell>)) {
+    billed += billedCellPaisa(cell);
+  }
+  return billed;
+};
+
 type LineProjection = {
   states: string[];
   anomalies: Record<string, string>;
@@ -661,14 +694,13 @@ export const createMergeEngine = (): MergeEngine => {
       const v = value as LineValue;
       const lp = projectLine(e.lineEdges.get(lineId));
       cells[lineId] = { ...v, states: lp.states, anomalies: lp.anomalies };
+      // The declared-once billed rule (billedCellPaisa; T-01-11 fix round F4):
+      // exited-decided zero, contested per the policy constant.
+      billedEffective += billedCellPaisa(cells[lineId] as BilledLineCell);
       const decidedExited = lp.states.length === 1 && EXITED.has(lp.states[0] as string);
       if (decidedExited) continue;
       linesTotal += 1;
       if (lp.cookingDone) linesReady += 1;
-      // Branchless policy application: the DECISION PENDING constant zeroes the
-      // contribution of a contested line iff the founder flips it (matrix §5.4).
-      const billable = lp.terminalCount < 2 || CONTESTED_LINE_BILLABLE;
-      billedEffective += v.qty * v.unit_price_paisa * Number(billable);
     }
     // 01-F33: settlement is an ACT (monotone OR over the close G-Set); a late
     // line-add never reopens — it raises uncovered_addition against the closes'
