@@ -1,0 +1,5 @@
+# Build output and the vendored Hermes binary (re-downloadable via run.mjs) and the
+# captured last run are all reproducible — not checked in.
+dist/
+vendor/
+last-run.txt
