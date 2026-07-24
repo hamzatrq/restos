@@ -2,7 +2,7 @@
 // cloud. Unknown keys are stripped (reject-or-drop, 01-F40 — slices are
 // sender-enforced; a client can never smuggle one in). Contract fixtures:
 // src/__acceptance__/fixtures (20 §2.7 — changing them is a spec-review event).
-import { zstdCompressSync, zstdDecompressSync } from "node:zlib";
+import { constants as zlibConstants, zstdCompressSync, zstdDecompressSync } from "node:zlib";
 import { DEVICE_CLASSES, EventEnvelope } from "@restos/domain";
 import { z } from "zod";
 
@@ -116,8 +116,19 @@ export const decodeMessage = (text: string): ProtocolMessage => parseMessage(JSO
 // m for every valid message, and the plain JSON codec above is UNTOUCHED (the
 // T-01-02 golden fixtures must not drift). zstd is Node's built-in (node:zlib,
 // synchronous; 18 §14 records the choice — 18 §15 rule 1 bias: no new dependency).
+//
+// Close-now follow-up #4 (audit-1): the frame carries a zstd CONTENT CHECKSUM
+// (ZSTD_c_checksumFlag, +4 bytes). A plain zstd frame has no integrity check, so
+// a single-byte-corrupted frame could decompress to a schema-valid but WRONG
+// ProtocolMessage that decodeCompressed then returned as real — a silent
+// mis-parse the merge engine would trust. With the checksum, decompression of a
+// corrupted frame FAILS (checksum mismatch → throw), making corruption LOUD, not
+// silent. Additive: the decoder auto-detects the flag from the frame header, the
+// round-trip law holds, and the plain JSON codec is untouched.
 export const encodeCompressed = (message: ProtocolMessage): Uint8Array =>
-  zstdCompressSync(Buffer.from(encodeMessage(message), "utf8"));
+  zstdCompressSync(Buffer.from(encodeMessage(message), "utf8"), {
+    params: { [zlibConstants.ZSTD_c_checksumFlag]: 1 },
+  });
 
 export const decodeCompressed = (bytes: Uint8Array): ProtocolMessage =>
   decodeMessage(zstdDecompressSync(bytes).toString("utf8"));

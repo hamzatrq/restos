@@ -63,13 +63,25 @@ describe("follow-up #4: decodeCompressed rejects corrupt frames (never mis-parse
     expect(decodeCompressed(encodeCompressed(page))).toEqual(page);
   });
 
-  it("a TRUNCATED zstd frame THROWS cleanly — never a valid-wrong ProtocolMessage", () => {
-    // zstd truncation is silent at the decompressor; the JSON layer catches the
-    // partial/empty payload. Several truncation depths, each must throw.
-    const frame = encodeCompressed(fixedPage(40));
-    for (const drop of [1, 4, Math.floor(frame.length / 2), frame.length - 2]) {
+  it("a TRUNCATED zstd frame never yields a valid-WRONG ProtocolMessage — it throws, or (checksum-only truncation) returns the exact original", () => {
+    // The property that matters is "never a valid-wrong message", NOT "always
+    // throws": a DEEP truncation cuts the content block → partial/empty → the
+    // JSON layer throws; a SHALLOW truncation that removes only the trailing
+    // content-checksum bytes leaves the content block intact, so the codec
+    // legitimately returns the ORIGINAL message. Neither path ever fabricates a
+    // different, schema-valid message. Assert that invariant across every depth.
+    const page = fixedPage(40);
+    const frame = Buffer.from(encodeCompressed(page));
+    const canonical = JSON.stringify(page);
+    for (let drop = 1; drop < frame.length; drop++) {
       const truncated = frame.subarray(0, frame.length - drop);
-      expect(() => decodeCompressed(truncated)).toThrow();
+      let decoded: ProtocolMessage;
+      try {
+        decoded = decodeCompressed(truncated);
+      } catch {
+        continue; // clean throw — the contract
+      }
+      expect(JSON.stringify(decoded)).toBe(canonical); // returned ⇒ must be the ORIGINAL
     }
   });
 

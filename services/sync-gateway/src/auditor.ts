@@ -433,7 +433,6 @@ export const runAuditor = async (args: RunAuditorArgs): Promise<AuditorReport> =
   // is the finding (tail truncation is the gap leg's catch — the cross-check).
   const chains = new Map<string, EventEnvelopeT[]>();
   for (const row of eventRows) {
-    if (!AUDIT_TYPES.has(row.envelope.type)) continue;
     // Fix round 2 Finding 2 (ruled): audit events are fold-inert, so they `continue`
     // in the refold BEFORE its per-event parse guard (F1b) — leaving leg 5 to feed
     // UNPARSED audit envelopes to verifyAuditChain. A corrupt/null-payload audit-typed
@@ -443,7 +442,15 @@ export const runAuditor = async (args: RunAuditorArgs): Promise<AuditorReport> =
     // structured `unparseable_merged_event` finding and is dropped from the chain, so
     // the report survives ANY poisoned input. The row's slot is already counted covered
     // by the gap leg (a merged row holds its slot regardless of parseability).
+    //
+    // Close-now (review §6 / follow-up #1, audit-1): the CLASSIFIER read
+    // (row.envelope.type) must sit INSIDE this guard too — symmetric to the
+    // refold's guarded read (~line 249). A 'null'::jsonb (or scalar) merged
+    // envelope throws TypeError at that read; outside the try it aborted the
+    // whole-org report. Inside, an unreadable envelope becomes the same
+    // unparseable_merged_event finding and the report survives.
     try {
+      if (!AUDIT_TYPES.has(row.envelope.type)) continue;
       parseEvent(row.envelope);
     } catch {
       findings.push({

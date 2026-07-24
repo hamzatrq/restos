@@ -537,17 +537,37 @@ export const createGateway = ({
                     where org_id = ${session.orgId} and claimed_event_id = ${envelope.id}`,
               )),
             ][0];
-            const blockerEnvelope =
-              blocker === undefined
-                ? undefined
-                : (JSON.parse(String(blocker.envelope)) as {
-                    device_id?: unknown;
-                    lamport_seq?: unknown;
-                  });
+            // review #3 (close-now, audit-1): the blocker's envelope column is
+            // TEXT and MAY be corrupt (a disk fault, or a pre-storage-hardening
+            // row) — a bare JSON.parse here throws INSIDE the push transaction
+            // and aborts the WHOLE push, so the origin's outbox re-pushes the
+            // same batch forever (a crash-wedge, never allowed: 01-F17). Guard
+            // it: an unreadable blocker cannot PROVE the same-origin-other-slot
+            // forgery case, so we take the conservative no-wedge direction —
+            // treat it as absent and credit the origin's slot below.
+            let blockerEnvelope: { device_id?: unknown; lamport_seq?: unknown } | undefined;
+            if (blocker !== undefined) {
+              try {
+                blockerEnvelope = JSON.parse(String(blocker.envelope)) as {
+                  device_id?: unknown;
+                  lamport_seq?: unknown;
+                };
+              } catch {
+                console.warn(
+                  `[gateway] corrupt quarantine blocker envelope for org ${session.orgId} ` +
+                    `claimed_event_id ${envelope.id} — treating as unprovable, crediting the slot ` +
+                    "(review #3 crash-wedge guard, 01-F17)",
+                );
+              }
+            }
+            // sameOriginOtherSlot is a PROVEN forgery (same origin's row at a
+            // DIFFERENT slot); an unparseable blockerEnvelope proves nothing, so
+            // it must fall through to the fill (credit) below.
             const sameOriginOtherSlot =
               blocker !== undefined &&
+              blockerEnvelope !== undefined &&
               String(blocker.device_id) === deviceId &&
-              blockerEnvelope?.lamport_seq !== envelope.lamport_seq;
+              blockerEnvelope.lamport_seq !== envelope.lamport_seq;
             if (!sameOriginOtherSlot) {
               // When the blocker is the PROVISIONAL origin_unregistered placeholder
               // stored while this origin was still unregistered (the DEC-SYNC-009
