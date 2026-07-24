@@ -1,8 +1,11 @@
 // T-01-07 Postgres data contract (binding — plans/wave-0/kernel-tasks.md T-01-07;
-// owning spec 01 §3/§5): the four kernel-schema tables, plus the T-01-08
-// quarantine-notice outbox (DEC-SYNC-008). sync-gateway is the sole writer of
-// all five (18 §4). No UPDATE or DELETE statement exists anywhere in this
-// package for kernel.events (01-F1 append-only ledger). Ids are text, not
+// owning spec 01 §3/§5): the four original kernel-schema tables, plus the
+// T-01-08 quarantine-notice outbox (DEC-SYNC-008) and the T-01-09 device
+// registry — six in all. sync-gateway is the sole writer of all six (18 §4).
+// No UPDATE or DELETE of kernel.events exists anywhere in this
+// package (01-F1 append-only ledger; quarantine/registry rows are mutable —
+// heal-in-place T-01-11, revocation T-01-09 — but the event ledger never is).
+// Ids are text, not
 // uuid — the storage layer must not tighten the wire contract (assumption 11).
 // envelope jsonb is verbatim-as-received; the two cloud-stamped values live in
 // their own columns and are merged into the envelope at serve time (assumption 12).
