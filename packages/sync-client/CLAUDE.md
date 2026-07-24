@@ -4,4 +4,4 @@
 
 - PROTECTED PATH. Device sync engine: outbox (the canonical durable-queue core, 18 §4), folds, LAN mesh, hub election.
 - Folds are pure, commutative, idempotent (01-F34) — property tests mandatory (20 §2.3).
-- This package is a scaffold stub: no implementation exists until its plans/ task and pre-implementation artifacts (24-F8) do.
+- **IMPLEMENTED (Wave 0).** See `README.md` for the module map (device store, merge fold engine, LAN mesh/hub, cloud session). PROTECTED path — senior review on every change.
