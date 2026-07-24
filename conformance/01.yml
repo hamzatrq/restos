@@ -386,6 +386,7 @@ rows:
       - "services/sync-gateway/src/__acceptance__/relay-origin-registry.test.ts#01-F13/DEC-SYNC-009: a registered hub-eligible device with the hub_relay claim is relay-authorized — relays a registered WAITER origin verbatim, per-origin ack, origin watermark, and the origin's own hello resumes past the relayed prefix (01-F25/01-F8)"
       - "services/sync-gateway/src/__acceptance__/relay-origin-registry.test.ts#01-F25/DEC-SYNC-009: a REVOKED origin stops relaying on next contact — origin_revoked quarantine attributed to the ORIGIN, prior merged events remain (01-F1), watermark unmoved"
       - "services/sync-gateway/src/__acceptance__/relay-origin-registry.test.ts#01-F25/01-F42 + T-01-12: a REVOKED HUB loses relay with the rest of its participation — the relay push is rejected session-level, nothing persisted, no quarantine row"
+      - "services/sync-gateway/src/__acceptance__/sec-f1-revoked-fanout.test.ts#01-F25/01-F42, 18 §5: a revoked PURE READER (never pushed/caught-up) receives no further fan-out and is evicted+purged; a still-authorized peer keeps receiving"
   - fr: 01-F26
     status: unmapped
   - fr: 01-F27
@@ -684,6 +685,7 @@ rows:
       - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F42/18 §4 (fix-round F8): a malformed drop key is rejected loudly with nothing changed — `line:O1` must never silently mis-parse into (order O, line O1)"
       - "services/sync-gateway/src/__acceptance__/device-auth.test.ts#01-F42/01-F25: a revoked device's next hello → purge_command { scope: 'all' } and NO session; re-sent on every hello while revoked (no purge-ack wire kind exists)"
       - "services/sync-gateway/src/__acceptance__/relay-origin-registry.test.ts#01-F25/01-F42 + T-01-12: a REVOKED HUB loses relay with the rest of its participation — the relay push is rejected session-level, nothing persisted, no quarantine row"
+      - "services/sync-gateway/src/__acceptance__/sec-f1-revoked-fanout.test.ts#01-F25/01-F42, 18 §5: a revoked PURE READER (never pushed/caught-up) receives no further fan-out and is evicted+purged; a still-authorized peer keeps receiving"
   - fr: 01-N1
     status: green
     tests:

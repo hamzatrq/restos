@@ -228,6 +228,36 @@ export const createGateway = ({
     branchSets.get(branchKey(record.session.orgId, record.session.branchId))?.delete(record);
   };
 
+  /**
+   * sec-F1 read-side revocation (audit-1 finding #1 HIGH / T-01-09 fix docket
+   * F3): requireUnrevoked is a WRITE-block — it fires only on push/catchup, so a
+   * device that just RECEIVES (a pure reader that never pushes) is never
+   * re-checked and would keep receiving the whole branch stream after revocation
+   * (a confidentiality breach; 01-F25/01-F42 kill switch, registry authority
+   * 18 §5). The READ path closes it here, at fan-out delivery time. Mechanism =
+   * candidate (a): a single BATCHED registry read per push (not per peer, not on
+   * the per-send path), run POST-COMMIT alongside fan-out — its cost is one
+   * round-trip independent of peer count and never touches the hot merge path
+   * (the merge has already committed; a sale is never blocked, 01-F17). A
+   * revoked peer is caught before any event bytes reach it. NOTE (implied
+   * policy): eviction is LAZY — a revoked reader leaves branchSets on the next
+   * fan-out to its branch, not the instant revokeDevice runs; there is no leak
+   * (the next push evicts it before delivering), but an eager kill would need a
+   * revokeDevice→gateway eviction hook (a cross-module change; candidate DEC on
+   * eviction-latency SLA).
+   */
+  const revokedDeviceIds = async (
+    orgId: string,
+    deviceIds: readonly string[],
+  ): Promise<Set<string>> => {
+    if (deviceIds.length === 0) return new Set();
+    const rows = await db.execute(
+      sql`select device_id from kernel.device_registry
+          where org_id = ${orgId} and device_id in ${deviceIds} and revoked_at is not null`,
+    );
+    return new Set([...rows].map((row) => String(row.device_id)));
+  };
+
   const handleHello = async (record: ConnectionRecord, message: HelloMessage): Promise<void> => {
     if (record.session !== null) {
       throw new ProtocolViolationError("second hello on an open session");
@@ -781,8 +811,27 @@ export const createGateway = ({
       }));
       const set = branchSets.get(branchKey(session.orgId, session.branchId));
       if (set !== undefined) {
-        for (const peer of [...set]) {
-          if (!peer.open || peer.session === null) continue;
+        const peers = [...set].filter(
+          (peer): peer is ConnectionRecord & { session: SessionState } =>
+            peer.open && peer.session !== null,
+        );
+        // sec-F1 (audit-1 #1 / T-01-09 F3): before any bytes fan out, one
+        // batched registry read culls any peer revoked since it connected — the
+        // read-side half of revocation the write-only requireUnrevoked misses
+        // for a pure reader. A revoked peer is told to purge (01-F42, the same
+        // signal a revoked hello gets) and dropped from branchSets; it receives
+        // no event_batch. Still-authorized peers are served unchanged.
+        const revoked = await revokedDeviceIds(
+          session.orgId,
+          peers.map((peer) => peer.session.deviceId),
+        );
+        for (const peer of peers) {
+          if (revoked.has(peer.session.deviceId)) {
+            peer.sink(parseMessage({ v: 1, kind: "purge_command", scope: "all" }));
+            peer.open = false;
+            leaveFanout(peer);
+            continue;
+          }
           peer.sink(
             parseMessage({
               v: 1,
