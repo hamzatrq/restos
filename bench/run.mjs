@@ -8,11 +8,16 @@
 //   node bench/run.mjs parity     # phase 1 only
 //   node bench/run.mjs bench      # phase 2 only
 // Env:
-//   HERMES_BIN=/path/to/hermes    # use an existing Hermes instead of the vendored one
+//   HERMES_BIN=/path/to/hermes    # use a Hermes you trust (preferred)
 //   SKIP_HERMES=1                 # Node-only run (no cross-engine comparison)
+//   ALLOW_HERMES_DOWNLOAD=1       # opt in to fetching the prebuilt CLI (OFF by default)
+//   HERMES_SHA256=<64 hex>        # required with the opt-in: verifies the tarball before use
+// Auto-download is disabled by default and, when enabled, refuses to run a
+// binary whose sha256 does not match HERMES_SHA256 (supply-chain safety).
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildBundle } from "./build.mjs";
@@ -41,29 +46,62 @@ const cap = (s = "") => {
 };
 
 // ── Hermes acquisition ──────────────────────────────────────────────────────
+const sha256 = (p) => createHash("sha256").update(readFileSync(p)).digest("hex");
+
 function ensureHermes() {
   // biome-ignore lint/suspicious/noUndeclaredEnvVars: harness-only knobs read directly, not a turbo-cached task
-  if (process.env.SKIP_HERMES === "1") return null;
-  // biome-ignore lint/suspicious/noUndeclaredEnvVars: harness-only knobs read directly, not a turbo-cached task
-  if (process.env.HERMES_BIN && existsSync(process.env.HERMES_BIN)) return process.env.HERMES_BIN;
+  const env = process.env;
+  if (env.SKIP_HERMES === "1") return null;
+  // Preferred path: point at a Hermes you already trust.
+  if (env.HERMES_BIN && existsSync(env.HERMES_BIN)) return env.HERMES_BIN;
   const vendored = join(VENDOR, "hermes");
   if (existsSync(vendored)) return vendored;
-  // Lightweight prebuilt path — download + extract the official CLI tarball. No build.
+
+  // Auto-download is OFF by default: fetching and executing a binary from the
+  // internet on `pnpm bench` is a supply-chain risk (this repo is a
+  // money-handling kernel). To enable the cross-engine parity assertion, either
+  // set HERMES_BIN to a Hermes you trust, or opt in explicitly AND pin the
+  // expected tarball hash from the official release you have verified:
+  //   ALLOW_HERMES_DOWNLOAD=1 HERMES_SHA256=<sha256 of hermes-cli-darwin.tar.gz>
+  if (env.ALLOW_HERMES_DOWNLOAD !== "1") {
+    log("  hermes not found → Node-only run (no cross-engine parity).");
+    log("  Enable it with HERMES_BIN=<trusted hermes>, or");
+    log(`  ALLOW_HERMES_DOWNLOAD=1 HERMES_SHA256=<sha256 of the ${HERMES_VERSION} tarball>.`);
+    return null;
+  }
+  const expected = (env.HERMES_SHA256 || "").toLowerCase().trim();
+  if (!/^[0-9a-f]{64}$/.test(expected)) {
+    log("  ALLOW_HERMES_DOWNLOAD=1 but HERMES_SHA256 is missing/invalid — refusing to");
+    log("  run an unverified binary. Pin the official tarball's sha256 and retry.");
+    return null;
+  }
   try {
-    log(`  hermes not found locally; downloading ${HERMES_VERSION} prebuilt CLI…`);
+    log(`  downloading ${HERMES_VERSION} prebuilt CLI (will verify sha256)…`);
     mkdirSync(VENDOR, { recursive: true });
     const tgz = join(VENDOR, "hermes-cli-darwin.tar.gz");
-    execFileSync("curl", ["-sSL", HERMES_URL, "-o", tgz], {
+    // https-only, fail on HTTP error, modern TLS.
+    execFileSync("curl", ["-fsSL", "--proto", "=https", "--tlsv1.2", HERMES_URL, "-o", tgz], {
       stdio: ["ignore", "ignore", "inherit"],
     });
-    execFileSync("tar", ["xzf", tgz, "-C", VENDOR], { stdio: "inherit" });
-    execFileSync("xattr", ["-c", vendored], { stdio: "ignore" }); // clear any quarantine
-    if (existsSync(vendored)) {
-      log(`  hermes ready: ${vendored}`);
-      return vendored;
+    const got = sha256(tgz);
+    if (got !== expected) {
+      rmSync(tgz, { force: true });
+      log(`  sha256 MISMATCH — refusing to extract. expected ${expected}, got ${got}`);
+      return null;
     }
+    execFileSync("tar", ["xzf", tgz, "-C", VENDOR], { stdio: "inherit" });
+    // Containment check — reject any symlink/traversal escape from VENDOR.
+    if (!existsSync(vendored) || !realpathSync(vendored).startsWith(`${realpathSync(VENDOR)}/`)) {
+      rmSync(vendored, { force: true });
+      log("  extracted binary is missing or escaped the vendor dir — refusing.");
+      return null;
+    }
+    // Note: the macOS quarantine xattr is intentionally NOT stripped — the
+    // binary is verified by hash, and silently clearing Gatekeeper is not our call.
+    log(`  hermes ready (sha256 verified): ${vendored}`);
+    return vendored;
   } catch (e) {
-    log(`  hermes download failed (${e.message}); continuing Node-only.`);
+    log(`  hermes setup failed (${e.message}); continuing Node-only.`);
   }
   return null;
 }

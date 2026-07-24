@@ -19,12 +19,20 @@ pnpm bench:parity   # phase 1 only — cross-engine byte-identity
 pnpm bench:perf     # phase 2 only — the busy-day table
 ```
 
-First run downloads a prebuilt Hermes CLI (~10 MB) to `bench/vendor/` (git-ignored).
-Env knobs:
+**By default the run is Node-only** — it does *not* fetch anything. The cross-engine
+parity assertion needs a Hermes VM, which you enable one of two safe ways:
 
-- `HERMES_BIN=/path/to/hermes` — use an existing Hermes instead of the vendored one.
-- `SKIP_HERMES=1` — Node-only run (still builds + runs the battery under Node; prints the
-  parity case list and the Node column, but performs no cross-engine comparison).
+- `HERMES_BIN=/path/to/hermes` — point at a Hermes binary you already trust (preferred).
+- `ALLOW_HERMES_DOWNLOAD=1 HERMES_SHA256=<64-hex>` — opt in to fetching the prebuilt
+  `v0.13.0` CLI to `bench/vendor/` (git-ignored). The harness **verifies the tarball's
+  sha256 against `HERMES_SHA256` before extracting or executing it** and refuses on
+  mismatch; it does not strip the macOS quarantine attribute. Get the hash from the
+  official release you have verified — auto-download-and-run of an unverified binary is a
+  supply-chain risk this repo (a money kernel) should not take by default.
+
+Other knobs:
+
+- `SKIP_HERMES=1` — force Node-only even if a vendored/HERMES_BIN Hermes is present.
 
 The captured console output of the last run is written to `bench/last-run.txt`.
 
