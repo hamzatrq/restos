@@ -428,7 +428,12 @@ export const createGateway = ({
       // hub's own slot at that number would displace the hub's genuine future
       // event there (watermark advance → lamport_conflict → durable merged-log
       // loss). Nothing wedges by not filling: the garbage was never in the
-      // hub's outbox. The row is stored verbatim either way (01-F37).
+      // hub's outbox. NOTE: the row is stored verbatim only when THIS push is
+      // the first to claim (org, claimed_event_id); if a foreign row already
+      // pre-claimed the id, this insert no-ops (ON CONFLICT DO NOTHING) and the
+      // honest event's bytes are NOT stored — the loud lamport_gap is the only
+      // record (accepted cost of the loud-alarm ruling; widening the key to
+      // (org, claimed_event_id, device_id) is scheduled hardening).
       //
       // T-01-11 fix round 2 (ruled, supersedes fix round 1's per-(org,
       // claimed_event_id) rule): the slot fill is tracked per (ORIGIN, slot). Fix

@@ -78,7 +78,7 @@ Eight kernel tasks, each through the same loop — **acceptance tests written fi
 | **T-01-08** | The quarantine pipeline + durable notice outbox |
 | **T-01-09** | Device auth (JWT), registry, revocation, origin-existence checks |
 | **T-01-11** | The Auditor — five read-only correctness legs, run nightly |
-| **T-01-16** | Batched catch-up + zstd wire compression |
+| **T-01-16** | Batched catch-up persistence + the zstd wire codec *(codec present + fixture-tested; **not yet wired into live transport** — the plain JSON codec is still used on the socket. Compression is a filed follow-up, so the 60s/4G budget's compression half is not in the shipped path yet.)* |
 
 **Current state:** `pnpm verify` green (docs-lint + typecheck + lint); `pnpm verify:01` = **34 green / 0 red / 13 unmapped of 47 FRs**; full suites green — domain 98, sync-protocol 32, sync-client 264, testing 49, gateway 151 (on real Postgres via Testcontainers). `pnpm test` needs Docker.
 
@@ -92,3 +92,4 @@ Eight kernel tasks, each through the same loop — **acceptance tests written fi
 - **Filed follow-ups (MED/LOW, non-blocking)** in the `t-01-*-fix-round.md` files: e.g. the Auditor leg-5 null-envelope guard, the heal→notice reconciliation, live zstd framing wiring.
 - **Not yet done at all:** physical wall-clock proof on a real 2 GB tablet (p95, plug-pull — deferred to the hardware rig, `D3`); the H-01 test-harness rungs. The kernel is verified in logic and simulation; it has never run on target hardware.
 - **Governance:** every task touches protected paths (`domain`, `sync-client`, `sync-gateway`); CODEOWNERS senior review is mandatory before merge. That review is what this document is for.
+- **Residual trust assumption (DEC-SYNC-009, accepted):** a compromised *relay-authorized hub* can fabricate events attributed to any registered branch peer — the gateway's origin gate checks the origin's *existence*, not *authorship*; Wave 0 has no per-event origin signatures. Accepted for the branch-hub topology; stated here so it is visible.

@@ -49,7 +49,6 @@ const cap = (s = "") => {
 const sha256 = (p) => createHash("sha256").update(readFileSync(p)).digest("hex");
 
 function ensureHermes() {
-  // biome-ignore lint/suspicious/noUndeclaredEnvVars: harness-only knobs read directly, not a turbo-cached task
   const env = process.env;
   if (env.SKIP_HERMES === "1") return null;
   // Preferred path: point at a Hermes you already trust.
