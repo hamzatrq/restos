@@ -16,6 +16,86 @@ Verdict: kernel sound; ordering design would-stake-cash-on-it. Two merge conditi
 - follow-up — heal→notice reconciliation; live zstd framing wiring; fold-brand migration (DEC-MONEY-005, now unblocked).
 - review #6 — widen quarantine key to (org, claimed_event_id, device_id) so a foreign pre-claim doesn't lose the honest event's bytes.
 
+## ⛔ ADVERSARIAL REVIEW OF THE POST-REVIEW ROUND — 3 BLOCKERS, DO NOT MERGE
+
+Found by the `24 §3` adversarial leg over `fdb4efd~1..HEAD`, after all six tasks were
+reported green. **All three blockers were verified against the code, and each
+contradicts a claim in my own commit messages.** Every suite was green throughout —
+these are end-to-end gaps that per-task oracles structurally could not see, because
+each oracle pinned its own side's contract.
+
+**B1 — Token renewal is never applied; the fleet's cloud plane dies at T+90 days.**
+The gateway mints and sends `renewed_token` correctly. **No client reads it** (two
+producer sites, zero consumers), `registerDevice` never seeds `token_expires_at` (so a
+relayed origin is never "due"), and the hub's `forwardCloudAck` rebuilds the LAN
+`push_ack` without the field. At day 90 a device enters drain mode; with an empty
+outbox it has no push to earn a renewal on, its `catchup_request` is refused, the
+socket closes, and it reconnects at 1 Hz forever with `blocked: null` and no
+indication why. **A hub in this state strands the entire branch** — the DEC-SYNC-009
+failure re-created by the auth task. Reachable by the passage of time alone, fleet-wide
+and simultaneous. Violates 01-F47, 01-F48, 01-F11, commandment 4.
+*Also correct the residual filed below: "it must reconnect" is wrong — reconnecting
+presents the same expired token and the same empty outbox. It is a permanent wedge.*
+
+**B2 — The blocked cursor is erased AND skipped by the next live fan-out batch.**
+`applyEvents` serves both `catchup_response` and live `event_batch`, and
+`blockedCursor = report` is unconditional. One sale on any other terminal produces a
+clean batch that clears the report and advances `last_global_seq` past the blocking
+sequence — which is then never re-requested. Violates DEC-SYNC-011(a) AND (b)
+("stop-and-report, **never skip** … skipping is unrecoverable"), 01-F9, 01-F34.
+Reachable within seconds on any multi-device branch. The doc-comment claiming it
+"clears only when the cursor advances past the blocking sequence" is false.
+
+**B3 — Neither ratified auth guarantee is wired at the composition root.**
+`sweepRevocations` is exported and called by nothing outside tests (no timer, no
+LISTEN/NOTIFY, no hook in `buildServer`), so 01-F48's ≤30 s eviction does not exist in
+the shipped server — revocation still waits for voluntary contact. And `buildServer`
+passes only `token_secret`, so `iss`/`aud` are never configured and a staging token
+validates against production. Both FRs are marked `by: T-01-18` in
+`conformance/wave-0-scope.yml`; the artifact does not exhibit them.
+
+### HIGH / MED, same review
+
+- **H1 fail-closed is implemented as fail-DESTRUCTIVE.** `sweepRevocations`' catch sets
+  `revoked = every device in the org` and then sends each one `purge_command
+  {scope:"all"}` before dropping it. A transient DB error therefore orders an org-wide
+  wipe. Inert today (no client purge handler exists), but 01-F42's device-side purge is
+  a scheduled item — landing it arms this into org-wide destruction of unsynced local
+  ledgers. 01-F48 says unreadable state means *refuse participation*; purge is not
+  refusal. Fix: drop sessions, do not purge.
+- **H2 the confirm anchor elects the least trustworthy clock.** `argmin(branch_created_at,
+  id)` ignores `time_basis`, and a `branch_provisional` stamp IS the raw device clock
+  (offset 0). Because the tiebreak is `min`, a device whose clock is behind always wins.
+  A tablet booted before the counter, confirming an order, sets `confirmed_at`/`age_basis`
+  years in the past — converged identically on every screen, with no basis marker on the
+  projection for a UI to flag. So `01-F45` is closed for `branch` events only, and
+  `merge.ts`'s "the engine now reads no device clock at all" is false for provisional
+  ones. **Needs a ruling** (prefer `branch` over `branch_provisional` members? mark the
+  row?), not a silent patch.
+- **H2b (ruling needed, oracle-pinned).** A solo/hub device records `acquired = 1` at
+  offset 0, so a T1 single-terminal restaurant stamps `time_basis: 'branch'` on every
+  event from a completely unverified clock. `01-F44`'s text reads the other way. Doc 16
+  must not read `branch` as "verified".
+- **M1 one money accumulator is still a raw double**, and the extended lint rule does not
+  reach it: `maxRefundClaimByParent.set(parent, (… ?? 0) + Math.max(...amounts))` decides
+  `cap_violated`, sums in Map-insertion (ingest) order, and neither operand is a
+  money-named identifier or member. Same absurd-magnitude precondition as the case
+  T-01-22 did fix, so "fold money in BigInt" is overstated.
+- **M2 supersede-on-merge is not scoped to the claimant.** The UPDATE omits `device_id`
+  despite the key having just been widened, so a forger's evidence row is marked
+  superseded when the honest event merges — the bytes survive but the forgery attempt
+  leaves the doc-15 live surface and its notice is cancelled.
+- **L1** `schema.ts:66-73` still documents heal-in-place as live; that UPDATE was deleted
+  in T-01-21. Protected path — the next session will work from it.
+
+### Confirmed sound by the same review
+Compression negotiation (no stranding in either direction, per-connection scoping,
+handshake always plain); branch time surviving the wire in all four paths and the
+retry path carrying stored stamps; hub re-election continuity (`e85f9a5`); the renewal
+intersection being genuinely non-escalating; drain mode's read surface; the quarantine
+widening's byte-preservation and the `listQuarantine` total-order fix; the BigInt
+migration where applied, including the Auditor's `money_overflow` short-circuit.
+
 ## Open after T-01-18 (auth) — four filed, none blocking
 
 1. **Empty-backlog drain session has no in-session path to its renewal.** A device whose
