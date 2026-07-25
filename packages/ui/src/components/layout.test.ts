@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { ageLevel } from "./AgeBadge";
 import { pageCapacity } from "./ItemGrid";
+import { acceptKeystroke } from "./NumericKeypad";
 
 describe("27-F2 — page capacity is DERIVED, never a hardcoded count", () => {
   it("reproduces the 27-F11a reference figures on the founder's hardware", () => {
@@ -90,6 +91,40 @@ describe("03-F47 — ticket age is driven by fixed configured minutes", () => {
     // (law 1, 01-F34).
     for (const m of [0, 5, 10, 15, 20, 25, 100]) {
       expect(ageLevel(m, 10, 20)).toBe(ageLevel(m, 10, 20));
+    }
+  });
+});
+
+describe("27-F29 — impossible numbers are blocked AT ENTRY, not warned about after", () => {
+  // Blocking roughly halves out-by-10 errors, and numeric entry is where this population's
+  // errors concentrate. A post-hoc warning asks the operator to notice, re-read and compare
+  // — three literacy-dependent acts, under the most time pressure, with a customer waiting.
+
+  it("refuses a keystroke that would exceed the maximum", () => {
+    expect(acceptKeystroke("50", "0", 999, 7)).toBe("500");
+    expect(acceptKeystroke("500", "0", 999, 7)).toBeNull(); // 5000 > 999 — refused
+  });
+
+  it("refuses a keystroke past the digit limit, which is the out-by-10 guard", () => {
+    expect(acceptKeystroke("999", "9", 1_000_000, 4)).toBe("9999");
+    expect(acceptKeystroke("9999", "9", 1_000_000, 4)).toBeNull();
+  });
+
+  it("never strands the operator — clear and backspace always work", () => {
+    // A blocked state the operator cannot escape is worse than the bad entry it prevented.
+    expect(acceptKeystroke("9999", "back", 10, 4)).toBe("999");
+    expect(acceptKeystroke("9999", "clear", 10, 4)).toBe("");
+    expect(acceptKeystroke("", "back", 10, 4)).toBe("");
+  });
+
+  it("does not accumulate leading zeros", () => {
+    expect(acceptKeystroke("0", "5", 999, 7)).toBe("5");
+    expect(acceptKeystroke("0", "0", 999, 7)).toBe("0");
+  });
+
+  it("accepts every digit that is still legal", () => {
+    for (const d of ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]) {
+      expect(acceptKeystroke("1", d, 999, 7)).toBe(`1${d}`);
     }
   });
 });
