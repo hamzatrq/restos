@@ -64,13 +64,15 @@ export const deviceWatermarks = kernel.table(
  * faithfully hold (e.g. U+0000 in any string) must still be quarantinable as
  * storage_reject (fix-round amendment 3).
  *
- * ONE carve-out to "first stored wins" (T-01-11 heal-in-place, `gateway.ts`):
- * a provisional `origin_unregistered` placeholder stored during the DEC-SYNC-009
- * unregistered→registered relay race is UPDATEd — `device_id` + `reason` only —
- * once the origin registers and re-pushes THAT SAME event, so the Auditor's
- * coverage-by-attribution leg counts it as the slot's filler. This is the sole
- * legitimate UPDATE on this table; the stored `envelope` is still never rewritten
- * (01-F1 — a relay never re-authors), and a FOREIGN pre-claim is never touched.
+ * Heal-in-place is GONE (T-01-21): it existed only because the org-wide key let a
+ * hub's placeholder occupy the origin's single slot. With one row PER CLAIMANT the
+ * origin simply stores its own correctly-attributed row and nothing needs rewriting.
+ *
+ * The only UPDATE that remains is `superseded_at` — a placeholder whose event later
+ * merged legitimately (review #7). The stored `envelope` is never rewritten (01-F1 —
+ * a relay never re-authors), and a FOREIGN claim is never superseded, because
+ * supersession keys on `envelope_author` (who WROTE the bytes) rather than on
+ * `device_id` (who the row is attributed to). Those differ exactly where it matters.
  */
 export const quarantine = kernel.table(
   "quarantine",

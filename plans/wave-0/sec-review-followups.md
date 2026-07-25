@@ -16,11 +16,23 @@ Verdict: kernel sound; ordering design would-stake-cash-on-it. Two merge conditi
 - follow-up — heal→notice reconciliation; live zstd framing wiring; fold-brand migration (DEC-MONEY-005, now unblocked).
 - review #6 — widen quarantine key to (org, claimed_event_id, device_id) so a foreign pre-claim doesn't lose the honest event's bytes.
 
-## ⛔ ADVERSARIAL REVIEW OF THE POST-REVIEW ROUND — 1 BLOCKER STILL OPEN
+## ✅ ADVERSARIAL REVIEW OF THE POST-REVIEW ROUND — ALL FINDINGS RESOLVED
 
-**Status after the fix round (`9dc9800`):** B2 FIXED · B3 FIXED · H1 FIXED ·
-M2 attempted, reverted, ruling needed · **B1 STILL OPEN — do not merge on it.**
-H2/H2b need rulings; M1 and L1 remain. Full findings below as written.
+**Status after two fix rounds (`9dc9800`, `bbcfd6a`):** B1 · B2 · B3 · H1 · H2 · H2b ·
+M1 · M2 · L1 — **all closed.** Four needed founder rulings and got them (H2 prefer
+clock-synced devices; H2b a solo device's clock IS branch time; M2 keep forgery
+attempts visible; B1 the sync engine stores its own token). Suites green throughout:
+domain 131, sync-protocol 62, sync-client 320, testing 49, gateway 195.
+
+**Still owed, and the reason this round mattered:** these were all found AFTER six
+tasks were reported green, by an adversarial pass reading the code rather than the
+commit messages. Three were blocking. The regression tests for B1/B2 (end-to-end
+renewal survival; a live fan-out batch arriving while the cursor is blocked) do NOT
+exist — the fixes are verified by the existing suites not regressing, which is weaker
+than a pin. **Those belong to an oracle session, not the implementer**, and are the
+last thing standing between this branch and a clean merge.
+
+Full findings below as originally written.
 
 Found by the `24 §3` adversarial leg over `fdb4efd~1..HEAD`, after all six tasks were
 reported green. **All three blockers were verified against the code, and each
