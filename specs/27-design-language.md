@@ -83,8 +83,78 @@ deliverables, which understates it. This reorders the module and doc 27 with it.
   who cannot read must still parse a KOT, and there the load falls entirely on **numerals,
   vertical position, and whitespace** — the only channels thermal printing has. Doc 03's
   bitmap-rasterisation path (03-F8) covers rendering non-Latin *content*, not making a
-  ticket legible to a non-reader. **This is the most important unsolved design problem in
-  Wave 1 and it is owed a section here plus FRs in doc 03.**
+  ticket legible to a non-reader. **DISCHARGED July 2026 → §2b (27-F55..F62) here and
+  03-F30..F45 in doc 03 — but see §2b's opening: it is a reasoned construction, because the
+  research found that ZERO studies of this problem exist.**
+
+## 2b. Thermal paper — the design language §2a owed (July 2026)
+
+This section discharges `27-F11h`. It opens with what the research actually found, because
+that finding governs how much weight the rest of it can carry:
+
+> **There is ZERO research — academic, industrial or standards-body — on how
+> low-literacy adults parse printed operational tickets.** Not thin research. None. Every
+> low-literacy design finding this corpus cites (`27-F30`..`27-F34`) was measured on
+> screens, on signage, or on medication labels.
+
+So §2b is a **reasoned construction, not an evidence-backed one**, and it is the part of
+doc 27 most likely to be wrong. It is written to be *falsifiable on real staff* rather than
+defended: every FR below is subordinate to `27-F35`'s ≥85% post-training comprehension
+gate, and where the pilot contradicts this section, **this section loses**.
+
+- 27-F55 **Paper has four channels, and they are not the screen's four.** Colour, hue-coded
+  state, hover/press feedback and progressive disclosure are all unavailable. What remains
+  is **(1) ink density** (normal, bold, and inverted white-on-black solid fill), **(2)
+  character size** (1×, 2× width, 2× height, 2×2), **(3) vertical position and grouping
+  whitespace**, and **(4) rasterised glyphs** (`03-F8`). All four are monochrome and
+  all four are consumed by the eye in that order at arm's length. **This is a poorer
+  palette than glass, and the KOT must therefore carry LESS information than a pass-screen
+  ticket, not the same information in a narrower column.**
+- 27-F56 **The ink ladder — exactly three levels, allocated once, platform-wide.** Mirroring
+  the `27-F16` colour budget, emphasis on paper is a *budget*, not a formatting option:
+  **inverted solid fill** is reserved for the single most consequential fact on the ticket
+  and nothing else (`CANCEL`, `VOID`, `REPRINT`, allergen); **2×2 size** for the item line's
+  quantity and the order/table identifier; **normal weight** for everything else. Bold is
+  **not** a level — at 203 dpi on 48 GSM the difference between bold and normal is
+  unreliable across the printers we actually support, and a distinction the hardware may
+  not render is worse than no distinction. A ticket that uses inversion twice has used it
+  zero times.
+- 27-F57 **Quantity is never separated from the item it counts.** The mapping step — pairing
+  a number to the thing it quantifies — is where comprehension collapses in every study we
+  have (readers who *decode* a line at ~71% *execute* it correctly at ~35%). Quantity sits
+  **immediately left of the item name on the same line**, at the same size, never in a
+  right-aligned column and never on its own row. This single constraint is the reason
+  `03-F30`'s 80 mm floor is mandatory: at 32 columns, after the flag, quantity and code
+  there are ~10 characters left, and the pairing breaks.
+- 27-F58 **Vertical position encodes urgency; whitespace encodes grouping.** The reading
+  order is fixed and never configurable: **identifier → timing → items → modifiers →
+  notes**. A cook who reads nothing must still be able to point at the top line and be
+  understood by someone who can. Groups are separated by **blank lines, not rules** — a
+  full-width rule costs a line of paper and reads as a *boundary between documents* to
+  someone who parses shape rather than text.
+- 27-F59 **Modifiers are indented under their item and never inlined.** An inlined modifier
+  turns one scannable line into a wrapped paragraph, and wrapping destroys the vertical
+  alignment that `27-F57` and `27-F58` depend on. Where a modifier is a *removal* it
+  carries the inverted marker of `27-F56`, because a removal that is missed is an allergen
+  incident, not a preference miss.
+- 27-F60 **Icons on paper are permitted but never load-bearing alone.** The raster path
+  (`03-F8`) makes glyphs available, so `27-F26`'s icon-plus-label law applies unchanged:
+  an icon may accompany a word, never replace it. `27-F27`'s prohibition on inventing
+  pictograms is **stronger** here — a 24×24 dot glyph at 203 dpi has less resolution than
+  any icon this corpus has validated, and **no Pakistan-specific pictogram comprehension
+  data exists at all**.
+- 27-F61 **Urdu on a thermal ticket is UNPROVEN and must be physically tested before it is
+  designed around.** The estimate that Nastaliq needs a 48-dot (≈6 mm) cell — costing
+  **+60% paper per line** and yielding only ~14 ligature slots across 72 mm — is derived by
+  analogy from CJK's 24×24 allocation, and **has no source anywhere**. It is the weakest
+  inference in the Wave-1 research. **Print a test sheet on the 48 GSM stock actually sold
+  in Pakistan and have an Urdu reader judge it; do not validate on screen**, where the
+  rendering has nothing to do with what 203 dpi will produce. Until that sheet exists, no
+  FR may assume Urdu is usable on paper.
+- 27-F62 **Paper is not a status surface (`03-F44`).** A ticket cannot update, so nothing
+  whose meaning changes over time may be printed as if it were fixed — no "ready at" that a
+  delay invalidates, no state word that a later event contradicts. Print what was true at
+  **append** time, stamped with `branch_created_at`, and let the ledger own the present.
 
 ## 3. Colour
 
