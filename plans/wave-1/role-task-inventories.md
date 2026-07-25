@@ -637,7 +637,25 @@ Appendix A lists Customer as a role. `21 §5` says every screen belongs to exact
 
 ---
 
-## 9. CONFLICTS — named, not resolved
+## 9. CONFLICTS — **all ten now CLOSED (July 2026)**
+
+> Status, in resolution order. Four of these were **self-inflicted** — doc 27 contradicted
+> a doc it had not amended, which is what an amendments section is for.
+>
+> | # | Closed by | Ruling |
+> |---|---|---|
+> | C1 | `27-F11e/F11f` + `03 §1` | Paper is primary; the pass screen is **optional**, and a **22-inch panel** where present. The "cheap Android tablet" is superseded in doc 03 itself. |
+> | C2 | `03-F46` | The queue **pages within** chronological order, so **the oldest ticket is always on page 1** — reaching work is never a navigation act. Paging in one flat list is lateral, not depth. |
+> | C3 | `27-F6` + `21 §5` | *Required* is the operative word: search is an escape hatch, so **the grid must be complete without it**. Non-numeric typing stays banned for operational roles. |
+> | C4 | `27-F8` kitchen row | **96 dp**, set deliberately above the standing-counter minimum — it is the surface where the 21.34% wet-hand error was measured, at 1–2 m. |
+> | C5 | `27-F11d` | **An S1 alarm takes a BAND, never the screen.** A half-built cart is never taken from a cashier with a customer waiting. |
+> | C6 | `03-F47` + `21 §5` amended | **Fixed configured minutes**, not expected-prep — a colour driven by a model that may never become confident is a colour that lies. |
+> | C7 | `27-F14`..`27-F16` | The 3+1 budget is **allocated platform-wide**, once, rather than spent by whichever module ships first. |
+> | C8 | `27-F2` + `27-F11a` | "6 per page" was a **phone** finding I transplanted; page capacity derives from usable area and target size. The founder's 15.6″ hardware (~88 tiles) dissolved it. |
+> | C9 | `27 §8` | Learnability stays a criterion; doc 02's stale `≥48 dp` is superseded by `27-F8`. |
+> | C10 | `27 §9` | Light vs dark on the KDS is **pilot-decided**, not decided here. |
+
+### Original statements (retained — the reasoning is the record)
 
 Each of these is two specs disagreeing. None is resolved here. Each needs a founder or design-owner ruling, and each blocks specific Wave 1 UI work.
 

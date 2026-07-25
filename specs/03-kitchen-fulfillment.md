@@ -7,7 +7,7 @@
 Everything between order confirm and food leaving the kitchen:
 
 - the **printing service** — KOTs, receipts, cash-drawer kick, on every tier;
-- the **pass screen** (T2) — one cheap Android tablet at the pass showing the branch queue with aging and line-level assembly state;
+- the **pass screen** (T2) — **OPTIONAL, and a 22-inch panel where present** (`27-F11e/F11f`, founder ruling July 2026; the earlier "one cheap Android tablet" is SUPERSEDED — a 10" tablet holds ~1.5 tickets at 1.5 m and more pixels change nothing, because only physical height buys capacity). Paper is the primary kitchen surface; most deployments never see glass. Shows the branch queue with aging and line-level assembly state;
 - the **KDS** (T3) — per-station screens with routing and bump;
 - the **timing pipeline** — aging timers from day one, and silent training of per-item prep-time estimates from ready-marks.
 
@@ -116,6 +116,11 @@ Users: chefs, pass staff, and whichever role owns the ready signal (03-F24). Dev
 - 03-F44 **Paper is never a record; the ledger is (01-F1).** A thermal image is destroyed by cooking oil, alcohol/hand sanitiser, esters and ketones, **human sweat**, PVC or plasticiser contact, and adhesive tape — and is **developed by a fingernail** (frictional heat). Heat plus humidity together is many times worse than either alone. No flow may require a printed document to be readable later to recover state; plan printed image life at **5 years** for the 48 GSM stock actually sold in Pakistan, and unprinted roll shelf life at **2 years**.
 - 03-F45 **Consumables are procured by metres and GSM, and checked on receipt.** The international "80×80" convention **does not exist as a SKU in Pakistan**, and the market is ~exclusively **48 GSM** (≈52 µm; µm ≈ GSM × 1.09). Short rolls are a live risk — the same nominal SKU ranges **2.6× in price** on one marketplace in one day, and a listing sells *"80 mm × 40 **Yards**"* (a 8.5% shortfall hidden in the unit). A **vernier caliper is a sufficient goods-inwards test**: at 0.80 packing on a 12 mm core a genuine roll measures ≈ 59 mm OD at 40 m, 65 at 50 m, 74 at 65 m. Paper prices rose ~20%/yr for five years, so **every PKR figure in this corpus carries a review date**. BPA transfer to skin is ~10× higher onto wet or greasy fingers — which describes a kitchen line, not the cashier the EU limit was written for — and **no Pakistani regulator enforces it**, so BPA-free is a *purchasing requirement with supplier documentation* (14) or it is nothing.
 
+**Queue navigation and aging (conflicts C1/C2/C6 closed, July 2026)**
+
+- 03-F46 **The queue pages; it never scrolls — and the oldest ticket is always on page 1.** `27-F2` bans scrolling to reach a primary action (nearly half of field subjects did not know content existed below the fold); `03-N4` budgeted for a 40-order scroll. Both are satisfied by paging **within** the strictly-chronological order of `03-F13`: page 1 always holds the oldest tickets, bumping one pulls the next up, so **the work is always on the first page and reaching it is never a navigation act.** Later pages exist for situational awareness only — how much is queued — never to reach work. Paging inside one flat list is **lateral, not depth**, and does not spend `27-F1`'s depth budget (same rule as persistent tabs).
+- 03-F47 **Aging colour is driven by fixed configured minutes, not by expected-prep.** `21 §5` said *"amber at expected-prep"*; `03-F14` says *"amber at X min"*. **`03-F14` wins and `21 §5` is amended.** Expected-prep is an ETA-derived per-item quantity that exists only once `03-F27/F28`'s confidence gate passes — and `03 §3` forbids the kitchen from displaying ETAs at all. A colour driven by a model that may never become confident is a colour that lies about how late the food is. Thresholds stay org-configurable per order type (defaults: dine-in 10/20, delivery 15/25).
+
 ## 4. Key flows
 
 **Confirm → multi-printer KOT (happy + failure)**
@@ -153,7 +158,7 @@ Users: chefs, pass staff, and whichever role owns the ready signal (03-F24). Dev
 - 03-N1 Confirm → first byte at printer < 2 s (00 §5.3) with 3 routed printers in the fan-out.
 - 03-N2 Spool durability: plug-pull mid-print never loses a job (00 §4 protocol); spool writes sit inside the same durability envelope as order events (01-F2).
 - 03-N3 Print-failure alert raised ≤ 10 s after final retry exhaustion; alert audible at kitchen noise levels (device at max volume, tone chosen for cut-through).
-- 03-N4 Pass/KDS render an incoming state change < 1 s over LAN (01-F15); a queue of 40 open orders scrolls without dropped input on the 2–3 GB reference tablet.
+- 03-N4 Pass/KDS render an incoming state change < 1 s over LAN (01-F15); a queue of 40 open orders **pages** without dropped input (`03-F46`; the earlier "scrolls" is SUPERSEDED, and the "2–3 GB reference tablet" is superseded by 27-F11f's 22-inch panel).
 - 03-N5 Pipeline jobs never touch the serving path: estimation runs cloud-side only; a branch fully offline for a week keeps printing, marking ready, and buffering samples locally.
 
 ## 7. Customizability
