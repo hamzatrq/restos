@@ -22,6 +22,21 @@
 - 27-F6 **No operational role is ever required to type non-numeric text to complete a CRITICAL-PATH task.** Modifiers and reasons are pick-lists of tiles, or voice; of 27 field subjects, 24 could not type a single word. Typing may exist as an **optional escape hatch** — 21 §5 names search as exactly that, and 02-F2 search, 02-F6 notes and 02-F27 customer name are all legitimate under this reading. The test is whether a non-typing operator can complete the task by another route, not whether a keyboard appears anywhere.
 - 27-F7 **A list's visual order MUST be its work order.** If tickets render in an order other than the order they should be worked, that is a defect, not a display preference.
 
+## 1a. Reference hardware (founder-confirmed, July 2026)
+
+Sizing is meaningless without the panel. These are the real deployment targets, and every
+capacity claim in this document is computed against them — never against a design mock.
+
+| surface | panel | PPI | 76 dp tile | 126 dp keypad | comfortable tiles/page |
+|---|---|---|---|---|---|
+| counter POS | **15.6″**, 1366×768 or 1920×1080 (laptop or all-in-one) | 100–141 | 47–67 px | 79–111 px | **~88** (11×8) |
+| waiter tablet | ~10.1″ Android | ~224 | 106 px | 177 px | ~35 (7×5) |
+| waiter phone | ~6.5″ Android | ~405 | 191 px | 319 px | **~12** (2×6) |
+
+- 27-F11a **The 15.6″ counter resolves 02-N2 outright.** ~88 tiles per page against ~12 persistent category tabs means a 300-item catalogue is **~25 items per tab — one page each.** No paging within a tab, no scrolling, depth one, positions frozen (27-F4). The apparent conflict between a 300-item menu and a flat layout was an artefact of assuming phone-sized capacity.
+- 27-F11b **The phone is where "~6 per page" actually applies** (~12 comfortable tiles). Waiter and rider surfaces inherit the tested paging configuration; the counter does not, and must not be designed as a scaled-up phone.
+- 27-F11c **Physical size, never resolution, sets capacity.** A 1366×768 and a 1920×1080 15.6″ panel hold the *same* number of 12 mm tiles. Extra pixels buy sharpness; only inches buy room. Design in millimetres, render in pixels.
+
 ## 2. Touch, density and latency
 
 The ergonomics and low-literacy strands converge here from opposite directions, which is why these numbers are raised rather than split: bigger targets and fewer-items-per-page are the *same* design.
@@ -41,6 +56,8 @@ The ergonomics and low-literacy strands converge here from opposite directions, 
 - 27-F9 **Destructive actions are never adjacent to high-frequency ones on any surface a wet hand touches.** Wet-screen gesture error is **21.34% against 0.00% dry**, water becomes a hindrance within ~20 seconds, and the sensed touch point physically *migrates toward the moisture*. This is a hard rule, not a preference.
 - 27-F10 Touch feedback <100 ms (restating 21 §4 as the perceptual threshold). Optimistic UI for anything the device can decide locally; a spinner is an admission the device asked someone else.
 - 27-F11 **Density is a professional-tool decision, not a taste one.** Expert operators scanning a familiar layout are doing something categorically different from a first-time reader. Density is bounded by 27-F8's target sizes and by 27-F2's page size — not by an aesthetic preference for whitespace.
+
+- 27-F11d **An S1 alarm takes a BAND, never the screen** (founder ruling, July 2026; amends 21 §5's interrupt-priority law and doc 03's S1 shape). A print failure, red-late order or critical cash variance renders as a persistent, loud, repeating banner that cannot be dismissed without an attributed acknowledgement — **and the work underneath stays visible and usable.** A half-built cart is never taken away from a cashier with a customer waiting. Reasoning: 01-F17 says a sale is never blocked, and an alarm that interrupts a transaction teaches staff to fear the screen, which is how workarounds start. Escalation to the manager console at 60 s is unchanged. Deferring the alarm to a "safe moment" is also rejected — food is not being cooked, so the delay is the harm.
 
 ## 3. Colour
 
