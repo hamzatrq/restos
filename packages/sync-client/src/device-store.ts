@@ -7,37 +7,40 @@
 // or deletes an event row (01-F1). Append validates through the domain registry —
 // an unknown type or invalid payload persists nothing (01-F4).
 //
-// Folds v1 (T-01-04) + incremental maintenance (T-01-04b): always-on materialized
-// state tables per FOLDS.md, kept by an in-memory fold accumulator (src/folds/
-// replay.ts) whose writes commit in the same transaction as the ledger row, so fold
-// state stays atomic with its ledger write and reopen self-heals to refold()-
-// equivalence (01-F6). The common in-order arrival fast-paths to a targeted upsert;
-// any event that would reorder canonical history falls back to a full recompute —
-// the law is equivalence with canonical replay, never "never recompute". `ingest`
-// is the branch-stream entry point — peer
-// envelopes persist to `peer_events`, dedupe by event id (01-F8), and park at the
-// fold layer when a typed parent is unseen (01-F10); append never fails or blocks
-// for fold reasons — a sale is never blocked (01-F17). Cloud ordering lands via the
-// `global_seq_map` sidecar (`assignGlobalSeq`) so no event row is ever updated
-// (01-F1) and devices converge to cloud ordering on ack (01-F34).
+// Folds (T-01-15): the merge-semantics engine (src/folds/merge.ts) — every
+// projected field carries its own merge rule (rewritten 01-F34; specs/26), state
+// is a pure function of the stored event SET, and `global_seq` adoption is a
+// sidecar write with ZERO fold work. Fold writes commit in the same transaction
+// as the ledger row, so fold state stays atomic with its ledger write and reopen
+// self-heals by full replay of the surviving set (01-F6; replay order is
+// irrelevant — the fold is order-free). `ingest` is the branch-stream entry
+// point — peer envelopes persist to `peer_events`, dedupe by event id (01-F8);
+// parking is by key-presence (01-F10 amended): only the bare order-fact types
+// wait for their order key, indexed by `waiting_for`. Append never fails or
+// blocks for fold reasons — a sale is never blocked (01-F17). Cloud ordering
+// lands via the `global_seq_map` sidecar (`assignGlobalSeq`) so no event row is
+// ever updated (01-F1); adoption changes NO fold state (01-F34).
 import {
   auditEventHash,
   canonicalJson,
   type EventEnvelopeT,
   isAuditEvent,
+  type ParsedEvent,
   parseEnvelope,
   parseEvent,
+  type TimeBasis,
 } from "@restos/domain";
 import Database from "better-sqlite3";
 import {
-  createFoldEngine,
-  type FoldInput,
+  createMergeEngine,
+  type DropPlan,
   type FoldState,
+  type FoldStats,
   type KitchenQueueRow,
   type OpenOrderRow,
   type ParkedRow,
   type ProjectedOrder,
-} from "./folds/replay.js";
+} from "./folds/merge.js";
 
 export class AckBeyondAppendedError extends Error {
   constructor(watermark: number, ownHighWater: number | null) {
@@ -74,8 +77,33 @@ export type StoreIdentity = {
   device_id: string;
 };
 
-/** Envelope minus the store-assigned fields — the store stamps both (plan contract). */
-export type AppendInput = Omit<EventEnvelopeT, "lamport_seq" | "server_received_at">;
+/**
+ * Envelope minus the store-assigned fields — the store stamps them all. `lamport_seq`
+ * and `server_received_at` per the original plan contract; `branch_created_at` and
+ * `time_basis` since T-01-17, on the same store-owned-platform-law grounds as the
+ * audit chain (01 §7): a caller must not be able to choose its own branch stamp or
+ * claim a `branch` basis it never earned.
+ */
+export type AppendInput = Omit<
+  EventEnvelopeT,
+  "lamport_seq" | "server_received_at" | "branch_created_at" | "time_basis"
+>;
+
+/** Skew above this raises the 01-N2 device-health flag. Observational only — never blocks. */
+export const SKEW_FLAG_THRESHOLD_MS = 300_000;
+
+/**
+ * Branch-time state (01-F43/01-F44/01-N2). `basis` is what `append` stamps onto
+ * `time_basis`. `skew_ms` is how far this device's RAW clock sits from branch time —
+ * the one sanctioned read of the untrusted clock (the named 01-F45 exemption), and
+ * null before any hub contact, since there is nothing to measure against yet.
+ */
+export type BranchTimeStatus = {
+  offset_ms: number;
+  basis: TimeBasis;
+  skew_ms: number | null;
+  skew_flagged: boolean;
+};
 
 export type SyncStatus = {
   queue_depth: number;
@@ -89,12 +117,42 @@ export type IngestResult = { stored: boolean };
 /** Per-event outcome counts for the batch seam — failures skip, never throw (01-F37 seed). */
 export type IngestBatchResult = { appended: number; deduped: number; rejected: number };
 
+/** One catch-up-page item — the same two arguments as `ingest` (T-01-16, 26 §6.4). */
+export type PageItem = { envelope: unknown; global_seq?: number };
+
+/**
+ * One ORDERED per-item outcome from `ingestPage` (T-01-16). A failure — including a
+ * `DivergentDuplicateError` — is CARRIED in `error`, never thrown out of the page, so
+ * the caller computes the contiguous landed prefix and passes/stops per event exactly
+ * as the per-event loop did (26 §6.4 warning: batching must keep per-event granularity).
+ */
+export type PageResult = { ok: true; stored: boolean } | { ok: false; error: unknown };
+
+/**
+ * Ingest-path work counters (T-01-16; the T-01-14/T-01-15 foldStats precedent —
+ * "one transaction per catch-up page" is not black-box assertable otherwise).
+ * `commits` = ingest-path write-transactions committed (one `ingest`, one whole
+ * `ingestPage`, or one `ingestBatch` each add 1). `events_ingested` = newly-persisted
+ * peer event rows.
+ */
+export type IngestStats = { commits: number; events_ingested: number };
+
 export type DeviceStore = {
   /** The store's org/branch/device identity — the mesh session derives hello from it (T-01-05). */
   identity: StoreIdentity;
   append(input: AppendInput): EventEnvelopeT;
   ingest(envelope: unknown, opts?: { global_seq?: number }): IngestResult;
   ingestBatch(events: readonly unknown[]): IngestBatchResult;
+  /**
+   * Persist + project a WHOLE catch-up page in ONE transaction (one fsync) with
+   * PER-EVENT savepoint isolation, returning one result PER item IN ORDER (T-01-16,
+   * 26 §6.4). A per-item failure rolls back only that item's savepoint — the good
+   * prefix commits, siblings after it are still attempted, and a divergent duplicate
+   * is a carried `{ ok: false }`, never a throw that wedges the page (01-F1/F9/F17).
+   */
+  ingestPage(items: readonly PageItem[]): readonly PageResult[];
+  /** Ingest-path work counters (T-01-16) — the "one transaction per page" observable. */
+  ingestStats(): IngestStats;
   readAllEvents(): EventEnvelopeT[];
   assignGlobalSeq(event_id: string, global_seq: number): void;
   nextBatch(max: number): EventEnvelopeT[];
@@ -104,8 +162,86 @@ export type DeviceStore = {
   kitchenQueue(): KitchenQueueRow[];
   parked(): ParkedRow[];
   refold(): void;
+  /** Fold work counters (T-01-15 contract; events_folded is the real quantity). */
+  foldStats(): FoldStats;
+  /** Retention shrink: atomic per-entity key drop with the open-bill guard
+   * (matrix conventions; keys `order:<id>` / `line:<order>:<line>`). */
+  retentionDrop(keys: readonly string[]): void;
   status(): SyncStatus;
   setLastGlobalSeq(n: number): void;
+  /**
+   * Record the measured offset to branch time (01-F43). THE one write path — calling
+   * it IS hub contact, so it also flips the basis to `branch`. The hub itself calls
+   * `setBranchTimeOffset(0)`: offset 0 with `acquired` true is the authority, which is
+   * a different state from never-contacted (also offset 0, but `branch_provisional`).
+   */
+  setBranchTimeOffset(offset_ms: number): void;
+  branchTimeStatus(): BranchTimeStatus;
+  /**
+   * The token to present on the next connection (01-F47): the most recent renewal the
+   * cloud has issued, or null before any renewal — in which case the caller uses the
+   * token it was constructed with.
+   */
+  deviceToken(): string | null;
+  /** Persist a renewal received from the cloud. Silent by design — no host involvement. */
+  setDeviceToken(token: string): void;
+  // ── DEC-SYNC-009 hub-relay seam (T-01-12) ─────────────────────────────────
+  // VOLATILE cross-plane signals between the mesh session (LAN) and the cloud
+  // session (WAN) of ONE device, carried by the store handle because it is the
+  // only object both sessions share. Never persisted: after a restart the hub
+  // re-relays from zero and re-learns per-origin acks (id-dedupe + per-origin
+  // acks absorb the overlap, 01-F8). Future skip signal (fix round F7,
+  // accepted as designed): once held peer events carry an adopted global_seq
+  // sidecar (01-F34 delivery cursor), a restarted hub can skip
+  // already-cloud-merged events instead of re-relaying from zero — an
+  // optimization over the same dedupe-safe baseline, not a correctness need.
+  /** Mesh (acting hub) → cloud session: peer events were ingested — relay them upward. */
+  requestRelayDrain(): void;
+  /** Cloud session subscribes to relay-drain requests; returns unsubscribe. */
+  onRelayDrainRequested(listener: () => void): () => void;
+  /** Mesh (leaving hub duty — demotion or stop) → cloud session: clear any latched
+   * relay request; followers never relay (DEC-SYNC-006, fix round F4). */
+  cancelRelayDrain(): void;
+  /** Cloud session subscribes to relay-cancel signals; returns unsubscribe. */
+  onRelayDrainCancelled(listener: () => void): () => void;
+  /** Cloud session records a per-ORIGIN cloud ack learned from a relay push_ack. */
+  noteRelayedCloudAck(device_id: string, acked_watermark: number): void;
+  /** Highest known relayed cloud ack for an origin (mesh reads it to forward over LAN). */
+  relayedCloudAck(device_id: string): number | null;
+  /** Cloud session records a renewal the cloud issued FOR a relayed origin (01-F47) —
+   * the origin's token never reaches the cloud, so this is its only delivery path. */
+  noteRelayedRenewal(device_id: string, token: string): void;
+  /**
+   * Record that the CLOUD refused a relayed origin as revoked (01-F48 LAN half). The
+   * hub already learns this — the gateway quarantines that origin's events
+   * `origin_revoked` — but until now it only stopped RELAYING them while continuing to
+   * fan branch events back to that device over LAN. Revocation blocks READS as well as
+   * writes, so the mesh reads this set to evict the peer.
+   */
+  noteRevokedPeer(device_id: string): void;
+  /** Peers the cloud has refused as revoked; the mesh refuses them on LAN. */
+  isRevokedPeer(device_id: string): boolean;
+  /** Pending renewal for an origin; the mesh forwards it over LAN on the next beat. */
+  relayedRenewal(device_id: string): string | null;
+  /**
+   * Drop a pending relayed renewal (mesh calls this when the peer leaves). A renewal is
+   * a CREDENTIAL, so it must not be held and re-forwarded indefinitely: a token minted
+   * moments before its device was revoked would otherwise be handed over on every
+   * heartbeat forever. Bounding the window is not a substitute for the LAN revocation
+   * check (01-F48's LAN half, still unimplemented) — it just stops this path from
+   * making that gap worse.
+   */
+  clearRelayedRenewal(device_id: string): void;
+  /** Cloud session records a cloud quarantine_notice whose event belongs to a
+   * relayed ORIGIN (T-01-08; 01-F37 "originating device notified" — a WAN-less
+   * origin's only path is the hub's LAN forward). Deduped by event id. */
+  noteRelayedQuarantineNotice(
+    device_id: string,
+    notice: { event_id: string; reason: string },
+  ): void;
+  /** Recorded notices for an origin (mesh reads them to forward over LAN,
+   * at-least-once — re-sent per heartbeat, duplicates legal per DEC-SYNC-008). */
+  relayedQuarantineNotices(device_id: string): readonly { event_id: string; reason: string }[];
   /** This device's own audit-chain HEAD (01-F5); null before the first own audit append. */
   auditChainHead(): { hash: string; event_id: string } | null;
   close(): void;
@@ -152,14 +288,48 @@ CREATE TABLE IF NOT EXISTS audit_chain (
   head_event_id TEXT
 ) STRICT;
 INSERT OR IGNORE INTO audit_chain (id, head_hash, head_event_id) VALUES (0, NULL, NULL);
--- Fold state tables — exactly FOLDS.md (01-F6, 01-F10).
+-- Branch-time offset (01-F43, T-01-17) — a single row mirroring the audit_chain
+-- pattern. DURABLE deliberately: a volatile offset would make every restarted
+-- terminal stamp branch_provisional until its next heartbeat, which changes which
+-- events fiscal consumers (01-F44) see marked provisional for no gain. The
+-- 'acquired' flag distinguishes "hub contact happened, offset is 0 because we ARE
+-- the hub" from "never contacted, using 0 as a fallback" — the two look identical
+-- in offset_ms but carry a different time_basis, so it is load-bearing, not
+-- bookkeeping.
+CREATE TABLE IF NOT EXISTS branch_time (
+  id INTEGER PRIMARY KEY CHECK (id = 0),
+  offset_ms INTEGER NOT NULL,
+  acquired INTEGER NOT NULL
+) STRICT;
+INSERT OR IGNORE INTO branch_time (id, offset_ms, acquired) VALUES (0, 0, 0);
+-- Device credential (01-F47, T-01-18 fix round B1). The cloud renews tokens silently;
+-- the device must PERSIST the renewal and present it on every later connection, or
+-- expiry is terminal rather than transient and the whole fleet enters a reconnect loop
+-- at TTL. Persistence lives here rather than in the host app because "silent" is the
+-- FR's own word: a host that forgot to store it would brick its devices at 90 days.
+-- NULL token ⇔ never renewed; the constructor-supplied token is used until then.
+CREATE TABLE IF NOT EXISTS device_credential (
+  id INTEGER PRIMARY KEY CHECK (id = 0),
+  token TEXT
+) STRICT;
+INSERT OR IGNORE INTO device_credential (id, token) VALUES (0, NULL);
+-- Fold state tables — the T-01-15 merge-model projections (01-F6, 01-F10; the
+-- openOrders row shape is oracle-pinned, contract ruling C8).
 CREATE TABLE IF NOT EXISTS orders (
   order_id TEXT PRIMARY KEY,
   channel TEXT NOT NULL,
   order_type TEXT,
-  table_id TEXT,
   confirmed_at INTEGER,
   settled INTEGER NOT NULL,
+  table_ids_json TEXT NOT NULL,
+  table_conflict INTEGER NOT NULL,
+  pay_total INTEGER NOT NULL,
+  repaid_total INTEGER NOT NULL,
+  refund_total INTEGER NOT NULL,
+  pay_attempts_json TEXT NOT NULL,
+  refund_attempts_json TEXT NOT NULL,
+  cap_violated INTEGER NOT NULL,
+  exceptions_json TEXT NOT NULL,
   json_lines TEXT NOT NULL
 ) STRICT;
 CREATE TABLE IF NOT EXISTS queue (
@@ -231,6 +401,29 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     "UPDATE audit_chain SET head_hash = ?, head_event_id = ? WHERE id = 0",
   );
 
+  // Branch-time offset (01-F43): read inside append to stamp branch_created_at +
+  // time_basis, written only by setBranchTimeOffset. Durable across reopen.
+  const readBranchTime = db.prepare<[], { offset_ms: number; acquired: number }>(
+    "SELECT offset_ms, acquired FROM branch_time WHERE id = 0",
+  );
+  const writeBranchTime = db.prepare<[number]>(
+    "UPDATE branch_time SET offset_ms = ?, acquired = 1 WHERE id = 0",
+  );
+  const branchTime = (): { offset_ms: number; acquired: boolean } => {
+    const row = readBranchTime.get();
+    return { offset_ms: row?.offset_ms ?? 0, acquired: (row?.acquired ?? 0) === 1 };
+  };
+  const basisOf = (acquired: boolean): TimeBasis => (acquired ? "branch" : "branch_provisional");
+
+  // Renewed device credential (01-F47): read at connect, written when the cloud sends
+  // one. Durable, so a restart does not fall back to a token that may have expired.
+  const readCredential = db.prepare<[], { token: string | null }>(
+    "SELECT token FROM device_credential WHERE id = 0",
+  );
+  const writeCredential = db.prepare<[string]>(
+    "UPDATE device_credential SET token = ? WHERE id = 0",
+  );
+
   // T-01-04 fold surfaces: peer ingest, global_seq sidecar, fold-state rebuild.
   const allOwnEnvelopes = db.prepare<[], { envelope: string }>("SELECT envelope FROM events");
   const peerById = db.prepare<[string], { id: string }>("SELECT id FROM peer_events WHERE id = ?");
@@ -254,16 +447,29 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   const insertGseq = db.prepare<[string, number]>(
     "INSERT INTO global_seq_map (event_id, global_seq) VALUES (?, ?)",
   );
-  const allGseq = db.prepare<[], { event_id: string; global_seq: number }>(
-    "SELECT event_id, global_seq FROM global_seq_map",
-  );
   const clearOrders = db.prepare("DELETE FROM orders");
   const clearQueue = db.prepare("DELETE FROM queue");
   const clearParked = db.prepare("DELETE FROM parked");
   const insertOrderRow = db.prepare<
-    [string, string, string | null, string | null, number | null, number, string]
+    [
+      string,
+      string,
+      string | null,
+      number | null,
+      number,
+      string,
+      number,
+      number,
+      number,
+      number,
+      string,
+      string,
+      number,
+      string,
+      string,
+    ]
   >(
-    "INSERT INTO orders (order_id, channel, order_type, table_id, confirmed_at, settled, json_lines) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO orders (order_id, channel, order_type, confirmed_at, settled, table_ids_json, table_conflict, pay_total, repaid_total, refund_total, pay_attempts_json, refund_attempts_json, cap_violated, exceptions_json, json_lines) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const insertQueueRow = db.prepare<[string, number, string, number, number, number]>(
     "INSERT INTO queue (order_id, confirm_at, channel, age_basis, lines_ready, lines_total) VALUES (?, ?, ?, ?, ?, ?)",
@@ -271,12 +477,13 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   const insertParkedRow = db.prepare<[string, string, string]>(
     "INSERT INTO parked (event_id, waiting_for, envelope_json) VALUES (?, ?, ?)",
   );
-  // Targeted deletes for the incremental fast-path upsert (T-01-04b) — one order's
-  // two rows, replaced in place; the full-rebuild fallback uses the clears above.
+  // Targeted writes: one order's rows replaced in place; one parked row removed
+  // per drained event (the waiting_for-indexed drain, 01-F10).
   const deleteOrderRow = db.prepare<[string]>("DELETE FROM orders WHERE order_id = ?");
   const deleteQueueRow = db.prepare<[string]>("DELETE FROM queue WHERE order_id = ?");
+  const deleteParkedRow = db.prepare<[string]>("DELETE FROM parked WHERE event_id = ?");
   const selectOrders = db.prepare<[], OpenOrderRow>(
-    "SELECT order_id, channel, order_type, table_id, confirmed_at, settled, json_lines FROM orders ORDER BY order_id",
+    "SELECT order_id, channel, order_type, confirmed_at, settled, table_ids_json, table_conflict, pay_total, repaid_total, refund_total, pay_attempts_json, refund_attempts_json, cap_violated, exceptions_json, json_lines FROM orders ORDER BY order_id",
   );
   const selectQueue = db.prepare<[], KitchenQueueRow>(
     "SELECT order_id, confirm_at, channel, age_basis, lines_ready, lines_total FROM queue ORDER BY order_id",
@@ -314,19 +521,18 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   const storedPrev = (envelope: EventEnvelopeT): string | null =>
     (envelope.payload as { prev_audit_hash: string | null }).prev_audit_hash;
 
-  // The live fold accumulator (T-01-04b) — persists across writes so an in-order
-  // append is O(1), not a full canonical replay. `refoldTx()` on open seeds it.
-  const engine = createFoldEngine();
+  // The live merge lattice (T-01-15) — kept across writes; every mutation is a
+  // targeted per-key update (fold work independent of ledger size). Seeded on
+  // open by full replay of the surviving set (order-free, 01-F6).
+  const engine = createMergeEngine();
 
-  const readAllInputs = (): FoldInput[] => {
-    const gseqOf = new Map(allGseq.all().map((row) => [row.event_id, row.global_seq]));
-    // Audit events are fold-inert (01-F5/01-F6): they carry no order/line/money state, so
-    // they never enter the fold feed — refold() stays equivalent to the incremental path.
-    return [...allOwnEnvelopes.all(), ...allPeerEnvelopes.all()]
+  const readAllParsed = (): ParsedEvent[] =>
+    // Audit events are fold-inert (01-F5/01-F6): they carry no order/line/money
+    // state, so they never enter the fold feed.
+    [...allOwnEnvelopes.all(), ...allPeerEnvelopes.all()]
       .map(rowToEnvelope)
       .filter((envelope) => !isAuditEvent(envelope.type))
-      .map((envelope) => ({ envelope, global_seq: gseqOf.get(envelope.id) ?? null }));
-  };
+      .map((envelope) => parseEvent(envelope));
 
   const writeFullTables = (state: FoldState): void => {
     clearOrders.run();
@@ -337,9 +543,17 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
         row.order_id,
         row.channel,
         row.order_type,
-        row.table_id,
         row.confirmed_at,
         row.settled,
+        row.table_ids_json,
+        row.table_conflict,
+        row.pay_total,
+        row.repaid_total,
+        row.refund_total,
+        row.pay_attempts_json,
+        row.refund_attempts_json,
+        row.cap_violated,
+        row.exceptions_json,
         row.json_lines,
       );
     }
@@ -358,28 +572,37 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     }
   };
 
-  // Drop-and-rebuild all fold tables (and the live accumulator) from events ∪
-  // peer_events + the sidecar — the always-correct fallback (01-F6) and the reopen
-  // self-heal, run inside the mutating transaction so fold state stays atomic.
+  // Drop-and-rebuild all fold tables (and the live lattice) from events ∪
+  // peer_events — replay order irrelevant, the fold is a pure function of the
+  // set. The reopen self-heal and the refold() surface (01-F6).
   const recomputeFolds = (): void => {
-    engine.rebuild(readAllInputs());
+    engine.rebuild(readAllParsed());
     writeFullTables(engine.snapshot());
   };
 
-  // Replace one order's two rows in place (the fast-path delta); the queue row is
-  // written only when the order has confirmed (FOLDS.md — no queue row otherwise).
-  const upsertOrder = (p: ProjectedOrder): void => {
-    deleteOrderRow.run(p.order.order_id);
+  // Replace one order's rows in place (the targeted delta); the queue row exists
+  // iff the confirmed fact holds; a null projection means no delivered create.
+  const upsertOrder = (orderId: string, p: ProjectedOrder | null): void => {
+    deleteOrderRow.run(orderId);
+    deleteQueueRow.run(orderId);
+    if (!p) return;
     insertOrderRow.run(
       p.order.order_id,
       p.order.channel,
       p.order.order_type,
-      p.order.table_id,
       p.order.confirmed_at,
       p.order.settled,
+      p.order.table_ids_json,
+      p.order.table_conflict,
+      p.order.pay_total,
+      p.order.repaid_total,
+      p.order.refund_total,
+      p.order.pay_attempts_json,
+      p.order.refund_attempts_json,
+      p.order.cap_violated,
+      p.order.exceptions_json,
       p.order.json_lines,
     );
-    deleteQueueRow.run(p.order.order_id);
     if (p.queue) {
       insertQueueRow.run(
         p.queue.order_id,
@@ -392,27 +615,38 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     }
   };
 
-  const rewriteParked = (): void => {
-    clearParked.run();
-    for (const row of engine.parkedRows()) {
-      insertParkedRow.run(row.event_id, row.waiting_for, row.envelope_json);
-    }
-  };
+  // F6 (fix-round) recovery flags: `foldTouched` — the current top-level call
+  // reached the fold (reset by `guarded`); `eventFoldTouched` — the current
+  // ingestBatch element reached it (reset per element); `batchNeedsRefold` —
+  // some element's savepoint rolled back AFTER its fold, so the lattice may
+  // lead the committed batch.
+  let foldTouched = false;
+  let eventFoldTouched = false;
+  let batchNeedsRefold = false;
 
-  // Incremental fold maintenance for a newly-stored event (T-01-04b): fast-path an
-  // in-order tail arrival to a targeted upsert of the touched orders + the parked
-  // table; an out-of-order arrival falls back to a full recompute. Both stay
-  // byte-equivalent to refold() — the T-01-04 fold properties are the oracle.
-  const applyFold = (input: FoldInput): void => {
-    // Audit events are fold-inert (01-F5): they feed the fold engine no order/money state,
-    // so the append/ingest paths skip them here — nothing applied, nothing parked.
-    if (isAuditEvent(input.envelope.type)) return;
-    if (engine.apply(input)) {
-      for (const p of engine.takeDirty()) upsertOrder(p);
-      rewriteParked();
-    } else {
-      recomputeFolds();
+  // Ingest-path work counters (T-01-16; ingestStats). Incremented at the public seam
+  // AFTER a transaction commits, so a per-event savepoint rollback inside ingestPage
+  // /ingestBatch never inflates the page's single commit (the 26 §6.4 observable).
+  let ingestCommits = 0;
+  let eventsIngested = 0;
+
+  // Fold maintenance for a newly-stored event (T-01-15): every write is targeted
+  // — the touched orders' rows and the parked-row delta only. Never a replay.
+  const applyFold = (parsed: ParsedEvent): void => {
+    // Audit events are fold-inert (01-F5): nothing applied, nothing parked.
+    if (isAuditEvent(parsed.envelope.type)) return;
+    foldTouched = true; // F6: the engine may mutate past this point
+    eventFoldTouched = true;
+    const result = engine.apply(parsed);
+    if (result.parked) {
+      insertParkedRow.run(
+        result.parked.event_id,
+        result.parked.waiting_for,
+        result.parked.envelope_json,
+      );
     }
+    for (const eventId of result.drained) deleteParkedRow.run(eventId);
+    for (const orderId of result.dirty) upsertOrder(orderId, engine.projectOrder(orderId));
   };
 
   // Lamport assignment and the durable insert are one transaction (01-F3): a
@@ -434,6 +668,14 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
         ...retryInput,
         lamport_seq: envelope.lamport_seq,
         server_received_at: envelope.server_received_at,
+        // Reconstruct against the STORED branch stamp, not a freshly-computed one
+        // (T-01-17). The offset legitimately moves between an append and its retry —
+        // a heartbeat lands, or the device acquires its first offset — and recomputing
+        // here would make an IDENTICAL retry compare unequal and throw. Same reasoning
+        // as lamport_seq/server_received_at above: store-assigned fields are carried,
+        // never re-derived, so 01-F8 idempotency stays a statement about caller content.
+        branch_created_at: envelope.branch_created_at,
+        time_basis: envelope.time_basis,
       }).envelope;
       if (canonical(retry) !== canonical(envelope)) {
         throw new Error(
@@ -455,20 +697,30 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     // Stamp the current HEAD (NULL ⇒ this device's first audit event ⇒ prev_audit_hash: null).
     const payload = isAudit ? stampPrev(input.payload, auditHead()) : input.payload;
     const next = (ownHighWater() ?? -1) + 1;
-    const { envelope } = parseEvent({
+    // Branch time is stamped HERE, at append, and travels inside the event (01-F43).
+    // It is deliberately not computed at fold time: folds must be a pure function of
+    // the delivered event set (01-F34), so two devices holding the same events but
+    // different offsets must still fold identically. Applying a local offset while
+    // folding would break that silently — no test of plain convergence would catch it,
+    // because each device would be self-consistent.
+    const { offset_ms, acquired } = branchTime();
+    const parsed = parseEvent({
       ...input,
       payload,
       lamport_seq: next,
+      branch_created_at: input.device_created_at + offset_ms,
+      time_basis: basisOf(acquired),
       server_received_at: null,
     });
+    const envelope = parsed.envelope;
     insertEvent.run(envelope.id, envelope.lamport_seq, JSON.stringify(envelope));
     // The chain HEAD advances inside this one transaction, atomic with the durable ledger
     // row (01-F2/F3); non-audit append never touches it.
     if (isAudit) setAuditHead.run(auditEventHash(envelope), envelope.id);
-    // Folds apply in the same transaction; an unmet dependency parks at the fold
-    // layer — append never fails or blocks for fold reasons (01-F17, 01-F10). Audit
-    // events are fold-inert (applyFold skips them).
-    applyFold({ envelope, global_seq: null });
+    // Folds apply in the same transaction; an absent order key parks the bare
+    // order facts at the fold layer — append never fails or blocks for fold
+    // reasons (01-F17, 01-F10). Audit events are fold-inert (applyFold skips them).
+    applyFold(parsed);
     return envelope;
   });
 
@@ -476,7 +728,8 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   // nothing persists on failure (01-F4); dedupes by event id (01-F8); own events
   // enter only via append (18 §4 loud failure); folds apply in the same transaction.
   const ingestTx = db.transaction((value: unknown, opts?: { global_seq?: number }) => {
-    const { envelope } = parseEvent(value);
+    const parsed = parseEvent(value);
+    const envelope = parsed.envelope;
     if (envelope.org_id !== identity.org_id || envelope.branch_id !== identity.branch_id) {
       throw new Error(
         `ingest of event ${envelope.id} from ${envelope.org_id}/${envelope.branch_id} does not ` +
@@ -498,8 +751,11 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
       // Identical duplicate: no new row ever, but a CARRIED global_seq is adopted
       // exactly as assignGlobalSeq would — the LAN-first-then-cloud-catchup path
       // converges (01-F34); without opts this is a pure idempotent no-op (01-F8).
+      // Adoption is a SIDECAR write only: zero fold work, zero state change
+      // (rewritten 01-F34 — global_seq is a delivery cursor, never a business
+      // arbiter).
       const carried = opts?.global_seq;
-      if (carried !== undefined && adoptGlobalSeq(envelope.id, carried)) recomputeFolds();
+      if (carried !== undefined) adoptGlobalSeq(envelope.id, carried);
       return { stored: false };
     }
     if (envelope.device_id === identity.device_id) {
@@ -524,7 +780,7 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     }
     insertPeer.run(envelope.id, envelope.device_id, envelope.lamport_seq, JSON.stringify(envelope));
     if (globalSeq !== undefined) insertGseq.run(envelope.id, globalSeq); // UNIQUE clash throws, rolls back
-    applyFold({ envelope, global_seq: globalSeq ?? null });
+    applyFold(parsed); // the carried seq is sidecar-only — the fold never reads it (01-F34)
     return { stored: true };
   });
 
@@ -573,28 +829,125 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   const ingestBatchTx = db.transaction((events: readonly unknown[]): IngestBatchResult => {
     const counts: IngestBatchResult = { appended: 0, deduped: 0, rejected: 0 };
     for (const event of events) {
+      eventFoldTouched = false;
       try {
         if (ingestTx(event).stored) counts.appended += 1;
         else counts.deduped += 1; // already held (own or peer) — idempotent no-op (01-F8)
       } catch {
         counts.rejected += 1; // skipped and counted — quarantine machinery is a later task
+        // F6: this element's savepoint rolled back AFTER its fold — the lattice
+        // may lead the batch; resync once the batch commits.
+        if (eventFoldTouched) batchNeedsRefold = true;
       }
     }
     return counts;
   });
 
+  // Batched catch-up seam (T-01-16; 26 §6.4 bottleneck 1 + its load-bearing warning):
+  // the WHOLE page persists + projects in ONE transaction (one fsync — not one per
+  // event), but each item runs through `ingestTx` as a nested savepoint, so a per-item
+  // failure rolls back ONLY that savepoint and the good prefix stays committed. The
+  // ordered per-item results let the caller compute the contiguous landed prefix and
+  // PASS a DivergentDuplicateError rather than wedge the pull (01-F9/F17) — the exact
+  // per-event granularity the pre-batch loop had, preserved (the same shape as
+  // ingestBatchTx, but surfacing each item's error instead of collapsing to counts).
+  const ingestPageTx = db.transaction((items: readonly PageItem[]): PageResult[] => {
+    const results: PageResult[] = [];
+    for (const item of items) {
+      eventFoldTouched = false;
+      try {
+        const result = ingestTx(
+          item.envelope,
+          item.global_seq === undefined ? undefined : { global_seq: item.global_seq },
+        );
+        results.push({ ok: true, stored: result.stored });
+      } catch (error) {
+        results.push({ ok: false, error });
+        // F6: this item's savepoint rolled back AFTER its fold — the lattice may lead
+        // the committed page; resync once the page commits (mirrors ingestBatchTx).
+        if (eventFoldTouched) batchNeedsRefold = true;
+      }
+    }
+    return results;
+  });
+
   const assignGlobalSeqTx = db.transaction((eventId: string, globalSeq: number) => {
-    // devices converge to cloud ordering on ack (01-F34)
-    if (adoptGlobalSeq(eventId, globalSeq)) recomputeFolds();
+    // Rewritten 01-F34: adoption is sidecar bookkeeping ONLY — the delivery
+    // cursor is never a business arbiter, so the fold does ZERO work here.
+    adoptGlobalSeq(eventId, globalSeq);
   });
 
   const refoldTx = db.transaction(() => {
     recomputeFolds();
   });
 
+  // F6 (fix-round): the engine's in-JS lattice cannot roll back with the SQL
+  // transaction, and the projection-row writes must FOLLOW the fold that
+  // produces them — so "SQL first, engine after" is structurally impossible on
+  // the append/ingest seams (retentionDrop, whose projections are computed in
+  // the pure plan, DOES reorder — see below). Chosen shape here:
+  // REFOLD-ON-TX-FAILURE. If a transaction dies AFTER the engine folded
+  // (`foldTouched`), the lattice may lead the rolled-back ledger — rebuild it
+  // from the surviving set before rethrowing, so no phantom fold state outlives
+  // the failure (01-F6). Every tested validation failure throws BEFORE any fold
+  // and skips the rebuild, keeping the common paths byte-identical.
+  const tryRefold = (): void => {
+    try {
+      refoldTx();
+    } catch {
+      // The rebuild itself failed (persistent I/O fault): the reopen self-heal
+      // (01-F6) is the backstop; the ORIGINAL transaction error surfaces.
+    }
+  };
+  const guarded = <T>(fn: () => T): T => {
+    foldTouched = false;
+    try {
+      return fn();
+    } catch (err) {
+      if (foldTouched) tryRefold();
+      throw err;
+    }
+  };
+
+  // Retention shrink (T-01-15; matrix conventions; fix-round F1/F2/F6/F8): an
+  // outer-layer key-set operation — atomic per-entity, open-bill guarded, never
+  // an inverse merge. engine.planDrop is PURE: a malformed key (F8) or an open
+  // entity rejects the whole call with NOTHING changed anywhere, and the plan —
+  // key-order independent by construction (F1, ruling g) — carries the
+  // post-drop projections, so this transaction runs ALL the SQL first and the
+  // lattice + session dropped-key memory (F2) mutate only after durable commit:
+  // the F6 "SQL succeeds before engine mutation" ordering, exact at this seam.
+  // The LEDGER rows are untouched, and so is durability across reopen:
+  // event-row pruning (which is what makes a drop durable) is the compaction
+  // task's global_seq prune watermark (01 §5; matrix §2 entry 3) — until it
+  // lands, a reopen legitimately rebuilds from the full retained ledger
+  // (fix-round ruling b: dropped-key memory is in-session only).
+  const deleteParkedByWaiting = db.prepare<[string]>("DELETE FROM parked WHERE waiting_for = ?");
+  const retentionDropTx = db.transaction((plan: DropPlan) => {
+    for (const orderId of plan.removedOrders) {
+      deleteOrderRow.run(orderId);
+      deleteQueueRow.run(orderId);
+      deleteParkedByWaiting.run(orderId);
+    }
+    for (const dirty of plan.dirty) upsertOrder(dirty.order_id, dirty.projection);
+  });
+
   // Self-heal on open (01-F6): state tables ≡ refold() of the surviving ledger,
   // even after an abrupt handle abandon (20 §2.6 fold-durability seed).
   refoldTx();
+
+  // DEC-SYNC-009 hub-relay seam (T-01-12): volatile, in-memory on the handle —
+  // see the DeviceStore type doc. Listeners fire synchronously.
+  const relayDrainListeners = new Set<() => void>();
+  const relayCancelListeners = new Set<() => void>();
+  const relayedCloudAcks = new Map<string, number>();
+  const relayedRenewals = new Map<string, string>();
+  const revokedPeers = new Set<string>();
+  // Per-origin cloud quarantine notices awaiting LAN forward (T-01-08): volatile
+  // like the rest of the seam — the durable at-least-once guarantee lives in the
+  // GATEWAY's kernel.quarantine_notices outbox (DEC-SYNC-008); this map only
+  // carries the live LAN forward. Keyed origin → (event_id → reason).
+  const relayedNotices = new Map<string, Map<string, string>>();
 
   return {
     identity: { ...identity },
@@ -610,15 +963,41 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
             "the store identity (01-F2 — one device, one store; nothing persisted)",
         );
       }
-      return appendTx(input);
+      return guarded(() => appendTx(input));
     },
 
     ingest(envelope, opts) {
-      return ingestTx(envelope, opts);
+      const result = guarded(() => ingestTx(envelope, opts));
+      ingestCommits += 1; // committed (a throw rethrows above, never reaching here)
+      if (result.stored) eventsIngested += 1;
+      return result;
     },
 
     ingestBatch(events) {
-      return ingestBatchTx(events);
+      batchNeedsRefold = false;
+      const counts = guarded(() => ingestBatchTx(events));
+      ingestCommits += 1; // one transaction for the whole batch
+      eventsIngested += counts.appended;
+      // F6: a mid-batch savepoint rollback after a fold — resync the lattice
+      // with the committed batch (best-effort; reopen self-heal is the backstop).
+      if (batchNeedsRefold) tryRefold();
+      return counts;
+    },
+
+    ingestPage(items) {
+      if (items.length === 0) return []; // no work, no transaction, no commit
+      batchNeedsRefold = false;
+      const results = guarded(() => ingestPageTx(items));
+      ingestCommits += 1; // ONE transaction for the whole page (26 §6.4)
+      for (const result of results) if (result.ok && result.stored) eventsIngested += 1;
+      // F6: a mid-page savepoint rollback after a fold — resync the lattice with the
+      // committed page (best-effort; reopen self-heal is the backstop).
+      if (batchNeedsRefold) tryRefold();
+      return results;
+    },
+
+    ingestStats() {
+      return { commits: ingestCommits, events_ingested: eventsIngested };
     },
 
     readAllEvents() {
@@ -650,6 +1029,16 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
 
     refold() {
       refoldTx();
+    },
+
+    foldStats() {
+      return engine.stats();
+    },
+
+    retentionDrop(keys) {
+      const plan = engine.planDrop(keys); // pure — a reject throws with NOTHING changed (F1/F8)
+      retentionDropTx(plan); // all SQL; a failure rolls back with the engine untouched (F6)
+      engine.commitDrop(plan); // infallible in-memory work, only after durable success
     },
 
     nextBatch(max) {
@@ -690,6 +1079,110 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
       setPull.run(n);
     },
 
+    setBranchTimeOffset(offset_ms) {
+      if (!Number.isInteger(offset_ms)) {
+        throw new Error(
+          `branch-time offset must be an integer millisecond value, got ${offset_ms} ` +
+            "(01-F43 — a fractional offset would make branch_created_at non-integral; nothing changed)",
+        );
+      }
+      writeBranchTime.run(offset_ms);
+    },
+
+    deviceToken() {
+      return readCredential.get()?.token ?? null;
+    },
+
+    setDeviceToken(token) {
+      if (token.length === 0) {
+        throw new Error("device token must be non-empty (01-F47; nothing changed)");
+      }
+      writeCredential.run(token);
+    },
+
+    branchTimeStatus() {
+      const { offset_ms, acquired } = branchTime();
+      // Skew is |offset|: branch time is device clock + offset, so the offset IS how far
+      // this device's raw clock sits from the branch's. Null before contact — there is
+      // nothing to measure against, and reporting 0 would claim a healthy clock we have
+      // not checked. Observational only; it never gates append (01-N2, 01-F17).
+      const skew_ms = acquired ? Math.abs(offset_ms) : null;
+      return {
+        offset_ms,
+        basis: basisOf(acquired),
+        skew_ms,
+        skew_flagged: skew_ms !== null && skew_ms > SKEW_FLAG_THRESHOLD_MS,
+      };
+    },
+
+    requestRelayDrain() {
+      for (const listener of [...relayDrainListeners]) listener();
+    },
+
+    onRelayDrainRequested(listener) {
+      relayDrainListeners.add(listener);
+      return () => {
+        relayDrainListeners.delete(listener);
+      };
+    },
+
+    cancelRelayDrain() {
+      for (const listener of [...relayCancelListeners]) listener();
+    },
+
+    onRelayDrainCancelled(listener) {
+      relayCancelListeners.add(listener);
+      return () => {
+        relayCancelListeners.delete(listener);
+      };
+    },
+
+    noteRelayedCloudAck(device_id, acked_watermark) {
+      const current = relayedCloudAcks.get(device_id);
+      if (current === undefined || acked_watermark > current) {
+        relayedCloudAcks.set(device_id, acked_watermark); // monotone, never regresses
+      }
+    },
+
+    relayedCloudAck(device_id) {
+      return relayedCloudAcks.get(device_id) ?? null;
+    },
+
+    noteRelayedRenewal(device_id, token) {
+      relayedRenewals.set(device_id, token); // latest wins — an older renewal is dead
+    },
+
+    relayedRenewal(device_id) {
+      return relayedRenewals.get(device_id) ?? null;
+    },
+
+    clearRelayedRenewal(device_id) {
+      relayedRenewals.delete(device_id);
+    },
+
+    noteRevokedPeer(device_id) {
+      revokedPeers.add(device_id);
+      // A revoked device must not be handed a credential (the review's finding that
+      // B1 raised the severity of this gap). Drop any pending renewal for it.
+      relayedRenewals.delete(device_id);
+    },
+
+    isRevokedPeer(device_id) {
+      return revokedPeers.has(device_id);
+    },
+
+    noteRelayedQuarantineNotice(device_id, notice) {
+      const held = relayedNotices.get(device_id) ?? new Map<string, string>();
+      if (!held.has(notice.event_id)) held.set(notice.event_id, notice.reason); // first wins
+      relayedNotices.set(device_id, held);
+    },
+
+    relayedQuarantineNotices(device_id) {
+      const held = relayedNotices.get(device_id);
+      if (held === undefined) return [];
+      return [...held].map(([event_id, reason]) => ({ event_id, reason }));
+    },
+
     auditChainHead() {
       const row = readAuditHead.get();
       if (!row || row.head_hash === null || row.head_event_id === null) return null;
@@ -697,6 +1190,10 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     },
 
     close() {
+      relayDrainListeners.clear();
+      relayCancelListeners.clear();
+      relayedCloudAcks.clear();
+      relayedNotices.clear();
       db.close();
     },
   };

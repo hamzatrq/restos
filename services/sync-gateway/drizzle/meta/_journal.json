@@ -15,6 +15,41 @@
       "when": 1784425356643,
       "tag": "0001_quarantine_envelope_text",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784763498400,
+      "tag": "0002_quarantine_notices",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784767300227,
+      "tag": "0003_device_registry",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785000000000,
+      "tag": "0004_quarantine_widen_key",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785000100000,
+      "tag": "0005_device_token_expiry",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785000200000,
+      "tag": "0006_quarantine_envelope_author",
+      "breakpoints": true
     }
   ]
 }

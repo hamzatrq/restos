@@ -110,16 +110,18 @@ describe("cloud session catchup + fan-out (contract (b); 01-F9/01-F34)", () => {
     expect(b.session.status().last_global_seq).toBeGreaterThanOrEqual(1);
   });
 
-  it("(b)/01-F34: origin-inclusive fan-out — the device learns its own events' global_seq and stays ≡ refold()", () => {
+  // T-01-15 enumeration entry 28 (R): the fan-out adoption law survives; the
+  // refold leg is dropped (adoption is a sidecar write with zero fold work —
+  // rewritten 01-F34; merge-workcounter pins the counter law).
+  it("(b)/01-F34: origin-inclusive fan-out — the device learns its own events' global_seq with zero fold-state change", () => {
     const sim = createSim({ seed: 5 });
     const cloud = createSimCloud({ sim });
     const a = cloudDevice(sim, cloud, "dev-a");
     appendN(a, 3);
-    run(sim);
-    expect(a.session.status().last_global_seq).toBe(cloud.state().last_global_seq);
     const before = a.store.openOrders();
-    a.store.refold();
-    expect(a.store.openOrders()).toEqual(before); // cloud-order adoption is refold-stable
+    run(sim); // push → merge → origin-inclusive fan-out returns the seqs
+    expect(a.session.status().last_global_seq).toBe(cloud.state().last_global_seq);
+    expect(a.store.openOrders()).toEqual(before); // adoption changed no fold state
   });
 });
 

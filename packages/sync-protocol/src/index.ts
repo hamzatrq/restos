@@ -1,11 +1,17 @@
 // @restos/sync-protocol — wire types shared by sync-client and sync-gateway
 // (PROTECTED PATH, 20 §4.4). Owning spec: 01 §8; design: PROTOCOL.md.
 export {
+  type Compression,
+  createFrameCodec,
+  decodeCompressed,
   decodeMessage,
+  encodeCompressed,
   encodeMessage,
+  type FrameCodec,
   MESSAGE_KINDS,
   type MessageKind,
   messageSchemas,
+  negotiateCompression,
   PROTOCOL_VERSION,
   type ProtocolMessage,
   parseMessage,

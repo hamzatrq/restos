@@ -1,6 +1,7 @@
 // T-01-07 migrate seam (contracted in src/__acceptance__/global-setup.ts):
 // applies EVERY migration under services/sync-gateway/drizzle/ programmatically,
-// creating the `kernel` schema and all four data-contract tables — migrations
+// creating the `kernel` schema and all six data-contract tables (four original
+// + quarantine_notices T-01-08 + device_registry T-01-09) — migrations
 // are exercised on every suite run (T-01-07 testing approach; 18 §4 append-only).
 import { fileURLToPath } from "node:url";
 import { drizzle } from "drizzle-orm/postgres-js";

@@ -20,6 +20,7 @@ import {
   pushMsg,
   quarantineRows,
   storedWatermark,
+  TEST_TOKEN_SECRET,
   unknownTypeEnvelope,
   validEnvelope,
   validEnvelopes,
@@ -32,7 +33,7 @@ let gateway: Gateway;
 beforeAll(() => {
   db = openDb();
   verify = openDb();
-  gateway = createGateway({ db, clock: makeClock() });
+  gateway = createGateway({ db, clock: makeClock(), auth: { token_secret: TEST_TOKEN_SECRET } });
 });
 
 afterAll(async () => {

@@ -3,6 +3,9 @@
 // These construct plain wire-shaped objects; they are NOT protocol code.
 import { newId } from "@restos/domain";
 
+// T-01-17 (DEC-TIME-001): the wire envelope carries the time layer —
+// `branch_created_at` (01-F43) and the `time_basis` marker (01-F44). A zero-offset
+// device stamps branch == device time; the two fields are independent on the wire.
 export const envelope = () => ({
   id: newId(),
   org_id: newId(),
@@ -11,6 +14,8 @@ export const envelope = () => ({
   actor_user_id: null,
   lamport_seq: 3,
   device_created_at: 1752800000000,
+  branch_created_at: 1752800000000,
+  time_basis: "branch",
   server_received_at: null,
   type: "order.created",
   schema_version: 1,

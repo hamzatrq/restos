@@ -1,11 +1,12 @@
-// Acceptance property tests — T-01-04 fold laws (20 §2.3), authored from the
-// kernel-tasks binding contract + packages/sync-client/FOLDS.md +
-// specs/01-kernel-sync.md §3/§6 only (24 §3 step 2: read-only to the
-// implementing session). The contract's four property laws: replay determinism
-// (01-N1), commutativity + idempotence over concurrently-received events
-// (01-F34), refold equivalence (01-F6). Heavy properties cap at numRuns 30;
-// every draw routes through the NAMED seeded generator `generateBranchEventSet`
-// so any failure reproduces from the printed fast-check seed.
+// Acceptance property tests — fold laws (20 §2.3), re-expressed for the T-01-15
+// merge engine per the oracle's superseded-law enumeration: entry 15 (R —
+// interleaving determinism 01-N1, commutativity + idempotence 01-F34 survive;
+// generator mechanically updated to the amended payloads) and entry 16 (S —
+// refold-equivalence deleted, never ported: it encoded the superseded
+// comparator; its slot carries the ratified adoption-invariance law). Heavy
+// properties cap at numRuns 30; every draw routes through the NAMED seeded
+// generator `generateBranchEventSet` so any failure reproduces from the printed
+// fast-check seed.
 
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
@@ -26,15 +27,23 @@ import {
   seededRng,
 } from "./builders.js";
 
-// T-01-04 store surface per the binding contract (mirrors the contract typing in
-// folds-directed.test.ts) — a missing method fails the red run at runtime.
+// T-01-15 store surface (mirrors the C8-pinned typing in folds-directed.test.ts)
+// — a missing method fails the red run at runtime.
 type OpenOrderRow = {
   order_id: string;
   channel: string;
   order_type: string | null;
-  table_id: string | null;
   confirmed_at: number | null;
   settled: number;
+  table_ids_json: string;
+  table_conflict: number;
+  pay_total: number;
+  repaid_total: number;
+  refund_total: number;
+  pay_attempts_json: string;
+  refund_attempts_json: string;
+  cap_violated: number;
+  exceptions_json: string;
   json_lines: string;
 };
 
@@ -181,20 +190,30 @@ const generateBranchEventSet = (setSeed: number): BranchEventSet => {
           : [pick(lineIds)];
       emit(anyDevice(), lineStateChanged(orderId, targets, pick(LINE_TARGET_STATES)));
     }
-    const paymentEventIds: string[] = [];
+    // T-01-15 M (oracle enumeration, cross-cutting): refunds reference the parent
+    // payment's settlement_attempt_id, never its envelope id (01-F29 amended).
+    const paymentAttempts: string[] = [];
     for (let p = int(0, 2); p > 0; p--) {
       const base = paymentRecorded(orderId, int(0, 6) * 100);
-      const payId = emit(anyDevice(), {
+      const attempt = `sa-${eventIds.length}`;
+      emit(anyDevice(), {
         type: base.type,
-        payload: { ...base.payload, settlement_attempt_id: `sa-${eventIds.length}` },
+        payload: { ...base.payload, settlement_attempt_id: attempt },
       });
-      paymentEventIds.push(payId);
+      paymentAttempts.push(attempt);
     }
-    for (const payId of paymentEventIds) {
-      if (rng() < 0.4) emit(anyDevice(), paymentRefunded(payId, int(0, 3) * 100));
+    for (const attempt of paymentAttempts) {
+      if (rng() < 0.4) {
+        const base = paymentRefunded(orderId, int(0, 3) * 100, { parent: attempt });
+        emit(anyDevice(), {
+          type: base.type,
+          payload: { ...base.payload, settlement_attempt_id: `sa-r-${eventIds.length}` },
+        });
+      }
     }
   }
-  // Permanent orphans (01-F10): consumed types whose parent never exists in the set.
+  // Permanent orphans (01-F10): a bare order fact whose order never exists parks;
+  // a ghost-line edge is HELD, never parked (key-presence, matrix rows 61/70).
   if (rng() < 0.4) emit(anyDevice(), orderConfirmed("O-ghost"));
   if (rng() < 0.3) emit(anyDevice(), lineStateChanged(pick(orderIds), ["L-ghost"], "confirmed"));
   // The laws quantify over own-append AND peer-ingest deliveries — never let either be vacuous.
@@ -340,22 +359,23 @@ describe("fold property laws — named seeded generator (20 §2.3)", () => {
     );
   });
 
-  it("01-F6: after any delivery sequence, refold() reproduces the incrementally-maintained tables exactly — before and after cloud global_seq assignment (01-F34)", () => {
+  // Oracle enumeration entry 16 (S): refold-equivalence was the banned oracle —
+  // it encoded the superseded comparator and is deleted, never ported. The slot
+  // re-expresses the ratified replacement law (rewritten 01-F34): cloud
+  // global_seq adoption is a sidecar write — the projection is BYTE-INVARIANT
+  // across any adoption order over any stored subset.
+  it("01-F34: assigning cloud global_seq over any stored subset, in any order, changes the fold tables not at all", () => {
     fc.assert(
       fc.property(seedArb, seedArb, seedArb, (setSeed, orderSeed, ackSeed) => {
         const set = generateBranchEventSet(setSeed);
         const store = foldStore(set.identity);
         deliver(store, interleaveQueues(set.queues, orderSeed));
-        const incremental = snapshot(store);
-        store.refold();
-        expect(snapshot(store)).toBe(incremental);
+        const before = snapshot(store);
         // Cloud acks any stored subset in any order (unique global_seq per event, 01-F3).
         for (const [gseq, eventId] of subsetShuffle(set.eventIds, ackSeed).entries()) {
           store.assignGlobalSeq(eventId, gseq);
         }
-        const converged = snapshot(store);
-        store.refold();
-        expect(snapshot(store)).toBe(converged);
+        expect(snapshot(store)).toBe(before);
         store.close();
       }),
       { numRuns: 30 },

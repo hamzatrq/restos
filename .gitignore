@@ -6,3 +6,7 @@ dist/
 coverage/
 *.tsbuildinfo
 .DS_Store
+
+# founder scratch / review artifacts — deliberately untracked
+Cutomer profiles.txt
+audit-1.md

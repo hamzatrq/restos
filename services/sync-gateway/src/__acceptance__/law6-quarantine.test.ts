@@ -24,6 +24,7 @@ import {
   pushMsg,
   quarantineRows,
   storedWatermark,
+  TEST_TOKEN_SECRET,
   type TestClock,
   unknownTypeEnvelope,
   validEnvelope,
@@ -38,7 +39,7 @@ beforeAll(() => {
   db = openDb();
   verify = openDb();
   clock = makeClock();
-  gateway = createGateway({ db, clock });
+  gateway = createGateway({ db, clock, auth: { token_secret: TEST_TOKEN_SECRET } });
 });
 
 afterAll(async () => {

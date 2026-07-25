@@ -20,6 +20,7 @@ import {
   openSession,
   pushMsg,
   type Session,
+  TEST_TOKEN_SECRET,
   validEnvelopes,
 } from "./helpers.js";
 
@@ -30,7 +31,7 @@ let gateway: Gateway;
 beforeAll(() => {
   db = openDb();
   verify = openDb();
-  gateway = createGateway({ db, clock: makeClock() });
+  gateway = createGateway({ db, clock: makeClock(), auth: { token_secret: TEST_TOKEN_SECRET } });
 });
 
 afterAll(async () => {
@@ -57,7 +58,12 @@ describe("law 4 — catchup paging (01-F9)", () => {
     const pusher = await openSession(gateway, identity);
     // A second branch in the SAME org — its events must never surface in the
     // first branch's pages even though the org sequence interleaves them.
-    const otherBranch = { ...identity, branch_id: freshIdentity().branch_id };
+    // (Own device per branch: T-01-09's registry keys a device to ONE branch.)
+    const otherBranch = {
+      org_id: identity.org_id,
+      branch_id: freshIdentity().branch_id,
+      device_id: freshIdentity().device_id,
+    };
     const otherPusher = await openSession(gateway, otherBranch);
 
     const total = CATCHUP_PAGE_SIZE + 50;

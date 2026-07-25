@@ -30,6 +30,8 @@ export const envelope = (device_id: string, lamport_seq: number) => ({
   actor_user_id: null,
   lamport_seq,
   device_created_at: 1752800000000,
+  branch_created_at: 1752800000000, // T-01-17 (01-F43 branch-consensus time)
+  time_basis: "branch" as const, // T-01-17 (01-F44 envelope marker)
   server_received_at: null,
   type: "order.created",
   schema_version: 1,

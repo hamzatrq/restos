@@ -16,6 +16,8 @@ import {
   must,
   openDb,
   pushMsg,
+  registerIdentity,
+  TEST_TOKEN_SECRET,
   validEnvelopes,
 } from "./helpers.js";
 
@@ -26,7 +28,7 @@ let gateway: Gateway;
 beforeAll(() => {
   db = openDb();
   independent = openDb();
-  gateway = createGateway({ db, clock: makeClock() });
+  gateway = createGateway({ db, clock: makeClock(), auth: { token_secret: TEST_TOKEN_SECRET } });
 });
 
 afterAll(async () => {
@@ -38,6 +40,7 @@ afterAll(async () => {
 describe("law 3 — persist-before-ack (01-F2)", () => {
   it("01-F2: when push_ack reaches the sink, the sink's own independent connection already sees every acked row and the watermark", async () => {
     const identity = freshIdentity();
+    await registerIdentity(db, identity); // T-01-09: this test hellos via gateway.connect directly
     const batch = validEnvelopes(identity, 0, 5);
     const batchIds = batch.map((e) => e.id).sort();
 

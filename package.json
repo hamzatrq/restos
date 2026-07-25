@@ -15,7 +15,10 @@
     "build": "turbo run build",
     "docs:lint": "node scripts/docs-lint.mjs",
     "verify": "pnpm docs:lint && pnpm typecheck && pnpm lint",
-    "verify:01": "node scripts/verify-module.mjs 01"
+    "verify:01": "node scripts/verify-module.mjs 01",
+    "bench": "node bench/run.mjs",
+    "bench:parity": "node bench/run.mjs parity",
+    "bench:perf": "node bench/run.mjs bench"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.4",

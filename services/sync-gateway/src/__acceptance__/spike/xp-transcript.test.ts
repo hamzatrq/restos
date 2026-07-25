@@ -26,8 +26,24 @@ import type { CloudTranscriptEntry } from "@restos/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Gateway } from "../../index.js";
 import { createGateway } from "../../index.js";
-import { closeDb, type Db, makeClock, openDb, recorder } from "../helpers.js";
-import { inMessages, normalizeOut, outMessages, recordTranscript } from "./xp-exchange.js";
+import {
+  closeDb,
+  type Db,
+  makeClock,
+  openDb,
+  recorder,
+  registerIdentity,
+  TEST_TOKEN_SECRET,
+} from "../helpers.js";
+import {
+  inMessages,
+  normalizeOut,
+  outMessages,
+  recordTranscript,
+  XP_BRANCH,
+  XP_DEVICE,
+  XP_ORG,
+} from "./xp-exchange.js";
 
 // The committed golden transcript (20 §2.7 artifact). Repo-relative, same style as
 // law8's fixture reader. Regenerate via `tsx src/__acceptance__/spike/xp-record.ts`.
@@ -48,11 +64,18 @@ const wire = (messages: readonly ProtocolMessage[]): ProtocolMessage[] =>
 let db: Db;
 let gateway: Gateway;
 
-beforeAll(() => {
+beforeAll(async () => {
   db = openDb();
   // Scripted (injected) clock — server_received_at is compared modulo, but the
   // gateway contract forbids new Date() in the core, so we inject one (18 §4).
-  gateway = createGateway({ db, clock: makeClock() });
+  gateway = createGateway({ db, clock: makeClock(), auth: { token_secret: TEST_TOKEN_SECRET } });
+  // T-01-09: the REAL gateway is registry-authoritative — the fixture identity
+  // needs a row before the replayed hello (the sim-cloud does not mirror auth).
+  await registerIdentity(db, {
+    org_id: XP_ORG,
+    branch_id: XP_BRANCH,
+    device_id: XP_DEVICE,
+  });
 });
 
 afterAll(async () => {

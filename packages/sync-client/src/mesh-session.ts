@@ -5,8 +5,15 @@
 // design (both hubs relay append-only events; heal merges by set-union + id-dedupe,
 // 01-F8/F38). Delivery is fire-and-forget: correctness never depends on any single
 // send — follower re-push, per-heartbeat window re-fan, and event-id dedupe absorb
-// loss. The hub ack is session-local and volatile: it NEVER moves store.advanceTo —
-// that watermark is the cloud write-checkpoint (19 §5).
+// loss. The PLAIN hub ack is session-local and volatile: it NEVER moves
+// store.advanceTo — that watermark is the cloud write-checkpoint (19 §5). The one
+// exception (DEC-SYNC-009, T-01-12): a push_ack carrying origin_device_id ==
+// self is the hub-relayed CLOUD ack for this device's stream — the ORIGIN's own
+// act of advancing its checkpoint on learning its events were cloud-persisted.
+// Acting as hub, this session also (a) signals the cloud session over the store
+// relay seam after ingesting follower events (the hub is the branch's cloud
+// uplink for WAN-less peers) and (b) forwards each origin's recorded cloud ack
+// over LAN on the heartbeat.
 import type { DeviceClass, EventEnvelopeT } from "@restos/domain";
 import type {
   Clock,
@@ -50,7 +57,10 @@ export type MeshSession = {
   status(): MeshSessionStatus;
 };
 
-type FollowerSession = { missed: number; timer: TimerId | null };
+type FollowerSession = {
+  missed: number;
+  timer: TimerId | null;
+};
 
 export const createMeshSession = (options: {
   store: DeviceStore;
@@ -61,6 +71,8 @@ export const createMeshSession = (options: {
 }): MeshSession => {
   const { store, transport, clock, device_class, token } = options;
   const self: PeerInfo = { device_id: store.identity.device_id, device_class };
+  /** This device's current offset to branch time (01-F43); 0 before any hub contact. */
+  const branchOffset = (): number => store.branchTimeStatus().offset_ms;
   const eligible = electHub([self]) === self.device_id;
 
   let running = false;
@@ -121,7 +133,12 @@ export const createMeshSession = (options: {
       device_id: self.device_id,
       device_class,
       branch_id: store.identity.branch_id,
-      token,
+      // The PERSISTED renewal if one exists (01-F47 "presents it on every later
+      // connection" — a LAN connection is a connection). Inert while the mesh hello
+      // arm inspects no token, but it must not be the thing that breaks the day LAN
+      // admission lands: otherwise the first device to renew would be locked off the
+      // LAN by presenting a credential its own hub still remembered as the old one.
+      token: store.deviceToken() ?? token,
       last_global_seq: st.last_global_seq ?? 0,
       own_high_water: st.own_high_water ?? 0,
     });
@@ -210,6 +227,11 @@ export const createMeshSession = (options: {
 
   const teardownHub = (): void => {
     for (const device_id of [...followers.keys()]) dropFollower(device_id);
+    // Fix round F4 (DEC-SYNC-006): leaving hub duty (demotion or stop) clears
+    // the cloud session's latched relay request over the store seam — a demoted
+    // follower must never relay third-party events, even after a WAN bounce
+    // whose hello_ack would otherwise resume a stale latch.
+    store.cancelRelayDrain();
   };
 
   /** Full-window event_batch — joiner catchup and per-heartbeat re-fan; id-dedupe absorbs (assumption 6). */
@@ -217,6 +239,52 @@ export const createMeshSession = (options: {
     const events = store.readAllEvents();
     if (events.length === 0) return;
     send(device_id, { v: 1, kind: "event_batch", events });
+  };
+
+  /**
+   * DEC-SYNC-009 (T-01-12): forward the recorded per-ORIGIN cloud ack to a
+   * connected follower — push_ack{origin_device_id: follower} is the relayed
+   * CLOUD ack, distinct from the volatile LAN ack. Re-sent on EVERY heartbeat
+   * like replayWindowTo (fix round F5): a marked-forwarded-at-SEND-time latch
+   * would let a single lost LAN frame stall the origin's checkpoint forever;
+   * the receiver's advanceTo is idempotent/monotone, so re-forwarding is free.
+   * The origin acts on it (store.advanceTo at the receiver); the hub never
+   * writes its checkpoint.
+   */
+  const forwardCloudAck = (device_id: string): void => {
+    const cloudAck = store.relayedCloudAck(device_id);
+    if (cloudAck === null) return;
+    // A renewal the cloud issued FOR this origin rides the same ack (01-F47). Without
+    // this the hub swallowed it and a WAN-less device could never renew — the clause
+    // that is supposed to make a 90-day TTL safe in a LAN-only deployment instead of
+    // bricking every waiter tablet.
+    const renewal = store.relayedRenewal(device_id);
+    send(device_id, {
+      v: 1,
+      kind: "push_ack",
+      acked_watermark: cloudAck,
+      origin_device_id: device_id,
+      ...(renewal === null ? {} : { renewed_token: renewal }),
+    });
+  };
+
+  /**
+   * T-01-08 (01-F37 / DEC-SYNC-008): forward the cloud's quarantine notices for
+   * this ORIGIN's events over the LAN — the only notification path a WAN-less
+   * origin has (PROTOCOL.md: quarantine_notice → origin device). Re-sent per
+   * heartbeat like forwardCloudAck (the F5 rationale: a send-time latch would
+   * let one lost LAN frame lose the notice); duplicates are legal at the
+   * receiver (DEC-SYNC-008 at-least-once).
+   */
+  const forwardQuarantineNotices = (device_id: string): void => {
+    for (const notice of store.relayedQuarantineNotices(device_id)) {
+      send(device_id, {
+        v: 1,
+        kind: "quarantine_notice",
+        event_id: notice.event_id,
+        reason: notice.reason,
+      });
+    }
   };
 
   const scheduleHeartbeat = (device_id: string): void => {
@@ -230,9 +298,21 @@ export const createMeshSession = (options: {
         dropFollower(device_id); // HEARTBEAT_MISSED_LIMIT unanswered → heartbeats stop
         return;
       }
+      // Re-check every beat, not only at hello: revocation can land mid-session, and
+      // the ≤30 s bound of 01-F48 is about wherever a path reaches the device.
+      if (store.isRevokedPeer(device_id)) {
+        dropFollower(device_id);
+        return;
+      }
       live.missed += 1;
-      send(device_id, { v: 1, kind: "ping", t: clock.now() });
+      // BRANCH time, not this device's raw clock (01-F43). The hub SERVES the branch
+      // clock rather than defining it, so what it publishes must be the branch's time —
+      // otherwise a re-elected hub silently re-anchors every follower onto its own
+      // untrusted clock and the whole branch's durations jump.
+      send(device_id, { v: 1, kind: "ping", t: clock.now() + branchOffset() });
       replayWindowTo(device_id); // idempotent loss recovery for fan-out (01-F8)
+      forwardCloudAck(device_id); // relayed cloud ack propagation (DEC-SYNC-009, F5 re-forward)
+      forwardQuarantineNotices(device_id); // origin notification via relay (T-01-08, 01-F37)
       scheduleHeartbeat(device_id);
     }, HEARTBEAT_INTERVAL_MS);
   };
@@ -264,6 +344,11 @@ export const createMeshSession = (options: {
     // acked < 0 means nothing contiguously held — the wire watermark is a
     // nonnegative seq, so stay silent and let the origin's retry re-push.
     if (acked >= 0) send(from, { v: 1, kind: "push_ack", acked_watermark: acked });
+    // DEC-SYNC-009 (T-01-12): the hub is the branch's cloud uplink for WAN-less
+    // peers — signal the cloud session (store relay seam) to relay the held
+    // branch window upward. Fires only while acting hub/solo (this handler's
+    // guard), so followers never relay third-party events (DEC-SYNC-006).
+    store.requestRelayDrain();
     if (fresh.length === 0) return;
     for (const device_id of followers.keys()) {
       if (device_id === from) continue;
@@ -287,11 +372,28 @@ export const createMeshSession = (options: {
   /** Re-run the pure election over (visible ∖ suspects) ∪ self and adopt the result. */
   const recompute = (): void => {
     if (!running) return;
-    const peers = [...visible.values()].filter((p) => !suspects.has(p.device_id));
+    // A revoked peer is not a candidate. Without this the eviction survives only until
+    // the next election: the revoked device is typically a `counter_electron`, which
+    // electHub ranks highest, so on any hub reboot it WINS — and every device,
+    // including the one that evicted it, then hellos to it, pushes to it, and takes its
+    // fan-out. Revocation's read block was fully reversed by a routine re-election.
+    const peers = [...visible.values()].filter(
+      (p) => !suspects.has(p.device_id) && !store.isRevokedPeer(p.device_id),
+    );
     const winner = electHub([...peers, self]);
     if (winner === self.device_id) {
       if (state === "follower" || state === "candidate") teardownFollower();
       state = visible.size === 0 ? "solo" : "hub"; // solo acts as hub for later joiners
+      // This device now SERVES branch time (01-F43) — but it does not get to redefine
+      // it. Branch time is CONTINUOUS across re-election: a new hub RETAINS the offset
+      // it already measured, so the branch's clock survives the handover unchanged.
+      // Resetting to 0 here would teleport branch time onto this device's untrusted raw
+      // clock, and since hub loss re-elects within 10 s on any counter reboot, a display
+      // stuck years ahead would make every open order's age jump by that error. Only a
+      // device that has NEVER acquired an offset starts at 0 — for it, its own clock is
+      // the only branch time that exists yet.
+      const held = store.branchTimeStatus();
+      store.setBranchTimeOffset(held.basis === "branch" ? held.offset_ms : 0);
       return;
     }
     if (state === "hub" || state === "solo") teardownHub();
@@ -313,11 +415,26 @@ export const createMeshSession = (options: {
 
   const dispatch = (from: string, message: ProtocolMessage): void => {
     // Inbound traffic is the ONLY thing that clears suspicion (fix-round 2): the
-    // sender is provably alive; it re-enters candidacy on the next peer-set
-    // recompute — never by an immediate re-election here.
-    suspects.delete(from);
+    // sender is provably alive. Clearing a REAL suspect recomputes immediately
+    // (T-01-12 fix round, F5 rider): a false hub-loss fired at a lossy-window
+    // heal boundary (heartbeat period divides HUB_LOSS_TIMEOUT_MS, so idle hits
+    // the limit at the exact instant the first healed ping lands) parks this
+    // device in state hub with the true hub still visible — and with no future
+    // visibility event there IS no "next peer-set recompute", so the split-brain
+    // (and every relayed-cloud-ack forward with it) would wedge forever. The
+    // recompute runs before the message body so the frame is handled under the
+    // re-adopted state (a hub ping immediately refreshes liveness and pongs).
+    if (suspects.delete(from)) recompute();
     switch (message.kind) {
       case "hello": {
+        // 01-F48 LAN half: revocation blocks READS as well as writes. A peer the cloud
+        // has refused as revoked is not admitted, so it receives no fan-out and no
+        // window replay over LAN. Without this the hub kept feeding the branch's events
+        // to a device the cloud had already cut off.
+        if (store.isRevokedPeer(from)) {
+          dropFollower(from);
+          return;
+        }
         if (state === "hub" || state === "solo") admitFollower(from);
         return;
       }
@@ -338,11 +455,40 @@ export const createMeshSession = (options: {
       case "push": {
         // Ingest from any device while acting as hub — id-dedupe keeps the mesh
         // converging even when session bookkeeping is mid-repair.
+        // Revocation blocks WRITES too (01-F48). A dropped follower keeps draining on
+        // its own 2 s tick until its loss timer trips, and without this the hub ingested
+        // those events, acked them, and fanned them to every other device — putting a
+        // revoked device's events in every local ledger on the branch.
+        if (store.isRevokedPeer(from)) return;
         if (state === "hub" || state === "solo") handlePush(from, message.events);
         return;
       }
       case "push_ack": {
         if (state !== "follower" || !connected || from !== hubTarget) return;
+        if (message.origin_device_id !== undefined) {
+          // DEC-SYNC-009 (T-01-12): a push_ack naming an origin is the hub-
+          // relayed CLOUD ack for that origin's stream — never the volatile LAN
+          // cursor. When it names THIS device, advancing the cloud
+          // write-checkpoint is the ORIGIN's own act (19 §5): the outbox drains
+          // without this device ever having WAN of its own.
+          if (message.origin_device_id !== self.device_id) return;
+          // The hub-forwarded RENEWAL for this WAN-less origin (01-F47). This is the
+          // only path a device with no cloud session of its own has to a new token —
+          // without consuming it here, such a device could never renew and would
+          // brick at TTL no matter how healthy its branch is.
+          if (message.renewed_token !== undefined) store.setDeviceToken(message.renewed_token);
+          // Fix round F3 (19 §5): an ack beyond own appended high — a forged
+          // peer, or the wiped-store DR rejoin where the hub remembers a larger
+          // stream than the reborn store holds — is IGNORED, never thrown out
+          // of the transport dispatch: the checkpoint never claims unappended
+          // slots and the session keeps processing later genuine acks.
+          const { own_high_water, acked_watermark } = store.status();
+          if (own_high_water === null || message.acked_watermark > own_high_water) return;
+          if (acked_watermark === null || message.acked_watermark > acked_watermark) {
+            store.advanceTo(message.acked_watermark);
+          }
+          return;
+        }
         if (lastPushAck === null || message.acked_watermark > lastPushAck) {
           lastPushAck = message.acked_watermark; // session-local; NEVER store.advanceTo (19 §5)
           drainPush(); // continue past the ack if more remains
@@ -355,7 +501,18 @@ export const createMeshSession = (options: {
       }
       case "ping": {
         if (from !== hubTarget) return; // non-hub pings: life already noted above
-        lastHubAliveAt = clock.now();
+        const at = clock.now();
+        lastHubAliveAt = at;
+        // Branch-time offset acquisition (01-F43, T-01-17). The hub heartbeats its
+        // followers, so this inbound `t` IS branch time at the moment the hub sent it —
+        // no extra message kind, no extra timer, no round trip to arrange. The estimate
+        // runs one-way-delay early by exactly the LAN transit time, which 01-F15 bounds
+        // at < 1 s p95 and is typically single-digit ms. That error is irrelevant at
+        // both scales that consume this: the 01-N2 skew flag trips at 5 MINUTES, and
+        // every duration the product renders is minutes-to-hours of kitchen age. What
+        // matters is that all followers take their offset from the SAME hub clock, so
+        // the residual cancels in every difference (01-F43's whole argument).
+        store.setBranchTimeOffset(message.t - at);
         send(from, { v: 1, kind: "pong", t: message.t });
         return;
       }
@@ -378,6 +535,15 @@ export const createMeshSession = (options: {
     },
     onPeerLost: (device_id) => {
       visible.delete(device_id);
+      // NOTE: the pending renewal is deliberately NOT cleared here. Dropping it on
+      // peer loss looked like good credential hygiene and was a worse bug: the cloud
+      // has ALREADY advanced `token_expires_at` by 90 days when it minted, so a tablet
+      // that walks out of Wi-Fi range in the round-trip window loses its only copy and
+      // is un-renewable until the registry's recorded expiry comes due again — across
+      // its own real expiry. A waiter tablet leaving range is the normal case, not the
+      // edge case. Retention is bounded by branch size, the token is that peer's own
+      // and valid, and the security case that mattered — a REVOKED peer — is handled
+      // by `noteRevokedPeer`, which drops it.
       dropFollower(device_id);
       if (device_id === hubTarget) {
         onHubLoss(false);
@@ -396,6 +562,12 @@ export const createMeshSession = (options: {
       running = true;
       // Cold start: empty peer set → solo if hub-eligible, else follower/null.
       state = eligible ? "solo" : "follower";
+      // A device that never sees a peer never reaches recompute(), so without this a
+      // T1 single-terminal restaurant would stamp `branch_provisional` forever — the
+      // exact deployment 01-F44's ruling names, and now load-bearing because the
+      // 01-F45 basis precedence puts provisional confirms in the unverified tier.
+      // Solo IS the branch, so its own clock is branch time by definition.
+      if (eligible) store.setBranchTimeOffset(store.branchTimeStatus().offset_ms);
       transport.start(handlers);
     },
 

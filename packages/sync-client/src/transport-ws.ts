@@ -15,8 +15,8 @@ import {
   type Clock,
   type CloudTransport,
   type CloudTransportHandlers,
-  decodeMessage,
-  encodeMessage,
+  createFrameCodec,
+  type FrameCodec,
   type MeshTransport,
   type PeerInfo,
   type ProtocolMessage,
@@ -37,6 +37,14 @@ const rawToText = (raw: RawData): string =>
     : Array.isArray(raw)
       ? Buffer.concat(raw).toString("utf8")
       : Buffer.from(raw).toString("utf8");
+
+/** Raw ws payload as bytes — the binary half of the T-01-19 framing distinction. */
+const toBytes = (raw: RawData): Uint8Array =>
+  Buffer.isBuffer(raw)
+    ? new Uint8Array(raw)
+    : Array.isArray(raw)
+      ? new Uint8Array(Buffer.concat(raw))
+      : new Uint8Array(Buffer.from(raw as ArrayBuffer));
 
 // ── LAN transport ────────────────────────────────────────────────────────────
 // Every socket payload is wrapped so a transport-level PeerInfo announce (out-of-band,
@@ -195,6 +203,13 @@ export const createWsCloudTransport = (config: {
   let running = false;
   let socket: WebSocket | null = null;
   let signaledUp = false; // whether onUp is currently outstanding (drives a single onDown)
+  // PER-CONNECTION framing (DEC-SYNC-010, T-01-19), owned BELOW the session and reset
+  // on every dial. Learned from messages already passing through this transport — the
+  // outbound hello's advertisement and the inbound ack's grant — so there is no config
+  // key and no new seam. `advertised` is what makes the opt-in mutual on this side: a
+  // grant we never asked for is ignored rather than trusted.
+  let advertised = false;
+  let codec: FrameCodec = createFrameCodec(undefined);
   let reconnectTimer: ReturnType<Clock["setTimeout"]> | null = null;
 
   const scheduleReconnect = (): void => {
@@ -209,18 +224,31 @@ export const createWsCloudTransport = (config: {
     if (!running) return;
     const ws = new WebSocket(url);
     socket = ws;
+    // Reset the negotiation on EVERY dial — that is what "per connection" means: a
+    // redial re-negotiates rather than inheriting a grant the new peer may not honour.
+    advertised = false;
+    codec = createFrameCodec(undefined);
     ws.on("open", () => {
       if (!running || socket !== ws) return;
       signaledUp = true;
       handlers?.onUp(); // the cloud session hellos here
     });
-    ws.on("message", (raw: RawData) => {
+    ws.on("message", (raw: RawData, isBinary: boolean) => {
       if (!running || socket !== ws) return;
       let message: ProtocolMessage;
       try {
-        message = decodeMessage(rawToText(raw));
+        // The TRANSPORT's own text/binary distinction carries the framing — the frame's
+        // contents never do. Sniffing the zstd magic number would make the wire format
+        // depend on the message rather than the handshake, and a peer that can decode
+        // a compressed frame today may not after a rollback.
+        message = codec.decode(isBinary ? toBytes(raw) : rawToText(raw));
       } catch {
         return;
+      }
+      // Adopt the grant only if WE advertised: both ends opt in, so a grant we never
+      // asked for is ignored rather than trusted.
+      if (message.kind === "hello_ack" && advertised && message.compression !== undefined) {
+        codec = createFrameCodec(message.compression);
       }
       handlers?.onMessage(message);
     });
@@ -259,7 +287,13 @@ export const createWsCloudTransport = (config: {
 
     send(message) {
       if (socket === null || socket.readyState !== WebSocket.OPEN) return; // dropped while down
-      socket.send(encodeMessage(message));
+      // Note what WE advertised, so an unsolicited grant can be ignored above.
+      if (message.kind === "hello") advertised = message.accepts_compression === true;
+      const frame = codec.encode(message);
+      // `string` ⇒ text frame, `Uint8Array` ⇒ binary. ws infers this from the argument
+      // type, which is exactly the distinction the receiving end reads back off
+      // `isBinary` — one contract, both directions.
+      socket.send(frame);
     },
   };
 };

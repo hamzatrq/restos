@@ -3,23 +3,51 @@
 // contract (plans/wave-0/kernel-tasks.md).
 
 export { auditEventHash, type VerifyAuditChainResult, verifyAuditChain } from "./audit.js";
+export {
+  BUSINESS_DAY_CUTOVER_HOUR_DEFAULT,
+  BUSINESS_TIMEZONE,
+  businessDate,
+  businessDayBounds,
+} from "./business-day.js";
 export { canonicalJson } from "./canonical.js";
 export { DEVICE_CLASSES, type DeviceClass, HUB_ELIGIBLE_CLASSES } from "./device-classes.js";
-export { EventEnvelope, type EventEnvelopeT, parseEnvelope } from "./envelope.js";
+export {
+  EventEnvelope,
+  type EventEnvelopeT,
+  parseEnvelope,
+  TIME_BASES,
+  type TimeBasis,
+} from "./envelope.js";
 export { newId } from "./ids.js";
 export {
+  type RefundRemainderArgs,
+  refundRemainderExceeded,
+  type SettledConservationArgs,
+  settledConservationResidualPaisa,
+} from "./invariants.js";
+export {
   addPaisa,
+  applyRateBps,
   type Milligrams,
   type Millilitres,
   mg,
   ml,
   type Paisa,
   paisa,
+  splitPaisa,
   subPaisa,
   sumPaisa,
+  totalPaisaOrNull,
   type Units,
   units,
 } from "./money.js";
+export { payloadHash } from "./payload-hash.js";
+export {
+  AVAILABILITY_FALSE_WINS,
+  CONTESTED_LINE_BILLABLE,
+  EXCESS_TENDER_IS_EXCEPTION,
+  KOT_TWO_HEAD_TABLE_HEADER,
+} from "./product-constants.js";
 export {
   AUDIT_EVENT_TYPES,
   type AuditEventType,
@@ -32,6 +60,7 @@ export {
 } from "./registry.js";
 export {
   applyLineState,
+  LEGAL_NEXT,
   type LineStateResult,
   ORDER_LINE_STATES,
   type OrderLineState,

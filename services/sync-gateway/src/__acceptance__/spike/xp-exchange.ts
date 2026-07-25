@@ -23,9 +23,12 @@
 // unordered set within a push — rejected as a weaker, fuzzier oracle.
 //
 // All ids/timestamps are FIXED literals (never newId()/Date.now()) so the fixture is
-// byte-stable and re-recording is deep-equal (20 §2.4 determinism). Envelopes are
-// registry-valid order.created (01 §4 seed catalog). Consumes only @restos/domain +
-// @restos/sync-protocol + @restos/testing — never sync-gateway internals.
+// byte-stable and re-recording is deep-equal (20 §2.4 determinism); the token is the
+// helpers' DETERMINISTIC HS256 mint under the committed TEST_TOKEN_SECRET (T-01-09
+// spec-review re-mint — the dev token the fixture previously carried is retired).
+// Envelopes are registry-valid order.created (01 §4 seed catalog). Consumes only
+// @restos/domain + @restos/sync-protocol + @restos/testing + the acceptance helpers'
+// token mint — never sync-gateway internals.
 import type { EventEnvelopeT } from "@restos/domain";
 import {
   type CloudTransportHandlers,
@@ -33,6 +36,7 @@ import {
   type ProtocolMessage,
 } from "@restos/sync-protocol";
 import { type CloudTranscriptEntry, createSim, createSimCloud } from "@restos/testing";
+import { signedToken } from "../helpers.js";
 
 /** Fixed fleet identity baked into the committed fixture (deterministic replay). */
 export const XP_ORG = "xp-org";
@@ -42,26 +46,33 @@ export const XP_CLASS = "counter_electron" as const;
 /** Fixed base epoch-ms; per-event offset is the lamport seq (deterministic). */
 const BASE_TS = 1_752_800_000_000;
 
-/** Wave-0 dev token: unsigned base64url-JSON claims — the verifyDeviceToken shape (01-F27). */
+/** T-01-09 device token: deterministic HS256 under TEST_TOKEN_SECRET (01-F27; no
+ * hub_relay claim, so neither core advertises relay_authorized). */
 export const xpToken = (): string =>
-  Buffer.from(
-    JSON.stringify({ org_id: XP_ORG, branch_id: XP_BRANCH, device_id: XP_DEVICE }),
-  ).toString("base64url");
+  signedToken({ org_id: XP_ORG, branch_id: XP_BRANCH, device_id: XP_DEVICE });
 
-const envelope = (lamport: number, id: string, orderId: string): EventEnvelopeT => ({
-  id,
-  org_id: XP_ORG,
-  branch_id: XP_BRANCH,
-  device_id: XP_DEVICE,
-  actor_user_id: null,
-  lamport_seq: lamport,
-  device_created_at: BASE_TS + lamport,
-  server_received_at: null,
-  type: "order.created",
-  schema_version: 1,
-  payload: { order_id: orderId, channel: "dine_in" },
-  refs: [],
-});
+// T-01-17 (DEC-TIME-001): the literal carries the ratified time-layer fields and is
+// ASSERTED rather than annotated, so this builder compiles both before the envelope
+// schema gains them (red phase) and after (green phase).
+const envelope = (lamport: number, id: string, orderId: string): EventEnvelopeT =>
+  ({
+    id,
+    org_id: XP_ORG,
+    branch_id: XP_BRANCH,
+    device_id: XP_DEVICE,
+    actor_user_id: null,
+    lamport_seq: lamport,
+    device_created_at: BASE_TS + lamport,
+    // 01-F43/01-F44: the transcript's envelopes carry branch-consensus time and
+    // the basis marker; the committed fixture is re-pinned to match (20 §2.7).
+    branch_created_at: BASE_TS + lamport,
+    time_basis: "branch",
+    server_received_at: null,
+    type: "order.created",
+    schema_version: 1,
+    payload: { order_id: orderId, channel: "dine_in" },
+    refs: [],
+  }) as EventEnvelopeT;
 
 // e0/e1 merge cleanly; eNul is registry-valid (order_id is a non-empty string) but
 // carries U+0000, which Postgres jsonb cannot hold — the gateway quarantines it

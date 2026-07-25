@@ -200,14 +200,16 @@ The only residual out-of-order insert is **LAN delivery reordering** — a peer 
 
 ## 14. The time layer — separate from the ordering layer
 
+> **STATUS: RATIFIED (founder, July 2026) and promoted.** This section is the analysis; the normative text is `01-F43..F46` plus the un-deferred `01-N2`, and the register row is `DEC-TIME-001` (**accepted**). Implementing task **T-01-17**. Unlike §11–§16's ordering proposal, nothing here was refuted — the time layer is needed under every ordering choice, and the ordering design that shipped (`26`) reads no clock at all, which is what makes this layer cleanly separable.
+
 The original design error was conflating "what order did these happen in" with "what time did they happen at." §13 answers the first and deliberately answers *nothing* about the second. The second needs its own mechanism:
 
 - **Durations need a consistent clock, not a correct one.** Kitchen age and ETA (doc 03) are *differences* — `now − kot_at` — and a uniform offset cancels in a difference. So a branch whose clocks all agree is sufficient for every duration in the product, even if that shared time is collectively wrong.
 - **Branch-consensus time.** The elected hub (`01-F13`) is the branch time authority; devices carry an offset to hub time and stamp durations in it. This composes with `DEC-SYNC-009`: the hub is *also* the branch's WAN uplink, so in the common deployment the hub is the device that has internet — hence real NTP time. **Branch time is therefore genuinely correct in the normal case and merely self-consistent in the fully-offline case**, which is exactly the guarantee each case needs.
 - **Absolute business timestamps** — tax and fiscal instants (doc 16), audit chronology (`01-F5`), the day boundary — use `server_received_at` when available, and are stamped in branch time and **marked provisional** when offline, reconciled at contact. `16-N3` already anticipates precisely this ("skew > 5 min is flagged (01-N2) and `server_received_at` is stored alongside for reconciliation").
 - **`device_created_at` is demoted** to an untrusted display/forensic hint. It leaves the ordering key entirely.
-- **Live defect to fix regardless of this decision:** `replay.ts:247,256` set `confirmed_at` and `kot_at` from raw `env.device_created_at`, so a wrong clock writes wrong values straight into timing read models that doc 03 consumes. No ordering scheme repairs this — it is a time-layer bug.
-- **`01-N2` is specced but unimplemented** (no skew detection exists in `packages/` or `services/`) and is deferred out of Wave 0 (`conformance/wave-0-scope.yml:75`). That deferral should be revisited: it is the detection half of this layer.
+- **Live defect to fix regardless of this decision:** `folds/merge.ts` sets `confirmed_at`, `kot_at` and `age_basis` from raw `env.device_created_at` (the pre-T-01-15 site was `folds/replay.ts:247,256`, since deleted), so a wrong clock writes wrong values straight into timing read models that doc 03 consumes. No ordering scheme repairs this — it is a time-layer bug. **Closed by `01-F45` under T-01-17.**
+- **`01-N2` is specced but unimplemented** (no skew detection exists in `packages/` or `services/`) and was deferred out of Wave 0. That deferral is now **reversed** — it is the detection half of this layer, and a time layer that absorbs arbitrary skew without reporting it is undiagnosable in the field. `01-N2` moved to `in_scope.pending` in `conformance/wave-0-scope.yml`, owned by T-01-17.
 - **Day boundary** anchored to Asia/Karachi irrespective of cloud region (T4).
 
 ## 15. Blast radius

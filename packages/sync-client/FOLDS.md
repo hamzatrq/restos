@@ -1,5 +1,9 @@
 # Fold registry v1 (24-F8 artifact for spec 01 — implementation follows in T-01-04)
 
+> ## ⚠️ STALE — pre-implementation artifact. Do not read as the shipped design.
+> This is the T-01-04 planning artifact and predates **T-01-15** (the merge-semantics fold engine) and **spec 26**. It still describes the **superseded comparator law** ("LWW entities tiebreak on cloud `global_seq`"), a single-column `orders` schema that does **not** match the shipped 15-key `OpenOrderRow`, and six folds of which only two (`open_orders`, `kitchen_queue`) are implemented. **Authoritative sources for the shipped engine:** `README.md` (this package), `src/folds/merge.ts`, and `specs/26-merge-semantics.md`. Retained for historical context only.
+
+
 Laws (01-F34/F35, 01-N1): every fold is a pure `(state, envelope) → state`, commutative and idempotent over concurrently-received events, respecting per-device lamport order; terminal states never regress (anomalies recorded, never applied); events referencing unseen parents are **parked** and re-applied on arrival (01-F10); LWW entities (catalog/config, 01-F18) tiebreak on cloud `global_seq`. Canonical JSON in fold state sorts object keys **by UTF-16 code unit** at every depth (pinned so non-JS refold-and-diff implementations byte-match, 20 §4.2).
 
 | fold | device classes | state table (SQLite) | consumes |
