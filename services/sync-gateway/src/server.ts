@@ -8,7 +8,7 @@
 import { pathToFileURL } from "node:url";
 import websocket from "@fastify/websocket";
 import { defineEnv } from "@restos/config";
-import { decodeMessage, encodeMessage } from "@restos/sync-protocol";
+import { createFrameCodec } from "@restos/sync-protocol";
 import { drizzle } from "drizzle-orm/postgres-js";
 import Fastify, { type FastifyInstance } from "fastify";
 import { createGateway } from "./gateway.js";
@@ -27,17 +27,30 @@ export const buildServer = (databaseUrl: string, tokenSecret: string): FastifyIn
   void app.register(websocket);
   void app.register(async (instance) => {
     instance.get("/sync", { websocket: true }, (socket) => {
+      // PER-CONNECTION framing (DEC-SYNC-010, T-01-19). One codec per live socket,
+      // starting plain and upgraded only when this connection's hello_ack actually
+      // grants it — so the wire format follows the handshake, never the frame.
+      let codec = createFrameCodec(undefined);
       const conn = gateway.connect((message) => {
-        socket.send(encodeMessage(message));
+        // Adopt AFTER sending the ack: the ack itself must cross plain, because the
+        // client's decoder is still plain when it arrives.
+        const frame = codec.encode(message);
+        socket.send(frame);
+        if (message.kind === "hello_ack" && message.compression !== undefined) {
+          codec = createFrameCodec(message.compression);
+        }
       });
-      socket.on("message", (raw: Buffer) => {
-        void (async () => conn.handle(decodeMessage(raw.toString("utf8"))))().catch(
-          (error: unknown) => {
-            instance.log.error({ err: error }, "sync session terminated (decode/handle error)");
-            conn.close();
-            socket.close();
-          },
-        );
+      socket.on("message", (raw: Buffer, isBinary: boolean) => {
+        // The transport's own text/binary distinction carries the framing. Passing
+        // everything as text (the previous `raw.toString("utf8")`) would make a
+        // compressed frame indistinguishable from mojibake and force magic-number
+        // sniffing, which DEC-SYNC-010 forbids.
+        const frame: string | Uint8Array = isBinary ? new Uint8Array(raw) : raw.toString("utf8");
+        void (async () => conn.handle(codec.decode(frame)))().catch((error: unknown) => {
+          instance.log.error({ err: error }, "sync session terminated (decode/handle error)");
+          conn.close();
+          socket.close();
+        });
       });
       socket.on("close", () => {
         conn.close();

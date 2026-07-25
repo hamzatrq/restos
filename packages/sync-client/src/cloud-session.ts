@@ -165,6 +165,11 @@ export const createCloudSession = (options: {
       token,
       last_global_seq: st.last_global_seq ?? 0,
       own_high_water: st.own_high_water ?? 0,
+      // Advertise that this build can DECODE compressed frames (DEC-SYNC-010). It is
+      // only half the contract — the gateway must also grant it in hello_ack, and
+      // absent a grant this connection stays plain JSON for its whole life. That
+      // both-ends rule is what makes the rollout safe in either direction.
+      accepts_compression: true,
     });
   };
 

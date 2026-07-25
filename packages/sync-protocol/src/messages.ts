@@ -24,6 +24,11 @@ export const messageSchemas = {
     token: z.string().min(1),
     last_global_seq: seq,
     own_high_water: seq,
+    // Additive under v:1 (DEC-SYNC-010, T-01-19): this peer can DECODE compressed
+    // frames. Advertising is half the contract — the grant only holds if the server
+    // also accepts (hello_ack.compression). Absent ⇒ plain JSON for this connection's
+    // whole life, which is the property that stops a new gateway stranding an old device.
+    accepts_compression: z.boolean().optional(),
   }),
   hello_ack: z.object({
     v,
@@ -40,6 +45,10 @@ export const messageSchemas = {
     // and the committed golden transcript — stay byte-identical. Renewing on every
     // hello would destroy issuance determinism, which those fixtures depend on.
     renewed_token: z.string().min(1).optional(),
+    // Additive under v:1 (DEC-SYNC-010, T-01-19). Granted IFF the client advertised
+    // AND this server accepts — a closed vocabulary, so an unknown codec name is a
+    // parse failure rather than a silent downgrade. Absent ⇒ plain, forever.
+    compression: z.literal("zstd").optional(),
   }),
   push: z.object({ v, kind: z.literal("push"), events: z.array(EventEnvelope), watermark: seq }),
   push_ack: z.object({
@@ -150,3 +159,68 @@ export const encodeCompressed = (message: ProtocolMessage): Uint8Array =>
 
 export const decodeCompressed = (bytes: Uint8Array): ProtocolMessage =>
   decodeMessage(zstdDecompressSync(bytes).toString("utf8"));
+
+/** The negotiated framing for one connection; `undefined` = plain JSON (T-01-19). */
+export type Compression = "zstd";
+
+/**
+ * Decide one connection's framing (DEC-SYNC-010, T-01-19). Both ends must opt in:
+ * the peer advertises `accepts_compression` in its `hello`, and this end declares
+ * whether it accepts. Either side declining yields plain JSON **for the life of the
+ * connection** — that is the anti-stranding property, not a fallback. A newly
+ * deployed gateway must never send frames an un-updated device cannot parse, which
+ * in this product means a counter terminal that silently stops receiving orders.
+ */
+export const negotiateCompression = (
+  // `| undefined` explicitly: the repo runs `exactOptionalPropertyTypes`, so a parsed
+  // `hello` whose optional field is present-but-undefined is not assignable otherwise.
+  hello: { accepts_compression?: boolean | undefined },
+  selfAccepts: boolean,
+): Compression | undefined =>
+  hello.accepts_compression === true && selfAccepts ? "zstd" : undefined;
+
+/**
+ * A per-connection frame codec (T-01-19). `encode` returns a `string` for a plain
+ * text frame and `Uint8Array` for a compressed binary one, so the TRANSPORT's own
+ * text/binary distinction carries the framing — never the frame's contents.
+ *
+ * That typing is the anti-sniffing mechanism, and it is deliberate. Detecting the
+ * zstd magic number would make the wire format depend on the message rather than on
+ * the agreement, and a peer that can decode a compressed frame today may not after a
+ * rollback. So an un-negotiated connection REFUSES a compressed frame even though it
+ * could technically decode one.
+ *
+ * Decode tolerance is one-directional and also deliberate: a granted codec still
+ * accepts plain frames, because the two ends do not switch in the same instant — the
+ * `hello_ack` that grants compression is itself plain, and messages already in flight
+ * behind it are too. A plain codec never accepts a compressed frame.
+ */
+export type FrameCodec = {
+  encode(message: ProtocolMessage): string | Uint8Array;
+  decode(frame: string | Uint8Array): ProtocolMessage;
+};
+
+/**
+ * The handshake pair is ALWAYS sent plain, even once a codec is granted. `hello` is
+ * what establishes what this peer can read, and `hello_ack` crosses the wire while
+ * the client's decoder is still plain — compressing either would require the receiver
+ * to already know the answer the message itself carries.
+ */
+const ALWAYS_PLAIN: ReadonlySet<string> = new Set(["hello", "hello_ack"]);
+
+export const createFrameCodec = (compression: Compression | undefined): FrameCodec => ({
+  encode: (message) =>
+    compression === undefined || ALWAYS_PLAIN.has(message.kind)
+      ? encodeMessage(message)
+      : encodeCompressed(message),
+  decode: (frame) => {
+    if (typeof frame === "string") return decodeMessage(frame);
+    if (compression === undefined) {
+      throw new Error(
+        "received a binary frame on a connection that did not negotiate compression " +
+          "(DEC-SYNC-010 — framing comes from the handshake, never from sniffing the frame)",
+      );
+    }
+    return decodeCompressed(frame);
+  },
+});

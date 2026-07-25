@@ -22,7 +22,7 @@ import {
   parseEvent,
   refundRemainderExceeded,
 } from "@restos/domain";
-import { type ProtocolMessage, parseMessage } from "@restos/sync-protocol";
+import { negotiateCompression, type ProtocolMessage, parseMessage } from "@restos/sync-protocol";
 import { sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { DEVICE_TOKEN_TTL_MS, issueDeviceToken, verifyDeviceToken } from "./auth.js";
@@ -435,6 +435,10 @@ export const createGateway = ({
     // (01-F47). A DRAINING session is deliberately excluded: its renewal rides the
     // ack of the push it was admitted to make, so that the read refusals are
     // observable in between. If it rode hello_ack there would be no drain mode at all.
+    // Per-connection framing (DEC-SYNC-010, T-01-19). The server accepts whenever the
+    // client advertises: this build can always decode, so the only reason to decline
+    // would be a peer that cannot — and that peer simply does not advertise.
+    const negotiated = negotiateCompression(message, true);
     const renewedToken = expired
       ? undefined
       : await mintRenewal(
@@ -455,6 +459,11 @@ export const createGateway = ({
         hub: false,
         resume_from: resumeFrom,
         ...(renewedToken === undefined ? {} : { renewed_token: renewedToken }),
+        // DEC-SYNC-010: granted iff the client advertised AND this server accepts.
+        // Absent means plain JSON for the life of this connection — the property that
+        // stops a newly-deployed gateway sending frames an un-updated device cannot
+        // parse, which in this product is a terminal that silently stops receiving orders.
+        ...(negotiated === undefined ? {} : { compression: negotiated }),
         // Advertised ONLY when the grant holds (DEC-SYNC-009 / T-01-09): the
         // client-side gate for relaying — absent otherwise, keeping plain
         // sessions (and the committed XP transcript) byte-identical.
