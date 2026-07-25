@@ -33,7 +33,7 @@ synchronous append path where `node:crypto`/WebCrypto are not), and `uuidv7` (id
 | `registry.ts` | The `01 §4` typed event catalog + parse gate | `eventRegistry`, `parseEvent`, `ParsedEvent`, `KnownEventType`, `AUDIT_EVENT_TYPES`, `AuditEventType`, `isAuditEvent`, `UnknownEventTypeError` |
 | `states.ts` | Order-line state machine + legality table | `ORDER_LINE_STATES`, `OrderLineState`, `TERMINAL_LINE_STATES`, `LEGAL_NEXT`, `applyLineState`, `LineStateResult` |
 | `invariants.ts` | Executable money-conservation invariants (`01-F29/F30`) | `refundRemainderExceeded`, `settledConservationResidualPaisa`, `RefundRemainderArgs`, `SettledConservationArgs` |
-| `product-constants.ts` | Four **DECISION PENDING** founder-owned merge-policy constants | `CONTESTED_LINE_BILLABLE`, `AVAILABILITY_FALSE_WINS`, `KOT_TWO_HEAD_TABLE_HEADER`, `EXCESS_TENDER_IS_EXCEPTION` |
+| `product-constants.ts` | Four **ratified** founder-owned merge-policy constants | `CONTESTED_LINE_BILLABLE`, `AVAILABILITY_FALSE_WINS`, `KOT_TWO_HEAD_TABLE_HEADER`, `EXCESS_TENDER_IS_EXCEPTION` |
 | `device-classes.ts` | Fixed device-class slice + hub-election priority | `DEVICE_CLASSES`, `DeviceClass`, `HUB_ELIGIBLE_CLASSES` |
 | `ids.ts` | Single platform id source | `newId` |
 
@@ -157,8 +157,9 @@ before their parent (`01-F17`/`DEC-SYNC-007`).
 
 ### `product-constants.ts` — four founder-owned constants (`T-01-15`, `26 §9`)
 
-Every value here is `// DECISION PENDING` — the merge-matrix **default**, not a ratified
-product call. Flag these to the founder; they are the only policy knobs in the package:
+All four were **ratified by the founder in July 2026** at their merge-matrix defaults
+(`26 §9`); the values below are law, not analysis. They remain named constants because
+they are the only policy knobs in the package — one place to read, one place to overrule:
 
 - `CONTESTED_LINE_BILLABLE = true` — a contested line (e.g. served vs voided heads) still
   counts toward billed revenue (matrix §5.4).
@@ -200,5 +201,6 @@ product call. Flag these to the founder; they are the only policy knobs in the p
   ban.
 - **`T-01-09` (device auth).** Nothing in this package — auth lives elsewhere (`sync-client`
   + registry). Noted so a reviewer doesn't hunt for it here.
-- **Pending product constants.** The four `product-constants.ts` values remain founder-owned
-  `DECISION PENDING` defaults; none blocks the merge engine, but none is a ratified call yet.
+- **Product constants — ratified.** The four `product-constants.ts` values were ratified by
+  the founder in July 2026 at their matrix defaults (`26 §9`). They stay as named constants
+  so the policy has one readable home, but they are no longer open questions.

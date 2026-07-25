@@ -54,7 +54,16 @@ in_scope:
     - { fr: 01-F7,  by: T-01-11, note: "Auditor demonstrates rebuildable projections; per-module read models are later" }
     - { fr: 01-F25, by: T-01-09, note: "device registry + jose tokens + revocation (registration pairing UX is doc 14/15)" }
     - { fr: 01-F38, by: T-01-06, note: "split/merge + departed-origin partition shape demonstrated (DEC-SYNC-006)" }
+    - { fr: 01-N2,  by: T-01-17, note: "clock-skew detection un-deferred with DEC-TIME-001 — it is the detection half of the time layer; the flag stays observational and never blocks (was deferred to doc 15 fleet health, which now consumes it rather than owning it)" }
     - { fr: 01-F42, by: T-01-09, note: "revocation + purge_command on every revoked hello (LAN-side purge needs registry distribution — follow-up)" }
+    # Ratified July 2026 — DEC-TIME-001 / DEC-AUTH-001 / DEC-AUTH-002 accepted, so these
+    # enter Wave-0 scope with their implementing tasks. See specs/DECISIONS.md.
+    - { fr: 01-F43, by: T-01-17, note: "branch-consensus time: hub is the time authority; durations evaluated on a consistent (not correct) clock" }
+    - { fr: 01-F44, by: T-01-17, note: "absolute stamps use server_received_at, else branch time marked time_basis=branch_provisional and reconciled at contact" }
+    - { fr: 01-F45, by: T-01-17, note: "device_created_at demoted to untrusted hint; banned from folds/read models alongside the 01-F34 ordering-metadata ban" }
+    - { fr: 01-F46, by: T-01-17, note: "business-day boundary anchored to Asia/Karachi regardless of cloud region" }
+    - { fr: 01-F47, by: T-01-18, note: "token exp (90d default) + iss/aud binding + silent renewal incl. hub-relayed; expiry never blocks a local sale" }
+    - { fr: 01-F48, by: T-01-18, note: "revocation eviction < 30s on any reachable path, fail-closed; read half already landed in 9a0c1ff" }
 
 deferred:
   # Explicitly OUT of Wave-0 kernel scope — each belongs to a later module/wave.
@@ -72,7 +81,6 @@ deferred:
   - { fr: 01-F33, reason: "post-settlement correction pairs / refund-remainder enforcement", target: "money-fold wave (T-01-08+ / doc 02)" }
   - { fr: 01-F36, reason: "approval.* idempotency", target: "manager console wave (doc 05)" }
   - { fr: 01-F41, reason: "reassignment backfill (scoped slices)", target: "Wave 1 slices" }
-  - { fr: 01-N2, reason: "clock-skew device health flag", target: "fleet health (doc 15)" }
   - { fr: 01-N3, reason: "storage budget on 2GB tablet", target: "D3 rig" }
   - { fr: 01-N4, reason: "cloud ingestion load (50 orders/min x 200 branches)", target: "Wave 1 load staging" }
   - { fr: 01-N5, reason: "cold-start replacement device < 10min", target: "Wave 1 (registration + backfill)" }
