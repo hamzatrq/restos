@@ -85,3 +85,24 @@ export const applyRateBps = (amount: Paisa, bps: number): Paisa => {
   }
   return paisa(Number(scaled));
 };
+
+/**
+ * Split paisa into whole rupees and the remaining paisa, for DISPLAY only (27-F23).
+ *
+ * The divide lives here rather than in the UI because DEC-MONEY-005 bans raw arithmetic on
+ * money everywhere, not only in ledgers — and the GritQL rule correctly rejected the
+ * obvious `paisa / 100` in a formatter. Exact and float-free on all safe integers: the
+ * remainder is removed before dividing, so the quotient is an exactly representable
+ * integer division.
+ *
+ * Rounding: NONE. This is a lossless decomposition, not a conversion — the caller decides
+ * what to do with `subPaisa`. 27-F23 says operational screens show no decimals, so the
+ * operational caller discards it; a fiscal document (16) does not.
+ */
+export const rupeesFromPaisa = (amount: Paisa): { rupees: number; subPaisa: number } => {
+  const a = asInt(amount, "rupeesFromPaisa amount"); // brands are compile-time only (18 §4)
+  const sign = a < 0 ? -1 : 1;
+  const abs = a * sign;
+  const sub = abs % 100;
+  return { rupees: sign * ((abs - sub) / 100), subPaisa: sub };
+};

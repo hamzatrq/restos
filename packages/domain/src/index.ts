@@ -34,6 +34,7 @@ export {
   ml,
   type Paisa,
   paisa,
+  rupeesFromPaisa,
   splitPaisa,
   subPaisa,
   sumPaisa,

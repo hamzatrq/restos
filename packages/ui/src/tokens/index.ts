@@ -21,9 +21,19 @@ export const space = values<number>(manifest.space);
 export const touch = values<number>(manifest.touch);
 export const kds = values<number>(manifest.kds);
 export const money = values<string | number>(manifest.money);
+/** 27-F42 — typography tokens are COMPOSITE. Take one whole; never assemble your own. */
+export type TypeStyle = {
+  fontFamily: string;
+  fontSize: number;
+  lineHeight: number;
+  fontWeight: number;
+  letterSpacing: string;
+};
+export type TypeName = "text-numeric-hero" | "text-numeric-primary" | "text-body" | "text-label";
+
 export const typography = Object.fromEntries(
   Object.entries(manifest.typography).filter(([k]) => !k.startsWith("$")),
-);
+) as unknown as Record<TypeName, TypeStyle>;
 
 /** A missing token is a bug, not an `undefined` — fail loudly at the point of use. */
 const must = <T>(g: Record<string, T>, k: string): T => {
