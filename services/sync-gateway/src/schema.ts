@@ -88,6 +88,10 @@ export const quarantine = kernel.table(
     // tried to send, and deleting would leave an investigation a hole with no trace.
     // null ⇔ live; listQuarantine filters non-null out of the doc-15 live surface.
     superseded_at: bigint("superseded_at", { mode: "number" }),
+    // WHO WROTE the stored bytes, as distinct from `device_id` (who the row is
+    // attributed to). They differ exactly where supersession must discriminate: a
+    // relayed placeholder is attributed to the hub but authored by the origin.
+    envelope_author: text("envelope_author"),
   },
   // ONE ROW PER CLAIMANT DEVICE per claimed event id (audit-1 #6). The org-wide
   // (org_id, claimed_event_id) unique index is deliberately GONE: it let the FIRST

@@ -249,11 +249,17 @@ export const createMeshSession = (options: {
   const forwardCloudAck = (device_id: string): void => {
     const cloudAck = store.relayedCloudAck(device_id);
     if (cloudAck === null) return;
+    // A renewal the cloud issued FOR this origin rides the same ack (01-F47). Without
+    // this the hub swallowed it and a WAN-less device could never renew — the clause
+    // that is supposed to make a 90-day TTL safe in a LAN-only deployment instead of
+    // bricking every waiter tablet.
+    const renewal = store.relayedRenewal(device_id);
     send(device_id, {
       v: 1,
       kind: "push_ack",
       acked_watermark: cloudAck,
       origin_device_id: device_id,
+      ...(renewal === null ? {} : { renewed_token: renewal }),
     });
   };
 
@@ -435,6 +441,11 @@ export const createMeshSession = (options: {
           // write-checkpoint is the ORIGIN's own act (19 §5): the outbox drains
           // without this device ever having WAN of its own.
           if (message.origin_device_id !== self.device_id) return;
+          // The hub-forwarded RENEWAL for this WAN-less origin (01-F47). This is the
+          // only path a device with no cloud session of its own has to a new token —
+          // without consuming it here, such a device could never renew and would
+          // brick at TTL no matter how healthy its branch is.
+          if (message.renewed_token !== undefined) store.setDeviceToken(message.renewed_token);
           // Fix round F3 (19 §5): an ack beyond own appended high — a forged
           // peer, or the wiped-store DR rejoin where the hub remembers a larger
           // stream than the reborn store holds — is IGNORED, never thrown out

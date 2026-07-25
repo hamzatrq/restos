@@ -10,6 +10,7 @@
 // provisioning error and surfaces as the PK violation.
 import { DEVICE_CLASSES, type DeviceClass } from "@restos/domain";
 import { sql } from "drizzle-orm";
+import { DEVICE_TOKEN_TTL_MS } from "./auth.js";
 import type { GatewayDb } from "./gateway.js";
 
 export type DeviceRegistration = {
@@ -17,6 +18,8 @@ export type DeviceRegistration = {
   branch_id: string;
   device_id: string;
   device_class: string;
+  /** Optional issuance expiry (01-F47); defaults to the standard lifetime when absent. */
+  token_expires_at?: number;
 };
 
 /** One registry row as the auth checks read it; undefined = never registered. */
@@ -50,9 +53,19 @@ export const registerDevice = async (
     );
   }
   await db.execute(
-    sql`insert into kernel.device_registry (org_id, branch_id, device_id, device_class, revoked_at)
+    // token_expires_at is SEEDED here (01-F47, review B1). Leaving it null made the
+    // hub-relayed renewal path unreachable: `mintRenewal` treats a null recorded expiry
+    // as "not due", so a freshly-provisioned WAN-less origin would never be renewed at
+    // all — the one clause that makes a 90-day TTL safe in a LAN-only deployment.
+    // Seeded to the caller's issuance expiry when known, else the default lifetime from
+    // the DATABASE clock (registry bookkeeping is not domain logic, so Postgres `now()`
+    // keeps Date.now() out of gateway src — the same reasoning revokeDevice uses).
+    sql`insert into kernel.device_registry
+          (org_id, branch_id, device_id, device_class, revoked_at, token_expires_at)
         values (${registration.org_id}, ${registration.branch_id}, ${registration.device_id},
-          ${registration.device_class}, null)`,
+          ${registration.device_class}, null,
+          coalesce(${registration.token_expires_at ?? null}::bigint,
+                   (extract(epoch from now()) * 1000)::bigint + ${DEVICE_TOKEN_TTL_MS}))`,
   );
 };
 

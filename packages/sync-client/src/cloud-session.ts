@@ -162,7 +162,10 @@ export const createCloudSession = (options: {
       device_id: store.identity.device_id,
       device_class,
       branch_id: store.identity.branch_id,
-      token,
+      // The PERSISTED renewal if the cloud has ever issued one, else the token this
+      // session was constructed with (01-F47). Reading it here rather than caching at
+      // construction is what makes renewal take effect on the very next connection.
+      token: store.deviceToken() ?? token,
       last_global_seq: st.last_global_seq ?? 0,
       own_high_water: st.own_high_water ?? 0,
       // Advertise that this build can DECODE compressed frames (DEC-SYNC-010). It is
@@ -323,6 +326,11 @@ export const createCloudSession = (options: {
     switch (message.kind) {
       case "hello_ack": {
         connected = true;
+        // Silent renewal (01-F47). Persisted immediately, so an expiry that arrives
+        // while the device is offline is already covered by the time it reconnects.
+        // Dropping this — as the first cut did — makes expiry TERMINAL: at TTL every
+        // device enters drain mode at once, and a hub in that state strands its branch.
+        if (message.renewed_token !== undefined) store.setDeviceToken(message.renewed_token);
         // The gateway's relay advertisement (DEC-SYNC-009): absent = never relay.
         relayAuthorized = message.relay_authorized === true;
         // A FRESH session retries suppressed origins once — re-noticed →
@@ -336,6 +344,18 @@ export const createCloudSession = (options: {
         return;
       }
       case "push_ack": {
+        // Two carriers land here, and they must NOT be confused. A renewal on an ack
+        // that names ANOTHER device belongs to that relayed origin — adopting it would
+        // give the hub a peer's credential. Only an ack for this device (or one with no
+        // origin named) is our own renewal (01-F47).
+        if (message.renewed_token !== undefined) {
+          const forOrigin = message.origin_device_id;
+          if (forOrigin === undefined || forOrigin === store.identity.device_id) {
+            store.setDeviceToken(message.renewed_token);
+          } else {
+            store.noteRelayedRenewal(forOrigin, message.renewed_token);
+          }
+        }
         const origin = message.origin_device_id;
         if (origin !== undefined && origin !== store.identity.device_id) {
           // Per-ORIGIN relay ack (DEC-SYNC-009): record it for the mesh to

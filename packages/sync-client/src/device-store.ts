@@ -177,6 +177,14 @@ export type DeviceStore = {
    */
   setBranchTimeOffset(offset_ms: number): void;
   branchTimeStatus(): BranchTimeStatus;
+  /**
+   * The token to present on the next connection (01-F47): the most recent renewal the
+   * cloud has issued, or null before any renewal — in which case the caller uses the
+   * token it was constructed with.
+   */
+  deviceToken(): string | null;
+  /** Persist a renewal received from the cloud. Silent by design — no host involvement. */
+  setDeviceToken(token: string): void;
   // ── DEC-SYNC-009 hub-relay seam (T-01-12) ─────────────────────────────────
   // VOLATILE cross-plane signals between the mesh session (LAN) and the cloud
   // session (WAN) of ONE device, carried by the store handle because it is the
@@ -200,6 +208,11 @@ export type DeviceStore = {
   noteRelayedCloudAck(device_id: string, acked_watermark: number): void;
   /** Highest known relayed cloud ack for an origin (mesh reads it to forward over LAN). */
   relayedCloudAck(device_id: string): number | null;
+  /** Cloud session records a renewal the cloud issued FOR a relayed origin (01-F47) —
+   * the origin's token never reaches the cloud, so this is its only delivery path. */
+  noteRelayedRenewal(device_id: string, token: string): void;
+  /** Pending renewal for an origin; the mesh forwards it over LAN on the next beat. */
+  relayedRenewal(device_id: string): string | null;
   /** Cloud session records a cloud quarantine_notice whose event belongs to a
    * relayed ORIGIN (T-01-08; 01-F37 "originating device notified" — a WAN-less
    * origin's only path is the hub's LAN forward). Deduped by event id. */
@@ -270,6 +283,17 @@ CREATE TABLE IF NOT EXISTS branch_time (
   acquired INTEGER NOT NULL
 ) STRICT;
 INSERT OR IGNORE INTO branch_time (id, offset_ms, acquired) VALUES (0, 0, 0);
+-- Device credential (01-F47, T-01-18 fix round B1). The cloud renews tokens silently;
+-- the device must PERSIST the renewal and present it on every later connection, or
+-- expiry is terminal rather than transient and the whole fleet enters a reconnect loop
+-- at TTL. Persistence lives here rather than in the host app because "silent" is the
+-- FR's own word: a host that forgot to store it would brick its devices at 90 days.
+-- NULL token ⇔ never renewed; the constructor-supplied token is used until then.
+CREATE TABLE IF NOT EXISTS device_credential (
+  id INTEGER PRIMARY KEY CHECK (id = 0),
+  token TEXT
+) STRICT;
+INSERT OR IGNORE INTO device_credential (id, token) VALUES (0, NULL);
 -- Fold state tables — the T-01-15 merge-model projections (01-F6, 01-F10; the
 -- openOrders row shape is oracle-pinned, contract ruling C8).
 CREATE TABLE IF NOT EXISTS orders (
@@ -371,6 +395,15 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     return { offset_ms: row?.offset_ms ?? 0, acquired: (row?.acquired ?? 0) === 1 };
   };
   const basisOf = (acquired: boolean): TimeBasis => (acquired ? "branch" : "branch_provisional");
+
+  // Renewed device credential (01-F47): read at connect, written when the cloud sends
+  // one. Durable, so a restart does not fall back to a token that may have expired.
+  const readCredential = db.prepare<[], { token: string | null }>(
+    "SELECT token FROM device_credential WHERE id = 0",
+  );
+  const writeCredential = db.prepare<[string]>(
+    "UPDATE device_credential SET token = ? WHERE id = 0",
+  );
 
   // T-01-04 fold surfaces: peer ingest, global_seq sidecar, fold-state rebuild.
   const allOwnEnvelopes = db.prepare<[], { envelope: string }>("SELECT envelope FROM events");
@@ -889,6 +922,7 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   const relayDrainListeners = new Set<() => void>();
   const relayCancelListeners = new Set<() => void>();
   const relayedCloudAcks = new Map<string, number>();
+  const relayedRenewals = new Map<string, string>();
   // Per-origin cloud quarantine notices awaiting LAN forward (T-01-08): volatile
   // like the rest of the seam — the durable at-least-once guarantee lives in the
   // GATEWAY's kernel.quarantine_notices outbox (DEC-SYNC-008); this map only
@@ -1035,6 +1069,17 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
       writeBranchTime.run(offset_ms);
     },
 
+    deviceToken() {
+      return readCredential.get()?.token ?? null;
+    },
+
+    setDeviceToken(token) {
+      if (token.length === 0) {
+        throw new Error("device token must be non-empty (01-F47; nothing changed)");
+      }
+      writeCredential.run(token);
+    },
+
     branchTimeStatus() {
       const { offset_ms, acquired } = branchTime();
       // Skew is |offset|: branch time is device clock + offset, so the offset IS how far
@@ -1081,6 +1126,14 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
 
     relayedCloudAck(device_id) {
       return relayedCloudAcks.get(device_id) ?? null;
+    },
+
+    noteRelayedRenewal(device_id, token) {
+      relayedRenewals.set(device_id, token); // latest wins — an older renewal is dead
+    },
+
+    relayedRenewal(device_id) {
+      return relayedRenewals.get(device_id) ?? null;
     },
 
     noteRelayedQuarantineNotice(device_id, notice) {

@@ -646,9 +646,10 @@ export const createGateway = ({
         // T-01-11 Auditor gap check are per-origin).
         const stored = await tx.execute(
           sql`insert into kernel.quarantine
-                (id, org_id, branch_id, device_id, claimed_event_id, reason, envelope, received_at)
+                (id, org_id, branch_id, device_id, claimed_event_id, reason, envelope, received_at, envelope_author)
               values (${newId()}, ${session.orgId}, ${session.branchId}, ${deviceId},
-                ${envelope.id}, ${reason}, ${JSON.stringify(envelope)}, ${clock.now()})
+                ${envelope.id}, ${reason}, ${JSON.stringify(envelope)}, ${clock.now()},
+                ${envelope.device_id})
               on conflict (org_id, claimed_event_id, device_id) do nothing
               returning claimed_event_id`,
         );
@@ -866,19 +867,25 @@ export const createGateway = ({
         // drained as notices — an origin must not be told its event was rejected when
         // the event is in the merged log.
         await tx.execute(
-          // Org-wide for this claimed id — deliberately NOT scoped to the event's
-          // author, and the adversarial review's M2 finding about that is filed rather
-          // than fixed. Scoping to `device_id = envelope.device_id` looks obviously
-          // right and breaks a RATIFIED requirement: the review-#7 pre-registration
-          // placeholder is attributed to the relaying HUB (per the T-01-12 F2
-          // attribution law), not to the origin, so an author-scoped predicate would
-          // leave it live forever. Distinguishing "the hub's placeholder for THIS
-          // event" from "a forger's row claiming the same id" needs a rule about the
-          // STORED envelope's authorship, which is a semantic ruling, not a predicate
-          // tweak. See the M2 entry in plans/wave-0/sec-review-followups.md.
+          // Scoped by the STORED ENVELOPE's AUTHOR (01-F37 as amended; review M2).
+          // Row attribution is the wrong key: a pre-registration placeholder is
+          // attributed to the relaying HUB, so an attribution-scoped predicate would
+          // leave it live forever — but a relay carries the origin's envelope VERBATIM
+          // (01-F1), so its stored bytes ARE this event. A forged claim on the same id
+          // was authored by someone else and therefore survives, which is the point:
+          // impersonating a terminal is exactly what the live surface exists to show.
+          //
+          // Read from a COLUMN, never by casting `envelope`. That column is TEXT and
+          // may not be valid JSON (`storage_reject` rows exist because Postgres could
+          // not hold those bytes), and Postgres does not guarantee AND-condition
+          // evaluation order — so a guarded `::jsonb` cast could still throw inside the
+          // merge transaction and wedge the push (01-F17). A null author (pre-migration
+          // or unparseable) simply never matches: the row stays live, the safe
+          // direction for evidence.
           sql`update kernel.quarantine set superseded_at = ${serverReceivedAt}
               where org_id = ${session.orgId} and claimed_event_id = ${envelope.id}
-                and superseded_at is null`,
+                and superseded_at is null
+                and envelope_author = ${envelope.device_id}`,
         );
         merged.push({ envelope, globalSeq: nextSeq, serverReceivedAt });
         storedById.set(envelope.id, envelope); // in-batch dedupe view (amendment 1)

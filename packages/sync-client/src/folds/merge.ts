@@ -139,8 +139,8 @@ type Entity = {
   nodes: Map<string, string | null>;
   /** MATERIALIZED tombstones — union of every delivered `supersedes` (Addendum-B). */
   tombstones: Set<string>;
-  /** Confirm G-Set: event id → the delivered branch stamp (matrix row 57, one-epoch). */
-  confirms: Map<string, { stamp: number }>;
+  /** Confirm G-Set: event id → the delivered branch stamp + its basis (matrix row 57). */
+  confirms: Map<string, { stamp: number; verified: boolean }>;
   /** settlement_closed G-Set: event id → payload (settled = non-emptiness, 01-F33). */
   closes: Map<string, Record<string, unknown>>;
   /** Per-line value MVR: line id → (canonical bytes → {item, qty, price}). */
@@ -450,7 +450,10 @@ export const createMergeEngine = (): MergeEngine => {
         // the anchor's argmin(stamp, id) below stays set-determined. The payloadHash
         // that used to ride here is gone with the mixed-epoch branch: it never
         // separated anything (`order.confirmed`'s payload is `{order_id}` alone).
-        e.confirms.set(env.id, { stamp: env.branch_created_at });
+        e.confirms.set(env.id, {
+          stamp: env.branch_created_at,
+          verified: env.time_basis === "branch",
+        });
         dirty.add(p.order_id);
         return;
       }
@@ -632,10 +635,23 @@ export const createMergeEngine = (): MergeEngine => {
     // "whichever device's clock was furthest behind". The id term now only breaks
     // ties between members with the SAME stamp — so it selects a canonical member
     // without ever changing the projected value, which is what invariance requires.
-    let anchor: { stamp: number; id: string } | null = null;
+    // BASIS PRECEDENCE first (01-F45, adversarial review H2): a `branch_provisional`
+    // stamp IS the raw device clock (offset 0), so under a plain earliest-wins rule a
+    // device whose clock is behind ALWAYS wins — a tablet powered on before the counter
+    // would set every order it confirms years in the past, converged identically on
+    // every screen. Verified members are therefore selected among first; provisional
+    // ones are used only when no verified confirm exists, because an imperfect age is
+    // better than none. This is a partition of the delivered set, so selection stays
+    // set-determined and order-independent (01-F34) — the id term still only breaks
+    // ties between EQUAL stamps within the chosen tier, never moving the value.
+    let anchor: { stamp: number; id: string; verified: boolean } | null = null;
     for (const [id, c] of e.confirms) {
-      if (anchor === null || c.stamp < anchor.stamp || (c.stamp === anchor.stamp && id < anchor.id))
-        anchor = { stamp: c.stamp, id };
+      const better =
+        anchor === null ||
+        (c.verified && !anchor.verified) ||
+        (c.verified === anchor.verified &&
+          (c.stamp < anchor.stamp || (c.stamp === anchor.stamp && id < anchor.id)));
+      if (better) anchor = { stamp: c.stamp, id, verified: c.verified };
     }
     // Table anchor: distinct head VALUES of the supersedes-DAG (value-equality
     // auto-clears), UTF-16 sorted; conflict = |distinct values| > 1.
@@ -657,7 +673,13 @@ export const createMergeEngine = (): MergeEngine => {
     let refundTotal = 0n;
     const payAttempts: Record<string, Record<string, unknown>[]> = {};
     const refundAttempts: Record<string, Record<string, unknown>[]> = {};
-    const maxRefundClaimByParent = new Map<string, number>();
+    // BigInt (adversarial review M1): this accumulator decides `cap_violated`, and it
+    // sums across Map iteration order = INGEST order. A raw double `+` is non-associative
+    // near 2^53, so two devices with different delivery orders could compute different
+    // `claimed` and disagree on the flag — the same 01-F34 break the totals above were
+    // migrated to fix, in the one accumulator T-01-22 left behind. Neither operand was a
+    // money-named identifier or member, so the widened lint rule does not reach it either.
+    const maxRefundClaimByParent = new Map<string, bigint>();
     for (const [attempt, cell] of e.pay) {
       const members = [...cell.keys()]
         .sort(utf16)
@@ -687,9 +709,11 @@ export const createMergeEngine = (): MergeEngine => {
         sub(claimByParent, m.payment_attempt_id as string, () => []).push(m.amount_paisa as number);
       }
       for (const [parent, amounts] of claimByParent) {
+        let largest = amounts[0] as number;
+        for (const a of amounts) if (a > largest) largest = a;
         maxRefundClaimByParent.set(
           parent,
-          (maxRefundClaimByParent.get(parent) ?? 0) + Math.max(...amounts),
+          (maxRefundClaimByParent.get(parent) ?? 0n) + BigInt(largest),
         );
       }
     }
@@ -707,12 +731,12 @@ export const createMergeEngine = (): MergeEngine => {
     for (const [attempt, cell] of e.pay) {
       const claimed = maxRefundClaimByParent.get(attempt);
       if (claimed === undefined) continue;
-      let floor = Number.POSITIVE_INFINITY;
+      let floor: bigint | null = null;
       for (const m of cell.values()) {
-        const amount = m.amount_paisa as number;
-        if (amount < floor) floor = amount;
+        const amount = BigInt(m.amount_paisa as number);
+        if (floor === null || amount < floor) floor = amount;
       }
-      if (claimed > floor) capViolated = 1;
+      if (floor !== null && claimed > floor) capViolated = 1;
     }
     // Lines: value MVR + edge-set workflow projection.
     const cells: Record<
