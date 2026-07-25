@@ -866,6 +866,16 @@ export const createGateway = ({
         // drained as notices — an origin must not be told its event was rejected when
         // the event is in the merged log.
         await tx.execute(
+          // Org-wide for this claimed id — deliberately NOT scoped to the event's
+          // author, and the adversarial review's M2 finding about that is filed rather
+          // than fixed. Scoping to `device_id = envelope.device_id` looks obviously
+          // right and breaks a RATIFIED requirement: the review-#7 pre-registration
+          // placeholder is attributed to the relaying HUB (per the T-01-12 F2
+          // attribution law), not to the origin, so an author-scoped predicate would
+          // leave it live forever. Distinguishing "the hub's placeholder for THIS
+          // event" from "a forger's row claiming the same id" needs a rule about the
+          // STORED envelope's authorship, which is a semantic ruling, not a predicate
+          // tweak. See the M2 entry in plans/wave-0/sec-review-followups.md.
           sql`update kernel.quarantine set superseded_at = ${serverReceivedAt}
               where org_id = ${session.orgId} and claimed_event_id = ${envelope.id}
                 and superseded_at is null`,
@@ -1152,21 +1162,34 @@ export const createGateway = ({
         }
         for (const [orgId, orgRecords] of byOrg) {
           let revoked: Set<string>;
+          // `unreadable` distinguishes "these devices are revoked" from "we could not
+          // find out". Both drop the session — fail-closed refuses participation — but
+          // only a PROVEN revocation may carry a purge. Adversarial-review H1: this
+          // catch used to treat every device in the org as revoked AND send each one
+          // `purge_command {scope:"all"}`, so a connection-pool blip would order an
+          // org-wide wipe. That is fail-DESTRUCTIVE, not fail-closed; 01-F48 says
+          // unreadable state means participation is refused, and a purge is not a
+          // refusal. Inert today only because no client purge handler exists yet —
+          // landing 01-F42's device half would have armed it into destruction of every
+          // unsynced local ledger in the org.
+          let unreadable = false;
           try {
             revoked = await revokedDeviceIds(
               orgId,
               orgRecords.map((r) => (r.session as SessionState).deviceId),
             );
           } catch {
+            unreadable = true;
             revoked = new Set(orgRecords.map((r) => (r.session as SessionState).deviceId));
           }
           for (const record of orgRecords) {
             const s = record.session as SessionState;
             if (!revoked.has(s.deviceId)) continue;
-            // 01-F42: the purge command rides the eviction, so a device that IS
+            // 01-F42: the purge command rides a PROVEN eviction, so a device that is
             // reachable wipes now rather than at its next hello.
-            if (record.open)
+            if (record.open && !unreadable) {
               record.sink(parseMessage({ v: 1, kind: "purge_command", scope: "all" }));
+            }
             record.open = false;
             record.session = null;
             leaveFanout(record);

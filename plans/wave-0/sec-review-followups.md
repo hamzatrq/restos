@@ -81,10 +81,21 @@ validates against production. Both FRs are marked `by: T-01-18` in
   `cap_violated`, sums in Map-insertion (ingest) order, and neither operand is a
   money-named identifier or member. Same absurd-magnitude precondition as the case
   T-01-22 did fix, so "fold money in BigInt" is overstated.
-- **M2 supersede-on-merge is not scoped to the claimant.** The UPDATE omits `device_id`
-  despite the key having just been widened, so a forger's evidence row is marked
-  superseded when the honest event merges — the bytes survive but the forgery attempt
-  leaves the doc-15 live surface and its notice is cancelled.
+- **M2 supersede-on-merge is not scoped to the claimant — NEEDS A RULING, not a fix.**
+  The UPDATE omits `device_id` despite the key having just been widened, so a forger's
+  evidence row is marked superseded when the honest event merges: the bytes survive but
+  the forgery attempt leaves the doc-15 live surface and its notice is cancelled.
+  **Attempted and reverted:** adding `device_id = envelope.device_id` breaks the
+  RATIFIED review-#7 requirement, because the pre-registration placeholder is attributed
+  to the relaying HUB (T-01-12 F2 attribution law), not to the origin — an author-scoped
+  predicate leaves it live forever. The two requirements genuinely conflict.
+  The distinguishing fact is the **stored envelope's authorship**: the hub's placeholder
+  holds the origin's envelope verbatim (a relay never re-authors), while a forger's row
+  holds a different envelope claiming the same id. So the correct predicate is about the
+  stored bytes, not the row's attribution column — and `quarantine.envelope` is TEXT that
+  may not be valid JSON (storage_reject rows exist precisely because Postgres could not
+  hold them), so a bare `::jsonb` cast would throw inside the merge transaction and wedge
+  the push (01-F17). Needs its own loop.
 - **L1** `schema.ts:66-73` still documents heal-in-place as live; that UPDATE was deleted
   in T-01-21. Protected path — the next session will work from it.
 

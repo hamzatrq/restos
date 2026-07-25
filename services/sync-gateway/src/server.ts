@@ -11,9 +11,14 @@ import { defineEnv } from "@restos/config";
 import { createFrameCodec } from "@restos/sync-protocol";
 import { drizzle } from "drizzle-orm/postgres-js";
 import Fastify, { type FastifyInstance } from "fastify";
-import { createGateway } from "./gateway.js";
+import { createGateway, REVOCATION_SWEEP_INTERVAL_MS } from "./gateway.js";
 
-export const buildServer = (databaseUrl: string, tokenSecret: string): FastifyInstance => {
+export const buildServer = (
+  databaseUrl: string,
+  tokenSecret: string,
+  issuer?: string,
+  audience?: string,
+): FastifyInstance => {
   const app = Fastify({ logger: true });
   const db = drizzle(databaseUrl);
   // The real clock is injected at the composition root only (18 §4); the
@@ -21,8 +26,29 @@ export const buildServer = (databaseUrl: string, tokenSecret: string): FastifyIn
   const gateway = createGateway({
     db,
     clock: { now: () => Date.now() },
-    auth: { token_secret: tokenSecret },
+    // issuer/audience bind tokens to THIS deployment (01-F47). Adversarial-review B3:
+    // the gateway supported them and the composition root never passed them, so a
+    // staging token validated against production — the capability existed and the
+    // shipped artifact did not exhibit it.
+    auth: {
+      token_secret: tokenSecret,
+      ...(issuer === undefined ? {} : { issuer }),
+      ...(audience === undefined ? {} : { audience }),
+    },
   });
+
+  // 01-F48 / DEC-AUTH-002: the ≤30 s eviction bound is a property of the RUNNING
+  // server, not of an exported method. Adversarial-review B3: `sweepRevocations` was
+  // called by nothing outside tests, so revocation still waited for the device's next
+  // voluntary contact — exactly the defect the decision exists to close. Errors are
+  // swallowed per tick (the sweep is itself fail-closed internally) so a transient DB
+  // fault cannot kill the timer and silently retire the guarantee.
+  const sweep = setInterval(() => {
+    void gateway.sweepRevocations().catch((error: unknown) => {
+      app.log.error({ err: error }, "revocation sweep failed (01-F48); retrying next tick");
+    });
+  }, REVOCATION_SWEEP_INTERVAL_MS);
+  sweep.unref();
 
   void app.register(websocket);
   void app.register(async (instance) => {
@@ -59,6 +85,7 @@ export const buildServer = (databaseUrl: string, tokenSecret: string): FastifyIn
   });
 
   app.addHook("onClose", async () => {
+    clearInterval(sweep);
     await gateway.close();
     await db.$client.end({ timeout: 5 });
   });
@@ -82,6 +109,12 @@ export const start = async (): Promise<FastifyInstance> => {
       }
       return raw;
     },
+    // 01-F47 deployment binding. OPTIONAL, not required: an unbound deployment must
+    // keep working (verifyDeviceToken checks each only when configured), and making
+    // them mandatory would break every existing environment at boot. Setting them is
+    // what stops a token minted for staging validating against production.
+    DEVICE_TOKEN_ISSUER: (raw) => (raw === undefined || raw === "" ? undefined : raw),
+    DEVICE_TOKEN_AUDIENCE: (raw) => (raw === undefined || raw === "" ? undefined : raw),
     PORT: (raw) => {
       const port = Number(raw ?? "8080");
       if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -90,7 +123,12 @@ export const start = async (): Promise<FastifyInstance> => {
       return port;
     },
   });
-  const app = buildServer(env.DATABASE_URL, env.DEVICE_TOKEN_SECRET);
+  const app = buildServer(
+    env.DATABASE_URL,
+    env.DEVICE_TOKEN_SECRET,
+    env.DEVICE_TOKEN_ISSUER,
+    env.DEVICE_TOKEN_AUDIENCE,
+  );
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
   return app;
 };

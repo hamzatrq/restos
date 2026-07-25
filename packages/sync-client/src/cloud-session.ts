@@ -255,8 +255,15 @@ export const createCloudSession = (options: {
       return global_seq === undefined ? { envelope } : { envelope, global_seq };
     });
     const results = store.ingestPage(items);
+    const priorBlock = blockedCursor;
     let advanceTo = -1;
     let blocked = false;
+    // Did THIS page apply the event we were previously stuck on? Only that clears the
+    // block. Adversarial-review B2: `applyEvents` serves live `event_batch` as well as
+    // `catchup_response`, so a clean live batch used to clear the report AND advance
+    // the cursor past the blockage — one sale on another terminal, and the blocking
+    // event was never requested again. That is the "never skip" rule inverted.
+    let landedBlocking = false;
     // DEC-SYNC-011: the FIRST non-landed event is where the cursor stops, so it is the
     // one reported. Previously this whole classification was thrown away — the local
     // `blocked` flag correctly stopped the advance and then told nobody, which is the
@@ -287,16 +294,29 @@ export const createCloudSession = (options: {
         }
       }
       if (!landed) blocked = true;
+      if (landed && global_seq !== undefined && global_seq === priorBlock?.global_seq) {
+        landedBlocking = true;
+      }
       if (!blocked && global_seq !== undefined && global_seq > advanceTo) advanceTo = global_seq;
     }
+    // Resolve the block BEFORE the cursor moves. A page that blocks re-reports where it
+    // stopped; a page that does not can only clear a standing block by having actually
+    // APPLIED the blocking event — not merely by being clean. A live fan-out batch at
+    // seq 1000 says nothing about seq 500.
+    if (report !== null) blockedCursor = report;
+    else if (priorBlock !== null && landedBlocking) blockedCursor = null;
+    // While a block stands the cursor may advance only to the sequence BEFORE it
+    // (DEC-SYNC-011 stop-and-report). The landed prefix of the blocking page still
+    // counts — that is real progress — but nothing may step over the gap, which is
+    // what a live fan-out batch at a much higher seq would otherwise do. Live events
+    // still ingest and fold, so the device keeps working on what it holds (01-F17);
+    // only the catch-up cursor is held back, and re-requesting is free (01-F8 dedupe).
+    const stopBefore = blockedCursor?.global_seq ?? null;
+    if (stopBefore !== null && advanceTo >= stopBefore) advanceTo = stopBefore - 1;
     if (advanceTo >= 0) {
       const current = store.status().last_global_seq ?? 0;
       if (advanceTo > current) store.setLastGlobalSeq(advanceTo);
     }
-    // Clear only when this page actually got through. A page that blocks again — the
-    // same blockage re-delivered — simply re-reports it, so a permanent stop stays
-    // visible while a transient one resolves itself with no operator action.
-    blockedCursor = report;
   };
 
   const dispatch = (message: ProtocolMessage): void => {
