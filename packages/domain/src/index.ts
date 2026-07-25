@@ -37,6 +37,7 @@ export {
   splitPaisa,
   subPaisa,
   sumPaisa,
+  totalPaisaOrNull,
   type Units,
   units,
 } from "./money.js";

@@ -5,12 +5,25 @@ language js
 // enter. The blessed path is the `domain` helpers: addPaisa / subPaisa / sumPaisa /
 // splitPaisa / applyRateBps (rates as integer basis points, 00 §6).
 //
-// Scope (deliberately narrow): an arithmetic operation — binary (+ - * / %), compound
-// assignment (+= -= *= /= %=), or update (++ / --, prefix and postfix; M2 fix round) —
-// where an operand is a BARE identifier whose name contains `paisa`/`Paisa`. Member
-// expressions such as `payload.amount_paisa` are the plain-number fold plane — its
-// migration to branded types is the deferred DEC-MONEY-005 fold clause, not this rule.
-// Plain `=` and the logical/bitwise compound assignments are not arithmetic and stay legal.
+// Scope: an arithmetic operation — binary (+ - * / %), compound assignment
+// (+= -= *= /= %=), or update (++ / --, prefix and postfix; M2 fix round) — where an
+// operand is a money value, meaning EITHER a bare identifier whose name contains
+// `paisa`/`Paisa`, OR a member expression whose property name does (`payload.amount_paisa`,
+// `cell.unit_price_paisa`), optionally wrapped in a TypeScript `as` cast.
+//
+// T-01-22 extended this to member expressions. They were previously excluded as "the
+// plain-number fold plane", which left the fold's money arithmetic outside the ban in
+// BOTH directions — `payTotal += m.amount_paisa as number` matched neither arm, since
+// the LHS name has no `paisa` and the RHS is a member behind a cast. That gap was not
+// theoretical: float `+` is non-associative near 2^53, so a running double total let
+// DELIVERY ORDER decide a money outcome through schema-valid payloads (01-F34 break,
+// fixed in the same task). Forgetting the `as` arm would close nothing — every shipped
+// occurrence is cast.
+//
+// Plain `=`, comparisons, function arguments and string concatenation stay legal, and
+// deliberately so: `m.amount_paisa < floor` is the 01-F29 cap witness and the 01-F33
+// ceiling check — legitimate set predicates, not arithmetic. A rule that fired on those
+// would be suppressed, which is worse than the gap it closes.
 //
 // Engine quirks (Biome 2.5.4 GritQL, all verified empirically — re-verify on upgrade):
 //   * Snippet metavariables in WRITE positions do not work: `$x += $y` fails to compile
@@ -37,8 +50,8 @@ or {
     `$x % $y`
   } as $bin where {
     or {
-      $x <: r"^[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*$",
-      $y <: r"^[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*$"
+      $x <: r"(?s)^\(*(?:[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*|[^()]*\.[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*)(?:\s+as\s+[^()]*)?\)*$",
+      $y <: r"(?s)^\(*(?:[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*|[^()]*\.[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*)(?:\s+as\s+[^()]*)?\)*$"
     },
     register_diagnostic(span=$bin, message="Raw arithmetic on a money value is banned (18 §4 / DEC-MONEY-005). Use the domain helpers: addPaisa/subPaisa/sumPaisa for +/-, splitPaisa for division, applyRateBps for rates (integer basis points).")
   },
@@ -53,8 +66,12 @@ or {
         $asgn <: r"(?s)^[A-Za-z0-9_$]+\s*(?:\+=|-=|\*=|/=|%=).*$"
       },
       and {
-        $b <: r"^[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*$",
-        $asgn <: r"(?s)^.*(?:\+=|-=|\*=|/=|%=)\s*[A-Za-z0-9_$]+$"
+        // RHS money operand — bare identifier OR member expression, cast or not.
+        // The operator is pinned by the $asgn regex CONTAINING one of the five
+        // arithmetic compounds, so plain `=` (and ??=/&&=/||=/bitwise) never match
+        // while the RHS tail is free to be `m.amount_paisa as number`.
+        $b <: r"(?s)^\(*(?:[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*|[^()]*\.[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*)(?:\s+as\s+[^()]*)?\)*$",
+        $asgn <: r"(?s)^.*(?:\+=|-=|\*=|/=|%=).*$"
       }
     },
     register_diagnostic(span=$asgn, message="Raw arithmetic on a money value is banned (18 §4 / DEC-MONEY-005). Use the domain helpers: addPaisa/subPaisa/sumPaisa for +/-, splitPaisa for division, applyRateBps for rates (integer basis points).")

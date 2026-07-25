@@ -189,11 +189,25 @@ export type BilledLineCell = { qty: number; unit_price_paisa: number; states: st
  * terminal set (≥2 heads) contributes per CONTESTED_LINE_BILLABLE (branchless
  * policy application, matrix §5.4). Declared ONCE — projectEntity and the
  * exported helper below both read it (T-01-11 fix round F4). */
-const billedCellPaisa = (cell: BilledLineCell): number => {
-  if (cell.states.length === 1 && EXITED.has(cell.states[0] as string)) return 0;
+const billedCellPaisa = (cell: BilledLineCell): bigint => {
+  if (cell.states.length === 1 && EXITED.has(cell.states[0] as string)) return 0n;
   const terminalCount = cell.states.filter((s) => TERMINAL.has(s)).length;
-  return cell.qty * cell.unit_price_paisa * Number(terminalCount < 2 || CONTESTED_LINE_BILLABLE);
+  // BigInt: qty × unit_price is a PRODUCT, so it leaves the exact-integer range far
+  // sooner than a sum does, and a double product rounds silently (3 × 3002399751580331
+  // renders as ...992, not ...993). Exactness here is what lets the caller decide
+  // between a true total and an anomaly instead of printing a plausible wrong number.
+  return (
+    BigInt(cell.qty) *
+    BigInt(cell.unit_price_paisa) *
+    BigInt(Number(terminalCount < 2 || CONTESTED_LINE_BILLABLE))
+  );
 };
+
+/** Exact JS integer, or null when the value cannot be represented (T-01-22). */
+const safeNumber = (value: bigint): number | null =>
+  value > BigInt(Number.MAX_SAFE_INTEGER) || value < -BigInt(Number.MAX_SAFE_INTEGER)
+    ? null
+    : Number(value);
 
 /**
  * billed_effective from an OpenOrderRow's `json_lines` cell map — the ENGINE's
@@ -205,11 +219,15 @@ const billedCellPaisa = (cell: BilledLineCell): number => {
  * otherwise, so counting terminal members of `states` IS `terminalCount`.
  */
 export const billedEffectiveFromJsonLines = (jsonLines: string): number => {
-  let billed = 0;
+  let billed = 0n;
   for (const cell of Object.values(JSON.parse(jsonLines) as Record<string, BilledLineCell>)) {
     billed += billedCellPaisa(cell);
   }
-  return billed;
+  // Unrepresentable ⇒ ZERO, matching what the fold's own accumulators do, and the row
+  // carries the overflow anomaly. Returning the rounded double instead would hand the
+  // cloud Auditor (services/sync-gateway/src/auditor.ts) a value that silently differs
+  // from the engine's, turning a money anomaly into a false conservation finding.
+  return safeNumber(billed) ?? 0;
 };
 
 type LineProjection = {
@@ -630,9 +648,13 @@ export const createMergeEngine = (): MergeEngine => {
     // to every total and is rendered, never picked (01-F31).
     const exceptions = new Set<string>();
     if (e.createMembers.size > 1) exceptions.add("order_identity_conflict");
-    let payTotal = 0;
-    let repaidTotal = 0;
-    let refundTotal = 0;
+    // Accumulated in BigInt (T-01-22, DEC-MONEY-005 fold clause). A running double
+    // total is NOT associative near 2^53, so delivery order would decide the money
+    // outcome through schema-valid payloads — the exact failure 26 §2 exists to
+    // remove, and a live 01-F34 break rather than a theoretical one.
+    let payTotal = 0n;
+    let repaidTotal = 0n;
+    let refundTotal = 0n;
     const payAttempts: Record<string, Record<string, unknown>[]> = {};
     const refundAttempts: Record<string, Record<string, unknown>[]> = {};
     const maxRefundClaimByParent = new Map<string, number>();
@@ -643,8 +665,8 @@ export const createMergeEngine = (): MergeEngine => {
       payAttempts[attempt] = members;
       if (cell.size === 1) {
         const m = members[0] as Record<string, unknown>;
-        if (m.purpose === "repays_receivable") repaidTotal += m.amount_paisa as number;
-        else payTotal += m.amount_paisa as number;
+        if (m.purpose === "repays_receivable") repaidTotal += BigInt(m.amount_paisa as number);
+        else payTotal += BigInt(m.amount_paisa as number);
       } else exceptions.add("attempt_divergence");
     }
     for (const [attempt, cell] of e.refund) {
@@ -654,7 +676,7 @@ export const createMergeEngine = (): MergeEngine => {
       refundAttempts[attempt] = members;
       if (cell.size === 1) {
         const m = members[0] as Record<string, unknown>;
-        refundTotal += m.amount_paisa as number;
+        refundTotal += BigInt(m.amount_paisa as number);
       } else exceptions.add("attempt_divergence");
       // Cap contributions (fix-round F3): EVERY member is a witnessable
       // sub-view choice. A sub-view keeps at most one member per attempt key,
@@ -697,7 +719,7 @@ export const createMergeEngine = (): MergeEngine => {
       string,
       LineValue & { states: string[]; anomalies: Record<string, string> }
     > = {};
-    let billedEffective = 0;
+    let billedEffective = 0n;
     let linesTotal = 0;
     let linesReady = 0;
     for (const [lineId, values] of e.lineValues) {
@@ -744,8 +766,26 @@ export const createMergeEngine = (): MergeEngine => {
         }
         if (ceiling === null || (snap as number) > ceiling) ceiling = snap as number;
       }
-      if (ceiling !== null && billedEffective > ceiling) exceptions.add("uncovered_addition");
+      if (ceiling !== null && billedEffective > BigInt(ceiling))
+        exceptions.add("uncovered_addition");
     }
+    // Render the money columns (T-01-22). A total the fold cannot represent EXACTLY
+    // contributes ZERO and raises `money_overflow` — the 01-F31 disputed-key
+    // precedent, and the only order-free choice: a "sum of the representable prefix"
+    // would be a delivery-order artifact, and clamping to MAX_SAFE_INTEGER is exactly
+    // the silent truncation the ban exists to prevent. Members are still retained and
+    // rendered in the attempts maps (01-F1) — nothing is picked or dropped, only the
+    // derived TOTAL declines to print a number it cannot stand behind. Never throws:
+    // this runs on the ingest path, where a throw would wedge sync (01-F17).
+    const renderTotal = (value: bigint): number => {
+      const exact = safeNumber(value);
+      if (exact === null) exceptions.add("money_overflow");
+      return exact ?? 0;
+    };
+    const payRendered = renderTotal(payTotal);
+    const repaidRendered = renderTotal(repaidTotal);
+    const refundRendered = renderTotal(refundTotal);
+    if (safeNumber(billedEffective) === null) exceptions.add("money_overflow");
     const order: OpenOrderRow = {
       order_id: e.order_id,
       channel,
@@ -754,9 +794,9 @@ export const createMergeEngine = (): MergeEngine => {
       settled,
       table_ids_json: canonicalJson(tableIds),
       table_conflict: tableIds.length > 1 ? 1 : 0,
-      pay_total: payTotal,
-      repaid_total: repaidTotal,
-      refund_total: refundTotal,
+      pay_total: payRendered,
+      repaid_total: repaidRendered,
+      refund_total: refundRendered,
       pay_attempts_json: canonicalJson(payAttempts),
       refund_attempts_json: canonicalJson(refundAttempts),
       cap_violated: capViolated,

@@ -301,6 +301,28 @@ export const runAuditor = async (args: RunAuditorArgs): Promise<AuditorReport> =
       // the ENGINE's own derivation (fix round F4 — declared once in merge.ts).
       if (order.settled === 1) {
         try {
+          // T-01-22: an UNREPRESENTABLE money magnitude is a finding in its own right,
+          // not something to compare. The engine now renders such a total as 0 and
+          // raises `money_overflow` rather than printing a rounded double — which is
+          // correct for the device, but it means the arithmetic below would balance
+          // 0 against 0 and the order would audit CLEAN. Checking the anomaly directly
+          // keeps the cloud loud: previously the mismatch surfaced only as a side
+          // effect of the unsafe double, which was luck, not a check.
+          if (/"money_overflow"/.test(order.exceptions_json)) {
+            findings.push({
+              check: "conservation",
+              org_id,
+              device_id: null,
+              order_id: order.order_id,
+              event_id: null,
+              lamport_seq: null,
+              detail:
+                `settled order ${order.order_id} carries a money total past the exact-integer ` +
+                "range (money_overflow) — conservation is unauditable until the magnitudes " +
+                "are corrected (00 §6 / 01-F30)",
+            });
+            continue;
+          }
           const billed = billedEffectiveFromJsonLines(order.json_lines);
           const residual = settledConservationResidualPaisa({
             billed_paisa: billed,
