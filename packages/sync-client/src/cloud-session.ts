@@ -413,6 +413,13 @@ export const createCloudSession = (options: {
           if (message.reason === "origin_unregistered" || message.reason === "origin_revoked") {
             suppressedOrigins.add(held.device_id);
           }
+          // 01-F48's LAN half, as far as the hub can observe it: the cloud has told us
+          // this origin is REVOKED. Suppressing relay only stopped its writes; the
+          // device was still receiving the branch's events over LAN. Revocation blocks
+          // READS too, so the mesh evicts it. (A revoked device that never pushes is
+          // still invisible here — closing that needs registry distribution over LAN,
+          // which remains the filed gap.)
+          if (message.reason === "origin_revoked") store.noteRevokedPeer(held.device_id);
           store.noteRelayedQuarantineNotice(held.device_id, {
             event_id: message.event_id,
             reason: message.reason,

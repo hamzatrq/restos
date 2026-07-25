@@ -293,6 +293,12 @@ export const createMeshSession = (options: {
         dropFollower(device_id); // HEARTBEAT_MISSED_LIMIT unanswered → heartbeats stop
         return;
       }
+      // Re-check every beat, not only at hello: revocation can land mid-session, and
+      // the ≤30 s bound of 01-F48 is about wherever a path reaches the device.
+      if (store.isRevokedPeer(device_id)) {
+        dropFollower(device_id);
+        return;
+      }
       live.missed += 1;
       // BRANCH time, not this device's raw clock (01-F43). The hub SERVES the branch
       // clock rather than defining it, so what it publishes must be the branch's time —
@@ -409,6 +415,14 @@ export const createMeshSession = (options: {
     if (suspects.delete(from)) recompute();
     switch (message.kind) {
       case "hello": {
+        // 01-F48 LAN half: revocation blocks READS as well as writes. A peer the cloud
+        // has refused as revoked is not admitted, so it receives no fan-out and no
+        // window replay over LAN. Without this the hub kept feeding the branch's events
+        // to a device the cloud had already cut off.
+        if (store.isRevokedPeer(from)) {
+          dropFollower(from);
+          return;
+        }
         if (state === "hub" || state === "solo") admitFollower(from);
         return;
       }

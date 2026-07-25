@@ -211,6 +211,16 @@ export type DeviceStore = {
   /** Cloud session records a renewal the cloud issued FOR a relayed origin (01-F47) —
    * the origin's token never reaches the cloud, so this is its only delivery path. */
   noteRelayedRenewal(device_id: string, token: string): void;
+  /**
+   * Record that the CLOUD refused a relayed origin as revoked (01-F48 LAN half). The
+   * hub already learns this — the gateway quarantines that origin's events
+   * `origin_revoked` — but until now it only stopped RELAYING them while continuing to
+   * fan branch events back to that device over LAN. Revocation blocks READS as well as
+   * writes, so the mesh reads this set to evict the peer.
+   */
+  noteRevokedPeer(device_id: string): void;
+  /** Peers the cloud has refused as revoked; the mesh refuses them on LAN. */
+  isRevokedPeer(device_id: string): boolean;
   /** Pending renewal for an origin; the mesh forwards it over LAN on the next beat. */
   relayedRenewal(device_id: string): string | null;
   /**
@@ -932,6 +942,7 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   const relayCancelListeners = new Set<() => void>();
   const relayedCloudAcks = new Map<string, number>();
   const relayedRenewals = new Map<string, string>();
+  const revokedPeers = new Set<string>();
   // Per-origin cloud quarantine notices awaiting LAN forward (T-01-08): volatile
   // like the rest of the seam — the durable at-least-once guarantee lives in the
   // GATEWAY's kernel.quarantine_notices outbox (DEC-SYNC-008); this map only
@@ -1147,6 +1158,17 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
 
     clearRelayedRenewal(device_id) {
       relayedRenewals.delete(device_id);
+    },
+
+    noteRevokedPeer(device_id) {
+      revokedPeers.add(device_id);
+      // A revoked device must not be handed a credential (the review's finding that
+      // B1 raised the severity of this gap). Drop any pending renewal for it.
+      relayedRenewals.delete(device_id);
+    },
+
+    isRevokedPeer(device_id) {
+      return revokedPeers.has(device_id);
     },
 
     noteRelayedQuarantineNotice(device_id, notice) {
