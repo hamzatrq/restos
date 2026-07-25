@@ -18,7 +18,7 @@ Used by: customers (their own WhatsApp), restaurant staff (support surfaces in d
 ## 2. Position in platform
 
 - **Consumes:** `order.created / confirmed / rejected / line_state_changed`, `kot.printed`, `rider.picked_up / delivered` (notification triggers); customer file reads (01-F23); org channel config (doc 14); metering config (doc 15); analyst API (doc 13).
-- **Emits:** `whatsapp.inbound_received / outbound_sent / outbound_failed / template_status_changed / optin_recorded / optout_recorded`, `customer.created / phone_verified`, `order.created` (reorder confirms), `metering.usage_recorded` (kind `whatsapp_message`).
+- **Emits:** `whatsapp.inbound_received / outbound_sent / outbound_failed / template_status_changed`, `customer.opted_in / opted_out` (**the canonical consent family, 07-F18 — the earlier `whatsapp.optin_recorded / optout_recorded` names are WITHDRAWN July 2026; see below**), `customer.created / phone_verified`, `order.created` (reorder confirms), `metering.usage_recorded` (kind `whatsapp_message`).
 - **Depends on:** Meta WhatsApp Business Cloud API + webhooks; BullMQ (00 §3) for outbound; doc 06 for checkout handoff; doc 15 for WABA provisioning tooling.
 - **Extends 01 §4 catalog** (spec PR): the `whatsapp.*` family above; reuses `metering.usage_recorded` defined in doc 06.
 
@@ -40,7 +40,7 @@ Used by: customers (their own WhatsApp), restaurant staff (support surfaces in d
 
 **Function 2 — transactional notifications**
 - 07-F6 On `order.confirmed` (with ETA if present), all-lines-ready, and `rider.picked_up` for the customer's order, the service sends the matching pre-approved English template (07-F21). Delivered orders get a closing message. Triggers are kernel events only — no notification without a ledger fact (automation law, 00 §5.8).
-- 07-F7 Notifications require opt-in: recorded (`whatsapp.optin_recorded`) at first order per org — checkout checkbox (doc 06) or in-conversation consent. No opt-in, no proactive message, ever.
+- 07-F7 Notifications require opt-in: recorded (`customer.opted_in`, the 07-F18 canonical family — **corrected July 2026 from `whatsapp.optin_recorded`, a duplicate name for the same fact**; consent is a property of the CUSTOMER, not of a channel, which is why doc 06's checkout checkbox and doc 17's suppression read the same event) at first order per org — checkout checkbox (doc 06) or in-conversation consent. No opt-in, no proactive message, ever.
 - 07-F8 Template messages are sent only when the 24 h customer-service window is closed; inside an open window, free-form session messages are used (cheaper, no template constraints). Window state is tracked per (org number, customer) from the last inbound timestamp.
 
 **Function 3 — support rail**

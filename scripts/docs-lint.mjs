@@ -79,6 +79,52 @@ for (const f of specFiles) {
 if (agents.split("\n").length > 120)
   err(`AGENTS.md: ${agents.split("\n").length} lines exceeds the T0 cap (120)`);
 
+// C6 — event-catalog absorption (01 §4, Commandment 2). Every event type named in any
+// module doc must appear in the 01 §4 catalog line. 01-F4 makes producing an unknown type a
+// build-time AND runtime error, so an unabsorbed type is a latent build break, not a doc nit.
+// Fourteen had accumulated by July 2026, two of them blocking shippable tasks.
+{
+  const kernel = read("specs/01-kernel-sync.md");
+  const catalogLine = kernel.split("\n").find((l) => l.includes("`order.created / confirmed"));
+  if (!catalogLine) err("specs/01: the §4 event catalog line was not found — C6 cannot run");
+  else {
+    // Expand `a.b / c / d` shorthand into fully-qualified type names.
+    const known = new Set();
+    for (const m of catalogLine.matchAll(/`([a-z_]+)\.([a-z_*]+(?:\s*\/\s*[a-z_*]+)*)`/g)) {
+      for (const leaf of m[2].split("/")) known.add(`${m[1]}.${leaf.trim()}`);
+    }
+    const wildcards = [...known].filter((k) => k.endsWith(".*")).map((k) => k.slice(0, -1));
+    // Names that collide with an event-family prefix but are NOT event types: metric ids
+    // (13 §2), fold field names (26), and deliberately withdrawn names retained for the
+    // audit trail. Keep this list short — every entry is a place the heuristic gives up.
+    const notEvents = new Set([
+      "cash.variance", // 13 §2 metric id, sibling of sales.total / voids.count
+      "stock.variance_value", // 13 §2 metric id
+      "day.business_date", // 26 fold field, not an emission
+      "whatsapp.optin_recorded", // WITHDRAWN 07-F7 → customer.opted_in
+      "whatsapp.optout_recorded", // WITHDRAWN 07-F18 → customer.opted_out
+    ]);
+    const evRe = /`([a-z_]+\.[a-z_]+)`/g;
+    for (const f of specFiles) {
+      if (f.startsWith("01-")) continue;
+      const text = read(`specs/${f}`);
+      text.split("\n").forEach((line, i) => {
+        for (const m of line.matchAll(evRe)) {
+          const t = m[1];
+          // Only nouns that look like event types: a known family prefix.
+          const fam = t.split(".")[0];
+          if (![...known].some((k) => k.startsWith(`${fam}.`))) continue;
+          if (known.has(t) || notEvents.has(t) || wildcards.some((w) => t.startsWith(w))) continue;
+          err(
+            `specs/${f}:${i + 1}: event type \`${t}\` is not absorbed into the 01 §4 catalog — ` +
+              `01-F4 makes emitting it a build-time and runtime error (Commandment 2)`,
+          );
+        }
+      });
+    }
+  }
+}
+
 if (errors.length) {
   console.error(
     `docs-lint: ${errors.length} finding(s)\n${errors.map((e) => `  ✗ ${e}`).join("\n")}`,

@@ -14,7 +14,7 @@ The supply plane: theoretical stock maintained by recipe-chain deduction from th
 ## 2. Position in platform
 
 - **Events consumed:** `order.created / line_added / line_state_changed / channel_tagged` (all channels, incl. foodpanda via doc 08), `void.recorded`, `comp.recorded` (consumption logic 10-F7), `cash.paid_out` (supplier payments), `shift.opened/closed`, `day.opened/closed` (daypart bucketing), catalog reference versions (recipes, `InventoryItem`, par levels — 01-F21).
-- **Events emitted:** `stock.*` family (01 §4) plus extensions listed in §5.
+- **Events emitted:** `stock.movement_recorded / purchase_recorded / transfer_sent / transfer_received / production_recorded / wastage_recorded / count_recorded` (01 §4) plus these extensions, **absorbed into the 01 §4 catalog July 2026**: `stock.price_spike_flagged` (10-F15), `stock.low_level_flagged` (10-F21), `stock.count_overdue_flagged` (10-F20). (The earlier pointer to a list "in §5" was dangling — no such list existed, so these types lived only in FR prose and were therefore unimplementable under 01-F4.)
 - **Serves:** doc 05 (low-stock, discrepancy, count-overdue alerts on manager console), doc 12 (variance, purchases, wastage, planning views), doc 13 (forecast read model, anomaly foundations; the auto-86 autonomy rung consumes stock levels — it lives in doc 13, not here), doc 15 (onboarding tooling writes recipes/pars into the catalog).
 - **Requires:** object storage (invoice/wastage photos), jobs service (nightly forecast/prep runs on BullMQ).
 

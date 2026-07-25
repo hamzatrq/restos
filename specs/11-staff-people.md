@@ -15,7 +15,7 @@ The people plane: attendance, the advances/baqaya ledger, basic shift scheduling
 ## 2. Position in platform
 
 - **Events consumed:** kernel PIN sessions (01-F26/F28 — attendance rides on them), `shift.opened / closed`, `day.opened / closed`, `cash.paid_out` (drawer-sourced advances).
-- **Events emitted:** `staff.clocked_in / clocked_out / advance_recorded / advance_repaid` (01 §4) plus extensions in §5.
+- **Events emitted:** `staff.clocked_in / clocked_out / advance_recorded / advance_repaid` (01 §4) plus these extensions, **absorbed into the 01 §4 catalog July 2026**: `checklist.item_checked` / `checklist.completed` (11-F15), `handover.recorded` (11-F17), `staff.schedule_published` (11-F12), `staff.advance_acknowledged` (11-F10). (The earlier pointer to a list "in §5" was dangling — no such list existed, so these types lived only in FR prose and were therefore unimplementable under 01-F4.)
 - **Serves:** doc 05 (checklist state, overtime and missed-clock-out alarms), doc 12 (attendance/advances/memory views), doc 13 (labor signals for the nightly brief), doc 14 (templates, schedule editing, exports).
 - **Reference data:** checklist templates, shift presets, schedules, and SOP documents distribute to devices over the kernel reference-data channel (01 §8) — one replication path.
 
