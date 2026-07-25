@@ -71,6 +71,8 @@ export const createMeshSession = (options: {
 }): MeshSession => {
   const { store, transport, clock, device_class, token } = options;
   const self: PeerInfo = { device_id: store.identity.device_id, device_class };
+  /** This device's current offset to branch time (01-F43); 0 before any hub contact. */
+  const branchOffset = (): number => store.branchTimeStatus().offset_ms;
   const eligible = electHub([self]) === self.device_id;
 
   let running = false;
@@ -286,7 +288,11 @@ export const createMeshSession = (options: {
         return;
       }
       live.missed += 1;
-      send(device_id, { v: 1, kind: "ping", t: clock.now() });
+      // BRANCH time, not this device's raw clock (01-F43). The hub SERVES the branch
+      // clock rather than defining it, so what it publishes must be the branch's time —
+      // otherwise a re-elected hub silently re-anchors every follower onto its own
+      // untrusted clock and the whole branch's durations jump.
+      send(device_id, { v: 1, kind: "ping", t: clock.now() + branchOffset() });
       replayWindowTo(device_id); // idempotent loss recovery for fan-out (01-F8)
       forwardCloudAck(device_id); // relayed cloud ack propagation (DEC-SYNC-009, F5 re-forward)
       forwardQuarantineNotices(device_id); // origin notification via relay (T-01-08, 01-F37)
@@ -354,11 +360,16 @@ export const createMeshSession = (options: {
     if (winner === self.device_id) {
       if (state === "follower" || state === "candidate") teardownFollower();
       state = visible.size === 0 ? "solo" : "hub"; // solo acts as hub for later joiners
-      // This device IS the branch time authority now (01-F43), so its offset to branch
-      // time is 0 BY DEFINITION — and that is a materially different state from
-      // never-having-contacted-a-hub, which also sits at offset 0 but must keep
-      // stamping `branch_provisional`. Recording it flips the basis to `branch`.
-      store.setBranchTimeOffset(0);
+      // This device now SERVES branch time (01-F43) — but it does not get to redefine
+      // it. Branch time is CONTINUOUS across re-election: a new hub RETAINS the offset
+      // it already measured, so the branch's clock survives the handover unchanged.
+      // Resetting to 0 here would teleport branch time onto this device's untrusted raw
+      // clock, and since hub loss re-elects within 10 s on any counter reboot, a display
+      // stuck years ahead would make every open order's age jump by that error. Only a
+      // device that has NEVER acquired an offset starts at 0 — for it, its own clock is
+      // the only branch time that exists yet.
+      const held = store.branchTimeStatus();
+      store.setBranchTimeOffset(held.basis === "branch" ? held.offset_ms : 0);
       return;
     }
     if (state === "hub" || state === "solo") teardownHub();
