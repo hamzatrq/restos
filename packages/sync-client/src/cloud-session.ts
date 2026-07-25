@@ -154,6 +154,20 @@ export const createCloudSession = (options: {
 
   // ---- device → cloud ------------------------------------------------------
 
+  /**
+   * Store a renewal without letting a storage fault take the session down with it
+   * (01-F47/01-F17). The device keeps working on the credential it already holds; the
+   * cloud will offer another renewal on the next connection.
+   */
+  const persistRenewal = (renewed: string): void => {
+    try {
+      store.setDeviceToken(renewed);
+    } catch {
+      // Deliberately swallowed: losing a renewal costs one connection's worth of
+      // credential freshness, while throwing here costs the whole session.
+    }
+  };
+
   const sendHello = (): void => {
     const st = store.status();
     transport.send({
@@ -349,7 +363,15 @@ export const createCloudSession = (options: {
         // while the device is offline is already covered by the time it reconnects.
         // Dropping this — as the first cut did — makes expiry TERMINAL: at TTL every
         // device enters drain mode at once, and a hub in that state strands its branch.
-        if (message.renewed_token !== undefined) store.setDeviceToken(message.renewed_token);
+        //
+        // Guarded: a persistence failure (full or read-only disk on a POS terminal)
+        // must not abort the rest of this handler. Unguarded it threw before
+        // `drainPush`/`sendCatchup` ran, so the session did nothing, reconnected, and
+        // presented the same expired token — an indefinite reconnect loop, each turn
+        // costing the cloud a signature and a registry write. The session continues on
+        // the token it already holds; failing to STORE a renewal must not also cost the
+        // device the connection it just established (01-F17).
+        if (message.renewed_token !== undefined) persistRenewal(message.renewed_token);
         // The gateway's relay advertisement (DEC-SYNC-009): absent = never relay.
         relayAuthorized = message.relay_authorized === true;
         // A FRESH session retries suppressed origins once — re-noticed →
@@ -370,7 +392,7 @@ export const createCloudSession = (options: {
         if (message.renewed_token !== undefined) {
           const forOrigin = message.origin_device_id;
           if (forOrigin === undefined || forOrigin === store.identity.device_id) {
-            store.setDeviceToken(message.renewed_token);
+            persistRenewal(message.renewed_token);
           } else {
             store.noteRelayedRenewal(forOrigin, message.renewed_token);
           }

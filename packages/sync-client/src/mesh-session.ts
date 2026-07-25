@@ -372,7 +372,14 @@ export const createMeshSession = (options: {
   /** Re-run the pure election over (visible ∖ suspects) ∪ self and adopt the result. */
   const recompute = (): void => {
     if (!running) return;
-    const peers = [...visible.values()].filter((p) => !suspects.has(p.device_id));
+    // A revoked peer is not a candidate. Without this the eviction survives only until
+    // the next election: the revoked device is typically a `counter_electron`, which
+    // electHub ranks highest, so on any hub reboot it WINS — and every device,
+    // including the one that evicted it, then hellos to it, pushes to it, and takes its
+    // fan-out. Revocation's read block was fully reversed by a routine re-election.
+    const peers = [...visible.values()].filter(
+      (p) => !suspects.has(p.device_id) && !store.isRevokedPeer(p.device_id),
+    );
     const winner = electHub([...peers, self]);
     if (winner === self.device_id) {
       if (state === "follower" || state === "candidate") teardownFollower();
@@ -448,6 +455,11 @@ export const createMeshSession = (options: {
       case "push": {
         // Ingest from any device while acting as hub — id-dedupe keeps the mesh
         // converging even when session bookkeeping is mid-repair.
+        // Revocation blocks WRITES too (01-F48). A dropped follower keeps draining on
+        // its own 2 s tick until its loss timer trips, and without this the hub ingested
+        // those events, acked them, and fanned them to every other device — putting a
+        // revoked device's events in every local ledger on the branch.
+        if (store.isRevokedPeer(from)) return;
         if (state === "hub" || state === "solo") handlePush(from, message.events);
         return;
       }
@@ -523,9 +535,15 @@ export const createMeshSession = (options: {
     },
     onPeerLost: (device_id) => {
       visible.delete(device_id);
-      // A pending renewal is a CREDENTIAL. Do not keep holding a departed peer's token
-      // for indefinite re-forwarding — the exposure window ends with the peer.
-      store.clearRelayedRenewal(device_id);
+      // NOTE: the pending renewal is deliberately NOT cleared here. Dropping it on
+      // peer loss looked like good credential hygiene and was a worse bug: the cloud
+      // has ALREADY advanced `token_expires_at` by 90 days when it minted, so a tablet
+      // that walks out of Wi-Fi range in the round-trip window loses its only copy and
+      // is un-renewable until the registry's recorded expiry comes due again — across
+      // its own real expiry. A waiter tablet leaving range is the normal case, not the
+      // edge case. Retention is bounded by branch size, the token is that peer's own
+      // and valid, and the security case that mattered — a REVOKED peer — is handled
+      // by `noteRevokedPeer`, which drops it.
       dropFollower(device_id);
       if (device_id === hubTarget) {
         onHubLoss(false);

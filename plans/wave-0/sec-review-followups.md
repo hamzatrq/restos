@@ -16,7 +16,48 @@ Verdict: kernel sound; ordering design would-stake-cash-on-it. Two merge conditi
 - follow-up — heal→notice reconciliation; live zstd framing wiring; fold-brand migration (DEC-MONEY-005, now unblocked).
 - review #6 — widen quarantine key to (org, claimed_event_id, device_id) so a foreign pre-claim doesn't lose the honest event's bytes.
 
-## ✅ ADVERSARIAL REVIEW OF THE POST-REVIEW ROUND — ALL FINDINGS RESOLVED
+## ✅ SECOND ADVERSARIAL PASS (over the fix rounds) — F1–F9 ALL RESOLVED
+
+A pass over the FIXES found nine more, several inside the fixes themselves, and
+correctly called six commit-message claims overstated. Closed in `81dfced` + this round.
+
+**F1 (was a strict regression I introduced)** the B2 clamp froze the cursor for the
+process lifetime and made the block unclearable. Fixed by REWINDING the cursor below a
+discovered blockage. Two wrong attempts recorded in the commit, both of which looked
+right: contiguous-prefix advance breaks **sliced sync** (a scoped device's `global_seq`
+stream is legitimately sparse, 01-F40), and gating live batches on catch-up-in-flight
+broke two landed pins that use the live plane as their vehicle.
+**F2** `envelope_author` matched the *claimed* author on both sides, so it could not
+discriminate an impersonation — 01-F37 asserted behaviour the code lacked. Now matched
+on stored BYTES.
+**F3** the revocation sweep leaked records (`leaveFanout` no-ops once `session` is null,
+and the sweep nulled it first) and closed no socket, so a read-only device sat deaf and
+`connected: true`. Order fixed; `connect` gained an `onEvict` hook.
+**F4** dropping a pending relayed renewal on peer loss — my own "credential hygiene" —
+was worse than the leak it prevented: the cloud has already advanced `token_expires_at`
+by 90 days at mint, so a tablet leaving Wi-Fi range in the round-trip window became
+un-renewable across its own expiry. Retention restored; the security case (a REVOKED
+peer) is handled by `noteRevokedPeer`.
+**F5** LAN eviction survived only until the next election — the revoked device is
+typically the highest-ranked `counter_electron`, so it WON on any hub reboot and every
+device, including its evictor, followed it. Revoked peers are now excluded from
+election and their pushes refused.
+**F7** an unsequenced blocking event disabled its own clamp and could never clear.
+**F8** the LAN hello presented the constructor token, not the persisted renewal.
+**F9** 01-F44's solo-device ruling was in the spec and not the code.
+
+**F6 — partially closed, remainder accepted and recorded.** The amplification vector is
+fixed: a persistence failure no longer aborts the whole `hello_ack` handler, which had
+turned a full disk into an indefinite reconnect loop costing a signature and a registry
+write per turn. Two residuals accepted deliberately: (a) a drain session with a
+non-empty outbox mints twice (hello + push_ack) — wasteful, harmless, and removing it
+would break a landed oracle pin for no correctness gain; (b) an expired token still
+yields a fresh credential from a bare hello, weakening expiry as a *backstop*. That is
+the ratified position — 01-F47 says revocation is the operative kill switch — and the
+alternative (refusing to renew a device whose registry expiry is already far future)
+makes a device that failed to persist unrecoverable, which is strictly worse.
+
+## ✅ FIRST ADVERSARIAL REVIEW OF THE POST-REVIEW ROUND — ALL FINDINGS RESOLVED
 
 **Status after two fix rounds (`9dc9800`, `bbcfd6a`):** B1 · B2 · B3 · H1 · H2 · H2b ·
 M1 · M2 · L1 — **all closed.** Four needed founder rulings and got them (H2 prefer
