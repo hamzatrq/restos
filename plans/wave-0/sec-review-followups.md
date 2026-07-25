@@ -16,6 +16,46 @@ Verdict: kernel sound; ordering design would-stake-cash-on-it. Two merge conditi
 - follow-up — heal→notice reconciliation; live zstd framing wiring; fold-brand migration (DEC-MONEY-005, now unblocked).
 - review #6 — widen quarantine key to (org, claimed_event_id, device_id) so a foreign pre-claim doesn't lose the honest event's bytes.
 
+## Open after T-01-18 (auth) — four filed, none blocking
+
+1. **Empty-backlog drain session has no in-session path to its renewal.** A device whose
+   token expired while it had *nothing queued* is admitted in drain mode, but the renewal
+   rides a `push_ack` — and it has no push to make. It must reconnect. Not invented
+   around: an "empty push" rule would be new protocol surface, and the device is not
+   blocked (it keeps selling locally, 01-F17). Closing it cleanly probably means letting a
+   drain session request its own renewal explicitly, which is a new message kind and needs
+   an FR.
+
+2. **`BASE_T`-relative expiry is a time bomb for any wall-clock consumer.** Found the hard
+   way in the X10 harness: a token minted with a default expiry derived from the test epoch
+   is *already in the past* for a gateway running on the real clock, so every device was
+   refused and the rung timed out. The general rule — **any component that mints a
+   test-epoch-relative expiry but is consumed by a wall-clock service will fail silently
+   and confusingly.** Worth a lint or a helper that makes the choice explicit.
+
+3. **01-F11's 25%-remaining-life warning is host-side and untested.** The gateway cannot
+   observe it; the oracle correctly pinned only the reachable proxy (a low-life token
+   renews, an ample one does not) and deliberately did NOT pin the exact threshold. The
+   honesty-UI warning itself needs a `sync-client` companion test when the host surface
+   exists.
+
+4. **01-F48's LAN half is unimplemented.** "The hub does the same on LAN" — the cloud side
+   ships (`sweepRevocations`, fail-closed, ≤30 s); the hub-side eviction lives in
+   `sync-client` and is not covered by the gateway suite.
+
+## Owed regression test — T-01-17 hub re-election continuity
+
+The branch-time discontinuity fixed in `e85f9a5` (a new hub re-anchoring the branch onto
+its own untrusted clock) was **invisible to 291 green tests** — nothing exercised a hub
+handover with differing clocks. The fix is in; the regression test is not. It belongs to
+the T-01-17 oracle session, not the implementer (24 §3 step 2), and must pin: a hub
+handover between devices whose raw clocks differ by years leaves every already-stamped
+order's computed age unchanged.
+
+**Two related questions the spec still does not answer** — same family, neither a defect
+today: whether a *legitimate* clock correction (the hub gains WAN and NTP fixes it) should
+slew rather than jump, and whether a duration spanning an epoch change needs marking.
+
 ## Open after T-01-21 — the last silent case in the credit law
 
 **Double-claim stall (found by the T-01-21 oracle, not ruled).** Widening the quarantine
