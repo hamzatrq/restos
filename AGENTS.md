@@ -44,7 +44,8 @@ All docs in `specs/` (`NN-name.md`). `restaurant-os.md` = product vision + seed 
 | Marketing & loyalty | `17` | `07` |
 | Stack, packages, monorepo layout, code rules | `18` | — |
 | Testing, environments, Auditor, release gates | `20` | — |
-| Any UI/UX work (budgets, role laws, components) | `21` | — |
+| Any UI/UX work (budgets, role laws, components) | `21` | `27` |
+| Visual language: colour, type, numerals, icons, tokens | `27` | `21` |
 | Backup/DR, retention, erasure, export | `22` | — |
 | Fold performance, incremental maintenance, retroactive reordering | `25` | `01`, `19` |
 | Fold merge semantics, convergence without a total order (**live design**) | `26` | `25`, `01` |

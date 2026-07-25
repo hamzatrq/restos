@@ -37,6 +37,7 @@ Parent document: `../restaurant-os.md` (Part I: platform vision and settled prod
 | 24 | `24-development-harness.md` | Development harness: task contract, DoD ladder, conformance matrices, loop protocol, test-authorship law, drift rails | Standards | — | 0 |
 | 25 | `25-fold-performance.md` | Decision record: incremental fold maintenance under retroactive reordering — the measured O(N²) re-fold, the research verdict, and the refuted proposals (live design: 26) | Decision | Device | 0 |
 | 26 | `26-merge-semantics.md` | Design record: per-fold merge algebra — how folds converge without a universal total order; projection-key sidecar, `global_seq` as delivery cursor | Design | Device | 0 |
+| 27 | `27-design-language.md` | Engineering standards: the visual layer of doc 21 — layout depth law, touch minimums by posture, colour/type/numeral/icon systems, token architecture. Evidence-derived; every number traces to `plans/wave-1/research/` | Standards | All | 1 |
 | — | `DECISIONS.md` | Cross-cutting decision register: proposed/accepted platform decisions not yet owned by a single doc | Register | — | — |
 
 Waves are the dependency order from the concept doc §8: 0 Foundation → 1 Service → 2 Commerce+Delivery → 3 Supply+People → 4 Intelligence+Scale. A module's wave is when its first production slice ships to a dev-pilot restaurant; most modules keep growing afterward.
