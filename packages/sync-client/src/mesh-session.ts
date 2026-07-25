@@ -133,7 +133,12 @@ export const createMeshSession = (options: {
       device_id: self.device_id,
       device_class,
       branch_id: store.identity.branch_id,
-      token,
+      // The PERSISTED renewal if one exists (01-F47 "presents it on every later
+      // connection" — a LAN connection is a connection). Inert while the mesh hello
+      // arm inspects no token, but it must not be the thing that breaks the day LAN
+      // admission lands: otherwise the first device to renew would be locked off the
+      // LAN by presenting a credential its own hub still remembered as the old one.
+      token: store.deviceToken() ?? token,
       last_global_seq: st.last_global_seq ?? 0,
       own_high_water: st.own_high_water ?? 0,
     });
@@ -539,6 +544,12 @@ export const createMeshSession = (options: {
       running = true;
       // Cold start: empty peer set → solo if hub-eligible, else follower/null.
       state = eligible ? "solo" : "follower";
+      // A device that never sees a peer never reaches recompute(), so without this a
+      // T1 single-terminal restaurant would stamp `branch_provisional` forever — the
+      // exact deployment 01-F44's ruling names, and now load-bearing because the
+      // 01-F45 basis precedence puts provisional confirms in the unverified tier.
+      // Solo IS the branch, so its own clock is branch time by definition.
+      if (eligible) store.setBranchTimeOffset(store.branchTimeStatus().offset_ms);
       transport.start(handlers);
     },
 

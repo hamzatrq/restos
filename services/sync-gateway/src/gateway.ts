@@ -46,7 +46,14 @@ export type GatewayConnection = {
   close(): void;
 };
 export type Gateway = {
-  connect(sink: (message: ProtocolMessage) => void): GatewayConnection;
+  /**
+   * `onEvict` (optional) is how the transport-free core asks its adapter to CLOSE the
+   * socket — used when the server drops a session the peer did not ask to end
+   * (revocation sweep, 01-F48). Without it the peer observes silence rather than
+   * refusal: a read-only device would sit on an open socket reporting connected:true
+   * and never reconnect, because the cloud session sends no keepalive of its own.
+   */
+  connect(sink: (message: ProtocolMessage) => void, onEvict?: () => void): GatewayConnection;
   close(): Promise<void>;
   /**
    * Evict every live session whose device is now revoked (01-F48 / DEC-AUTH-002).
@@ -85,7 +92,12 @@ type SessionState = {
    */
   draining: boolean;
 };
-type ConnectionRecord = { sink: Sink; session: SessionState | null; open: boolean };
+type ConnectionRecord = {
+  sink: Sink;
+  session: SessionState | null;
+  open: boolean;
+  onEvict?: (() => void) | undefined;
+};
 type WireEvent = Extract<ProtocolMessage, { kind: "event_batch" }>["events"][number];
 type HelloMessage = Extract<ProtocolMessage, { kind: "hello" }>;
 type PushMessage = Extract<ProtocolMessage, { kind: "push" }>;
@@ -877,17 +889,25 @@ export const createGateway = ({
           // was authored by someone else and therefore survives, which is the point:
           // impersonating a terminal is exactly what the live surface exists to show.
           //
-          // Read from a COLUMN, never by casting `envelope`. That column is TEXT and
-          // may not be valid JSON (`storage_reject` rows exist because Postgres could
-          // not hold those bytes), and Postgres does not guarantee AND-condition
-          // evaluation order — so a guarded `::jsonb` cast could still throw inside the
-          // merge transaction and wedge the push (01-F17). A null author (pre-migration
-          // or unparseable) simply never matches: the row stays live, the safe
-          // direction for evidence.
+          // Matched on the STORED BYTES, not on the claimed author. Author alone cannot
+          // express this rule: the quarantine row's `envelope_author` is whatever the
+          // envelope CLAIMED, so an impersonation — device X pushing an envelope stamped
+          // `device_id: A` — records author A, and would then be superseded the moment
+          // the real A merged that id. The forgery would vanish from the live evidence
+          // surface, which is precisely what the rule exists to prevent.
+          //
+          // A plain TEXT equality, never a `::jsonb` cast: that column may hold bytes
+          // Postgres could not parse (`storage_reject` rows exist for exactly that
+          // reason) and Postgres does not guarantee AND-condition evaluation order, so
+          // a guarded cast could still throw inside the merge transaction and wedge the
+          // push (01-F17). Bytes that do not match simply stay live — the safe
+          // direction for evidence. The relayed placeholder matches because a relay
+          // stores the origin's envelope VERBATIM (01-F1), so its bytes are identical
+          // to the ones now merging.
           sql`update kernel.quarantine set superseded_at = ${serverReceivedAt}
               where org_id = ${session.orgId} and claimed_event_id = ${envelope.id}
                 and superseded_at is null
-                and envelope_author = ${envelope.device_id}`,
+                and envelope = ${JSON.stringify(envelope)}`,
         );
         merged.push({ envelope, globalSeq: nextSeq, serverReceivedAt });
         storedById.set(envelope.id, envelope); // in-batch dedupe view (amendment 1)
@@ -1128,8 +1148,8 @@ export const createGateway = ({
   };
 
   return {
-    connect(sink) {
-      const record: ConnectionRecord = { sink, session: null, open: true };
+    connect(sink, onEvict) {
+      const record: ConnectionRecord = { sink, session: null, open: true, onEvict };
       // handle() serializes per connection (fix-round amendment 5): a frame
       // never begins processing before the previous frame settles — kills the
       // double-hello TOCTOU that could register one connection in two orgs'
@@ -1199,9 +1219,18 @@ export const createGateway = ({
             if (record.open && !unreadable) {
               record.sink(parseMessage({ v: 1, kind: "purge_command", scope: "all" }));
             }
+            // ORDER MATTERS: leaveFanout returns early when `session` is null, so
+            // clearing the session first made it a no-op and the record stayed in
+            // `branchSets` for the process lifetime — re-filtered on every subsequent
+            // push, with the sink closure holding the socket. Leave the set FIRST.
+            leaveFanout(record);
             record.open = false;
             record.session = null;
-            leaveFanout(record);
+            // A refusal the peer cannot observe is not a refusal (01-F48). Without a
+            // close, a read-only device (a KDS with nothing to push) sits on an open
+            // socket reporting connected:true, receives nothing forever, and has no
+            // reconnect trigger — the cloud session sends no keepalive of its own.
+            record.onEvict?.();
           }
         }
       }

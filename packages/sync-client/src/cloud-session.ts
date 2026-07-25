@@ -69,7 +69,7 @@ export type BlockedReason = "unknown_event_type" | "schema_invalid" | "ingest_fa
  * actually advances past the blocking sequence.
  */
 export type BlockedCursor = {
-  global_seq: number | null;
+  global_seq: number;
   event_type: string;
   reason: BlockedReason;
 };
@@ -285,9 +285,15 @@ export const createCloudSession = (options: {
           quarantined.push({ event_id: result.error.eventId, reason: "divergent_duplicate" });
         } else {
           landed = false; // did not land — the cursor must not pass it
-          if (report === null) {
+          if (report === null && global_seq !== undefined) {
+            // Only a SEQUENCED blocking event is recorded. An event with no global_seq
+            // has nothing the cursor could be held below and nothing catch-up could
+            // re-request by, so recording it would give a block that disables its own
+            // clamp AND can never clear (`landedBlocking` compares against a null).
+            // The cursor still does not pass it — `blocked` already stopped the
+            // advance — so this is strictly the reporting decision.
             report = {
-              global_seq: global_seq ?? null,
+              global_seq,
               // Guaranteed present by the protocol schema (EventEnvelope.type is
               // z.string().min(1)) — a typeless event never reaches this layer.
               event_type: String((events[i] as { type?: unknown } | undefined)?.type ?? ""),
@@ -300,6 +306,7 @@ export const createCloudSession = (options: {
       if (landed && global_seq !== undefined && global_seq === priorBlock?.global_seq) {
         landedBlocking = true;
       }
+      if (!landed) blocked = true;
       if (!blocked && global_seq !== undefined && global_seq > advanceTo) advanceTo = global_seq;
     }
     // Resolve the block BEFORE the cursor moves. A page that blocks re-reports where it
@@ -308,17 +315,29 @@ export const createCloudSession = (options: {
     // seq 1000 says nothing about seq 500.
     if (report !== null) blockedCursor = report;
     else if (priorBlock !== null && landedBlocking) blockedCursor = null;
-    // While a block stands the cursor may advance only to the sequence BEFORE it
-    // (DEC-SYNC-011 stop-and-report). The landed prefix of the blocking page still
-    // counts — that is real progress — but nothing may step over the gap, which is
-    // what a live fan-out batch at a much higher seq would otherwise do. Live events
-    // still ingest and fold, so the device keeps working on what it holds (01-F17);
-    // only the catch-up cursor is held back, and re-requesting is free (01-F8 dedupe).
+    // The cursor may never sit at or above a standing blockage — and if it ALREADY
+    // does, it is REWOUND to just below it. That rewind is the fix for the fatal case:
+    // `applyEvents` serves live fan-out as well as catch-up, so a sale on another
+    // terminal at seq 20001 can push the cursor there while this device is still
+    // catching up at 5000. Without the rewind, `blockingSeq - 1` could never exceed the
+    // cursor, so it froze for the life of the process AND the block could never clear,
+    // because catch-up re-issued from 20001 and never re-delivered the blocking event.
+    // Rewinding is safe and cheap: re-delivered events dedupe by id (01-F8), and it is
+    // also HONEST — discovering a blockage below the cursor means the cursor was
+    // claiming ground the device does not actually hold.
+    //
+    // The cursor is deliberately NOT a contiguous prefix: with sliced sync (01-F40) a
+    // scoped device's global_seq stream is legitimately sparse, so demanding contiguity
+    // would freeze every waiter tablet. Highest-delivered is the right rule.
     const stopBefore = blockedCursor?.global_seq ?? null;
-    if (stopBefore !== null && advanceTo >= stopBefore) advanceTo = stopBefore - 1;
-    if (advanceTo >= 0) {
-      const current = store.status().last_global_seq ?? 0;
-      if (advanceTo > current) store.setLastGlobalSeq(advanceTo);
+    const current = store.status().last_global_seq ?? 0;
+    if (stopBefore !== null) {
+      const ceiling = stopBefore - 1;
+      if (advanceTo > ceiling) advanceTo = ceiling;
+      if (current > ceiling && ceiling >= 0) store.setLastGlobalSeq(ceiling);
+    }
+    if (advanceTo >= 0 && advanceTo > (store.status().last_global_seq ?? 0)) {
+      store.setLastGlobalSeq(advanceTo);
     }
   };
 

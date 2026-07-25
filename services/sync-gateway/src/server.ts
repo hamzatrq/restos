@@ -57,15 +57,23 @@ export const buildServer = (
       // starting plain and upgraded only when this connection's hello_ack actually
       // grants it — so the wire format follows the handshake, never the frame.
       let codec = createFrameCodec(undefined);
-      const conn = gateway.connect((message) => {
-        // Adopt AFTER sending the ack: the ack itself must cross plain, because the
-        // client's decoder is still plain when it arrives.
-        const frame = codec.encode(message);
-        socket.send(frame);
-        if (message.kind === "hello_ack" && message.compression !== undefined) {
-          codec = createFrameCodec(message.compression);
-        }
-      });
+      const conn = gateway.connect(
+        (message) => {
+          // Adopt AFTER sending the ack: the ack itself must cross plain, because the
+          // client's decoder is still plain when it arrives.
+          const frame = codec.encode(message);
+          socket.send(frame);
+          if (message.kind === "hello_ack" && message.compression !== undefined) {
+            codec = createFrameCodec(message.compression);
+          }
+        },
+        // 01-F48: an eviction the peer cannot observe is not a refusal. Closing the
+        // socket is what makes the device notice and reconnect (where it will be
+        // refused at hello, or purged).
+        () => {
+          socket.close();
+        },
+      );
       socket.on("message", (raw: Buffer, isBinary: boolean) => {
         // The transport's own text/binary distinction carries the framing. Passing
         // everything as text (the previous `raw.toString("utf8")`) would make a
