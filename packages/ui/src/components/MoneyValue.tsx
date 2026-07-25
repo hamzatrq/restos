@@ -13,8 +13,18 @@ import { color, money, type TypeName, typography } from "../tokens/index";
  * unfinished one.
  */
 export type MoneyValueProps = {
-  /** Integer paisa. Never a float — floats in ledgers never (00 §6). */
+  /**
+   * Integer paisa, NON-NEGATIVE. Never a float — floats in ledgers never (00 §6) — and
+   * never signed: money has no sign in this kernel. An append-only ledger cannot subtract
+   * from history, so a refund or a short drawer is a positive amount carrying a direction.
+   */
   paisa: number;
+  /**
+   * 27-F12 — direction is a WORD, never a minus sign and never a colour alone. A lone `-`
+   * is one glyph wide, is the first thing lost at 1–2 m or on a scratched panel, and means
+   * nothing to a non-reader. The word is also what a cashier repeats back to a customer.
+   */
+  direction?: "refund" | "short" | "over" | "change";
   size?: "hero" | "primary" | "body";
   /**
    * 27-F16 — money is NEVER coloured by default. Colour on a number means *this number is
@@ -37,11 +47,15 @@ const SIZES: Record<"hero" | "primary" | "body", TypeName> = {
  */
 export const formatPaisa = (value: number): string => {
   const { rupees } = rupeesFromPaisa(value as Parameters<typeof rupeesFromPaisa>[0]);
-  const grouped = Math.abs(rupees).toLocaleString("en-US");
-  return `${money["money-symbol"]} ${rupees < 0 ? "-" : ""}${grouped}`;
+  return `${money["money-symbol"]} ${rupees.toLocaleString("en-US")}`;
 };
 
-export const MoneyValue = ({ paisa, size = "body", abnormal = false }: MoneyValueProps) => {
+export const MoneyValue = ({
+  paisa,
+  size = "body",
+  abnormal = false,
+  direction,
+}: MoneyValueProps) => {
   const t = typography[SIZES[size]];
   return (
     <span
@@ -56,6 +70,7 @@ export const MoneyValue = ({ paisa, size = "body", abnormal = false }: MoneyValu
         color: abnormal ? color["bgColor-status-fault"] : color["fgColor-default"],
       }}
     >
+      {direction ? `${direction.toUpperCase()} ` : ""}
       {formatPaisa(paisa)}
     </span>
   );

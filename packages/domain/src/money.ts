@@ -98,11 +98,16 @@ export const applyRateBps = (amount: Paisa, bps: number): Paisa => {
  * Rounding: NONE. This is a lossless decomposition, not a conversion — the caller decides
  * what to do with `subPaisa`. 27-F23 says operational screens show no decimals, so the
  * operational caller discards it; a fiscal document (16) does not.
+ *
+ * `Paisa` is NON-NEGATIVE by contract (see `asInt`), so there is no sign to handle here and
+ * no signed-truncation ambiguity. A refund or a short drawer is a positive amount on an
+ * event that carries its own direction (`payment.refunded`, `cash.*`), never a negative
+ * balance — which is what an append-only ledger requires anyway: you cannot subtract from
+ * history, you can only append the opposite. UI that needs to show "short by" renders the
+ * direction as a word, not as a minus sign (27-F12: meaning is never carried by one channel).
  */
 export const rupeesFromPaisa = (amount: Paisa): { rupees: number; subPaisa: number } => {
   const a = asInt(amount, "rupeesFromPaisa amount"); // brands are compile-time only (18 §4)
-  const sign = a < 0 ? -1 : 1;
-  const abs = a * sign;
-  const sub = abs % 100;
-  return { rupees: sign * ((abs - sub) / 100), subPaisa: sub };
+  const sub = a % 100;
+  return { rupees: (a - sub) / 100, subPaisa: sub };
 };

@@ -26,8 +26,19 @@ export const Hero: Story = { args: { paisa: 348500, size: "hero" } };
  */
 export const LargeAmount: Story = { args: { paisa: 125000000, size: "primary" } };
 
-/** Refunds and negative variances. The sign leads; it is never conveyed by colour alone. */
-export const Negative: Story = { args: { paisa: -45000, size: "primary" } };
+/**
+ * **Money has no sign here, and the acceptance tests are what established it.** The `Paisa`
+ * brand rejects negatives outright, which is correct for an append-only ledger: you cannot
+ * subtract from history, only append the opposite. So a refund is a positive amount on a
+ * `payment.refunded` event, and the DIRECTION is a word.
+ *
+ * 27-F12 backs the same conclusion from the other end: a lone `-` is one glyph wide, is the
+ * first mark lost at distance or on a scratched panel, and means nothing to a non-reader.
+ */
+export const Refund: Story = { args: { paisa: 45000, size: "primary", direction: "refund" } };
+
+/** The change due — the number the cashier reads aloud, so it is hero-sized (27-F24/F25). */
+export const Change: Story = { args: { paisa: 25000, size: "hero", direction: "change" } };
 
 /**
  * 27-F16 — **money is never coloured by default.** Colour on a number means *this number is
@@ -35,7 +46,9 @@ export const Negative: Story = { args: { paisa: -45000, size: "primary" } };
  * channel on the base case. Opting in is an explicit act, used for a cash variance past
  * threshold and almost nothing else.
  */
-export const AbnormalOptIn: Story = { args: { paisa: -45000, size: "primary", abnormal: true } };
+export const AbnormalOptIn: Story = {
+  args: { paisa: 45000, size: "primary", direction: "short", abnormal: true },
+};
 
 /** A column of amounts — tabular figures must not jitter (27-F26 chose the face for this). */
 export const TabularColumn: Story = {
