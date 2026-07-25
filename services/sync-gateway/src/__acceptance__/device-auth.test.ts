@@ -109,10 +109,27 @@ type DeviceRegistration = {
 type OracleAuthSurface = {
   registerDevice(db: Db, registration: DeviceRegistration): Promise<void>;
   revokeDevice(db: Db, target: { org_id: string; device_id: string }): Promise<void>;
-  issueDeviceToken(claims: TokenClaims, tokenSecret: string): Promise<string>;
+  issueDeviceToken(
+    claims: TokenClaims,
+    tokenSecret: string,
+    options?: { now?: number },
+  ): Promise<string>;
 };
-const { registerDevice, revokeDevice, issueDeviceToken } =
-  gatewayModule as unknown as OracleAuthSurface;
+const {
+  registerDevice,
+  revokeDevice,
+  issueDeviceToken: mintDeviceToken,
+} = gatewayModule as unknown as OracleAuthSurface;
+
+/**
+ * T-01-18 re-ground (01-F47 / DEC-AUTH-001): expiry is MANDATORY at issuance, so
+ * the mint now needs an expiry or an injected issuance time (18 §4 — it has no
+ * clock of its own). These T-01-09 pins are unchanged in substance: the bare
+ * mints below carry the suite's injected BASE_T, and calls that pass an explicit
+ * expires_at keep overriding it.
+ */
+const issueDeviceToken = (claims: TokenClaims, tokenSecret: string): Promise<string> =>
+  mintDeviceToken(claims, tokenSecret, { now: BASE_T });
 
 /** createGateway with the pinned REQUIRED auth option (cast until the option lands). */
 const createGatewayWithAuth = createGateway as unknown as (options: {
@@ -201,17 +218,24 @@ describe("registration lifecycle (01-F25 / 01-F27)", () => {
     }
   });
 
-  it("01-F27/18 §4: expiry is enforced against the INJECTED clock — expires_at ≤ clock.now() rejects; a token expiring 60s past the injected now (long past for wall clock) is accepted", async () => {
+  it("01-F27/18 §4: expiry is measured against the INJECTED clock — a token expired at the injected now opens a DRAIN session (01-F47 ruling 1), never a normal one; a token expiring 60s past the injected now (long past for wall clock) is accepted", async () => {
     const identity = freshIdentity();
     await registerCounter(db, identity);
 
+    // T-01-18 supersede (01-F47 / DEC-AUTH-001, ruling 1). This test's SUBJECT
+    // is unchanged and still true: expiry is judged against the injected clock,
+    // never the wall clock (18 §4). Its OUTCOME is superseded — expiry now
+    // withdraws cloud/LAN ADMISSION only (01-F17), so an expired but unrevoked
+    // device is admitted for the sole purpose of draining its backlog and
+    // taking a renewal. What it must never get is a NORMAL session: reads stay
+    // refused until the renewal lands. The full drain law is pinned in
+    // auth-token-lifetime.test.ts; the one-line proof here is that the injected
+    // clock still decides WHICH kind of session this is.
     const expired = await issueDeviceToken({ ...identity, expires_at: BASE_T - 1 }, TOKEN_SECRET);
-    const rec = recorder();
-    const conn = gateway.connect(rec.sink);
-    await expect(conn.handle(helloMsg(identity, { token: expired }))).rejects.toThrow(
-      AuthRejectedError,
-    );
-    conn.close();
+    const drain = await openSession(gateway, identity, { token: expired });
+    await expect(drain.conn.handle(catchupMsg(0))).rejects.toThrow(/expired|drain/i);
+    expect(ofKind(drain.rec.all, "catchup_response")).toHaveLength(0);
+    drain.conn.close();
 
     // BASE_T is ~July 2025: wall-clock "now" is far beyond BASE_T + 60s, so this
     // leg passes ONLY if expiry is measured against the injected clock (18 §4).

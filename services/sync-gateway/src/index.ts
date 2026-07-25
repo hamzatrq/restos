@@ -11,8 +11,10 @@ export {
   runAuditor,
 } from "./auditor.js";
 export {
+  DEVICE_TOKEN_TTL_MS,
   type DeviceTokenClaims,
   type DeviceTokenInput,
+  type IssueOptions,
   issueDeviceToken,
   verifyDeviceToken,
 } from "./auth.js";
@@ -29,6 +31,7 @@ export {
   type Gateway,
   type GatewayConnection,
   type GatewayDb,
+  REVOCATION_SWEEP_INTERVAL_MS,
 } from "./gateway.js";
 export { applyMigrations } from "./migrate.js";
 export {

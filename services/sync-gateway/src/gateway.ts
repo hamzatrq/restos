@@ -25,9 +25,16 @@ import {
 import { type ProtocolMessage, parseMessage } from "@restos/sync-protocol";
 import { sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { verifyDeviceToken } from "./auth.js";
+import { DEVICE_TOKEN_TTL_MS, issueDeviceToken, verifyDeviceToken } from "./auth.js";
 import { AuthRejectedError, ProtocolViolationError, type QuarantineReason } from "./errors.js";
-import { type DeviceRegistryRow, readRegistryRow } from "./registry.js";
+import { type DeviceRegistryRow, readRegistryRow, recordTokenExpiry } from "./registry.js";
+
+/**
+ * Revocation eviction bound (01-F48 / DEC-AUTH-002): a revoked device leaves the mesh
+ * within this window wherever any path reaches it, rather than at its next voluntary
+ * contact. Exported so fleet health and operators can state the guarantee.
+ */
+export const REVOCATION_SWEEP_INTERVAL_MS = 10_000;
 
 /** Exported binding constant (T-01-07 catchup contract). */
 export const CATCHUP_PAGE_SIZE = 500;
@@ -41,6 +48,17 @@ export type GatewayConnection = {
 export type Gateway = {
   connect(sink: (message: ProtocolMessage) => void): GatewayConnection;
   close(): Promise<void>;
+  /**
+   * Evict every live session whose device is now revoked (01-F48 / DEC-AUTH-002).
+   * Revocation previously took effect only at a device's next VOLUNTARY contact, so
+   * a revoked tablet holding an open session kept participating indefinitely. Driving
+   * this pass at most every REVOCATION_SWEEP_INTERVAL_MS gives the ≤ 30 s bound; the
+   * drive mechanism (timer, LISTEN/NOTIFY, or an in-process hook after revokeDevice)
+   * is the host's choice. Fail-CLOSED: if revocation state cannot be read, sessions
+   * are dropped rather than kept — the opposite direction from expiry, which fails
+   * open toward the device keeping its ability to sell.
+   */
+  sweepRevocations(): Promise<void>;
 };
 
 type Sink = (message: ProtocolMessage) => void;
@@ -56,6 +74,16 @@ type SessionState = {
    * eligibility alone grants nothing (claim required, 18 §5).
    */
   relayAuthorized: boolean;
+  /**
+   * DRAIN mode (T-01-18; 01-F47's "sole purpose" clause made operative). True while
+   * an expired-but-unrevoked device is admitted PUSH-ONLY: it may upload its backlog
+   * and take a renewal, but every READ — catch-up, fan-out — is refused, because
+   * reads are where customer data leaks (00 §5.4) and a credential the cloud no
+   * longer fully trusts must not read. The same instinct as the revoked-reader fix.
+   * Cleared the moment the renewal is minted, on this same session. The device keeps
+   * selling and persisting locally throughout (01-F17) — nothing here blocks a sale.
+   */
+  draining: boolean;
 };
 type ConnectionRecord = { sink: Sink; session: SessionState | null; open: boolean };
 type WireEvent = Extract<ProtocolMessage, { kind: "event_batch" }>["events"][number];
@@ -210,8 +238,22 @@ export const createGateway = ({
 }: {
   db: GatewayDb;
   clock: Clock;
-  /** REQUIRED (T-01-09): the device-token verification key (jose HS256, 18 §5). */
-  auth: { token_secret: string };
+  /**
+   * REQUIRED (T-01-09): the device-token verification key (jose HS256, 18 §5).
+   * T-01-18 adds four OPTIONAL knobs (01-F47 / DEC-AUTH-001). `issuer`/`audience`
+   * are enforced only when set, so an unbound deployment is unchanged; `ttl_ms` is
+   * the minted lifetime (90-day default) and `renew_below_ms` the remaining-life
+   * threshold under which a session is silently re-issued. The threshold must NOT
+   * be "always": renewing on every hello would destroy issuance determinism, which
+   * the committed golden fixtures depend on.
+   */
+  auth: {
+    token_secret: string;
+    issuer?: string;
+    audience?: string;
+    ttl_ms?: number;
+    renew_below_ms?: number;
+  };
 }): Gateway => {
   const branchSets = new Map<string, Set<ConnectionRecord>>();
   const branchKey = (orgId: string, branchId: string): string => JSON.stringify([orgId, branchId]);
@@ -258,6 +300,64 @@ export const createGateway = ({
     return new Set([...rows].map((row) => String(row.device_id)));
   };
 
+  const tokenTtlMs = auth.ttl_ms ?? DEVICE_TOKEN_TTL_MS;
+  /** Default renewal threshold: the last third of life. Injectable via auth.renew_below_ms. */
+  const renewBelowMs = auth.renew_below_ms ?? Math.floor(tokenTtlMs / 3);
+
+  /**
+   * Mint a renewal for a device whose recorded life is running out, and record the
+   * new expiry (01-F47). Returns undefined when no renewal is due — that absence is
+   * load-bearing: minting on every hello would destroy issuance determinism, which
+   * the committed golden fixtures depend on.
+   *
+   * REVOCATION IS CHECKED BY THE CALLER via the registry row it passes — a renewal
+   * must never extend a revoked device.
+   *
+   * NOR MAY IT ESCALATE. The renewed capability is the INTERSECTION of what the old
+   * credential already carried and what the registry still allows: `priorHubRelay &&
+   * registry-class-eligible`. Both halves are load-bearing and fail in opposite
+   * directions — taking the registry alone would silently PROMOTE an ordinary
+   * terminal to a relay-capable one just by renewing it, and taking the prior claim
+   * alone would let a device demoted out of hub eligibility keep relaying forever.
+   * A RELAYED origin has no prior claim visible to the cloud (its token never
+   * arrives), so it renews with no relay capability at all — the conservative
+   * direction, and correct: the device being relayed FOR is by definition not the hub.
+   */
+  const mintRenewal = async (
+    executor: { execute: GatewayDb["execute"] },
+    orgId: string,
+    branchId: string,
+    deviceId: string,
+    registry: DeviceRegistryRow,
+    currentExpiry: number | null,
+    force: boolean,
+    priorHubRelay: boolean,
+  ): Promise<string | undefined> => {
+    if (registry.revoked_at !== null) return undefined;
+    const due = force || (currentExpiry !== null && currentExpiry - clock.now() < renewBelowMs);
+    if (!due) return undefined;
+    const expiresAt = clock.now() + tokenTtlMs;
+    const token = await issueDeviceToken(
+      {
+        org_id: orgId,
+        branch_id: branchId,
+        device_id: deviceId,
+        hub_relay:
+          priorHubRelay &&
+          (HUB_ELIGIBLE_CLASSES as readonly string[]).includes(registry.device_class),
+      },
+      auth.token_secret,
+      {
+        now: clock.now(),
+        ttl_ms: tokenTtlMs,
+        ...(auth.issuer === undefined ? {} : { issuer: auth.issuer }),
+        ...(auth.audience === undefined ? {} : { audience: auth.audience }),
+      },
+    );
+    await recordTokenExpiry(executor, orgId, deviceId, expiresAt);
+    return token;
+  };
+
   const handleHello = async (record: ConnectionRecord, message: HelloMessage): Promise<void> => {
     if (record.session !== null) {
       throw new ProtocolViolationError("second hello on an open session");
@@ -267,13 +367,26 @@ export const createGateway = ({
     // (2) expiry against the INJECTED clock; (3) claims must match the hello
     // identity (T-01-07 consistency law carried over); (4) the REGISTRY is the
     // authority — an unrevoked (org, device) row whose branch equals the claim.
-    const claims = await verifyDeviceToken(message.token, auth.token_secret);
+    const claims = await verifyDeviceToken(message.token, auth.token_secret, {
+      ...(auth.issuer === undefined ? {} : { issuer: auth.issuer }),
+      ...(auth.audience === undefined ? {} : { audience: auth.audience }),
+    });
     if (claims === null) {
       throw new AuthRejectedError("device token failed verification (01-F27, 18 §5)");
     }
-    if (claims.expires_at !== undefined && claims.expires_at <= clock.now()) {
-      throw new AuthRejectedError("device token expired (01-F27; injected clock, 18 §4)");
+    // Expiry binds at ADMISSION, not only at issuance (01-F47 / DEC-AUTH-001). A
+    // token with no expiry at all is refused: admitting one would leave every
+    // credential minted before this rule valid forever, and the decision would buy
+    // nothing. Note the ORDER — an expired token does NOT reject here; it falls
+    // through to the registry read, because expiry and revocation have opposite
+    // outcomes (drain-and-renew vs purge) and only the registry can tell them apart.
+    if (claims.expires_at === undefined) {
+      throw new AuthRejectedError(
+        "device token carries no expiry (01-F47 — expiry binds at admission; " +
+          "an unexpiring credential is never admitted)",
+      );
     }
+    const expired = claims.expires_at <= clock.now();
     if (claims.device_id !== message.device_id || claims.branch_id !== message.branch_id) {
       throw new AuthRejectedError("token claims do not match hello identity (01-F27)");
     }
@@ -312,9 +425,28 @@ export const createGateway = ({
       branchId: claims.branch_id,
       deviceId: claims.device_id,
       relayAuthorized,
+      draining: expired,
     };
     record.session = session;
-    joinFanout(record, session); // the session joins the fan-out set on hello_ack
+    // A draining session does NOT join fan-out: fan-out is a read (01-F47 sole
+    // purpose). It joins once its renewal lands, in the push_ack path.
+    if (!expired) joinFanout(record, session);
+    // Silent renewal for a session whose credential is still VALID but running low
+    // (01-F47). A DRAINING session is deliberately excluded: its renewal rides the
+    // ack of the push it was admitted to make, so that the read refusals are
+    // observable in between. If it rode hello_ack there would be no drain mode at all.
+    const renewedToken = expired
+      ? undefined
+      : await mintRenewal(
+          db,
+          claims.org_id,
+          claims.branch_id,
+          claims.device_id,
+          registry,
+          claims.expires_at,
+          false,
+          claims.hub_relay,
+        );
     record.sink(
       parseMessage({
         v: 1,
@@ -322,6 +454,7 @@ export const createGateway = ({
         session_id: session.sessionId,
         hub: false,
         resume_from: resumeFrom,
+        ...(renewedToken === undefined ? {} : { renewed_token: renewedToken }),
         // Advertised ONLY when the grant holds (DEC-SYNC-009 / T-01-09): the
         // client-side gate for relaying — absent otherwise, keeping plain
         // sessions (and the committed XP transcript) byte-identical.
@@ -780,12 +913,48 @@ export const createGateway = ({
     // contiguous high, named by origin_device_id (per-origin ack —
     // DEC-SYNC-009; one origin per relay push message).
     if (outcome.acked >= 0 && !outcome.mismatchOnlyRelay) {
+      // Two renewal carriers ride this ack (01-F47, T-01-18):
+      // (a) DRAIN — this session was admitted expired and push-only; the push it
+      //     was admitted to make has now merged, so it earns its renewal and the
+      //     session becomes normal (it also joins fan-out from here).
+      // (b) RELAY — the ack names a WAN-less ORIGIN whose token never reaches the
+      //     cloud, so its remaining life is judged from the REGISTRY column and the
+      //     hub forwards this ack to it over LAN. Without this, a LAN-only device
+      //     could never renew and every waiter tablet would brick at 90 days.
+      const renewFor =
+        outcome.ackOrigin !== null && outcome.ackOrigin !== session.deviceId
+          ? outcome.ackOrigin
+          : session.deviceId;
+      const renewRegistry = await readRegistryRow(db, session.orgId, renewFor);
+      const renewed =
+        renewRegistry === undefined
+          ? undefined
+          : await mintRenewal(
+              db,
+              session.orgId,
+              renewRegistry.branch_id,
+              renewFor,
+              renewRegistry,
+              renewRegistry.token_expires_at,
+              // A drain session's renewal is FORCED — its credential is already
+              // expired, so a threshold comparison would be meaningless.
+              session.draining && renewFor === session.deviceId,
+              // No escalation: the session renews with the relay capability it
+              // already holds; a RELAYED origin renews with none (the cloud never
+              // saw its claim, and the device being relayed for is not the hub).
+              renewFor === session.deviceId ? session.relayAuthorized : false,
+            );
+      if (renewed !== undefined && session.draining && renewFor === session.deviceId) {
+        session.draining = false;
+        joinFanout(record, session); // reads resume on this same session
+      }
       record.sink(
         parseMessage({
           v: 1,
           kind: "push_ack",
           acked_watermark: outcome.acked,
           ...(outcome.ackOrigin === null ? {} : { origin_device_id: outcome.ackOrigin }),
+          ...(renewed === undefined ? {} : { renewed_token: renewed }),
         }),
       );
     }
@@ -868,6 +1037,16 @@ export const createGateway = ({
     message: CatchupRequest,
   ): Promise<void> => {
     await requireUnrevoked(session);
+    // 01-F47 "sole purpose": a DRAIN session may push and take a renewal, nothing
+    // more. Catch-up is a read, and reads are where customer data leaks (00 §5.4).
+    // NOT a purge and NOT revocation — expiry is recoverable, so this refusal names
+    // itself and the very next drain push clears it on this same session.
+    if (session.draining) {
+      throw new AuthRejectedError(
+        "device token expired — session is in drain mode, reads are refused until the " +
+          "renewal lands (01-F47 sole purpose; push to renew)",
+      );
+    }
     // Branch stream, exclusive cursor (assumption 6), ascending, page-capped.
     // Fetch one extra row to compute `complete` without a second query.
     const rows = await db.execute(
@@ -947,6 +1126,44 @@ export const createGateway = ({
     close() {
       branchSets.clear();
       return Promise.resolve();
+    },
+    async sweepRevocations() {
+      // One batched read per org present in the live fan-out sets, then drop every
+      // matching session (01-F48). Fail-CLOSED: a read that throws evicts the whole
+      // org's sessions rather than leaving a revoked device connected — the opposite
+      // direction from expiry, deliberately. Keeping a revoked device online because
+      // we could not check is the failure this FR exists to prevent.
+      for (const set of [...branchSets.values()]) {
+        const records = [...set];
+        const byOrg = new Map<string, ConnectionRecord[]>();
+        for (const record of records) {
+          const s = record.session;
+          if (s === null) continue;
+          byOrg.set(s.orgId, [...(byOrg.get(s.orgId) ?? []), record]);
+        }
+        for (const [orgId, orgRecords] of byOrg) {
+          let revoked: Set<string>;
+          try {
+            revoked = await revokedDeviceIds(
+              orgId,
+              orgRecords.map((r) => (r.session as SessionState).deviceId),
+            );
+          } catch {
+            revoked = new Set(orgRecords.map((r) => (r.session as SessionState).deviceId));
+          }
+          for (const record of orgRecords) {
+            const s = record.session as SessionState;
+            if (!revoked.has(s.deviceId)) continue;
+            // 01-F42: the purge command rides the eviction, so a device that IS
+            // reachable wipes now rather than at its next hello.
+            if (record.open)
+              record.sink(parseMessage({ v: 1, kind: "purge_command", scope: "all" }));
+            record.open = false;
+            record.session = null;
+            leaveFanout(record);
+          }
+        }
+      }
     },
   };
 };

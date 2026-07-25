@@ -24,6 +24,13 @@ export type DeviceRegistryRow = {
   branch_id: string;
   device_class: string;
   revoked_at: number | null;
+  /**
+   * The cloud's record of this device's last-issued token expiry (T-01-18, 01-F47);
+   * null when never recorded. This — not the credential — is how a hub-RELAYED
+   * origin's remaining life is judged, because that device's token never reaches
+   * the cloud (18 §5: the registry, never the token, decides).
+   */
+  token_expires_at: number | null;
 };
 
 /** The read surface shared by db and tx (both satisfy `execute`). */
@@ -75,7 +82,7 @@ export const readRegistryRow = async (
   deviceId: string,
 ): Promise<DeviceRegistryRow | undefined> => {
   const rows = await executor.execute(
-    sql`select branch_id, device_class, revoked_at from kernel.device_registry
+    sql`select branch_id, device_class, revoked_at, token_expires_at from kernel.device_registry
         where org_id = ${orgId} and device_id = ${deviceId}`,
   );
   const row = [...rows][0];
@@ -84,5 +91,23 @@ export const readRegistryRow = async (
     branch_id: String(row.branch_id),
     device_class: String(row.device_class),
     revoked_at: row.revoked_at === null ? null : Number(row.revoked_at),
+    token_expires_at: row.token_expires_at === null ? null : Number(row.token_expires_at),
   };
+};
+
+/**
+ * Record a device's newly-issued token expiry (T-01-18). The SINGLE writer of
+ * `token_expires_at`, called at mint and at renewal — keeping it to one path is what
+ * bounds the drift risk this column trades for not moving credentials through the hub.
+ */
+export const recordTokenExpiry = async (
+  executor: SqlExecutor,
+  orgId: string,
+  deviceId: string,
+  expiresAt: number,
+): Promise<void> => {
+  await executor.execute(
+    sql`update kernel.device_registry set token_expires_at = ${expiresAt}
+        where org_id = ${orgId} and device_id = ${deviceId}`,
+  );
 };

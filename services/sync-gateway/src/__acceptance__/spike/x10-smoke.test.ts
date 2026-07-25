@@ -38,6 +38,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { buildServer } from "../../server.js";
 import {
   closeDb,
+  DEVICE_TOKEN_TTL_MS,
   eventRows,
   openDb,
   quarantineRows,
@@ -227,7 +228,16 @@ const baseConfig = (
   org: ORG,
   branch: BRANCH,
   db,
-  token: signedToken({ org_id: ORG, branch_id: BRANCH, device_id: device.id }),
+  // T-01-18 re-ground (01-F47): expiry binds at ADMISSION, and X10 is the one
+  // leg that runs the REAL server — whose clock is the wall clock, not the
+  // suite's injected BASE_T. Its token's 90 days are therefore measured from
+  // now, so this rung keeps passing whenever it is run.
+  token: signedToken({
+    org_id: ORG,
+    branch_id: BRANCH,
+    device_id: device.id,
+    expires_at: Date.now() + DEVICE_TOKEN_TTL_MS,
+  }),
   cloud_url: cloudUrl,
   script: "smoke",
 });

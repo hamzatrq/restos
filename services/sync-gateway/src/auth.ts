@@ -23,7 +23,7 @@ export type DeviceTokenClaims = {
   device_id: string;
   /** Hub-relay capability CLAIM (DEC-SYNC-009): necessary, never sufficient — the registry has veto. */
   hub_relay: boolean;
-  /** Optional expiry, epoch ms — enforced by the gateway against the injected clock (18 §4). */
+  /** Expiry, epoch ms — enforced by the gateway against the injected clock (18 §4). */
   expires_at?: number;
 };
 
@@ -34,6 +34,22 @@ export type DeviceTokenInput = {
   device_id: string;
   hub_relay?: boolean;
   expires_at?: number;
+};
+
+/** DEC-AUTH-001's ratified default device-token lifetime (01-F47): 90 days. */
+export const DEVICE_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+
+/**
+ * Issuance options (T-01-18). `now` is the INJECTED issuance instant (18 §4) —
+ * `issueDeviceToken` never reads a clock itself. `issuer`/`audience` bind the token
+ * to one deployment (01-F47); they are enforced at verify ONLY when configured, so
+ * an unbound deployment keeps working.
+ */
+export type IssueOptions = {
+  now?: number;
+  ttl_ms?: number;
+  issuer?: string;
+  audience?: string;
 };
 
 const keyOf = (tokenSecret: string): Uint8Array => new TextEncoder().encode(tokenSecret);
@@ -49,16 +65,34 @@ const keyOf = (tokenSecret: string): Uint8Array => new TextEncoder().encode(toke
 export const issueDeviceToken = async (
   claims: DeviceTokenInput,
   tokenSecret: string,
-): Promise<string> =>
-  new SignJWT({
+  options: IssueOptions = {},
+): Promise<string> => {
+  // Expiry is MANDATORY (01-F47 / DEC-AUTH-001): an explicit `expires_at`, else
+  // `now + ttl_ms` (90-day default). With neither, the mint REFUSES — the API must
+  // not be able to produce an unexpiring credential, because that is precisely the
+  // indefinitely-valid token this decision exists to abolish.
+  const expires_at =
+    claims.expires_at ??
+    (options.now === undefined ? undefined : options.now + (options.ttl_ms ?? DEVICE_TOKEN_TTL_MS));
+  if (expires_at === undefined) {
+    throw new Error(
+      "issueDeviceToken requires an expiry: pass claims.expires_at, or options.now so the " +
+        "90-day default applies (01-F47 — no unexpiring device token may be minted)",
+    );
+  }
+  let jwt = new SignJWT({
     org_id: claims.org_id,
     branch_id: claims.branch_id,
     device_id: claims.device_id,
     ...(claims.hub_relay === true ? { hub_relay: true } : {}),
-    ...(claims.expires_at === undefined ? {} : { expires_at: claims.expires_at }),
-  })
-    .setProtectedHeader({ alg: "HS256" })
-    .sign(keyOf(tokenSecret));
+    expires_at,
+  }).setProtectedHeader({ alg: "HS256" });
+  // `iss`/`aud` are safe as STANDARD claims — unlike `exp` they are compared by
+  // value, never against a clock, so determinism survives (see the doc-comment law).
+  if (options.issuer !== undefined) jwt = jwt.setIssuer(options.issuer);
+  if (options.audience !== undefined) jwt = jwt.setAudience(options.audience);
+  return jwt.sign(keyOf(tokenSecret));
+};
 
 const claim = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
@@ -72,10 +106,20 @@ const claim = (value: unknown): string | null =>
 export const verifyDeviceToken = async (
   token: string,
   tokenSecret: string,
+  binding: { issuer?: string; audience?: string } = {},
 ): Promise<DeviceTokenClaims | null> => {
   let payload: Record<string, unknown>;
   try {
-    ({ payload } = await jwtVerify(token, keyOf(tokenSecret), { algorithms: ["HS256"] }));
+    // Binding is enforced ONLY where configured (01-F47): an unbound deployment
+    // must keep working, and jose treats an undefined issuer/audience as "do not
+    // check". Where configured, a token minted for another deployment fails here
+    // even though its signature is perfectly valid — which is the entire point.
+    // Neither claim reads a clock, so issuance determinism is untouched.
+    ({ payload } = await jwtVerify(token, keyOf(tokenSecret), {
+      algorithms: ["HS256"],
+      ...(binding.issuer === undefined ? {} : { issuer: binding.issuer }),
+      ...(binding.audience === undefined ? {} : { audience: binding.audience }),
+    }));
   } catch {
     return null;
   }

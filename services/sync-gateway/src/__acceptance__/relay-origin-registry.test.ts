@@ -54,6 +54,7 @@ import type { Gateway } from "../index.js";
 import * as gatewayModule from "../index.js";
 import { AuthRejectedError, createGateway } from "../index.js";
 import {
+  BASE_T,
   closeDb,
   type Db,
   eventRows,
@@ -91,10 +92,26 @@ type DeviceRegistration = {
 type OracleAuthSurface = {
   registerDevice(db: Db, registration: DeviceRegistration): Promise<void>;
   revokeDevice(db: Db, target: { org_id: string; device_id: string }): Promise<void>;
-  issueDeviceToken(claims: TokenClaims, tokenSecret: string): Promise<string>;
+  issueDeviceToken(
+    claims: TokenClaims,
+    tokenSecret: string,
+    options?: { now?: number },
+  ): Promise<string>;
 };
-const { registerDevice, revokeDevice, issueDeviceToken } =
-  gatewayModule as unknown as OracleAuthSurface;
+const {
+  registerDevice,
+  revokeDevice,
+  issueDeviceToken: mintDeviceToken,
+} = gatewayModule as unknown as OracleAuthSurface;
+
+/**
+ * T-01-18 re-ground (01-F47 / DEC-AUTH-001): expiry is MANDATORY at issuance, so
+ * the mint now needs an expiry or an injected issuance time (18 §4). These
+ * T-01-12/T-01-09 relay pins are unchanged in substance — the bare mints below
+ * simply carry the suite's injected BASE_T.
+ */
+const issueDeviceToken = (claims: TokenClaims, tokenSecret: string): Promise<string> =>
+  mintDeviceToken(claims, tokenSecret, { now: BASE_T });
 
 const createGatewayWithAuth = createGateway as unknown as (options: {
   db: Db;

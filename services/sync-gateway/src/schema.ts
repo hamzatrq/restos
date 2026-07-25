@@ -115,6 +115,11 @@ export const deviceRegistry = kernel.table(
     device_id: text("device_id").notNull(),
     device_class: text("device_class").notNull(),
     revoked_at: bigint("revoked_at", { mode: "number" }),
+    // The cloud's record of this device's last-issued token expiry (T-01-18,
+    // 01-F47). Load-bearing for hub-relayed renewal: a WAN-less origin's token
+    // never reaches the cloud, so this column — not the credential — is how its
+    // remaining life is judged (18 §5). Written at mint and at renewal only.
+    token_expires_at: bigint("token_expires_at", { mode: "number" }),
   },
   (t) => [primaryKey({ columns: [t.org_id, t.device_id] })],
 );

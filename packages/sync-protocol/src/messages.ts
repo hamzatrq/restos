@@ -34,6 +34,12 @@ export const messageSchemas = {
     // Additive under v:1 (DEC-SYNC-009, T-01-12): true iff the session's token
     // carries the hub-relay capability — the client-side gate for relaying.
     relay_authorized: z.boolean().optional(),
+    // Additive under v:1 (DEC-AUTH-001, T-01-18): a silently re-issued device
+    // token, present ONLY when one was actually minted (remaining life below the
+    // configured threshold). Absent on an ordinary session, so healthy sessions —
+    // and the committed golden transcript — stay byte-identical. Renewing on every
+    // hello would destroy issuance determinism, which those fixtures depend on.
+    renewed_token: z.string().min(1).optional(),
   }),
   push: z.object({ v, kind: z.literal("push"), events: z.array(EventEnvelope), watermark: seq }),
   push_ack: z.object({
@@ -46,6 +52,15 @@ export const messageSchemas = {
     // ack (origin_device_id = the receiving origin), the only LAN push_ack that
     // may move the cloud write-checkpoint (19 §5).
     origin_device_id: z.string().min(1).optional(),
+    // Additive under v:1 (DEC-AUTH-001, T-01-18). Two carriers, one field:
+    // (a) a DRAIN session's renewal — an expired-but-unrevoked device is admitted
+    //     push-only (01-F47 "sole purpose"), so its renewal cannot ride hello_ack;
+    //     it rides the ack of the push it was admitted to make.
+    // (b) a hub-RELAYED origin's renewal — this ack already names its origin via
+    //     origin_device_id, so the hub forwards it over LAN and a WAN-less device
+    //     renews without ever holding WAN. That clause is what makes a 90-day TTL
+    //     safe in a LAN-only deployment instead of bricking every waiter tablet.
+    renewed_token: z.string().min(1).optional(),
   }),
   event_batch: z.object({ v, kind: z.literal("event_batch"), events: z.array(WireEnvelope) }),
   catchup_request: z.object({ v, kind: z.literal("catchup_request"), from_global_seq: seq }),

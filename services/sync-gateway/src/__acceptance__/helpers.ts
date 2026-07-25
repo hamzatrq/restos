@@ -99,10 +99,22 @@ export const devToken = (claims: Identity): string =>
 const b64url = (data: string): string => Buffer.from(data).toString("base64url");
 
 /**
+ * DEC-AUTH-001's ratified default device-token lifetime (01-F47).
+ * BASE_T + this is the expiry every suite token carries by default; every suite
+ * clock is BASE_T (or earlier), so the default token is always healthy.
+ */
+export const DEVICE_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+
+/**
  * Synchronous deterministic HS256 mint under TEST_TOKEN_SECRET (M1 signed
  * mint): the same compact-JWS bytes issueDeviceToken produces for the same
  * claims — sync so the message builders keep their T-01-07 signatures. Verified
  * against the real jose seam by every green session in the suite.
+ *
+ * T-01-18 re-ground (01-F47 / DEC-AUTH-001): expiry is MANDATORY — it binds at
+ * ADMISSION, not only at issuance, so a token carrying no `expires_at` opens no
+ * session anywhere. Every default suite token therefore carries the ratified
+ * 90-day life from BASE_T; callers still override it explicitly.
  */
 export const signedToken = (
   claims: Identity & { hub_relay?: boolean; expires_at?: number },
@@ -114,7 +126,7 @@ export const signedToken = (
       branch_id: claims.branch_id,
       device_id: claims.device_id,
       ...(claims.hub_relay === true ? { hub_relay: true } : {}),
-      ...(claims.expires_at === undefined ? {} : { expires_at: claims.expires_at }),
+      expires_at: claims.expires_at ?? BASE_T + DEVICE_TOKEN_TTL_MS,
     }),
   );
   const signature = createHmac("sha256", TEST_TOKEN_SECRET)
