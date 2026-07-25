@@ -1,5 +1,10 @@
 export { AgeBadge, ageLevel } from "./AgeBadge";
-export { AlarmBand } from "./AlarmBand";
+export { type Alarm, AlarmBand } from "./AlarmBand";
+export { ConnectionFacts, type Fact } from "./ConnectionFacts";
+export { type GridItem, ItemGrid, pageCapacity } from "./ItemGrid";
 export { formatPaisa, MoneyValue } from "./MoneyValue";
-export { QuantityItemLine } from "./QuantityItemLine";
+export { QuantityItemLine, type QuantityItemLineProps } from "./QuantityItemLine";
+export { StatusStrip } from "./StatusStrip";
+export { type Tab, TabRail } from "./TabRail";
+export { TicketCard } from "./TicketCard";
 export { Tile } from "./Tile";

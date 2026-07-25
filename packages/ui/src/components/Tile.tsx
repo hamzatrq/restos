@@ -13,21 +13,21 @@ import { color, type Posture, space, targetFor, typography } from "../tokens/ind
 export type TileProps = {
   posture: Posture;
   label: string;
-  children?: ReactNode;
-  onPress?: () => void;
+  children?: ReactNode | undefined;
+  onPress?: (() => void) | undefined;
   /**
    * 27-F4 — a conditional surface is DISABLED IN PLACE, never absent. A tile that vanishes
    * when unavailable destroys the positional memory of every operator who learned the grid
    * with it there, and adding/removing/reordering a grid item is a breaking change.
    */
-  unavailable?: boolean;
+  unavailable?: boolean | undefined;
   /** Why it is unavailable. Shown, because an unexplained dead tile reads as a broken app. */
-  unavailableReason?: string;
+  unavailableReason?: string | undefined;
   /**
    * 27-F9 — destructive actions are never adjacent to high-frequency ones on any surface a
    * wet hand touches. Marking a tile destructive is what lets a layout test assert that.
    */
-  destructive?: boolean;
+  destructive?: boolean | undefined;
 };
 
 export const Tile = ({

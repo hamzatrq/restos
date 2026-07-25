@@ -16,11 +16,19 @@ const values = <T extends string | number>(g: Record<string, unknown>): Record<s
       .map(([k, v]) => [k, (v as Entry).value as T]),
   ) as Record<string, T>;
 
-export const color = values<string>(manifest.color);
-export const space = values<number>(manifest.space);
-export const touch = values<number>(manifest.touch);
-export const kds = values<number>(manifest.kds);
-export const money = values<string | number>(manifest.money);
+// Key unions come from the manifest, so a typo in a token name is a TYPE error rather than
+// an `undefined` that reaches a screen as a blank colour or a zero-width gap.
+export type ColorName = Exclude<keyof typeof manifest.color, `$${string}`>;
+export type SpaceName = Exclude<keyof typeof manifest.space, `$${string}`>;
+export type TouchName = Exclude<keyof typeof manifest.touch, `$${string}`>;
+export type KdsName = Exclude<keyof typeof manifest.kds, `$${string}`>;
+export type MoneyName = Exclude<keyof typeof manifest.money, `$${string}`>;
+
+export const color = values<string>(manifest.color) as Record<ColorName, string>;
+export const space = values<number>(manifest.space) as Record<SpaceName, number>;
+export const touch = values<number>(manifest.touch) as Record<TouchName, number>;
+export const kds = values<number>(manifest.kds) as Record<KdsName, number>;
+export const money = values<string | number>(manifest.money) as Record<MoneyName, string | number>;
 /** 27-F42 — typography tokens are COMPOSITE. Take one whole; never assemble your own. */
 export type TypeStyle = {
   fontFamily: string;
@@ -36,7 +44,7 @@ export const typography = Object.fromEntries(
 ) as unknown as Record<TypeName, TypeStyle>;
 
 /** A missing token is a bug, not an `undefined` — fail loudly at the point of use. */
-const must = <T>(g: Record<string, T>, k: string): T => {
+const must = <K extends string, T>(g: Record<K, T>, k: K): T => {
   const v = g[k];
   if (v === undefined) throw new Error(`token "${k}" is not in the manifest (see TOKENS.md)`);
   return v;
@@ -44,7 +52,7 @@ const must = <T>(g: Record<string, T>, k: string): T => {
 
 /** 27-F8 — a component takes a POSTURE, never a size. This type is what enforces it. */
 export type Posture = "counter" | "keypad" | "kitchen" | "handheld" | "floor";
-export const targetFor = (p: Posture): number => must(touch, `touch-${p}`);
+export const targetFor = (p: Posture): number => must(touch, `touch-${p}` as TouchName);
 
 /**
  * 27-F27 — KDS type is specified in cap-millimetres at a stated viewing distance, never in

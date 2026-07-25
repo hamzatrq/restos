@@ -1,4 +1,4 @@
-import { color, space, typography } from "../tokens/index";
+import { type ColorName, color, space, typography } from "../tokens/index";
 
 /**
  * 03-F47 / 21 §5 — ticket age as a status, driven by FIXED CONFIGURED MINUTES.
@@ -30,12 +30,12 @@ export const ageLevel = (minutes: number, amberAt: number, redAt: number): Level
 // where a thin stroke or a small dot contributes almost nothing to the priority map.
 const RADIUS: Record<Level, number> = { normal: 999, abnormal: 4, fault: 0 };
 
-const FILL: Record<Level, string> = {
+const FILL: Record<Level, ColorName> = {
   normal: "bgColor-surface-sunken",
   abnormal: "bgColor-status-abnormal",
   fault: "bgColor-status-fault",
 };
-const ON: Record<Level, string> = {
+const ON: Record<Level, ColorName> = {
   normal: "fgColor-default",
   abnormal: "fgColor-on-status-abnormal",
   fault: "fgColor-on-status-fault",
