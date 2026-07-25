@@ -17,7 +17,7 @@
 // store's relay-drain signal; reconnect/backoff is the transport's job (the sim-cloud
 // double fires onUp/onDown, the real WS adapter schedules reconnect through its own
 // clock).
-import type { DeviceClass, EventEnvelopeT } from "@restos/domain";
+import { type DeviceClass, type EventEnvelopeT, UnknownEventTypeError } from "@restos/domain";
 import type {
   Clock,
   CloudTransport,
@@ -32,11 +32,74 @@ export const CLOUD_PUSH_BATCH_MAX = 500;
 /** A merged wire event: an envelope carrying its two cloud stamps (server_received_at + global_seq). */
 type WireEvent = Extract<ProtocolMessage, { kind: "event_batch" }>["events"][number];
 
+/**
+ * Machine-readable blocked-cursor reasons (DEC-SYNC-011). Snake_case tokens for
+ * fleet health (doc 15) to alert on — never a rendered message, and never anything
+ * derived from a payload: payloads carry customer PII (00 §5.4) and fleet health
+ * persists whatever it is given.
+ *
+ * On classifiability (the question the oracle round settled): at the point the cursor
+ * stops, every DETERMINISTIC device-store rejection is permanent by construction —
+ * transience only ever arrives from infrastructure (SQLITE_BUSY, disk full, fsync).
+ * The two cases DEC-SYNC-011 names are cleanly separable by error class; the rest —
+ * identity mismatch, lamport collision, bad global_seq, and genuine infra faults —
+ * are not separable by class and share `ingest_failed`. That is deliberate: nothing
+ * here claims "this is permanent", because the clearing rule (report on stop, clear
+ * on advance) is correct for both, and a `permanent` flag could not be derived
+ * honestly today without typed errors the store does not throw.
+ */
+export type BlockedReason = "unknown_event_type" | "schema_invalid" | "ingest_failed";
+
+/**
+ * The blocked-cursor report (DEC-SYNC-011). Present iff the contiguous-prefix cursor
+ * is stopped; `null` when catch-up is flowing.
+ *
+ * Why this exists: a permanent rejection — an event type this build does not know, a
+ * payload from a newer schema — is not divergence and not quarantinable at the device,
+ * so the cursor simply stops. It used to stop SILENTLY: the device sat at a fixed
+ * `last_global_seq`, `connected: true`, looking merely idle while it had permanently
+ * stopped receiving the branch's events, and the honesty UI (00 §5.7) lied by omission.
+ *
+ * `event_type` is always present: `EventEnvelope.type` is `z.string().min(1)`, so the
+ * protocol layer has already rejected any event that lacks one — a typeless blocking
+ * event is unreachable here, not merely unhandled.
+ *
+ * This is a property of the CURSOR, not of the connection: it survives a disconnect
+ * (the blockage is still there when the link returns) and clears only when the cursor
+ * actually advances past the blocking sequence.
+ */
+export type BlockedCursor = {
+  global_seq: number | null;
+  event_type: string;
+  reason: BlockedReason;
+};
+
+/**
+ * Classify an ingest rejection into a machine-readable reason (DEC-SYNC-011).
+ *
+ * Only the two cases the decision names are separable by error class. `ZodError` is
+ * matched by NAME rather than `instanceof` because a payload schema and the envelope
+ * schema may come from different zod instances across package boundaries, where
+ * `instanceof` silently fails and would quietly demote every schema rejection to the
+ * catch-all. Everything else — identity mismatch, lamport collision, bad global_seq,
+ * and genuine infrastructure faults — shares `ingest_failed`: they are not separable
+ * by class, and claiming otherwise would be a guess encoded as a fact.
+ */
+const classifyBlock = (error: unknown): BlockedReason => {
+  if (error instanceof UnknownEventTypeError) return "unknown_event_type";
+  if (error instanceof Error && (error.name === "ZodError" || error.name === "$ZodError")) {
+    return "schema_invalid";
+  }
+  return "ingest_failed";
+};
+
 export type CloudSessionStatus = {
   connected: boolean;
   last_push_ack: number | null;
   last_global_seq: number | null;
   quarantined: readonly { event_id: string; reason: string }[];
+  /** DEC-SYNC-011: where the cursor is stuck and why; null when flowing. */
+  blocked: BlockedCursor | null;
 };
 
 export type CloudSession = {
@@ -62,6 +125,8 @@ export const createCloudSession = (options: {
   let connected = false;
   let lastPushAck: number | null = null;
   const quarantined: { event_id: string; reason: string }[] = [];
+  /** DEC-SYNC-011: null while catch-up flows; set to where and why the cursor stopped. */
+  let blockedCursor: BlockedCursor | null = null;
   // ---- hub-relay state (DEC-SYNC-009, T-01-12; all volatile) ---------------
   // relayAuthorized: the gateway's hello_ack advertisement — without it this
   // session NEVER pushes third-party events (an unadvertised attempt would
@@ -187,6 +252,11 @@ export const createCloudSession = (options: {
     const results = store.ingestPage(items);
     let advanceTo = -1;
     let blocked = false;
+    // DEC-SYNC-011: the FIRST non-landed event is where the cursor stops, so it is the
+    // one reported. Previously this whole classification was thrown away — the local
+    // `blocked` flag correctly stopped the advance and then told nobody, which is the
+    // silence this task removes.
+    let report: BlockedCursor | null = null;
     for (let i = 0; i < results.length; i++) {
       const result = results[i];
       if (result === undefined) continue; // results is 1:1 with items — defensive only
@@ -194,9 +264,21 @@ export const createCloudSession = (options: {
       let landed = true;
       if (!result.ok) {
         if (result.error instanceof DivergentDuplicateError) {
+          // The other permanent failure, and deliberately NOT a blocked cursor: its id
+          // is already stored, so re-fetching cannot help and the cursor PASSES it. It
+          // is surfaced here instead (01-F17 — never wedge the pull).
           quarantined.push({ event_id: result.error.eventId, reason: "divergent_duplicate" });
         } else {
           landed = false; // did not land — the cursor must not pass it
+          if (report === null) {
+            report = {
+              global_seq: global_seq ?? null,
+              // Guaranteed present by the protocol schema (EventEnvelope.type is
+              // z.string().min(1)) — a typeless event never reaches this layer.
+              event_type: String((events[i] as { type?: unknown } | undefined)?.type ?? ""),
+              reason: classifyBlock(result.error),
+            };
+          }
         }
       }
       if (!landed) blocked = true;
@@ -206,6 +288,10 @@ export const createCloudSession = (options: {
       const current = store.status().last_global_seq ?? 0;
       if (advanceTo > current) store.setLastGlobalSeq(advanceTo);
     }
+    // Clear only when this page actually got through. A page that blocks again — the
+    // same blockage re-delivered — simply re-reports it, so a permanent stop stays
+    // visible while a transient one resolves itself with no operator action.
+    blockedCursor = report;
   };
 
   const dispatch = (message: ProtocolMessage): void => {
@@ -353,6 +439,12 @@ export const createCloudSession = (options: {
         last_push_ack: lastPushAck,
         last_global_seq: store.status().last_global_seq,
         quarantined: [...quarantined],
+        // A property of the CURSOR, not the connection (01-F11 / 00 §5.7): it is
+        // reported alongside `connected: true` on a live link, and it survives a
+        // disconnect, because the blockage is still there when the link returns. The
+        // two have different remedies — ship a build that understands the event vs
+        // restore the network — so a UI that conflates them sends staff to the wrong fix.
+        blocked: blockedCursor === null ? null : { ...blockedCursor },
       };
     },
   };
