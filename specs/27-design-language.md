@@ -14,11 +14,12 @@
 ## 1. Layout law — flat, paged, positional
 
 - 27-F1 **Maximum navigational depth on any operational screen is ONE.** Categories are page tabs or fixed section headers, never a drill-down. This overrides tidiness: the source research says *"minimize hierarchical depth even at the expense of conciseness."*
-- 27-F2 **Flat paged grids, not scrolling lists, for anything actionable.** A tested layout of 6 items per page in a 3×2 grid beat a 4-level hierarchy at equal tap count — 25 s vs 65.5 s, 100% vs 80% correct. Nearly half of field subjects did not know content existed below the fold, so **no primary action may require scrolling to reach.**
+- 27-F2 **Flat paged grids, not scrolling lists, for anything actionable.** The law is the SHAPE — flat, paged, lateral — not a fixed item count. The tested layout (6 items per page, 3×2, 7 pages ≈ 42 items) beat a 4-level hierarchy at equal tap count, 25 s vs 65.5 s and 100% vs 80%, **on a phone**. Transplanting "6" to a 22-inch counter screen would be a category error: **page capacity is derived from the surface's usable area and 27-F8's target size, never fixed by this document.** Nearly half of field subjects did not know content existed below the fold, so **no primary action may require scrolling to reach** — page laterally instead.
+- 27-F2a **Persistent category tabs are lateral, not depth.** A always-visible tab strip plus lateral paging within the selected tab is depth ONE and satisfies 27-F1: the operator never descends into a category and loses their place. A category that must be *entered*, hiding its siblings, is depth two and banned. This is what makes 02-N2's 300-item catalogue buildable — ~12 persistent tabs, each paging laterally — without the nesting that measured 40% task success.
 - 27-F3 **Back and forward controls are adjacent and differ only by arrow direction.** In the study where back was understood, it was understood *because* it sat beside the forward control already in use.
 - 27-F4 **Grid position is a compatibility contract** (strengthening 21 §5's cashier law to a platform rule). Adding, removing or reordering an item on an operational grid is a **breaking change** requiring PR justification and a dev-pilot acclimation window. **No adaptive, frecency-sorted or personalised ordering anywhere staff-facing** — static menus measurably beat adaptive ones, and 23 of 34 field subjects could not perform a task they knew well on a differently-arranged device.
 - 27-F5 **No context-dependent or invisible controls.** No soft keys, no hover or dwell activation, no long-press-only actions, no gesture-only affordances. Dwell-to-click was tried in the field and abandoned. Every action has a persistent, visible, labelled target.
-- 27-F6 **No operational role is ever required to type non-numeric text.** Modifiers, reasons and notes are pick-lists of tiles, or voice. Of 27 field subjects, 24 could not type a single word.
+- 27-F6 **No operational role is ever required to type non-numeric text to complete a CRITICAL-PATH task.** Modifiers and reasons are pick-lists of tiles, or voice; of 27 field subjects, 24 could not type a single word. Typing may exist as an **optional escape hatch** — 21 §5 names search as exactly that, and 02-F2 search, 02-F6 notes and 02-F27 customer name are all legitimate under this reading. The test is whether a non-typing operator can complete the task by another route, not whether a keyboard appears anywhere.
 - 27-F7 **A list's visual order MUST be its work order.** If tickets render in an order other than the order they should be worked, that is a defect, not a display preference.
 
 ## 2. Touch, density and latency
@@ -32,8 +33,10 @@ The ergonomics and low-literacy strands converge here from opposite directions, 
 | counter POS grid tile | standing at a fixed terminal | **76 dp** (12 mm) |
 | cash / numeric keypad | standing, high-consequence entry | **126 dp** (20 mm) |
 | handheld waiter/rider | one-handed thumb | **64 dp** (9.6 mm) |
+| **kitchen bump / KDS action** | **standing, wet or greasy hands, 1–2 m** | **96 dp** (15 mm) |
 | absolute floor, anything | — | **48 dp**, gaps ≥8 dp |
 
+  The kitchen row is set above the standing-counter minimum deliberately: it is the one surface where 27-F9's measured **21.34% wet-hand gesture error** was gathered, and the operator is also reading at 1–2 m. Doc 21's superseded law named "KDS bump targets ≥64dp"; that number came from no posture study and is raised here.
   Measured error rates at 9.6 mm are 2.8% and **there is no significant accuracy gain above it** — past ~10 mm you are buying speed, not accuracy. WCAG 2.2's 24 px (AA) and 44 px (AAA) are below every empirical figure and cite only the one-handed thumb study; they are a legal floor, never a design target.
 - 27-F9 **Destructive actions are never adjacent to high-frequency ones on any surface a wet hand touches.** Wet-screen gesture error is **21.34% against 0.00% dry**, water becomes a hindrance within ~20 seconds, and the sensed touch point physically *migrates toward the moisture*. This is a hard rule, not a preference.
 - 27-F10 Touch feedback <100 ms (restating 21 §4 as the perceptual threshold). Optimistic UI for anything the device can decide locally; a spinner is an admission the device asked someone else.
@@ -45,7 +48,16 @@ Colour is the strongest guiding attribute in vision, which is exactly why it mus
 
 - 27-F12 **Colour never carries state alone.** Every status is **colour + shape + position + a number**. Machine-enforced: a status component that accepts a colour prop without a shape prop fails typecheck. (WCAG SC 1.4.1, Level A.)
 - 27-F13 **Design achromatically first.** If a screen is unreadable in greyscale it is broken. Colour is added only after the achromatic design works.
-- 27-F14 **Budget: 3 status colours + 1 interactive accent.** Measured capacity is 7 and search degrades continuously below it; encoding one state with *two* colour attributes collapses performance even at minor heterogeneity.
+- 27-F14 **Budget: 3 status colours + 1 interactive accent, ALLOCATED HERE, platform-wide.** Measured capacity is 7 and search degrades continuously below it; encoding one state with *two* colour attributes collapses performance even at minor heterogeneity. The allocation is fixed so the first module to ship cannot spend it by accident:
+
+| slot | meaning (IEC 60073) | claimants it serves |
+|---|---|---|
+| **amber** | abnormal — attention required | ticket approaching due, low stock, pending approval, unaccepted channel order, sync degraded |
+| **red** | fault / danger / destructive | ticket overdue, print failure, cash variance past threshold, void & refund actions, revoked device |
+| **green** | **transient confirmation only — never a resting state** | payment taken, order sent, bump accepted |
+| **blue accent** | interactive / mandatory action | any control the operator may press |
+
+  A module needing a distinction not on this table expresses it with **shape, position or a number** (27-F12), never a fourth hue. Adding a colour requires an amendment here, not a local decision.
 - 27-F15 **Status colours ride a monotonic LIGHTNESS ladder, and the fill carries it — never a dot, badge or thin rule.** The naive equal-lightness traffic-light palette measures ΔE00 **8.2** under deuteranopia (near-identical olive); the lightness ladder measures **31.4** worst-case across all three dichromacies. Small patches lose hue first, and at 1–2 m a thin stroke contributes almost nothing to the priority map.
 - 27-F16 **Money is never coloured by default.** Colour on a number means *this number is abnormal*. Colouring the commonest number on screen spends the whole preattentive channel on the base case.
 - 27-F17 **Assume 1 in 20 male staff is deutan and does not know it.** Pakistani prevalence 2.75–5.75%, deutan-dominant; ~80% of affected people are unaware. No red/green pair is ever the sole distinguishing signal.

@@ -147,7 +147,7 @@ All tiers run it. In **T1 the POS is the entire restaurant** — one device, pri
 - 02-N3 Phone entry (02-F28) and quick entry (02-F30) each ≤ 30 s, measured in release builds.
 - 02-N4 ≥ 5 concurrent POS devices per branch stay LAN-coherent (`restaurant-os.md` Appendix G) within kernel propagation targets (01-F15).
 - 02-N5 A parked order is plug-pull safe the moment the park action returns (00 §5.2).
-- 02-N6 Any core cashier flow learnable in < 15 min (00 §5.6) — validated with real staff at dev-pilots before Wave 1 sign-off.
+- 02-N6 Any core cashier flow learnable in < 15 min (00 §5.6) — validated with real staff at dev-pilots before Wave 1 sign-off. **Internal target, not a merge criterion (27 §8):** published training-time claims for POS systems span 20 minutes to 40 hours, all vendor or SEO content, so no number here is evidentially grounded. Keep the goal; do not gate a release on it. Note also 27-F53 — a novice-only test cannot detect the flat-vs-hierarchical layout decision, whose benefit appears only in experts, so this check must be paired with an experienced operator at rush tempo.
 
 ## 7. Customizability
 
