@@ -743,6 +743,17 @@ Category tabs are explicitly permitted at depth one, so a 300-item menu across ~
 
 ### 10.1 Tasks staff perform that no FR covers
 
+> **Closed since (July 2026):** **G1** training mode → `DEC-TRAIN-001` / `01-F49..F51` /
+> `27-F63` (it is a *branch*, not a flag) · **G4** settling with no shift open → `02-F37`
+> (succeeds with an `unbound_settlement` anomaly; `01-F17` left no other legal option) ·
+> **G5** kitchen reprint → `03-F48` · **G7** kitchen touch minimum → `27-F8`'s kitchen row
+> (96 dp) · **G10** quick-tag cap → `02-F39` (one page at the target posture, derived not
+> fixed) · **G16** no self-approval → `02-F38`.
+>
+> **Still open, and each needs a founder product call rather than a spec edit:** G2 (the
+> busser has no role at all), G3, G6, G8, G9, G11, G12, G13 (partially answered by the
+> screen map's one-band rule), G14, G15, G17.
+
 | # | Gap | Evidence | Who it blocks |
 |---|---|---|---|
 | **G1** | **Training mode does not exist.** `27-F52` makes it a product requirement that *"reaches the kernel… This needs an architectural answer, not a UI toggle. (Owed to doc 01/02.)"* Nothing in doc 01 or 02 answers it. The research finding behind it (P5): staff either train on live tickets — polluting an append-only ledger and every report built on it — or don't train. | `27-F52`; `pos-kds-patterns.md` P5 | **Every role.** Also blocks `21-F11` RITE rounds and `27-F53`'s experienced-operator speed test, which need somewhere to run |
