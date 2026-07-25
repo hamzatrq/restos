@@ -213,6 +213,15 @@ export type DeviceStore = {
   noteRelayedRenewal(device_id: string, token: string): void;
   /** Pending renewal for an origin; the mesh forwards it over LAN on the next beat. */
   relayedRenewal(device_id: string): string | null;
+  /**
+   * Drop a pending relayed renewal (mesh calls this when the peer leaves). A renewal is
+   * a CREDENTIAL, so it must not be held and re-forwarded indefinitely: a token minted
+   * moments before its device was revoked would otherwise be handed over on every
+   * heartbeat forever. Bounding the window is not a substitute for the LAN revocation
+   * check (01-F48's LAN half, still unimplemented) — it just stops this path from
+   * making that gap worse.
+   */
+  clearRelayedRenewal(device_id: string): void;
   /** Cloud session records a cloud quarantine_notice whose event belongs to a
    * relayed ORIGIN (T-01-08; 01-F37 "originating device notified" — a WAN-less
    * origin's only path is the hub's LAN forward). Deduped by event id. */
@@ -1134,6 +1143,10 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
 
     relayedRenewal(device_id) {
       return relayedRenewals.get(device_id) ?? null;
+    },
+
+    clearRelayedRenewal(device_id) {
+      relayedRenewals.delete(device_id);
     },
 
     noteRelayedQuarantineNotice(device_id, notice) {

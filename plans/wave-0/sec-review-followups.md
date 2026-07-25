@@ -133,6 +133,15 @@ migration where applied, including the Auditor's `money_overflow` short-circuit.
    drain session request its own renewal explicitly, which is a new message kind and needs
    an FR.
 
+2b. **`token_expires_at` is seeded by one clock and judged by another** (journey-oracle
+   finding, the mirror of #2). `registerDevice` seeds it from the **Postgres** wall clock
+   (`extract(epoch from now())`); `mintRenewal` judges due-ness against the gateway's
+   **injected** clock (18 §4). Identical in production, divergent under every rig that
+   makes the clock injectable — DR replay, the rewound-clock pin, deterministic tests —
+   where a seeded device can read as permanently not-due and never renew. Documented at
+   the call site with an instruction to pass the value explicitly; a helper that forces
+   the clock choice would be better.
+
 2. **`BASE_T`-relative expiry is a time bomb for any wall-clock consumer.** Found the hard
    way in the X10 harness: a token minted with a default expiry derived from the test epoch
    is *already in the past* for a gateway running on the real clock, so every device was
@@ -146,9 +155,20 @@ migration where applied, including the Auditor's `money_overflow` short-circuit.
    honesty-UI warning itself needs a `sync-client` companion test when the host surface
    exists.
 
-4. **01-F48's LAN half is unimplemented.** "The hub does the same on LAN" — the cloud side
-   ships (`sweepRevocations`, fail-closed, ≤30 s); the hub-side eviction lives in
-   `sync-client` and is not covered by the gateway suite.
+4. **01-F48's LAN half is unimplemented — SEVERITY RAISED by the B1 fix.** The cloud side
+   ships (`sweepRevocations`, fail-closed, ≤30 s); the hub-side eviction does not, because
+   nothing distributes registry state over LAN, so the hub cannot see revocation at all.
+   **Why it is worse now (journey-oracle finding):** the hub holds a pending relayed
+   renewal in memory and re-forwards it on every heartbeat — deliberately, since that
+   at-least-once property is what lets a tablet that was off the LAN still renew. So a
+   token minted moments *before* its device was revoked keeps being handed to that
+   revoked device. Before B1 the worst this path carried was a stale watermark; it now
+   carries a fresh 90-day credential.
+   **Bounded, not closed:** the cloud still refuses that token at hello (the registry
+   decides), so impact is LAN participation only — which this gap already permits a
+   revoked device regardless of any token. Retention is now bounded by peer lifetime
+   (`clearRelayedRenewal` on peer loss). The real fix is registry distribution over LAN
+   so the hub can refuse a revoked peer. **This is the last substantive Wave-0 gap.**
 
 ## Owed regression test — T-01-17 hub re-election continuity
 

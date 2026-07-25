@@ -57,9 +57,13 @@ export const registerDevice = async (
     // hub-relayed renewal path unreachable: `mintRenewal` treats a null recorded expiry
     // as "not due", so a freshly-provisioned WAN-less origin would never be renewed at
     // all — the one clause that makes a 90-day TTL safe in a LAN-only deployment.
-    // Seeded to the caller's issuance expiry when known, else the default lifetime from
-    // the DATABASE clock (registry bookkeeping is not domain logic, so Postgres `now()`
-    // keeps Date.now() out of gateway src — the same reasoning revokeDevice uses).
+    // The caller MUST supply `token_expires_at` when it knows the issuance instant, and
+    // in practice always does. The Postgres-clock fallback exists only for provisioning
+    // paths that mint no token — and it is a genuine hazard, so it is named here rather
+    // than left as a footgun: this column is SEEDED from the database clock but judged
+    // against the gateway's INJECTED clock (18 §4). Under any rig where those differ —
+    // DR replay, the rewound-clock pin, every deterministic test — a seeded device can
+    // read as permanently not-due and never renew. Pass the value.
     sql`insert into kernel.device_registry
           (org_id, branch_id, device_id, device_class, revoked_at, token_expires_at)
         values (${registration.org_id}, ${registration.branch_id}, ${registration.device_id},

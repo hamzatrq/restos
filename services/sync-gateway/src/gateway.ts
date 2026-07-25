@@ -431,26 +431,28 @@ export const createGateway = ({
     // A draining session does NOT join fan-out: fan-out is a read (01-F47 sole
     // purpose). It joins once its renewal lands, in the push_ack path.
     if (!expired) joinFanout(record, session);
-    // Silent renewal for a session whose credential is still VALID but running low
-    // (01-F47). A DRAINING session is deliberately excluded: its renewal rides the
-    // ack of the push it was admitted to make, so that the read refusals are
-    // observable in between. If it rode hello_ack there would be no drain mode at all.
     // Per-connection framing (DEC-SYNC-010, T-01-19). The server accepts whenever the
     // client advertises: this build can always decode, so the only reason to decline
     // would be a peer that cannot — and that peer simply does not advertise.
     const negotiated = negotiateCompression(message, true);
-    const renewedToken = expired
-      ? undefined
-      : await mintRenewal(
-          db,
-          claims.org_id,
-          claims.branch_id,
-          claims.device_id,
-          registry,
-          claims.expires_at,
-          false,
-          claims.hub_relay,
-        );
+    // Silent renewal (01-F47). A DRAINING session gets one too, FORCED — its credential
+    // is already expired, so a threshold comparison would be meaningless. The session
+    // still stays push-only: `draining` is untouched here, so catch-up is refused and it
+    // joins no fan-out on THIS connection. That is the amendment — "sole purpose"
+    // constrains what a drain session may DO, not which message its credential arrives
+    // on. Requiring the renewal to be earned by a push wedged any device that came back
+    // from a long absence with an empty outbox: no push, no ack, no renewal, forever,
+    // which made expiry block a device outright (01-F17).
+    const renewedToken = await mintRenewal(
+      db,
+      claims.org_id,
+      claims.branch_id,
+      claims.device_id,
+      registry,
+      claims.expires_at,
+      expired,
+      claims.hub_relay,
+    );
     record.sink(
       parseMessage({
         v: 1,

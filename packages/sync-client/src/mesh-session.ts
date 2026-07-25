@@ -504,6 +504,9 @@ export const createMeshSession = (options: {
     },
     onPeerLost: (device_id) => {
       visible.delete(device_id);
+      // A pending renewal is a CREDENTIAL. Do not keep holding a departed peer's token
+      // for indefinite re-forwarding — the exposure window ends with the peer.
+      store.clearRelayedRenewal(device_id);
       dropFollower(device_id);
       if (device_id === hubTarget) {
         onHubLoss(false);

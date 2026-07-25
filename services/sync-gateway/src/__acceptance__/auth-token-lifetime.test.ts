@@ -39,17 +39,24 @@
 //     (T-01-12). ABSENT unless a renewal was actually minted, so ordinary
 //     sessions stay byte-identical. Until @restos/sync-protocol carries the
 //     fields, parseMessage strips them and these tests stay red.
-//   RULING 1 — an expired-but-unrevoked device is admitted in DRAIN mode, the
-//     "sole purpose" clause of 01-F47 made operative. Push only: catch-up,
-//     fan-out and every other READ are refused until the renewal has landed on
-//     that session, because reads are where customer data leaks (00 §5.4) and a
+//   RULING 1, as AMENDED (01-F47, July 2026) — an expired-but-unrevoked device
+//     is admitted in DRAIN mode, the "sole purpose" clause made operative. Push
+//     only: catch-up, fan-out and every other READ are refused on that
+//     connection, because reads are where customer data leaks (00 §5.4) and a
 //     credential the cloud no longer fully trusts must not read — the same
-//     instinct as the revoked-reader fix (9a0c1ff). A drain session's renewal
-//     therefore rides its drain push's `push_ack` (hello_ack cannot carry it:
-//     the renewal would land before any refusal could be observed, and there
-//     would be no drain mode at all). Once it lands the SAME session is normal.
-//     The device keeps selling and persisting locally throughout (01-F17); the
-//     degraded window is one round trip.
+//     instinct as the revoked-reader fix (9a0c1ff). Draining is cleared by the
+//     device's drain PUSH, not by holding a renewal.
+//     The renewal itself MAY ride hello_ack, and does. This oracle first pinned
+//     the opposite — renewal earned only by pushing — and journey J1/B1
+//     (journey-b1-renewal.test.ts) proved that a PERMANENT WEDGE: a device
+//     offline across its whole renewal window returns with an EMPTY OUTBOX, so
+//     it has no push to make, no push_ack, no renewal, and its catch-up is
+//     refused — forever, identically on every reconnect. Expiry would then block
+//     a device outright (01-F17 forbids it) and strand a branch when the wedged
+//     device is the hub. "Sole purpose" constrains what the session may DO, not
+//     which message the credential arrives on: the renewal changes the NEXT
+//     connection while drain mode stays observable on this one.
+//     The device keeps selling and persisting locally throughout (01-F17).
 //   RULING 2 — hub-relayed renewal is REGISTRY-side. kernel.device_registry
 //     gains `token_expires_at` (nullable bigint, epoch ms), written at mint and
 //     at renewal — the single writer. The cloud judges a WAN-less ORIGIN's
@@ -490,12 +497,27 @@ describe("drain-only admission for an expired credential (01-F47 ruling 1 / 01-F
     const expired = await tokenWithLife(identity, -1 * DAY_MS); // expired a day ago
     const session = await openSession(gateway, identity, { token: expired });
 
-    // The renewal cannot ride hello_ack: it would land before any read could be
-    // refused, and there would be no drain mode to observe (ruling 1).
-    expect(
+    // T-01-18 re-pin (01-F47 AMENDED July 2026, after journey J1/B1 proved the
+    // empty-backlog wedge: a device whose outbox is empty has no push to make,
+    // so a renewal that can ONLY be earned by pushing never arrives and expiry
+    // blocks the device outright — which 01-F17 forbids, and which strands a
+    // whole branch when the wedged device is the hub). The renewal MAY ride
+    // hello_ack; "sole purpose" constrains what the session may DO, not which
+    // message the credential arrives on. So the pin is no longer the absence of
+    // a field — it is that the credential arrives AND the session is still
+    // drain-only on this connection.
+    const helloRenewal = must(
       (session.helloAck as RenewableHelloAck).renewed_token,
-      "the renewal is earned by draining, not by connecting",
-    ).toBeUndefined();
+      "hello_ack.renewed_token — an expired credential must always have a path to renewal (01-F47/01-F17)",
+    );
+    expect(payloadOf(helloRenewal).device_id).toBe(identity.device_id);
+    expect(payloadOf(helloRenewal).expires_at).toBe(BASE_T + NINETY_DAYS_MS);
+    // …and it did NOT promote this session: reads are still refused here.
+    await expect(
+      session.conn.handle(catchupMsg(0)),
+      "the renewal changes the NEXT connection; this one stays drain-only",
+    ).rejects.toThrow(/expired|drain/i);
+    expect(ofKind(session.rec.all, "catchup_response")).toHaveLength(0);
 
     // Admitted: the backlog it accumulated while offline reaches the merged log
     // — a sale is never blocked and never lost (01-F17).
@@ -518,7 +540,11 @@ describe("drain-only admission for an expired credential (01-F47 ruling 1 / 01-F
     next.conn.close();
   });
 
-  it("01-F47 ruling 1/00 §5.4: a drain session READS nothing until the renewal lands — no catch-up, no fan-out — and reads on the SAME session succeed once it has", async () => {
+  // Wording re-grounded to the 01-F47 amendment: holding the renewal is NOT
+  // what makes a session normal (it now arrives on hello_ack). Draining is
+  // cleared by the drain PUSH — the session's declared purpose being served.
+  // Every assertion below is unchanged.
+  it("01-F47 ruling 1/00 §5.4: a drain session READS nothing on the connection it was admitted on — no catch-up, no fan-out — and reads resume on that SAME session once its drain push clears it", async () => {
     const branch = freshIdentity();
     const draining: Identity = { ...branch, device_id: freshIdentity().device_id };
     const peer: Identity = { ...branch, device_id: freshIdentity().device_id };
@@ -530,21 +556,21 @@ describe("drain-only admission for an expired credential (01-F47 ruling 1 / 01-F
       token: await tokenWithLife(draining, -1 * DAY_MS),
     });
 
-    // PRE-RENEWAL READ 1 — fan-out: a healthy peer's push must not reach it.
+    // DRAIN-MODE READ 1 — fan-out: a healthy peer's push must not reach it.
     await peerSession.conn.handle(pushMsg(validEnvelopes(peer, 0, 1)));
     expect(
       ofKind(drain.rec.all, "event_batch"),
       "a drain session receives no branch fan-out (00 §5.4: reads are where data leaks)",
     ).toHaveLength(0);
 
-    // PRE-RENEWAL READ 2 — catch-up: refused with its own reason, and NOT the
+    // DRAIN-MODE READ 2 — catch-up: refused with its own reason, and NOT the
     // revocation signal (expiry never purges a device: it still sells locally).
     await expect(drain.conn.handle(catchupMsg(0))).rejects.toThrow(GatewayError);
     await expect(drain.conn.handle(catchupMsg(0))).rejects.toThrow(/expired|drain/i);
     expect(ofKind(drain.rec.all, "catchup_response")).toHaveLength(0);
     expect(ofKind(drain.rec.all, "purge_command")).toHaveLength(0);
 
-    // The drain push earns the renewal…
+    // The drain push serves the session's declared purpose…
     await drain.conn.handle(pushMsg(validEnvelopes(draining, 0, 1)));
     const ack = must(ofKind(drain.rec.all, "push_ack").at(-1), "drain ack") as RenewablePushAck;
     expect(ack.renewed_token, "renewal on the drain ack").toBeDefined();
@@ -553,7 +579,7 @@ describe("drain-only admission for an expired credential (01-F47 ruling 1 / 01-F
     // …and the SAME session is normal from that moment: catch-up is served…
     await drain.conn.handle(catchupMsg(0));
     const response = must(ofKind(drain.rec.all, "catchup_response").at(-1), "catchup_response");
-    expect(response.events.length, "the renewed session reads its branch again").toBeGreaterThan(0);
+    expect(response.events.length, "the cleared session reads its branch again").toBeGreaterThan(0);
 
     // …and fan-out reaches it again.
     await peerSession.conn.handle(pushMsg(validEnvelopes(peer, 1, 1)));
