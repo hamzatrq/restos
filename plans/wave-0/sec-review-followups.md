@@ -16,7 +16,11 @@ Verdict: kernel sound; ordering design would-stake-cash-on-it. Two merge conditi
 - follow-up — heal→notice reconciliation; live zstd framing wiring; fold-brand migration (DEC-MONEY-005, now unblocked).
 - review #6 — widen quarantine key to (org, claimed_event_id, device_id) so a foreign pre-claim doesn't lose the honest event's bytes.
 
-## ⛔ ADVERSARIAL REVIEW OF THE POST-REVIEW ROUND — 3 BLOCKERS, DO NOT MERGE
+## ⛔ ADVERSARIAL REVIEW OF THE POST-REVIEW ROUND — 1 BLOCKER STILL OPEN
+
+**Status after the fix round (`9dc9800`):** B2 FIXED · B3 FIXED · H1 FIXED ·
+M2 attempted, reverted, ruling needed · **B1 STILL OPEN — do not merge on it.**
+H2/H2b need rulings; M1 and L1 remain. Full findings below as written.
 
 Found by the `24 §3` adversarial leg over `fdb4efd~1..HEAD`, after all six tasks were
 reported green. **All three blockers were verified against the code, and each
