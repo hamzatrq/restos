@@ -132,7 +132,7 @@ Users: chefs, pass staff, and whichever role owns the ready signal (03-F24). Dev
 ## 7. Customizability
 
 - **Layer 2 (org):** category→printer routing, station map, KDS-vs-printer per station, aging thresholds X/Y per order type, ready-signal ownership, rush threshold, course grouping on/off, retry count/window, assembly buffer minutes.
-- **Layer 3 (branch/device):** printer assignments + paper width, station identity, alert tone/volume, recall-strip length.
+- **Layer 3 (branch/device):** printer assignments + **printer capability profile**, station identity, alert tone/volume, recall-strip length. **"Paper width" as a `58 | 80` enum is WITHDRAWN (July 2026) — it silently truncates the PRICE column.** The folklore that 80 mm means 42 or 48 columns is wrong twice over: 42-vs-48 is a *resolution* difference, not a font one, and there is a third value — a TH230 at 576 dots gives **44** Font-A columns while a TM-P80 at the same 576 dots gives 42 and a TM-T20II gives 48. Layout is therefore expressed in **columns**, derived as `print_dots ÷ font_cell_dots` (Font A = 12, Font B = 9) from a per-model capability record `{model_id, dots, dpi, cols_font_a, cols_font_b, has_native_qr, has_cutter, raster_ok}`, seeded from a shipped table, defaulting **conservatively to 32** for an unknown model, with a technician override in the 03-F10 test harness (which already maintains the compatibility list). Millimetres are used only where a regulator specifies mm — the fiscal QR.
 - **Deliberately not configurable:** disabling print-failure alerts (never), any form of system-dictated cook order (never), sample capture (always on — it is a pure side-effect), the confidence-gate floor (platform layer only).
 
 ## 8. Tech notes

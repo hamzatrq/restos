@@ -30,7 +30,8 @@ All docs in `specs/` (`NN-name.md`). `restaurant-os.md` = product vision + seed 
 |---|---|---|
 | Kernel: events, sync, money contract, auth, catalog | `01` | `19` (why custom), `20 §2.4` |
 | POS / counter app | `02` | `01 §4`, `21` |
-| Printing, pass screen, KDS, timing/ETA | `03` | `21` |
+| Printing, pass screen, KDS, timing/ETA | `03` | `21`, `27` |
+| Printed-document model (`DocumentSpec`/`DocumentProfile`, KOT + receipt layout) | `03` owns the renderer; `14` owns only the editing surface | `27`, `16` |
 | Waiter app · Manager console | `04` · `05` | `21` |
 | Storefront (QR/pickup/delivery, confirm policy) | `06` | `02-F9`, `07` |
 | WhatsApp (doors, templates, voice, language policy) | `07` | `06`, `13` (analyst) |
