@@ -29,12 +29,18 @@
 //   A3    — same, plus the negative control: the genuinely uncovered slots
 //           beyond coverage must STILL be reported (loud, never silent) and
 //           must name the RIGHT device.
-import type { EventEnvelopeT } from "@restos/domain";
+//   A4    — added AFTER the key landed, carrying forward review #5's concern
+//           from the pin T-01-21 retired in close-now-parse-guards.test.ts
+//           describe C (the ruling is recorded there): the byte-loss class that
+//           SURVIVES the widening — an unreadable stored row covering nothing
+//           while its slot was credited — must still be loud.
+import { type EventEnvelopeT, newId } from "@restos/domain";
 import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createGateway, type Gateway } from "../index.js";
 import { byCheck, runAuditor, setWatermark } from "./auditor-builders.js";
 import {
+  BASE_T,
   closeDb,
   type Db,
   freshIdentity,
@@ -193,5 +199,52 @@ describe("A3 — loud, never silent: a genuinely uncovered slot still surfaces, 
     expect(must(claimants.get(deviceA.device_id), "device A's row for the shared id")).toBe(
       "schema_invalid",
     );
+  });
+});
+
+// ── A4 — review #5's concern, re-pinned where a genuine loss still exists ─────
+// T-01-21 retired the loudness pin in close-now-parse-guards.test.ts describe C:
+// under the widened key a foreign pre-claim destroys nothing, so the alarm it
+// asserted would now be a false positive (the ruling is recorded in that file).
+// The concern behind it — a loss that is SILENT is unrecoverable — survives the
+// widening and is pinned here against the class that survives with it. With the
+// key widened, the only remaining way an honest device's slot is credited while
+// no readable evidence covers it is an UNREADABLE stored row for that device's
+// claimed id (a disk fault, or a pre-hardening row): the push must not abort
+// inside its transaction (01-F17, the review #3 guard), so the slot is credited
+// conservatively — and the Auditor must then say so out loud.
+describe("A4 — the surviving byte-loss class is still LOUD (review #5's concern, re-pinned; 01-F17 / 20 §4.2)", () => {
+  it("01-F17/01-F37/DEC-SYNC-005: when the row holding this device's claimed id is UNREADABLE, the push survives and credits the slot (never a crash-wedge) — and because no readable row covers that slot, the Auditor raises a lamport_gap naming it: a loss is never silent", async () => {
+    const identity = freshIdentity();
+    const session = await openSession(gateway, identity);
+
+    // The corrupt pre-existing row for the device's OWN claimed id: only a disk
+    // fault (or a pre-hardening row) can put non-JSON in the text column — the
+    // gateway always writes JSON.stringify(envelope).
+    const slot1 = { ...unknownTypeEnvelope(identity, 1), id: newId() };
+    await db.execute(
+      sql`insert into kernel.quarantine
+            (id, org_id, branch_id, device_id, claimed_event_id, reason, envelope, received_at)
+          values (${newId()}, ${identity.org_id}, ${identity.branch_id}, ${identity.device_id},
+            ${slot1.id}, ${"storage_reject"}, ${"not-json{{{ CORRUPT"}, ${BASE_T})`,
+    );
+
+    await session.conn.handle(
+      pushMsg([validEnvelope(identity, 0), slot1, validEnvelope(identity, 2)]),
+    );
+    session.conn.close();
+
+    // No crash-wedge: the tail merged and the watermark advanced past slot 1.
+    expect(await storedWatermark(db, identity.org_id, identity.device_id)).toBe(2);
+
+    // LOUD: slot 1 was credited but the only row for it is unreadable, so it is
+    // covered by nothing — exactly the state an operator must be told about.
+    const report = await runAuditor({ db, org_id: identity.org_id });
+    const gaps = byCheck(report, "lamport_gap").filter((f) => f.device_id === identity.device_id);
+    expect(gaps.length).toBeGreaterThan(0);
+    expect(
+      gaps.map((finding) => must(finding.lamport_seq, "a lamport_gap finding names its slot")),
+    ).toEqual([1]);
+    expect(report.ok).toBe(false);
   });
 });

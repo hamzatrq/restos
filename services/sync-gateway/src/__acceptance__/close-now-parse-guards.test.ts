@@ -19,10 +19,12 @@
 //     symmetric to the refold's guarded read (auditor.ts:~249): an unreadable
 //     envelope → unparseable_merged_event finding, the report survives.
 //
-//   C (review #5, GREEN characterization) — no test asserts the lamport_gap
-//     finding actually EXISTS after a foreign device pre-claims an honest
-//     origin's event id. The "loud alarm, not silent wedge" ruling (F2-wedge-2)
-//     rests on it. This pins the presence of the gap for the stranded slot.
+//   C (review #5) — SUPERSEDED by the T-01-21 oracle; see the ruling block above
+//     the third describe. It pinned that a lamport_gap EXISTS after a foreign
+//     device pre-claims an honest origin's event id. That alarm was the last
+//     surviving trace of bytes the org-wide quarantine key destroyed; T-01-21
+//     widened the key so the bytes survive, and the assertion is replaced by the
+//     strictly stronger guarantee it was standing in for.
 import { newId } from "@restos/domain";
 import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -177,9 +179,36 @@ describe("review §6 / follow-up #1 — Auditor leg-5 type read survives a null-
   });
 });
 
-// ── C — the foreign pre-claim raises a LOUD lamport_gap, not a silent wedge ──
-describe("review #5 — a foreign pre-claim of an honest origin's event id raises a LOUD lamport_gap", () => {
-  it("DEC-SYNC-009/01-F1: after device A pre-claims (org, poisonId) and the hub relays O's outbox, the Auditor PRODUCES a lamport_gap finding for O's stranded poison slot — the loud-alarm ruling's guarantee (not a silent wedge)", async () => {
+// ── C — the foreign pre-claim now destroys NOTHING, so there is no alarm ─────
+//
+// RULING (T-01-21 oracle, plans/wave-0/t-01-21-quarantine-key.md; recorded here
+// rather than in a deleted test). The assertion this describe used to carry —
+// "the Auditor PRODUCES a lamport_gap for O's stranded poison slot" — is
+// OBSOLETE, not regressed. Its own premise, quoted from the version it replaces,
+// was: "O's slot fills (no wedge) but no O-attributed row covers it." That
+// premise held only because kernel.quarantine was keyed UNIQUE(org_id,
+// claimed_event_id) org-wide, so an insider's pre-claim DISCARDED the honest
+// origin's envelope entirely (audit-1 #6) and the gap was the only surviving
+// trace of the loss. T-01-21 widened the key to (org_id, claimed_event_id,
+// device_id): O now stores its OWN correctly-attributed row, the slot is covered
+// by attribution, and the Auditor is right to be silent. Keeping the old
+// assertion would pin a FALSE POSITIVE against the ratified coverage law
+// (01-F37 "the Auditor's lamport-gap check counts quarantine rows as
+// slot-filling"; DEC-SYNC-005) — it would require the Auditor to shout about
+// evidence that is intact.
+//
+// Review #5's real concern — a loss that is silent is unrecoverable — is NOT
+// dropped. It is re-pinned where a genuine loss still exists:
+//   • an uncovered slot is loud, and named against the RIGHT device —
+//     quarantine-key-auditor.test.ts, describe "A3 — loud, never silent";
+//   • the SURVIVING byte-loss class (a stored row whose bytes are unreadable
+//     covers nothing, yet its slot was credited — the state describe A above
+//     engineers) is loud — quarantine-key-auditor.test.ts, describe "A4".
+// What stands here instead is strictly stronger than the alarm it retires: no
+// alarm, because nothing was lost. The un-wedged watermark assertion is
+// unchanged.
+describe("review #5 (SUPERSEDED by T-01-21) — a foreign pre-claim destroys nothing, so there is nothing to be loud about", () => {
+  it("01-F37/01-F1/DEC-SYNC-005: after device A pre-claims (org, poisonId) and the hub relays O's outbox, O's OWN row is stored — attributed to O, holding O's bytes VERBATIM at the poison slot — so the origin is un-wedged (watermark 2) AND the Auditor reports NO lamport_gap for O: the slot is covered by attribution", async () => {
     const hub = freshIdentity();
     const origin = peerOf(hub, "w"); // O, the WAN-less origin
     const insider = peerOf(hub, "a"); // A, a plain same-branch device
@@ -193,24 +222,64 @@ describe("review #5 — a foreign pre-claim of an honest origin's event id raise
     // A pre-claims (org, poisonId): a schema-invalid envelope under A's own
     // identity carrying O's poison-event id → stored schema_invalid, attributed to A.
     const aSession = await openSession(gateway, insider);
-    await aSession.conn.handle(pushMsg([{ ...unknownTypeEnvelope(insider, 0), id: poisonId }]));
+    const preclaim = { ...unknownTypeEnvelope(insider, 0), id: poisonId };
+    await aSession.conn.handle(pushMsg([preclaim]));
     aSession.conn.close();
 
-    // The hub relays O's outbox. O's poison hits storage_reject and conflicts with
-    // A's pre-claim; O's slot fills (no wedge) but no O-attributed row covers it.
+    // The hub relays O's outbox. O's poison hits storage_reject and stores its own
+    // row under (org, poisonId, O) — the pre-claim blocks nothing now.
     const relay = await openSession(gateway, hub, {
       token: signedToken({ ...hub, hub_relay: true }),
     });
-    await relay.conn.handle(pushMsg(outbox));
+    const push = pushMsg(outbox);
+    if (push.kind !== "push") throw new Error("pushMsg did not build a push message");
+    await relay.conn.handle(push);
     relay.conn.close();
 
-    // The origin un-wedged (watermark advanced over the poison slot)…
+    // The origin un-wedged (watermark advanced over the poison slot) — unchanged.
     expect(await storedWatermark(db, hub.org_id, origin.device_id)).toBe(2);
+    const merged = (await eventRows(db, hub.org_id))
+      .filter((r) => r.device_id === origin.device_id)
+      .map((r) => r.lamport_seq)
+      .sort((a, b) => a - b);
+    expect(merged).toEqual([0, 2]); // slot 1 is the poison, durably quarantined
 
-    // …AND the loud alarm: a lamport_gap finding for O at the stranded poison slot 1.
+    // The evidence the old alarm stood in for: BOTH claimants' rows, each its own.
+    const rows = [
+      ...(await db.execute(
+        sql`select device_id, reason, envelope from kernel.quarantine
+            where org_id = ${hub.org_id} and claimed_event_id = ${poisonId}`,
+      )),
+    ].map((row) => ({
+      device_id: String(row.device_id),
+      reason: String(row.reason),
+      envelope: JSON.parse(String(row.envelope)) as unknown,
+    }));
+    const claimants = new Map(rows.map((row) => [row.device_id, row]));
+    expect([...claimants.keys()].sort()).toEqual([insider.device_id, origin.device_id].sort());
+
+    // O's row: O's attribution, O's true class, O's bytes exactly as received
+    // (01-F1 — a relay attests, it never re-authors).
+    const originRow = must(claimants.get(origin.device_id), "the honest origin's own row");
+    expect(originRow.reason).toBe("storage_reject");
+    const received = JSON.parse(
+      JSON.stringify(must(push.events[1], "the relayed poison as received")),
+    ) as unknown;
+    expect(originRow.envelope).toEqual(received);
+    // A's pre-claim is untouched by O's arrival — neither device inherits the other's.
+    const insiderRow = must(claimants.get(insider.device_id), "the pre-claimer's row");
+    expect(insiderRow.reason).toBe("schema_invalid");
+    expect(insiderRow.envelope).not.toEqual(originRow.envelope);
+
+    // NO alarm, because nothing was lost: the slot is covered by attribution
+    // (01-F37 / DEC-SYNC-005). Loudness on a GENUINE loss is pinned in
+    // quarantine-key-auditor.test.ts, describes A3 and A4.
     const report = await runAuditor({ db, org_id: hub.org_id });
-    const oGaps = byCheck(report, "lamport_gap").filter((f) => f.device_id === origin.device_id);
-    expect(oGaps.some((f) => f.lamport_seq === 1)).toBe(true);
-    expect(oGaps).not.toEqual([]); // presence, not silence — the ruling's whole point
+    expect(byCheck(report, "lamport_gap").filter((f) => f.device_id === origin.device_id)).toEqual(
+      [],
+    );
+    expect(byCheck(report, "lamport_gap").filter((f) => f.device_id === insider.device_id)).toEqual(
+      [],
+    );
   });
 });

@@ -16,6 +16,29 @@ Verdict: kernel sound; ordering design would-stake-cash-on-it. Two merge conditi
 - follow-up — heal→notice reconciliation; live zstd framing wiring; fold-brand migration (DEC-MONEY-005, now unblocked).
 - review #6 — widen quarantine key to (org, claimed_event_id, device_id) so a foreign pre-claim doesn't lose the honest event's bytes.
 
+## Open after T-01-21 — the last silent case in the credit law
+
+**Double-claim stall (found by the T-01-21 oracle, not ruled).** Widening the quarantine
+key retired every *byte-losing* case, but one refusal survives by design: when an origin
+already holds a row for a claimed id **at a different slot** (a forged id reused across
+two of its own slots), the gateway must not credit the second slot — crediting it would
+fabricate coverage, and the fix-round-1 double-claim pin requires the refusal.
+
+The residual is that this refusal is **silent**: the watermark never advances, so `hi`
+never exceeds the last covered slot, so the Auditor sees no gap and reports nothing.
+Review #5's objection — *silence is unrecoverable where loudness is not* — still has
+purchase here, and T-01-21 did not change it.
+
+Mitigating, which is why it is filed rather than blocking: the input is **forged** (an
+honest device never reuses an event id across slots), and the device's own `push_ack`
+stops advancing, so the device itself can tell. Nothing is lost — the bytes of both
+claims are stored under the widened key.
+
+Closing it needs a **new law**, not a patch: either double-claim rows extend the coverage
+obligation, or doc-15 grows a stalled-device signal driven by a watermark that stops
+moving while an outbox is non-empty. The second is likely better — it catches every
+stall cause, not just this one. Needs its own loop and an FR.
+
 ## Founder decisions — surface, cannot code
 - review #1 residual / F3-eager — eviction-latency SLA (eager `revokeDevice`→gateway hook) — candidate DEC.
 - review #8 — fold money accumulators are unguarded doubles (DEC-MONEY-005 fold clause) — schedule, don't just document.

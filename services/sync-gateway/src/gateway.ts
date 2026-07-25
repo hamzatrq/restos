@@ -335,10 +335,21 @@ export const createGateway = ({
     // legal; a marked row is never redelivered on a later hello.
     const pendingNotices = [
       ...(await db.execute(
-        sql`select id, claimed_event_id, reason from kernel.quarantine_notices
-            where org_id = ${session.orgId} and device_id = ${session.deviceId}
-              and delivered_at is null
-            order by created_at asc, claimed_event_id asc`,
+        // Superseded rows are skipped (T-01-21, review #7): if this device's claimed
+        // event later merged legitimately, telling its origin "rejected" would be a
+        // durable lie about an event that IS in the merged log — and one redelivered
+        // on every subsequent hello. The join is on the full widened key so one
+        // device's superseded row never suppresses another device's live notice for
+        // the same claimed id.
+        sql`select n.id, n.claimed_event_id, n.reason from kernel.quarantine_notices n
+            where n.org_id = ${session.orgId} and n.device_id = ${session.deviceId}
+              and n.delivered_at is null
+              and not exists (
+                select 1 from kernel.quarantine q
+                where q.org_id = n.org_id and q.claimed_event_id = n.claimed_event_id
+                  and q.device_id = n.device_id and q.superseded_at is not null
+              )
+            order by n.created_at asc, n.claimed_event_id asc`,
       )),
     ];
     for (const row of pendingNotices) {
@@ -496,7 +507,7 @@ export const createGateway = ({
                 (id, org_id, branch_id, device_id, claimed_event_id, reason, envelope, received_at)
               values (${newId()}, ${session.orgId}, ${session.branchId}, ${deviceId},
                 ${envelope.id}, ${reason}, ${JSON.stringify(envelope)}, ${clock.now()})
-              on conflict (org_id, claimed_event_id) do nothing
+              on conflict (org_id, claimed_event_id, device_id) do nothing
               returning claimed_event_id`,
         );
         // T-01-08 (DEC-SYNC-008): EVERY quarantine class writes a notice-outbox
@@ -511,45 +522,46 @@ export const createGateway = ({
                 (id, org_id, branch_id, device_id, claimed_event_id, reason, created_at, delivered_at)
               values (${newId()}, ${session.orgId}, ${session.branchId}, ${deviceId},
                 ${envelope.id}, ${reason}, ${clock.now()}, null)
-              on conflict (org_id, claimed_event_id) do nothing`,
+              on conflict (org_id, claimed_event_id, device_id) do nothing`,
         );
-        // T-01-11 fix round 2 (corrected F2): the slot fill is tracked per (ORIGIN,
-        // slot), NOT per (org, claimed_event_id). Fix round 1 filled a slot only when
-        // THIS insert stored a row — which credited nothing when a NO-FILL-class row
-        // (origin_unregistered, stream=null) already held the claimed id, PERMANENTLY
-        // and SILENTLY wedging an honest WAN-less origin whose events were relayed
-        // BEFORE it registered: through stops, stop-at-gap strands the tail, the Auditor
-        // audits clean (DEC-SYNC-009 R3/X9 never-wedge + commandment 4 violated).
-        // Corrected: a fill-class quarantine credits the origin's slot UNLESS the
-        // blocking row is this SAME origin's own row at a DIFFERENT slot — a forged id
-        // reused across two of the origin's slots, whose slot is durably held by no row
-        // of this origin (F2's false-gap; the fix-round-1 double-claim pin). A
-        // no-fill-class prior or a FOREIGN origin's pre-claim never blocks; a genuine
-        // (origin, slot) duplicate re-credits via fill()'s slot<=through guard — once.
+        // Slot fill is tracked per (ORIGIN, slot). T-01-21 WIDENED the quarantine key to
+        // (org, claimed_event_id, device_id), which collapses most of what the T-01-11
+        // F2-amend had to reason about: a FOREIGN pre-claim can no longer block this
+        // origin's insert at all, so it can no longer cost the origin its bytes OR its
+        // credit. The insert can now only conflict with THIS SAME device's own row for
+        // this claimed id — so the heal-in-place UPDATE is gone too (an honest origin
+        // relayed before it registered simply stores its OWN correctly-attributed row
+        // once it registers, rather than needing the hub's placeholder rewritten).
+        //
+        // The one surviving refusal is F2's genuine forgery case: this origin already
+        // holds a row for this claimed id at a DIFFERENT slot — a forged id reused
+        // across two of its own slots, so THIS slot is durably held by no row of this
+        // origin and crediting it would fabricate coverage. Same-slot re-push is a
+        // genuine duplicate and re-credits through fill()'s slot<=through guard, once.
         if (stream !== null) {
           if ([...stored].length > 0) {
             fill(stream, envelope.lamport_seq);
           } else {
-            // The insert conflicted — inspect the blocking row for this claimed id.
+            // Conflict ⇒ this device's own prior row for this claimed id.
             const blocker = [
               ...(await tx.execute(
-                sql`select device_id, reason, envelope from kernel.quarantine
-                    where org_id = ${session.orgId} and claimed_event_id = ${envelope.id}`,
+                sql`select envelope from kernel.quarantine
+                    where org_id = ${session.orgId} and claimed_event_id = ${envelope.id}
+                      and device_id = ${deviceId}`,
               )),
             ][0];
-            // review #3 (close-now, audit-1): the blocker's envelope column is
-            // TEXT and MAY be corrupt (a disk fault, or a pre-storage-hardening
-            // row) — a bare JSON.parse here throws INSIDE the push transaction
-            // and aborts the WHOLE push, so the origin's outbox re-pushes the
-            // same batch forever (a crash-wedge, never allowed: 01-F17). Guard
-            // it: an unreadable blocker cannot PROVE the same-origin-other-slot
-            // forgery case, so we take the conservative no-wedge direction —
-            // treat it as absent and credit the origin's slot below.
-            let blockerEnvelope: { device_id?: unknown; lamport_seq?: unknown } | undefined;
+            // review #3 (close-now, audit-1): the envelope column is TEXT and MAY be
+            // corrupt (a disk fault, or a pre-storage-hardening row) — a bare
+            // JSON.parse here throws INSIDE the push transaction and aborts the WHOLE
+            // push, so the origin's outbox re-pushes the same batch forever (a
+            // crash-wedge, never allowed: 01-F17). Still load-bearing after the
+            // widening, though narrower: it can now only ever see this device's own
+            // row. An unreadable blocker cannot PROVE the other-slot forgery, so we
+            // take the conservative no-wedge direction and credit the slot below.
+            let blockerEnvelope: { lamport_seq?: unknown } | undefined;
             if (blocker !== undefined) {
               try {
                 blockerEnvelope = JSON.parse(String(blocker.envelope)) as {
-                  device_id?: unknown;
                   lamport_seq?: unknown;
                 };
               } catch {
@@ -560,37 +572,9 @@ export const createGateway = ({
                 );
               }
             }
-            // sameOriginOtherSlot is a PROVEN forgery (same origin's row at a
-            // DIFFERENT slot); an unparseable blockerEnvelope proves nothing, so
-            // it must fall through to the fill (credit) below.
             const sameOriginOtherSlot =
-              blocker !== undefined &&
-              blockerEnvelope !== undefined &&
-              String(blocker.device_id) === deviceId &&
-              blockerEnvelope.lamport_seq !== envelope.lamport_seq;
-            if (!sameOriginOtherSlot) {
-              // When the blocker is the PROVISIONAL origin_unregistered placeholder
-              // stored while this origin was still unregistered (the DEC-SYNC-009
-              // unregistered→registered relay race) and it holds THIS same event, heal
-              // its attribution + class to the now-registered origin so the T-01-11
-              // Auditor counts it as the slot's filler (coverage-by-attribution stays
-              // true — no gap-leg change). A FOREIGN fill-class pre-claim is left
-              // untouched (01-F1 — the relay never re-authors it): the origin's slot is
-              // still credited (un-wedged), and its uncovered slot surfaces as a LOUD
-              // lamport_gap, never a silent wedge.
-              if (
-                blocker !== undefined &&
-                blocker.reason === "origin_unregistered" &&
-                String(blockerEnvelope?.device_id) === deviceId &&
-                blockerEnvelope?.lamport_seq === envelope.lamport_seq
-              ) {
-                await tx.execute(
-                  sql`update kernel.quarantine set device_id = ${deviceId}, reason = ${reason}
-                      where org_id = ${session.orgId} and claimed_event_id = ${envelope.id}`,
-                );
-              }
-              fill(stream, envelope.lamport_seq);
-            }
+              blockerEnvelope !== undefined && blockerEnvelope.lamport_seq !== envelope.lamport_seq;
+            if (!sameOriginOtherSlot) fill(stream, envelope.lamport_seq);
           }
         }
       };
@@ -730,6 +714,20 @@ export const createGateway = ({
           await quarantine(stream, envelope, "storage_reject", envelope.device_id);
           continue;
         }
+        // Review #7 (ruled): this event has now legitimately merged, so any quarantine
+        // row still holding its claimed id is a stale placeholder — typically the hub's
+        // provisional `origin_unregistered` copy from the DEC-SYNC-009 race, stored
+        // before the origin registered. It is MARKED superseded, never deleted: the
+        // table is evidence of what a device tried to send, and deleting it would leave
+        // an investigation a hole with no trace anything was removed (01-F1's spirit).
+        // Marked rows drop out of the doc-15 live-quarantine surface and stop being
+        // drained as notices — an origin must not be told its event was rejected when
+        // the event is in the merged log.
+        await tx.execute(
+          sql`update kernel.quarantine set superseded_at = ${serverReceivedAt}
+              where org_id = ${session.orgId} and claimed_event_id = ${envelope.id}
+                and superseded_at is null`,
+        );
         merged.push({ envelope, globalSeq: nextSeq, serverReceivedAt });
         storedById.set(envelope.id, envelope); // in-batch dedupe view (amendment 1)
         nextSeq += 1;

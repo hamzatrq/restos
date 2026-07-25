@@ -83,8 +83,18 @@ export const quarantine = kernel.table(
     reason: text("reason").notNull(),
     envelope: text("envelope").notNull(),
     received_at: bigint("received_at", { mode: "number" }).notNull(),
+    // Review #7 (ruled): a placeholder whose event was later legitimately merged is
+    // RETAINED and marked, never deleted — this table is evidence of what a device
+    // tried to send, and deleting would leave an investigation a hole with no trace.
+    // null ⇔ live; listQuarantine filters non-null out of the doc-15 live surface.
+    superseded_at: bigint("superseded_at", { mode: "number" }),
   },
-  (t) => [unique("quarantine_org_claimed_event_uq").on(t.org_id, t.claimed_event_id)],
+  // ONE ROW PER CLAIMANT DEVICE per claimed event id (audit-1 #6). The org-wide
+  // (org_id, claimed_event_id) unique index is deliberately GONE: it let the FIRST
+  // claimant own the only slot, so an honest origin arriving second had its envelope
+  // DISCARDED ENTIRELY — bytes gone, not merely mis-attributed. A trivial insider
+  // pre-claim destroyed exactly the evidence 01-F37 exists to preserve.
+  (t) => [unique("quarantine_org_claimed_device_uq").on(t.org_id, t.claimed_event_id, t.device_id)],
 );
 
 /**
@@ -130,7 +140,15 @@ export const quarantineNotices = kernel.table(
     delivered_at: bigint("delivered_at", { mode: "number" }),
   },
   (t) => [
-    unique("quarantine_notices_org_claimed_event_uq").on(t.org_id, t.claimed_event_id),
+    // Widened in lockstep with kernel.quarantine (T-01-21). Left at the org-wide pair
+    // it would silently defeat the widening: the second claimant's row would exist but
+    // its origin could NEVER be notified, so an honest device whose event was rejected
+    // would simply never hear about it — the exact silence 01-F37 exists to prevent.
+    unique("quarantine_notices_org_claimed_device_uq").on(
+      t.org_id,
+      t.claimed_event_id,
+      t.device_id,
+    ),
     // The hello-time drain query (undelivered notices for one device).
     index("quarantine_notices_org_device_delivered_idx").on(t.org_id, t.device_id, t.delivered_at),
   ],

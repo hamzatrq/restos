@@ -370,7 +370,8 @@ const parseEnvelopeColumn = (value: unknown): Record<string, unknown> =>
 export const quarantineRows = async (db: Db, orgId: string): Promise<QuarantineRow[]> => {
   const rows = await db.execute(
     sql`select id, org_id, branch_id, device_id, claimed_event_id, reason, envelope, received_at
-        from kernel.quarantine where org_id = ${orgId} order by received_at asc, claimed_event_id asc`,
+        from kernel.quarantine where org_id = ${orgId}
+        order by received_at asc, claimed_event_id asc, device_id asc`,
   );
   return [...rows].map((row) => ({
     id: String(row.id),
@@ -384,17 +385,37 @@ export const quarantineRows = async (db: Db, orgId: string): Promise<QuarantineR
   }));
 };
 
-/** The RAW driver value of kernel.quarantine.envelope for one claimed event id. */
+/**
+ * The RAW driver value of kernel.quarantine.envelope for one claimed event id.
+ *
+ * `deviceId` is optional but matters since T-01-21 widened the key to
+ * (org, claimed_event_id, device_id): several devices can now hold a row for the same
+ * claimed id, so "the row" is only well-defined per device. Omitting it asserts there
+ * is exactly ONE row — the helper fails loudly rather than silently picking one, which
+ * would make a test pass against whichever claimant happened to sort first.
+ */
 export const quarantineEnvelopeRaw = async (
   db: Db,
   orgId: string,
   claimedEventId: string,
+  deviceId?: string,
 ): Promise<unknown> => {
-  const rows = await db.execute(
-    sql`select envelope from kernel.quarantine
-        where org_id = ${orgId} and claimed_event_id = ${claimedEventId}`,
-  );
-  return must([...rows][0], `quarantine row for claimed id ${claimedEventId}`).envelope;
+  const rows = [
+    ...(await db.execute(
+      sql`select device_id, envelope from kernel.quarantine
+          where org_id = ${orgId} and claimed_event_id = ${claimedEventId}
+          ${deviceId === undefined ? sql`` : sql`and device_id = ${deviceId}`}
+          order by device_id asc`,
+    )),
+  ];
+  if (deviceId === undefined && rows.length > 1) {
+    throw new Error(
+      `quarantineEnvelopeRaw: ${rows.length} rows for claimed id ${claimedEventId} ` +
+        `(devices ${rows.map((r) => String(r.device_id)).join(", ")}) — pass deviceId; ` +
+        "the T-01-21 key is (org, claimed_event_id, device_id)",
+    );
+  }
+  return must(rows[0], `quarantine row for claimed id ${claimedEventId}`).envelope;
 };
 
 export const storedWatermark = async (

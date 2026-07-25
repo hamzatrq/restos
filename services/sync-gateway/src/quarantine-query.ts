@@ -5,6 +5,15 @@
 // ABSOLUTELY (00 §5.4 — another org reusing the same branch_id string never
 // leaks), optional branch/device filters, received_at DESC (newest first),
 // page-capped. Listing changes nothing.
+//
+// This is the LIVE quarantine surface (T-01-21): rows marked `superseded_at` are
+// excluded. A superseded row is a placeholder whose event later merged legitimately —
+// retained as evidence (review #7, ruled) but not a problem anyone needs to act on,
+// so counting it here would show staff a permanent phantom in the "needs attention"
+// list. The sort adds `device_id` because the widened key
+// (org, claimed_event_id, device_id) makes several rows per claimed id possible, and
+// (received_at, claimed_event_id) alone stopped being a total order — an unstable
+// sort silently breaks paging by dropping or repeating rows at page boundaries.
 import { sql } from "drizzle-orm";
 import type { GatewayDb } from "./gateway.js";
 
@@ -36,9 +45,10 @@ export const listQuarantine = async (
     sql`select claimed_event_id, device_id, reason, received_at, envelope
         from kernel.quarantine
         where org_id = ${filter.org_id}
+          and superseded_at is null
         ${filter.branch_id === undefined ? sql`` : sql`and branch_id = ${filter.branch_id}`}
         ${filter.device_id === undefined ? sql`` : sql`and device_id = ${filter.device_id}`}
-        order by received_at desc, claimed_event_id desc
+        order by received_at desc, claimed_event_id desc, device_id desc
         limit ${limit}`,
   );
   return [...rows].map((row) => ({
