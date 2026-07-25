@@ -6,7 +6,15 @@ minutes, and picking the wrong side would be a money bug. Each is written here s
 next session finds the reasoning instead of re-deriving it — and so nobody "tidies" one
 side without a ruling.
 
+> **BOTH ARE NOW RULED (founder, July 2026).** The analysis below stands as the record of
+> *why*; the decisions are stated at the head of each section and promoted into the FRs
+> (`01-F31` for R1, `01-F29` + DEC-SYNC-007 for R2). Implementing task: **T-01-21**.
+
 ## R1 — `settlement_attempt_id` uniqueness is trusted, not enforced (review #11)
+
+**RULED: detect and alarm, never reject.** The gateway checks org-global uniqueness and
+raises a loud fleet-health + Auditor anomaly on collision, but still merges the event.
+The rejecting variant analysed below is refused on the 01-F17 grounds it names.
 
 `01-F31` (ratified, DEC-MONEY-008) makes the token **org-globally unique, UI-minted,
 UUID-class**. The entire unique-keyed-sum money algebra (`26 §7`) rests on it: a colliding
@@ -31,6 +39,11 @@ rather than an anomaly, and a device whose UI mints badly would have real sales 
 That trade needs a founder ruling before it lands, because it can block a sale (01-F17).
 
 ## R2 — divergent-parent cap tolerance splits between gateway and engine (review #12)
+
+**RULED: the gateway stops picking.** A disputed parent attempt key makes the cap
+unprovable, so the refund passes through with the anomaly flagged — matching both
+DEC-SYNC-007's fold-free-provable scope and the engine's disputed-contributes-zero law.
+The recommendation below is now the decision; implement it in T-01-21.
 
 The refund cap (`01-F29`) is evaluated in two places with **two different tie policies**:
 

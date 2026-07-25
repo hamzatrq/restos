@@ -164,7 +164,7 @@ restos/
 Three layers, strictly ordered; lower layers cannot override higher ones:
 
 1. **Platform admin (vendor):** org provisioning, feature flags/tier enablement, own-channel take-rate %, rollout channels.
-2. **Organization (back office):** operating profile, hardware tier (T1/T2/T3), channels enabled, menu/catalog/recipes, roles & users, **signal ownership** (which role advances which order state — e.g. who marks "ready"), approval thresholds (discount %, void rules), tax posture, printer routing rules, alert thresholds.
+2. **Organization (back office):** operating profile, hardware tier (T1/T2/T3), channels enabled, menu/catalog/recipes, roles & users, **signal ownership** (which role advances which order state — e.g. who marks "ready"), approval thresholds (discount %, void rules), tax posture, printer routing rules, alert thresholds, **business-day cutover hour** (default 05:00; the Asia/Karachi anchor itself is platform law, not a setting — 01-F46).
 3. **Branch/device:** printer assignments, station identity (this screen is "grill"), float amounts, idle-lock timeout.
 
 **Presets, not knobs:** restaurants pick a profile + tier which sets sane defaults for everything in layer 2; individual settings are adjustable within designed bounds, but modules must not introduce free-form configuration. Every module doc's Customizability section lists exactly which settings it exposes at which layer — and states what is deliberately NOT configurable.

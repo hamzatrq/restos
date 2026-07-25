@@ -60,7 +60,22 @@ quarantine row at send time rather than duplicated at write time. **Prefer the d
 read** — one source of truth cannot drift from itself. Redelivery stays at-least-once with
 duplicates legal (DEC-SYNC-008); the *content* must reflect the healed state.
 
-## Open question for review #7 (do not silently pick)
+## Review #7 — RULED (founder, July 2026): option (b), retain and mark superseded
+
+The placeholder **stays** and is marked `superseded_at` (null ⇔ live), filtered out of
+`listQuarantine` and the doc-15 fleet-health counts. Rationale accepted as argued below:
+this table exists to preserve evidence of what a device tried to send, and (a) would leave
+a later investigation with a hole and no trace that anything was removed. Promoted into
+`01-F37`. The oracle's `PENDING RULING #7(b)` test is now simply a required test.
+
+Also ruled in the same round and implemented here: the **notification target** for
+identity-failure classes is the device that actually **pushed** the event, not the claimed
+origin (promoted into `01-F37`) — notifying a forgeable claimed origin would let anyone
+flood an innocent terminal with rejection notices, turning the honesty UI into a spam
+channel. This resolves the `01-F37`-vs-F2-attribution tension the oracle flagged: the spec
+text was the thing that was wrong, and it has been amended rather than the code.
+
+### Original analysis (retained for the record)
 
 A valid pre-registration relay can leave an event **both merged and quarantined** — a
 placeholder that outlives its usefulness. Widening the key does not by itself retire the
