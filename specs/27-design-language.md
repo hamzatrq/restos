@@ -59,6 +59,33 @@ The ergonomics and low-literacy strands converge here from opposite directions, 
 
 - 27-F11d **An S1 alarm takes a BAND, never the screen** (founder ruling, July 2026; amends 21 §5's interrupt-priority law and doc 03's S1 shape). A print failure, red-late order or critical cash variance renders as a persistent, loud, repeating banner that cannot be dismissed without an attributed acknowledgement — **and the work underneath stays visible and usable.** A half-built cart is never taken away from a cashier with a customer waiting. Reasoning: 01-F17 says a sale is never blocked, and an alarm that interrupts a transaction teaches staff to fear the screen, which is how workarounds start. Escalation to the manager console at 60 s is unchanged. Deferring the alarm to a "safe moment" is also rejected — food is not being cooked, so the delay is the harm.
 
+## 2a. Paper is the primary kitchen surface (founder field ruling, July 2026)
+
+**Even many large Pakistani restaurants prefer paper in the kitchen; only some use a
+screen.** Doc 03 lists "printing service" and "pass screen" as co-equal Wave-1
+deliverables, which understates it. This reorders the module and doc 27 with it.
+
+- 27-F11e **The KOT is the primary kitchen interface, and the pass screen is optional.**
+  Everything in §1–§2 and §3–§5 governs glass. For most deployments the kitchen never
+  sees glass. Print reliability, not screen design, is the kitchen's critical path.
+- 27-F11f **Where a pass screen IS used it is a 22-inch panel** (founder ruling): the
+  smallest size showing three tickets at 1.5 m without paging (10″ ≈ 1.5 tickets, 15.6″ ≈ 2,
+  22″ ≈ 3), with room for the 96 dp wet-hand bump targets of 27-F8. Doc 03's "one cheap
+  Android tablet at the pass" is superseded.
+- 27-F11g **A failed print is more severe than modelled.** Where paper is the only kitchen
+  channel there is no screen fallback — a failed KOT means food is genuinely not being
+  cooked and nobody knows. The S1 band of 27-F11d is the *only* signal, which is precisely
+  why it must be loud, persistent and un-dismissable without acknowledgement, and why it
+  must not steal the cashier's cart (she is the one who has to react).
+- 27-F11h **GAP, named not solved: this document has no design language for thermal paper.**
+  §3–§5 are colour, type at distance, and icons — none survive an 80 mm monochrome
+  receipt. The low-literacy problem does not disappear on paper; it changes shape. A cook
+  who cannot read must still parse a KOT, and there the load falls entirely on **numerals,
+  vertical position, and whitespace** — the only channels thermal printing has. Doc 03's
+  bitmap-rasterisation path (03-F8) covers rendering non-Latin *content*, not making a
+  ticket legible to a non-reader. **This is the most important unsolved design problem in
+  Wave 1 and it is owed a section here plus FRs in doc 03.**
+
 ## 3. Colour
 
 Colour is the strongest guiding attribute in vision, which is exactly why it must be scarce: every additional colour on screen makes every other colour a worse target. Two standards bodies already say this for our class of display — ISA-101 mandates a low-saturation grey base with colour reserved for abnormal conditions, and IEC 60073 fixes the meanings.
