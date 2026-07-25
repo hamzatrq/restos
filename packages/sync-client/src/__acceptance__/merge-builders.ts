@@ -331,6 +331,12 @@ export const settlementClosed = (order_id: string, extra: Record<string, unknown
 // "byte-equal under clock injection" is reported, not silently absorbed.
 // parked() contributes membership only (waiting_for / envelope_json are
 // delivery-layer, deliberately unpinned).
+//
+// T-01-17 NOTE (DEC-TIME-001 now accepted): that exclusion is superseded. 01-F45
+// bans the device clock from folds, so the time columns are inside the invariance
+// law — `time-invariance.test.ts` compares the FULL projection (see
+// `fullProjectionBytes` in time-builders.ts). The invariant view below is left as
+// the T-01-15 artifact it is; it is a strict subset of what T-01-17 asserts.
 // ---------------------------------------------------------------------------
 
 export const projection = (store: MergeStore) => ({

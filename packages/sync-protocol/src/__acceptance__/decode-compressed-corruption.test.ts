@@ -43,6 +43,8 @@ const fixedPage = (n: number): ProtocolMessage =>
       actor_user_id: null,
       lamport_seq: i,
       device_created_at: 1_752_800_000_000,
+      branch_created_at: 1_752_800_000_000, // T-01-17 (01-F43)
+      time_basis: "branch", // T-01-17 (01-F44)
       server_received_at: null,
       type: "order.created",
       schema_version: 1,

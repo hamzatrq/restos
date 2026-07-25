@@ -44,8 +44,16 @@
 //   { type:"fatal",    message }                 a caught startup/runtime error
 import type { DeviceClass, EventEnvelopeT } from "@restos/domain";
 
-/** Append input = envelope minus the store-assigned fields (matches DeviceStore.append). */
-export type AppendInput = Omit<EventEnvelopeT, "lamport_seq" | "server_received_at">;
+/**
+ * Append input = envelope minus the store-assigned fields (matches DeviceStore.append).
+ * `branch_created_at` + `time_basis` joined that set in T-01-17: the store stamps branch
+ * time at append (01-F43) and a caller must not be able to choose its own stamp or claim
+ * a `branch` basis it never earned.
+ */
+export type AppendInput = Omit<
+  EventEnvelopeT,
+  "lamport_seq" | "server_received_at" | "branch_created_at" | "time_basis"
+>;
 
 export type LanPeer = { device_id: string; host: string; port: number };
 export type LanRole = "hub" | "follower";

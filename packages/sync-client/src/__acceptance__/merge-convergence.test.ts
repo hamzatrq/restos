@@ -261,13 +261,33 @@ describe("durability — the merge projection survives abrupt abandon (01-F2/01-
   });
 });
 
-describe("time-valued columns — value stamping unchanged until DEC-TIME-001 (T-01-15 out-of-scope note)", () => {
-  it("01-F6: a single confirm stamps confirmed_at/confirm_at from its own device_created_at (value law unchanged; rank law is clock-free)", () => {
+// T-01-17 SUPERSESSION (DEC-TIME-001 accepted): the T-01-15 out-of-scope note kept
+// the value stamping on `device_created_at` and flagged the conflict with 01-F34 for
+// correction rather than absorbing it. 01-F45 now bans the device clock from folds
+// outright, so the value law below is re-derived from `branch_created_at` — with the
+// two stamps driven APART, which is the only shape that can tell them apart. The
+// rank law (anchor SELECTION over (payloadHash, id)) is unchanged and clock-free.
+// The deeper invariance properties live in time-invariance.test.ts.
+describe("time-valued columns — value stamping is BRANCH time (01-F45, T-01-17)", () => {
+  it("01-F45/01-F6: a single confirm stamps confirmed_at/confirm_at from its branch_created_at — its device clock is six years off and contributes nothing", () => {
     const id = identity();
     const peer = peerIdentity(id);
     const store = mergeStore(id);
-    store.ingest(peerEnvelope(peer, 0, { ...created("O1"), ...at(0) }));
-    store.ingest(peerEnvelope(peer, 1, { ...confirmed("O1"), ...at(500) }));
+    const wrongClock = T0 - 6 * 365 * 24 * 60 * 60 * 1000;
+    store.ingest(
+      peerEnvelope(peer, 0, {
+        ...created("O1"),
+        branch_created_at: T0,
+        device_created_at: wrongClock,
+      }),
+    );
+    store.ingest(
+      peerEnvelope(peer, 1, {
+        ...confirmed("O1"),
+        branch_created_at: T0 + 500,
+        device_created_at: wrongClock + 500,
+      }),
+    );
     expect(store.openOrders()[0]?.confirmed_at).toBe(T0 + 500);
     expect(store.kitchenQueue()[0]?.confirm_at).toBe(T0 + 500);
     store.close();

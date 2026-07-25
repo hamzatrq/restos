@@ -48,6 +48,35 @@ describe("golden fixtures (20 §2.7)", () => {
     expect(push.watermark).toBe(pushedEvent.lamport_seq);
   });
 
+  it("01-F43/01-F44 (T-01-17 re-pin): every fixture envelope carries the time layer — integer branch_created_at + a closed time_basis marker", () => {
+    // The wire contract now carries branch-consensus time (01-F43) and the
+    // provisional marker (01-F44) alongside the RAW device clock (01-F45, kept for
+    // 01-N2 skew forensics). The golden set pins BOTH marker values: push.json is a
+    // device-local append that has had no hub contact (branch_provisional,
+    // server_received_at null); the merged streams carry branch.
+    const envelopesOf = (kind: string): Array<Record<string, unknown>> => {
+      const decoded = decodeMessage(fixtureText(kind)) as {
+        events?: Array<Record<string, unknown>>;
+      };
+      return decoded.events ?? [];
+    };
+    const seenBases = new Set<unknown>();
+    for (const kind of ["push", "event_batch", "catchup_response"]) {
+      const events = envelopesOf(kind);
+      expect(events.length, kind).toBeGreaterThan(0);
+      for (const event of events) {
+        expect(Number.isInteger(event.branch_created_at), `${kind}.branch_created_at`).toBe(true);
+        expect(Number.isInteger(event.device_created_at), `${kind}.device_created_at`).toBe(true);
+        expect(["branch", "branch_provisional"], `${kind}.time_basis`).toContain(event.time_basis);
+        seenBases.add(event.time_basis);
+      }
+    }
+    expect([...seenBases].sort()).toEqual(["branch", "branch_provisional"]);
+    const [pushed] = envelopesOf("push");
+    expect(pushed?.time_basis).toBe("branch_provisional"); // never yet seen by the cloud
+    expect(pushed?.server_received_at).toBeNull();
+  });
+
   it("01-F3/01-F9: the event_batch fixture carries a cloud-assigned non-negative integer global_seq", () => {
     const batch = decodeMessage(fixtureText("event_batch")) as {
       events: Array<{ global_seq?: number; server_received_at: number | null }>;

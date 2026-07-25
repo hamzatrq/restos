@@ -354,6 +354,11 @@ export const createMeshSession = (options: {
     if (winner === self.device_id) {
       if (state === "follower" || state === "candidate") teardownFollower();
       state = visible.size === 0 ? "solo" : "hub"; // solo acts as hub for later joiners
+      // This device IS the branch time authority now (01-F43), so its offset to branch
+      // time is 0 BY DEFINITION — and that is a materially different state from
+      // never-having-contacted-a-hub, which also sits at offset 0 but must keep
+      // stamping `branch_provisional`. Recording it flips the basis to `branch`.
+      store.setBranchTimeOffset(0);
       return;
     }
     if (state === "hub" || state === "solo") teardownHub();
@@ -443,7 +448,18 @@ export const createMeshSession = (options: {
       }
       case "ping": {
         if (from !== hubTarget) return; // non-hub pings: life already noted above
-        lastHubAliveAt = clock.now();
+        const at = clock.now();
+        lastHubAliveAt = at;
+        // Branch-time offset acquisition (01-F43, T-01-17). The hub heartbeats its
+        // followers, so this inbound `t` IS branch time at the moment the hub sent it —
+        // no extra message kind, no extra timer, no round trip to arrange. The estimate
+        // runs one-way-delay early by exactly the LAN transit time, which 01-F15 bounds
+        // at < 1 s p95 and is typically single-digit ms. That error is irrelevant at
+        // both scales that consume this: the 01-N2 skew flag trips at 5 MINUTES, and
+        // every duration the product renders is minutes-to-hours of kitchen age. What
+        // matters is that all followers take their offset from the SAME hub clock, so
+        // the residual cancels in every difference (01-F43's whole argument).
+        store.setBranchTimeOffset(message.t - at);
         send(from, { v: 1, kind: "pong", t: message.t });
         return;
       }

@@ -11,6 +11,11 @@ const envelope = (type: string, payload: unknown) => ({
   actor_user_id: newId(),
   lamport_seq: 1,
   device_created_at: 1752800000000,
+  // T-01-17 (DEC-TIME-001): the ratified envelope carries the time layer —
+  // branch-consensus time (01-F43) + its basis marker (01-F44). A zero-offset
+  // device stamps branch == device time.
+  branch_created_at: 1752800000000,
+  time_basis: "branch" as const,
   server_received_at: null,
   type,
   schema_version: 1,

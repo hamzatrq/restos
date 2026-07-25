@@ -12,6 +12,7 @@ export {
 export {
   AckBeyondAppendedError,
   type AppendInput,
+  type BranchTimeStatus,
   type DeviceStore,
   DivergentDuplicateError,
   type IngestBatchResult,
@@ -20,6 +21,7 @@ export {
   openStore,
   type PageItem,
   type PageResult,
+  SKEW_FLAG_THRESHOLD_MS,
   type StoreIdentity,
   type SyncStatus,
 } from "./device-store.js";

@@ -51,20 +51,28 @@ const BASE_TS = 1_752_800_000_000;
 export const xpToken = (): string =>
   signedToken({ org_id: XP_ORG, branch_id: XP_BRANCH, device_id: XP_DEVICE });
 
-const envelope = (lamport: number, id: string, orderId: string): EventEnvelopeT => ({
-  id,
-  org_id: XP_ORG,
-  branch_id: XP_BRANCH,
-  device_id: XP_DEVICE,
-  actor_user_id: null,
-  lamport_seq: lamport,
-  device_created_at: BASE_TS + lamport,
-  server_received_at: null,
-  type: "order.created",
-  schema_version: 1,
-  payload: { order_id: orderId, channel: "dine_in" },
-  refs: [],
-});
+// T-01-17 (DEC-TIME-001): the literal carries the ratified time-layer fields and is
+// ASSERTED rather than annotated, so this builder compiles both before the envelope
+// schema gains them (red phase) and after (green phase).
+const envelope = (lamport: number, id: string, orderId: string): EventEnvelopeT =>
+  ({
+    id,
+    org_id: XP_ORG,
+    branch_id: XP_BRANCH,
+    device_id: XP_DEVICE,
+    actor_user_id: null,
+    lamport_seq: lamport,
+    device_created_at: BASE_TS + lamport,
+    // 01-F43/01-F44: the transcript's envelopes carry branch-consensus time and
+    // the basis marker; the committed fixture is re-pinned to match (20 §2.7).
+    branch_created_at: BASE_TS + lamport,
+    time_basis: "branch",
+    server_received_at: null,
+    type: "order.created",
+    schema_version: 1,
+    payload: { order_id: orderId, channel: "dine_in" },
+    refs: [],
+  }) as EventEnvelopeT;
 
 // e0/e1 merge cleanly; eNul is registry-valid (order_id is a non-empty string) but
 // carries U+0000, which Postgres jsonb cannot hold — the gateway quarantines it

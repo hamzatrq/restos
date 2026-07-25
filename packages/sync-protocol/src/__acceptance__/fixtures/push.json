@@ -10,6 +10,8 @@
       "actor_user_id": null,
       "lamport_seq": 18,
       "device_created_at": 1752800000000,
+      "branch_created_at": 1752800000000,
+      "time_basis": "branch_provisional",
       "server_received_at": null,
       "type": "order.created",
       "schema_version": 1,

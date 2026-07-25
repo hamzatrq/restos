@@ -184,7 +184,10 @@ export const validEnvelope = (
   lamportSeq: number,
   overrides: EnvelopeOverrides = {},
 ): EventEnvelopeT => {
-  const envelope: EventEnvelopeT = {
+  // T-01-17 (DEC-TIME-001): the literal carries the ratified time-layer fields and
+  // is ASSERTED rather than annotated, so this builder compiles both before the
+  // envelope schema gains them (red phase) and after (green phase).
+  const envelope = {
     id: newId(),
     org_id: identity.org_id,
     branch_id: identity.branch_id,
@@ -192,13 +195,17 @@ export const validEnvelope = (
     actor_user_id: null,
     lamport_seq: lamportSeq,
     device_created_at: BASE_T + lamportSeq,
+    // The originating device stamps branch-consensus time (01-F43) and its basis
+    // marker (01-F44); a zero-offset device stamps branch == device time.
+    branch_created_at: BASE_T + lamportSeq,
+    time_basis: "branch",
     server_received_at: null,
     type: "order.created",
     schema_version: 1,
     payload: { order_id: newId(), channel: "counter" },
     refs: [],
     ...overrides,
-  };
+  } as EventEnvelopeT;
   parseEvent(envelope); // self-check: the suite never pushes accidentally-invalid events
   return envelope;
 };

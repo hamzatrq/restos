@@ -3,9 +3,21 @@
 // contract (plans/wave-0/kernel-tasks.md).
 
 export { auditEventHash, type VerifyAuditChainResult, verifyAuditChain } from "./audit.js";
+export {
+  BUSINESS_DAY_CUTOVER_HOUR_DEFAULT,
+  BUSINESS_TIMEZONE,
+  businessDate,
+  businessDayBounds,
+} from "./business-day.js";
 export { canonicalJson } from "./canonical.js";
 export { DEVICE_CLASSES, type DeviceClass, HUB_ELIGIBLE_CLASSES } from "./device-classes.js";
-export { EventEnvelope, type EventEnvelopeT, parseEnvelope } from "./envelope.js";
+export {
+  EventEnvelope,
+  type EventEnvelopeT,
+  parseEnvelope,
+  TIME_BASES,
+  type TimeBasis,
+} from "./envelope.js";
 export { newId } from "./ids.js";
 export {
   type RefundRemainderArgs,

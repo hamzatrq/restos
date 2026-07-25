@@ -38,6 +38,14 @@ const AUDIT_TYPES = [
 const prevOf = (env: EventEnvelopeT): string | null =>
   (env.payload as { prev_audit_hash: string | null }).prev_audit_hash;
 
+/** T-01-17 RE-PIN (oracle-owned, 24 §3 step 2): the ratified envelope carries the
+ * time layer — `branch_created_at` (01-F43) and `time_basis` (01-F44). 01-F5 hashes
+ * the envelope minus `server_received_at`, so both are hash-covered; the forge-
+ * resistance case below is extended onto them rather than around them. The suite's
+ * expectations are all INDEPENDENTLY recomputed (`independentHash`), so the re-pin
+ * moves fixtures, never an assertion's strength. */
+const timeLayer = { branch_created_at: T0, time_basis: "branch" } as const;
+
 const auditEnvelope = (overrides: Partial<EventEnvelopeT> = {}): EventEnvelopeT => ({
   id: newId(),
   org_id: "org-A",
@@ -46,6 +54,7 @@ const auditEnvelope = (overrides: Partial<EventEnvelopeT> = {}): EventEnvelopeT 
   actor_user_id: newId(),
   lamport_seq: 0,
   device_created_at: T0,
+  ...timeLayer,
   server_received_at: null,
   type: "audit.login",
   schema_version: 1,
@@ -142,6 +151,9 @@ describe("audit event hashing (01-F5, 01 §7 platform law)", () => {
       type: "audit.login",
       schema_version: 1,
       server_received_at: null,
+      // T-01-17 re-pin: the time layer is part of the hashed envelope and is
+      // written here out of declaration order on purpose — canonical JSON sorts.
+      ...timeLayer,
       device_created_at: env.device_created_at,
       lamport_seq: 0,
       actor_user_id: env.actor_user_id,
@@ -175,6 +187,10 @@ describe("audit event hashing (01-F5, 01 §7 platform law)", () => {
       { ...base, actor_user_id: newId() },
       { ...base, lamport_seq: 1 },
       { ...base, device_created_at: base.device_created_at + 1 },
+      // T-01-17 re-pin (01-F43/01-F44): the two time-layer fields are inside the
+      // hashed envelope, so forging either is as detectable as forging device_id.
+      { ...base, branch_created_at: T0 + 1 },
+      { ...base, time_basis: "branch_provisional" as const },
       { ...base, type: "audit.reprint" },
       { ...base, schema_version: 2 },
       { ...base, refs: ["r0", "r1"] },

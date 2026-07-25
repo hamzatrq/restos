@@ -28,6 +28,7 @@ import {
   type ParsedEvent,
   parseEnvelope,
   parseEvent,
+  type TimeBasis,
 } from "@restos/domain";
 import Database from "better-sqlite3";
 import {
@@ -76,8 +77,33 @@ export type StoreIdentity = {
   device_id: string;
 };
 
-/** Envelope minus the store-assigned fields — the store stamps both (plan contract). */
-export type AppendInput = Omit<EventEnvelopeT, "lamport_seq" | "server_received_at">;
+/**
+ * Envelope minus the store-assigned fields — the store stamps them all. `lamport_seq`
+ * and `server_received_at` per the original plan contract; `branch_created_at` and
+ * `time_basis` since T-01-17, on the same store-owned-platform-law grounds as the
+ * audit chain (01 §7): a caller must not be able to choose its own branch stamp or
+ * claim a `branch` basis it never earned.
+ */
+export type AppendInput = Omit<
+  EventEnvelopeT,
+  "lamport_seq" | "server_received_at" | "branch_created_at" | "time_basis"
+>;
+
+/** Skew above this raises the 01-N2 device-health flag. Observational only — never blocks. */
+export const SKEW_FLAG_THRESHOLD_MS = 300_000;
+
+/**
+ * Branch-time state (01-F43/01-F44/01-N2). `basis` is what `append` stamps onto
+ * `time_basis`. `skew_ms` is how far this device's RAW clock sits from branch time —
+ * the one sanctioned read of the untrusted clock (the named 01-F45 exemption), and
+ * null before any hub contact, since there is nothing to measure against yet.
+ */
+export type BranchTimeStatus = {
+  offset_ms: number;
+  basis: TimeBasis;
+  skew_ms: number | null;
+  skew_flagged: boolean;
+};
 
 export type SyncStatus = {
   queue_depth: number;
@@ -143,6 +169,14 @@ export type DeviceStore = {
   retentionDrop(keys: readonly string[]): void;
   status(): SyncStatus;
   setLastGlobalSeq(n: number): void;
+  /**
+   * Record the measured offset to branch time (01-F43). THE one write path — calling
+   * it IS hub contact, so it also flips the basis to `branch`. The hub itself calls
+   * `setBranchTimeOffset(0)`: offset 0 with `acquired` true is the authority, which is
+   * a different state from never-contacted (also offset 0, but `branch_provisional`).
+   */
+  setBranchTimeOffset(offset_ms: number): void;
+  branchTimeStatus(): BranchTimeStatus;
   // ── DEC-SYNC-009 hub-relay seam (T-01-12) ─────────────────────────────────
   // VOLATILE cross-plane signals between the mesh session (LAN) and the cloud
   // session (WAN) of ONE device, carried by the store handle because it is the
@@ -222,6 +256,20 @@ CREATE TABLE IF NOT EXISTS audit_chain (
   head_event_id TEXT
 ) STRICT;
 INSERT OR IGNORE INTO audit_chain (id, head_hash, head_event_id) VALUES (0, NULL, NULL);
+-- Branch-time offset (01-F43, T-01-17) — a single row mirroring the audit_chain
+-- pattern. DURABLE deliberately: a volatile offset would make every restarted
+-- terminal stamp branch_provisional until its next heartbeat, which changes which
+-- events fiscal consumers (01-F44) see marked provisional for no gain. The
+-- 'acquired' flag distinguishes "hub contact happened, offset is 0 because we ARE
+-- the hub" from "never contacted, using 0 as a fallback" — the two look identical
+-- in offset_ms but carry a different time_basis, so it is load-bearing, not
+-- bookkeeping.
+CREATE TABLE IF NOT EXISTS branch_time (
+  id INTEGER PRIMARY KEY CHECK (id = 0),
+  offset_ms INTEGER NOT NULL,
+  acquired INTEGER NOT NULL
+) STRICT;
+INSERT OR IGNORE INTO branch_time (id, offset_ms, acquired) VALUES (0, 0, 0);
 -- Fold state tables — the T-01-15 merge-model projections (01-F6, 01-F10; the
 -- openOrders row shape is oracle-pinned, contract ruling C8).
 CREATE TABLE IF NOT EXISTS orders (
@@ -309,6 +357,20 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   const setAuditHead = db.prepare<[string, string]>(
     "UPDATE audit_chain SET head_hash = ?, head_event_id = ? WHERE id = 0",
   );
+
+  // Branch-time offset (01-F43): read inside append to stamp branch_created_at +
+  // time_basis, written only by setBranchTimeOffset. Durable across reopen.
+  const readBranchTime = db.prepare<[], { offset_ms: number; acquired: number }>(
+    "SELECT offset_ms, acquired FROM branch_time WHERE id = 0",
+  );
+  const writeBranchTime = db.prepare<[number]>(
+    "UPDATE branch_time SET offset_ms = ?, acquired = 1 WHERE id = 0",
+  );
+  const branchTime = (): { offset_ms: number; acquired: boolean } => {
+    const row = readBranchTime.get();
+    return { offset_ms: row?.offset_ms ?? 0, acquired: (row?.acquired ?? 0) === 1 };
+  };
+  const basisOf = (acquired: boolean): TimeBasis => (acquired ? "branch" : "branch_provisional");
 
   // T-01-04 fold surfaces: peer ingest, global_seq sidecar, fold-state rebuild.
   const allOwnEnvelopes = db.prepare<[], { envelope: string }>("SELECT envelope FROM events");
@@ -554,6 +616,14 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
         ...retryInput,
         lamport_seq: envelope.lamport_seq,
         server_received_at: envelope.server_received_at,
+        // Reconstruct against the STORED branch stamp, not a freshly-computed one
+        // (T-01-17). The offset legitimately moves between an append and its retry —
+        // a heartbeat lands, or the device acquires its first offset — and recomputing
+        // here would make an IDENTICAL retry compare unequal and throw. Same reasoning
+        // as lamport_seq/server_received_at above: store-assigned fields are carried,
+        // never re-derived, so 01-F8 idempotency stays a statement about caller content.
+        branch_created_at: envelope.branch_created_at,
+        time_basis: envelope.time_basis,
       }).envelope;
       if (canonical(retry) !== canonical(envelope)) {
         throw new Error(
@@ -575,10 +645,19 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     // Stamp the current HEAD (NULL ⇒ this device's first audit event ⇒ prev_audit_hash: null).
     const payload = isAudit ? stampPrev(input.payload, auditHead()) : input.payload;
     const next = (ownHighWater() ?? -1) + 1;
+    // Branch time is stamped HERE, at append, and travels inside the event (01-F43).
+    // It is deliberately not computed at fold time: folds must be a pure function of
+    // the delivered event set (01-F34), so two devices holding the same events but
+    // different offsets must still fold identically. Applying a local offset while
+    // folding would break that silently — no test of plain convergence would catch it,
+    // because each device would be self-consistent.
+    const { offset_ms, acquired } = branchTime();
     const parsed = parseEvent({
       ...input,
       payload,
       lamport_seq: next,
+      branch_created_at: input.device_created_at + offset_ms,
+      time_basis: basisOf(acquired),
       server_received_at: null,
     });
     const envelope = parsed.envelope;
@@ -944,6 +1023,31 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
 
     setLastGlobalSeq(n) {
       setPull.run(n);
+    },
+
+    setBranchTimeOffset(offset_ms) {
+      if (!Number.isInteger(offset_ms)) {
+        throw new Error(
+          `branch-time offset must be an integer millisecond value, got ${offset_ms} ` +
+            "(01-F43 — a fractional offset would make branch_created_at non-integral; nothing changed)",
+        );
+      }
+      writeBranchTime.run(offset_ms);
+    },
+
+    branchTimeStatus() {
+      const { offset_ms, acquired } = branchTime();
+      // Skew is |offset|: branch time is device clock + offset, so the offset IS how far
+      // this device's raw clock sits from the branch's. Null before contact — there is
+      // nothing to measure against, and reporting 0 would claim a healthy clock we have
+      // not checked. Observational only; it never gates append (01-N2, 01-F17).
+      const skew_ms = acquired ? Math.abs(offset_ms) : null;
+      return {
+        offset_ms,
+        basis: basisOf(acquired),
+        skew_ms,
+        skew_flagged: skew_ms !== null && skew_ms > SKEW_FLAG_THRESHOLD_MS,
+      };
     },
 
     requestRelayDrain() {

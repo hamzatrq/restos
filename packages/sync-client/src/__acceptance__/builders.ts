@@ -167,26 +167,42 @@ export const peerIdentity = (id: Identity): Identity => ({ ...id, device_id: new
 /**
  * Full envelope from a peer device for store.ingest — caller supplies lamport_seq
  * (the peer's own counter; the store never assigns peer lamports).
+ *
+ * T-01-17 (DEC-TIME-001): a peer envelope carries the time layer stamped by its
+ * ORIGINATING device — `branch_created_at` (01-F43) and `time_basis` (01-F44).
+ * Unless a caller pins them, the peer is modelled as a zero-offset hub-synced
+ * device: `branch_created_at` MIRRORS whatever `device_created_at` the caller gave,
+ * `time_basis` is "branch". That keeps every pre-T-01-17 suite's meaning intact
+ * while making the two fields independently assertable — the T-01-17 suites
+ * (branch-time / time-invariance) drive them APART on purpose, which is the only
+ * way to tell a fold that reads the branch stamp from one that reads the clock.
  */
 export const peerEnvelope = (
   peer: Identity,
   lamport_seq: number,
   overrides: Record<string, unknown> = {},
-) => ({
-  id: newId(),
-  org_id: peer.org_id,
-  branch_id: peer.branch_id,
-  device_id: peer.device_id,
-  actor_user_id: null,
-  lamport_seq,
-  device_created_at: 1752800000000,
-  server_received_at: null,
-  type: "order.created",
-  schema_version: 1,
-  payload: { order_id: newId(), channel: "dine_in" },
-  refs: [],
-  ...overrides,
-});
+) => {
+  const base = {
+    id: newId(),
+    org_id: peer.org_id,
+    branch_id: peer.branch_id,
+    device_id: peer.device_id,
+    actor_user_id: null,
+    lamport_seq,
+    device_created_at: 1752800000000,
+    server_received_at: null,
+    type: "order.created",
+    schema_version: 1,
+    payload: { order_id: newId(), channel: "dine_in" },
+    refs: [],
+    ...overrides,
+  };
+  return {
+    branch_created_at: base.device_created_at,
+    time_basis: "branch",
+    ...base,
+  };
+};
 
 /**
  * Canonical JSON per the T-01-04 contract: object keys sorted lexicographically at

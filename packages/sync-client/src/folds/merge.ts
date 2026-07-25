@@ -6,11 +6,16 @@
 // Fold state is a pure function of the delivered event SET: the engine reads NO
 // ordering metadata — no global_seq, no lamport_seq, no device clock, no id
 // comparison — property-pinned by the bijective-relabel + injection invariance
-// oracle (merge-invariance.test.ts). The one sanctioned exception (contract ruling
-// C1): the confirm ANCHOR's time value keeps `device_created_at` stamping until
-// DEC-TIME-001 — anchor SELECTION is clock-free (argmin over (payloadHash, id),
-// matrix row 57; the id read is identity-plus-anchor-selection, the branch the
-// matrix explicitly sanctions), only the stamped VALUE reads the clock.
+// oracle (merge-invariance.test.ts). Contract ruling C1 (the confirm anchor's VALUE
+// keeping `device_created_at`) is RETIRED by T-01-17: the anchor stamps
+// `branch_created_at`, a delivered field of the event, so the engine now reads no
+// device clock at all and the ban has no exception. Anchor SELECTION was always
+// clock-free (argmin over (payloadHash, id), matrix row 57; the id read is
+// identity-plus-anchor-selection, the branch the matrix explicitly sanctions).
+// `branch_created_at` is safe to read for the same reason `payload` is: it is part
+// of the delivered event SET, stamped once at the origin's append (01-F43), not
+// derived from the reading device's state. A stamp computed at fold time from the
+// local offset would break 01-F34 convergence silently.
 //
 // Parking is by KEY-PRESENCE (01-F10 amended): an event carrying its full
 // projection keys never parks — payments/refunds/line edges/assignments/closes
@@ -134,8 +139,8 @@ type Entity = {
   nodes: Map<string, string | null>;
   /** MATERIALIZED tombstones — union of every delivered `supersedes` (Addendum-B). */
   tombstones: Set<string>;
-  /** Confirm G-Set: event id → { stamp (C1 value layer), hash (anchor selection) }. */
-  confirms: Map<string, { stamp: number; hash: string }>;
+  /** Confirm G-Set: event id → the delivered branch stamp (matrix row 57, one-epoch). */
+  confirms: Map<string, { stamp: number }>;
   /** settlement_closed G-Set: event id → payload (settled = non-emptiness, 01-F33). */
   closes: Map<string, Record<string, unknown>>;
   /** Per-line value MVR: line id → (canonical bytes → {item, qty, price}). */
@@ -422,12 +427,12 @@ export const createMergeEngine = (): MergeEngine => {
       case "order.confirmed": {
         const p = event.payload as OrderRefP;
         const e = entity(p.order_id);
-        // Monotone OR fact + the C1 value layer: stamp kept for the anchor,
-        // selection is clock-free (payloadHash, then event id — matrix row 57).
-        e.confirms.set(env.id, {
-          stamp: env.device_created_at,
-          hash: payloadHash(event.payload),
-        });
+        // Monotone OR fact + the value layer. The stamp is the DELIVERED branch time
+        // (01-F43) — part of the event set, not derived from this device's state — so
+        // the anchor's argmin(stamp, id) below stays set-determined. The payloadHash
+        // that used to ride here is gone with the mixed-epoch branch: it never
+        // separated anything (`order.confirmed`'s payload is `{order_id}` alone).
+        e.confirms.set(env.id, { stamp: env.branch_created_at });
         dirty.add(p.order_id);
         return;
       }
@@ -592,12 +597,27 @@ export const createMergeEngine = (): MergeEngine => {
     const reg = register as Record<string, unknown>;
     const channel = reg.channel as string;
     const orderType = (reg.order_type as string | undefined) ?? null;
-    // Confirm anchor: set-wise argmin over (payloadHash, event id) — matrix row
-    // 57's mixed-epoch branch; the VALUE keeps device_created_at stamping (C1).
-    let anchor: { stamp: number; hash: string; id: string } | null = null;
+    // Confirm anchor: set-wise argmin over (branch_created_at, event id) — matrix row
+    // 57's ONE-EPOCH branch, unblocked by DEC-TIME-001 (that cell was explicitly
+    // "BLOCKED" pending the time layer; T-01-17 lands it).
+    //
+    // The mixed-epoch fallback argmin(payloadHash, id) is RETIRED, and matrix §(e)
+    // says why it had to be: `order.confirmed`'s payload is `{order_id}` alone, so
+    // every member hashes identically and the tiebreak always fell through to
+    // `envelope.id` — which makes the projected VALUE depend on which id happened to
+    // sort first. Under a bijective id relabel the winner changes and `confirmed_at`
+    // moves, breaking 01-F34 invariance (caught by time-invariance.test.ts, and
+    // latent under the old device_created_at stamping too).
+    //
+    // Branch-consensus time is precisely what makes `min` meaningful again: with all
+    // members on ONE clock (01-F43), the earliest confirm is a real fact rather than
+    // "whichever device's clock was furthest behind". The id term now only breaks
+    // ties between members with the SAME stamp — so it selects a canonical member
+    // without ever changing the projected value, which is what invariance requires.
+    let anchor: { stamp: number; id: string } | null = null;
     for (const [id, c] of e.confirms) {
-      if (anchor === null || c.hash < anchor.hash || (c.hash === anchor.hash && id < anchor.id))
-        anchor = { stamp: c.stamp, hash: c.hash, id };
+      if (anchor === null || c.stamp < anchor.stamp || (c.stamp === anchor.stamp && id < anchor.id))
+        anchor = { stamp: c.stamp, id };
     }
     // Table anchor: distinct head VALUES of the supersedes-DAG (value-equality
     // auto-clears), UTF-16 sorted; conflict = |distinct values| > 1.

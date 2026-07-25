@@ -63,6 +63,9 @@ export const messageSchemas = {
     reason: z.string().min(1),
   }),
   purge_command: z.object({ v, kind: z.literal("purge_command"), scope: z.literal("all") }),
+  // `ping.t` is the sender's clock at send. Since the HUB heartbeats its followers
+  // (01-F13), a follower's inbound ping already carries branch time — which is what
+  // makes the 01-F43 offset acquisition need no protocol change at all.
   ping: z.object({ v, kind: z.literal("ping"), t: z.number().int() }),
   pong: z.object({ v, kind: z.literal("pong"), t: z.number().int() }),
 } as const;
