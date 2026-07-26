@@ -4,6 +4,17 @@
 // LAN mesh session over the injected transport seam (01-F12/F13/F15;
 // plans/wave-0/kernel-tasks.md, HUB-ELECTION.md).
 export {
+  CATALOG_SCHEMA,
+  type CatalogApplyResult,
+  type CatalogDelta,
+  type CatalogEntry,
+  type CatalogKind,
+  type CatalogSnapshot,
+  type CatalogStore,
+  type CatalogUpdate,
+  createCatalogStore,
+} from "./catalog.js";
+export {
   type BlockedCursor,
   type BlockedReason,
   CLOUD_PUSH_BATCH_MAX,

@@ -10,8 +10,8 @@ import { describe, expect, it, vi } from "vitest";
 import { createGateway, type GatewayDeps } from "../gateway";
 
 const JSON_LINES = JSON.stringify({
-  "line-a": { qty: 2, unit_price_paisa: 45000, states: ["confirmed"] },
-  "line-b": { qty: 4, unit_price_paisa: 5000, states: ["confirmed"] },
+  "line-a": { item_id: "i-karahi", qty: 2, unit_price_paisa: 45000, states: ["confirmed"] },
+  "line-b": { item_id: "i-naan", qty: 4, unit_price_paisa: 5000, states: ["confirmed"] },
 });
 
 const stubStore = (over: Partial<DeviceStore> = {}) =>
@@ -26,7 +26,7 @@ const stubStore = (over: Partial<DeviceStore> = {}) =>
 
 const deps = (over: Partial<GatewayDeps> = {}): GatewayDeps => ({
   store: stubStore(),
-  catalog: (id) => (id === "line-a" ? { name: "Chicken Karahi" } : null),
+  catalog: (id) => (id === "i-karahi" ? { name: "Chicken Karahi" } : null),
   actor: "Ayesha",
   actorUserId: "user-1",
   deviceLabel: "Counter 1",
@@ -71,7 +71,7 @@ describe("26 §8 / 01-F34 — the order total comes from the engine, never from 
     // A renamed or not-yet-synced item renders its id. An unnamed line the cashier can still
     // see beats a screen that will not render — a sale is never blocked.
     const [order] = createGateway(deps()).openOrders();
-    expect(order?.lines.map((l) => l.name)).toEqual(["Chicken Karahi", "line-b"]);
+    expect(order?.lines.map((l) => l.name)).toEqual(["Chicken Karahi", "i-naan"]);
   });
 });
 

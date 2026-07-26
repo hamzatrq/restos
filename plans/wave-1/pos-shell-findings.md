@@ -3,7 +3,7 @@
 Wiring `apps/pos-electron` to `sync-client` for the first time. Three findings, all of them
 the kind that only appear when two layers actually meet.
 
-## F1 — There is no catalog on the device. At all. **Blocks the POS grid.**
+## F1 — There is no catalog on the device. At all. **Blocks the POS grid.** ✅ CLOSED
 
 `01-F21` specifies a versioned catalog chain, and `03-F38` adds a `kitchen_name` to it. But
 `grep -rn catalog packages/sync-client/src` returns **one test file and no implementation**.
@@ -20,10 +20,23 @@ the KOT. The gateway takes a `CatalogResolver` as an injected seam so the shell 
 now, and a missing entry renders the line id rather than throwing (`01-F17` — a sale is never
 blocked, and an unnamed line the cashier can still see beats a screen that will not render).
 
-**This is the largest single Wave-1 gap and it is not a UI task.** It needs: catalog storage
-in `sync-client`, the `01-F21` version chain, org-scope pull (`01-F9` "plus org-scope
-reference data"), and a decision about what a device does with a line whose catalog version
-it has not yet received.
+**CLOSED July 2026** — `01-F52`..`01-F56` specify the contract and `packages/sync-client/src/catalog.ts`
+implements it (16 tests). Storage is versioned snapshots + deltas, and the four behaviours
+that were undecided are now decided and tested:
+
+- **Money never depends on catalog sync (`01-F53`)** — `unit_price_paisa` is captured into
+  the event at add time, so a stale catalog costs a word and never a rupee. This is the
+  property that makes the rest of the degradation safe rather than merely tolerable.
+- **An unknown item degrades to its id and never blocks (`01-F54`, `01-F17`)**.
+- **Deletion is a tombstone (`01-F55`)** — a reprint of an order placed before an item was
+  deleted must still render its name.
+- **An out-of-order delta is REFUSED and the device asks for a snapshot (`01-F56`)** —
+  applying it would diverge one device's menu from every other's, which is undetectable at
+  the till and surfaces days later as a mispriced item.
+
+**Still owed:** the transport half — org-scope pull of snapshots/deltas over the sync
+channel (`01-F9`), and wiring `catalog.changed` to trigger a fetch. The device side is done
+and testable; nothing yet delivers updates to it.
 
 ## F2 — The blocked cursor is not on `status()`, so the honesty UI cannot be built from the store
 
@@ -49,6 +62,17 @@ sum `json_lines` itself.
 
 Now exported as a value. **`packages/sync-client` is a protected path — this wants senior
 review.**
+
+## F4 — `BilledLineCell` under-declared its own data, hiding `item_id`
+
+Found while wiring the catalog: the projected cell is built as `{ ...lineValue, states,
+anomalies }`, and `LineValue` carries `item_id` — so **the field was always written**. But
+the exported type declared only `{ qty, unit_price_paisa, states }`, so a host app reading
+`json_lines` had no typed way to map a line to a catalog entry.
+
+A declaration narrower than the data is a silent capability loss: it looked like the fold
+did not project the item reference, when in fact it always had. Corrected to declare what is
+actually stored. No data change, no migration — 352 tests unchanged.
 
 ## Also worth recording
 

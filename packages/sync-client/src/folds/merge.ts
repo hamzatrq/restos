@@ -181,7 +181,24 @@ const edgeLegal = (ed: Edge): boolean => {
 
 /** One projected line cell as rendered into `json_lines` — the billed
  * derivation's input shape (line VALUE fields + projected workflow states). */
-export type BilledLineCell = { qty: number; unit_price_paisa: number; states: string[] };
+export type BilledLineCell = {
+  /**
+   * The catalog item this line sells. **Corrected July 2026:** this field was always
+   * WRITTEN (the cell is built as `{ ...lineValue, states, anomalies }` and `LineValue`
+   * carries `item_id`) but was not declared here — so a host app reading `json_lines` had no
+   * typed way to resolve a line to a catalog entry, and `apps/pos-electron` could not render
+   * an item name. A declaration narrower than the data is a silent capability loss.
+   *
+   * Display resolution only (`01-F52`): the catalog is never a fold input, and the money on
+   * this cell was captured at append time (`01-F53`), so a stale catalog costs a word and
+   * never a rupee.
+   */
+  item_id: string;
+  qty: number;
+  unit_price_paisa: number;
+  states: string[];
+  anomalies?: Record<string, string>;
+};
 
 /** billed_effective of ONE projected cell (01-F30: billed derives from
  * delivered lines, exited lines excluded — "a fully-voided order nets to

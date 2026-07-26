@@ -31,6 +31,7 @@ import {
   type TimeBasis,
 } from "@restos/domain";
 import Database from "better-sqlite3";
+import { CATALOG_SCHEMA, type CatalogStore, createCatalogStore } from "./catalog.js";
 import {
   createMergeEngine,
   type DropPlan,
@@ -177,6 +178,8 @@ export type DeviceStore = {
    */
   setBranchTimeOffset(offset_ms: number): void;
   branchTimeStatus(): BranchTimeStatus;
+  /** Device catalog — reference data, display only (01-F52..F56). Never read by a fold. */
+  readonly catalog: CatalogStore;
   /**
    * The token to present on the next connection (01-F47): the most recent renewal the
    * cloud has issued, or null before any renewal — in which case the caller uses the
@@ -250,7 +253,9 @@ export type DeviceStore = {
 // Device schema v1 (01 §5). `sync_state` is the single-row write-checkpoint
 // (19 §5): the outbox is derived — events past the checkpoint — so acking is a
 // checkpoint move, never a row delete.
+
 const SCHEMA = `
+${CATALOG_SCHEMA}
 CREATE TABLE IF NOT EXISTS events (
   id TEXT PRIMARY KEY,
   lamport_seq INTEGER NOT NULL UNIQUE,
@@ -366,6 +371,11 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   db.pragma("synchronous = FULL"); // plug-pull law outranks throughput (00 §5.2)
   db.pragma("foreign_keys = ON"); // device DB rule (18 §4)
   db.exec(SCHEMA);
+
+  // 01-F52: reference data, constructed alongside the ledger but deliberately separate from
+  // it. Nothing in `folds/` may reach for this — a projected value that read a name would
+  // depend on catalog sync state at fold time, which is the 01-F34 break.
+  const catalog = createCatalogStore(db as never);
 
   const byId = db.prepare<[string], { envelope: string }>(
     "SELECT envelope FROM events WHERE id = ?",
@@ -1100,6 +1110,7 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
       writeCredential.run(token);
     },
 
+    catalog,
     branchTimeStatus() {
       const { offset_ms, acquired } = branchTime();
       // Skew is |offset|: branch time is device clock + offset, so the offset IS how far

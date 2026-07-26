@@ -31,10 +31,11 @@ export type Gateway = {
  * time, which is the `01-F34` break law 1 exists to prevent. The read models carry line ids,
  * quantities and paisa — never words.
  *
- * So the app must resolve names itself, and `sync-client` has **no catalog surface yet**
- * (see `plans/wave-1/pos-shell-findings.md`). This resolver is the seam that gap will fill.
+ * So the app resolves names itself, from the device catalog (`01-F52`..`01-F56`), keyed by
+ * the cell's `item_id`. Injectable rather than reached for directly so the seam tests
+ * without a database.
  */
-export type CatalogResolver = (lineOrItemId: string) => { name: string } | null;
+export type CatalogResolver = (item_id: string) => { name: string } | null;
 
 export type GatewayDeps = {
   store: DeviceStore;
@@ -57,15 +58,15 @@ export type GatewayDeps = {
   businessDay: () => string;
 };
 
-type LineCell = { qty: number; unit_price_paisa: number; states: string[] };
+type LineCell = { item_id: string; qty: number; unit_price_paisa: number; states: string[] };
 
 const linesFrom = (jsonLines: string, catalog: CatalogResolver): OpenOrder["lines"] =>
   Object.entries(JSON.parse(jsonLines) as Record<string, LineCell>).map(([line_id, cell]) => ({
     line_id,
-    // A missing catalog entry renders the id rather than throwing. 01-F17: a sale is never
-    // blocked — and an unnamed line the cashier can still see beats a screen that will not
-    // render because one item was renamed upstream.
-    name: catalog(line_id)?.name ?? line_id,
+    // 01-F54 — an unsynced or renamed item degrades to its identifier and NEVER blocks. The
+    // quantity and the money both come from the EVENT (01-F53), so the cashier can still
+    // complete the sale and the only thing lost is a word.
+    name: catalog(cell.item_id)?.name ?? cell.item_id,
     quantity: cell.qty,
     // The read models carry no modifier or note detail yet; these arrive with doc 02's
     // event work. Empty is honest, whereas inventing them here would be a fold reimplemented
