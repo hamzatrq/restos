@@ -78,6 +78,8 @@ Works in-branch over LAN and remotely over cloud; remote views always carry sync
 - 05-F22 The full console works over cloud from anywhere. Every screen shows last-synced age; when the branch is unreachable, the console says so plainly ("branch offline — last seen 12 min ago") and never renders stale state as live (00 §5.7).
 - 05-F23 Remote alarm push continues via FCM/APNs whenever the branch has WAN; while the branch is offline, the console shows the alarm gap honestly instead of implying calm.
 
+- 05-F26 **Pausing a channel offline takes effect LOCALLY and shows the aggregator leg as unsent (gap G15, founder ruling July 2026).** `05-F13`'s pause needs an aggregator API push that a WAN-down branch cannot make, and nothing said what the manager sees. **The branch has genuinely decided to stop accepting, so record that immediately** (`01-F17` spirit — never block the local decision on a remote system), and render the aggregator leg as a **separate, visibly unsent fact** per `00 §5.7`'s honesty rule, retried by the doc-08 outbox. The manager is told exactly which half took effect: one number of channels paused here, one count of pushes still owed. Orders that arrive from the still-live aggregator in the meantime are **not** auto-rejected — auto-rejection carries commercial consequences with the aggregator (`08`) and is not a side effect to take on a WAN blip.
+
 ## 4. Key flows
 
 **Void approval (happy + fallback)**

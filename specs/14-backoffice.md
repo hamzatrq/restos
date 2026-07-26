@@ -85,6 +85,8 @@ Everything here follows **presets, not knobs** (00 §7): a profile + tier choice
   - owner app connected and receiving.
   Completion is recorded per step; a regressed item re-blocks the checklist.
 
+- 14-F28 **A menu edit's application time is the owner's choice per edit — default DAY-END, with an explicit immediate option (gap G17, founder ruling July 2026).** `27-F4` makes adding, removing or reordering an operational grid item a **breaking change**, because a cashier's speed is muscle memory; but back-office menu editing is a runtime org action, and nothing connected the two. The resolution honours both: **the default is the 05:00 business-day boundary (`01-F46`), so a grid never moves under a cashier mid-shift** — and because menu changes are sometimes genuinely urgent, the owner may mark any edit **apply now**, which is a deliberate act with the consequence stated on the control, not a hidden default. Pending day-end edits are visible and cancellable until they land. New items carry a first-days marker on the grid so a cashier can find what changed. **Amends `27-F4`**: the acclimation requirement binds the *vendor's* shipped grid structure absolutely, and org menu content through this timing rule.
+
 ## 4. Key flows
 
 **Price change**

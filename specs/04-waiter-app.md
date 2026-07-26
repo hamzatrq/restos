@@ -80,12 +80,14 @@ Expo React Native, sharing `packages/domain` + `packages/sync-client` with the f
   Filtering is enforced server- and hub-side (01-F27) — the client never merely hides the data.
 - 04-F18 A scoped device that loses its slice (reinstall, cache purge) re-syncs from hub or cloud in < 60 s on branch Wi-Fi — small by construction. Section reassignment mid-shift triggers slice backfill for the gained tables.
 
+- 04-F19 **Clearing a table is the waiter's action; there is no busser role (gap G2, founder ruling July 2026).** `04 §4` said "busser taps done" while no busser existed in Appendix A, held a device, or was named in any FR — ~40 table turns a shift with no owner. **Resolved by removing the role, not by adding one:** the waiter already holds a handheld and already owns the table, so `table.state_changed → available` is a waiter action needing no new device, login or permission row. **Stated cost:** attribution records the waiter who tapped, which may not be the person who physically cleaned — acceptable because the attribution that matters here is *who asserts the table is ready to seat*, and that is a waiter judgement either way.
+
 ## 4. Key flows
 
 **Seat → order → serve (happy path)**
 1. Waiter marks table seated → captures 3 items with modifiers + a note → confirm → KOT prints at stations < 2 s → table auto-flips to `ordered`.
 2. Kitchen bumps; pass assembles ("2 of 3 ready…"); order marked ready → waiter's phone chimes, names the table → waiter picks up, taps served → table `served`.
-3. Guests ask for the bill → waiter taps needs-bill → counter POS surfaces it, settles, prints the receipt → table flips `cleaning` → busser taps done → `available`.
+3. Guests ask for the bill → waiter taps needs-bill → counter POS surfaces it, settles, prints the receipt → table flips `cleaning` → **the waiter** taps done → `available` (04-F19 — **founder ruling July 2026: there is no busser role**).
 
 **WAN down, LAN up**
 1. Internet dies mid-rush → the handheld keeps capturing over the LAN mesh (00 §5.1).
