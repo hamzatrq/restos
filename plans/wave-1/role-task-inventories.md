@@ -761,8 +761,15 @@ Category tabs are explicitly permitted at depth one, so a 300-item menu across ~
 > residual oversell risk named) · **G15** → `05-F26` · **G17** → `14-F28` (day-end by
 > default, with an explicit per-edit "apply now").
 >
-> **Still open:** **G9** only — the call-center operator is neither a role nor clearly a
-> mode, and it is Wave-4 scoping rather than a Wave-1 blocker.
+> **G9 — DEFERRED to Wave 4 with the question recorded (founder ruling July 2026).** The
+> call-center operator (`02-F29`) is genuinely Wave-4 scope and nothing in Waves 1–3 depends
+> on it. **The answer must land before `02-F29` is built, not during it:** is it a *mode* of
+> the cashier role (same permissions minus drawer and printer, plus a branch selector — but
+> "cashier with no drawer" is an awkward thing for the permission model to say) or a
+> *distinct role* (cleanest, but a role defined years before anyone uses it tends to be
+> defined wrong). Recorded here so it is not discovered late.
+>
+> **All seventeen gaps are now dispositioned.**
 
 | # | Gap | Evidence | Who it blocks |
 |---|---|---|---|
