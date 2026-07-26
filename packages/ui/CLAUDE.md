@@ -26,6 +26,16 @@ sentence is the artifact `27-F35`'s ≥85% comprehension gate is run against. Pe
 those claims are reasoned, not measured: no research exists on this population parsing
 operational UI, so the stories are written to be falsified on real staff.
 
+## The guards that came from a real review
+
+`src/components/discipline.test.ts` exists because an adversarial pass over the first draft
+found each of these as a live defect: no `opacity` for state (it put disabled-reason text at
+**1.97:1**, defeating `27-F4`), no touch-size literals (a destructive control had shipped at
+44 px, under the 48 dp floor), no `bgColor-` as a foreground or `fgColor-` as a background
+(`27-F40`'s prefix exists to say which property a token belongs to), no hex in component
+code, and every `fgColor-` token AA against **every** surface — that last rule caught the
+*fix* for the third one within minutes.
+
 ## Checked, not asserted
 
 `src/tokens/tokens.test.ts` re-derives doc 27's arithmetic on every commit — the dichromacy
