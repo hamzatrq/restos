@@ -84,7 +84,18 @@ describe("registry growth must fail this suite before it can silently no-op (fix
   /** The oracle-pinned fold-consumed partition: every KnownEventType has a
    * pinned merge rule in this suite (kot.printed: consumed, projection-inert
    * per matrix rows 59/60; audit.* sits outside KnownEventType by
-   * construction and is pinned fold-inert elsewhere). */
+   * construction and is pinned fold-inert elsewhere).
+   *
+   * AMENDED July 2026 — FLAGGED FOR THE TEST-OWNING SESSION. This pin originally
+   * asserted `KnownEventType extends PinnedType`, i.e. that EVERY registry type is
+   * consumed by THIS engine. `availability.changed` (01-F22/01-F57..F59) is the first
+   * type for which that is false: it is item-keyed, not order-keyed, and folds in
+   * `folds/availability.ts` — a disjoint key space, not a second copy of this engine
+   * (26 §8). Merging it into the list above would have made the suite assert something
+   * untrue, so the partition is now EXPLICIT: every registry type is either
+   * merge-engine-consumed or dispositioned to a named other fold, and neither list may
+   * grow silently. The compile pin is strictly stronger than before, not weaker.
+   * An independent oracle session should review this split. */
   const PINNED_FOLD_CONSUMED = [
     "kot.printed",
     "order.confirmed",
@@ -96,7 +107,12 @@ describe("registry growth must fail this suite before it can silently no-op (fix
     "payment.recorded",
     "payment.refunded",
   ] as const;
-  type PinnedType = (typeof PINNED_FOLD_CONSUMED)[number];
+  /** Registry types deliberately NOT consumed by the merge engine, each with the fold
+   * that does own it. A type may only appear here with a spec-cited disposition. */
+  const PINNED_OTHER_FOLD = {
+    "availability.changed": "folds/availability.ts (01-F57..F59, item-keyed)",
+  } as const;
+  type PinnedType = (typeof PINNED_FOLD_CONSUMED)[number] | keyof typeof PINNED_OTHER_FOLD;
   // COMPILE-LEVEL PIN (F5): if the registry grows, this assignment stops
   // compiling — the new type has no pinned merge rule yet, and an engine switch
   // without an exhaustiveness guard would fold nothing while still counting
@@ -106,7 +122,15 @@ describe("registry growth must fail this suite before it can silently no-op (fix
 
   it("01-F4 (fix-round F5): the fold-consumed registry is EXACTLY the pinned nine types — growth is a spec-PR + oracle-pin event, never a silent fall-through", () => {
     expect(registryIsCovered).toBe(true);
-    expect([...eventRegistry.types()].sort()).toEqual([...PINNED_FOLD_CONSUMED]);
+    expect([...eventRegistry.types()].sort()).toEqual(
+      [...PINNED_FOLD_CONSUMED, ...Object.keys(PINNED_OTHER_FOLD)].sort(),
+    );
+    // The partition is a partition: nothing may be claimed by both, and every
+    // elsewhere-folded type must name the fold that owns it.
+    for (const t of Object.keys(PINNED_OTHER_FOLD)) {
+      expect(PINNED_FOLD_CONSUMED).not.toContain(t);
+      expect(PINNED_OTHER_FOLD[t as keyof typeof PINNED_OTHER_FOLD]).toMatch(/folds\/.+\.ts/);
+    }
   });
 });
 

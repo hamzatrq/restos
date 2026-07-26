@@ -32,6 +32,16 @@ const payloadSchemas = {
     qty: z.number().int().positive(), // integer units (00 §6)
     unit_price_paisa: z.number().int().nonnegative(), // snapshotted at line-add, never re-derived (01-F18)
   }),
+  // 01-F22 / 01-F57: an operational toggle, never a catalog edit. `supersedes` is the
+  // carried causal link — the ONLY thing that makes this converge, exactly as for
+  // `order.table_assigned`. "Latest wins" would need a clock or an id comparison, and both
+  // are banned from folds (01-F45, 01-F34).
+  "availability.changed": z.looseObject({
+    item_id: z.string().min(1),
+    available: z.boolean(),
+    supersedes: z.array(z.string().min(1)),
+    reason: z.string().min(1).optional(),
+  }),
   "order.table_assigned": z.looseObject({
     order_id: z.string().min(1),
     table_id: z.string().min(1),

@@ -553,6 +553,13 @@ export const createMergeEngine = (): MergeEngine => {
         dirty.add(p.order_id);
         return;
       }
+      // 01-F22 / 01-F57: availability is ITEM-keyed, not order-keyed, so it folds in
+      // `folds/availability.ts` — a disjoint key space, not a second copy of this engine's
+      // logic (26 §8). Named here only so registry growth still FAILS COMPILE at the
+      // assertNever below: a new event type must be dispositioned, and "belongs to another
+      // fold" is a disposition. Touches no order, so it dirties nothing.
+      case "availability.changed":
+        return;
       case "order.settlement_closed": {
         const p = event.payload as ClosedP;
         const e = entity(p.order_id);

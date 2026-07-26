@@ -3,6 +3,7 @@
 // folds v1 per FOLDS.md (01-F6/F10/F34, 01-N1); T-01-05 lands hub election + the
 // LAN mesh session over the injected transport seam (01-F12/F13/F15;
 // plans/wave-0/kernel-tasks.md, HUB-ELECTION.md).
+
 export {
   CATALOG_SCHEMA,
   type CatalogApplyResult,
@@ -38,6 +39,13 @@ export {
   type StoreIdentity,
   type SyncStatus,
 } from "./device-store.js";
+export {
+  type AvailabilityFold,
+  type AvailabilityRow,
+  type AvailabilityToggle,
+  createAvailabilityFold,
+  projectAvailability,
+} from "./folds/availability.js";
 export type { FoldStats, KitchenQueueRow, OpenOrderRow, ParkedRow } from "./folds/merge.js";
 // `billedEffectiveFromJsonLines` is exported as a VALUE because host apps must render the
 // order total from the engine's own derivation rather than summing `json_lines` themselves
