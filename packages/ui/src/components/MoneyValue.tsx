@@ -67,7 +67,7 @@ export const MoneyValue = ({
         // 27-F26: IBM Plex Sans ships tabular digits with no feature flag needed, but a
         // fallback face may not — bind it so columns of money never jitter.
         fontVariantNumeric: "tabular-nums",
-        color: abnormal ? color["bgColor-status-fault"] : color["fgColor-default"],
+        color: abnormal ? color["fgColor-status-fault"] : color["fgColor-default"],
       }}
     >
       {direction ? `${direction.toUpperCase()} ` : ""}

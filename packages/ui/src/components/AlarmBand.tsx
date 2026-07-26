@@ -81,8 +81,12 @@ export const AlarmBand = ({ alarms, onAcknowledge }: AlarmBandProps) => {
         type="button"
         onClick={() => onAcknowledge(head.id)}
         style={{
-          // Keypad posture: dismissing this is high-consequence numeric-entry-grade, not a
-          // 48 dp chip that a wet hand hits by accident (27-F8, 27-F9).
+          // Keypad WIDTH, counter HEIGHT. Stated precisely because the first draft of this
+          // comment claimed "keypad posture" while the code only met it on one axis —
+          // dismissing "food is not being cooked" is high-consequence, so the target is
+          // deliberately far above the 48 dp floor a wet hand hits by accident (27-F8/F9),
+          // but it is a wide banner control and a 126 dp tall button would crowd the band
+          // into the screen, which 27-F11d forbids.
           minWidth: targetFor("keypad"),
           minHeight: targetFor("counter"),
           padding: space["space-3"],
@@ -90,7 +94,7 @@ export const AlarmBand = ({ alarms, onAcknowledge }: AlarmBandProps) => {
           fontSize: label.fontSize,
           fontWeight: 600,
           background: color["fgColor-on-status-fault"],
-          color: color["bgColor-status-fault"],
+          color: color["fgColor-status-fault"],
           border: "none",
           borderRadius: space["space-2"],
           cursor: "pointer",

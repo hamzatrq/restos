@@ -74,14 +74,19 @@ export const TabRail = ({ tabs, activeId, onSelect }: TabRailProps) => {
               // 27-F13: the active tab is marked by FILL and weight, not by hue. The
               // interactive accent is reserved for controls the operator may press — every
               // tab is pressable, so spending it here would say nothing.
-              background: active ? color["bgColor-surface-raised"] : "transparent",
-              color: tab.unavailable ? color["fgColor-muted"] : color["fgColor-default"],
+              background: tab.unavailable
+                ? color["bgColor-surface-sunken"]
+                : active
+                  ? color["bgColor-surface-raised"]
+                  : "transparent",
+              // No opacity wash — see Tile: it makes the reason unreadable (1.97:1) and the
+              // reason is the only thing that makes disabling-in-place useful.
+              color: tab.unavailable ? color["fgColor-disabled"] : color["fgColor-default"],
               border: "none",
               borderBottom: active
                 ? `3px solid ${color["bgColor-interactive"]}`
                 : "3px solid transparent",
               cursor: tab.unavailable ? "not-allowed" : "pointer",
-              opacity: tab.unavailable ? 0.5 : 1,
             }}
           >
             <span>{tab.label}</span>
@@ -104,7 +109,7 @@ export const TabRail = ({ tabs, activeId, onSelect }: TabRailProps) => {
               </span>
             ) : null}
             {tab.unavailable && tab.unavailableReason ? (
-              <span style={{ color: color["fgColor-muted"] }}>{tab.unavailableReason}</span>
+              <span style={{ color: color["fgColor-disabled"] }}>{tab.unavailableReason}</span>
             ) : null}
           </button>
         );

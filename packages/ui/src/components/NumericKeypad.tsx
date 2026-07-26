@@ -78,12 +78,17 @@ export const NumericKeypad = ({ value, onChange, max, maxDigits = 7 }: NumericKe
               fontSize: t.fontSize,
               fontWeight: t.fontWeight,
               fontVariantNumeric: "tabular-nums",
-              background: color["bgColor-surface-raised"],
-              color: color["fgColor-default"],
+              background: blocked
+                ? color["bgColor-surface-sunken"]
+                : color["bgColor-surface-raised"],
+              // A blocked key stays READABLE — the operator must be able to see that the 9
+              // is still a 9 and simply refused, not that the keypad has gone blank. An
+              // opacity wash measured 2.17:1 and made the digit ambiguous, which is a worse
+              // failure than the mis-entry the block exists to prevent.
+              color: blocked ? color["fgColor-disabled"] : color["fgColor-default"],
               border: `1px solid ${color["borderColor-default"]}`,
               borderRadius: space["space-2"],
               cursor: blocked ? "not-allowed" : "pointer",
-              opacity: blocked ? 0.35 : 1,
             }}
           >
             {key === "back" ? "⌫" : key === "clear" ? "C" : key}

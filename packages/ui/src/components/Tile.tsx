@@ -64,16 +64,29 @@ export const Tile = ({
         cursor: unavailable ? "not-allowed" : "pointer",
         // 27-F13: design achromatically first. The resting tile carries NO status colour —
         // colour is reserved for exceptions, so spending it on the base case would blunt it.
-        background: destructive ? color["bgColor-status-fault"] : color["bgColor-surface-raised"],
-        color: destructive ? color["fgColor-on-status-fault"] : color["fgColor-default"],
+        background: unavailable
+          ? color["bgColor-surface-sunken"]
+          : destructive
+            ? color["bgColor-status-fault"]
+            : color["bgColor-surface-raised"],
+        color: unavailable
+          ? color["fgColor-disabled"]
+          : destructive
+            ? color["fgColor-on-status-fault"]
+            : color["fgColor-default"],
+        // NO opacity. A 0.45 wash puts the reason text at 1.97:1 — far under AA — which
+        // defeats 27-F4's entire purpose: the tile is disabled IN PLACE so the operator can
+        // read WHY. "Disabled" is carried by the sunken fill (27-F15: the fill carries it),
+        // and the reason stays fully legible at 5.22:1.
         border: `1px solid ${color["borderColor-default"]}`,
-        opacity: unavailable ? 0.45 : 1,
       }}
     >
       <span>{label}</span>
       {children}
       {unavailable && unavailableReason ? (
-        <span style={{ color: color["fgColor-muted"] }}>{unavailableReason}</span>
+        <span style={{ color: color["fgColor-disabled"], fontWeight: 600 }}>
+          {unavailableReason}
+        </span>
       ) : null}
     </button>
   );

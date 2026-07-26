@@ -1,4 +1,4 @@
-import { color, space, typography } from "../tokens/index";
+import { color, space, targetFor, typography } from "../tokens/index";
 import { MoneyValue } from "./MoneyValue";
 import { QuantityItemLine, type QuantityItemLineProps } from "./QuantityItemLine";
 
@@ -61,12 +61,17 @@ export const Cart = ({ lines, totalPaisa, onRemove }: CartProps) => {
                   // never sits where a wet hand lands while scanning the list. Removal
                   // pre-KOT is a plain event; post-KOT it must be a void with an approver
                   // (01 §4), which is a different control on a different surface entirely.
-                  minWidth: 44,
-                  minHeight: 44,
+                  // Was a raw 44 — BELOW the 48 dp absolute floor, on a destructive control.
+                  // Caught by the adversarial pass; a raw pixel number here is exactly what
+                  // TOKENS.md bans, and it is why the ban exists.
+                  minWidth: targetFor("floor"),
+                  minHeight: targetFor("floor"),
                   marginLeft: space["space-4"],
                   background: "transparent",
-                  color: color["bgColor-status-fault"],
-                  border: `1px solid ${color["bgColor-status-fault"]}`,
+                  // fgColor-, not bgColor- — the role prefix exists to say which property a
+                  // token belongs to, and using a fill as a foreground silently breaks that.
+                  color: color["fgColor-status-fault"],
+                  border: `1px solid ${color["fgColor-status-fault"]}`,
                   borderRadius: space["space-1"],
                   cursor: "pointer",
                 }}
