@@ -80,6 +80,8 @@ Works in-branch over LAN and remotely over cloud; remote views always carry sync
 
 - 05-F26 **Pausing a channel offline takes effect LOCALLY and shows the aggregator leg as unsent (gap G15, founder ruling July 2026).** `05-F13`'s pause needs an aggregator API push that a WAN-down branch cannot make, and nothing said what the manager sees. **The branch has genuinely decided to stop accepting, so record that immediately** (`01-F17` spirit — never block the local decision on a remote system), and render the aggregator leg as a **separate, visibly unsent fact** per `00 §5.7`'s honesty rule, retried by the doc-08 outbox. The manager is told exactly which half took effect: one number of channels paused here, one count of pushes still owed. Orders that arrive from the still-live aggregator in the meantime are **not** auto-rejected — auto-rejection carries commercial consequences with the aggregator (`08`) and is not a side effect to take on a WAN blip.
 
+- 05-F27 **The walk-over PIN approval budgets the TAPS, not the walk (gap G11, founder ruling July 2026).** `02-F20`/`05-F8` make an in-person manager PIN the fallback whenever the phone is unreachable, and `21 §4` budgets only the machine path (`05-N1`). The human path is now budgeted where software can actually move it: **the pending request is visible on the terminal without searching for it, and approval is ≤3 taps from that state.** The walk itself is deliberately unbudgeted — it is floor layout, not software, and a metric nobody can act on is worse than none.
+
 ## 4. Key flows
 
 **Void approval (happy + fallback)**

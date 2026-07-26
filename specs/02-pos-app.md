@@ -108,6 +108,8 @@ All tiers run it. In **T1 the POS is the entire restaurant** — one device, pri
 
 - 02-F40 **In a printer-only kitchen, 86-ing is a counter action and the chef must say so out loud — a stated tier consequence, not a defect (gap G14, founder ruling July 2026).** `02-F7` puts the toggle on the POS and `03-F16` on the pass screen; a T1/T2 kitchen (`27-F11e` — most deployments) has neither, so stopping the platform selling a finished dish means the chef tells the counter. **No new mechanism is added**: not a kitchen device (hardware in the worst environment in the building for a handful of taps a day), not a WhatsApp path (`00 §5.1` — no in-branch feature may require WAN). The residual risk is real and named: the walk happens during the exact rush where an oversell is most likely, and `02-F31`'s oversell handling is what absorbs it.
 
+- 02-F41 **Attribution is whoever's PIN is in, with no "acting for" concept (gap G12, founder ruling July 2026).** `27-F51` makes second-order usability a design requirement — a shift lead driving the terminal for a junior who is stuck — and no FR owned it. **Ruled: no mechanism.** The supervisor's PIN means the supervisor is accountable, which is true anyway the moment they choose to take over, and modelling dual identity would add a concept to the permission matrix that must be got right under exactly the time pressure that caused the takeover. `27-F51` still binds the *design* — a screen must be operable by someone standing beside its owner — but not the *ledger*.
+
 ## 4. Key flows
 
 **Dine-in order (happy + print failure)**

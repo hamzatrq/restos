@@ -750,9 +750,19 @@ Category tabs are explicitly permitted at depth one, so a 300-item menu across ~
 > (96 dp) · **G10** quick-tag cap → `02-F39` (one page at the target posture, derived not
 > fixed) · **G16** no self-approval → `02-F38`.
 >
-> **Still open, and each needs a founder product call rather than a spec edit:** G2 (the
-> busser has no role at all), G3, G6, G8, G9, G11, G12, G13 (partially answered by the
-> screen map's one-band rule), G14, G15, G17.
+> **Closed by founder ruling (July 2026):** **G2** → `04-F19` (there is *no* busser role —
+> the waiter clears; closed by removing a role, not adding one) · **G3** → `04-F20` ·
+> **G6** → `09-F21` (self-serve on duty over the *cloud*; the rider phone was never on the
+> LAN, so `00 §5.1` was never engaged) · **G8** → `06-F29` (customers get their own law;
+> `21 §5`'s defaults are tuned for trained experts on known hardware) · **G11** → `05-F27`
+> (budget the taps, not the walk — the walk is floor layout, not software) · **G12** →
+> `02-F41` (attribution is whoever's PIN is in; no "acting for" concept) · **G13** → the
+> screen map's one-band rule · **G14** → `02-F40` (a stated tier consequence, with the
+> residual oversell risk named) · **G15** → `05-F26` · **G17** → `14-F28` (day-end by
+> default, with an explicit per-edit "apply now").
+>
+> **Still open:** **G9** only — the call-center operator is neither a role nor clearly a
+> mode, and it is Wave-4 scoping rather than a Wave-1 blocker.
 
 | # | Gap | Evidence | Who it blocks |
 |---|---|---|---|

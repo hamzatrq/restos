@@ -82,6 +82,8 @@ Expo React Native, sharing `packages/domain` + `packages/sync-client` with the f
 
 - 04-F19 **Clearing a table is the waiter's action; there is no busser role (gap G2, founder ruling July 2026).** `04 §4` said "busser taps done" while no busser existed in Appendix A, held a device, or was named in any FR — ~40 table turns a shift with no owner. **Resolved by removing the role, not by adding one:** the waiter already holds a handheld and already owns the table, so `table.state_changed → available` is a waiter action needing no new device, login or permission row. **Stated cost:** attribution records the waiter who tapped, which may not be the person who physically cleaned — acceptable because the attribution that matters here is *who asserts the table is ready to seat*, and that is a waiter judgement either way.
 
+- 04-F20 **The waiter has an own-attribution day view — the "I'm clean" view (gap G3).** `04 §5` listed it under Data and no FR created it, while every other role's protection view has one (`02-F23` cashier, `09-F16` rider, `11-F6` staff). It shows the waiter their own tables, their own items and their own day, and nothing about anyone else. Same purpose as `02-F23`: adoption depends on staff believing the system is on their side rather than watching them, and a role that can be *questioned* by the record but cannot *read* it is being watched.
+
 ## 4. Key flows
 
 **Seat → order → serve (happy path)**
