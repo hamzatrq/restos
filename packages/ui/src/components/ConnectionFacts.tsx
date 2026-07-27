@@ -30,6 +30,13 @@ const FILL: Record<Fact, ColorName> = {
   degraded: "bgColor-status-abnormal",
   down: "bgColor-status-fault",
 };
+// 27-F64: the outline carries SC 1.4.11's 3:1 so the fill's luminance is free for
+// dichromacy separation. It derives from its own fill and never encodes meaning.
+const OUTLINE: Record<Fact, ColorName> = {
+  ok: "borderColor-default",
+  degraded: "outlineColor-status-abnormal",
+  down: "outlineColor-status-fault",
+};
 const ON: Record<Fact, ColorName> = {
   ok: "fgColor-default",
   degraded: "fgColor-on-status-abnormal",
@@ -49,6 +56,9 @@ const Chip = ({ label, state, muted }: { label: string; state: Fact; muted: bool
         padding: `${space["space-1"]}px ${space["space-2"]}px`,
         borderRadius: state === "ok" ? 999 : state === "degraded" ? 4 : 0,
         background: muted ? color["bgColor-surface-sunken"] : color[FILL[state]],
+        // 27-F64: the outline carries only the BOUNDARY (SC 1.4.11). A muted fact takes the
+        // neutral outline for the same reason it takes the neutral fill — it is not a status.
+        border: `1px solid ${color[muted ? "borderColor-default" : OUTLINE[state]]}`,
         color: muted ? color["fgColor-muted"] : color[ON[state]],
         fontFamily: t.fontFamily,
         fontSize: t.fontSize,

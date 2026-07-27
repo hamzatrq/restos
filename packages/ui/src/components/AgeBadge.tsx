@@ -35,6 +35,13 @@ const FILL: Record<Level, ColorName> = {
   abnormal: "bgColor-status-abnormal",
   fault: "bgColor-status-fault",
 };
+// 27-F64: the outline carries SC 1.4.11's 3:1 so the fill's luminance is free for
+// dichromacy separation. It derives from its own fill and never encodes meaning.
+const OUTLINE: Record<Level, ColorName> = {
+  normal: "borderColor-default",
+  abnormal: "outlineColor-status-abnormal",
+  fault: "outlineColor-status-fault",
+};
 const ON: Record<Level, ColorName> = {
   normal: "fgColor-default",
   abnormal: "fgColor-on-status-abnormal",
@@ -56,7 +63,9 @@ export const AgeBadge = ({ minutes, amberAt, redAt }: AgeBadgeProps) => {
         gap: space["space-1"],
         padding: `${space["space-1"]}px ${space["space-3"]}px`,
         // 27-F15: the FILL carries the ladder — never a dot, badge outline or thin rule.
+        // 27-F64: the outline carries only the BOUNDARY (SC 1.4.11), never the meaning.
         background: color[FILL[level]],
+        border: `1px solid ${color[OUTLINE[level]]}`,
         color: color[ON[level]],
         borderRadius: RADIUS[level],
         fontFamily: t.fontFamily,
