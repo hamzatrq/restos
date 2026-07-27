@@ -547,6 +547,7 @@ const parseDropKey = (key: string): DropKey => {
 const assertNever = (type: never): never => {
   throw new Error(`foldIn: no merge rule for event type ${String(type)} (fix-round F5)`);
 };
+/* v8 ignore stop */
 
 export const createMergeEngine = (): MergeEngine => {
   let entities = new Map<string, Entity>();
@@ -752,6 +753,10 @@ export const createMergeEngine = (): MergeEngine => {
     // a new KnownEventType needs an oracle-pinned merge rule before the engine
     // may consume it; a silent fall-through would still count events_folded
     // (the honesty overcount F5 names).
+    /* v8 ignore next -- same proof as the declaration: `type` is `never` here, so the
+       compiler has already shown no value arrives. Marked at the CALL SITE too because a
+       region directive around the declaration does not reach this line, and an unpaired
+       region is how ~68% of this file silently left the measured set once already. */
     assertNever(type);
   };
 

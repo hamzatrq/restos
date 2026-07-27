@@ -378,6 +378,92 @@ describe("P1-4 / 01-F58 — an unresolvable head set resolves conservatively and
     ).replace(/\s*\n\s*\*\s*/g, " ");
     expect(constants).not.toMatch(/Unconsumed until the availability fold lands/);
   });
+
+  it("20 §2.2 / 24-F3: every coverage-ignore directive in the fold engine is PAIRED — an unterminated one silently exempts the rest of the file", () => {
+    // v8's ignore-start runs to END OF FILE when its stop is missing. That is invisible in
+    // review, and it turns the 100% branch gate into a gate over whatever happens to sit
+    // above the directive — green forever, on a protected path. The observable is the
+    // DENOMINATOR, which no threshold can see: when this was first written, one unpaired
+    // start at merge.ts:543 dropped the measured set from 426 statements / 202 branches to
+    // 113 / 65, taking the whole of `createMergeEngine` (declared nine lines below it) out
+    // of the gate while it reported 100%.
+    //
+    // Structural, not behavioural — a coverage run cannot detect this about itself. Scans
+    // only `src/*.ts` and `src/folds/*.ts`, so this file is NOT in the scanned set and its
+    // own mentions of the directives cannot satisfy it (the scanner is excluded from the
+    // scanned; the literals below are split for the same reason).
+    const START = `${"v8"} ignore start`;
+    const STOP = `${"v8"} ignore stop`;
+    const count = (s: string, needle: string) => s.split(needle).length - 1;
+    for (const dir of [join(SRC, "folds"), SRC]) {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.endsWith(".ts")) continue;
+        const src = readFileSync(join(dir, entry.name), "utf8");
+        expect({ file: entry.name, starts: count(src, START), stops: count(src, STOP) }).toEqual({
+          file: entry.name,
+          starts: count(src, START),
+          stops: count(src, START),
+        });
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 01-F22 — the empty-toggle-set default, and why it is NOT the incomplete case
+// ---------------------------------------------------------------------------
+
+describe("01-F22 — an item nobody has toggled is AVAILABLE, which is a different answer from unresolvable", () => {
+  // merge.ts:462's `toggles.size === 0` guard. `projectItemKey` is public on the engine, so
+  // this branch is reachable directly rather than only through a delivered event — and it is
+  // the only thing standing between an untoggled item and the incomplete-set branch one line
+  // below, which resolves to UNAVAILABLE with `availability_incomplete`. Delete the guard and
+  // every item nobody has ever touched reads as 86'd.
+  //
+  // The default is 01-F22's, not 01-F59's (the citation this round corrected): the catalog
+  // says what exists and availability is an operational override layered on top of it, so
+  // "no toggle delivered" means "sell it". Catalog is never a fold input (01-F52), which is
+  // why the engine can answer for an item it has never heard of.
+
+  it("01-F22: projectItemKey on a never-toggled item is available and uncontested, with no heads and no anomaly", () => {
+    const engine = createMergeEngine();
+    expect(engine.projectItemKey("never-toggled")).toEqual({
+      item_id: "never-toggled",
+      available: 1,
+      contested: 0,
+      head_ids_json: "[]",
+      anomalies_json: "[]",
+    });
+  });
+
+  it("01-F22 vs 01-F58: an empty set and an unresolvable set are told apart by the anomaly, and neither item's answer leaks into the other", () => {
+    const peer = peerIdentity(identity());
+    const engine = createMergeEngine();
+    // karahi's ENTIRE delivered set is a 2-cycle, so nothing is maximal: incomplete, not empty.
+    engine.rebuild(
+      [av(peer, "a", false, ["b"], "karahi"), av(peer, "b", false, ["a"], "karahi")].map((e) =>
+        parseEvent(e),
+      ),
+    );
+
+    const unresolvable = engine.projectItemKey("karahi");
+    const untoggled = engine.projectItemKey("naan");
+
+    // Told apart by the ANOMALY under every value of the ratified constant — that is the
+    // invariant distinction. (Under AVAILABILITY_FALSE_WINS as ratified they also differ in
+    // `available`; asserting both separately keeps this test correct if it is ever flipped.)
+    expect(unresolvable.available).toBe(CONSERVATIVE_AVAILABLE);
+    expect(JSON.parse(unresolvable.anomalies_json)).toEqual([INCOMPLETE]);
+
+    // Per-item: an unresolvable neighbour must never 86 an item nobody has touched.
+    expect(untoggled).toEqual({
+      item_id: "naan",
+      available: 1,
+      contested: 0,
+      head_ids_json: "[]",
+      anomalies_json: "[]",
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
