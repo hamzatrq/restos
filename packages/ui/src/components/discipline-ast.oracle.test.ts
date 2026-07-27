@@ -337,6 +337,13 @@ describe("the guard suite actually covers the package", () => {
         "components/Tile.stories.tsx",
         "components/Tile.tsx",
         "index.ts",
+        // NOT a component, and scanned on purpose: `color-science.ts` is source in
+        // `packages/ui/src` like any other, so TOKENS.md's "never a raw value" rule applies to
+        // it too. It was missing from the first draft of this list — a hand-typed inventory,
+        // which is the failure mode a pinned list exists to prevent and duly demonstrated on
+        // itself. `Surface.tsx` below is the one entry that is deliberately absent from disk:
+        // 27-F43 requires it, so this canary stays red until it ships.
+        "tokens/color-science.ts",
         "tokens/index.ts",
       ].sort(),
     );

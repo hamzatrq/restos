@@ -47,9 +47,9 @@ The ergonomics and low-literacy strands converge here from opposite directions, 
 |---|---|---|
 | counter POS grid tile | standing at a fixed terminal | **76 dp** (12 mm) |
 | cash / numeric keypad | standing, high-consequence entry | **126 dp** (20 mm) |
-| handheld waiter/rider | one-handed thumb | **64 dp** (9.6 mm) |
+| handheld waiter/rider | one-handed thumb | **64 dp** (10.2 mm) |
 | **kitchen bump / KDS action** | **standing, wet or greasy hands, 1–2 m** | **96 dp** (15 mm) |
-| absolute floor, anything | — | **48 dp**, gaps ≥8 dp |
+| absolute floor, anything | — | **48 dp** (7.6 mm), gaps ≥8 dp |
 
   The kitchen row is set above the standing-counter minimum deliberately: it is the one surface where 27-F9's measured **21.34% wet-hand gesture error** was gathered, and the operator is also reading at 1–2 m. Doc 21's superseded law named "KDS bump targets ≥64dp"; that number came from no posture study and is raised here.
   Measured error rates at 9.6 mm are 2.8% and **there is no significant accuracy gain above it** — past ~10 mm you are buying speed, not accuracy. WCAG 2.2's 24 px (AA) and 44 px (AAA) are below every empirical figure and cite only the one-handed thumb study; they are a legal floor, never a design target.

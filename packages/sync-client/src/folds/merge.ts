@@ -540,6 +540,10 @@ const parseDropKey = (key: string): DropKey => {
  * type without an oracle-pinned merge rule must not compile; at runtime
  * (unreachable — the domain parseEvent admits only registry types) it fails
  * loud, never a silent no-op that still counts fold work. */
+/* v8 ignore start -- unreachable by construction: `never` means the compiler has
+   already proved no value reaches here. A test for this would be a test that
+   TypeScript works, and an uncoverable line makes a 100% gate permanently red for
+   a reason no author can act on (24-F3). */
 const assertNever = (type: never): never => {
   throw new Error(`foldIn: no merge rule for event type ${String(type)} (fix-round F5)`);
 };

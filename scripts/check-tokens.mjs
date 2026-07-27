@@ -40,7 +40,13 @@ try {
   // git grep exits 1 when there are no matches — the clean case.
 }
 
-const lines = hits.split("\n").filter((l) => l.trim() !== "");
+// A marker inside a TEST is a fixture, not shipped source — the suite that proves this gate
+// works has to be able to write the string it detects. Same class of defect the UI oracle hit
+// twice in its own guards: a source-scanning check must not scan the thing doing the scanning.
+const lines = hits
+  .split("\n")
+  .filter((l) => l.trim() !== "")
+  .filter((l) => !/\.(test|spec|stories)\.tsx?:|__oracle__\/|__fixtures__\//.test(l));
 if (lines.length === 0) {
   console.log("check-tokens: clean — no unreviewed `check-token` markers in package source");
   process.exit(0);

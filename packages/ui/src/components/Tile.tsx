@@ -74,7 +74,7 @@ export const Tile = ({
           : destructive
             ? color["fgColor-on-status-fault"]
             : color["fgColor-default"],
-        // NO opacity. A 0.45 wash puts the reason text at 1.97:1 — far under AA — which
+        // NO opacity. A 0.45 wash puts the reason text at 1.89:1 — far under AA — which
         // defeats 27-F4's entire purpose: the tile is disabled IN PLACE so the operator can
         // read WHY. "Disabled" is carried by the sunken fill (27-F15: the fill carries it),
         // and the reason stays fully legible at 5.22:1.

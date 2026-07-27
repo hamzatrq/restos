@@ -24,12 +24,66 @@ const hex = (n: string): string => {
 const walk = (dir: string): string[] =>
   readdirSync(dir).flatMap((e) => {
     const full = join(dir, e);
-    if (statSync(full).isDirectory()) return e === "node_modules" ? [] : walk(full);
+    if (statSync(full).isDirectory()) {
+      // Build artifacts are excluded for the SAME reason as the oracle files, and this was
+      // the second instance of the bug: `.turbo/turbo-test.log` captures this suite's own
+      // console output, so a failure message quoting "1.97:1" was being written into the
+      // corpus that the next run scans. The test then reports its own previous failure as a
+      // finding and can never go green. Any directory a tool writes into is not source.
+      const generated = e === "node_modules" || e === "__oracle__" || e === "dist";
+      return generated || e.startsWith(".") ? [] : walk(full);
+    }
     return [".ts", ".tsx", ".md", ".json"].includes(extname(full)) ? [full] : [];
   });
-const PACKAGE_FILES = walk(UI_ROOT).map(
-  (f) => [relative(REPO_ROOT, f), readFileSync(f, "utf8")] as const,
-);
+
+/**
+ * A SOURCE-SCANNING TEST MUST NOT SCAN ITSELF.
+ *
+ * Learned the hard way in this very file. The F10 and F8 checks below forbid a literal string
+ * ("2.17:1", "27-F3 positional memory") appearing in package source — and then necessarily
+ * quote that string themselves, in the assertion, the comment and the failure message. Left
+ * in the corpus, each test finds itself and stays red no matter what the implementation does.
+ * That is not a strict test; it is not a test at all, because nothing can satisfy it.
+ *
+ * So the oracle files are excluded here, and the exclusion is itself asserted below — a
+ * silent exclusion would just move the problem from "permanently red" to "silently green".
+ */
+const isOracleOwned = (path: string): boolean =>
+  /\.oracle\.test\.tsx?$/.test(path) || path.includes("/__oracle__/");
+
+const ALL_FILES = walk(UI_ROOT).map((f) => relative(REPO_ROOT, f));
+const PACKAGE_FILES = walk(UI_ROOT)
+  .map((f) => [relative(REPO_ROOT, f), readFileSync(f, "utf8")] as const)
+  .filter(([f]) => !isOracleOwned(f));
+
+describe("a source-scanning test must not scan itself", () => {
+  it("excludes the oracle files from the corpus they scan", () => {
+    // The invariant, stated positively so it survives a future refactor of `walk`.
+    expect(PACKAGE_FILES.filter(([f]) => isOracleOwned(f)).map(([f]) => f)).toEqual([]);
+  });
+
+  it("still scans the implementation and the non-oracle tests", () => {
+    // The exclusion must be narrow. `discipline.test.ts` quoted 1.97:1 too, and that is
+    // exactly the kind of stale figure F10 exists to catch — excluding all tests would have
+    // hidden it.
+    const scanned = PACKAGE_FILES.map(([f]) => f);
+    expect(scanned).toContain("packages/ui/src/components/Tile.tsx");
+    expect(scanned).toContain("packages/ui/src/components/discipline.test.ts");
+    expect(scanned).toContain("packages/ui/CLAUDE.md");
+  });
+
+  it("proves the exclusion is load-bearing, not decorative", () => {
+    // If the oracle files did NOT contain the forbidden literals, excluding them would be
+    // pointless and this guard would be cargo cult. They do contain them — that is the whole
+    // reason the exclusion exists — so assert it, and this guard fails the day someone
+    // "cleans up" the exclusion because it looks unnecessary.
+    const selfReferential = ALL_FILES.filter(isOracleOwned).filter((f) => {
+      const src = readFileSync(join(REPO_ROOT, f), "utf8");
+      return src.includes("2.17:1") || src.includes("1.97:1") || /27-F3\s+positional/.test(src);
+    });
+    expect(selfReferential.length).toBeGreaterThan(0);
+  });
+});
 
 describe("F10 — a contrast figure written in a comment must be the figure the code produces", () => {
   // Three of the five hand-written ratios in this package reproduce. Two do not, and both are

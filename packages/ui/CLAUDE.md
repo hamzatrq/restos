@@ -30,7 +30,7 @@ operational UI, so the stories are written to be falsified on real staff.
 
 `src/components/discipline.test.ts` exists because an adversarial pass over the first draft
 found each of these as a live defect: no `opacity` for state (it put disabled-reason text at
-**1.97:1**, defeating `27-F4`), no touch-size literals (a destructive control had shipped at
+**1.89:1**, defeating `27-F4`), no touch-size literals (a destructive control had shipped at
 44 px, under the 48 dp floor), no `bgColor-` as a foreground or `fgColor-` as a background
 (`27-F40`'s prefix exists to say which property a token belongs to), no hex in component
 code, and every `fgColor-` token AA against **every** surface — that last rule caught the
