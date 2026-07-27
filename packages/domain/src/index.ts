@@ -28,6 +28,8 @@ export {
 export {
   addPaisa,
   applyRateBps,
+  type DirectedPaisa,
+  directedPaisa,
   type Milligrams,
   type Millilitres,
   mg,

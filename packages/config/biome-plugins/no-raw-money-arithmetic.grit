@@ -8,8 +8,29 @@ language js
 // Scope: an arithmetic operation — binary (+ - * / %), compound assignment
 // (+= -= *= /= %=), or update (++ / --, prefix and postfix; M2 fix round) — where an
 // operand is a money value, meaning EITHER a bare identifier whose name contains
-// `paisa`/`Paisa`, OR a member expression whose property name does (`payload.amount_paisa`,
-// `cell.unit_price_paisa`), optionally wrapped in a TypeScript `as` cast.
+// `paisa`/`Paisa` or `rupee`/`Rupee`, OR a member expression whose property name does
+// (`payload.amount_paisa`, `cell.unit_price_paisa`, `rupeesFromPaisa(x).rupees`),
+// optionally wrapped in a TypeScript `as` cast.
+//
+// The RUPEE half is the oracle fix round (review F1). `rupeesFromPaisa` returns a field
+// named `rupees`, and the rule matched only on `paisa` — so the helper written to SATISFY
+// this ban became the shortest way around it. Measured before the fix: `rupees * 1.17` (a
+// float tax rate applied to money) and `running += rupees` (money accumulated in a double)
+// both produced zero diagnostics, while their paisa-named twins were flagged 4/4.
+//
+// The member arm's receiver was also widened from `[^()]*` to `.*`, because that class
+// excluded CALL-expression receivers: `rupeesFromPaisa(x).rupees / 3` — the single most
+// likely way a caller reaches the value — matched nothing. The money-name class itself
+// still excludes parens, so a trailing call (`obj.paisaHelper(x) + y`) stays out of scope.
+//
+// HONEST LIMIT, recorded rather than glossed. This is a syntactic rule and Biome's GritQL
+// has no type information, so ANY name-based ban dies to a rename:
+// `const { rupees: whole } = x; whole * 1.17` is invisible and stays invisible. What the
+// extension buys is that the evasion goes from free to deliberate and legible in a diff.
+// The fixture pins both evasions as GAP cases asserted clean, so a future session that
+// closes one inverts the assertion rather than discovering the hole again. Sealing it would
+// take a display helper that returns a finished STRING — nothing left to do arithmetic on —
+// which moves locale grouping into `domain` and is a larger change than this round.
 //
 // T-01-22 extended this to member expressions. They were previously excluded as "the
 // plain-number fold plane", which left the fold's money arithmetic outside the ban in
@@ -20,10 +41,16 @@ language js
 // fixed in the same task). Forgetting the `as` arm would close nothing — every shipped
 // occurrence is cast.
 //
-// Plain `=`, comparisons, function arguments and string concatenation stay legal, and
-// deliberately so: `m.amount_paisa < floor` is the 01-F29 cap witness and the 01-F33
-// ceiling check — legitimate set predicates, not arithmetic. A rule that fired on those
-// would be suppressed, which is worse than the gap it closes.
+// Plain `=`, comparisons and function arguments stay legal, and deliberately so:
+// `m.amount_paisa < floor` is the 01-F29 cap witness and the 01-F33 ceiling check —
+// legitimate set predicates, not arithmetic. A rule that fired on those would be
+// suppressed, which is worse than the gap it closes.
+//
+// This comment previously also claimed string concatenation stays legal. It does NOT:
+// `"Rs " + amount_paisa` is a `+` with a money operand and has always been flagged. The
+// oracle measured it. Nothing shipped depends on the answer — the production formatter uses
+// a template literal and `.toLocaleString()`, both genuinely clean and both pinned in the
+// fixture — so the behaviour is left as it is and only the false claim is corrected.
 //
 // Engine quirks (Biome 2.5.4 GritQL, all verified empirically — re-verify on upgrade):
 //   * Snippet metavariables in WRITE positions do not work: `$x += $y` fails to compile
@@ -50,8 +77,8 @@ or {
     `$x % $y`
   } as $bin where {
     or {
-      $x <: r"(?s)^\(*(?:[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*|[^()]*\.[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*)(?:\s+as\s+[^()]*)?\)*$",
-      $y <: r"(?s)^\(*(?:[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*|[^()]*\.[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*)(?:\s+as\s+[^()]*)?\)*$"
+      $x <: r"(?s)^\(*(?:[A-Za-z0-9_$]*(?:[Pp]aisa|[Rr]upee)[A-Za-z0-9_$]*|.*\.[A-Za-z0-9_$]*(?:[Pp]aisa|[Rr]upee)[A-Za-z0-9_$]*)(?:\s+as\s+[^()]*)?\)*$",
+      $y <: r"(?s)^\(*(?:[A-Za-z0-9_$]*(?:[Pp]aisa|[Rr]upee)[A-Za-z0-9_$]*|.*\.[A-Za-z0-9_$]*(?:[Pp]aisa|[Rr]upee)[A-Za-z0-9_$]*)(?:\s+as\s+[^()]*)?\)*$"
     },
     register_diagnostic(span=$bin, message="Raw arithmetic on a money value is banned (18 §4 / DEC-MONEY-005). Use the domain helpers: addPaisa/subPaisa/sumPaisa for +/-, splitPaisa for division, applyRateBps for rates (integer basis points).")
   },
@@ -62,7 +89,7 @@ or {
   JsAssignmentExpression(left=$a, right=$b) as $asgn where {
     or {
       and {
-        $a <: r"^[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*$",
+        $a <: r"^[A-Za-z0-9_$]*(?:[Pp]aisa|[Rr]upee)[A-Za-z0-9_$]*$",
         $asgn <: r"(?s)^[A-Za-z0-9_$]+\s*(?:\+=|-=|\*=|/=|%=).*$"
       },
       and {
@@ -70,7 +97,7 @@ or {
         // The operator is pinned by the $asgn regex CONTAINING one of the five
         // arithmetic compounds, so plain `=` (and ??=/&&=/||=/bitwise) never match
         // while the RHS tail is free to be `m.amount_paisa as number`.
-        $b <: r"(?s)^\(*(?:[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*|[^()]*\.[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*)(?:\s+as\s+[^()]*)?\)*$",
+        $b <: r"(?s)^\(*(?:[A-Za-z0-9_$]*(?:[Pp]aisa|[Rr]upee)[A-Za-z0-9_$]*|.*\.[A-Za-z0-9_$]*(?:[Pp]aisa|[Rr]upee)[A-Za-z0-9_$]*)(?:\s+as\s+[^()]*)?\)*$",
         $asgn <: r"(?s)^.*(?:\+=|-=|\*=|/=|%=).*$"
       }
     },
@@ -81,7 +108,7 @@ or {
     JsPostUpdateExpression(operand=$u),
     JsPreUpdateExpression(operand=$u)
   } as $upd where {
-    $u <: r"^[A-Za-z0-9_$]*[Pp]aisa[A-Za-z0-9_$]*$",
+    $u <: r"^[A-Za-z0-9_$]*(?:[Pp]aisa|[Rr]upee)[A-Za-z0-9_$]*$",
     register_diagnostic(span=$upd, message="Raw arithmetic on a money value is banned (18 §4 / DEC-MONEY-005). Use the domain helpers: addPaisa/subPaisa/sumPaisa for +/-, splitPaisa for division, applyRateBps for rates (integer basis points).")
   }
 }

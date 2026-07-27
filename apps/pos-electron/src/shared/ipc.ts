@@ -48,8 +48,19 @@ export type DeviceState = z.infer<typeof DeviceStateSchema>;
 export const OpenOrderSchema = z.object({
   order_id: z.string(),
   reference: z.string(),
-  /** Integer paisa (00 §6). Computed by the fold in BigInt; never summed in the renderer. */
-  total_paisa: z.number().int(),
+  /**
+   * Integer paisa (`00 §6`). Computed by the fold in BigInt; never summed in the renderer.
+   *
+   * `.nonnegative()` is load-bearing, not decoration. It was missing while every schema in
+   * `domain` carries it, so the two planes disagreed about whether money can be negative —
+   * and `MoneyValue` throws a `RangeError` on a negative, which in React 19 unmounts the
+   * root and blanks the till. Refusing it HERE, at the plane boundary, is the fix rather
+   * than an ErrorBoundary around the render: `01-F54`'s remedy for bad data is to *degrade*
+   * — show the identifier, keep the money — and there is nothing to degrade to when the
+   * money itself is the corrupt value. A blank region on a counter screen is
+   * indistinguishable from a hung app.
+   */
+  total_paisa: z.number().int().nonnegative(),
   lines: z.array(
     z.object({
       line_id: z.string(),

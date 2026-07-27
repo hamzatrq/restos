@@ -10,15 +10,12 @@
 // lines, agreed tendering/refund sums) come from the real merge engine's
 // projection at the call site. PLACEMENT = T-01-11 ruling 4's senior-review
 // checkpoint.
+import { asPaisaInt } from "./money.js";
 
-/** Integer-paisa runtime guard (00 §6: floats never; brands are compile-time
- * only — T-01-13 posture — so the runtime check IS the enforcement). */
-const asPaisaInt = (n: number, label: string): number => {
-  if (!Number.isSafeInteger(n) || n < 0) {
-    throw new RangeError(`${label} must be a non-negative safe integer of paisas, got ${n}`);
-  }
-  return n;
-};
+// Integer-paisa runtime guard (00 §6: floats never; brands are compile-time only — T-01-13
+// posture — so the runtime check IS the enforcement). Imported, not redeclared: this module
+// carried its own copy with identical semantics and a differently-worded message, and the
+// message is where two copies of one rule diverge first (18 §2).
 
 export type RefundRemainderArgs = {
   /** The parent payment attempt's amount (01-F29: the merged `payment.recorded`
