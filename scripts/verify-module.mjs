@@ -75,7 +75,15 @@ for (const ws of workspaces) {
   for (const file of report.testResults ?? []) {
     const rel = String(file.name ?? "").replace(`${ROOT}`, "");
     for (const t of file.assertionResults ?? []) {
-      for (const m of String(t.title ?? "").matchAll(frRe)) {
+      // Ancestor `describe` titles count as citations, not only the leaf `it`. Both
+      // conventions are in the corpus — some suites put the FR on the describe and group
+      // several cases under it, others repeat it in every leaf — and reading the leaf alone
+      // made the ledger report NO evidence for FRs that had passing tests. That is the
+      // dangerous direction for a gate to be wrong in: `--gate` blocks D1 on unmapped rows,
+      // so under-reporting coverage turns real evidence into a phantom gap, and the obvious
+      // "fix" is to write duplicate tests for a requirement that is already proven.
+      const cited = [...(t.ancestorTitles ?? []), t.title ?? ""].join(" ");
+      for (const m of cited.matchAll(frRe)) {
         const row = byFr.get(m[1]) ?? { tests: new Set(), statuses: [] };
         row.tests.add(`${rel}#${t.title}`);
         row.statuses.push(t.status);
