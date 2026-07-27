@@ -233,6 +233,33 @@ export const worstDeltaE = (a: string, b: string): { delta: number; vision: Visi
 };
 
 /**
+ * HSL hue in degrees, or `null` for an achromatic colour.
+ *
+ * Used to gate `27-F14`'s ALLOCATION, which a ΔE00 optimiser will happily violate: pushing
+ * two colours apart in perceptual distance is indifferent to whether the result still means
+ * what IEC 60073 says it means. A "fault" colour optimised into pink is further from amber
+ * and no longer reads as danger.
+ */
+export const hueDegrees = (hex: string): number | null => {
+  const [r, g, b] = hexToRgb(hex).map((c) => c / 255) as [number, number, number];
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  if (delta === 0) return null;
+  let h: number;
+  if (max === r) h = 60 * (((g - b) / delta) % 6);
+  else if (max === g) h = 60 * ((b - r) / delta + 2);
+  else h = 60 * ((r - g) / delta + 4);
+  return (h + 360) % 360;
+};
+
+/** True when `hue` lies in [lo, hi], handling a band that wraps through 0 (red). */
+export const hueWithin = (hue: number | null, lo: number, hi: number): boolean => {
+  if (hue === null) return false;
+  return lo <= hi ? hue >= lo && hue <= hi : hue >= lo || hue <= hi;
+};
+
+/**
  * CSS alpha compositing of `fg` over `bg` at opacity `alpha`. Browsers composite in
  * gamma-encoded sRGB, so this does too — the result is what a screen actually shows, which
  * is the only thing an opacity claim in a comment can honestly be about.

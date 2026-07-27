@@ -27,14 +27,27 @@
 
 import { describe, expect, it } from "vitest";
 import { contrastRatio } from "./__oracle__/color-oracle";
+import { type ColorName, type Polarity, palette } from "./index";
 import tokens from "./tokens.json" with { type: "json" };
 
-const color = tokens.color as Record<string, { value?: string }>;
-const hex = (name: string): string => {
-  const v = color[name]?.value;
-  if (typeof v !== "string") throw new Error(`token "${name}" is not in the manifest`);
-  return v;
-};
+/** The declared fill -> on-colour pairings (27-F43). Structure from the manifest, values from
+ *  whichever polarity is under test. */
+const PAIRINGS: readonly (readonly [ColorName, ColorName])[] = Object.entries(
+  tokens.color as Record<string, { pairsWith?: string }>,
+)
+  .filter(([k, v]) => !k.startsWith("$") && typeof v.pairsWith === "string")
+  .map(([k, v]) => [k as ColorName, v.pairsWith as ColorName]);
+
+/**
+ * BOTH POLARITIES. 27-F19 makes light the default on every surface and dark a per-site KDS
+ * opt-in, and the manifest's `$law` claims "every SC 1.4.11 separation holds in BOTH". A claim
+ * about two sets checked on one set is a claim about neither, so every table below runs twice.
+ *
+ * This is not symmetric in importance. Light is what every counter, waiter and rider surface
+ * actually renders; dark is what a kitchen may opt into. A failure on light is a failure in
+ * production today.
+ */
+const POLARITIES = Object.keys(palette) as Polarity[];
 
 /** SC 1.4.11 Level AA. */
 const NON_TEXT_FLOOR = 3;
@@ -43,15 +56,16 @@ type Pair = {
   /** Where the composition happens, so a failure points at code, not at a token. */
   where: string;
   what: string;
-  fg: string;
-  bg: string;
+  fg: ColorName;
+  bg: ColorName;
 };
 
-const p = (where: string, what: string, fg: string, bg: string): Pair => ({
+/** Token NAMES, not hexes — the same composition is measured in each polarity. */
+const p = (where: string, what: string, fg: ColorName, bg: ColorName): Pair => ({
   where,
   what,
-  fg: hex(fg),
-  bg: hex(bg),
+  fg,
+  bg,
 });
 
 /**
@@ -189,50 +203,83 @@ const STATES: readonly Pair[] = [
   ),
 ];
 
-describe("SC 1.4.11 — a control must have a perceivable boundary", () => {
-  it.each(BOUNDARIES)("$where — $what", ({ fg, bg }) => {
-    expect(contrastRatio(fg, bg)).toBeGreaterThanOrEqual(NON_TEXT_FLOOR);
+describe.each(POLARITIES)("SC 1.4.11 on the %s palette", (polarity) => {
+  const c = palette[polarity];
+  const ratio = ({ fg, bg }: Pair): number => contrastRatio(c[fg], c[bg]);
+
+  describe("a control must have a perceivable boundary", () => {
+    it.each(BOUNDARIES)("$where — $what", (pair) => {
+      expect(ratio(pair)).toBeGreaterThanOrEqual(NON_TEXT_FLOOR);
+    });
+  });
+
+  describe("a status fill must be visible on the surface it is drawn on (27-F15)", () => {
+    it.each(STATUS_FILLS)("$where — $what", (pair) => {
+      expect(ratio(pair)).toBeGreaterThanOrEqual(NON_TEXT_FLOOR);
+    });
+  });
+
+  describe("a state change must be carried by something visible", () => {
+    it.each(STATES)("$where — $what", (pair) => {
+      expect(ratio(pair)).toBeGreaterThanOrEqual(NON_TEXT_FLOOR);
+    });
+  });
+
+  describe("27-F21 — text pairings, which the ladder floor is conditioned on", () => {
+    it("clears AA for every fgColor- token on every surface", () => {
+      const surfaces = (Object.keys(c) as ColorName[]).filter((k) =>
+        k.startsWith("bgColor-surface"),
+      );
+      const fgs = (Object.keys(c) as ColorName[]).filter(
+        (k) => k.startsWith("fgColor-") && !k.startsWith("fgColor-on-"),
+      );
+      const failures = fgs.flatMap((f) =>
+        surfaces
+          .filter((s) => contrastRatio(c[f], c[s]) < 4.5)
+          .map((s) => `${f} on ${s}: ${contrastRatio(c[f], c[s]).toFixed(2)}:1`),
+      );
+      expect(failures).toEqual([]);
+    });
+
+    it("clears AA for every on-* pairing against its own fill (27-F43)", () => {
+      const failures = PAIRINGS.filter(([fill, on]) => contrastRatio(c[fill], c[on]) < 4.5).map(
+        ([fill, on]) => `${on} on ${fill}: ${contrastRatio(c[fill], c[on]).toFixed(2)}:1`,
+      );
+      expect(failures).toEqual([]);
+    });
   });
 });
 
-describe("SC 1.4.11 + 27-F15 — a status fill must be visible on the surface it is drawn on", () => {
-  it.each(STATUS_FILLS)("$where — $what", ({ fg, bg }) => {
-    expect(contrastRatio(fg, bg)).toBeGreaterThanOrEqual(NON_TEXT_FLOOR);
-  });
-});
-
-describe("SC 1.4.11 — a state change must be carried by something visible", () => {
-  it.each(STATES)("$where — $what", ({ fg, bg }) => {
-    expect(contrastRatio(fg, bg)).toBeGreaterThanOrEqual(NON_TEXT_FLOOR);
-  });
-});
-
-describe("27-F63 — the training tint is a safety signal, not a decoration", () => {
-  it("distinguishes a training shell from a live one on the surface alone", () => {
-    // The band is unmissable (16.91:1) but 27-F63 requires "a persistent full-width band PLUS
-    // a visibly different surface tint on every screen". The tint is the half that survives
-    // when the band is scrolled past, occluded by an alarm, or simply not looked at — and the
-    // failure it guards is a member of staff treating a real order as practice. If the tint is
-    // below 3:1 the requirement has one half, not two.
-    const ratio = contrastRatio(hex("bgColor-surface-sunken"), hex("bgColor-surface"));
-    expect(ratio).toBeGreaterThanOrEqual(NON_TEXT_FLOOR);
-  });
-});
+describe.each(POLARITIES)(
+  "27-F63 on the %s palette — the training tint is a safety signal",
+  (polarity) => {
+    it("distinguishes a training shell from a live one on the surface alone", () => {
+      // The band is unmissable (16.91:1) but 27-F63 requires "a persistent full-width band PLUS
+      // a visibly different surface tint on every screen". The tint is the half that survives
+      // when the band is scrolled past, occluded by an alarm, or simply not looked at — and the
+      // failure it guards is a member of staff treating a real order as practice. If the tint is
+      // below 3:1 the requirement has one half, not two.
+      const c = palette[polarity];
+      const ratio = contrastRatio(c["bgColor-surface-sunken"], c["bgColor-surface"]);
+      expect(ratio).toBeGreaterThanOrEqual(NON_TEXT_FLOOR);
+    });
+  },
+);
 
 describe("the gate is total — no surface/fill pair may be left unmeasured", () => {
   it("covers every status fill against every surface a component can place it on", () => {
     // A regression guard on the TEST, not the palette: if a status colour is added, or a
     // surface token is added, this fails until the pair tables above are extended. The
     // previous suite's blind spot was a pair nobody had listed, so the list itself is checked.
-    const statuses = Object.keys(color).filter(
+    const statuses = (Object.keys(palette.light) as ColorName[]).filter(
       (k) => k.startsWith("bgColor-status-") || k === "bgColor-interactive",
     );
-    const drawnOn = ["bgColor-surface-raised", "bgColor-surface-sunken"];
+    const drawnOn: ColorName[] = ["bgColor-surface-raised", "bgColor-surface-sunken"];
     const covered = new Set(STATUS_FILLS.map((x) => `${x.fg}|${x.bg}`));
     const missing: string[] = [];
     for (const s of statuses) {
       for (const d of drawnOn) {
-        if (!covered.has(`${hex(s)}|${hex(d)}`)) missing.push(`${s} on ${d}`);
+        if (!covered.has(`${s}|${d}`)) missing.push(`${s} on ${d}`);
       }
     }
     expect(missing, `unmeasured status/surface combinations: ${missing.join(", ")}`).toHaveLength(

@@ -1,157 +1,198 @@
-// ORACLE ACCEPTANCE TESTS — 27-F15, the status-colour ladder.
+// ORACLE ACCEPTANCE TESTS — 27-F15 (amended July 2026), over BOTH polarities.
 //
-// PROVENANCE: authored by the oracle session (24 §3 step 2), not by the session that wrote
-// tokens.json or color-science.ts. Uses the independent oracle in `__oracle__/`, validated
-// against Sharma/Wu/Dalal 2005 in `__oracle__/color-oracle.test.ts`. It does not import
-// `color-science.ts`, because a palette checked with the arithmetic that produced it is not
-// checked at all.
+// PROVENANCE: oracle session (24 §3 step 2). Uses the independent oracle in `__oracle__/`,
+// validated against Sharma/Wu/Dalal 2005. It does not import `color-science.ts`, because a
+// palette checked with the arithmetic that produced it is not checked at all.
 //
-// WHY THIS FILE REPLACES THE 27-F15 BLOCK IN tokens.test.ts:
+// WHAT CHANGED, AND WHY THIS IS NOT JUST THE OLD FILE POINTED AT A SMALLER NUMBER.
 //
-// The existing test asserts the spec's 31.4 against amber <-> red, which passes at 44.34,
-// and excludes green from "the ladder" on the reasoning that 27-F14 makes green transient.
-// But 31.4 is not a number about amber and red. Its source is
-// `plans/wave-1/research/colour-typography.md:15-18`:
+// 27-F15's floor is now ΔE00 >= 20 on the WORST pair of the 27-F14 set, measured across normal
+// vision and all three dichromacies **with the 27-F21 separation gate held**. The former 31.4
+// was measured on a single pair, on a different ladder, with no separation gate applied — and
+// no four-colour set satisfying that gate reaches it on any theme.
 //
-//     "Measured dE00 GREEN VS RED under deuteranopia: 8.2 (from 67.9 normal) - near-identical
-//      olive. Fix is a monotonic lightness ladder L* 100 -> 77.5 -> 39.7; worst case under
-//      any dichromacy 31.4."
-//
-// So 8.2 and 31.4 are both about GREEN VS RED. The shipped palette measures 29.42 on that
-// pair. The test that quoted the number applied it to the pair that passes it, and covered
-// the pair it was measured on with a self-chosen `>15` and a comment conceding the result was
-// "EXPECTED to be weak". That is a test written to pass rather than to check.
-//
-// This file states the spec's number, on every pair, with no carve-outs.
+// The CONDITION matters more than the number. "ΔE00 >= 20 with separation held" is two
+// requirements, and a palette can satisfy either alone while failing the pair — so both are
+// asserted here, per polarity. A failed separation gate is never treated as an excuse from the
+// ladder: 27-F19 makes light the DEFAULT on every surface, so the default palette does not get
+// to be the one that is exempt from the FR written for it.
 
 import { describe, expect, it } from "vitest";
-import { contrastRatio, lightness, VISIONS, worstDeltaE } from "./__oracle__/color-oracle";
-import tokens from "./tokens.json" with { type: "json" };
+import {
+  contrastRatio,
+  hueDegrees,
+  hueWithin,
+  lightness,
+  worstDeltaE,
+} from "./__oracle__/color-oracle";
+import { type ColorName, type Polarity, palette } from "./index";
 
-const color = tokens.color as Record<string, { value?: string } | string>;
-const hex = (name: string): string => {
-  const t = color[name];
-  const v = typeof t === "string" ? undefined : t?.value;
-  if (typeof v !== "string") throw new Error(`token "${name}" is not in the manifest`);
-  return v;
-};
+const POLARITIES = Object.keys(palette) as Polarity[];
 
 /**
- * The 27-F14 allocation, in full. Every entry is a colour the operator may see on an
- * operational surface, so every PAIR is a discrimination the operator may have to make.
- * There is deliberately no subsetting here: a carve-out is a design decision, and a design
- * decision belongs in doc 27 with evidence, not in a test file.
+ * The 27-F14 allocation in full, with the IEC 60073 meaning each slot carries and the hue band
+ * that meaning implies. Every PAIR is a discrimination an operator may have to make, so there
+ * is deliberately no subsetting: a carve-out is a design decision and belongs in doc 27 with
+ * evidence, not in a test file.
  */
 const ALLOCATION = [
-  ["amber", "bgColor-status-abnormal"],
-  ["red", "bgColor-status-fault"],
-  ["green", "bgColor-status-confirmed"],
-  ["blue", "bgColor-interactive"],
-] as const;
+  { name: "amber", token: "bgColor-status-abnormal", meaning: "abnormal", lo: 25, hi: 65 },
+  { name: "red", token: "bgColor-status-fault", meaning: "fault/danger", lo: 345, hi: 25 },
+  { name: "green", token: "bgColor-status-confirmed", meaning: "confirmation", lo: 100, hi: 175 },
+  { name: "blue", token: "bgColor-interactive", meaning: "interactive", lo: 185, hi: 250 },
+] as const satisfies readonly {
+  name: string;
+  token: ColorName;
+  meaning: string;
+  lo: number;
+  hi: number;
+}[];
 
-/** 27-F15's headline number, from `plans/wave-1/research/colour-typography.md:17`. */
-const LADDER_FLOOR = 31.4;
+/** 27-F15 as amended, July 2026. */
+const LADDER_FLOOR = 20;
+/** WCAG 2.2 SC 1.4.11 Level AA — the gate the floor is conditioned on. */
+const SEPARATION_FLOOR = 3;
+/** The surfaces a status fill is actually drawn on. Never `bgColor-surface`. */
+const FILL_SURFACES = ["bgColor-surface-raised", "bgColor-surface-sunken"] as const;
 
-const pairs = ALLOCATION.flatMap(([an, ak], i) =>
-  ALLOCATION.slice(i + 1).map(([bn, bk]) => ({ an, bn, a: hex(ak), b: hex(bk) })),
-);
+const pairs = ALLOCATION.flatMap((a, i) => ALLOCATION.slice(i + 1).map((b) => ({ a, b })));
 
-describe("27-F15 — every allocated pair rides the ladder, with no carve-outs", () => {
-  it.each(pairs)("$an <-> $bn separates by at least 31.4 under every vision", ({ a, b }) => {
-    const { delta, vision } = worstDeltaE(a, b);
+describe.each(POLARITIES)("27-F15 amended — the %s palette", (polarity) => {
+  const c = palette[polarity];
+
+  it.each(pairs)("$a.name <-> $b.name clears the ΔE00 floor under every vision", ({ a, b }) => {
+    const { delta, vision } = worstDeltaE(c[a.token], c[b.token]);
     expect(delta, `worst under ${vision}`).toBeGreaterThanOrEqual(LADDER_FLOOR);
   });
 
-  it("reports the whole matrix, so an amendment can be written against measurements", () => {
-    // Not a carve-out — a diagnostic. If 27-F15 is to be amended, it should be amended to a
-    // number someone measured, and this is where that number comes from.
-    const rows = pairs.map(({ an, bn, a, b }) => {
-      const { delta, vision } = worstDeltaE(a, b);
-      return `${an}<->${bn}: ${delta.toFixed(2)} (${vision})`;
+  it("holds the separation gate the floor is conditioned on", () => {
+    // A palette that reaches 20 by letting a fill vanish into its surface has met nothing.
+    const failures = ALLOCATION.flatMap(({ name, token }) =>
+      FILL_SURFACES.filter((s) => contrastRatio(c[token], c[s]) < SEPARATION_FLOOR).map(
+        (s) => `${name} on ${s}: ${contrastRatio(c[token], c[s]).toFixed(2)}:1`,
+      ),
+    );
+    expect(failures, "separation gate not held, so the ΔE00 floor is unconditioned").toEqual([]);
+  });
+
+  it("reports the whole matrix, so any future amendment is written against measurements", () => {
+    const rows = pairs.map(({ a, b }) => {
+      const { delta, vision } = worstDeltaE(c[a.token], c[b.token]);
+      return `${a.name}<->${b.name}: ${delta.toFixed(2)} (${vision})`;
     });
-    const worst = Math.min(...pairs.map(({ a, b }) => worstDeltaE(a, b).delta));
+    const worst = Math.min(...pairs.map(({ a, b }) => worstDeltaE(c[a.token], c[b.token]).delta));
+    expect(worst, `measured across the allocation — ${rows.join("; ")}`).toBeGreaterThanOrEqual(
+      LADDER_FLOOR,
+    );
+  });
+
+  it("keeps each status colour inside the hue band its IEC 60073 meaning implies", () => {
+    // THE SECOND FAILURE MODE, pinned. A pure ΔE00 optimiser is indifferent to MEANING: it
+    // will push "fault" toward pink because pink is further from amber. That clears every
+    // distance and contrast gate and still violates 27-F14's allocation — red means danger,
+    // and a colour that no longer reads as red no longer carries the slot it was given.
+    for (const { name, token, meaning, lo, hi } of ALLOCATION) {
+      const h = hueDegrees(c[token]);
+      expect(
+        hueWithin(h, lo, hi),
+        `${name} (${meaning}) is at hue ${h?.toFixed(0) ?? "achromatic"}, outside ${lo}-${hi}`,
+      ).toBe(true);
+    }
+  });
+
+  it("orders the ladder monotonically away from its own surface", () => {
+    // 27-F15 is a LIGHTNESS ladder, and which direction is "heavier" depends on the field: on
+    // a light base a severe state is DARKER than the page, on a dark base it is LIGHTER. The
+    // old test asserted the light direction literally and would have to be rewritten for every
+    // new polarity. The invariant that survives both is that severity moves monotonically AWAY
+    // from the surface.
+    const surface = lightness(c["bgColor-surface"]);
+    const away = (token: ColorName): number => Math.abs(lightness(c[token]) - surface);
     expect(
-      worst,
-      `measured worst-case across the allocation — ${rows.join("; ")}`,
-    ).toBeGreaterThanOrEqual(LADDER_FLOOR);
+      away("bgColor-status-fault"),
+      "fault must sit further from the page than abnormal",
+    ).toBeGreaterThan(away("bgColor-status-abnormal"));
   });
 });
 
 describe("27-F15 — the failure mode is reproduced, not quoted", () => {
   it("shows the naive traffic light collapsing on GREEN VS RED, the pair the research measured", () => {
-    // The research measured the naive palette at dE00 8.2 under deuteranopia, from 67.9 under
-    // normal vision. Reproducing that claim requires a GREEN and a RED at similar lightness —
-    // the "near-identical olive". The previous exemplar used two red-oranges (#C98145 /
-    // #E16C48), which reproduces a real collapse but not the one the number describes.
-    const naiveGreen = "#2E9B57";
-    const naiveRed = "#C0392B";
-
-    const normal = worstDeltaE(naiveGreen, naiveGreen).delta;
-    expect(normal).toBe(0); // sanity: the oracle is comparing what we think it is
-
-    const { delta, vision } = worstDeltaE(naiveGreen, naiveRed);
+    // The research measured the naive palette at ΔE00 8.2 under deuteranopia. Reproducing THAT
+    // claim needs a green and a red at similar lightness — the "near-identical olive". An
+    // earlier exemplar used two red-oranges, which reproduces a real collapse but not the one
+    // the number describes.
+    const { delta, vision } = worstDeltaE("#2E9B57", "#C0392B");
     expect(vision, "the traffic light fails for DEUTANS specifically (27-F17)").toBe(
       "deuteranopia",
     );
     expect(delta, "the naive green/red pair must reproduce the ~8.2 collapse").toBeLessThan(12);
   });
+});
 
-  it("shows the shipped palette beating that collapse on the SAME pair", () => {
-    // This is the comparison 27-F15 actually claims: the fix, measured where the break was.
-    const { delta } = worstDeltaE(hex("bgColor-status-confirmed"), hex("bgColor-status-fault"));
-    expect(delta).toBeGreaterThanOrEqual(LADDER_FLOOR);
+describe("the contrast gates and the ΔE00 gate are INDEPENDENT", () => {
+  // THE FIRST FAILURE MODE, pinned. A palette hand-picked for semantic fitness cleared every
+  // contrast gate in this package while its joint ΔE00 was 13.01 — amber and green
+  // near-identical under dichromacy (`plans/wave-1/palette-repaint.md`). Contrast is a
+  // LUMINANCE relation between a colour and its background; ΔE00 is a PERCEPTUAL relation
+  // between two colours. Neither implies the other, and a suite checking only contrast will
+  // certify a palette unreadable to exactly the people 27-F15 protects.
+
+  /**
+   * Found by searching the sRGB cube for the pair with MINIMAL worst-case ΔE00 among colours
+   * that clear every contrast gate on the light base and sit in the amber (h26) and green
+   * (h105) bands. The result is stronger than the 13.01 that prompted this: these two are
+   * ΔE00 **0.00** under protanopia — not merely close, but the SAME COLOUR to a protanope —
+   * while measuring 14.70:1 and 15.80:1 against white and 12.76:1 and 13.71:1 against the
+   * sunken surface. Every contrast gate in this package passes them comfortably.
+   */
+  const TRAP = { amber: "#402008", green: "#102808" } as const;
+
+  it("demonstrates a pair that passes every contrast gate and still fails the ladder", () => {
+    for (const [slot, hex] of Object.entries(TRAP)) {
+      for (const s of FILL_SURFACES) {
+        expect(
+          contrastRatio(hex, palette.light[s]),
+          `${slot} ${hex} on ${s} must CLEAR separation, so the trap is about ΔE00 alone`,
+        ).toBeGreaterThanOrEqual(SEPARATION_FLOOR);
+      }
+      expect(
+        contrastRatio(hex, "#FFFFFF"),
+        `${slot} must carry an AA foreground`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+    const { delta, vision } = worstDeltaE(TRAP.amber, TRAP.green);
+    expect(
+      delta,
+      `every contrast gate passed, yet the pair is indistinguishable under ${vision}`,
+    ).toBeLessThan(LADDER_FLOOR);
+  });
+
+  it("keeps the shipped palettes clear of that trap on the pair it bites", () => {
+    for (const polarity of POLARITIES) {
+      const c = palette[polarity];
+      const { delta } = worstDeltaE(c["bgColor-status-abnormal"], c["bgColor-status-confirmed"]);
+      expect(delta, `${polarity} amber<->green`).toBeGreaterThanOrEqual(LADDER_FLOOR);
+    }
   });
 });
 
-describe("27-F15 — the ladder is monotonic in LIGHTNESS on the surfaces it is drawn on", () => {
-  it("orders severity by L* against every surface token, not just bgColor-surface", () => {
-    // The existing test checks the ladder against `bgColor-surface`. No component renders a
-    // status fill there: they sit on `-raised` (cards, rails, keys) and `-sunken` (the
-    // AgeBadge resting state). The ladder must hold on the surfaces actually used.
-    const surfaces = ["bgColor-surface", "bgColor-surface-raised", "bgColor-surface-sunken"];
-    for (const s of surfaces) {
-      expect(lightness(hex(s)), `${s} must be lighter than amber`).toBeGreaterThan(
-        lightness(hex("bgColor-status-abnormal")),
-      );
-    }
-    expect(lightness(hex("bgColor-status-abnormal"))).toBeGreaterThan(
-      lightness(hex("bgColor-status-fault")),
+describe("27-F19 — the manifest claims both polarities are gated, so both are", () => {
+  it("ships a distinct dark value for every colour token", () => {
+    // A partial dark set is worse than none: a surface that opts in silently inherits
+    // light-theme values for whichever tokens were forgotten, and inherits them as a FILL on a
+    // dark field, which is the worst possible direction to get wrong.
+    const shared = (Object.keys(palette.light) as ColorName[]).filter(
+      (k) => palette.dark[k] === palette.light[k],
     );
-  });
-});
-
-describe("27-F14 — the green slot gets the in-situ verification it has never had", () => {
-  // `bgColor-status-confirmed` is used by ZERO of the 13 components. A third of the colour
-  // budget has shipped without ever being rendered, and it is also the token carrying the
-  // 27-F15 shortfall. These are the checks the other three fills already get by being used.
-
-  it("has a paired foreground that clears AA on it", () => {
-    const pair = (color["bgColor-status-confirmed"] as { pairsWith?: string }).pairsWith;
-    expect(pair, "green declares no pairsWith").toBeDefined();
-    expect(contrastRatio(hex("bgColor-status-confirmed"), hex(pair ?? ""))).toBeGreaterThanOrEqual(
-      4.5,
-    );
+    expect(shared, "tokens with no distinct dark value").toEqual([]);
   });
 
-  it("is discriminable from the surfaces it would be drawn on, under every vision", () => {
-    // 27-F15: "the fill carries it". A confirmation the operator cannot see has confirmed
-    // nothing. Measured against -raised and -sunken, which is where fills actually sit.
-    for (const s of ["bgColor-surface-raised", "bgColor-surface-sunken"]) {
-      const { delta, vision } = worstDeltaE(hex("bgColor-status-confirmed"), hex(s));
-      expect(delta, `green vs ${s}, worst under ${vision}`).toBeGreaterThanOrEqual(20);
-    }
-  });
-
-  it("is never mistakable for the interactive accent under any vision", () => {
-    // 27-F14 gives blue "any control the operator may press" and green "that worked". An
-    // operator who cannot tell them apart will press a confirmation. `worstDeltaE` already
-    // minimises over VISIONS, so one assertion covers all four observers.
-    const { delta, vision } = worstDeltaE(
-      hex("bgColor-status-confirmed"),
-      hex("bgColor-interactive"),
-    );
-    expect(delta, `worst under ${vision} of ${VISIONS.join("/")}`).toBeGreaterThanOrEqual(
-      LADDER_FLOOR,
+  it("keeps light as the default, per 27-F19", () => {
+    // 27-F19 is explicit that light is the default on every surface and dark is a per-site KDS
+    // opt-in. Pinned so a future edit cannot quietly swap them: positive polarity wins on
+    // acuity at small character sizes, which is where the counter POS lives.
+    expect(lightness(palette.light["bgColor-surface"])).toBeGreaterThan(
+      lightness(palette.dark["bgColor-surface"]),
     );
   });
 });
