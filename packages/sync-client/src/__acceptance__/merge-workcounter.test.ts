@@ -86,17 +86,24 @@ describe("registry growth must fail this suite before it can silently no-op (fix
    * per matrix rows 59/60; audit.* sits outside KnownEventType by
    * construction and is pinned fold-inert elsewhere).
    *
-   * AMENDED July 2026 — FLAGGED FOR THE TEST-OWNING SESSION. This pin originally
-   * asserted `KnownEventType extends PinnedType`, i.e. that EVERY registry type is
-   * consumed by THIS engine. `availability.changed` (01-F22/01-F57..F59) is the first
-   * type for which that is false: it is item-keyed, not order-keyed, and folds in
-   * `folds/availability.ts` — a disjoint key space, not a second copy of this engine
-   * (26 §8). Merging it into the list above would have made the suite assert something
-   * untrue, so the partition is now EXPLICIT: every registry type is either
-   * merge-engine-consumed or dispositioned to a named other fold, and neither list may
-   * grow silently. The compile pin is strictly stronger than before, not weaker.
-   * An independent oracle session should review this split. */
+   * REVIEWED AND REVERTED TO ONE SET, July 2026 (oracle session; founder ruling on the
+   * 26 §3 structural question). The July amendment split this into a partition —
+   * engine-consumed types plus `availability.changed` dispositioned to
+   * `folds/availability.ts` — on the argument that its key space was disjoint. That
+   * argument was sound on its own terms and aimed at the wrong question: `26 §3`
+   * specifies a projection-key sidecar in which the engine returns EVERY key an event
+   * affects (`order:O1`, `item:I4`), and merge.ts's own key derivation records
+   * generalising to it as the scheduled follow-up. Availability is the first `item:`-keyed
+   * event, i.e. the trigger for that work — not grounds for a second fold outside the
+   * engine, which also placed it outside persistence, the Auditor's independent refold
+   * (01-F7/20 §4.2) and this very work counter.
+   *
+   * So the partition is gone and the pin is back to its original, stronger shape: EVERY
+   * registry type is consumed by THIS engine. The disjointness assertion and the
+   * `folds/.+\.ts` module-name string check went with it — neither describes anything
+   * real once there is one engine. */
   const PINNED_FOLD_CONSUMED = [
+    "availability.changed",
     "kot.printed",
     "order.confirmed",
     "order.created",
@@ -107,12 +114,7 @@ describe("registry growth must fail this suite before it can silently no-op (fix
     "payment.recorded",
     "payment.refunded",
   ] as const;
-  /** Registry types deliberately NOT consumed by the merge engine, each with the fold
-   * that does own it. A type may only appear here with a spec-cited disposition. */
-  const PINNED_OTHER_FOLD = {
-    "availability.changed": "folds/availability.ts (01-F57..F59, item-keyed)",
-  } as const;
-  type PinnedType = (typeof PINNED_FOLD_CONSUMED)[number] | keyof typeof PINNED_OTHER_FOLD;
+  type PinnedType = (typeof PINNED_FOLD_CONSUMED)[number];
   // COMPILE-LEVEL PIN (F5): if the registry grows, this assignment stops
   // compiling — the new type has no pinned merge rule yet, and an engine switch
   // without an exhaustiveness guard would fold nothing while still counting
@@ -120,17 +122,9 @@ describe("registry growth must fail this suite before it can silently no-op (fix
   // pin before the code can ship a silent fall-through.
   const registryIsCovered: [KnownEventType] extends [PinnedType] ? true : never = true;
 
-  it("01-F4 (fix-round F5): the fold-consumed registry is EXACTLY the pinned nine types — growth is a spec-PR + oracle-pin event, never a silent fall-through", () => {
+  it("01-F4 (fix-round F5): the fold-consumed registry is EXACTLY the pinned ten types — growth is a spec-PR + oracle-pin event, never a silent fall-through", () => {
     expect(registryIsCovered).toBe(true);
-    expect([...eventRegistry.types()].sort()).toEqual(
-      [...PINNED_FOLD_CONSUMED, ...Object.keys(PINNED_OTHER_FOLD)].sort(),
-    );
-    // The partition is a partition: nothing may be claimed by both, and every
-    // elsewhere-folded type must name the fold that owns it.
-    for (const t of Object.keys(PINNED_OTHER_FOLD)) {
-      expect(PINNED_FOLD_CONSUMED).not.toContain(t);
-      expect(PINNED_OTHER_FOLD[t as keyof typeof PINNED_OTHER_FOLD]).toMatch(/folds\/.+\.ts/);
-    }
+    expect([...eventRegistry.types()].sort()).toEqual([...PINNED_FOLD_CONSUMED].sort());
   });
 });
 

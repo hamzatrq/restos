@@ -24,6 +24,7 @@
 // indexed by `waiting_for`, so a drain touches only the events awaiting the
 // newly-arrived key (26 §4 defect 2 removed structurally).
 import {
+  AVAILABILITY_FALSE_WINS,
   applyLineState,
   CONTESTED_LINE_BILLABLE,
   canonicalJson,
@@ -75,10 +76,30 @@ export type FoldStats = {
   events_folded: number;
 };
 
+/**
+ * Item availability (`01-F22`, `01-F57`..`01-F59`) — the first `item:`-keyed projection.
+ *
+ * `head_ids_json` is the maximal set, exported so an operator surface can build a correct
+ * superseding toggle WITHOUT re-deriving the supersedes-DAG. Without it a contest was
+ * unclearable in practice: superseding only the head your screen happened to show leaves the
+ * other head standing, and the item stays 86'd forever. The sort is UTF-16 and is a
+ * PRESENTATION sequence only — it never reaches a value (`01-F34`), which the relabel
+ * property pins.
+ */
+export type AvailabilityRow = {
+  item_id: string;
+  /** 0/1 — SQLite STRICT has no boolean type. */
+  available: number;
+  contested: number;
+  head_ids_json: string;
+  anomalies_json: string;
+};
+
 export type FoldState = {
   orders: OpenOrderRow[];
   queue: KitchenQueueRow[];
   parked: ParkedRow[];
+  availability: AvailabilityRow[];
 };
 
 export type ProjectedOrder = { order: OpenOrderRow; queue: KitchenQueueRow | null };
@@ -87,6 +108,18 @@ export type ProjectedOrder = { order: OpenOrderRow; queue: KitchenQueueRow | nul
 export type ApplyResult = {
   /** Orders whose projection must be rewritten (scoped, never the ledger). */
   dirty: readonly string[];
+  /**
+   * Item keys whose availability projection must be rewritten (`26 §3` sidecar).
+   *
+   * A SEPARATE field rather than namespacing `dirty` in place. The order path's dirty
+   * plumbing is threaded through seven fold arms, the store's row-write and the drop plan,
+   * and the oracle named a silent-staleness regression there as the second-highest risk of
+   * this change — a namespaced key reaching a row-writer that still expects a bare id leaves
+   * the lattice right and SQLite wrong, visible only on a read BETWEEN deliveries. Adding a
+   * field cannot break a consumer that does not read it; changing the meaning of an existing
+   * one can. Key DERIVATION is generalised (see `keysFor`); the write channels stay typed.
+   */
+  dirtyItems: readonly string[];
   /** Parked row to insert (the event itself parked), or null. */
   parked: ParkedRow | null;
   /** Parked event ids drained (applied) by this delivery. */
@@ -331,6 +364,8 @@ export type MergeEngine = {
   rebuild(events: readonly ParsedEvent[]): void;
   /** One order's projected rows (null when the order has no delivered create). */
   projectOrder(orderId: string): ProjectedOrder | null;
+  /** One item's availability row — the `item:`-key analogue of `projectOrder` (`26 §3`). */
+  projectItemKey(itemId: string): AvailabilityRow;
   /** Every fold row, for a full table rewrite after rebuild(). */
   snapshot(): FoldState;
   parkedRows(): ParkedRow[];
@@ -363,6 +398,116 @@ export type DropPlan = {
 /** The bare order-fact types that park while their order key is absent (01-F10
  * amended: everything else carries its full projection keys and never parks). */
 const PARKING_TYPES: ReadonlySet<string> = new Set(["order.confirmed", "kot.printed"]);
+
+/** Every registry type the ORDER-keyed switch handles — i.e. all of them except the
+ * item-keyed ones. Declared as an Exclude so adding a new item-keyed event is a compile
+ * error in exactly one place (the sidecar) rather than a silent fall-through here. */
+type OrderKeyedEventType = Exclude<KnownEventType, "availability.changed">;
+
+const ORDER_NS = "order:";
+const ITEM_NS = "item:";
+
+type AvailabilityChangedP = { item_id: string; available: boolean; supersedes: string[] };
+
+/**
+ * The `26 §3` projection-key sidecar: every key an event affects.
+ *
+ * Returning a LIST rather than one key is the point — `26 §3` specifies it that way so an
+ * event may touch more than one projection, and the engine routes on the namespace instead
+ * of assuming `payload.order_id`. Today every event yields exactly one key; the shape is
+ * what makes the next multi-key event a data change rather than an engine change.
+ */
+const keysFor = (event: ParsedEvent): readonly string[] => {
+  if (event.type === "availability.changed") {
+    return [`${ITEM_NS}${(event.payload as AvailabilityChangedP).item_id}`];
+  }
+  return [`${ORDER_NS}${(event.payload as OrderRefP).order_id}`];
+};
+
+/**
+ * One item's availability lattice, keyed by `<event id>\u0000<payload hash>`.
+ *
+ * The composite key is what makes this a value-register rather than a last-write-wins cell:
+ * an identical redelivery collapses (same id, same bytes), while two claimants' DIVERGENT
+ * payloads under one id both survive and render as a conflict. Keying by id alone made the
+ * projection depend on ARRIVAL ORDER — a live `01-F34` break.
+ *
+ * `event_id` is carried in the VALUE because the key is an internal dedup device: heads and
+ * supersedes are both stated in envelope ids, and leaking a composite key into `head_ids_json`
+ * would hand an operator surface a token it cannot put in a `supersedes` array.
+ */
+type ItemEntity = Map<string, { event_id: string; value: boolean; supersedes: readonly string[] }>;
+
+/**
+ * Project one item from its toggle set (`01-F22`, `01-F57`..`01-F59`). A pure function of
+ * the SET, so delivery order cannot reach the result.
+ *
+ * "Latest wins" is illegal here — it needs a device clock (`01-F45`) or an id comparison
+ * reaching a projected value (`01-F34`), and concurrent toggles are ORDINARY because
+ * `01-F22` puts the 86 control on the POS, the pass screen and the manager console at once.
+ * So each toggle names what it replaces and the fold takes the maximal set.
+ */
+const projectItem = (
+  toggles: ItemEntity,
+): { available: boolean; contested: boolean; heads: string[]; anomalies: string[] } => {
+  const superseded = new Set<string>();
+  for (const t of toggles.values()) {
+    // Self-reference excluded — a malformed event must not erase itself and take the item's
+    // whole history with it. `order.table_assigned` now carries the identical guard.
+    for (const s of t.supersedes) if (s !== t.event_id) superseded.add(s);
+  }
+  const live = [...toggles.values()].filter((t) => !superseded.has(t.event_id));
+  const heads = [...new Set(live.map((t) => t.event_id))].sort();
+
+  if (toggles.size === 0) return { available: true, contested: false, heads, anomalies: [] };
+
+  if (heads.length === 0) {
+    // Every delivered toggle is superseded by one that is absent, or the supersedes edges
+    // form a cycle. NOT a default: it is a data-completeness fact, and the old code answered
+    // it with `available: true`, which meant a k>=2 cycle over toggles that ALL said
+    // unavailable projected AVAILABLE and resurrected an 86'd dish with no anomaly. Under
+    // `01-F39`'s scoped waiter slice that is reachable from an ordinary partial delivery.
+    //
+    // `26 §7` names this hazard — availability subset-blindness — as provably unfixable by
+    // any algebra, needing a delivery-completeness mechanism nobody has specced. So this is
+    // not a fix: it is the SAFE direction plus visibility. Direction comes from the ratified
+    // constant, not from a hardcoded literal (`26 §9`, `DEC-*` product constants).
+    // contested is TRUE here too: it means "the heads did not resolve this", and an
+    // unresolvable head set is unresolved whether the cause is disagreement or incompleteness.
+    // The two are told apart by the anomaly code, not by pretending one of them settled.
+    return {
+      available: !AVAILABILITY_FALSE_WINS,
+      contested: true,
+      heads,
+      anomalies: ["availability_incomplete"],
+    };
+  }
+
+  const distinct = new Set(live.map((t) => t.value));
+  if (distinct.size === 1) {
+    return { available: [...distinct][0] === true, contested: false, heads, anomalies: [] };
+  }
+  // 01-F58 — the fold does not pick a winner (01-F31). The errors are asymmetric: failing to
+  // sell a dish you could costs a re-toggle; selling one you cannot costs a refund and a
+  // customer. `heads` is what makes this CLEARABLE in one operator act.
+  return {
+    available: !AVAILABILITY_FALSE_WINS,
+    contested: true,
+    heads,
+    anomalies: ["availability_contested"],
+  };
+};
+
+const availabilityRowOf = (item_id: string, toggles: ItemEntity): AvailabilityRow => {
+  const p = projectItem(toggles);
+  return {
+    item_id,
+    available: p.available ? 1 : 0,
+    contested: p.contested ? 1 : 0,
+    head_ids_json: canonicalJson(p.heads),
+    anomalies_json: canonicalJson([...new Set(p.anomalies)].sort()),
+  };
+};
 
 type DropKey =
   | { kind: "order"; order_id: string }
@@ -413,6 +558,35 @@ export const createMergeEngine = (): MergeEngine => {
    * and the retention scope is part of what the projection is a function of. */
   const droppedOrders = new Set<string>();
   const droppedLines = new Set<string>();
+  /** `item:`-keyed lattice — a disjoint key space from `entities`, one engine. */
+  let items = new Map<string, ItemEntity>();
+
+  const foldAvailability = (event: ParsedEvent): void => {
+    const p = event.payload as AvailabilityChangedP;
+    let m = items.get(p.item_id);
+    if (!m) {
+      m = new Map();
+      items.set(p.item_id, m);
+    }
+    // Keyed by event id AND canonical payload bytes, exactly as the engine keys its other
+    // MVRs (`createMembers`, `lineValues`, `pay`/`refund`). Keying by id alone made this
+    // last-write-wins by ARRIVAL for two same-id envelopes with divergent payloads — a live
+    // 01-F34 break the shipped property suite hit on ~2.5% of runs. The store rejects same-id
+    // divergence on ingest, but 01-F37 keys quarantine per (org, claimed_event_id, device_id)
+    // — "each claimant's bytes are preserved as its own evidence row" — so two claimants'
+    // envelopes genuinely coexist in the merged cloud log the Auditor refolds. Value-keying
+    // is an ENGINE obligation, not a store one.
+    m.set(`${event.envelope.id}\u0000${payloadHash(p as unknown as Record<string, unknown>)}`, {
+      event_id: event.envelope.id,
+      value: p.available,
+      supersedes: p.supersedes,
+    });
+  };
+
+  /** Availability rows, keyed by item. Untoggled items never appear (01-F52: the catalog
+   * says what exists; availability is an operational override, never catalog-driven). */
+  const availabilitySnapshot = (): AvailabilityRow[] =>
+    [...items.keys()].sort().map((id) => availabilityRowOf(id, items.get(id) ?? new Map()));
   const lineKey = (orderId: string, lineId: string): string => `${orderId}\u0000${lineId}`;
 
   const entity = (orderId: string): Entity => {
@@ -447,7 +621,12 @@ export const createMergeEngine = (): MergeEngine => {
   const foldIn = (event: ParsedEvent, dirty: Set<string>): void => {
     counters.events_folded += 1;
     const env = event.envelope;
-    const type: KnownEventType = event.type;
+    // ORDER-KEYED types only. `apply` routes item-keyed events to their own fold before this
+    // is reached, and narrowing the type here makes that routing invariant COMPILER-ENFORCED
+    // rather than a comment: an item-keyed type can no longer have a case in this switch, so
+    // the branch cannot exist to be dead. A `case` that merely returned would still count
+    // `events_folded` above it if the routing ever regressed — the F5 honesty overcount.
+    const type: OrderKeyedEventType = event.type as OrderKeyedEventType;
     switch (type) {
       case "order.created": {
         const p = event.payload as CreatedP;
@@ -485,7 +664,11 @@ export const createMergeEngine = (): MergeEngine => {
         const p = event.payload as TableAssignedP;
         const e = entity(p.order_id);
         e.nodes.set(env.id, p.table_id);
-        for (const id of p.supersedes) e.tombstones.add(id);
+        // Self-reference is EXCLUDED: a malformed event that supersedes itself must not
+        // erase itself and take the anchor with it. The availability fold guarded this and
+        // this one did not, so two folds gave opposite answers to one malformed input while
+        // three places claimed they were identical (oracle P2-8). One engine now, one guard.
+        for (const id of p.supersedes) if (id !== env.id) e.tombstones.add(id);
         dirty.add(p.order_id);
         return;
       }
@@ -553,13 +736,6 @@ export const createMergeEngine = (): MergeEngine => {
         dirty.add(p.order_id);
         return;
       }
-      // 01-F22 / 01-F57: availability is ITEM-keyed, not order-keyed, so it folds in
-      // `folds/availability.ts` — a disjoint key space, not a second copy of this engine's
-      // logic (26 §8). Named here only so registry growth still FAILS COMPILE at the
-      // assertNever below: a new event type must be dispositioned, and "belongs to another
-      // fold" is a disposition. Touches no order, so it dirties nothing.
-      case "availability.changed":
-        return;
       case "order.settlement_closed": {
         const p = event.payload as ClosedP;
         const e = entity(p.order_id);
@@ -576,16 +752,24 @@ export const createMergeEngine = (): MergeEngine => {
   };
 
   const apply = (event: ParsedEvent): ApplyResult => {
+    // 26 §3 projection-key sidecar. Key derivation is no longer hardcoded to the order key:
+    // `availability.changed` is the first `item:`-keyed event, which is exactly the trigger
+    // the engine's own note named for this work. The sidecar answers "which projections does
+    // this event touch", and the engine routes on the namespace.
+    const keys = keysFor(event);
+    const itemKey = keys.find((k) => k.startsWith(ITEM_NS));
+    if (itemKey !== undefined) {
+      foldAvailability(event);
+      counters.events_folded += 1;
+      return { dirty: [], dirtyItems: [itemKey.slice(ITEM_NS.length)], parked: null, drained: [] };
+    }
     const payload = event.payload as OrderRefP;
-    // Key derivation is deliberately hardcoded to the ORDER key (fix-round F5
-    // ruling): every registry type carries `order_id`; generalising to a key
-    // sidecar is the scheduled follow-up task, not drive-by work here.
     const orderId = payload.order_id;
     // Fix-round F2 session memory: a straggler for a DROPPED order key is
     // ledger-retained by the caller but does ZERO fold work here — never
     // folded, never parked, never projected, and never counted (the honesty
     // counter must not claim work; oracle-pinned counter treatment).
-    if (droppedOrders.has(orderId)) return { dirty: [], parked: null, drained: [] };
+    if (droppedOrders.has(orderId)) return { dirty: [], dirtyItems: [], parked: null, drained: [] };
     const dirty = new Set<string>();
     // Key-presence parking (01-F10): bare order facts wait for their order key.
     if (PARKING_TYPES.has(event.type) && (entities.get(orderId)?.createMembers.size ?? 0) === 0) {
@@ -596,7 +780,7 @@ export const createMergeEngine = (): MergeEngine => {
       };
       sub(parkedByKey, orderId, () => new Map<string, ParsedEvent>()).set(event.envelope.id, event);
       parkedRowsById.set(event.envelope.id, row);
-      return { dirty: [], parked: row, drained: [] };
+      return { dirty: [], dirtyItems: [], parked: row, drained: [] };
     }
     foldIn(event, dirty);
     // Drain: an applied create makes the order key present — re-attempt ONLY the
@@ -608,7 +792,7 @@ export const createMergeEngine = (): MergeEngine => {
         drained.push(eventId);
       }
     }
-    return { dirty: [...dirty], parked: null, drained };
+    return { dirty: [...dirty], dirtyItems: [], parked: null, drained };
   };
 
   /** Remove and return the parked entries waiting on a key (shared by the create
@@ -874,6 +1058,7 @@ export const createMergeEngine = (): MergeEngine => {
   const rebuild = (events: readonly ParsedEvent[]): void => {
     counters.full_rebuilds += 1;
     entities = new Map();
+    items = new Map();
     parkedByKey = new Map();
     parkedRowsById = new Map();
     // The fold is a pure function of the SET — replay order is irrelevant; the
@@ -892,8 +1077,13 @@ export const createMergeEngine = (): MergeEngine => {
       orders: projections.map((p) => p.order),
       queue: projections.map((p) => p.queue).filter((q): q is KitchenQueueRow => q !== null),
       parked: parkedRows(),
+      availability: availabilitySnapshot(),
     };
   };
+
+  /** One item's availability row (the `item:`-key analogue of `projectOrder`). */
+  const projectItemKey = (itemId: string): AvailabilityRow =>
+    availabilityRowOf(itemId, items.get(itemId) ?? new Map());
 
   const parkedRows = (): ParkedRow[] => [...parkedRowsById.values()];
 
@@ -967,6 +1157,7 @@ export const createMergeEngine = (): MergeEngine => {
     apply,
     rebuild,
     projectOrder,
+    projectItemKey,
     snapshot,
     parkedRows,
     stats: () => ({ ...counters }),

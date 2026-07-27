@@ -33,6 +33,7 @@ import {
 import Database from "better-sqlite3";
 import { CATALOG_SCHEMA, type CatalogStore, createCatalogStore } from "./catalog.js";
 import {
+  type AvailabilityRow,
   createMergeEngine,
   type DropPlan,
   type FoldState,
@@ -162,6 +163,8 @@ export type DeviceStore = {
   openOrders(): OpenOrderRow[];
   kitchenQueue(): KitchenQueueRow[];
   parked(): ParkedRow[];
+  /** Item availability rows (01-F22, 01-F6) — the 26 §3 item-keyed projection. */
+  availability(): AvailabilityRow[];
   refold(): void;
   /** Fold work counters (T-01-15 contract; events_folded is the real quantity). */
   foldStats(): FoldStats;
@@ -350,6 +353,17 @@ CREATE TABLE IF NOT EXISTS parked (
   waiting_for TEXT NOT NULL,
   envelope_json TEXT NOT NULL
 ) STRICT;
+-- 01-F6 names availability a materialized state table; 26 §3 makes it an item-keyed
+-- projection of the same engine. Deliberately NOT joined to the catalog table — the catalog
+-- says what exists, availability is an operational override, and catalog is never a fold
+-- input (01-F52).
+CREATE TABLE IF NOT EXISTS availability (
+  item_id TEXT PRIMARY KEY,
+  available INTEGER NOT NULL,
+  contested INTEGER NOT NULL,
+  head_ids_json TEXT NOT NULL,
+  anomalies_json TEXT NOT NULL
+) STRICT;
 `;
 
 /** Canonical JSON (sorted object keys) — structural divergence detection for re-appends (01-F8). */
@@ -501,6 +515,20 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   const selectParked = db.prepare<[], ParkedRow>(
     "SELECT event_id, waiting_for, envelope_json FROM parked ORDER BY event_id",
   );
+  // 26 §3 item-key projection. Upsert rather than delete-then-insert: an availability row
+  // never ceases to exist once toggled — the fold's own "untoggled items never appear" is
+  // about items with no toggle at all, not about a toggle being withdrawn.
+  const insertAvailabilityRow = db.prepare<[string, number, number, string, string]>(
+    `INSERT INTO availability (item_id, available, contested, head_ids_json, anomalies_json)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(item_id) DO UPDATE SET available = excluded.available,
+       contested = excluded.contested, head_ids_json = excluded.head_ids_json,
+       anomalies_json = excluded.anomalies_json`,
+  );
+  const deleteAllAvailability = db.prepare("DELETE FROM availability");
+  const selectAvailability = db.prepare<[], AvailabilityRow>(
+    "SELECT item_id, available, contested, head_ids_json, anomalies_json FROM availability ORDER BY item_id",
+  );
 
   const rowToEnvelope = (row: { envelope: string }): EventEnvelopeT =>
     parseEnvelope(JSON.parse(row.envelope));
@@ -548,6 +576,10 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     clearOrders.run();
     clearQueue.run();
     clearParked.run();
+    // Availability is rebuilt from the same snapshot as every other table — the whole point
+    // of the sidecar is that refold() covers it without a second code path (01-F6).
+    deleteAllAvailability.run();
+    for (const row of state.availability) upsertAvailability(row);
     for (const row of state.orders) {
       insertOrderRow.run(
         row.order_id,
@@ -588,6 +620,17 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   const recomputeFolds = (): void => {
     engine.rebuild(readAllParsed());
     writeFullTables(engine.snapshot());
+  };
+
+  /** Replace one item's availability row in place — the `item:`-key targeted delta. */
+  const upsertAvailability = (row: AvailabilityRow): void => {
+    insertAvailabilityRow.run(
+      row.item_id,
+      row.available,
+      row.contested,
+      row.head_ids_json,
+      row.anomalies_json,
+    );
   };
 
   // Replace one order's rows in place (the targeted delta); the queue row exists
@@ -657,6 +700,11 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     }
     for (const eventId of result.drained) deleteParkedRow.run(eventId);
     for (const orderId of result.dirty) upsertOrder(orderId, engine.projectOrder(orderId));
+    // 26 §3 sidecar: item keys write their own materialized table (01-F6). Kept a separate
+    // loop over a separate field rather than a namespaced `dirty` — a namespaced key
+    // reaching this writer while it still expected a bare id would leave the lattice right
+    // and SQLite stale, visible only on a read BETWEEN deliveries with no refold.
+    for (const itemId of result.dirtyItems) upsertAvailability(engine.projectItemKey(itemId));
   };
 
   // Lamport assignment and the durable insert are one transaction (01-F3): a
@@ -1035,6 +1083,10 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
 
     parked() {
       return selectParked.all();
+    },
+
+    availability() {
+      return selectAvailability.all();
     },
 
     refold() {

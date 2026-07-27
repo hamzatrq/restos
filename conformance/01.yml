@@ -25,6 +25,7 @@ rows:
     status: green
     tests:
       - "packages/sync-client/src/__acceptance__/audit-store.test.ts#01-F5/01-F2: the chain HEAD is committed atomically with the durable ledger row — a second handle on the same file sees both"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F2/01-F6: the projection is PERSISTED — it survives closing and reopening the store, and refold() reproduces it byte-for-byte"
       - "packages/sync-client/src/__acceptance__/crash-resume.test.ts#01-F2/20 §2.6: every event confirmed before an abrupt abandon survives reopen, gap-free"
       - "packages/sync-client/src/__acceptance__/crash-resume.test.ts#01-F2/01-F3/20 §2.6: a seeded run of append/ack cycles across abrupt reopens never loses a confirmed event nor leaves a gap"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F2/01-F6: after abrupt abandon, reopen yields state tables ≡ pre-crash tables"
@@ -88,7 +89,7 @@ rows:
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F4: ingest of an unknown event type throws and persists nothing"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F4: ingest of a known type with an invalid payload throws and persists nothing"
       - "packages/sync-client/src/__acceptance__/ingest-batch.test.ts#01-F37/01-F4: invalid envelopes are skipped and counted, never thrown — the valid remainder still lands"
-      - "packages/sync-client/src/__acceptance__/merge-workcounter.test.ts#01-F4 (fix-round F5): the fold-consumed registry is EXACTLY the pinned nine types — growth is a spec-PR + oracle-pin event, never a silent fall-through"
+      - "packages/sync-client/src/__acceptance__/merge-workcounter.test.ts#01-F4 (fix-round F5): the fold-consumed registry is EXACTLY the pinned ten types — growth is a spec-PR + oracle-pin event, never a silent fall-through"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F4: an unknown event type throws and persists nothing"
       - "packages/sync-client/src/__acceptance__/store-append.test.ts#01-F4: an invalid payload for a known type throws and persists nothing"
       - "services/sync-gateway/src/__acceptance__/auditor-audit-chain.test.ts#01-F5/01-F4: an audit event whose prev_audit_hash is garbage-but-string MERGES — the registry checks presence/type only; chain integrity is the Auditor's cross-check, not the gateway's gate"
@@ -134,6 +135,11 @@ rows:
       - "packages/sync-client/src/__acceptance__/audit-store.test.ts#01-F5/01-F6: interleaving audit.* appends leaves open_orders/kitchen_queue/parked byte-identical"
       - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F6/01-F34: a parked event's envelope_json is byte-identical across reopen, even with JSON-omitted payload values"
       - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F6/01-F34: folds' canonicalJson IS the domain serializer, and both mirror JSON.stringify on omitted values"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F6/01-F22: an ingested availability.changed produces a projection row whose head id IS THE ENVELOPE ID"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F6: items are keyed independently — a toggle on one item never projects a row for another"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F2/01-F6: the projection is PERSISTED — it survives closing and reopening the store, and refold() reproduces it byte-for-byte"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F6 (F5 honesty): the engine folds availability.changed, so events_folded counts it — 'counted, folded nothing' is the one combination the honesty rule forbids"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F6: incremental delivery must write the PERSISTED row, not only the in-memory lattice"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: order.created materializes a row with the T-01-15 defaults and empty canonical json_lines"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6: optional order_type/table_id on order.created land in the row — the birth table is the assignment DAG's root head (additive under schema_version 1, 00 §6)"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F6/01-N1: with two confirms the anchor is delivery-order independent and its value is one of the delivered stamps"
@@ -245,6 +251,7 @@ rows:
       - "packages/sync-protocol/src/__acceptance__/fixtures.test.ts#01-F3/01-F9: the event_batch fixture carries a cloud-assigned non-negative integer global_seq"
       - "packages/sync-protocol/src/__acceptance__/messages.test.ts#01-F9: catchup_request.from_global_seq is a non-negative integer — 0 accepted, negatives/fractions/strings rejected"
       - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F9/01-F34: an event that FAILS to ingest halts the pull cursor, so catchup re-delivers it instead of skipping it forever"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F9: the engine-level fix does NOT weaken the store's divergent-duplicate guard, and the store still projects the first-landed event"
       - "packages/sync-client/src/__acceptance__/catchup-blocked-status.test.ts#DEC-SYNC-011(b)/01-F9: the blocking event is NOT stored, the cursor does NOT advance past it, and the next catch-up re-fetches it from the pre-block cursor"
       - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F9: a cold cloud session catches up pre-existing cloud events from the exclusive cursor"
       - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F9/01-F34: a live event_batch fan-out from a peer is applied via store.ingest with its global_seq"
@@ -272,6 +279,8 @@ rows:
   - fr: 01-F10
     status: green
     tests:
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F10/26 §4: a confirm before its create parks under the ORDER key, and only that order's create drains it"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F10/01-F17: an availability.changed never parks — it carries its full projection key and must never wait for an order"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F10: a child before its parent parks — no state effect — then drains identically to parent-first delivery"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F29/01-F10: payments and refunds never park — the fully-reversed chain converges to the forward delivery"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F34/01-F10: line-state edges never park — delivered before the order and its lines, they converge to the forward delivery"
@@ -362,7 +371,10 @@ rows:
   - fr: 01-F17
     status: green
     tests:
+      - "packages/domain/src/__acceptance__/money-directed.test.ts#a refund merged BEFORE its parent still resolves (01-F17 / DEC-SYNC-007)"
       - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F17/01-F34: a divergent duplicate inside a cloud batch is surfaced as quarantined AND the pull cursor advances past it (it must not wedge the pull)"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F59/01-F17/01-F53: 86-ing an item leaves an order that sells it byte-identical, and a line added AFTER the 86 still lands"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F10/01-F17: an availability.changed never parks — it carries its full projection key and must never wait for an order"
       - "packages/sync-client/src/__acceptance__/branch-time-mesh.test.ts#01-F43/01-F44: a device that never sees a hub keeps stamping branch_provisional — and keeps selling (01-F17)"
       - "packages/sync-client/src/__acceptance__/branch-time.test.ts#01-F17/01-F43: offset acquisition NEVER blocks — a device that has never seen a hub appends, persists and serves the sale"
       - "packages/sync-client/src/__acceptance__/branch-time.test.ts#01-N2/01-F17: a device flagged ten years out still appends, still folds and still serves — the flag NEVER blocks operation"
@@ -392,6 +404,7 @@ rows:
   - fr: 01-F19
     status: green
     tests:
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F19/01-F34: an order.table_assigned naming its OWN envelope id keeps its assignment"
       - "packages/sync-client/src/__acceptance__/folds-directed.test.ts#01-F19/01-F34: a supersedes chain yields one head; concurrent assignments render the conflict set — identically in every delivery order"
       - "packages/sync-client/src/__acceptance__/merge-lines.test.ts#01-F35/01-F19: two distinct terminal heads project THE SET, in ORDER_LINE_STATES index order, byte-identically in every delivery order"
       - "packages/sync-client/src/__acceptance__/merge-lines.test.ts#01-F19: a resolution edge naming BOTH terminal heads adopts one — |from_states| > 1 ∧ to ∈ from_states is a choice among emitted terminals, not a transition"
@@ -411,7 +424,9 @@ rows:
   - fr: 01-F21
     status: unmapped
   - fr: 01-F22
-    status: unmapped
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F6/01-F22: an ingested availability.changed produces a projection row whose head id IS THE ENVELOPE ID"
   - fr: 01-F23
     status: unmapped
   - fr: 01-F24
@@ -578,6 +593,13 @@ rows:
       - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F17/01-F34: a divergent duplicate inside a cloud batch is surfaced as quarantined AND the pull cursor advances past it (it must not wedge the pull)"
       - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F6/01-F34: a parked event's envelope_json is byte-identical across reopen, even with JSON-omitted payload values"
       - "packages/sync-client/src/__acceptance__/audit2-regression.test.ts#01-F6/01-F34: folds' canonicalJson IS the domain serializer, and both mirror JSON.stringify on omitted values"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F34/01-F58: two same-id envelopes with divergent payloads BOTH survive into the maximal set and project contested"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F34: the projection is byte-identical in both delivery orders (the shipped fold returns available=1 for one order and 0 for the other)"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F34: redelivering the IDENTICAL envelope is still a no-op — value-keying must not turn a transport duplicate into a conflict"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F34 / 26 §8: exposing head ids must not leak an ordering into a VALUE — under an order-REVERSING id bijection every projected value is byte-identical and only head_ids_json is relabelled"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F34 / 26 §8: relabel invariance as a PROPERTY over random supersedes graphs — ported from availability.test.ts and strengthened to an ORDER-REVERSING bijection"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F19/01-F34: an order.table_assigned naming its OWN envelope id keeps its assignment"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F57/01-F34: an availability.changed naming its OWN envelope id keeps its toggle — the same answer, through the same engine"
       - "packages/sync-client/src/__acceptance__/catchup-blocked-status.test.ts#01-F34/01-F17: a divergent duplicate is still PASSED and still surfaced in quarantined — and is NOT reported as a blocked cursor"
       - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F9/01-F34: a live event_batch fan-out from a peer is applied via store.ingest with its global_seq"
       - "packages/sync-client/src/__acceptance__/cloud-session.test.ts#(b)/01-F34: origin-inclusive fan-out — the device learns its own events' global_seq with zero fold-state change"
@@ -757,6 +779,7 @@ rows:
   - fr: 01-F42
     status: green
     tests:
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F42/fix-round F1: dropping an ORDER key leaves item keys untouched — the namespaces must not collide"
       - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F42/01-F19: dropping an order key is WHOLESALE and atomic — no fragment survives to resurrect a retired head or strand a ghost row; other orders untouched"
       - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F42/01-F17: the open-bill guard — dropping an order with no settlement_closed throws and changes nothing (prune only ever removes closed entities)"
       - "packages/sync-client/src/__acceptance__/merge-tables.test.ts#01-F40/01-F42: dropping a line key removes the line WHOLESALE — the device asserts nothing about it, never a fragment (matrix-C predicate 7)"
@@ -885,6 +908,47 @@ rows:
       - "services/sync-gateway/src/__acceptance__/auth-eviction-latency.test.ts#01-F48: the eviction pass runs inside the ratified 30 s bound"
       - "services/sync-gateway/src/__acceptance__/auth-eviction-latency.test.ts#01-F48/01-F25: revocation blocks READS as well as writes — a revoked session's catchup_request is rejected, not served"
       - "services/sync-gateway/src/__acceptance__/auth-eviction-latency.test.ts#01-F48: unreadable revocation state REFUSES participation — no session opens, and an open session's push is rejected with nothing persisted"
+  - fr: 01-F49
+    status: unmapped
+  - fr: 01-F50
+    status: unmapped
+  - fr: 01-F51
+    status: unmapped
+  - fr: 01-F52
+    status: unmapped
+  - fr: 01-F53
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F59/01-F17/01-F53: 86-ing an item leaves an order that sells it byte-identical, and a line added AFTER the 86 still lands"
+  - fr: 01-F54
+    status: unmapped
+  - fr: 01-F55
+    status: unmapped
+  - fr: 01-F56
+    status: unmapped
+  - fr: 01-F57
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F57: the k=1 self-reference case keeps its EXISTING answer — the event stands, it is not an incompleteness"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F57: `supersedes` survives the schema boundary — a superseding toggle retires its named predecessor through the ingest path"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F57/01-F34: an availability.changed naming its OWN envelope id keeps its toggle — the same answer, through the same engine"
+  - fr: 01-F58
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F34/01-F58: two same-id envelopes with divergent payloads BOTH survive into the maximal set and project contested"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F58: a 2-cycle over two UNAVAILABLE toggles does not resurrect the item"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F58/26 §9: the direction comes from AVAILABILITY_FALSE_WINS even when every delivered toggle says AVAILABLE"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F58: a 3-cycle is the same case — the guard must not be arity-specific"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F58: a cycle with non-cycle nodes hanging off it is still unresolvable"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F58: a page delivering a concurrent pair 86s the item WITH an anomaly, and the resolving toggle in a LATER page clears both (non-monotone, clears on backfill)"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F58: the row NAMES its maximal set, so a caller can build a correct superseding toggle without re-deriving the DAG"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F58: one toggle superseding exactly head_ids resolves the contest to available"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F58: one toggle superseding exactly head_ids resolves the contest to unavailable"
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F58: superseding head_ids ALWAYS clears — the shipped asymmetry (same intent, opposite outcome by which event was named) must be unreachable"
+  - fr: 01-F59
+    status: green
+    tests:
+      - "packages/sync-client/src/__acceptance__/availability-fix-round.test.ts#01-F59/01-F17/01-F53: 86-ing an item leaves an order that sells it byte-identical, and a line added AFTER the 86 still lands"
   - fr: 01-N1
     status: green
     tests:

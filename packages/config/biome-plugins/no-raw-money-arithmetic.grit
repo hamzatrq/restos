@@ -18,10 +18,18 @@ language js
 // float tax rate applied to money) and `running += rupees` (money accumulated in a double)
 // both produced zero diagnostics, while their paisa-named twins were flagged 4/4.
 //
-// The member arm's receiver was also widened from `[^()]*` to `.*`, because that class
-// excluded CALL-expression receivers: `rupeesFromPaisa(x).rupees / 3` — the single most
-// likely way a caller reaches the value — matched nothing. The money-name class itself
-// still excludes parens, so a trailing call (`obj.paisaHelper(x) + y`) stays out of scope.
+// The member arm's receiver was also widened to admit ONE BALANCED call group
+// (`[^()]*(?:\([^()]*\))?[^()]*\.`), because the original `[^()]*` excluded call-expression
+// receivers: `rupeesFromPaisa(x).rupees / 3` — the likeliest way a caller reaches the value
+// — matched nothing.
+//
+// "Balanced" is doing real work here and a plain `.*` is WRONG. `.*` also matches an
+// UNCLOSED call prefix, which makes `BigInt(m.amount_paisa as number)` a member expression
+// whose receiver is `BigInt(m` — flagging the blessed BigInt accumulation path that standing
+// law 3 REQUIRES of every fold. Measured: five false positives in merge.ts, on the exact
+// arithmetic the ban exists to make people write. Requiring the receiver's parens to close
+// before the dot separates "a call whose RESULT has a money property" (banned) from "a call
+// that WRAPS a money value" (blessed).
 //
 // HONEST LIMIT, recorded rather than glossed. This is a syntactic rule and Biome's GritQL
 // has no type information, so ANY name-based ban dies to a rename:
@@ -77,8 +85,8 @@ or {
     `$x % $y`
   } as $bin where {
     or {
-      $x <: r"(?s)^\(*(?:[A-Za-z0-9_$]*(?:[Pp]aisa|[Rr]upee)[A-Za-z0-9_$]*|.*\.[A-Za-z0-9_$]*(?:[Pp]aisa|[Rr]upee)[A-Za-z0-9_$]*)(?:\s+as\s+[^()]*)?\)*$",
-      $y <: r"(?s)^\(*(?:[A-Za-z0-9_$]*(?:[Pp]aisa|[Rr]upee)[A-Za-z0-9_$]*|.*\.[A-Za-z0-9_$]*(?:[Pp]aisa|[Rr]upee)[A-Za-z0-9_$]*)(?:\s+as\s+[^()]*)?\)*$"
+      $x <: r"(?s)^\(*(?:[A-Za-z0-9_$]*(?:[Pp]aisa|[Rr]upee)[A-Za-z0-9_$]*|[^()]*(?:\([^()]*\))?[^()]*\.[A-Za-z0-9_$]*(?:[Pp]aisa|[Rr]upee)[A-Za-z0-9_$]*)(?:\s+as\s+[^()]*)?\)*$",
+      $y <: r"(?s)^\(*(?:[A-Za-z0-9_$]*(?:[Pp]aisa|[Rr]upee)[A-Za-z0-9_$]*|[^()]*(?:\([^()]*\))?[^()]*\.[A-Za-z0-9_$]*(?:[Pp]aisa|[Rr]upee)[A-Za-z0-9_$]*)(?:\s+as\s+[^()]*)?\)*$"
     },
     register_diagnostic(span=$bin, message="Raw arithmetic on a money value is banned (18 §4 / DEC-MONEY-005). Use the domain helpers: addPaisa/subPaisa/sumPaisa for +/-, splitPaisa for division, applyRateBps for rates (integer basis points).")
   },
@@ -97,7 +105,7 @@ or {
         // The operator is pinned by the $asgn regex CONTAINING one of the five
         // arithmetic compounds, so plain `=` (and ??=/&&=/||=/bitwise) never match
         // while the RHS tail is free to be `m.amount_paisa as number`.
-        $b <: r"(?s)^\(*(?:[A-Za-z0-9_$]*(?:[Pp]aisa|[Rr]upee)[A-Za-z0-9_$]*|.*\.[A-Za-z0-9_$]*(?:[Pp]aisa|[Rr]upee)[A-Za-z0-9_$]*)(?:\s+as\s+[^()]*)?\)*$",
+        $b <: r"(?s)^\(*(?:[A-Za-z0-9_$]*(?:[Pp]aisa|[Rr]upee)[A-Za-z0-9_$]*|[^()]*(?:\([^()]*\))?[^()]*\.[A-Za-z0-9_$]*(?:[Pp]aisa|[Rr]upee)[A-Za-z0-9_$]*)(?:\s+as\s+[^()]*)?\)*$",
         $asgn <: r"(?s)^.*(?:\+=|-=|\*=|/=|%=).*$"
       }
     },

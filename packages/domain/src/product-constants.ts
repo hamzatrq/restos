@@ -17,8 +17,9 @@ export const CONTESTED_LINE_BILLABLE = true;
  * Availability among concurrent heads: does `false` (86'd) win? A pure product
  * call since the subset-safety argument was withdrawn (matrix row "availability",
  * §5.8). RATIFIED TRUE (false-wins): the conservative preference among the heads
- * the device holds — do not sell what someone marked out. Unconsumed until the
- * availability fold lands.
+ * the device holds — do not sell what someone marked out. CONSUMED by the merge engine's
+ * item-keyed availability projection (the 26 §3 sidecar) — it supplies the direction
+ * both for a contested head set and for an unresolvable one.
  */
 export const AVAILABILITY_FALSE_WINS = true;
 

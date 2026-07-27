@@ -39,14 +39,13 @@ export {
   type StoreIdentity,
   type SyncStatus,
 } from "./device-store.js";
-export {
-  type AvailabilityFold,
-  type AvailabilityRow,
-  type AvailabilityToggle,
-  createAvailabilityFold,
-  projectAvailability,
-} from "./folds/availability.js";
-export type { FoldStats, KitchenQueueRow, OpenOrderRow, ParkedRow } from "./folds/merge.js";
+export type {
+  AvailabilityRow,
+  FoldStats,
+  KitchenQueueRow,
+  OpenOrderRow,
+  ParkedRow,
+} from "./folds/merge.js";
 // `billedEffectiveFromJsonLines` is exported as a VALUE because host apps must render the
 // order total from the engine's own derivation rather than summing `json_lines` themselves
 // (26 §8 / 01-F34, and the T-01-11 ruling that deleted the Auditor's mirror of this sum:
