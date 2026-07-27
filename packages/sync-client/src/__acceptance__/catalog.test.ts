@@ -94,14 +94,24 @@ describe("01-F21 / 01-F56 — versioned snapshots and deltas", () => {
   });
 
   it("ignores a replay of the version it already holds", () => {
+    // The replay is the SAME delta arriving twice — an at-least-once link produces it all
+    // day (DEC-SYNC-008). Re-delivered byte-identical, so it stays a replay however version
+    // identity is later strengthened, rather than a second update contending for one version.
+    // A SNAPSHOT at the held version is NOT this case: 01-F56 refuses what is *older*, and a
+    // full replacement is idempotent by construction, so it is the device's only self-heal.
+    // That half is pinned in catalog-integrity.test.ts.
     const s = store();
-    s.catalog.apply({ kind: "snapshot", version: 3, entries: [item("i1", "Karahi")] });
-    expect(s.catalog.apply({ kind: "snapshot", version: 3, entries: [] })).toEqual({
-      applied: false,
-      reason: "stale",
+    s.catalog.apply({ kind: "snapshot", version: 2, entries: [item("i1", "Karahi")] });
+    const delta = {
+      kind: "delta" as const,
+      from_version: 2,
       version: 3,
-    });
-    expect(s.catalog.lookup("item", "i1")).not.toBeNull();
+      upserts: [item("i1", "Chicken Karahi")],
+      deletes: [],
+    };
+    expect(s.catalog.apply(delta)).toEqual({ applied: true, version: 3 });
+    expect(s.catalog.apply(delta)).toEqual({ applied: false, reason: "stale", version: 3 });
+    expect(s.catalog.lookup("item", "i1")?.name).toBe("Chicken Karahi");
   });
 
   it("a snapshot REPLACES rather than merges", () => {
