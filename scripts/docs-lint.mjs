@@ -88,33 +88,79 @@ if (agents.split("\n").length > 120)
   const catalogLine = kernel.split("\n").find((l) => l.includes("`order.created / confirmed"));
   if (!catalogLine) err("specs/01: the §4 event catalog line was not found — C6 cannot run");
   else {
-    // Expand `a.b / c / d` shorthand into fully-qualified type names.
+    // Expand the catalog line's shorthand into fully-qualified type names. TWO notations are
+    // in use and both must parse, because a group this parser silently drops becomes a family
+    // C6 cannot see at all:
+    //   `order.created / confirmed / rejected`     — family stated once, then bare leaves
+    //   `void.recorded / comp.recorded / discount.recorded` — each leaf fully qualified
+    // Footnote markers (`line_removed†`) are stripped first. The dagger is why this check
+    // spent its first month blind to all sixteen `order.*` types: it broke the group match,
+    // the family never registered, and the old "unknown family ⇒ skip" rule below then
+    // exempted every `order.*` mention in every module doc.
     const known = new Set();
-    for (const m of catalogLine.matchAll(/`([a-z_]+)\.([a-z_*]+(?:\s*\/\s*[a-z_*]+)*)`/g)) {
-      for (const leaf of m[2].split("/")) known.add(`${m[1]}.${leaf.trim()}`);
+    for (const [, group] of catalogLine.matchAll(/`([^`]+)`/g)) {
+      const cleaned = group.replace(/[†‡]/g, "").trim();
+      if (!/^[a-z_]+\.[a-z_.*\s/]+$/.test(cleaned)) continue; // not an event group (e.g. a path)
+      let family = null;
+      for (const raw of cleaned.split("/")) {
+        const leaf = raw.trim();
+        if (!leaf) continue;
+        if (leaf.includes(".")) {
+          const [f, ...rest] = leaf.split(".");
+          family = f;
+          known.add(`${f}.${rest.join(".")}`);
+        } else if (family) known.add(`${family}.${leaf}`);
+      }
     }
     const wildcards = [...known].filter((k) => k.endsWith(".*")).map((k) => k.slice(0, -1));
-    // Names that collide with an event-family prefix but are NOT event types: metric ids
-    // (13 §2), fold field names (26), and deliberately withdrawn names retained for the
-    // audit trail. Keep this list short — every entry is a place the heuristic gives up.
+
+    // Dotted names that are NOT event types. There is no family-prefix escape hatch: a name
+    // is either a catalogued event, or it is listed here with a reason. That asymmetry is the
+    // point — the old rule skipped any name whose family was absent from the catalog, which
+    // exempted precisely the wholly-unabsorbed families (`governance.*`, `fiscal.*`,
+    // `campaign.*`, `loyalty.*`) that the check exists to catch.
     const notEvents = new Set([
-      "cash.variance", // 13 §2 metric id, sibling of sales.total / voids.count
-      "stock.variance_value", // 13 §2 metric id
-      "day.business_date", // 26 fold field, not an emission
-      "whatsapp.optin_recorded", // WITHDRAWN 07-F7 → customer.opted_in
-      "whatsapp.optout_recorded", // WITHDRAWN 07-F18 → customer.opted_out
+      // 13 §2 metric ids — a metric is a derived number, not an emission.
+      "cash.variance",
+      "stock.variance_value",
+      "sales.total",
+      "voids.count",
+      "margin.gross_estimate",
+      // 25/26 fold field and predicate names, not emissions.
+      "day.business_date",
+      "env.device_created_at",
+      "in_scope.pending",
+      "orders.settled",
+      "shifts.open_at",
+      // Withdrawn names, retained in prose for the audit trail (07-F7 / 07-F18).
+      "whatsapp.optin_recorded",
+      "whatsapp.optout_recorded",
+      // Code identifiers quoted in prose (18 §4, 26 §8, DEC-AUDIT-001).
+      "console.log",
+      "process.env",
+      "z.object",
+      // Database objects (kernel schema), not events.
+      "kernel.quarantine_notices",
+      // The naming-convention placeholder itself (00 §6).
+      "noun.verb_past",
     ]);
+    // Filenames read as `a.b`. An extension test beats listing every file the corpus cites.
+    const fileRe = /\.(ts|tsx|js|mjs|json|md|sql|yaml|yml|toml|css|html)$/;
+
     const evRe = /`([a-z_]+\.[a-z_]+)`/g;
     for (const f of specFiles) {
       if (f.startsWith("01-")) continue;
+      // DECISIONS.md is excluded BY DESIGN: it is the one doc where undecided things are
+      // legitimately named, so an event discussed in an open proposal is not yet owed to the
+      // catalog. A decision that ratifies an event still gets caught — commandment 9 makes it
+      // land in its owning module doc, and every module doc is scanned.
+      if (f === "DECISIONS.md") continue;
       const text = read(`specs/${f}`);
       text.split("\n").forEach((line, i) => {
         for (const m of line.matchAll(evRe)) {
           const t = m[1];
-          // Only nouns that look like event types: a known family prefix.
-          const fam = t.split(".")[0];
-          if (![...known].some((k) => k.startsWith(`${fam}.`))) continue;
-          if (known.has(t) || notEvents.has(t) || wildcards.some((w) => t.startsWith(w))) continue;
+          if (known.has(t) || notEvents.has(t) || fileRe.test(t)) continue;
+          if (wildcards.some((w) => t.startsWith(w))) continue;
           err(
             `specs/${f}:${i + 1}: event type \`${t}\` is not absorbed into the 01 §4 catalog — ` +
               `01-F4 makes emitting it a build-time and runtime error (Commandment 2)`,
