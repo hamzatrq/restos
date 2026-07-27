@@ -96,9 +96,17 @@ const BOUNDARIES: readonly Pair[] = [
 ];
 
 /**
- * Status fills, against the surfaces they are ACTUALLY drawn on. 27-F15 says "the fill
- * carries it — never a dot, badge or thin rule". A fill that cannot be told from the card
- * it sits on is not carrying anything.
+ * SUPERSEDED FOR STATUS FILLS BY 27-F64, and deliberately not deleted.
+ *
+ * When this table was written, a status fill had to meet 3:1 against its surface itself.
+ * 27-F64 moved that to a required OUTLINE, because no four-colour set clears fill separation
+ * AND ΔE00 >= 20 AND the severity ladder on either polarity. Asserting the old rule here would
+ * now contradict doc 27, so the four pure status-fill rows are marked `statusFill` and are
+ * gated in `outline-boundary.oracle.test.ts` against their outline instead.
+ *
+ * What REMAINS gated here are the rows that were never about a status colour: a resting badge,
+ * an "ok" chip and an elevation step are NEUTRAL surfaces against neutral surfaces, and 27-F64
+ * is scoped to status surfaces, so nothing has relieved them. They are the still-open gap.
  */
 const STATUS_FILLS: readonly Pair[] = [
   p(
@@ -213,9 +221,22 @@ describe.each(POLARITIES)("SC 1.4.11 on the %s palette", (polarity) => {
     });
   });
 
-  describe("a status fill must be visible on the surface it is drawn on (27-F15)", () => {
-    it.each(STATUS_FILLS)("$where — $what", (pair) => {
+  describe("neutral surfaces and derived marks (27-F64 relocated the STATUS rows)", () => {
+    // A pure status fill measured against a plain surface is now the outline's job. Everything
+    // else in this table — an elevation step, a resting chip, an already-outlined control — is
+    // untouched by 27-F64 and still has to be visible on its own.
+    const stillGatedHere = STATUS_FILLS.filter(
+      (x) => !(x.fg.startsWith("bgColor-status-") || x.fg === "bgColor-interactive"),
+    );
+    it.each(stillGatedHere)("$where — $what", (pair) => {
       expect(ratio(pair)).toBeGreaterThanOrEqual(NON_TEXT_FLOOR);
+    });
+
+    it("relocated exactly the status rows, and no others", () => {
+      // Guards the filter itself: if a neutral row is ever mis-tagged as a status fill it
+      // would silently stop being gated anywhere.
+      const relocated = STATUS_FILLS.length - stillGatedHere.length;
+      expect(relocated, "status-fill rows now gated in outline-boundary.oracle.test.ts").toBe(7);
     });
   });
 

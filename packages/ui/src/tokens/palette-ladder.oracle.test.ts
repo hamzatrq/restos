@@ -65,14 +65,24 @@ describe.each(POLARITIES)("27-F15 amended — the %s palette", (polarity) => {
     expect(delta, `worst under ${vision}`).toBeGreaterThanOrEqual(LADDER_FLOOR);
   });
 
-  it("holds the separation gate the floor is conditioned on", () => {
-    // A palette that reaches 20 by letting a fill vanish into its surface has met nothing.
-    const failures = ALLOCATION.flatMap(({ name, token }) =>
-      FILL_SURFACES.filter((s) => contrastRatio(c[token], c[s]) < SEPARATION_FLOOR).map(
-        (s) => `${name} on ${s}: ${contrastRatio(c[token], c[s]).toFixed(2)}:1`,
-      ),
-    );
-    expect(failures, "separation gate not held, so the ΔE00 floor is unconditioned").toEqual([]);
+  it("holds the boundary gate the floor is conditioned on — now the OUTLINE (27-F64)", () => {
+    // SUPERSEDED BY 27-F64, and this is the whole point of that FR. The ΔE00 floor is still
+    // conditional on SC 1.4.11 being met — but the fill no longer has to meet it, because no
+    // four-colour set clears 3:1 fill separation AND ΔE00 >= 20 AND the severity ladder on
+    // either polarity. The boundary moved to the outline; it did NOT disappear. Asserting the
+    // old fill-separation rule here would now contradict doc 27, and dropping the condition
+    // entirely would leave the floor unconditioned, which is what made 31.4 wrong.
+    //
+    // `outline-boundary.oracle.test.ts` owns the outline's own 3:1 gate and the hue rules that
+    // stop it becoming a fifth colour. This test only asserts the CONDITION holds at all.
+    const cAny = c as Record<string, string>;
+    const missing = ALLOCATION.filter(
+      ({ token }) => cAny[token.replace(/^bgColor-/, "outlineColor-")] === undefined,
+    ).map(({ name }) => name);
+    expect(
+      missing,
+      "27-F64 requires an outline per status fill; without one nothing carries SC 1.4.11 and the ΔE00 floor is unconditioned",
+    ).toEqual([]);
   });
 
   it("reports the whole matrix, so any future amendment is written against measurements", () => {
