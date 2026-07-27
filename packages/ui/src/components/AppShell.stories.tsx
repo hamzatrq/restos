@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
+import { color } from "../tokens/index";
 import { AppShell } from "./AppShell";
 import { Cart } from "./Cart";
 import { ItemGrid } from "./ItemGrid";
@@ -70,7 +71,7 @@ const BASE = {
 const CounterScreen = ({ training = false }: { training?: boolean }) => {
   const [tab, setTab] = useState("order");
   return (
-    <div style={{ width: 1366, height: 768, border: "1px solid #ccc" }}>
+    <div style={{ width: 1366, height: 768, border: `1px solid ${color["borderColor-default"]}` }}>
       <AppShell
         {...BASE}
         activeTabId={tab}
@@ -130,7 +131,9 @@ export const WithS1Alarm: Story = {
   render: () => {
     const [tab, setTab] = useState("order");
     return (
-      <div style={{ width: 1366, height: 768, border: "1px solid #ccc" }}>
+      <div
+        style={{ width: 1366, height: 768, border: `1px solid ${color["borderColor-default"]}` }}
+      >
         <AppShell
           {...BASE}
           activeTabId={tab}
@@ -177,7 +180,9 @@ export const PassPanel: Story = {
       { id: "2", quantity: 1, name: "Beef Burger", removals: ["ONION"] },
     ];
     return (
-      <div style={{ width: 1366, height: 768, border: "1px solid #ccc" }}>
+      <div
+        style={{ width: 1366, height: 768, border: `1px solid ${color["borderColor-default"]}` }}
+      >
         <AppShell
           {...BASE}
           actor="Kitchen"

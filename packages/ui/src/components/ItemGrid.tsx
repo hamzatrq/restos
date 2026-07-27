@@ -138,7 +138,7 @@ export const ItemGrid = ({
             same rule as the tab rail and as the kitchen queue (03-F46). They are rendered as
             explicit numbered pages rather than as a scroll affordance, because a page number
             is a place an operator can learn ("chapli kebab is on page 3") and a scroll
-            position is not (27-F3 positional memory).
+            position is not (27-F4 positional memory).
           */}
           {pageNumbers.map((n) => (
             <button

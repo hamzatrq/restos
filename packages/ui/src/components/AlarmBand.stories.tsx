@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { color } from "../tokens/index";
 import { AlarmBand } from "./AlarmBand";
 
 /**
@@ -57,9 +58,9 @@ export const OverTheWorkSurface: Story = {
   },
   decorators: [
     (Story) => (
-      <div style={{ border: "1px dashed #C7CCD1", minHeight: 320 }}>
+      <div style={{ border: `1px dashed ${color["borderColor-default"]}`, minHeight: 320 }}>
         <Story />
-        <div style={{ padding: 16, opacity: 0.9 }}>
+        <div style={{ padding: 16 }}>
           <p>
             <strong>The cart underneath stays visible and usable.</strong>
           </p>

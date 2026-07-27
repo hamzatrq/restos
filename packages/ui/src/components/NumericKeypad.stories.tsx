@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
+import { typography } from "../tokens/index";
 import { NumericKeypad } from "./NumericKeypad";
 
 /**
@@ -31,7 +32,7 @@ const Interactive = ({ max, maxDigits }: { max: number; maxDigits?: number }) =>
           fontSize: 48,
           fontWeight: 600,
           fontVariantNumeric: "tabular-nums",
-          minHeight: 56,
+          minHeight: typography["text-numeric-hero"].lineHeight,
         }}
       >
         Rs {value === "" ? "0" : Number(value).toLocaleString("en-US")}
