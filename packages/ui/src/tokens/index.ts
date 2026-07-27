@@ -24,7 +24,37 @@ export type TouchName = Exclude<keyof typeof manifest.touch, `$${string}`>;
 export type KdsName = Exclude<keyof typeof manifest.kds, `$${string}`>;
 export type MoneyName = Exclude<keyof typeof manifest.money, `$${string}`>;
 
+/**
+ * `27-F19` — LIGHT is the default on every surface; dark is a per-site KDS opt-in.
+ *
+ * The evidence is not close and it points the way most kitchen software does not: positive
+ * polarity wins on acuity and proofreading for younger and older adults alike, and the
+ * advantage is LARGEST at small character sizes — which is exactly where the counter POS
+ * lives. Every commercial KDS ships dark and no study supports it, so `27-F19` files that as
+ * a pilot A/B rather than a decision.
+ *
+ * That A/B was not runnable while one set of hexes existed. It is now: both polarities are
+ * gated independently in the manifest — every `27-F21` pairing and every SC 1.4.11 separation
+ * holds in BOTH — so a surface may switch without a component changing.
+ *
+ * `color` stays the default (light). `colorDark` is the opt-in, and the surfaces that take it
+ * are kitchen surfaces: read at 1–2 m through steam, where a wall-mounted panel's glare
+ * matters more than small-glyph acuity, and where amber-as-a-resting-state has to survive
+ * 500 lux (`27-F18`). The counter keeps light; so does the handheld, which is used outdoors
+ * where a dark field washes out entirely.
+ */
 export const color = values<string>(manifest.color) as Record<ColorName, string>;
+
+/** The `27-F19` KDS opt-in set. Same keys, same laws, different polarity. */
+export const colorDark = Object.fromEntries(
+  Object.entries(manifest.color)
+    .filter(([k]) => !k.startsWith("$"))
+    .map(([k, v]) => [k, (v as { dark?: string; value: string }).dark ?? (v as Entry).value]),
+) as Record<ColorName, string>;
+
+/** Both polarities by name — what a theme-aware surface and every gate test resolve through. */
+export const palette = { light: color, dark: colorDark } as const;
+export type Polarity = keyof typeof palette;
 export const space = values<number>(manifest.space) as Record<SpaceName, number>;
 export const touch = values<number>(manifest.touch) as Record<TouchName, number>;
 export const kds = values<number>(manifest.kds) as Record<KdsName, number>;
