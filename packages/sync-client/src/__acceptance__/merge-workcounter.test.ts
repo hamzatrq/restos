@@ -114,17 +114,84 @@ describe("registry growth must fail this suite before it can silently no-op (fix
     "payment.recorded",
     "payment.refunded",
   ] as const;
-  type PinnedType = (typeof PINNED_FOLD_CONSUMED)[number];
+
+  /**
+   * AMENDED July 2026, and the amendment is a STRENGTHENING — read the reason before the
+   * change, because "the pin was widened" is what this would look like from the diff alone.
+   *
+   * The pin above modelled the registry as binary: every type is fold-consumed, or the build
+   * fails. `catalog.changed` is the first type that must be in the registry (`01 §4` lists
+   * it; `01-F4` makes emitting an unregistered type a runtime error, so doc 14 could not
+   * record a menu edit at all without it) and must have NO merge rule (`01-F52`: "catalog
+   * state is not an input to any fold"). The old model could not express that: the honest
+   * disposition and the silent fall-through the pin exists to catch looked identical.
+   *
+   * So the pin now partitions instead of asserting a single set — and a partition is a
+   * stronger claim than the union it replaces, because a type must be named in exactly one
+   * side. A type in NEITHER list still fails to compile, which was the whole point; a type in
+   * BOTH now fails too, which the old shape could not even ask.
+   */
+  const PINNED_NOT_FOLDED = ["catalog.changed"] as const;
+
+  type PinnedType = (typeof PINNED_FOLD_CONSUMED)[number] | (typeof PINNED_NOT_FOLDED)[number];
   // COMPILE-LEVEL PIN (F5): if the registry grows, this assignment stops
-  // compiling — the new type has no pinned merge rule yet, and an engine switch
+  // compiling — the new type has no pinned disposition yet, and an engine switch
   // without an exhaustiveness guard would fold nothing while still counting
   // events_folded (the F5 honesty overcount). Red-at-compile forces the oracle
   // pin before the code can ship a silent fall-through.
   const registryIsCovered: [KnownEventType] extends [PinnedType] ? true : never = true;
 
-  it("01-F4 (fix-round F5): the fold-consumed registry is EXACTLY the pinned ten types — growth is a spec-PR + oracle-pin event, never a silent fall-through", () => {
+  it("01-F4 (fix-round F5): every registry type has EXACTLY ONE pinned disposition — growth is a spec-PR + oracle-pin event, never a silent fall-through", () => {
     expect(registryIsCovered).toBe(true);
-    expect([...eventRegistry.types()].sort()).toEqual([...PINNED_FOLD_CONSUMED].sort());
+    expect([...eventRegistry.types()].sort()).toEqual(
+      [...PINNED_FOLD_CONSUMED, ...PINNED_NOT_FOLDED].sort(),
+    );
+    // The partition is disjoint. Without this, a type could be pinned as BOTH folded and
+    // not-folded and the union check above would still pass — which is how a "stronger"
+    // assertion quietly becomes a weaker one.
+    const both = PINNED_FOLD_CONSUMED.filter((t) =>
+      (PINNED_NOT_FOLDED as readonly string[]).includes(t),
+    );
+    expect(both, "a type cannot be both folded and deliberately not folded").toEqual([]);
+  });
+
+  it("01-F52: a non-folded type does ZERO fold work and is NOT counted as folded", () => {
+    // The honesty half, asserted by EXECUTION rather than by reading the branch. An
+    // `events_folded` that claims an event which folded nothing is exactly the overcount this
+    // file is named for, and it is the mistake `availability.changed` made when it was wired
+    // to nothing: the counter incremented before a switch whose case did not exist.
+    //
+    // Driven through the real store rather than the engine in isolation, because `01-F52`'s
+    // claim is about what the DEVICE does with a catalog event, and an engine-only assertion
+    // would not notice a store that projected one on the way in.
+    const id = identity();
+    const store = mergeStore(id);
+    const peer = { ...peerIdentity(id), device_id: "d-catalog" };
+    const before = foldStats(store).events_folded;
+
+    store.ingest(
+      peerEnvelope(peer, 0, {
+        id: "e-catalog-0",
+        device_created_at: T0,
+        type: "catalog.changed",
+        payload: {
+          entity: "item",
+          entity_id: "I1",
+          version: 2,
+          before_ref: null,
+          after_ref: "ref-2",
+        },
+      }),
+    );
+
+    expect(foldStats(store).events_folded, "a non-folded event was counted as folded").toBe(before);
+    expect(store.openOrders(), "a catalog event reached the order projection").toEqual([]);
+    expect(store.kitchenQueue(), "a catalog event reached the queue projection").toEqual([]);
+    // Never PARKED either. Parking is for a fact waiting on a key that may yet arrive; a
+    // catalog event has no key and never will, so parking it would leak an event that can
+    // never drain into a table the operator can see (DEC-SYNC-011's stuck-cursor shape).
+    expect(store.parked(), "a catalog event was parked and can never drain").toEqual([]);
+    store.close();
   });
 });
 

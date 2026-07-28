@@ -4,8 +4,10 @@
 `01-F52`..`01-F56`). Also binding: `14-F28` (menu-edit timing), `01-F49` (training branches),
 `DEC-SYNC-011` (blocked cursors are observable).
 
-**Status: NOT APPROVED. Do not implement from this file yet.** It touches two protected paths
-(`sync-protocol`, `sync-client`) and asks two questions only the founder can answer (§6).
+**Status: APPROVED July 2026.** Both §6 questions are answered — **Q1: the API publishes,
+the gateway serves. Q2: confirmed, day-end edits are withheld server-side.** The `24 §3`
+step-2 split in §4 still binds: `sync-protocol` and `sync-client` are protected paths and
+their acceptance tests must be authored by a different session than the implementer.
 
 ---
 
@@ -154,20 +156,29 @@ Each of these is a test, not a sentiment:
 9. Two devices on the same org converge to byte-identical catalogs from different starting
    versions and different message orders.
 
-## 6. Questions this plan cannot answer
+## 6. Questions this plan could not answer — ANSWERED
 
-**Q1 — Where does the authoritative catalog live?** `14 §` puts the catalog *write model* in the
-back office behind tRPC (`services/api`), while the thing that must serve it to devices is
-`services/sync-gateway`. Two services, one truth. Either the gateway reads the API's tables
-(coupling two services at the database), or the API publishes versioned snapshots the gateway
-serves (clean, and a second copy of the menu). **Recommendation: the API publishes; the gateway
-serves.** A published snapshot is immutable and versioned, which is exactly what the device
-protocol wants, and it keeps the gateway from growing an opinion about menu structure.
+**Q1 — Where does the authoritative catalog live? → THE API PUBLISHES; THE GATEWAY SERVES.**
+*(Founder ruling, July 2026.)* `14 §` puts the catalog *write model* in the back office behind
+tRPC (`services/api`), while the thing that must serve it to devices is `services/sync-gateway`.
+Two services, one truth. The alternative — the gateway reading the API's tables — buys one copy
+of the menu at the cost of coupling two services at the database, which is the thing a service
+boundary exists to prevent: an API-side migration would break device sync with no contract
+between them to catch it.
 
-**Q2 — Confirm §3.4:** day-end edits are withheld server-side until the 05:00 boundary, so
-devices only ever see landed versions. The plan assumes yes. The consequence to accept: a device
-offline across the boundary applies the edit when it reconnects, not at the boundary — which is
-the correct behaviour but means "applied at day-end" is true of the *org*, not of every device.
+The ruling costs a second copy of the menu and buys three things. A **published snapshot is
+immutable and versioned**, which is exactly the shape the device protocol already wants — the
+version is not something the gateway has to derive, it is stamped at publish. The **gateway
+never parses menu structure**, so it cannot grow an opinion about it, and `01-F52`'s "catalog is
+reference data, not ledger" stays true on the serving side by construction. And the publish step
+is the natural place for `14-F28`'s day-end hold (Q2) to live.
+
+**Q2 — day-end edits withheld server-side → CONFIRMED.** Devices only ever see landed versions.
+The consequence, accepted explicitly: a device offline across the 05:00 boundary applies the edit
+when it reconnects, not at the boundary — so **"applied at day-end" is a statement about the
+ORG, not about every device**. That is the correct behaviour and the alternative is worse: an
+`effective_at` shipped to devices would need a device-side scheduler, a second version axis and a
+clock read on the application path, and it would apply an edit the owner had since cancelled.
 
 ---
 

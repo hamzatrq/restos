@@ -399,10 +399,32 @@ export type DropPlan = {
  * amended: everything else carries its full projection keys and never parks). */
 const PARKING_TYPES: ReadonlySet<string> = new Set(["order.confirmed", "kot.printed"]);
 
+/**
+ * Registry types that are DELIBERATELY NOT FOLDED, with the FR that says so.
+ *
+ * `catalog.changed` is the first of these and it is why this set exists. `01-F52` is
+ * explicit: *"catalog state is not an input to any fold — a projected value that read a name
+ * would depend on catalog sync state at fold time, which is the `01-F34` break law 1 exists
+ * to prevent."* Before this, the engine's model was binary — every registry type had a merge
+ * rule or the build failed — so the first type that must have NO rule could not be expressed
+ * at all, and the honest answer looked identical to the mistake the exhaustiveness guard
+ * exists to catch.
+ *
+ * Membership here is a claim that needs an FR, not a way to silence the compiler. A type
+ * added to this set without one is exactly the silent fall-through `assertNever` prevents,
+ * wearing a different hat.
+ */
+const NON_FOLD_TYPES = { "catalog.changed": "01-F52" } as const satisfies Partial<
+  Record<KnownEventType, string>
+>;
+type NonFoldEventType = keyof typeof NON_FOLD_TYPES;
+const isNonFold = (t: string): t is NonFoldEventType => t in NON_FOLD_TYPES;
+
 /** Every registry type the ORDER-keyed switch handles — i.e. all of them except the
- * item-keyed ones. Declared as an Exclude so adding a new item-keyed event is a compile
- * error in exactly one place (the sidecar) rather than a silent fall-through here. */
-type OrderKeyedEventType = Exclude<KnownEventType, "availability.changed">;
+ * item-keyed ones and the ones no fold may read. Declared as an Exclude so adding a new
+ * item-keyed or non-fold event is a compile error in exactly one place (the sidecar) rather
+ * than a silent fall-through here. */
+type OrderKeyedEventType = Exclude<KnownEventType, "availability.changed" | NonFoldEventType>;
 
 const ORDER_NS = "order:";
 const ITEM_NS = "item:";
@@ -418,6 +440,11 @@ type AvailabilityChangedP = { item_id: string; available: boolean; supersedes: s
  * what makes the next multi-key event a data change rather than an engine change.
  */
 const keysFor = (event: ParsedEvent): readonly string[] => {
+  // A non-fold type affects NO projection, so the honest sidecar answer is the empty list —
+  // not a key nothing reads. `26 §3` asks "which projections does this event touch"; for
+  // `catalog.changed` the answer is none, and saying so here is what keeps the engine from
+  // having to special-case it downstream.
+  if (isNonFold(event.type)) return [];
   if (event.type === "availability.changed") {
     return [`${ITEM_NS}${(event.payload as AvailabilityChangedP).item_id}`];
   }
@@ -766,6 +793,11 @@ export const createMergeEngine = (): MergeEngine => {
     // the engine's own note named for this work. The sidecar answers "which projections does
     // this event touch", and the engine routes on the namespace.
     const keys = keysFor(event);
+    // No keys means no projection is touched (01-F52). ZERO fold work, and deliberately NOT
+    // counted: `events_folded` is an honesty counter, and incrementing it for an event that
+    // folded nothing is precisely the overcount the work-counter pin exists to prevent — the
+    // same mistake `availability.changed` made when it was wired to nothing.
+    if (keys.length === 0) return { dirty: [], dirtyItems: [], parked: null, drained: [] };
     const itemKey = keys.find((k) => k.startsWith(ITEM_NS));
     if (itemKey !== undefined) {
       foldAvailability(event);

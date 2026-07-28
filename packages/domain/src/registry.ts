@@ -42,6 +42,31 @@ const payloadSchemas = {
     supersedes: z.array(z.string().min(1)),
     reason: z.string().min(1).optional(),
   }),
+  /**
+   * `01-F52` / `14 §` / `15 §` — an AUDIT record that a catalog version exists. It is in the
+   * `01 §4` catalog and was missing from this registry, which `01-F4` turns into a runtime
+   * error at emit: doc 14's back office could not record a menu edit at all.
+   *
+   * **It does not carry the catalog** (`01-F52`), and the device never consumes it — a device
+   * learns its catalog is stale by comparing versions on `hello_ack` and fetching
+   * (`plans/wave-1/catalog-transport.md` §3.1). Its consumer is the back-office history view
+   * (`14-F6` price history), which is why the payload is actor + before/after REFS rather than
+   * entity bodies: a ledger event that carried the menu would make the catalog ledger data,
+   * contradicting `01-F52` in the same breath as satisfying it.
+   */
+  "catalog.changed": z.looseObject({
+    /** The catalog entity edited — `item`, `variant`, `category`, `modifier_group`. */
+    entity: z.string().min(1),
+    entity_id: z.string().min(1),
+    /** The org catalog version this edit produced. Devices compare against it; see §3.2. */
+    version: z.number().int().positive(),
+    /**
+     * `14 §`'s before/after REFS. Opaque content-addressed handles into the published
+     * snapshot, never inline entity bodies — see the note above.
+     */
+    before_ref: z.union([z.string().min(1), z.null()]),
+    after_ref: z.union([z.string().min(1), z.null()]),
+  }),
   "order.table_assigned": z.looseObject({
     order_id: z.string().min(1),
     table_id: z.string().min(1),
