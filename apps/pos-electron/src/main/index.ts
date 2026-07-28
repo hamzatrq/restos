@@ -1,4 +1,5 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { businessDate } from "@restos/domain";
 import { type BlockedCursor, openStore, wallClock } from "@restos/sync-client";
 import { app, BrowserWindow, ipcMain } from "electron";
@@ -23,6 +24,15 @@ import { type CatalogResolver, createGateway } from "./gateway";
  * and is Wave-1 work that has not landed; until it does, the ids are stable constants rather
  * than `newId()` calls so that a relaunch resumes the same store instead of orphaning it.
  */
+/**
+ * This bundle's own directory.
+ *
+ * NOT `__dirname`: `package.json` declares `"type": "module"` and electron-vite emits main as
+ * ESM accordingly, where `__dirname` does not exist. It builds cleanly either way — the
+ * failure is at load, and it takes the whole app down before a window is ever created.
+ */
+const HERE = dirname(fileURLToPath(import.meta.url));
+
 const DEV_IDENTITY = {
   org_id: "00000000-0000-7000-8000-000000000001",
   branch_id: "00000000-0000-7000-8000-000000000002",
@@ -57,7 +67,7 @@ const createWindow = (): BrowserWindow => {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      preload: join(__dirname, "../preload/index.cjs"),
+      preload: join(HERE, "../preload/index.cjs"),
     },
   });
   // Shown only once painted: a counter screen that flashes white on launch reads as a crash
@@ -72,7 +82,7 @@ const load = (window: BrowserWindow): void => {
     void window.loadURL(devServer);
     return;
   }
-  void window.loadFile(join(__dirname, "../renderer/index.html"));
+  void window.loadFile(join(HERE, "../renderer/index.html"));
 };
 
 app.whenReady().then(() => {

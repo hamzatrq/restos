@@ -49,6 +49,17 @@ export const messageSchemas = {
     // AND this server accepts — a closed vocabulary, so an unknown codec name is a
     // parse failure rather than a silent downgrade. Absent ⇒ plain, forever.
     compression: z.literal("zstd").optional(),
+    /**
+     * Additive under v:1 (T-C1, `01-F9` "plus org-scope reference data"). The ORG's current
+     * authoritative catalog version.
+     *
+     * **This single field is what makes the catalog transport correct**, and the push below
+     * is only latency. The device compares it against its own stored version and requests if
+     * behind, so every reconnection reconciles — including for a device that has been offline
+     * for a week and has no hope of replaying an announcement it was not connected for.
+     * Absent ⇒ an older server that serves no catalog, and the device simply never asks.
+     */
+    catalog_version: seq.optional(),
   }),
   push: z.object({ v, kind: z.literal("push"), events: z.array(EventEnvelope), watermark: seq }),
   push_ack: z.object({
@@ -80,6 +91,72 @@ export const messageSchemas = {
     complete: z.boolean(),
     next_from: seq,
   }),
+  /**
+   * `T-C1` — the catalog fetch pair (`01-F9`, `01-F52`..`01-F56`).
+   *
+   * The device asks; the server decides snapshot vs delta from `have_version`. A delta if it
+   * can construct one from that EXACT base, a snapshot otherwise — including `have_version: 0`
+   * and including a base too old to reconstruct. The device's existing `needs_snapshot`
+   * refusal (`01-F56`) is then the belt to that braces: it is what happens if the server gets
+   * this wrong, and it is already implemented and tested.
+   */
+  catalog_request: z.object({
+    v,
+    kind: z.literal("catalog_request"),
+    /** What the device has now. `0` means "nothing", and gets a snapshot. */
+    have_version: seq,
+    /** Paging cursor, echoed from a previous `catalog_response.next_from`. */
+    from: seq.optional(),
+  }),
+  catalog_response: z.object({
+    v,
+    kind: z.literal("catalog_response"),
+    form: z.enum(["snapshot", "delta"]),
+    /** The version this payload brings the device TO. */
+    version: seq,
+    /** For a delta, the exact base it applies to. A device holding anything else refuses. */
+    base_version: seq.optional(),
+    entries: z.array(
+      z.object({
+        kind: z.string().min(1),
+        id: z.string().min(1),
+        name: z.string().min(1),
+        /** 03-F38 — a short kitchen name, so long item names stop being a KOT layout problem. */
+        kitchen_name: z.union([z.string().min(1), z.null()]).optional(),
+        parent_id: z.union([z.string().min(1), z.null()]).optional(),
+        sort: z.number().int().optional(),
+        /**
+         * `01-F55` — deletion is a TOMBSTONE. A reprint of an order placed before an item was
+         * deleted must still render its name, so a delete travels as a marked entry rather
+         * than as an absence. This is also why a snapshot carries its tombstones: the oracle
+         * round found that clearing and re-inserting destroyed every one of them, and made
+         * `01-F55` fail on its own named scenario after any recovery.
+         */
+        deleted: z.boolean().optional(),
+      }),
+    ),
+    /**
+     * Paging, in `catchup_response`'s vocabulary rather than a second idiom. A large org's
+     * catalog will exceed one frame. **A snapshot must apply ATOMICALLY** — the device must
+     * never hold half a menu — so paged snapshot chunks accumulate and commit on `complete`.
+     */
+    complete: z.boolean(),
+    next_from: seq,
+  }),
+  /**
+   * `T-C1` — server→device, org-scoped, carrying ONLY a version number.
+   *
+   * Covers a version changing DURING a live session, so a menu edit does not wait for the
+   * next reconnect. It is a freshness optimisation and **the system is correct without it**,
+   * which is the property that matters: a notice is exactly the kind of message that gets
+   * dropped on a lossy link, and `hello_ack.catalog_version` is what makes that cost freshness
+   * rather than correctness.
+   */
+  catalog_notice: z.object({
+    v,
+    kind: z.literal("catalog_notice"),
+    version: seq,
+  }),
   quarantine_notice: z.object({
     v,
     kind: z.literal("quarantine_notice"),
@@ -107,6 +184,9 @@ const union = z.discriminatedUnion("kind", [
   messageSchemas.event_batch,
   messageSchemas.catchup_request,
   messageSchemas.catchup_response,
+  messageSchemas.catalog_request,
+  messageSchemas.catalog_response,
+  messageSchemas.catalog_notice,
   messageSchemas.quarantine_notice,
   messageSchemas.purge_command,
   messageSchemas.ping,

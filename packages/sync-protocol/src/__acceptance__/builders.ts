@@ -50,6 +50,20 @@ export const builders = {
     complete: true,
     next_from: 44,
   }),
+  // T-C1 — the catalog fetch pair and its notice (01-F9, 01-F52..F56). A minimal instance is
+  // a SNAPSHOT with one entry: `have_version: 0` is the case the server must answer with a
+  // snapshot, so the minimal request and the minimal response are the same exchange.
+  catalog_request: () => ({ v: 1, kind: "catalog_request", have_version: 0 }),
+  catalog_response: () => ({
+    v: 1,
+    kind: "catalog_response",
+    form: "snapshot",
+    version: 7,
+    entries: [{ kind: "item", id: newId(), name: "Chapli Kebab" }],
+    complete: true,
+    next_from: 0,
+  }),
+  catalog_notice: () => ({ v: 1, kind: "catalog_notice", version: 8 }),
   quarantine_notice: () => ({
     v: 1,
     kind: "quarantine_notice",

@@ -1,43 +1,4 @@
-//#region \0rolldown/runtime.js
-var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
-//#endregion
-//#region ../../node_modules/.pnpm/electron@43.2.0/node_modules/electron/index.js
-var require_electron = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	var { spawnSync } = require("child_process");
-	var fs = require("fs");
-	var path = require("path");
-	var pathFile = path.join(__dirname, "path.txt");
-	function downloadElectron() {
-		console.log("Downloading Electron binary...");
-		if (spawnSync(process.execPath, [path.join(__dirname, "install.js")], { stdio: "inherit" }).status !== 0) throw new Error("Electron failed to install correctly. Please delete `node_modules/electron` and run \"npx install-electron --no\" manually.");
-	}
-	/**
-	* Fetches the path to the Electron executable to use in development mode.
-	* If the executable is missing, attempt to download it first.
-	*
-	* @returns the path to the Electron executable to run
-	*/
-	function getElectronPath() {
-		let executablePath;
-		if (fs.existsSync(pathFile)) executablePath = fs.readFileSync(pathFile, "utf-8");
-		if (process.env.ELECTRON_OVERRIDE_DIST_PATH) return path.join(process.env.ELECTRON_OVERRIDE_DIST_PATH, executablePath || "electron");
-		if (executablePath) {
-			const fullPath = path.join(__dirname, "dist", executablePath);
-			if (!fs.existsSync(fullPath)) downloadElectron();
-			return fullPath;
-		} else {
-			try {
-				downloadElectron();
-			} catch {
-				throw new Error("Electron failed to install correctly. Please delete `node_modules/electron` and run \"npx install-electron --no\" manually.");
-			}
-			executablePath = fs.readFileSync(pathFile, "utf-8");
-			return path.join(__dirname, "dist", executablePath);
-		}
-	}
-	module.exports = getElectronPath();
-}));
-//#endregion
+let electron = require("electron");
 //#region ../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core/core.js
 var _a$1;
 function $constructor(name, initializer, params) {
@@ -2829,7 +2790,7 @@ function initializeContext(params) {
 		external: params?.external ?? void 0
 	};
 }
-function process$1(schema, ctx, _params = {
+function process(schema, ctx, _params = {
 	path: [],
 	schemaPath: []
 }) {
@@ -2866,7 +2827,7 @@ function process$1(schema, ctx, _params = {
 		const parent = schema._zod.parent;
 		if (parent) {
 			if (!result.ref) result.ref = parent;
-			process$1(parent, ctx, params);
+			process(parent, ctx, params);
 			ctx.seen.get(parent).isParent = true;
 		}
 	}
@@ -3086,7 +3047,7 @@ var createToJSONSchemaMethod = (schema, processors = {}) => (params) => {
 		...params,
 		processors
 	});
-	process$1(schema, ctx);
+	process(schema, ctx);
 	extractDefs(ctx, schema);
 	return finalize(ctx, schema);
 };
@@ -3098,7 +3059,7 @@ var createStandardJSONSchemaMethod = (schema, io, processors = {}) => (params) =
 		io,
 		processors
 	});
-	process$1(schema, ctx);
+	process(schema, ctx);
 	extractDefs(ctx, schema);
 	return finalize(ctx, schema);
 };
@@ -3178,7 +3139,7 @@ var arrayProcessor = (schema, ctx, _json, params) => {
 	if (typeof minimum === "number") json.minItems = minimum;
 	if (typeof maximum === "number") json.maxItems = maximum;
 	json.type = "array";
-	json.items = process$1(def.element, ctx, {
+	json.items = process(def.element, ctx, {
 		...params,
 		path: [...params.path, "items"]
 	});
@@ -3189,7 +3150,7 @@ var objectProcessor = (schema, ctx, _json, params) => {
 	json.type = "object";
 	json.properties = {};
 	const shape = def.shape;
-	for (const key in shape) json.properties[key] = process$1(shape[key], ctx, {
+	for (const key in shape) json.properties[key] = process(shape[key], ctx, {
 		...params,
 		path: [
 			...params.path,
@@ -3207,7 +3168,7 @@ var objectProcessor = (schema, ctx, _json, params) => {
 	if (def.catchall?._zod.def.type === "never") json.additionalProperties = false;
 	else if (!def.catchall) {
 		if (ctx.io === "output") json.additionalProperties = false;
-	} else if (def.catchall) json.additionalProperties = process$1(def.catchall, ctx, {
+	} else if (def.catchall) json.additionalProperties = process(def.catchall, ctx, {
 		...params,
 		path: [...params.path, "additionalProperties"]
 	});
@@ -3215,7 +3176,7 @@ var objectProcessor = (schema, ctx, _json, params) => {
 var unionProcessor = (schema, ctx, json, params) => {
 	const def = schema._zod.def;
 	const isExclusive = def.inclusive === false;
-	const options = def.options.map((x, i) => process$1(x, ctx, {
+	const options = def.options.map((x, i) => process(x, ctx, {
 		...params,
 		path: [
 			...params.path,
@@ -3228,7 +3189,7 @@ var unionProcessor = (schema, ctx, json, params) => {
 };
 var intersectionProcessor = (schema, ctx, json, params) => {
 	const def = schema._zod.def;
-	const a = process$1(def.left, ctx, {
+	const a = process(def.left, ctx, {
 		...params,
 		path: [
 			...params.path,
@@ -3236,7 +3197,7 @@ var intersectionProcessor = (schema, ctx, json, params) => {
 			0
 		]
 	});
-	const b = process$1(def.right, ctx, {
+	const b = process(def.right, ctx, {
 		...params,
 		path: [
 			...params.path,
@@ -3254,7 +3215,7 @@ var recordProcessor = (schema, ctx, _json, params) => {
 	const keyType = def.keyType;
 	const patterns = keyType._zod.bag?.patterns;
 	if (def.mode === "loose" && patterns && patterns.size > 0) {
-		const valueSchema = process$1(def.valueType, ctx, {
+		const valueSchema = process(def.valueType, ctx, {
 			...params,
 			path: [
 				...params.path,
@@ -3265,11 +3226,11 @@ var recordProcessor = (schema, ctx, _json, params) => {
 		json.patternProperties = {};
 		for (const pattern of patterns) json.patternProperties[pattern.source] = valueSchema;
 	} else {
-		if (ctx.target === "draft-07" || ctx.target === "draft-2020-12") json.propertyNames = process$1(def.keyType, ctx, {
+		if (ctx.target === "draft-07" || ctx.target === "draft-2020-12") json.propertyNames = process(def.keyType, ctx, {
 			...params,
 			path: [...params.path, "propertyNames"]
 		});
-		json.additionalProperties = process$1(def.valueType, ctx, {
+		json.additionalProperties = process(def.valueType, ctx, {
 			...params,
 			path: [...params.path, "additionalProperties"]
 		});
@@ -3282,7 +3243,7 @@ var recordProcessor = (schema, ctx, _json, params) => {
 };
 var nullableProcessor = (schema, ctx, json, params) => {
 	const def = schema._zod.def;
-	const inner = process$1(def.innerType, ctx, params);
+	const inner = process(def.innerType, ctx, params);
 	const seen = ctx.seen.get(schema);
 	if (ctx.target === "openapi-3.0") {
 		seen.ref = def.innerType;
@@ -3291,27 +3252,27 @@ var nullableProcessor = (schema, ctx, json, params) => {
 };
 var nonoptionalProcessor = (schema, ctx, _json, params) => {
 	const def = schema._zod.def;
-	process$1(def.innerType, ctx, params);
+	process(def.innerType, ctx, params);
 	const seen = ctx.seen.get(schema);
 	seen.ref = def.innerType;
 };
 var defaultProcessor = (schema, ctx, json, params) => {
 	const def = schema._zod.def;
-	process$1(def.innerType, ctx, params);
+	process(def.innerType, ctx, params);
 	const seen = ctx.seen.get(schema);
 	seen.ref = def.innerType;
 	json.default = JSON.parse(JSON.stringify(def.defaultValue));
 };
 var prefaultProcessor = (schema, ctx, json, params) => {
 	const def = schema._zod.def;
-	process$1(def.innerType, ctx, params);
+	process(def.innerType, ctx, params);
 	const seen = ctx.seen.get(schema);
 	seen.ref = def.innerType;
 	if (ctx.io === "input") json._prefault = JSON.parse(JSON.stringify(def.defaultValue));
 };
 var catchProcessor = (schema, ctx, json, params) => {
 	const def = schema._zod.def;
-	process$1(def.innerType, ctx, params);
+	process(def.innerType, ctx, params);
 	const seen = ctx.seen.get(schema);
 	seen.ref = def.innerType;
 	let catchValue;
@@ -3326,20 +3287,20 @@ var pipeProcessor = (schema, ctx, _json, params) => {
 	const def = schema._zod.def;
 	const inIsTransform = def.in._zod.traits.has("$ZodTransform");
 	const innerType = ctx.io === "input" ? inIsTransform ? def.out : def.in : def.out;
-	process$1(innerType, ctx, params);
+	process(innerType, ctx, params);
 	const seen = ctx.seen.get(schema);
 	seen.ref = innerType;
 };
 var readonlyProcessor = (schema, ctx, json, params) => {
 	const def = schema._zod.def;
-	process$1(def.innerType, ctx, params);
+	process(def.innerType, ctx, params);
 	const seen = ctx.seen.get(schema);
 	seen.ref = def.innerType;
 	json.readOnly = true;
 };
 var optionalProcessor = (schema, ctx, _json, params) => {
 	const def = schema._zod.def;
-	process$1(def.innerType, ctx, params);
+	process(def.innerType, ctx, params);
 	const seen = ctx.seen.get(schema);
 	seen.ref = def.innerType;
 };
@@ -4185,9 +4146,6 @@ function refine(fn, _params = {}) {
 function superRefine(fn, params) {
 	return /* @__PURE__ */ _superRefine(fn, params);
 }
-//#endregion
-//#region src/shared/ipc.ts
-var import_electron = require_electron();
 object({
 	actor: string(),
 	deviceLabel: string(),
@@ -4272,16 +4230,16 @@ var CHANNELS = {
 };
 //#endregion
 //#region src/preload/index.ts
-import_electron.contextBridge.exposeInMainWorld("restos", {
-	deviceState: () => import_electron.ipcRenderer.invoke(CHANNELS.deviceState),
-	openOrders: () => import_electron.ipcRenderer.invoke(CHANNELS.openOrders),
-	kitchenQueue: () => import_electron.ipcRenderer.invoke(CHANNELS.kitchenQueue),
-	append: (req) => import_electron.ipcRenderer.invoke(CHANNELS.append, req),
+electron.contextBridge.exposeInMainWorld("restos", {
+	deviceState: () => electron.ipcRenderer.invoke(CHANNELS.deviceState),
+	openOrders: () => electron.ipcRenderer.invoke(CHANNELS.openOrders),
+	kitchenQueue: () => electron.ipcRenderer.invoke(CHANNELS.kitchenQueue),
+	append: (req) => electron.ipcRenderer.invoke(CHANNELS.append, req),
 	onChanged: (fn) => {
 		const handler = () => fn();
-		import_electron.ipcRenderer.on(CHANNELS.changed, handler);
+		electron.ipcRenderer.on(CHANNELS.changed, handler);
 		return () => {
-			import_electron.ipcRenderer.off(CHANNELS.changed, handler);
+			electron.ipcRenderer.off(CHANNELS.changed, handler);
 		};
 	}
 });

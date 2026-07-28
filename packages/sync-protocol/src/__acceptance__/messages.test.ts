@@ -14,6 +14,13 @@ const KINDS_PER_PROTOCOL_MD = [
   "event_batch",
   "catchup_request",
   "catchup_response",
+  // T-C1 (`plans/wave-1/catalog-transport.md`, founder-approved July 2026). Additive under
+  // v:1 — PROTOCOL_VERSION is unchanged on purpose, because an old device simply never sends
+  // `catalog_request` and a new gateway never volunteers a `catalog_response` it was not
+  // asked for. `20 §2.7` makes extending this table a spec-review event, which this is.
+  "catalog_request",
+  "catalog_response",
+  "catalog_notice",
   "quarantine_notice",
   "purge_command",
   "ping",
@@ -21,8 +28,8 @@ const KINDS_PER_PROTOCOL_MD = [
 ];
 
 describe("wire message vocabulary (PROTOCOL.md)", () => {
-  it("PROTOCOL.md: MESSAGE_KINDS is exactly the 11 kinds of the message table", () => {
-    expect(MESSAGE_KINDS).toHaveLength(11);
+  it("PROTOCOL.md: MESSAGE_KINDS is exactly the 14 kinds of the message table", () => {
+    expect(MESSAGE_KINDS).toHaveLength(14);
     expect([...MESSAGE_KINDS].sort()).toEqual([...KINDS_PER_PROTOCOL_MD].sort());
   });
 

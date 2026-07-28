@@ -1,6 +1,8 @@
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
+import { BrowserWindow, app, ipcMain } from "electron";
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
@@ -5496,6 +5498,31 @@ var payloadSchemas = {
 		supersedes: array(string().min(1)),
 		reason: string().min(1).optional()
 	}),
+	/**
+	* `01-F52` / `14 §` / `15 §` — an AUDIT record that a catalog version exists. It is in the
+	* `01 §4` catalog and was missing from this registry, which `01-F4` turns into a runtime
+	* error at emit: doc 14's back office could not record a menu edit at all.
+	*
+	* **It does not carry the catalog** (`01-F52`), and the device never consumes it — a device
+	* learns its catalog is stale by comparing versions on `hello_ack` and fetching
+	* (`plans/wave-1/catalog-transport.md` §3.1). Its consumer is the back-office history view
+	* (`14-F6` price history), which is why the payload is actor + before/after REFS rather than
+	* entity bodies: a ledger event that carried the menu would make the catalog ledger data,
+	* contradicting `01-F52` in the same breath as satisfying it.
+	*/
+	"catalog.changed": looseObject({
+		/** The catalog entity edited — `item`, `variant`, `category`, `modifier_group`. */
+		entity: string().min(1),
+		entity_id: string().min(1),
+		/** The org catalog version this edit produced. Devices compare against it; see §3.2. */
+		version: number().int().positive(),
+		/**
+		* `14 §`'s before/after REFS. Opaque content-addressed handles into the published
+		* snapshot, never inline entity bodies — see the note above.
+		*/
+		before_ref: union$1([string().min(1), _null()]),
+		after_ref: union$1([string().min(1), _null()])
+	}),
 	"order.table_assigned": looseObject({
 		order_id: string().min(1),
 		table_id: string().min(1),
@@ -5857,6 +5884,23 @@ var projectLine = (edgesById) => {
 /** The bare order-fact types that park while their order key is absent (01-F10
 * amended: everything else carries its full projection keys and never parks). */
 var PARKING_TYPES = /* @__PURE__ */ new Set(["order.confirmed", "kot.printed"]);
+/**
+* Registry types that are DELIBERATELY NOT FOLDED, with the FR that says so.
+*
+* `catalog.changed` is the first of these and it is why this set exists. `01-F52` is
+* explicit: *"catalog state is not an input to any fold — a projected value that read a name
+* would depend on catalog sync state at fold time, which is the `01-F34` break law 1 exists
+* to prevent."* Before this, the engine's model was binary — every registry type had a merge
+* rule or the build failed — so the first type that must have NO rule could not be expressed
+* at all, and the honest answer looked identical to the mistake the exhaustiveness guard
+* exists to catch.
+*
+* Membership here is a claim that needs an FR, not a way to silence the compiler. A type
+* added to this set without one is exactly the silent fall-through `assertNever` prevents,
+* wearing a different hat.
+*/
+var NON_FOLD_TYPES = { "catalog.changed": "01-F52" };
+var isNonFold = (t) => t in NON_FOLD_TYPES;
 var ORDER_NS = "order:";
 var ITEM_NS = "item:";
 /**
@@ -5868,6 +5912,7 @@ var ITEM_NS = "item:";
 * what makes the next multi-key event a data change rather than an engine change.
 */
 var keysFor = (event) => {
+	if (isNonFold(event.type)) return [];
 	if (event.type === "availability.changed") return [`${ITEM_NS}${event.payload.item_id}`];
 	return [`${ORDER_NS}${event.payload.order_id}`];
 };
@@ -6103,7 +6148,14 @@ var createMergeEngine = () => {
 		assertNever(type);
 	};
 	const apply = (event) => {
-		const itemKey = keysFor(event).find((k) => k.startsWith(ITEM_NS));
+		const keys = keysFor(event);
+		if (keys.length === 0) return {
+			dirty: [],
+			dirtyItems: [],
+			parked: null,
+			drained: []
+		};
+		const itemKey = keys.find((k) => k.startsWith(ITEM_NS));
 		if (itemKey !== void 0) {
 			foldAvailability(event);
 			counters.events_folded += 1;
@@ -6999,7 +7051,18 @@ var messageSchemas = {
 		resume_from: seq,
 		relay_authorized: boolean().optional(),
 		renewed_token: string().min(1).optional(),
-		compression: literal("zstd").optional()
+		compression: literal("zstd").optional(),
+		/**
+		* Additive under v:1 (T-C1, `01-F9` "plus org-scope reference data"). The ORG's current
+		* authoritative catalog version.
+		*
+		* **This single field is what makes the catalog transport correct**, and the push below
+		* is only latency. The device compares it against its own stored version and requests if
+		* behind, so every reconnection reconciles — including for a device that has been offline
+		* for a week and has no hope of replaying an announcement it was not connected for.
+		* Absent ⇒ an older server that serves no catalog, and the device simply never asks.
+		*/
+		catalog_version: seq.optional()
 	}),
 	push: object({
 		v,
@@ -7030,6 +7093,70 @@ var messageSchemas = {
 		events: array(WireEnvelope),
 		complete: boolean(),
 		next_from: seq
+	}),
+	/**
+	* `T-C1` — the catalog fetch pair (`01-F9`, `01-F52`..`01-F56`).
+	*
+	* The device asks; the server decides snapshot vs delta from `have_version`. A delta if it
+	* can construct one from that EXACT base, a snapshot otherwise — including `have_version: 0`
+	* and including a base too old to reconstruct. The device's existing `needs_snapshot`
+	* refusal (`01-F56`) is then the belt to that braces: it is what happens if the server gets
+	* this wrong, and it is already implemented and tested.
+	*/
+	catalog_request: object({
+		v,
+		kind: literal("catalog_request"),
+		/** What the device has now. `0` means "nothing", and gets a snapshot. */
+		have_version: seq,
+		/** Paging cursor, echoed from a previous `catalog_response.next_from`. */
+		from: seq.optional()
+	}),
+	catalog_response: object({
+		v,
+		kind: literal("catalog_response"),
+		form: _enum(["snapshot", "delta"]),
+		/** The version this payload brings the device TO. */
+		version: seq,
+		/** For a delta, the exact base it applies to. A device holding anything else refuses. */
+		base_version: seq.optional(),
+		entries: array(object({
+			kind: string().min(1),
+			id: string().min(1),
+			name: string().min(1),
+			/** 03-F38 — a short kitchen name, so long item names stop being a KOT layout problem. */
+			kitchen_name: union$1([string().min(1), _null()]).optional(),
+			parent_id: union$1([string().min(1), _null()]).optional(),
+			sort: number().int().optional(),
+			/**
+			* `01-F55` — deletion is a TOMBSTONE. A reprint of an order placed before an item was
+			* deleted must still render its name, so a delete travels as a marked entry rather
+			* than as an absence. This is also why a snapshot carries its tombstones: the oracle
+			* round found that clearing and re-inserting destroyed every one of them, and made
+			* `01-F55` fail on its own named scenario after any recovery.
+			*/
+			deleted: boolean().optional()
+		})),
+		/**
+		* Paging, in `catchup_response`'s vocabulary rather than a second idiom. A large org's
+		* catalog will exceed one frame. **A snapshot must apply ATOMICALLY** — the device must
+		* never hold half a menu — so paged snapshot chunks accumulate and commit on `complete`.
+		*/
+		complete: boolean(),
+		next_from: seq
+	}),
+	/**
+	* `T-C1` — server→device, org-scoped, carrying ONLY a version number.
+	*
+	* Covers a version changing DURING a live session, so a menu edit does not wait for the
+	* next reconnect. It is a freshness optimisation and **the system is correct without it**,
+	* which is the property that matters: a notice is exactly the kind of message that gets
+	* dropped on a lossy link, and `hello_ack.catalog_version` is what makes that cost freshness
+	* rather than correctness.
+	*/
+	catalog_notice: object({
+		v,
+		kind: literal("catalog_notice"),
+		version: seq
 	}),
 	quarantine_notice: object({
 		v,
@@ -7062,6 +7189,9 @@ discriminatedUnion("kind", [
 	messageSchemas.event_batch,
 	messageSchemas.catchup_request,
 	messageSchemas.catchup_response,
+	messageSchemas.catalog_request,
+	messageSchemas.catalog_response,
+	messageSchemas.catalog_notice,
 	messageSchemas.quarantine_notice,
 	messageSchemas.purge_command,
 	messageSchemas.ping,
@@ -10664,43 +10794,6 @@ var wallClock = {
 		clearTimeout(id);
 	}
 };
-//#endregion
-//#region src/shared/ipc.ts
-var import_electron = (/* @__PURE__ */ __commonJSMin(((exports, module) => {
-	var { spawnSync } = __require("child_process");
-	var fs = __require("fs");
-	var path = __require("path");
-	var pathFile = path.join(__dirname, "path.txt");
-	function downloadElectron() {
-		console.log("Downloading Electron binary...");
-		if (spawnSync(process.execPath, [path.join(__dirname, "install.js")], { stdio: "inherit" }).status !== 0) throw new Error("Electron failed to install correctly. Please delete `node_modules/electron` and run \"npx install-electron --no\" manually.");
-	}
-	/**
-	* Fetches the path to the Electron executable to use in development mode.
-	* If the executable is missing, attempt to download it first.
-	*
-	* @returns the path to the Electron executable to run
-	*/
-	function getElectronPath() {
-		let executablePath;
-		if (fs.existsSync(pathFile)) executablePath = fs.readFileSync(pathFile, "utf-8");
-		if (process.env.ELECTRON_OVERRIDE_DIST_PATH) return path.join(process.env.ELECTRON_OVERRIDE_DIST_PATH, executablePath || "electron");
-		if (executablePath) {
-			const fullPath = path.join(__dirname, "dist", executablePath);
-			if (!fs.existsSync(fullPath)) downloadElectron();
-			return fullPath;
-		} else {
-			try {
-				downloadElectron();
-			} catch {
-				throw new Error("Electron failed to install correctly. Please delete `node_modules/electron` and run \"npx install-electron --no\" manually.");
-			}
-			executablePath = fs.readFileSync(pathFile, "utf-8");
-			return path.join(__dirname, "dist", executablePath);
-		}
-	}
-	module.exports = getElectronPath();
-})))();
 object({
 	actor: string(),
 	deviceLabel: string(),
@@ -10874,6 +10967,14 @@ var createGateway = (deps) => ({
 * and is Wave-1 work that has not landed; until it does, the ids are stable constants rather
 * than `newId()` calls so that a relaunch resumes the same store instead of orphaning it.
 */
+/**
+* This bundle's own directory.
+*
+* NOT `__dirname`: `package.json` declares `"type": "module"` and electron-vite emits main as
+* ESM accordingly, where `__dirname` does not exist. It builds cleanly either way — the
+* failure is at load, and it takes the whole app down before a window is ever created.
+*/
+var HERE = dirname(fileURLToPath(import.meta.url));
 var DEV_IDENTITY = {
 	org_id: "00000000-0000-7000-8000-000000000001",
 	branch_id: "00000000-0000-7000-8000-000000000002",
@@ -10891,7 +10992,7 @@ var catalogResolver = (store) => (item_id) => {
 	return entry ? { name: entry.name } : null;
 };
 var createWindow = () => {
-	const window = new import_electron.BrowserWindow({
+	const window = new BrowserWindow({
 		width: 1366,
 		height: 768,
 		show: false,
@@ -10900,7 +11001,7 @@ var createWindow = () => {
 			contextIsolation: true,
 			nodeIntegration: false,
 			sandbox: true,
-			preload: join(__dirname, "../preload/index.cjs")
+			preload: join(HERE, "../preload/index.cjs")
 		}
 	});
 	window.once("ready-to-show", () => window.show());
@@ -10912,11 +11013,11 @@ var load = (window) => {
 		window.loadURL(devServer);
 		return;
 	}
-	window.loadFile(join(__dirname, "../renderer/index.html"));
+	window.loadFile(join(HERE, "../renderer/index.html"));
 };
-import_electron.app.whenReady().then(() => {
+app.whenReady().then(() => {
 	const store = openStore({
-		path: join(import_electron.app.getPath("userData"), "device.db"),
+		path: join(app.getPath("userData"), "device.db"),
 		identity: DEV_IDENTITY
 	});
 	/**
@@ -10940,22 +11041,22 @@ import_electron.app.whenReady().then(() => {
 		blockedCursor,
 		businessDay: () => businessDate(wallClock.now() + store.branchTimeStatus().offset_ms)
 	});
-	import_electron.ipcMain.handle(CHANNELS.deviceState, () => gateway.deviceState());
-	import_electron.ipcMain.handle(CHANNELS.openOrders, () => gateway.openOrders());
-	import_electron.ipcMain.handle(CHANNELS.kitchenQueue, () => gateway.kitchenQueue());
-	import_electron.ipcMain.handle(CHANNELS.append, (_event, req) => gateway.append(req));
+	ipcMain.handle(CHANNELS.deviceState, () => gateway.deviceState());
+	ipcMain.handle(CHANNELS.openOrders, () => gateway.openOrders());
+	ipcMain.handle(CHANNELS.kitchenQueue, () => gateway.kitchenQueue());
+	ipcMain.handle(CHANNELS.append, (_event, req) => gateway.append(req));
 	const window = createWindow();
 	load(window);
 	const notifyChanged = () => {
 		if (!window.isDestroyed()) window.webContents.send(CHANNELS.changed);
 	};
-	import_electron.ipcMain.on(CHANNELS.append, notifyChanged);
-	import_electron.app.on("activate", () => {
-		if (import_electron.BrowserWindow.getAllWindows().length === 0) load(createWindow());
+	ipcMain.on(CHANNELS.append, notifyChanged);
+	app.on("activate", () => {
+		if (BrowserWindow.getAllWindows().length === 0) load(createWindow());
 	});
 });
-import_electron.app.on("window-all-closed", () => {
-	if (process.platform !== "darwin") import_electron.app.quit();
+app.on("window-all-closed", () => {
+	if (process.platform !== "darwin") app.quit();
 });
 //#endregion
 export { DEV_IDENTITY };

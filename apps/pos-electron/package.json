@@ -7,15 +7,19 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "rebuild:native": "electron-rebuild -f -w better-sqlite3",
+    "start": "electron-vite build && electron out/main/index.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
     "@restos/domain": "workspace:*",
     "@restos/sync-client": "workspace:*",
-    "@restos/ui": "workspace:*"
+    "@restos/ui": "workspace:*",
+    "better-sqlite3": "12.11.1"
   },
   "devDependencies": {
+    "@electron/rebuild": "4.2.0",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.4",
