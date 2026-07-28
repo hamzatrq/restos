@@ -96,3 +96,59 @@ describe("TOKENS.md — never a raw value in component code", () => {
     }
   });
 });
+
+describe("27-F64/F66 — the relief is only real if the outline is actually rendered", () => {
+  // ORACLE ROUND 2 / A9. `nontext-contrast.oracle.test.ts` relieves a status FILL of SC 1.4.11
+  // on the ground that its OUTLINE carries the boundary instead. But the outline test gates
+  // outline TOKENS against surfaces — it never checks that the component drawing the fill draws
+  // one. Two did not: TabRail's count badge (2.91:1 light) and TicketCard's DONE bump button
+  // (2.35:1 dark, on the KDS's own polarity, with `border: "none"`). Both were relieved on
+  // account of a boundary that did not exist.
+  //
+  // This is the missing half, and it is structural rather than numeric: if a component names a
+  // status fill, it must also name that fill's outline.
+  it("every component using a status fill also renders its outline token", () => {
+    const STATUS_FILLS = [
+      "bgColor-status-abnormal",
+      "bgColor-status-fault",
+      "bgColor-status-confirmed",
+      "bgColor-interactive",
+    ] as const;
+    const missing: string[] = [];
+    for (const [name, src] of sources) {
+      if (name.endsWith(".stories.tsx")) continue;
+      for (const fill of STATUS_FILLS) {
+        // The fill must be used as a FILL — `background:` — not merely mentioned. A component
+        // that names the token in a type or a map without painting with it owes no outline.
+        const paints = new RegExp(`background:[^,;]*"${fill}"`).test(src);
+        if (!paints) continue;
+        const outline = fill.replace("bgColor-", "outlineColor-");
+        if (!src.includes(outline)) missing.push(`${name} paints ${fill} without ${outline}`);
+      }
+    }
+    expect(missing, "a status fill relieved of SC 1.4.11 with no outline to carry it").toEqual([]);
+  });
+});
+
+describe("27-F19/F67 — a component reads the palette in force, never a hard-coded polarity", () => {
+  // ORACLE ROUND 2 / A7. All 14 components call `useColor()` today and NOTHING held them to it:
+  // a reviewer reverted one to the static light-only `color` record and the whole suite stayed
+  // green. That matters more than it sounds. 27-F67's argument for polarity inversion as the
+  // training signal is that the inversion is TOTAL — so one component reading the static record
+  // renders a production-coloured region inside a training shell, which is precisely the
+  // "staff member treats a real order as practice" failure 27-F63 exists to prevent. It breaks
+  // 27-F19's KDS opt-in in the same way and for the same reason.
+  it("every component resolves colour through useColor(), not the static record", () => {
+    const offenders: string[] = [];
+    for (const [name, src] of sources) {
+      if (name.endsWith(".stories.tsx")) continue;
+      if (!src.includes("color[")) continue; // renders no colour at all — nothing to hold
+      const viaHook = /const\s+color\s*=\s*useColor\(\)/.test(src);
+      // Importing the static record from the token module is the bypass, and it is the exact
+      // idiom `TOKENS.md` still teaches — which is why this is a test and not a convention.
+      const viaStatic = /import\s*\{[^}]*\bcolor\b[^}]*\}\s*from\s*"\.\.\/tokens\/index"/.test(src);
+      if (!viaHook || viaStatic) offenders.push(name);
+    }
+    expect(offenders, "a component that cannot follow the polarity in force").toEqual([]);
+  });
+});

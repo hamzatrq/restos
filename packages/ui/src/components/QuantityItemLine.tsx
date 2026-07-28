@@ -100,6 +100,8 @@ export const QuantityItemLine = ({
             // meaning from the mark, and it survives the 80 mm thermal path (27-F55 §2b)
             // where a clip-path or a radius would not.
             background: color["bgColor-status-fault"],
+            // 27-F64 — the fill is relieved of SC 1.4.11 only because an OUTLINE carries it.
+            border: `1px solid ${color["outlineColor-status-fault"]}`,
             color: color["fgColor-on-status-fault"],
             padding: `${space["space-1"]}px ${space["space-2"]}px`,
             alignSelf: "flex-start",

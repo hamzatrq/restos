@@ -79,6 +79,8 @@ export const TicketCard = ({
             alignSelf: "flex-start",
             padding: `${space["space-1"]}px ${space["space-2"]}px`,
             background: color["bgColor-status-fault"],
+            // 27-F64 — the fill is relieved of SC 1.4.11 only because an OUTLINE carries it.
+            border: `1px solid ${color["outlineColor-status-fault"]}`,
             color: color["fgColor-on-status-fault"],
             fontFamily: label.fontFamily,
             fontWeight: 700,
@@ -106,7 +108,12 @@ export const TicketCard = ({
           fontWeight: 700,
           background: color["bgColor-interactive"],
           color: color["fgColor-on-interactive"],
-          border: "none",
+          // 27-F64 — the OUTLINE carries SC 1.4.11. This was `border: "none"` while the fill had
+          // been relieved of the 3:1 requirement on the outline's account, which measured
+          // 2.35:1 against the card ON DARK — and dark is the KDS polarity (27-F19), so the
+          // primary control of the kitchen screen had no perceivable boundary on the surface it
+          // actually ships to.
+          border: `1px solid ${color["outlineColor-interactive"]}`,
           borderRadius: space["space-2"],
           cursor: "pointer",
         }}

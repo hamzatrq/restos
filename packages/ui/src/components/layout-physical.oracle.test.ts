@@ -167,13 +167,24 @@ const GAP_MIN = (tokens.touch as Record<string, { value?: number }>)["touch-gap-
  * constant: a table that restates what a component used to do cannot observe it being fixed,
  * and cannot observe it regressing either.
  */
-const gapTokenIn = (file: string): number => {
+const gapTokenIn = (file: string, occurrence = 0): number => {
   const src = readFileSync(join(UI_ROOT, "src", "components", file), "utf8");
-  // The container's own `gap:`, which is the first one in the file — a nested gap belongs to a
-  // child. Asserting on the first is what makes the reference to "adjacent tab buttons" true.
-  const m = src.match(/\bgap:\s*space\["(space-\d+)"\]/);
-  if (!m?.[1]) throw new Error(`${file} renders no space-token gap`);
-  return px(m[1]);
+  const all = [...src.matchAll(/\bgap:\s*space\["(space-\d+)"\]/g)];
+  const m = all[occurrence]?.[1];
+  if (m === undefined) {
+    throw new Error(`${file} renders no space-token gap at occurrence ${occurrence}`);
+  }
+  return px(m);
+};
+
+/**
+ * A component's own `margin`, which counts toward the gap between two of it. `Tile` carries one
+ * on every side, so two neighbours are separated by the container's gap PLUS two margins.
+ */
+const marginTokenIn = (file: string): number => {
+  const src = readFileSync(join(UI_ROOT, "src", "components", file), "utf8");
+  const m = src.match(/\bmargin:\s*space\["(space-\d+)"\]/);
+  return m?.[1] === undefined ? 0 : px(m[1]);
 };
 
 /**
@@ -197,21 +208,23 @@ const TARGET_ROWS: readonly { where: string; what: string; gap: number; extra?: 
     gap: gapTokenIn("TabRail.tsx"),
   },
   {
-    where: "NumericKeypad.tsx:56",
+    where: "NumericKeypad.tsx",
     what: "adjacent keypad keys, each targetFor('keypad')",
-    gap: px("space-2"),
+    gap: gapTokenIn("NumericKeypad.tsx"),
   },
   {
-    where: "ItemGrid.tsx:107 + Tile.tsx:53",
+    where: "ItemGrid.tsx + Tile.tsx",
     what: "adjacent grid tiles",
-    gap: px("space-2"),
-    // Tile carries `margin: space-1` on every side, so neighbours gain 4 px each.
-    extra: px("space-1") * 2,
+    gap: gapTokenIn("ItemGrid.tsx"),
+    // Tile carries a margin on every side, so neighbours gain one each. Read from the
+    // component, so deleting that margin is visible here.
+    extra: marginTokenIn("Tile.tsx") * 2,
   },
   {
-    where: "ItemGrid.tsx:131",
+    where: "ItemGrid.tsx (pager)",
     what: "adjacent page buttons, each targetFor('floor')",
-    gap: px("space-2"),
+    // The THIRD gap in the file: outer column, then the tile grid, then the pager rail.
+    gap: gapTokenIn("ItemGrid.tsx", 2),
   },
 ];
 

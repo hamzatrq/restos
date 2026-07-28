@@ -14,14 +14,30 @@ full before every edit.
    **not** reach for a nearly-right token — a wrong token is worse than a flagged gap, because
    it looks correct in review.
 
+4. **`color` comes from `useColor()`, never from an import.** `27-F19` makes dark a per-site KDS
+   opt-in and `27-F67` makes training render the OPPOSITE polarity — both are one runtime
+   switch, and a component holding the static record simply does not follow it. The failure is
+   not cosmetic: a production-coloured region inside a training shell is the "staff member
+   treats a real order as practice" case `27-F63` exists to prevent. Held by
+   `components/discipline.test.ts`; this page used to teach the bypass.
+
 ```ts
-// correct
+// correct — the palette in force, whichever polarity that is
+const color = useColor();
 background: color["bgColor-status-fault"]
 // correct when the token genuinely does not exist yet
 background: color["bgColor-status-pending"] /* check-token */
+// WRONG — a hard-coded polarity: right on a light counter, wrong on a KDS and wrong in training
+import { color } from "../tokens/index";
 // WRONG — invents a value, will pass review, will break the colour budget
 background: "#FFA500"
 ```
+
+**A status FILL always carries its outline** (`27-F64`): if you write
+`background: color["bgColor-status-fault"]` you also write
+``border: `1px solid ${color["outlineColor-status-fault"]}` ``. The fill is relieved of SC
+1.4.11's 3:1 *on the outline's account*, so a fill without one has no perceivable boundary and
+the relief was granted for nothing. Also held by `discipline.test.ts`.
 
 ## Picking a colour
 

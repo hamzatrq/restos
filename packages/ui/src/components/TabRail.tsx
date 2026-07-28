@@ -108,6 +108,11 @@ export const TabRail = ({ tabs, activeId, onSelect }: TabRailProps) => {
                   // Abnormal, not fault: a queue of unaccepted orders needs attention, it is
                   // not a breakage. Fault is reserved so that when it appears it means it.
                   background: color["bgColor-status-abnormal"],
+                  // 27-F64 — the OUTLINE carries SC 1.4.11, and this badge was relieved of the
+                  // fill requirement without ever rendering one. Measured at 2.91:1 against the
+                  // rail, i.e. below the 3:1 floor with nothing else carrying it: the relief was
+                  // granted on account of a boundary that did not exist.
+                  border: `1px solid ${color["outlineColor-status-abnormal"]}`,
                   color: color["fgColor-on-status-abnormal"],
                 }}
               >

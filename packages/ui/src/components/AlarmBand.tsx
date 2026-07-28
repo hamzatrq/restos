@@ -60,6 +60,8 @@ export const AlarmBand = ({ alarms, onAcknowledge }: AlarmBandProps) => {
         width: "100%",
         // 27-F15: the fill carries it. Fault is the darkest rung of the ladder.
         background: color["bgColor-status-fault"],
+        // 27-F64 — the fill is relieved of SC 1.4.11 only because an OUTLINE carries it.
+        border: `1px solid ${color["outlineColor-status-fault"]}`,
         color: color["fgColor-on-status-fault"],
       }}
     >

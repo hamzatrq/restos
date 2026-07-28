@@ -104,6 +104,28 @@ export const lex = (source: string): Token[] => {
         depth,
         line: 0,
       });
+      /**
+       * **A `TemplateMiddle` OPENS THE NEXT SUBSTITUTION, and this branch used to `continue`
+       * past the code that accounts for it.** The result was a depth leak, and the leak silently
+       * disabled the guard for most of the package.
+       *
+       * Trace `` padding: `${a}px ${b}px` `` inside an object at depth 1: the head pushes and
+       * takes depth to 2; the first `}` re-lexes to a middle and returns depth to 1 — but the
+       * next substitution's contents then sit at 1 instead of 2, so its closing `}` fails the
+       * `depth - 1` test above, is treated as an ordinary brace, and drops depth to **0**. Below
+       * the object's own base, every later property's value loop breaks instantly and every
+       * later property name is at the wrong depth.
+       *
+       * Measured before the fix: `properties()` returned 0 of 1 `background:` declarations in
+       * Tile, AgeBadge, ConnectionFacts and StatusStrip, and 1 of 3 in TabRail and TicketCard —
+       * 8 of 10 invisible. `roleCheck` (27-F40), `touchCheck` (27-F8) and `opacityCheck`'s alpha
+       * branch all silently stopped covering those files. A reviewer laundered `fgColor-muted`
+       * into a `background:` through AgeBadge's own const map and the whole suite stayed green.
+       *
+       * The files affected are exactly the ones converted to `useColor()`, because that
+       * conversion is what moved template literals above the colour declarations.
+       */
+      if (kind === SyntaxKind.TemplateMiddle) depth += 1;
       continue;
     }
 

@@ -80,7 +80,10 @@ export const Tile = ({
         // defeats 27-F4's entire purpose: the tile is disabled IN PLACE so the operator can
         // read WHY. "Disabled" is carried by the sunken fill (27-F15: the fill carries it),
         // and the reason stays fully legible at 5.22:1.
-        border: `1px solid ${color["borderColor-default"]}`,
+        // 27-F64 — a STATUS fill takes its own outline; a neutral fill takes the neutral one
+        // (27-F66). A destructive tile was rendering `borderColor-default` over a fault fill,
+        // which is the boundary for the surface it is NOT on.
+        border: `1px solid ${color[destructive ? "outlineColor-status-fault" : "borderColor-default"]}`,
       }}
     >
       <span>{label}</span>
