@@ -152,3 +152,27 @@ describe("27-F19/F67 — a component reads the palette in force, never a hard-co
     expect(offenders, "a component that cannot follow the polarity in force").toEqual([]);
   });
 });
+
+describe("01-F59 — availability is NOT an 01-F17 block", () => {
+  // ORACLE ROUND 2 / A14. `Tile` set `disabled={unavailable}`, so an 86'd item could not be sold
+  // at all. 01-F59 says the opposite in terms: "Availability is not an 01-F17 block … the
+  // counter may still sell it deliberately — 02-F31 owns the oversell path." 02-F7 asks only
+  // that it "grey out", and 02-F40's founder ruling names 02-F31's oversell handling as what
+  // absorbs the printer-only kitchen's delay — which requires the counter to be ABLE to sell.
+  //
+  // Structural rather than behavioural because this package renders nothing in test: the claim
+  // is about what the component can express, and `disabled` is what took the path away.
+  // Scoped to `Tile`, deliberately. `TabRail` also has an `unavailable`, and there it means a
+  // SURFACE THAT DOES NOT EXIST — a tab with no screen behind it — where `27-F4`'s
+  // disabled-in-place is exactly right and pressing it could do nothing useful. Two different
+  // concepts wearing one word; only the sellable one is governed by 01-F59, and a guard that
+  // conflated them would force a wrong fix on the other.
+  it("Tile never disables a sellable item on availability alone", () => {
+    const tile = sources.find(([name]) => name === "Tile.tsx");
+    expect(tile, "Tile.tsx left the scan").toBeDefined();
+    expect(
+      /disabled=\{[^}]*\bunavailable\b[^}]*\}/.test(tile?.[1] ?? ""),
+      "an 86'd item that cannot be sold — the platform withholding a sale on availability state",
+    ).toBe(false);
+  });
+});

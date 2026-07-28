@@ -28,6 +28,16 @@ export const Handheld: Story = { args: { posture: "handheld", label: "Table 6" }
  * vanishes when 86'd destroys the positional memory of every operator who learned the grid
  * with it there. Adding, removing or reordering a grid item is a breaking change.
  */
+/**
+ * **What a non-reader must be able to do with this:** see that this dish is off, and still be
+ * able to press it if the manager says to sell it anyway.
+ *
+ * `01-F59` — greyed is NOT disabled. "Availability is not an `01-F17` block … the counter may
+ * still sell it deliberately — `02-F31` owns the oversell path." This tile stays pressable on
+ * purpose: `02-F40`'s founder ruling accepts that a printer-only kitchen 86s by walking to the
+ * counter, and names `02-F31`'s oversell handling as what absorbs the delay — which only works
+ * if the counter can complete the sale.
+ */
 export const Unavailable: Story = {
   args: {
     posture: "counter",

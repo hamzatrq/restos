@@ -46,7 +46,19 @@ export const Tile = ({
   return (
     <button
       type="button"
-      disabled={unavailable}
+      /**
+       * **NOT `disabled`.** `01-F59` is explicit: *"Availability is not an `01-F17` block …
+       * the counter may still sell it deliberately — `02-F31` owns the oversell path."*
+       * `02-F7` asks only that an 86'd item "grey out", and `02-F40`'s founder ruling names
+       * `02-F31`'s oversell handling as what absorbs the printer-only kitchen's walk-to-the-
+       * counter delay — which requires the counter to be ABLE to sell it.
+       *
+       * A `disabled` button removed that path entirely, so the platform withheld a sale on
+       * availability state, which is the one thing `01-F17` says it must never do. The tile is
+       * greyed and carries its reason (`27-F4` — disabled IN PLACE, with the reason, because
+       * the reason is what makes disabling-in-place useful); the decision stays with the
+       * operator.
+       */
       onClick={onPress}
       aria-label={unavailable && unavailableReason ? `${label} — ${unavailableReason}` : label}
       style={{
@@ -63,7 +75,9 @@ export const Tile = ({
         fontSize: t.fontSize,
         fontWeight: t.fontWeight,
         borderRadius: space["space-2"],
-        cursor: unavailable ? "not-allowed" : "pointer",
+        // `pointer` even when unavailable, because it IS allowed (01-F59). `not-allowed` was
+        // the same claim the `disabled` attribute made, in a second place.
+        cursor: "pointer",
         // 27-F13: design achromatically first. The resting tile carries NO status colour —
         // colour is reserved for exceptions, so spending it on the base case would blunt it.
         background: unavailable
