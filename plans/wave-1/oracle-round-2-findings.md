@@ -275,16 +275,47 @@ those commits passed `pnpm verify` and a green 1130-test suite.
 
 ## D. Disposition
 
-**Fixed in this round:** A1, A2 (`fc2f69f`); A10 in part (`41b5dc6`).
+**ALL CLOSED** as of `7bf3c10`+. Every finding above was fixed, and each fix carries the
+reproduction that justified it. What each took:
 
-**Fix next, in order:** A3 (validate at the writer — one poisoned entry is an org-wide outage),
-A5 and A4 (pin the version in the request; refuse a fetch already in flight), A6 (the scanner),
-A7 (stop exporting the static record), A9 (render the outlines the relief was granted on), A17
-and A18 (an FR that does not resolve, and a repo-state line that misdirects every session).
+| # | Fix | Commit |
+|---|---|---|
+| A1 | `will-navigate`/`will-redirect` refused, `setWindowOpenHandler` denies; attack re-run against the fix | `fc2f69f` |
+| A2 | notify from inside the `handle` callback — `.on` and `.handle` are different registries | `fc2f69f` |
+| A3 | `CatalogEntryWire` exported and validated **at the writer**, so one definition governs both ends | `bbae677` |
+| A4 | `catalog_request.at_version` pins a continuation; the device also refuses pages that disagree | `bbae677` |
+| A5 | a fetch in flight is never restarted; retries bounded; no-progress detected | `bbae677` |
+| A6 | `TemplateMiddle` re-enters its substitution — 8/10 blind sites now seen, exploit now fails | `072d338` |
+| A7 | a guard holds every component to `useColor()`; `TOKENS.md` no longer teaches the bypass | `072d338` |
+| A9 | five status fills gained their outline (reviewers found two; the structural guard found three more) | `072d338` |
+| A10 | capacity and layout are one calculation (`pageGrid`); the surface is measured, not named | `41b5dc6` |
+| A11 | `PROTOCOL.md` carries the three frames and `hello_ack.catalog_version`; golden fixtures added | this commit |
+| A12/A13 | the missing paging, revocation, delta-paging and gateway-driven money tests exist | `bbae677`, `7bf3c10` |
+| A14 | **decided**: `01-F59` already ruled — greyed is not disabled, and `Tile` no longer disables | `8b28a72` |
+| A15 | all three reads parse their declared schema; `businessDay` constrained to a real date | `7bf3c10` |
+| A16 | comment corrected to match the (correct) code, with the test that makes it observable | `7bf3c10` |
+| A17 | `sec-F1` → `01-F25`/`01-F48`, which resolve | `8b28a72` |
+| A18 | `AGENTS.md` repo-state line rewritten | `6c99d11` |
+| A19 | the snapshot pages in SQL rather than materialising the org per page | `bbae677` |
+| A20 | the gap table reads all four components; the atomicity comment no longer credits statement order | `bbae677`, `072d338` |
 
-**Needs a spec answer, not a patch:** A14 — `01-F59` says an 86'd item stays sellable and the
-component makes it `disabled`; doc 02 owes the deliberate-sell path before this can be right.
+**A flake the round did not find, found while closing it.** Two full-suite runs failed on
+`measures age against branch time` (`expected 14 to be 15`) and passed in isolation. A capture
+harness caught it twice in twelve runs: the stub computes `age_basis` from a `Date.now()` read
+that happens INSIDE `kitchenQueue()`, i.e. *after* the gateway has read its own clock, so the
+elapsed span is a hair short of the literal — and landing exactly on a minute boundary made
+`floor` return 14 whenever a millisecond ticked between the two reads. A test defect, not a
+product one, but it is the false-green hazard in its purest form: the suite was "green" and one
+run in six was lying. Fixed by moving the fixture off the boundary; eight clean runs since.
 
-**Owed structurally:** `packages/ui` has no component-rendering test of any kind, and
-`apps/pos-electron`'s `main/index.ts`, `preload/index.ts` and real resolver are covered by
-nothing — which is exactly the seam A2 lived in.
+**Still owed, and deliberately not done here** — these are scope, not defects:
+
+- **Nothing constructs a cloud session.** The transport is real and reachable inside
+  `sync-client` and no application calls it, so `catalog_request` has never left a device and
+  the POS's menu still comes from its local store. This is the next real piece of work.
+- **`packages/ui` has no component-rendering test of any kind** — no jsdom, no RTL. Every guard
+  here is structural or arithmetic, so `27-F67`'s inversion is token-correct and never observed.
+- **`apps/pos-electron`'s `main/index.ts` and `preload/index.ts` are covered by nothing**, which
+  is precisely the seam A2 lived in.
+- **`publishCatalog` and `notifyCatalogVersion` have no production caller** — `services/api` is
+  still a stub, so "the API publishes" describes a path nothing drives.

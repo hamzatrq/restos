@@ -143,7 +143,18 @@ describe("01-F43/F45 — elapsed time is branch-consensus on both ends", () => {
     // measured branch offset. The offset cancels in the difference, which is exactly why
     // durations need a CONSISTENT clock rather than a correct one.
     const store = stubStore({
-      kitchenQueue: () => [{ order_id: "order-1234abcd", age_basis: Date.now() - 15 * 60_000 }],
+      // 15.5 MINUTES, not 15, and the half-minute is the whole point. `age_basis` is computed
+      // from a `Date.now()` read that happens INSIDE `kitchenQueue()` — i.e. AFTER the gateway
+      // has already read its own clock — so the elapsed span is very slightly SHORTER than the
+      // literal here. Landing exactly on a minute boundary made `floor` return 14 whenever a
+      // millisecond ticked between the two reads: a genuine ~1-in-6 flake, caught by a capture
+      // harness after two full suites failed and twelve passed.
+      //
+      // Offsetting off the boundary keeps the test about what it is FOR — that the branch
+      // offset cancels in the difference — and stops it also being a test of clock jitter.
+      kitchenQueue: () => [
+        { order_id: "order-1234abcd", age_basis: Date.now() - (15 * 60_000 + 30_000) },
+      ],
       branchTimeStatus: () => ({
         offset_ms: 0,
         basis: "branch",
@@ -160,7 +171,10 @@ describe("01-F43/F45 — elapsed time is branch-consensus on both ends", () => {
     // the time layer exists to prevent, and it is the one a naive Date.now() would ship.
     const HOUR = 3_600_000;
     const store = stubStore({
-      kitchenQueue: () => [{ order_id: "o", age_basis: Date.now() + HOUR - 15 * 60_000 }],
+      // Off the minute boundary for the reason given above.
+      kitchenQueue: () => [
+        { order_id: "o", age_basis: Date.now() + HOUR - (15 * 60_000 + 30_000) },
+      ],
       branchTimeStatus: () => ({
         offset_ms: HOUR,
         basis: "branch",

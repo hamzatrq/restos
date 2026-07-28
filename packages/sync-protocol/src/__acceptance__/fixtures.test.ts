@@ -13,7 +13,19 @@ import { decodeMessage, encodeMessage } from "../index.js";
 const fixtureText = (name: string): string =>
   readFileSync(fileURLToPath(new URL(`./fixtures/${name}.json`, import.meta.url)), "utf8");
 
-const FIXTURE_KINDS = ["hello", "push", "event_batch", "quarantine_notice"] as const;
+// T-C1 added the three catalog kinds. `20 §2.7` makes a fixture the CONTRACT — the response
+// fixture deliberately carries a paged, tombstone-bearing snapshot, because those two are the
+// fields an evolution is most likely to drop: `deleted` silently turns a tombstone into a live
+// item, and `complete: false` is the only shape that exercises paging at all.
+const FIXTURE_KINDS = [
+  "hello",
+  "push",
+  "event_batch",
+  "quarantine_notice",
+  "catalog_request",
+  "catalog_response",
+  "catalog_notice",
+] as const;
 
 describe("golden fixtures (20 §2.7)", () => {
   it("20 §2.7: every fixture decodes, carries v: 1, and its kind matches its filename", () => {
