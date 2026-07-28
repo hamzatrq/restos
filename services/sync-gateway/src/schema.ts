@@ -131,6 +131,71 @@ export const deviceRegistry = kernel.table(
 );
 
 /**
+ * Published catalog versions (T-C2; `01-F52`, `01-F9` "plus org-scope reference data").
+ *
+ * **ORG-scoped, never branch-scoped** — `01-F52` is explicit, and it is why a training branch
+ * mirrors production read-only (`01-F49`) with no special case anywhere.
+ *
+ * The founder ruling (`plans/wave-1/catalog-transport.md` §6 Q1) is *the API publishes, the
+ * gateway serves*: the back office decides what the menu IS and calls `publishCatalog`; this
+ * service stores an immutable versioned artifact and answers device fetches from it. The
+ * gateway never interprets an entry — `name`, `sort` and the rest pass through untouched — so
+ * it cannot grow an opinion about menu structure, which was the whole point of the ruling.
+ * `18 §4`'s "every table owns exactly one writer service" holds: that service is this one.
+ *
+ * Versions are per-org and strictly increasing. A row here is the COMMIT POINT — `catalog_entries`
+ * rows are written first and this row last, so a reader that sees version N is guaranteed to see
+ * every entry of version N. That ordering is the whole atomicity story for a paged fetch.
+ */
+export const catalogVersions = kernel.table(
+  "catalog_versions",
+  {
+    org_id: text("org_id").notNull(),
+    version: bigint("version", { mode: "number" }).notNull(),
+    published_at: bigint("published_at", { mode: "number" }).notNull(),
+    /** `14 §`'s actor, so `14-F6`'s price history has an author without reading the ledger. */
+    actor_user_id: text("actor_user_id"),
+  },
+  (t) => [primaryKey({ columns: [t.org_id, t.version] })],
+);
+
+/**
+ * What CHANGED at each version — a delta, never a full menu per version.
+ *
+ * This shape is chosen so the two things the device protocol asks for are both cheap and both
+ * derived from one table: a **delta** from version A to B is `A < version <= B`, and a
+ * **snapshot** at V is the greatest `version <= V` per `(kind, id)`. Storing a full menu per
+ * version would make the delta a diff — the expensive direction, and the one that invites a
+ * gateway to start comparing entries, i.e. to start understanding the menu.
+ *
+ * `deleted` is a TOMBSTONE row, not an absence (`01-F55`): a reprint of an order placed before
+ * an item was deleted must still render its name, so a delete travels as a marked entry. The
+ * oracle round found that the device side destroyed tombstones on every snapshot recovery;
+ * carrying them explicitly here is what lets the device stop doing that.
+ */
+export const catalogEntries = kernel.table(
+  "catalog_entries",
+  {
+    org_id: text("org_id").notNull(),
+    version: bigint("version", { mode: "number" }).notNull(),
+    kind: text("kind").notNull(),
+    entry_id: text("entry_id").notNull(),
+    name: text("name").notNull(),
+    /** 03-F38 — a short kitchen name, so long item names stop being a KOT layout problem. */
+    kitchen_name: text("kitchen_name"),
+    parent_id: text("parent_id"),
+    sort: bigint("sort", { mode: "number" }),
+    deleted: bigint("deleted", { mode: "number" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.org_id, t.version, t.kind, t.entry_id] }),
+    // Both access paths in one index: the delta scan (org, version range) and the snapshot
+    // fold (org, entity, greatest version).
+    index("catalog_entries_org_kind_entry_version_idx").on(t.org_id, t.kind, t.entry_id, t.version),
+  ],
+);
+
+/**
  * Durable quarantine-notice outbox (T-01-08 binding data contract; DEC-SYNC-008
  * accepted: at-least-once, keyed by ORIGIN device, live-sent + redelivered on
  * next hello, mark-on-send). One notice per claimed id, first wins (UNIQUE +

@@ -378,9 +378,29 @@ const canonical = (value: unknown): string =>
       : val,
   );
 
-export const openStore = (options: { path: string; identity: StoreIdentity }): DeviceStore => {
+export const openStore = (options: {
+  path: string;
+  identity: StoreIdentity;
+  /**
+   * An explicit path to the compiled `better_sqlite3.node`.
+   *
+   * Needed because ONE checkout serves two V8 ABIs. `better-sqlite3` resolves its addon through
+   * `bindings`, which checks `build/Release/` FIRST — so under pnpm, where every package shares
+   * one physical copy, rebuilding for Electron (ABI 148) overwrites the build Node (ABI 127)
+   * needs, and the test suites that open a store stop loading at all. They genuinely fight over
+   * one file; there is no ordering that satisfies both.
+   *
+   * So the DEFAULT is left alone — `build/Release/` stays the Node build, which is what every
+   * suite and every non-Electron host wants — and the Electron main process passes the path to
+   * its own ABI-matched binary instead. `apps/pos-electron` is the only caller.
+   */
+  nativeBinding?: string | undefined;
+}): DeviceStore => {
   const { identity } = options;
-  const db = new Database(options.path);
+  const db = new Database(
+    options.path,
+    options.nativeBinding === undefined ? {} : { nativeBinding: options.nativeBinding },
+  );
   db.pragma("journal_mode = WAL"); // multi-handle reads + crash recovery (18 §4)
   db.pragma("synchronous = FULL"); // plug-pull law outranks throughput (00 §5.2)
   db.pragma("foreign_keys = ON"); // device DB rule (18 §4)

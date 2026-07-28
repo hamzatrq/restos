@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { businessDate } from "@restos/domain";
@@ -32,6 +33,23 @@ import { type CatalogResolver, createGateway } from "./gateway";
  * failure is at load, and it takes the whole app down before a window is ever created.
  */
 const HERE = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Where `pnpm rebuild:native` leaves the Electron-ABI `better_sqlite3.node`.
+ *
+ * `@electron/rebuild` writes it to `bin/<platform>-<arch>-<abi>/`, which is `better-sqlite3`'s
+ * own prebuild layout, and it is deliberately NOT `build/Release/` — that path belongs to the
+ * Node build every test suite in this monorepo loads. `process.versions.modules` is Electron's
+ * ABI at runtime, so this resolves to the binary matching whatever Electron is executing it.
+ */
+const electronAddonPath = (): string =>
+  join(
+    createRequire(import.meta.url).resolve("better-sqlite3/package.json"),
+    "..",
+    "bin",
+    `${process.platform}-${process.arch}-${process.versions.modules}`,
+    "better-sqlite3.node",
+  );
 
 const DEV_IDENTITY = {
   org_id: "00000000-0000-7000-8000-000000000001",
@@ -89,6 +107,11 @@ app.whenReady().then(() => {
   const store = openStore({
     path: join(app.getPath("userData"), "device.db"),
     identity: DEV_IDENTITY,
+    // The Electron-ABI addon, built by `pnpm rebuild:native`. One checkout serves two V8 ABIs
+    // and `bindings` resolves `build/Release/` first, so leaving this to discovery means the
+    // Electron build overwrites the one Node's test suites need — they fight over one file.
+    // Pointing at ours by name is what lets both exist: `build/Release/` stays Node's.
+    nativeBinding: electronAddonPath(),
   });
 
   /**

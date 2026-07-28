@@ -50,6 +50,13 @@
       "when": 1785000200000,
       "tag": "0006_quarantine_envelope_author",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785000300000,
+      "tag": "0007_catalog_publication",
+      "breakpoints": true
     }
   ]
 }

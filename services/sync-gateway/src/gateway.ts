@@ -26,6 +26,7 @@ import { negotiateCompression, type ProtocolMessage, parseMessage } from "@resto
 import { sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { DEVICE_TOKEN_TTL_MS, issueDeviceToken, verifyDeviceToken } from "./auth.js";
+import { catalogPage, catalogVersion } from "./catalog.js";
 import { AuthRejectedError, ProtocolViolationError, type QuarantineReason } from "./errors.js";
 import { type DeviceRegistryRow, readRegistryRow, recordTokenExpiry } from "./registry.js";
 
@@ -66,6 +67,17 @@ export type Gateway = {
    * open toward the device keeping its ability to sell.
    */
   sweepRevocations(): Promise<void>;
+  /**
+   * T-C3 — announce a new catalog version to every live session in an ORG (`01-F52`: catalog
+   * is org-scoped, so this deliberately crosses branch boundaries where fan-out does not).
+   *
+   * **Freshness only, never correctness.** The system is correct without a single notice ever
+   * arriving: `hello_ack.catalog_version` is what actually reconciles, on every reconnection.
+   * This exists so a menu edit does not wait for the next reconnect — and a notice is exactly
+   * the kind of message that gets dropped on a lossy link, which is why nothing depends on it.
+   * Called by the back office after `publishCatalog`; never by a device.
+   */
+  notifyCatalogVersion(org_id: string, version: number): void;
 };
 
 type Sink = (message: ProtocolMessage) => void;
@@ -102,6 +114,7 @@ type WireEvent = Extract<ProtocolMessage, { kind: "event_batch" }>["events"][num
 type HelloMessage = Extract<ProtocolMessage, { kind: "hello" }>;
 type PushMessage = Extract<ProtocolMessage, { kind: "push" }>;
 type CatchupRequest = Extract<ProtocolMessage, { kind: "catchup_request" }>;
+type CatalogRequest = Extract<ProtocolMessage, { kind: "catalog_request" }>;
 
 /** 01-F40 named seam: identity at v1 — slice predicates are Wave 1. */
 const sliceFilter = (_session: SessionState, batch: readonly WireEvent[]): readonly WireEvent[] =>
@@ -447,6 +460,12 @@ export const createGateway = ({
     // client advertises: this build can always decode, so the only reason to decline
     // would be a peer that cannot — and that peer simply does not advertise.
     const negotiated = negotiateCompression(message, true);
+    // T-C3. A DRAINING session is told its catalog version too, and that is deliberate:
+    // 01-F47's "sole purpose" constrains what a drain session may DO — it may not read the
+    // stream — and a version NUMBER is not branch data. Withholding it would leave a device
+    // that recovers from expiry silently stale until its next reconnect, which is the freshness
+    // failure this field exists to prevent.
+    const catalogVersionAtHello = await catalogVersion(db, claims.org_id);
     // Silent renewal (01-F47). A DRAINING session gets one too, FORCED — its credential
     // is already expired, so a threshold comparison would be meaningless. The session
     // still stays push-only: `draining` is untouched here, so catch-up is refused and it
@@ -482,6 +501,16 @@ export const createGateway = ({
         // client-side gate for relaying — absent otherwise, keeping plain
         // sessions (and the committed XP transcript) byte-identical.
         ...(relayAuthorized ? { relay_authorized: true } : {}),
+        // T-C1/T-C3 (01-F9 "plus org-scope reference data"). THE correctness mechanism of the
+        // whole catalog transport: the device compares this against its own stored version and
+        // fetches if behind, so every reconnection reconciles — including for a device that has
+        // been offline for a week and could not have heard any announcement. The
+        // `catalog_notice` push is latency on top of this, never a substitute for it.
+        //
+        // Omitted at version 0 rather than sent as 0, so an org that has never published looks
+        // identical to an older gateway that serves no catalog: in both cases the device simply
+        // never asks, which is the correct behaviour for both.
+        ...(catalogVersionAtHello > 0 ? { catalog_version: catalogVersionAtHello } : {}),
       }),
     );
     // T-01-08 hello-time notice drain (DEC-SYNC-008): AFTER hello_ack, this
@@ -1122,6 +1151,45 @@ export const createGateway = ({
     );
   };
 
+  /**
+   * T-C3 — serve a catalog page (`01-F9`, `01-F52`..`01-F56`).
+   *
+   * Scoped by ORG, not by branch, which is the one place in this gateway that is true and the
+   * reason the transport needed designing rather than falling out of the existing stream:
+   * every device read is branch-filtered (`01-F13`, and `sec-F1` closed it again), so there is
+   * no stream a device is on that carries org-scoped rows. `01-F9`'s parenthesis — "plus
+   * org-scope reference data" — promised this capability and nobody had built it.
+   *
+   * It is a READ in the `01-F47` sense, so it takes both of the read gates: refused for a
+   * revoked device (`sec-F1` — revocation blocks reads) and refused for a draining session.
+   */
+  const handleCatalog = async (
+    record: ConnectionRecord,
+    session: SessionState,
+    message: CatalogRequest,
+  ): Promise<void> => {
+    await requireUnrevoked(session);
+    if (session.draining) {
+      throw new AuthRejectedError(
+        "device token expired — session is in drain mode, reads are refused until the " +
+          "renewal lands (01-F47 sole purpose; push to renew)",
+      );
+    }
+    const page = await catalogPage(db, session.orgId, message.have_version, message.from ?? 0);
+    record.sink(
+      parseMessage({
+        v: 1,
+        kind: "catalog_response",
+        form: page.form,
+        version: page.version,
+        ...(page.base_version === undefined ? {} : { base_version: page.base_version }),
+        entries: page.entries,
+        complete: page.complete,
+        next_from: page.next_from,
+      }),
+    );
+  };
+
   const dispatch = async (record: ConnectionRecord, message: ProtocolMessage): Promise<void> => {
     if (message.kind === "hello") return handleHello(record, message);
     const session = record.session;
@@ -1135,6 +1203,8 @@ export const createGateway = ({
         return handlePush(record, session, message);
       case "catchup_request":
         return handleCatchup(record, session, message);
+      case "catalog_request":
+        return handleCatalog(record, session, message);
       case "ping":
         record.sink(parseMessage({ v: 1, kind: "pong", t: message.t }));
         return;
@@ -1174,6 +1244,24 @@ export const createGateway = ({
     close() {
       branchSets.clear();
       return Promise.resolve();
+    },
+    notifyCatalogVersion(org_id, version) {
+      // ORG-scoped, so it walks every branch set and filters by org rather than using
+      // `branchSets` as an index. Fan-out is branch-keyed because event delivery is
+      // branch-scoped (01-F13, a security property); the catalog is the one thing that is
+      // deliberately not (01-F52), which is exactly why it could not ride the existing stream.
+      const notice = parseMessage({ v: 1, kind: "catalog_notice", version });
+      for (const set of branchSets.values()) {
+        for (const record of set) {
+          if (!record.open || record.session?.orgId !== org_id) continue;
+          // A DRAINING session is skipped: it may not read, so telling it to fetch would only
+          // produce a refusal it cannot act on. It reconciles on its next hello instead, which
+          // is the mechanism that makes dropping any notice cost freshness and never
+          // correctness.
+          if (record.session.draining) continue;
+          record.sink(notice);
+        }
+      }
     },
     async sweepRevocations() {
       // One batched read per org present in the live fan-out sets, then drop every

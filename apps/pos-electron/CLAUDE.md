@@ -15,10 +15,26 @@ pnpm dev              # electron-vite dev server with HMR
 
 **`rebuild:native` is not optional and not a workaround.** `better-sqlite3` is a native module
 and Electron 43 uses a different V8 ABI (148) from the Node that installed it (127), so the
-store cannot open until it is rebuilt. `electron-rebuild` writes the Electron build to
-`bin/darwin-arm64-148/` and **leaves the Node build in `build/Release/` untouched** —
-`bindings` selects by `process.versions.modules`, so both coexist and `pnpm test` (which runs
-`sync-client`'s 412 SQLite tests under Node) is unaffected. Verified, not assumed.
+store cannot open until it is rebuilt.
+
+**One checkout serves two ABIs, and by default they FIGHT.** `better-sqlite3` resolves its
+addon through `bindings`, which checks `build/Release/` **first** — and under pnpm every
+package shares one physical copy of the module. So `electron-rebuild` overwrites the exact file
+Node needs, and `pnpm test` then dies with `NODE_MODULE_VERSION 148 … requires 127` across
+every suite that opens a store. There is no ordering that satisfies both.
+
+The resolution: `build/Release/` **stays Node's**, and this app passes its own binary
+explicitly. `@electron/rebuild` also writes to `bin/<platform>-<arch>-<abi>/` (better-sqlite3's
+own prebuild layout), `openStore` takes an optional `nativeBinding`, and `main/index.ts`
+resolves it from `process.versions.modules` at runtime. If `rebuild:native` ever clobbers
+`build/Release/` again, restore it with:
+
+```
+cd node_modules/.pnpm/better-sqlite3@*/node_modules/better-sqlite3 && npm run build-release
+```
+
+Verify with a **`pnpm test --force`** — a cached turbo run will report green off results
+computed before the rebuild, which is how this was briefly believed to be fine when it was not.
 
 ## What the build gets wrong if you let it
 
