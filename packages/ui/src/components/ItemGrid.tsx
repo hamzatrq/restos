@@ -1,3 +1,4 @@
+import { CSS_PX_PER_INCH } from "../physical";
 import { useColor } from "../theme";
 import { mmFromDp, type Posture, space, targetFor, targetMm, typography } from "../tokens/index";
 import { Tile } from "./Tile";
@@ -59,14 +60,28 @@ export type GridItem = {
  * on a 100-PPI panel and 8.6 mm on a 141-PPI one, and only one of those clears the counter
  * minimum.
  */
-export const pageCapacity = (opts: {
+export type PageGrid = { cols: number; rows: number; capacity: number };
+
+/**
+ * The full answer: how many columns, how many rows, and therefore how many tiles.
+ *
+ * `pageCapacity` returns only the product, and returning ONLY the product was a real defect:
+ * the component then laid the grid out fluidly with `auto-fill`, so the number of tiles it
+ * COMPUTED and the number it RENDERED were two different calculations that agreed by luck.
+ * Where they disagreed the surplus went behind `overflow: hidden` — items on the page,
+ * invisible, with no pager to reach them, which on a counter is an item that cannot be sold.
+ *
+ * Returning the shape means the layout is DRIVEN by the capacity rather than checked against
+ * it, so the two cannot drift.
+ */
+export const pageGrid = (opts: {
   widthMm: number;
   heightMm: number;
   posture: Posture;
   /** Rendered tile edge in mm. Defaults to the posture minimum — the ceiling, not a design. */
   tileMm?: number;
   gapMm?: number;
-}): number => {
+}): PageGrid => {
   const min = targetMm(opts.posture);
   const tile = opts.tileMm ?? min;
   if (tile < min) {
@@ -75,12 +90,15 @@ export const pageCapacity = (opts: {
     );
   }
   const gap = opts.gapMm ?? mmFromDp(space["space-2"]);
-  const cols = Math.floor((opts.widthMm + gap) / (tile + gap));
-  const rows = Math.floor((opts.heightMm + gap) / (tile + gap));
   // A surface too small for even one tile still owes the operator one tile — returning 0
   // would page forever over an empty grid, which is a worse failure than an overflowing one.
-  return Math.max(1, cols * rows);
+  const cols = Math.max(1, Math.floor((opts.widthMm + gap) / (tile + gap)));
+  const rows = Math.max(1, Math.floor((opts.heightMm + gap) / (tile + gap)));
+  return { cols, rows, capacity: cols * rows };
 };
+
+export const pageCapacity = (opts: Parameters<typeof pageGrid>[0]): number =>
+  pageGrid(opts).capacity;
 
 export type ItemGridProps = {
   items: readonly GridItem[];
@@ -92,11 +110,11 @@ export type ItemGridProps = {
   widthMm: number;
   heightMm: number;
   /**
-   * Pixels per inch of the surface this renders on — the only place resolution enters, and it
-   * buys sharpness, never room. It converts the millimetre design to the pixels a browser
-   * draws; it is deliberately not an input to `pageCapacity`.
+   * Pixels per inch of the surface. Defaults to the CSS reference density, which is what
+   * `usePhysicalSize` measures in — so a caller that measures and a caller that names a panel
+   * cannot silently disagree about what a millimetre is.
    */
-  ppi: number;
+  ppi?: number | undefined;
   /** Rendered tile edge in mm; must be ≥ the posture minimum. Defaults to that minimum. */
   tileMm?: number | undefined;
   page: number;
@@ -109,7 +127,7 @@ export const ItemGrid = ({
   posture,
   widthMm,
   heightMm,
-  ppi,
+  ppi = CSS_PX_PER_INCH,
   tileMm,
   page,
   onPageChange,
@@ -117,7 +135,8 @@ export const ItemGrid = ({
 }: ItemGridProps) => {
   const color = useColor();
   const tile = tileMm ?? targetMm(posture);
-  const perPage = pageCapacity({ widthMm, heightMm, posture, tileMm: tile });
+  const shape = pageGrid({ widthMm, heightMm, posture, tileMm: tile });
+  const perPage = shape.capacity;
   /** mm → px. The render step, and the only step that knows what a pixel is. */
   const px = (mm: number): number => Math.round((mm / 25.4) * ppi);
   const pages = Math.max(1, Math.ceil(items.length / perPage));
@@ -128,13 +147,41 @@ export const ItemGrid = ({
   const t = typography["text-label"];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: space["space-2"] }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: space["space-2"],
+        // Fill the surface the caller measured, rather than imposing a width on it. The grid
+        // used to set `width: px(widthMm)` — a fixed pixel box computed from an assumed panel
+        // — which overflowed its container the moment the real surface was any other size, and
+        // pushed the cart off the screen.
+        flex: 1,
+        minWidth: 0,
+        minHeight: 0,
+      }}
+    >
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: `repeat(auto-fill, minmax(${px(tile)}px, 1fr))`,
+          // EXACTLY the shape `pageGrid` costed, never `auto-fill`. With auto-fill the browser
+          // decides the column count from the rendered width while `capacity` decided it from
+          // millimetres, and the two agreeing was luck; where they disagreed the surplus went
+          // behind `overflow: hidden` — tiles on the page, invisible, with no pager to reach
+          // them. Driving the layout FROM the capacity is what makes them one number.
+          gridTemplateColumns: `repeat(${shape.cols}, minmax(0, 1fr))`,
+          // Rows are TILE-SIZED, not `1fr`. With `1fr` a page holding fewer items than its
+          // capacity stretched the single row over the whole surface — six 106 × 568 px
+          // slivers, which is not a tile and not a touch target anyone aims at. The surplus
+          // belongs to the surface as empty space; it does not belong to the tiles.
+          gridAutoRows: `${px(tile)}px`,
+          // Top-aligned for the same reason, and for 27-F4: a page with four items must put
+          // them where a page with forty puts its first four, or positional memory is worth
+          // nothing the moment the menu changes size.
+          alignContent: "start",
           gap: space["space-2"],
-          width: px(widthMm),
+          flex: 1,
+          minHeight: 0,
           // No overflow: paging replaces scrolling entirely (27-F2). If content would spill,
           // the page size is wrong, and that is a bug to see rather than to hide.
           overflow: "hidden",

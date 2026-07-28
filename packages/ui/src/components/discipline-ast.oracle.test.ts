@@ -350,6 +350,12 @@ describe("the guard suite actually covers the package", () => {
         // in the package, so it is squarely source the token rules apply to. It ships for
         // 27-F19's KDS opt-in and 27-F67's training inversion, which are one mechanism.
         "theme.tsx",
+        // ADDED with `physical.ts` — 27-F11c's mm↔CSS-px conversion and the ResizeObserver
+        // that measures a surface instead of naming a panel. It carries the only two raw
+        // numeric constants outside `tokens.json` (96 CSS px per inch, 25.4 mm per inch), and
+        // both are DEFINITIONS rather than design values, which is exactly the distinction
+        // this pin exists to make someone state out loud.
+        "physical.ts",
       ].sort(),
     );
   });

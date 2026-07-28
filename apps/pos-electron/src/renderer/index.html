@@ -19,6 +19,26 @@
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"
     />
     <title>RestOS — Counter</title>
+    <style>
+      /*
+        The height chain. `AppShell` is `height: 100%`, which resolves against its parent — and
+        every ancestor had no height at all, so the whole shell collapsed to its content and
+        left the bottom two thirds of the window as bare page. A counter screen with a dead
+        band under it reads as a half-loaded app.
+
+        `overflow: hidden` on the body is 27-F2 stated at the outermost level: paging replaces
+        scrolling for anything actionable, so a scrollbar here would mean the layout is wrong
+        and hiding it — nearly half of field subjects did not know content existed below the
+        fold, which is exactly what a scrollbar on a till invites.
+      */
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
