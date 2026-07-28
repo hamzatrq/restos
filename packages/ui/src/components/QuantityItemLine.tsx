@@ -89,6 +89,14 @@ export const QuantityItemLine = ({
             // 27-F56 — a removal carries the inverted marker: on paper this is the single
             // reserved inversion, and on glass it is the fault fill. Same reasoning either
             // way: a missed removal is an allergen incident, not a missed preference.
+            //
+            // It shares the fault fill with AgeBadge, which would otherwise make red mean two
+            // things on one ticket — "late" and "allergen" — and put red on a HEALTHY ticket
+            // whenever a line has a removal, diluting the one colour 27-F14 reserves. The
+            // glyph is what separates them (founder ruling): shape carries the distinction,
+            // not a fifth colour. It leads rather than follows because a non-reader gets the
+            // meaning from the mark, and it survives the 80 mm thermal path (27-F55 §2b)
+            // where a clip-path or a radius would not.
             background: color["bgColor-status-fault"],
             color: color["fgColor-on-status-fault"],
             padding: `${space["space-1"]}px ${space["space-2"]}px`,
@@ -96,7 +104,7 @@ export const QuantityItemLine = ({
             marginLeft: space["space-6"],
           }}
         >
-          NO {r}
+          <span aria-hidden="true">{"\u2715"}</span> NO {r}
         </div>
       ))}
 
