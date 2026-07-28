@@ -13,3 +13,6 @@ audit-1.md
 
 # Storybook build output (packages/ui)
 storybook-static/
+
+# Electron build output (apps/pos-electron) — three bundles, all generated
+out/
