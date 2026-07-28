@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { businessDate } from "@restos/domain";
 import { type BlockedCursor, openStore, wallClock } from "@restos/sync-client";
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { CHANNELS } from "../shared/ipc";
 import { type CatalogResolver, createGateway } from "./gateway";
 
@@ -91,6 +91,38 @@ const createWindow = (): BrowserWindow => {
   // Shown only once painted: a counter screen that flashes white on launch reads as a crash
   // to an operator who has seen one.
   window.once("ready-to-show", () => window.show());
+
+  /**
+   * **THE DOCUMENT IS PINNED, and without this the whole bridge is worthless.**
+   *
+   * A preload is a property of the `webContents`, not of the page — so it is re-attached to
+   * every document that webContents loads, including a remote one. `contextIsolation`,
+   * `sandbox` and `nodeIntegration: false` say nothing about WHICH origin gets to call
+   * `window.restos`. Demonstrated against this exact build by an oracle reviewer: navigating
+   * the renderer to a third-party URL left the bridge live on that origin, which then read the
+   * device state, the menu and every open order, and **appended two forged events to the
+   * append-only ledger under this device's identity** (`01-F1` — a forgery cannot be deleted,
+   * only corrected). The `<meta>` CSP does not help: it dies with the document that carried
+   * it, and the remote page brings its own.
+   *
+   * The navigation is also one-way — Chromium refuses `https:` → `file:` — so the till would
+   * be stranded on the remote page with the bridge exposed and no route home.
+   *
+   * A POS has exactly one document, so the correct policy is total: no navigation off the
+   * loaded document, and no new windows at all. `18 §9` says the renderer reaches main "only
+   * through one preload bridge"; a bridge is only a boundary if the thing behind it is fixed.
+   */
+  const pinned = (): string | null => window.webContents.getURL() || null;
+  window.webContents.on("will-navigate", (event, url) => {
+    if (pinned() !== null && url !== pinned()) event.preventDefault();
+  });
+  // Covers the redirect and `window.location` paths `will-navigate` does not see.
+  window.webContents.on("will-redirect", (event) => event.preventDefault());
+  // No second window, ever — not a popup, not target=_blank, not `window.open`. Electron 43
+  // no longer inherits webPreferences into a child, so a child has no bridge; but a chrome-less
+  // desktop window showing an arbitrary remote page on a counter is its own problem.
+  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+
   return window;
 };
 
@@ -101,6 +133,22 @@ const load = (window: BrowserWindow): void => {
     return;
   }
   void window.loadFile(join(HERE, "../renderer/index.html"));
+};
+
+/**
+ * A launch that cannot open its store must SAY SO. `app.whenReady().then(...)` with no catch
+ * meant an unhandled rejection and a process that exited with no window, no dialog and no
+ * message — which is what a fresh checkout gets when `pnpm rebuild:native` has not been run,
+ * the very failure this app's own CLAUDE.md documents. To an operator the POS simply "does not
+ * start", and there is nothing on screen to report.
+ */
+const fatal = (error: unknown): void => {
+  const detail = error instanceof Error ? error.message : String(error);
+  dialog.showErrorBox(
+    "RestOS could not start",
+    `The device store could not be opened.\n\n${detail}\n\nThis device cannot take orders until it is fixed.`,
+  );
+  app.exit(1);
 };
 
 app.whenReady().then(() => {
@@ -141,14 +189,6 @@ app.whenReady().then(() => {
     businessDay: () => businessDate(wallClock.now() + store.branchTimeStatus().offset_ms),
   });
 
-  // One channel, one gateway method, no dispatcher. A generic handler that switched on a
-  // channel name would reintroduce exactly the free-form surface `18 §9` bans.
-  ipcMain.handle(CHANNELS.deviceState, () => gateway.deviceState());
-  ipcMain.handle(CHANNELS.openOrders, () => gateway.openOrders());
-  ipcMain.handle(CHANNELS.kitchenQueue, () => gateway.kitchenQueue());
-  ipcMain.handle(CHANNELS.menu, () => gateway.menu());
-  ipcMain.handle(CHANNELS.append, (_event, req: unknown) => gateway.append(req));
-
   const window = createWindow();
   load(window);
 
@@ -157,12 +197,32 @@ app.whenReady().then(() => {
   const notifyChanged = (): void => {
     if (!window.isDestroyed()) window.webContents.send(CHANNELS.changed);
   };
-  ipcMain.on(CHANNELS.append, notifyChanged);
+
+  // One channel, one gateway method, no dispatcher. A generic handler that switched on a
+  // channel name would reintroduce exactly the free-form surface `18 §9` bans.
+  ipcMain.handle(CHANNELS.deviceState, () => gateway.deviceState());
+  ipcMain.handle(CHANNELS.openOrders, () => gateway.openOrders());
+  ipcMain.handle(CHANNELS.kitchenQueue, () => gateway.kitchenQueue());
+  ipcMain.handle(CHANNELS.menu, () => gateway.menu());
+  ipcMain.handle(CHANNELS.append, (_event, req: unknown) => {
+    const result = gateway.append(req);
+    // NOTIFY FROM INSIDE THE HANDLER. This was `ipcMain.on(CHANNELS.append, notifyChanged)`,
+    // which never fired once: `invoke` dispatches only to the `handle` table, and `.on` is the
+    // `send`/`sendSync` table — two different registries on one channel name. So the renderer
+    // was never told the folds moved, and the counter stayed stale until relaunch. An order
+    // was appended, the store held it, and the cart still read "Nothing added yet / Rs 0".
+    //
+    // Latent only because `onSelect` is still a no-op; it is the core POS loop. Nothing caught
+    // it because nothing tests this file — the gateway suite injects every dependency and
+    // never exercises the wiring, which is exactly the seam a defect like this lives in.
+    notifyChanged();
+    return result;
+  });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) load(createWindow());
   });
-});
+}, fatal);
 
 // Windows is the counter platform (`18 §9`), where closing the last window means quitting.
 app.on("window-all-closed", () => {
