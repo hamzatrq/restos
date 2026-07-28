@@ -16,6 +16,13 @@ export {
   createCatalogStore,
 } from "./catalog.js";
 export {
+  type CatalogFetch,
+  createCatalogFetch,
+  type FetchStep,
+  type WireCatalogResponse,
+  type WireEntry,
+} from "./catalog-fetch.js";
+export {
   type BlockedCursor,
   type BlockedReason,
   CLOUD_PUSH_BATCH_MAX,

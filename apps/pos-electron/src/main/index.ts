@@ -124,6 +124,9 @@ app.whenReady().then(() => {
   const gateway = createGateway({
     store,
     catalog: catalogResolver(store),
+    // 01-F55 — the SELLABLE set, which excludes tombstones. `catalog.lookup` above still
+    // resolves them, because a reprint of an older order must render a deleted item's name.
+    menu: () => store.catalog.list("item").map((e) => ({ id: e.id, name: e.name })),
     actor: "dev",
     actorUserId: null,
     deviceLabel: "Counter 1",
@@ -143,6 +146,7 @@ app.whenReady().then(() => {
   ipcMain.handle(CHANNELS.deviceState, () => gateway.deviceState());
   ipcMain.handle(CHANNELS.openOrders, () => gateway.openOrders());
   ipcMain.handle(CHANNELS.kitchenQueue, () => gateway.kitchenQueue());
+  ipcMain.handle(CHANNELS.menu, () => gateway.menu());
   ipcMain.handle(CHANNELS.append, (_event, req: unknown) => gateway.append(req));
 
   const window = createWindow();

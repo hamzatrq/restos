@@ -26,8 +26,15 @@ import { Tile } from "./Tile";
 export type GridItem = {
   id: string;
   label: string;
-  unavailable?: boolean;
-  unavailableReason?: string;
+  /**
+   * `| undefined` spelled out, not merely optional. Under `exactOptionalPropertyTypes` a host
+   * app building this from a parsed IPC payload has `boolean | undefined`, and a plain
+   * `unavailable?: boolean` refuses it — pushing every caller into a conditional spread to
+   * satisfy a distinction that carries no meaning here. Absent and `undefined` both mean
+   * available.
+   */
+  unavailable?: boolean | undefined;
+  unavailableReason?: string | undefined;
 };
 
 /**

@@ -84,6 +84,29 @@ export const KitchenTicketSchema = z.object({
 export type KitchenTicket = z.infer<typeof KitchenTicketSchema>;
 
 /**
+ * The sellable grid (`01-F52`, `27-F2`).
+ *
+ * A FOURTH read, and it is deliberately not a fourth fold: the catalog is REFERENCE DATA, not
+ * ledger, and `01-F52` is explicit that no fold may read it — a projected value that embedded a
+ * name would depend on catalog sync state at fold time, which is the `01-F34` break law 1
+ * exists to prevent. So this channel reads the device catalog directly and the folds stay
+ * ignorant of words, which is why the other three channels carry line ids and paisa and never
+ * names.
+ *
+ * Note what is absent: **no price.** `01-F53` snapshots `unit_price_paisa` into the event at
+ * line-add, so the grid never needs one and a stale catalog costs a word rather than a rupee.
+ * A price here would be a second source of truth for money, and the wrong one.
+ */
+export const MenuItemSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  /** `01-F22` — an operational 86, projected by the availability fold and joined here. */
+  unavailable: z.boolean().optional(),
+  unavailableReason: z.string().optional(),
+});
+export type MenuItem = z.infer<typeof MenuItemSchema>;
+
+/**
  * The append surface, and note how little of it the renderer controls: it supplies a type,
  * a payload and refs. **Identity, event id, lamport sequence and every timestamp are stamped
  * in main** — `01-F43`'s branch-consensus time is stamped at APPEND, and a renderer that
@@ -110,6 +133,7 @@ export const CHANNELS = {
   deviceState: "restos:device-state",
   openOrders: "restos:open-orders",
   kitchenQueue: "restos:kitchen-queue",
+  menu: "restos:menu",
   append: "restos:append",
   /** Push: main tells the renderer the folds moved. Carries no data — the renderer re-reads. */
   changed: "restos:changed",
@@ -120,6 +144,7 @@ export type RestosBridge = {
   deviceState: () => Promise<DeviceState>;
   openOrders: () => Promise<OpenOrder[]>;
   kitchenQueue: () => Promise<KitchenTicket[]>;
+  menu: () => Promise<MenuItem[]>;
   append: (req: AppendRequest) => Promise<AppendResult>;
   /** Subscribe to fold changes. Returns an unsubscribe. */
   onChanged: (fn: () => void) => () => void;

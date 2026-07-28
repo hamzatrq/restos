@@ -7,6 +7,7 @@ import {
   type AppendResult,
   type DeviceState,
   type KitchenTicket,
+  type MenuItem,
   type OpenOrder,
 } from "../shared/ipc";
 
@@ -22,6 +23,7 @@ export type Gateway = {
   deviceState: () => DeviceState;
   openOrders: () => OpenOrder[];
   kitchenQueue: () => KitchenTicket[];
+  menu: () => MenuItem[];
   append: (req: unknown) => AppendResult;
 };
 
@@ -37,9 +39,19 @@ export type Gateway = {
  */
 export type CatalogResolver = (item_id: string) => { name: string } | null;
 
+/**
+ * The sellable grid, read straight from the device catalog. Injected for the same reason as
+ * `CatalogResolver` — so this seam tests without a database — and separate from it because they
+ * answer different questions: the resolver names ONE id (including a tombstoned one, so a
+ * reprint still renders), while this lists what may be SOLD (which excludes tombstones).
+ * `01-F55`'s whole point is that those two sets differ.
+ */
+export type CatalogList = () => { id: string; name: string }[];
+
 export type GatewayDeps = {
   store: DeviceStore;
   catalog: CatalogResolver;
+  menu: CatalogList;
   actor: string;
   /** 02-F19 — attribution is whoever's PIN is in (02-F41); there is no "acting for". */
   actorUserId: string | null;
@@ -119,6 +131,37 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
         // arithmetic in the host app, never a fold reading a clock — that would be 01-F34.
         minutes: Math.max(0, Math.floor((now - row.age_basis) / 60_000)),
         lines: order ? linesFrom(order.json_lines, deps.catalog) : [],
+      };
+    });
+  },
+
+  menu: () => {
+    // 01-F22 — availability is an OPERATIONAL toggle held by a fold, and the catalog knows
+    // nothing about it. Joining them here rather than in either one is what keeps 01-F52 true:
+    // the fold never reads a name, the catalog never reads an event, and the only place the two
+    // meet is this host app, at display time.
+    const availability = new Map(
+      deps.store.availability().map((row) => [row.item_id, row] as const),
+    );
+    return deps.menu().map((entry) => {
+      const state = availability.get(entry.id);
+      // `available` is 0/1 — SQLite STRICT has no boolean. An item the fold has never seen is
+      // SELLABLE: 01-F22's 86 is an explicit act, so absence of a toggle means available, and
+      // defaulting the other way would silently empty the grid of every item nobody has ever
+      // toggled — which is all of them, on day one.
+      const off = state !== undefined && state.available === 0;
+      // 01-F58 — CONTESTED is its own state, not a synonym for unavailable: two devices
+      // disagree about this item and neither claim supersedes the other. It is surfaced as a
+      // reason rather than hidden, because the operator is the one who can resolve it.
+      const contested = state !== undefined && state.contested === 1;
+      // 27-F4 — an unavailable item is DISABLED IN PLACE with its reason, never removed from
+      // the grid. Removing it would move every tile after it and destroy the positional memory
+      // an operator who cannot read depends on entirely.
+      return {
+        id: entry.id,
+        label: entry.name,
+        ...(off ? { unavailable: true } : {}),
+        ...(off ? { unavailableReason: contested ? "86 — disputed" : "86" } : {}),
       };
     });
   },

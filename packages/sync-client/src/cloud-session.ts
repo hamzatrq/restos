@@ -24,6 +24,7 @@ import type {
   CloudTransportHandlers,
   ProtocolMessage,
 } from "@restos/sync-protocol";
+import { type CatalogFetch, createCatalogFetch } from "./catalog-fetch.js";
 import { type DeviceStore, DivergentDuplicateError, type PageItem } from "./device-store.js";
 
 /** Cloud outbox drain page per push (contract (b)); id-dedupe makes overlap free (01-F8). */
@@ -100,6 +101,16 @@ export type CloudSessionStatus = {
   quarantined: readonly { event_id: string; reason: string }[];
   /** DEC-SYNC-011: where the cursor is stuck and why; null when flowing. */
   blocked: BlockedCursor | null;
+  /**
+   * `01-F56` + DEC-SYNC-011 for the catalog: a refused update is OBSERVABLE, never silent.
+   * Null when the catalog is healthy. `have_version` is what the device actually holds, so a
+   * support surface can say "stuck at version 7" rather than only "stuck".
+   *
+   * This exists because a catalog that has quietly stopped updating is indistinguishable from
+   * a catalog nobody has edited — the failure surfaces days later as a mispriced item, which is
+   * exactly the shape `01-F56` refuses the delta to prevent.
+   */
+  catalog_refusal: { reason: string; have_version: number } | null;
 };
 
 export type CloudSession = {
@@ -127,6 +138,19 @@ export const createCloudSession = (options: {
   const quarantined: { event_id: string; reason: string }[] = [];
   /** DEC-SYNC-011: null while catch-up flows; set to where and why the cursor stopped. */
   let blockedCursor: BlockedCursor | null = null;
+  /**
+   * T-C4 — the in-flight catalog fetch, or null. Volatile on purpose: a fetch belongs to ONE
+   * connection, and a snapshot half-accumulated on a session that then dropped must never be
+   * completed with pages from the next one. Cleared on disconnect for exactly that reason.
+   */
+  let catalogFetch: CatalogFetch | null = null;
+  /**
+   * DEC-SYNC-011 applied to the catalog: a refusal is OBSERVABLE, not silent. `01-F56` makes an
+   * out-of-order delta a first-class refusal, and B2 of the oracle round recorded that half of
+   * it was unbuilt — the delta was dropped with nothing surfaced to device health (`15`). A
+   * catalog that has silently stopped updating looks exactly like a catalog nobody has edited.
+   */
+  let catalogRefusal: { reason: string; have_version: number } | null = null;
   // ---- hub-relay state (DEC-SYNC-009, T-01-12; all volatile) ---------------
   // relayAuthorized: the gateway's hello_ack advertisement — without it this
   // session NEVER pushes third-party events (an unadvertised attempt would
@@ -192,6 +216,39 @@ export const createCloudSession = (options: {
 
   const sendCatchup = (from_global_seq: number): void => {
     transport.send({ v: 1, kind: "catchup_request", from_global_seq });
+  };
+
+  /**
+   * T-C4 — start (or continue) a catalog fetch (`01-F9`, `01-F52`..`01-F56`).
+   *
+   * The device is the one that decides it is behind: it compares the version the server
+   * advertised against its own and asks. It never waits to be told, which is what makes this
+   * work for a device that has been offline for a week and could not have heard an
+   * announcement it was not connected for.
+   */
+  const requestCatalog = (have_version: number, from = 0): void => {
+    transport.send({
+      v: 1,
+      kind: "catalog_request",
+      have_version,
+      ...(from === 0 ? {} : { from }),
+    });
+  };
+
+  /**
+   * Compare and fetch if behind. The ONE place that decides a fetch is needed, called from both
+   * `hello_ack` (the correctness path — every reconnection reconciles) and `catalog_notice`
+   * (the freshness path — a live edit does not wait for a reconnect).
+   */
+  const reconcileCatalog = (serverVersion: number | undefined): void => {
+    if (serverVersion === undefined) return; // an older gateway that serves no catalog
+    const have = store.catalog.version();
+    if (serverVersion <= have) return;
+    // A fresh accumulator per fetch. A half-accumulated snapshot from a dead session must
+    // never merge with pages from the next one — that would splice two menus together and
+    // commit the result under one version number, which is undetectable at the till.
+    catalogFetch = createCatalogFetch(have);
+    requestCatalog(have);
   };
 
   /**
@@ -382,6 +439,10 @@ export const createCloudSession = (options: {
         // everything"; catchup_response pages via next_from while complete === false.
         sendCatchup(store.status().last_global_seq ?? 0);
         relayDrain(); // resume any latched relay work across a reconnect (DEC-SYNC-009)
+        // T-C4 — THE catalog correctness mechanism (01-F9). Comparing versions here is what
+        // makes every reconnection reconcile, so a device that missed every notice while it was
+        // offline still converges the moment it comes back. The push is only latency.
+        reconcileCatalog(message.catalog_version);
         return;
       }
       case "push_ack": {
@@ -436,6 +497,47 @@ export const createCloudSession = (options: {
         if (!message.complete) sendCatchup(message.next_from); // page onward (01-F9)
         return;
       }
+      case "catalog_notice": {
+        // FRESHNESS ONLY. The system is correct if every one of these is dropped — a menu edit
+        // then waits for the next reconnect instead of landing live, and `hello_ack` reconciles
+        // it. That is deliberate: a notice is exactly the kind of message a lossy link loses,
+        // so nothing is allowed to depend on one arriving.
+        reconcileCatalog(message.version);
+        return;
+      }
+      case "catalog_response": {
+        // A frame for a fetch we did not start — a late page from a previous connection, or a
+        // server volunteering one. Ignored rather than applied: applying it would splice pages
+        // from two different fetches into one commit.
+        if (catalogFetch === null) return;
+        const step = catalogFetch.accept(message);
+        if (!step.done) {
+          requestCatalog(step.fetchMore.have_version, step.fetchMore.from);
+          return;
+        }
+        catalogFetch = null;
+        if (step.update === null) return;
+        const result = store.catalog.apply(step.update);
+        if (result.applied) {
+          catalogRefusal = null;
+          return;
+        }
+        // `01-F56` + DEC-SYNC-011: a refusal is OBSERVABLE. `stale` is not a fault — it means a
+        // redelivery we already have — so only the three real refusals are surfaced.
+        if (result.reason === "needs_snapshot") {
+          // The belt to the server's braces: it decided a delta was constructible and this
+          // device disagrees about the base. Ask again from where we actually are, which forces
+          // a snapshot. Bounded by construction — a snapshot has no base to disagree about.
+          catalogRefusal = { reason: result.reason, have_version: result.version };
+          catalogFetch = createCatalogFetch(result.version);
+          requestCatalog(result.version);
+          return;
+        }
+        if (result.reason !== "stale") {
+          catalogRefusal = { reason: result.reason, have_version: result.version };
+        }
+        return;
+      }
       case "quarantine_notice": {
         quarantined.push({ event_id: message.event_id, reason: message.reason });
         // T-01-08 (01-F37 "originating device notified" / PROTOCOL.md:
@@ -479,6 +581,11 @@ export const createCloudSession = (options: {
     },
     onDown: () => {
       connected = false;
+      // A fetch belongs to ONE connection. Dropping the accumulator here is what stops a
+      // snapshot half-received on a dead session being completed with pages from the next one
+      // — which would splice two menus together and commit the result under one version
+      // number, undetectable at the till. The next hello_ack starts a fresh fetch if needed.
+      catalogFetch = null;
     },
     onMessage: (message) => {
       if (running) dispatch(message);
@@ -538,6 +645,10 @@ export const createCloudSession = (options: {
         // two have different remedies — ship a build that understands the event vs
         // restore the network — so a UI that conflates them sends staff to the wrong fix.
         blocked: blockedCursor === null ? null : { ...blockedCursor },
+        // Like `blocked`, a property of the CATALOG rather than of the connection: it survives
+        // a disconnect because the refusal is still true when the link returns, and it clears
+        // only when an update actually applies.
+        catalog_refusal: catalogRefusal === null ? null : { ...catalogRefusal },
       };
     },
   };

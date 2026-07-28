@@ -19,6 +19,7 @@ const stubStore = (over: Partial<DeviceStore> = {}) =>
     identity: { org_id: "org1", branch_id: "br1", device_id: "dev1" },
     openOrders: () => [{ order_id: "order-1234abcd", json_lines: JSON_LINES }],
     kitchenQueue: () => [{ order_id: "order-1234abcd", age_basis: 0 }],
+    availability: () => [],
     branchTimeStatus: () => ({ offset_ms: 0, basis: "branch", skew_ms: null, skew_flagged: false }),
     append: vi.fn((input) => ({ ...input, lamport_seq: 1 })),
     ...over,
@@ -27,6 +28,7 @@ const stubStore = (over: Partial<DeviceStore> = {}) =>
 const deps = (over: Partial<GatewayDeps> = {}): GatewayDeps => ({
   store: stubStore(),
   catalog: (id) => (id === "i-karahi" ? { name: "Chicken Karahi" } : null),
+  menu: () => [{ id: "i-karahi", name: "Chicken Karahi" }],
   actor: "Ayesha",
   actorUserId: "user-1",
   deviceLabel: "Counter 1",
@@ -38,14 +40,74 @@ const deps = (over: Partial<GatewayDeps> = {}): GatewayDeps => ({
 });
 
 describe("18 §6 / 18 §9 — the renderer's whole surface", () => {
-  it("exposes exactly four operations and no query channel", () => {
+  it("exposes exactly five operations and no query channel", () => {
     // 18 §4: "Apps NEVER run SQL directly." The absence of a query channel is the law, not
     // an omission — anything the renderer can ask for is visible by reading this list.
+    //
+    // FIVE since T-C6, and the growth is the point of pinning it: `menu` was added because the
+    // sellable grid is REFERENCE data, not a fold projection. `01-F52` forbids any fold from
+    // reading the catalog — a projected value that embedded a name would depend on catalog sync
+    // state at fold time — so the grid cannot arrive through the other three, and adding it had
+    // to be an acknowledged widening rather than a quiet one.
+    //
+    // What makes it still a CLOSED vocabulary: `menu` takes no arguments, names no table and
+    // accepts no filter. It is one more fixed answer, not a query.
     expect(Object.keys(createGateway(deps())).sort()).toEqual([
       "append",
       "deviceState",
       "kitchenQueue",
+      "menu",
       "openOrders",
+    ]);
+  });
+
+  it("T-C6 — the grid is the SELLABLE set joined to availability, and carries no price", () => {
+    // The join lives HERE, in the host app, and that placement is the whole of 01-F52: the
+    // fold never reads a name, the catalog never reads an event, and display time is the only
+    // place the two are allowed to meet.
+    //
+    // No price: 01-F53 snapshots unit_price_paisa into the event at line-add, so a price on a
+    // grid tile would be a second source of truth for money, and the wrong one.
+    const grid = createGateway(deps()).menu();
+    expect(grid).toEqual([{ id: "i-karahi", label: "Chicken Karahi" }]);
+    expect(grid[0]).not.toHaveProperty("price");
+    expect(grid[0]).not.toHaveProperty("unit_price_paisa");
+  });
+
+  it("01-F22/27-F4 — an 86'd item is DISABLED IN PLACE, never dropped from the grid", () => {
+    // Removing it would move every tile after it and destroy the positional memory an operator
+    // who cannot read depends on entirely. 01-F58's CONTESTED is surfaced as a distinct reason
+    // rather than hidden, because the operator is who can resolve it.
+    const withToggles = deps({
+      store: stubStore({
+        availability: () => [
+          {
+            item_id: "i-karahi",
+            available: 0,
+            contested: 0,
+            head_ids_json: "[]",
+            anomalies_json: "[]",
+          },
+          {
+            item_id: "i-daal",
+            available: 0,
+            contested: 1,
+            head_ids_json: "[]",
+            anomalies_json: "[]",
+          },
+        ],
+      }),
+      menu: () => [
+        { id: "i-karahi", name: "Chicken Karahi" },
+        { id: "i-daal", name: "Daal" },
+        { id: "i-roti", name: "Roti" },
+      ],
+    });
+    expect(createGateway(withToggles).menu()).toEqual([
+      { id: "i-karahi", label: "Chicken Karahi", unavailable: true, unavailableReason: "86" },
+      { id: "i-daal", label: "Daal", unavailable: true, unavailableReason: "86 — disputed" },
+      // Never toggled, so sellable. Defaulting the other way would empty the grid on day one.
+      { id: "i-roti", label: "Roti" },
     ]);
   });
 

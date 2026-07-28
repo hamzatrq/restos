@@ -1,7 +1,7 @@
 import { paisa } from "@restos/domain";
 import { AppShell, Cart, ItemGrid, type Tab } from "@restos/ui";
 import { useCallback, useEffect, useState } from "react";
-import type { DeviceState, OpenOrder } from "../shared/ipc";
+import type { DeviceState, MenuItem, OpenOrder } from "../shared/ipc";
 
 /**
  * The counter screen — the first RestOS surface that renders on a device.
@@ -44,6 +44,7 @@ const TABS: readonly Tab[] = [
 export const Counter = () => {
   const [device, setDevice] = useState<DeviceState | null>(null);
   const [orders, setOrders] = useState<readonly OpenOrder[]>([]);
+  const [items, setItems] = useState<readonly MenuItem[]>([]);
   const [page, setPage] = useState(0);
   const [activeTab, setActiveTab] = useState("counter");
 
@@ -51,9 +52,14 @@ export const Counter = () => {
     // Three reads, never a join in the renderer: the folds already hold these projections and
     // assembling a fourth shape here would be fold logic reimplemented outside the engine
     // (26 §8). The gateway does the one join the queue genuinely needs.
-    const [d, o] = await Promise.all([window.restos.deviceState(), window.restos.openOrders()]);
+    const [d, o, m] = await Promise.all([
+      window.restos.deviceState(),
+      window.restos.openOrders(),
+      window.restos.menu(),
+    ]);
     setDevice(d);
     setOrders(o);
+    setItems(m);
   }, []);
 
   useEffect(() => {
@@ -87,7 +93,7 @@ export const Counter = () => {
     >
       <div style={{ display: "flex", gap: 16, height: "100%" }}>
         <ItemGrid
-          items={[]}
+          items={items}
           posture="counter"
           widthMm={GRID.widthMm}
           heightMm={GRID.heightMm}
@@ -97,11 +103,6 @@ export const Counter = () => {
           onPageChange={setPage}
           onSelect={() => {}}
         />
-        {/*
-          Empty until the catalog transport lands (plans/wave-1/catalog-transport.md): the
-          device catalog stores and versions correctly and nothing delivers to it yet. An
-          empty grid is the honest state, and `01-F54`'s degradation path is what fills it.
-        */}
         <Cart
           lines={(current?.lines ?? []).map((l) => ({
             id: l.line_id,
