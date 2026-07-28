@@ -12,9 +12,14 @@ import type { CatalogEntry, CatalogKind, CatalogRef, CatalogUpdate } from "./cat
  * recovery path is exactly when the link is least trustworthy, so pages accumulate here and
  * commit once, on `complete`.
  *
- * A DELTA does not need the same treatment and deliberately does not get it: its pages are
- * ordered by publication version, so a partial delta is a smaller but still-consistent step
- * forward. Holding it back would only widen the window in which the device is stale.
+ * **A DELTA IS ACCUMULATED TOO, and an earlier comment here claimed the opposite.** It said a
+ * partial delta was applied as it arrived, on the reasoning that its pages are version-ordered
+ * and so a prefix is a consistent step forward. The code never did that — `accept()` gates on
+ * `complete` with no branch on `form` — and on reflection the code is right and the comment was
+ * wrong. A prefix of a delta is only consistent if the device also records how far it got, and
+ * it does not: it would commit the delta's FINAL version while holding a prefix of its rows,
+ * which is the same "reports parity while holding a partial menu" failure a spliced snapshot
+ * causes. One rule for both forms is what makes that unreachable.
  */
 
 /**

@@ -244,3 +244,62 @@ describe("00 §5.7 / DEC-SYNC-011 — the honesty surface", () => {
     expect(createGateway(deps({ training: true })).deviceState().training).toBe(true);
   });
 });
+
+describe("ORACLE ROUND 2 / A15 — the money guard is EXECUTED, not merely declared", () => {
+  // `shared/ipc.ts` calls `total_paisa`'s `.nonnegative()` "load-bearing, not decoration" and
+  // rests the no-ErrorBoundary decision on it. Nothing parsed it: `z.infer` erases the
+  // constraint and no output path ran a schema, so the guard the renderer's safety rested on
+  // did not exist.
+  //
+  // The existing `ipc-money-seam.test.ts` could not catch that — every assertion there calls
+  // `OpenOrderSchema.safeParse` DIRECTLY, so it tests that Zod rejects negatives, not that the
+  // gateway runs Zod. These tests drive the GATEWAY.
+  const negativeStore = (paisa: number) =>
+    stubStore({
+      openOrders: () => [
+        {
+          order_id: "order-bad",
+          json_lines: JSON.stringify({
+            "line-a": {
+              item_id: "i-karahi",
+              qty: 1,
+              unit_price_paisa: paisa,
+              states: ["confirmed"],
+            },
+          }),
+        },
+      ],
+    } as Partial<DeviceStore>);
+
+  it("refuses a negative total at the plane boundary rather than blanking the till", () => {
+    // MoneyValue throws a RangeError on a negative and React 19 unmounts the root on a render
+    // throw — a blank region on a counter screen is indistinguishable from a hung app. 01-F54's
+    // remedy is to DEGRADE, and there is nothing to degrade to when the money is the corrupt
+    // value, so the boundary is where it has to be refused.
+    expect(() => createGateway(deps({ store: negativeStore(-1) })).openOrders()).toThrow(
+      /failed its IPC contract/,
+    );
+  });
+
+  it("names WHICH payload failed, so a kernel bug is not anonymous", () => {
+    try {
+      createGateway(deps({ store: negativeStore(-500) })).openOrders();
+      throw new Error("expected a refusal");
+    } catch (e) {
+      expect((e as Error).message).toContain("open order order-bad");
+    }
+  });
+
+  it("a healthy total still passes through untouched", () => {
+    // The guard must refuse the corrupt value WITHOUT refusing ordinary money — otherwise it
+    // would "fix" the hazard by making the till unable to render a sale.
+    const [order] = createGateway(deps()).openOrders();
+    expect(order?.total_paisa).toBe(110_000);
+  });
+
+  it("device state and kitchen tickets are checked on the same path", () => {
+    // The claim was made about the whole seam, not only about money, so all three reads run it.
+    const bad = deps({ businessDay: () => "" });
+    expect(() => createGateway(bad).deviceState()).toThrow(/failed its IPC contract/);
+  });
+});

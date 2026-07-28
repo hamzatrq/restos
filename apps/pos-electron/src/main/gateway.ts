@@ -6,9 +6,12 @@ import {
   AppendRequestSchema,
   type AppendResult,
   type DeviceState,
+  DeviceStateSchema,
   type KitchenTicket,
+  KitchenTicketSchema,
   type MenuItem,
   type OpenOrder,
+  OpenOrderSchema,
 } from "../shared/ipc";
 
 /**
@@ -88,30 +91,66 @@ const linesFrom = (jsonLines: string, catalog: CatalogResolver): OpenOrder["line
     note: null,
   }));
 
+/**
+ * Parse an outbound payload against its declared schema before it crosses the seam.
+ *
+ * `shared/ipc.ts` calls `total_paisa`'s `.nonnegative()` *"load-bearing, not decoration"* and
+ * rests the decision to have no `ErrorBoundary` on it. It was neither: `z.infer` erases the
+ * constraint, no output path ever parsed anything, and `AppendRequestSchema.parse` was the only
+ * runtime schema use in the app. The claim was true of the declaration and false of the code —
+ * so the guard the renderer's safety was resting on did not exist.
+ *
+ * It runs on the OUTBOUND side because that is where the claim was made. `MoneyValue` throws a
+ * `RangeError` on a negative and React 19 unmounts the root on a render throw, so the whole
+ * point is to refuse the value at the plane boundary rather than blank the till (`01-F54`'s
+ * remedy is to degrade, and there is nothing to degrade to when the money itself is corrupt).
+ */
+const checked = <T>(schema: { parse: (v: unknown) => T }, value: unknown, what: string): T => {
+  try {
+    return schema.parse(value);
+  } catch (cause) {
+    // Named loudly rather than swallowed: a fold producing a negative total is a kernel bug,
+    // and a till that quietly rendered nothing would hide it until a shift reconciliation.
+    throw new Error(`${what} failed its IPC contract before reaching the renderer`, { cause });
+  }
+};
+
 export const createGateway = (deps: GatewayDeps): Gateway => ({
   deviceState: () => {
     const b = deps.blockedCursor();
-    return {
-      actor: deps.actor,
-      deviceLabel: deps.deviceLabel,
-      businessDay: deps.businessDay(),
-      training: deps.training,
-      ...deps.reachability(),
-      blocked: b ? { global_seq: b.global_seq, event_type: b.event_type, reason: b.reason } : null,
-    };
+    return checked(
+      DeviceStateSchema,
+      {
+        actor: deps.actor,
+        deviceLabel: deps.deviceLabel,
+        businessDay: deps.businessDay(),
+        training: deps.training,
+        ...deps.reachability(),
+        blocked: b
+          ? { global_seq: b.global_seq, event_type: b.event_type, reason: b.reason }
+          : null,
+      },
+      "device state",
+    );
   },
 
   openOrders: () =>
-    deps.store.openOrders().map((row) => ({
-      order_id: row.order_id,
-      reference: row.order_id.slice(0, 8),
-      // The ENGINE's own billed derivation — never reimplemented here. 26 §8 and the T-01-11
-      // ruling: fold logic lives in one module, and the Auditor's mirror of it was deleted
-      // precisely because two implementations of one sum is how a money anomaly becomes a
-      // false conservation finding.
-      total_paisa: billedEffectiveFromJsonLines(row.json_lines),
-      lines: linesFrom(row.json_lines, deps.catalog),
-    })),
+    deps.store.openOrders().map((row) =>
+      checked(
+        OpenOrderSchema,
+        {
+          order_id: row.order_id,
+          reference: row.order_id.slice(0, 8),
+          // The ENGINE's own billed derivation — never reimplemented here. 26 §8 and the T-01-11
+          // ruling: fold logic lives in one module, and the Auditor's mirror of it was deleted
+          // precisely because two implementations of one sum is how a money anomaly becomes a
+          // false conservation finding.
+          total_paisa: billedEffectiveFromJsonLines(row.json_lines),
+          lines: linesFrom(row.json_lines, deps.catalog),
+        },
+        `open order ${row.order_id}`,
+      ),
+    ),
 
   kitchenQueue: () => {
     // The queue projection is 6 pinned keys and carries NO line detail, so the ticket body
@@ -122,16 +161,20 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
     const now = wallClock.now() + deps.store.branchTimeStatus().offset_ms;
     return deps.store.kitchenQueue().map((row) => {
       const order = orders.get(row.order_id);
-      return {
-        order_id: row.order_id,
-        reference: row.order_id.slice(0, 8),
-        // Elapsed minutes are DERIVED here from branch-consensus time on both ends
-        // (01-F43/F45): `age_basis` was stamped at APPEND from `branch_created_at`, and
-        // `now` is branch time, so the offset cancels in the difference. This is display
-        // arithmetic in the host app, never a fold reading a clock — that would be 01-F34.
-        minutes: Math.max(0, Math.floor((now - row.age_basis) / 60_000)),
-        lines: order ? linesFrom(order.json_lines, deps.catalog) : [],
-      };
+      return checked(
+        KitchenTicketSchema,
+        {
+          order_id: row.order_id,
+          reference: row.order_id.slice(0, 8),
+          // Elapsed minutes are DERIVED here from branch-consensus time on both ends
+          // (01-F43/F45): `age_basis` was stamped at APPEND from `branch_created_at`, and
+          // `now` is branch time, so the offset cancels in the difference. This is display
+          // arithmetic in the host app, never a fold reading a clock — that would be 01-F34.
+          minutes: Math.max(0, Math.floor((now - row.age_basis) / 60_000)),
+          lines: order ? linesFrom(order.json_lines, deps.catalog) : [],
+        },
+        `kitchen ticket ${row.order_id}`,
+      );
     });
   },
 

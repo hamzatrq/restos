@@ -25,9 +25,16 @@ import { z } from "zod";
 
 /** What the shell needs to render honestly (`00 §5.7`, `27-F63`). */
 export const DeviceStateSchema = z.object({
-  actor: z.string(),
-  deviceLabel: z.string(),
-  businessDay: z.string(),
+  actor: z.string().min(1),
+  deviceLabel: z.string().min(1),
+  /**
+   * `01-F46` — the Asia/Karachi business date, `YYYY-MM-DD`. Constrained to the SHAPE rather
+   * than left as any string: the strip renders this verbatim next to "Day", and an empty or
+   * malformed value there is a device claiming a business day it does not know, which is the
+   * kind of quiet dishonesty `00 §5.7` exists to prevent. Cheap to state, and now actually
+   * enforced — nothing parsed these schemas at all until the round-2 fix.
+   */
+  businessDay: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "business day must be YYYY-MM-DD"),
   /** 01-F49 — set when this device is bound to a training branch. Not a UI toggle. */
   training: z.boolean(),
   /** Three separate facts, never one dot (00 §5.7). */

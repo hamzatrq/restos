@@ -322,3 +322,41 @@ describe("T-C4 — applying to the real store (§5.3, §5.5)", () => {
     incremental.close?.();
   });
 });
+
+describe("A16 — a paged DELTA is accumulated exactly like a snapshot", () => {
+  // An earlier comment claimed deltas were applied per page. The code never did, and no test
+  // distinguished the two forms — every paging test used `form: "snapshot"`, so the comment
+  // could have been true or false and the suite would not have known. This is the test that
+  // makes the rule observable.
+  //
+  // The code is the right behaviour: a prefix of a delta is only a consistent step forward if
+  // the device records how far it got, and it does not — it would commit the delta's FINAL
+  // version while holding a prefix of its rows, which is the same "reports parity while holding
+  // a partial menu" failure a spliced snapshot causes.
+  it("yields nothing until the delta's last page", () => {
+    const fetch = createCatalogFetch(2);
+    const first = fetch.accept(
+      page({
+        form: "delta",
+        version: 5,
+        base_version: 2,
+        entries: [entry("I1", "A")],
+        complete: false,
+        next_from: 1,
+      }),
+    );
+    expect(first.done, "a partial delta was applied").toBe(false);
+
+    const second = fetch.accept(
+      page({ form: "delta", version: 5, base_version: 2, entries: [entry("I2", "B")] }),
+    );
+    const update = must(finished(second), "update");
+    if (update.kind !== "delta") throw new Error("expected a delta");
+    expect(update.from_version).toBe(2);
+    expect(update.version).toBe(5);
+    expect(
+      update.upserts.map((e) => e.id),
+      "both pages must commit together",
+    ).toEqual(["I1", "I2"]);
+  });
+});
