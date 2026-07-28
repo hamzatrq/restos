@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { color, type Posture, space, targetFor, typography } from "../tokens/index";
+import { useColor } from "../theme";
+import { type Posture, space, targetFor, typography } from "../tokens/index";
 
 /**
  * 27-F8 — touch minimums are POSTURE-typed. There is deliberately no `size` prop: the
@@ -39,6 +40,7 @@ export const Tile = ({
   unavailableReason,
   destructive = false,
 }: TileProps) => {
+  const color = useColor();
   const min = targetFor(posture);
   const t = typography["text-label"];
   return (

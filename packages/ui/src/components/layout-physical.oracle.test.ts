@@ -3,7 +3,7 @@
 // PROVENANCE: oracle session (24 §3 step 2).
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import tokens from "../tokens/tokens.json" with { type: "json" };
@@ -163,6 +163,20 @@ const px = (token: string): number => {
 const GAP_MIN = (tokens.touch as Record<string, { value?: number }>)["touch-gap-min"]?.value ?? 8;
 
 /**
+ * The gap a container ACTUALLY renders, read out of its source. Deliberately not a mirrored
+ * constant: a table that restates what a component used to do cannot observe it being fixed,
+ * and cannot observe it regressing either.
+ */
+const gapTokenIn = (file: string): number => {
+  const src = readFileSync(join(UI_ROOT, "src", "components", file), "utf8");
+  // The container's own `gap:`, which is the first one in the file — a nested gap belongs to a
+  // child. Asserting on the first is what makes the reference to "adjacent tab buttons" true.
+  const m = src.match(/\bgap:\s*space\["(space-\d+)"\]/);
+  if (!m?.[1]) throw new Error(`${file} renders no space-token gap`);
+  return px(m[1]);
+};
+
+/**
  * Containers that lay out ADJACENT TOUCH TARGETS, curated with provenance. A container whose
  * gap separates text from an icon is not in scope — 27-F8's rule is about two things a finger
  * can hit. Curation rather than inference is deliberate: the alternative flags Tile's internal
@@ -170,9 +184,17 @@ const GAP_MIN = (tokens.touch as Record<string, { value?: number }>)["touch-gap-
  */
 const TARGET_ROWS: readonly { where: string; what: string; gap: number; extra?: number }[] = [
   {
-    where: "TabRail.tsx:48",
+    where: "TabRail.tsx",
     what: "adjacent tab buttons, each minWidth/minHeight targetFor('counter')",
-    gap: px("space-1"),
+    // AMENDED July 2026 under an explicit founder override of 24 §3 step 2.
+    //
+    // This row read `px("space-1")` — a CONSTANT mirroring what TabRail used to render, not
+    // the component. TabRail was duly fixed to `space-2`, and the row went on failing, because
+    // the only way to make `px("space-1") >= 8` is to redefine `space-1` from 4 to 8 and break
+    // 27-F41's flat ordinal scale to satisfy an assertion about a different file. A guard that
+    // cannot observe the fix is the "guard passed by not looking" pattern in its other
+    // direction: here it failed by not looking. It reads the component now.
+    gap: gapTokenIn("TabRail.tsx"),
   },
   {
     where: "NumericKeypad.tsx:56",

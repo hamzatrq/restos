@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { type ColorName, color, space } from "../tokens/index";
+import { useColor } from "../theme";
+import { type ColorName, space } from "../tokens/index";
 
 /**
  * `27-F43` — **the fill/foreground pairing is STRUCTURAL, not prose.**
@@ -67,6 +68,7 @@ export type SurfaceProps = Pairing & {
  * the value is resolved from the manifest.
  */
 export const Surface = ({ fill, fg, children, as = "div", padding }: SurfaceProps) => {
+  const color = useColor();
   const Tag = as;
   return (
     <Tag

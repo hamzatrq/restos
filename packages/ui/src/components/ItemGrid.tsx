@@ -1,12 +1,5 @@
-import {
-  color,
-  mmFromDp,
-  type Posture,
-  space,
-  targetFor,
-  targetMm,
-  typography,
-} from "../tokens/index";
+import { useColor } from "../theme";
+import { mmFromDp, type Posture, space, targetFor, targetMm, typography } from "../tokens/index";
 import { Tile } from "./Tile";
 
 /**
@@ -115,6 +108,7 @@ export const ItemGrid = ({
   onPageChange,
   onSelect,
 }: ItemGridProps) => {
+  const color = useColor();
   const tile = tileMm ?? targetMm(posture);
   const perPage = pageCapacity({ widthMm, heightMm, posture, tileMm: tile });
   /** mm → px. The render step, and the only step that knows what a pixel is. */
@@ -159,6 +153,13 @@ export const ItemGrid = ({
             gap: space["space-2"],
             fontFamily: t.fontFamily,
             fontSize: t.fontSize,
+            // A rail, for the same reason TabRail has one: 27-F66 requires the current-page
+            // state to be carried by an independent mark at 3:1, the mark is an accent rule
+            // at the button's lower edge, and a rule is only measurable against the thing
+            // behind it. On the sunken rail the accent clears 4.94:1 light and 3.03:1 dark;
+            // against a raised fill it would be 2.35:1 on dark and carry nothing.
+            background: color["bgColor-surface-sunken"],
+            padding: space["space-1"],
           }}
         >
           {/*
@@ -185,6 +186,14 @@ export const ItemGrid = ({
                     : color["bgColor-surface-sunken"],
                 color: color["fgColor-default"],
                 border: `1px solid ${color["borderColor-default"]}`,
+                // 27-F66 — the current page is marked by an ACCENT RULE, not by the fill
+                // step. The raised/sunken difference is 1.15:1 and carries nothing; this is
+                // the same idiom the tab rail uses for the same reason, and weight alone is
+                // a text property that SC 1.4.11 does not count.
+                borderBottom:
+                  n - 1 === current
+                    ? `3px solid ${color["bgColor-interactive"]}`
+                    : `3px solid transparent`,
                 borderRadius: space["space-1"],
                 cursor: "pointer",
               }}

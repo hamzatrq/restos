@@ -1,4 +1,5 @@
-import { color, space, targetFor, typography } from "../tokens/index";
+import { useColor } from "../theme";
+import { space, targetFor, typography } from "../tokens/index";
 
 /**
  * `27-F8` — numeric entry is the **126 dp (20 mm)** kiosk condition, the largest target in
@@ -46,6 +47,7 @@ export const acceptKeystroke = (
 const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "clear", "0", "back"];
 
 export const NumericKeypad = ({ value, onChange, max, maxDigits = 7 }: NumericKeypadProps) => {
+  const color = useColor();
   const t = typography["text-numeric-primary"];
   const size = targetFor("keypad");
   return (
@@ -86,7 +88,12 @@ export const NumericKeypad = ({ value, onChange, max, maxDigits = 7 }: NumericKe
               // opacity wash measured 2.12:1 and made the digit ambiguous, which is a worse
               // failure than the mis-entry the block exists to prevent.
               color: blocked ? color["fgColor-disabled"] : color["fgColor-default"],
-              border: `1px solid ${color["borderColor-default"]}`,
+              // 27-F66 — blocked is a STATE, and the sunken/raised fill step that used to
+              // carry it is 1.15:1. The border is the independent mark: `-strong` against
+              // the blocked key's own fill measures 5.67:1 light / 5.84:1 dark, and the two
+              // states now differ by TOKEN rather than by a luminance step nobody can see.
+              // The digit deliberately stays readable — see the note above.
+              border: `1px solid ${color[blocked ? "borderColor-strong" : "borderColor-default"]}`,
               borderRadius: space["space-2"],
               cursor: blocked ? "not-allowed" : "pointer",
             }}

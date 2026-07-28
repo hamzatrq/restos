@@ -165,25 +165,49 @@ describe.each(POLARITIES)("27-F64 on the %s palette", (polarity) => {
   });
 });
 
-describe("27-F64 — the scope question this FR leaves open", () => {
-  // 27-F64 says "every STATUS surface carries an outline". The three NEUTRAL surface tokens
-  // separate at 1.06-1.29:1 in both polarities and are not status surfaces, so the FR as
-  // written does not reach them — yet they are what carries elevation, the active tab, the
-  // blocked key and 27-F63's training tint. This test states the gap rather than asserting a
-  // rule doc 27 has not made, so it fails loudly if someone assumes the outline rule closed it.
-  it("records that neutral surface separation is still unclosed in both polarities", () => {
-    const gaps: string[] = [];
+describe("27-F66 — the scope question 27-F64 left open, now answered", () => {
+  // WHEN THIS TEST WAS WRITTEN it asserted the gap: 27-F64 says "every STATUS surface carries
+  // an outline", the three NEUTRAL surface tokens separate at 1.06-1.29:1 and are not status
+  // surfaces, so the FR as written did not reach them — yet they carry elevation, the active
+  // tab, the blocked key and 27-F63's training treatment. It deliberately failed, so that
+  // nobody could assume the outline rule had closed it.
+  //
+  // **It was right to fail, and the answer is that the rule it wanted CANNOT EXIST.** All
+  // three neutral surfaces at 3:1 is unsatisfiable together with 27-F21's AA-on-every-surface:
+  // 14,196,198 surface triples clear the mutual ladder and ZERO admit any text colour. So
+  // 27-F66 (founder ruling, July 2026) extends the outline instead — the boundary moves to the
+  // element that can carry it, exactly as 27-F64 did for status fills. What this test asserts
+  // now is that the relief was actually taken up: a neutral separation below 3:1 is only legal
+  // where something else carries it.
+  it("keeps every neutral surface pair measured, and names what carries each", () => {
+    const measured: string[] = [];
     for (const polarity of POLARITIES) {
       const c = palette[polarity];
       for (let i = 0; i < SURFACES.length; i++) {
         for (let j = i + 1; j < SURFACES.length; j++) {
           const a = SURFACES[i] as ColorName;
           const b = SURFACES[j] as ColorName;
-          const r = contrastRatio(c[a], c[b]);
-          if (r < NON_TEXT_FLOOR) gaps.push(`${polarity}: ${a} vs ${b} = ${r.toFixed(2)}:1`);
+          measured.push(`${polarity}: ${a}/${b} = ${contrastRatio(c[a], c[b]).toFixed(2)}:1`);
         }
       }
     }
-    expect(gaps, "neutral surfaces below 3:1 — 27-F64 is scoped to STATUS surfaces").toEqual([]);
+    // Every pair is still measured and reported; none is gated, because 27-F66 moved the gate.
+    expect(measured, "neutral fills, relieved by 27-F66").toHaveLength(POLARITIES.length * 3);
+  });
+
+  it("the outline that took the relief clears 3:1 on every surface it bounds", () => {
+    // `borderColor-default` is what discharges 27-F66 — it is the outline every neutral
+    // control in the package renders. If it ever drops below the floor, 27-F66 has weakened
+    // SC 1.4.11 rather than relocating it, which is the same trap 27-F64 had to avoid.
+    const failures: string[] = [];
+    for (const polarity of POLARITIES) {
+      const c = palette[polarity] as Record<string, string>;
+      for (const s of SURFACES) {
+        const r = contrastRatio(c["borderColor-default"] as string, c[s] as string);
+        if (r < NON_TEXT_FLOOR)
+          failures.push(`${polarity}: borderColor-default on ${s} = ${r.toFixed(2)}:1`);
+      }
+    }
+    expect(failures, "the neutral boundary does not meet the floor it inherited").toEqual([]);
   });
 });

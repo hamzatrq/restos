@@ -1,4 +1,5 @@
-import { type ColorName, color, space, typography } from "../tokens/index";
+import { useColor } from "../theme";
+import { type ColorName, space, typography } from "../tokens/index";
 
 /**
  * `00 §5.7` sync honesty — **three separate facts, never one "online" dot.**
@@ -44,6 +45,7 @@ const ON: Record<Fact, ColorName> = {
 };
 
 const Chip = ({ label, state, muted }: { label: string; state: Fact; muted: boolean }) => {
+  const color = useColor();
   const t = typography["text-label"];
   return (
     <span

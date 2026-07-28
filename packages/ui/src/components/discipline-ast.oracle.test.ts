@@ -345,6 +345,11 @@ describe("the guard suite actually covers the package", () => {
         // 27-F43 requires it, so this canary stays red until it ships.
         "tokens/color-science.ts",
         "tokens/index.ts",
+        // ADDED July 2026 with `theme.tsx`, which is exactly the acknowledgement this pin
+        // exists to force: the polarity provider resolves a colour record for every component
+        // in the package, so it is squarely source the token rules apply to. It ships for
+        // 27-F19's KDS opt-in and 27-F67's training inversion, which are one mechanism.
+        "theme.tsx",
       ].sort(),
     );
   });

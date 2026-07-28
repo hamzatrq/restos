@@ -1,4 +1,5 @@
-import { color, space, targetFor, typography } from "../tokens/index";
+import { useColor } from "../theme";
+import { space, targetFor, typography } from "../tokens/index";
 
 /**
  * 27-F11d — an S1 alarm takes a BAND, never the screen.
@@ -36,6 +37,7 @@ export type AlarmBandProps = {
 };
 
 export const AlarmBand = ({ alarms, onAcknowledge }: AlarmBandProps) => {
+  const color = useColor();
   const head = alarms[0];
   if (!head) return null;
 

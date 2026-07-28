@@ -1,5 +1,6 @@
 import type { Paisa } from "@restos/domain";
-import { color, space, targetFor, typography } from "../tokens/index";
+import { useColor } from "../theme";
+import { space, targetFor, typography } from "../tokens/index";
 import { MoneyValue } from "./MoneyValue";
 import { QuantityItemLine, type QuantityItemLineProps } from "./QuantityItemLine";
 
@@ -28,6 +29,7 @@ export type CartProps = {
 };
 
 export const Cart = ({ lines, totalPaisa, onRemove }: CartProps) => {
+  const color = useColor();
   const label = typography["text-label"];
   return (
     <section

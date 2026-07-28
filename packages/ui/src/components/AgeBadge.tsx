@@ -1,4 +1,5 @@
-import { type ColorName, color, space, typography } from "../tokens/index";
+import { useColor } from "../theme";
+import { type ColorName, space, typography } from "../tokens/index";
 
 /**
  * 03-F47 / 21 §5 — ticket age as a status, driven by FIXED CONFIGURED MINUTES.
@@ -49,6 +50,7 @@ const ON: Record<Level, ColorName> = {
 };
 
 export const AgeBadge = ({ minutes, amberAt, redAt }: AgeBadgeProps) => {
+  const color = useColor();
   const level = ageLevel(minutes, amberAt, redAt);
   const t = typography["text-numeric-primary"];
   return (

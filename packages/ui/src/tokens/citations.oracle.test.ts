@@ -126,8 +126,15 @@ describe("F10 — a contrast figure written in a comment must be the figure the 
       2,
     );
     expect(contrastRatio("#A56309", hex("bgColor-surface-sunken"))).toBeCloseTo(4.15, 2);
+    // RE-DERIVED July 2026 under an explicit founder override of 24 §3 step 2, and the pin
+    // fired correctly on its way here — it caught a real palette move rather than a drifting
+    // comment. The move was 27-F64's repaint (`f7c3d34`, `404ced2`, `4f653b5`), which raised
+    // amber's separation from the page from 1.53:1 to 3.16:1 because that is exactly what the
+    // FR asked for. Re-pinned against the palette that repaint produced. The other two figures
+    // in this test were untouched by it and still reproduce to the digit, which is the
+    // evidence that this is a re-derivation and not a blanket loosening.
     expect(contrastRatio(hex("bgColor-status-abnormal"), hex("bgColor-surface"))).toBeCloseTo(
-      1.53,
+      3.16,
       2,
     );
   });

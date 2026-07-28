@@ -1,4 +1,5 @@
-import { color, space, typography } from "../tokens/index";
+import { useColor } from "../theme";
+import { space, typography } from "../tokens/index";
 import { type Alarm, AlarmBand } from "./AlarmBand";
 import { ConnectionFacts, type Fact } from "./ConnectionFacts";
 
@@ -39,6 +40,7 @@ export const StatusStrip = ({
   alarms,
   onAcknowledgeAlarm,
 }: StatusStripProps) => {
+  const color = useColor();
   const t = typography["text-label"];
   return (
     <div style={{ display: "flex", flexDirection: "column", width: "100%" }}>

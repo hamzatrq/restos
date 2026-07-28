@@ -77,7 +77,6 @@ const p = (where: string, what: string, fg: ColorName, bg: ColorName): Pair => (
 const BOUNDARIES: readonly Pair[] = [
   p("Tile.tsx:81", "tile border vs the page behind it", "borderColor-default", "bgColor-surface"),
   p("Tile.tsx:81", "tile border vs its own fill", "borderColor-default", "bgColor-surface-raised"),
-  p("Tile.tsx:71", "tile fill vs the page behind it", "bgColor-surface-raised", "bgColor-surface"),
   p(
     "NumericKeypad.tsx:89",
     "key border vs key fill",
@@ -96,17 +95,25 @@ const BOUNDARIES: readonly Pair[] = [
 ];
 
 /**
- * SUPERSEDED FOR STATUS FILLS BY 27-F64, and deliberately not deleted.
+ * SUPERSEDED FOR STATUS FILLS BY 27-F64, and for NEUTRAL fills by 27-F66. Deliberately not
+ * deleted — every row is still measured, and the rows that moved say where they moved to.
  *
  * When this table was written, a status fill had to meet 3:1 against its surface itself.
  * 27-F64 moved that to a required OUTLINE, because no four-colour set clears fill separation
- * AND ΔE00 >= 20 AND the severity ladder on either polarity. Asserting the old rule here would
- * now contradict doc 27, so the four pure status-fill rows are marked `statusFill` and are
- * gated in `outline-boundary.oracle.test.ts` against their outline instead.
+ * AND ΔE00 >= 20 AND the severity ladder on either polarity. The pure status-fill rows are
+ * therefore gated in `outline-boundary.oracle.test.ts` against their outline instead.
  *
- * What REMAINS gated here are the rows that were never about a status colour: a resting badge,
- * an "ok" chip and an elevation step are NEUTRAL surfaces against neutral surfaces, and 27-F64
- * is scoped to status surfaces, so nothing has relieved them. They are the still-open gap.
+ * **AMENDED July 2026 for `27-F66`, by the implementing session under an explicit founder
+ * override of the `24 §3` step-2 rule.** The neutral rows — a resting badge, an "ok" chip, an
+ * elevation step — asserted that three neutral surfaces separate at 3:1 while this same file
+ * requires every foreground to clear AA on all three. **Those two are unsatisfiable together:**
+ * exhaustive search over relative luminance finds 14,196,198 surface triples clearing the
+ * mutual ladder and ZERO admitting any text colour. 27-F66 rules that a neutral surface
+ * bounding a control carries an outline, and a neutral state difference carries an independent
+ * mark — so those rows are gated in `NEUTRAL_MARKS` below against the thing that actually
+ * carries them. This is a relocation, not a relaxation: every row that moved is asserted
+ * somewhere, and `RELIEVED` re-measures the fills so the numbers stay visible.
+ * Derivation: `plans/wave-1/ui-fix-round-findings.md` §2.1.
  */
 const STATUS_FILLS: readonly Pair[] = [
   p(
@@ -170,6 +177,96 @@ const STATUS_FILLS: readonly Pair[] = [
     "fgColor-status-fault",
     "bgColor-surface-raised",
   ),
+  // ADDED for the totality gate below, which was failing because these four combinations a
+  // component can compose were absent from this table. The gate asserts the table is complete
+  // and it was right: nothing measured them anywhere.
+  p(
+    "AlarmBand.tsx:96",
+    "fault band vs a sunken rail",
+    "bgColor-status-fault",
+    "bgColor-surface-sunken",
+  ),
+  p(
+    "TicketCard.tsx:105",
+    "confirmed mark vs card",
+    "bgColor-status-confirmed",
+    "bgColor-surface-raised",
+  ),
+  p(
+    "TicketCard.tsx:105",
+    "confirmed mark vs a sunken rail",
+    "bgColor-status-confirmed",
+    "bgColor-surface-sunken",
+  ),
+  p(
+    "ItemGrid.tsx:187",
+    "current-page accent vs the pager rail",
+    "bgColor-interactive",
+    "bgColor-surface-sunken",
+  ),
+];
+
+/**
+ * `27-F66` — what actually carries a neutral boundary or a neutral state change.
+ *
+ * Each row is the mark a component renders INSTEAD of relying on the fill step, measured
+ * against the surface it is drawn on. These are gated at the same 3:1: the requirement did not
+ * go away, it moved to the element that can meet it.
+ */
+const NEUTRAL_MARKS: readonly Pair[] = [
+  // Boundaries — the control's own outline, which is what identifies it (SC 1.4.11).
+  p("Tile.tsx:81", "tile outline (was: the raised fill)", "borderColor-default", "bgColor-surface"),
+  p(
+    "AgeBadge.tsx:60",
+    "resting badge outline (was: the sunken fill)",
+    "borderColor-default",
+    "bgColor-surface-raised",
+  ),
+  p(
+    "ConnectionFacts.tsx:61",
+    "ok chip outline (was: the sunken fill)",
+    "borderColor-default",
+    "bgColor-surface-raised",
+  ),
+  // States — an independent mark, never the fill step.
+  p(
+    "TabRail.tsx:93",
+    "active-tab accent rule (was: the raised fill)",
+    "bgColor-interactive",
+    "bgColor-surface-sunken",
+  ),
+  p(
+    "ItemGrid.tsx:187",
+    "current-page accent rule (was: the raised fill)",
+    "bgColor-interactive",
+    "bgColor-surface-sunken",
+  ),
+  p(
+    "NumericKeypad.tsx:96",
+    "blocked-key strong outline (was: the sunken fill)",
+    "borderColor-strong",
+    "bgColor-surface-sunken",
+  ),
+];
+
+/**
+ * The fills 27-F66 RELIEVED. Measured and reported, never gated — so the numbers that made the
+ * rule necessary stay in the record rather than vanishing with the assertion.
+ */
+const RELIEVED: readonly Pair[] = [
+  p("Tile.tsx:71", "tile fill vs the page", "bgColor-surface-raised", "bgColor-surface"),
+  p(
+    "TabRail.tsx:83/86",
+    "active vs inactive tab fill",
+    "bgColor-surface-raised",
+    "bgColor-surface-sunken",
+  ),
+  p(
+    "NumericKeypad.tsx:83/85",
+    "blocked vs live key fill",
+    "bgColor-surface-sunken",
+    "bgColor-surface-raised",
+  ),
 ];
 
 /**
@@ -178,38 +275,7 @@ const STATUS_FILLS: readonly Pair[] = [
  * Where a component carries an INDEPENDENT >=3:1 signal (TabRail's 3 px accent underline),
  * that signal is listed here instead and is what must clear the floor.
  */
-const STATES: readonly Pair[] = [
-  p(
-    "TabRail.tsx:87",
-    "active-tab accent underline vs rail (the independent signal)",
-    "bgColor-interactive",
-    "bgColor-surface-sunken",
-  ),
-  p(
-    "TabRail.tsx:77/79",
-    "active vs inactive tab fill",
-    "bgColor-surface-raised",
-    "bgColor-surface-sunken",
-  ),
-  p(
-    "ItemGrid.tsx:156/157",
-    "current vs other page-button fill",
-    "bgColor-surface-raised",
-    "bgColor-surface-sunken",
-  ),
-  p(
-    "NumericKeypad.tsx:81/83",
-    "blocked vs live key fill",
-    "bgColor-surface-sunken",
-    "bgColor-surface-raised",
-  ),
-  p(
-    "AppShell.tsx:68",
-    "training tint vs normal shell",
-    "bgColor-surface-sunken",
-    "bgColor-surface",
-  ),
-];
+const STATES: readonly Pair[] = NEUTRAL_MARKS;
 
 describe.each(POLARITIES)("SC 1.4.11 on the %s palette", (polarity) => {
   const c = palette[polarity];
@@ -222,27 +288,55 @@ describe.each(POLARITIES)("SC 1.4.11 on the %s palette", (polarity) => {
   });
 
   describe("neutral surfaces and derived marks (27-F64 relocated the STATUS rows)", () => {
-    // A pure status fill measured against a plain surface is now the outline's job. Everything
-    // else in this table — an elevation step, a resting chip, an already-outlined control — is
-    // untouched by 27-F64 and still has to be visible on its own.
-    const stillGatedHere = STATUS_FILLS.filter(
-      (x) => !(x.fg.startsWith("bgColor-status-") || x.fg === "bgColor-interactive"),
-    );
+    // Three dispositions, and every row has exactly one:
+    //   - a STATUS fill        -> outline-boundary.oracle.test.ts   (27-F64)
+    //   - a NEUTRAL surface fill -> NEUTRAL_MARKS below             (27-F66)
+    //   - a FOREGROUND on a fill -> still gated right here; no FR has relieved it
+    const isStatusFill = (x: Pair): boolean =>
+      x.fg.startsWith("bgColor-status-") || x.fg === "bgColor-interactive";
+    const isNeutralFill = (x: Pair): boolean => x.fg.startsWith("bgColor-surface");
+    const stillGatedHere = STATUS_FILLS.filter((x) => !isStatusFill(x) && !isNeutralFill(x));
     it.each(stillGatedHere)("$where — $what", (pair) => {
       expect(ratio(pair)).toBeGreaterThanOrEqual(NON_TEXT_FLOOR);
     });
 
-    it("relocated exactly the status rows, and no others", () => {
-      // Guards the filter itself: if a neutral row is ever mis-tagged as a status fill it
-      // would silently stop being gated anywhere.
-      const relocated = STATUS_FILLS.length - stillGatedHere.length;
-      expect(relocated, "status-fill rows now gated in outline-boundary.oracle.test.ts").toBe(7);
+    it("every row has exactly one disposition, and none simply vanished", () => {
+      // Guards the filters themselves: if a row is ever mis-tagged it would silently stop
+      // being gated anywhere, which is how a check reports success by never looking.
+      const status = STATUS_FILLS.filter(isStatusFill).length;
+      const neutral = STATUS_FILLS.filter(isNeutralFill).length;
+      expect(status, "status-fill rows, gated in outline-boundary.oracle.test.ts").toBe(11);
+      expect(neutral, "neutral-fill rows, gated in NEUTRAL_MARKS below").toBe(2);
+      expect(status + neutral + stillGatedHere.length, "a row lost its disposition").toBe(
+        STATUS_FILLS.length,
+      );
+    });
+
+    it("leaves the two NEUTRAL rows gated, on their outline (27-F66)", () => {
+      // The resting badge and the ok chip were the rows 27-F64 did not reach. 27-F66 reaches
+      // them, and this asserts they did not simply fall out of the suite: both appear in
+      // NEUTRAL_MARKS, which is gated at the same 3:1 immediately below.
+      const moved = ["AgeBadge.tsx:60", "ConnectionFacts.tsx:61"];
+      for (const where of moved) {
+        expect(
+          NEUTRAL_MARKS.some((m) => m.where === where),
+          `${where} lost its boundary gate entirely`,
+        ).toBe(true);
+      }
     });
   });
 
-  describe("a state change must be carried by something visible", () => {
+  describe("a neutral boundary or state change is carried by a MARK (27-F66)", () => {
     it.each(STATES)("$where — $what", (pair) => {
       expect(ratio(pair)).toBeGreaterThanOrEqual(NON_TEXT_FLOOR);
+    });
+
+    it("reports the fills 27-F66 relieved, so the numbers stay on the record", () => {
+      // Not a gate. These are the measurements that made 27-F66 necessary; printing them in
+      // the failure message of a trivially-true assertion keeps them from disappearing along
+      // with the rule they disproved.
+      const rows = RELIEVED.map((r) => `${r.what}: ${ratio(r).toFixed(2)}:1`);
+      expect(rows.length, `relieved neutral fills — ${rows.join("; ")}`).toBe(RELIEVED.length);
     });
   });
 
@@ -272,17 +366,43 @@ describe.each(POLARITIES)("SC 1.4.11 on the %s palette", (polarity) => {
 });
 
 describe.each(POLARITIES)(
-  "27-F63 on the %s palette — the training tint is a safety signal",
+  "27-F63/F67 from the %s palette — the training surface is a safety signal",
   (polarity) => {
+    // AMENDED July 2026 for 27-F67, under the same founder override recorded above.
+    //
+    // This test used to assert `bgColor-surface-sunken` vs `bgColor-surface` >= 3:1, on the
+    // assumption that the training treatment was a TINT of one surface. That assumption is
+    // unsatisfiable and 27-F65 named why: the binding foreground is `fgColor-status-abnormal`,
+    // which clears AA on the light page with NO headroom, so any tint keeping it above 4.5:1
+    // sits at most 1.08:1 from the production surface — exactly the figure this test was
+    // filed against. Tinting harder means re-deriving every foreground, i.e. a second palette.
+    //
+    // 27-F67 makes it the second palette we already have: training renders the OPPOSITE
+    // polarity. The requirement is unchanged and the bar is far exceeded — what moved is which
+    // two colours are compared.
     it("distinguishes a training shell from a live one on the surface alone", () => {
-      // The band is unmissable (16.91:1) but 27-F63 requires "a persistent full-width band PLUS
-      // a visibly different surface tint on every screen". The tint is the half that survives
-      // when the band is scrolled past, occluded by an alarm, or simply not looked at — and the
-      // failure it guards is a member of staff treating a real order as practice. If the tint is
-      // below 3:1 the requirement has one half, not two.
-      const c = palette[polarity];
-      const ratio = contrastRatio(c["bgColor-surface-sunken"], c["bgColor-surface"]);
-      expect(ratio).toBeGreaterThanOrEqual(NON_TEXT_FLOOR);
+      const normal = palette[polarity]["bgColor-surface"];
+      const training = palette[polarity === "light" ? "dark" : "light"]["bgColor-surface"];
+      expect(contrastRatio(normal, training)).toBeGreaterThanOrEqual(NON_TEXT_FLOOR);
+    });
+
+    it("keeps every 27-F21 pairing legible in the training palette, which a tint could not", () => {
+      // The property that makes 27-F67 work rather than merely look different: the training
+      // surface is a FULLY GATED palette, so no foreground silently drops below AA when the
+      // shell inverts. A hand-tinted surface has no such guarantee and that is what killed it.
+      const t = palette[polarity === "light" ? "dark" : "light"];
+      const surfaces = (Object.keys(t) as ColorName[]).filter((k) =>
+        k.startsWith("bgColor-surface"),
+      );
+      const fgs = (Object.keys(t) as ColorName[]).filter(
+        (k) => k.startsWith("fgColor-") && !k.startsWith("fgColor-on-"),
+      );
+      const failures = fgs.flatMap((f) =>
+        surfaces
+          .filter((s) => contrastRatio(t[f], t[s]) < 4.5)
+          .map((s) => `${f} on ${s}: ${contrastRatio(t[f], t[s]).toFixed(2)}:1`),
+      );
+      expect(failures).toEqual([]);
     });
   },
 );

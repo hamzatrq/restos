@@ -1,4 +1,5 @@
-import { color, space, targetFor, typography } from "../tokens/index";
+import { useColor } from "../theme";
+import { space, targetFor, typography } from "../tokens/index";
 import { AgeBadge } from "./AgeBadge";
 import { QuantityItemLine, type QuantityItemLineProps } from "./QuantityItemLine";
 
@@ -41,6 +42,7 @@ export const TicketCard = ({
   reprint = false,
   onBump,
 }: TicketCardProps) => {
+  const color = useColor();
   const hero = typography["text-numeric-hero"];
   const label = typography["text-label"];
   return (

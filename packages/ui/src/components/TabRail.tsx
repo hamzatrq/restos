@@ -1,4 +1,5 @@
-import { color, space, targetFor, typography } from "../tokens/index";
+import { useColor } from "../theme";
+import { space, targetFor, typography } from "../tokens/index";
 
 /**
  * `27-F1` layout depth ONE, as a shell.
@@ -39,6 +40,7 @@ export type TabRailProps = {
 };
 
 export const TabRail = ({ tabs, activeId, onSelect }: TabRailProps) => {
+  const color = useColor();
   const t = typography["text-label"];
   return (
     <nav

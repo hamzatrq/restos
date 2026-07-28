@@ -1,5 +1,6 @@
 import { type Paisa, rupeesFromPaisa } from "@restos/domain";
-import { color, money, type TypeName, typography } from "../tokens/index";
+import { useColor } from "../theme";
+import { money, type TypeName, typography } from "../tokens/index";
 
 /**
  * 27-F23 — `Rs`, symbol-first; Western 3-digit grouping; NO decimals on operational
@@ -65,6 +66,7 @@ export const MoneyValue = ({
   abnormal = false,
   direction,
 }: MoneyValueProps) => {
+  const color = useColor();
   const t = typography[SIZES[size]];
   return (
     <span

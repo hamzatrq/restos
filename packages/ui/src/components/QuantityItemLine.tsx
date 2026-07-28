@@ -1,4 +1,5 @@
-import { color, space, typography } from "../tokens/index";
+import { useColor } from "../theme";
+import { space, typography } from "../tokens/index";
 
 /**
  * 27-F57 — the quantity is NEVER separated from the item it counts.
@@ -31,6 +32,7 @@ export const QuantityItemLine = ({
   removals = [],
   note,
 }: QuantityItemLineProps) => {
+  const color = useColor();
   const t = typography["text-numeric-primary"];
   const label = typography["text-label"];
   return (
