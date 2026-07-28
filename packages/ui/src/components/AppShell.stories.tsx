@@ -1,3 +1,4 @@
+import { paisa } from "@restos/domain";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
 import { color } from "../tokens/index";
@@ -83,16 +84,17 @@ const CounterScreen = ({ training = false }: { training?: boolean }) => {
           <ItemGrid
             items={DISHES}
             posture="counter"
-            widthPx={880}
-            heightPx={520}
-            tilePx={108}
+            widthMm={158.5}
+            heightMm={93.7}
+            ppi={141}
+            tileMm={19.5}
             page={0}
             onPageChange={() => {}}
             onSelect={() => {}}
           />
           {/* 27-F5 — the cart is ALWAYS here, never collapsed, never a separate screen. It is
               the cashier's working memory on a counter where she is interrupted by design. */}
-          <Cart lines={CART} totalPaisa={248000} onRemove={() => {}} />
+          <Cart lines={CART} totalPaisa={paisa(248000)} onRemove={() => {}} />
         </div>
       </AppShell>
     </div>
@@ -150,14 +152,15 @@ export const WithS1Alarm: Story = {
             <ItemGrid
               items={DISHES}
               posture="counter"
-              widthPx={880}
-              heightPx={440}
-              tilePx={108}
+              widthMm={158.5}
+              heightMm={79.3}
+              ppi={141}
+              tileMm={19.5}
               page={0}
               onPageChange={() => {}}
               onSelect={() => {}}
             />
-            <Cart lines={CART} totalPaisa={248000} onRemove={() => {}} />
+            <Cart lines={CART} totalPaisa={paisa(248000)} onRemove={() => {}} />
           </div>
         </AppShell>
       </div>

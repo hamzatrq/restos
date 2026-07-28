@@ -6,6 +6,7 @@
 // which is the difference between a design system and a mood board.
 
 import { describe, expect, it } from "vitest";
+import { PAIRING } from "../components/Surface";
 import { contrast } from "./color-science";
 import tokens from "./tokens.json" with { type: "json" };
 
@@ -100,9 +101,31 @@ describe("27-F38..F46 — the naming laws that stop a rename from inverting a me
     }
   });
 
+  it("27-F43: <Surface>'s restated pairing map is exactly the manifest's", () => {
+    // `Surface.tsx` cannot derive its pairing union from `tokens.json`, because
+    // `resolveJsonModule` widens every string to `string` and a type built on that accepts
+    // every fill/foreground combination — which is precisely the composition 27-F43 exists to
+    // make impossible (`fgColor-status-fault` on `bgColor-status-fault` is 1.00:1). So the map
+    // is restated as literals in that file, and the drift risk that creates is closed HERE
+    // rather than left to review.
+    const declared = Object.fromEntries(
+      Object.entries(tokens.color)
+        .filter(([k, v]) => !k.startsWith("$") && "pairsWith" in (v as object))
+        .map(([k, v]) => [k, (v as { pairsWith: string }).pairsWith]),
+    );
+    expect(PAIRING, "Surface's pairing map has drifted from the manifest").toEqual(declared);
+  });
+
   it("27-F40: colour tokens carry a role-first prefix", () => {
     for (const k of Object.keys(color)) {
-      expect(/^(bgColor|fgColor|borderColor)-/.test(k), `${k} lacks a role prefix`).toBe(true);
+      // `outlineColor-` joined the set with 27-F64. It is a distinct role on purpose: a
+      // decorative rule and a REQUIRED SC 1.4.11 boundary are different properties, and
+      // 27-F40 exists so a name says which one it is. Conflating it with `borderColor-`
+      // would have let the boundary be restyled away as decoration.
+      expect(
+        /^(bgColor|fgColor|borderColor|outlineColor)-/.test(k),
+        `${k} lacks a role prefix`,
+      ).toBe(true);
     }
   });
 

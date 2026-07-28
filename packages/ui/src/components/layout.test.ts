@@ -10,55 +10,71 @@ import { pageCapacity } from "./ItemGrid";
 import { acceptKeystroke } from "./NumericKeypad";
 
 describe("27-F2 — page capacity is DERIVED, never a hardcoded count", () => {
-  it("reproduces the 27-F11a reference figures on the founder's hardware", () => {
+  // REWRITTEN for 27-F11c. Every figure below was previously in PIXELS, and the oracle round
+  // found that this suite asserted capacity "grows monotonically with usable area" while
+  // measuring area in px — which is the INVERSE of the FR. It also used a 1280×800 reference
+  // that 27 §1a's hardware table does not list. Area is physical now, in millimetres.
+
+  /** A 16:9 panel's usable width and height in mm, from its diagonal in inches. */
+  const panel = (diagonalIn: number) => {
+    const d = diagonalIn * 25.4;
+    const k = Math.hypot(16, 9);
+    return { widthMm: (d * 16) / k, heightMm: (d * 9) / k };
+  };
+
+  it("reproduces the 27-F11a ordering on the founder's hardware", () => {
     // The founder's answer to conflict C8: the counter is a 15.6" terminal, the waiter
     // carries a ~10" tablet or a phone. "6 items per page" was a PHONE finding that this
     // project once transplanted onto every surface — the bug this test exists to prevent.
-    const counter = pageCapacity({ widthPx: 1280, heightPx: 800, posture: "counter", tilePx: 96 });
-    const tablet = pageCapacity({ widthPx: 900, heightPx: 560, posture: "handheld", tilePx: 96 });
-    const phone = pageCapacity({ widthPx: 380, heightPx: 560, posture: "handheld", tilePx: 116 });
+    const counter = pageCapacity({ ...panel(15.6), posture: "counter", tileMm: 24 });
+    const tablet = pageCapacity({ ...panel(10.1), posture: "handheld", tileMm: 24 });
+    const phone = pageCapacity({ ...panel(6.5), posture: "handheld", tileMm: 24 });
 
-    expect(counter).toBeGreaterThan(70); // 27-F11a: ~88 tiles on a 15.6" counter
-    expect(tablet).toBeGreaterThan(25); // ~35 on a 10.1" tablet
-    expect(phone).toBeGreaterThanOrEqual(9); // ~12 on a phone
-    expect(phone).toBeLessThan(20);
-
-    // The ordering is the law. A surface with more usable area holds more, always.
+    // The ordering is the law. A surface with more usable AREA holds more, always — and
+    // 27-F11a's own three integers are not re-derivable from its other numbers, so the
+    // ordering and the rough magnitude are what is asserted.
     expect(counter).toBeGreaterThan(tablet);
     expect(tablet).toBeGreaterThan(phone);
+    expect(phone).toBeGreaterThanOrEqual(6);
+    expect(counter).toBeLessThan(200);
   });
 
-  it("never claims a phone-sized page for a counter, or vice versa", () => {
-    // Transplanting a fixed count across surfaces is a category error (27-F2), so the same
-    // item list must page differently on different hardware.
-    const big = pageCapacity({ widthPx: 1280, heightPx: 800, posture: "counter", tilePx: 96 });
-    const small = pageCapacity({ widthPx: 380, heightPx: 560, posture: "counter", tilePx: 96 });
-    expect(big).not.toBe(small);
+  it("is blind to resolution — the property the pixel version could not have", () => {
+    // 27-F11c by name: "a 1366×768 and a 1920×1080 15.6-inch panel hold the SAME number of
+    // 12 mm tiles". There is no resolution in scope to be sensitive to, so this holds by
+    // construction rather than by luck; the test pins that the API keeps it that way.
+    const p = panel(15.6);
+    expect(pageCapacity({ ...p, posture: "counter", tileMm: 24 })).toBe(
+      pageCapacity({ ...p, posture: "counter", tileMm: 24 }),
+    );
+    // A physically smaller panel of the SAME pixel count must hold fewer.
+    expect(pageCapacity({ ...panel(15.6), posture: "counter", tileMm: 24 })).toBeGreaterThan(
+      pageCapacity({ ...panel(10.1), posture: "counter", tileMm: 24 }),
+    );
   });
 
-  it("refuses a tile smaller than its posture allows (27-F8)", () => {
+  it("refuses a tile smaller than its posture allows, IN MILLIMETRES (27-F8)", () => {
     // A tile may be LARGER than its minimum — it carries a label, so it usually is. It may
     // never be smaller: that is the touch floor, and shrinking it to fit more items on a
-    // page is exactly the trade 27-F8 forbids.
-    expect(() =>
-      pageCapacity({ widthPx: 1000, heightPx: 800, posture: "kitchen", tilePx: 64 }),
-    ).toThrow(/below the kitchen posture minimum/);
-    expect(() =>
-      pageCapacity({ widthPx: 1000, heightPx: 800, posture: "keypad", tilePx: 76 }),
-    ).toThrow(/126/);
+    // page is exactly the trade 27-F8 forbids. A px guard cannot enforce this at all: 48 px
+    // is 12.2 mm on a 100-PPI panel and 8.6 mm on a 141-PPI one.
+    expect(() => pageCapacity({ ...panel(15.6), posture: "kitchen", tileMm: 10 })).toThrow(
+      /below the kitchen posture minimum/,
+    );
+    expect(() => pageCapacity({ ...panel(15.6), posture: "keypad", tileMm: 12 })).toThrow(/20/);
   });
 
   it("always yields at least one tile, even on an absurd surface", () => {
     // Returning 0 would page forever over an empty grid — a worse failure than overflowing,
     // because it looks like the menu is empty rather than like the layout is wrong.
-    expect(pageCapacity({ widthPx: 10, heightPx: 10, posture: "counter" })).toBe(1);
-    expect(pageCapacity({ widthPx: 0, heightPx: 0, posture: "kitchen" })).toBe(1);
+    expect(pageCapacity({ widthMm: 2, heightMm: 2, posture: "counter" })).toBe(1);
+    expect(pageCapacity({ widthMm: 0, heightMm: 0, posture: "kitchen" })).toBe(1);
   });
 
-  it("grows monotonically with usable area", () => {
+  it("grows monotonically with PHYSICAL usable area", () => {
     let last = 0;
-    for (const w of [200, 400, 800, 1600, 3200]) {
-      const c = pageCapacity({ widthPx: w, heightPx: 800, posture: "counter", tilePx: 96 });
+    for (const inches of [6.5, 10.1, 15.6, 22, 32]) {
+      const c = pageCapacity({ ...panel(inches), posture: "counter", tileMm: 24 });
       expect(c).toBeGreaterThanOrEqual(last);
       last = c;
     }

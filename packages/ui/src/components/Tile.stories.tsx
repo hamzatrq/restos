@@ -46,9 +46,17 @@ export const Destructive: Story = {
   args: { posture: "counter", label: "VOID", destructive: true },
 };
 
-/** All postures together — the ladder is the point, not any single number. */
+/**
+ * All four DESIGN postures together — the ladder is the point, not any single number.
+ *
+ * `floor` is deliberately absent. 27-F8 lists it as "absolute floor, anything — 48 dp", which
+ * is a permission for a control with nowhere better to be, not a posture to design to. While
+ * it was a member of `Posture` this story rendered it beside the others as if it were a peer,
+ * and `<ItemGrid posture="floor">` typechecked into a 48 dp counter grid where 27-F8 requires
+ * 76. The floor is still reachable — `targetFor("floor")` — just not as a design decision.
+ */
 export const PostureLadder: Story = {
-  args: { posture: "floor", label: "x" },
+  args: { posture: "counter", label: "x" },
   decorators: [
     () => (
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
@@ -56,7 +64,6 @@ export const PostureLadder: Story = {
         <Tile posture="kitchen" label="READY" />
         <Tile posture="counter" label="Karahi" />
         <Tile posture="handheld" label="T6" />
-        <Tile posture="floor" label="min" />
       </div>
     ),
   ],

@@ -1,3 +1,4 @@
+import type { Paisa } from "@restos/domain";
 import { color, space, targetFor, typography } from "../tokens/index";
 import { MoneyValue } from "./MoneyValue";
 import { QuantityItemLine, type QuantityItemLineProps } from "./QuantityItemLine";
@@ -17,8 +18,12 @@ import { QuantityItemLine, type QuantityItemLineProps } from "./QuantityItemLine
  */
 export type CartProps = {
   lines: readonly (QuantityItemLineProps & { id: string })[];
-  /** Already computed, in integer paisa. The screen never does money arithmetic. */
-  totalPaisa: number;
+  /**
+   * Already computed, in **branded** integer paisa. The screen never does money arithmetic,
+   * and now it cannot be handed a value that did not come from `domain` — the brand travels
+   * with the number all the way from the fold to the glyph.
+   */
+  totalPaisa: Paisa;
   onRemove?: ((id: string) => void) | undefined;
 };
 

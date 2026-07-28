@@ -1,3 +1,4 @@
+import { paisa } from "@restos/domain";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Cart } from "./Cart";
 
@@ -21,7 +22,7 @@ const LINES = [
 ];
 
 export const WithItems: Story = {
-  args: { lines: LINES, totalPaisa: 248000, onRemove: () => {} },
+  args: { lines: LINES, totalPaisa: paisa(248000), onRemove: () => {} },
 };
 
 /**
@@ -29,7 +30,7 @@ export const WithItems: Story = {
  * does not show an illustration — `27-F11` makes density a professional-tool decision, and
  * an operator on their four-hundredth order of the week does not need onboarding in the cart.
  */
-export const Empty: Story = { args: { lines: [], totalPaisa: 0, onRemove: () => {} } };
+export const Empty: Story = { args: { lines: [], totalPaisa: paisa(0), onRemove: () => {} } };
 
 /**
  * `27-F24` — the total arrives **finished**. There is no subtotal, no tax line to add up and
@@ -47,7 +48,7 @@ export const LargeOrder: Story = {
       { id: "4", quantity: 12, name: "Seekh Kebab", note: "Party order — table 9" },
       { id: "5", quantity: 6, name: "Mutton Pulao" },
     ],
-    totalPaisa: 1875000,
+    totalPaisa: paisa(1875000),
     onRemove: () => {},
   },
 };
@@ -57,4 +58,4 @@ export const LargeOrder: Story = {
  * item post-KOT is not a "remove" at all: `01 §4` makes it a `void.recorded` with an
  * approver, which is a different control on a different surface.
  */
-export const ReadOnly: Story = { args: { lines: LINES, totalPaisa: 248000 } };
+export const ReadOnly: Story = { args: { lines: LINES, totalPaisa: paisa(248000) } };

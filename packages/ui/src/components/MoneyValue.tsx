@@ -1,4 +1,4 @@
-import { rupeesFromPaisa } from "@restos/domain";
+import { type Paisa, rupeesFromPaisa } from "@restos/domain";
 import { color, money, type TypeName, typography } from "../tokens/index";
 
 /**
@@ -14,11 +14,20 @@ import { color, money, type TypeName, typography } from "../tokens/index";
  */
 export type MoneyValueProps = {
   /**
-   * Integer paisa, NON-NEGATIVE. Never a float — floats in ledgers never (00 §6) — and
-   * never signed: money has no sign in this kernel. An append-only ledger cannot subtract
-   * from history, so a refund or a short drawer is a positive amount carrying a direction.
+   * Integer paisa, NON-NEGATIVE — and **branded**, so all three of those words are enforced
+   * by the compiler rather than by a runtime throw. Never a float (floats in ledgers never,
+   * 00 §6) and never signed: money has no sign in this kernel. An append-only ledger cannot
+   * subtract from history, so a refund or a short drawer is a positive amount carrying a
+   * direction, and `domain`'s `directedPaisa` is where that direction comes from.
+   *
+   * The brand is load-bearing rather than decorative. While this was a plain `number`, the
+   * only thing standing between a bad value and the counter was `asPaisaInt`'s `RangeError`
+   * — thrown **during render**, which in React 19 unmounts the root and blanks the till. A
+   * blank region on a counter screen is indistinguishable from a hung app, and `01-F17` says
+   * a sale is never blocked. Refusing the value at the type boundary is the fix; an
+   * ErrorBoundary would only decorate the failure.
    */
-  paisa: number;
+  paisa: Paisa;
   /**
    * 27-F12 — direction is a WORD, never a minus sign and never a colour alone. A lone `-`
    * is one glyph wide, is the first thing lost at 1–2 m or on a scratched panel, and means
@@ -45,8 +54,8 @@ const SIZES: Record<"hero" | "primary" | "body", TypeName> = {
  * en-PK the `#,##0.###` pattern). The paisa→rupee divide is `domain`'s, not ours —
  * DEC-MONEY-005 bans raw arithmetic on money in every package, formatters included.
  */
-export const formatPaisa = (value: number): string => {
-  const { rupees } = rupeesFromPaisa(value as Parameters<typeof rupeesFromPaisa>[0]);
+export const formatPaisa = (value: Paisa): string => {
+  const { rupees } = rupeesFromPaisa(value);
   return `${money["money-symbol"]} ${rupees.toLocaleString("en-US")}`;
 };
 

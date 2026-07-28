@@ -80,9 +80,47 @@ const must = <K extends string, T>(g: Record<K, T>, k: K): T => {
   return v;
 };
 
-/** 27-F8 — a component takes a POSTURE, never a size. This type is what enforces it. */
-export type Posture = "counter" | "keypad" | "kitchen" | "handheld" | "floor";
-export const targetFor = (p: Posture): number => must(touch, `touch-${p}` as TouchName);
+/**
+ * 27-F8 — a component takes a POSTURE, never a size. This type is what enforces it.
+ *
+ * `floor` is deliberately NOT a member. 27-F8 lists it as "absolute floor, anything — 48 dp",
+ * which is a permission, not a design intent: a control that has nowhere better to be may sit
+ * there. While it was a peer in this union, `<ItemGrid posture="floor">` typechecked and
+ * rendered a 48 dp counter grid where 27-F8 requires 76 — and `pageCapacity` then validated
+ * the violation, because it checks a tile against whatever posture it was handed.
+ */
+export type Posture = "counter" | "keypad" | "kitchen" | "handheld";
+
+/**
+ * The floor, reachable only where a size is asked for directly — never where a POSTURE is.
+ * ItemGrid's page buttons and Cart's remove control legitimately sit here.
+ */
+export type TouchFloor = "floor";
+
+export const targetFor = (p: Posture | TouchFloor): number =>
+  must(touch, `touch-${p}` as TouchName);
+
+/**
+ * 27-F11c — "Physical size, never resolution, sets capacity. Extra pixels buy sharpness; only
+ * inches buy room. Design in millimetres, render in pixels."
+ *
+ * The manifest has always carried an `mm` column beside every posture's dp value; this typed
+ * view dropped it, which left nothing in the package able to express a physical size at all.
+ * That is why `pageCapacity` could report 91 tiles for a 1366×768 15.6″ panel and 180 for the
+ * 1920×1080 one — the same physical surface, both listed in `27 §1a`'s hardware table.
+ */
+export const targetMm = (p: Posture | TouchFloor): number => {
+  const entry = (manifest.touch as Record<string, { mm?: number }>)[`touch-${p}`];
+  const mm = entry?.mm;
+  if (mm === undefined) throw new Error(`touch-${p} carries no mm in the manifest (see TOKENS.md)`);
+  return mm;
+};
+
+/**
+ * dp → mm at the 160-dpi density that DEFINES a dp. The one conversion the package uses, so a
+ * spacing token can be spent on a physical layout without a second arithmetic appearing.
+ */
+export const mmFromDp = (dp: number): number => (dp / 160) * 25.4;
 
 /**
  * 27-F27 — KDS type is specified in cap-millimetres at a stated viewing distance, never in

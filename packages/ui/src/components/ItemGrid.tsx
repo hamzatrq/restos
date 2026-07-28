@@ -1,4 +1,12 @@
-import { color, type Posture, space, targetFor, typography } from "../tokens/index";
+import {
+  color,
+  mmFromDp,
+  type Posture,
+  space,
+  targetFor,
+  targetMm,
+  typography,
+} from "../tokens/index";
 import { Tile } from "./Tile";
 
 /**
@@ -30,37 +38,45 @@ export type GridItem = {
 };
 
 /**
- * Page capacity from usable area and tile size.
+ * Page capacity from **physical** usable area and **physical** tile size.
  *
- * The law `27-F2` protects is that a page size is never a **hardcoded item count** — not
- * that a caller may not know its own tile size. `targetFor(posture)` is the *touch minimum*,
- * and a real tile is larger than its minimum because it carries a name: a counter tile sized
- * at exactly 76 px would hold a touch target and no legible label. So `tilePx` is explicit,
- * and the invariant that matters is enforced here — **a tile may be larger than its posture
- * requires, never smaller.**
+ * `27-F11c` is the law: *"A 1366×768 and a 1920×1080 15.6-inch panel hold the SAME number of
+ * 12 mm tiles. Extra pixels buy sharpness; only inches buy room. Design in millimetres,
+ * render in pixels."* Both resolutions are in `27 §1a`'s hardware table as the counter target,
+ * so the pixel-taking version of this function was not merely imprecise — it reported 91 tiles
+ * for one and 180 for the other, for one physical surface, and a suite asserted that capacity
+ * grew monotonically **in pixels**, which is the inverse of the FR.
  *
- * With realistic tiles this reproduces `27-F11a`: ~88 on a 15.6″ counter, ~35 on a 10.1″
- * tablet, ~12 on a phone. Passing the bare posture minimum yields the theoretical ceiling,
- * which is useful for a layout test and wrong for a real screen.
+ * Taking millimetres makes the law hold by construction rather than by test: there is no
+ * resolution in scope to be sensitive to.
+ *
+ * The other rule `27-F2` protects is that a page size is never a **hardcoded item count** —
+ * not that a caller may not know its own tile size. `targetMm(posture)` is the *touch
+ * minimum*, and a real tile is larger than its minimum because it carries a name: a counter
+ * tile at exactly 12 mm holds a touch target and no legible label. So `tileMm` is explicit,
+ * and the invariant enforced here is that **a tile may be larger than its posture requires,
+ * never smaller** — checked in millimetres, because a px guard cannot do it. 48 px is 12.2 mm
+ * on a 100-PPI panel and 8.6 mm on a 141-PPI one, and only one of those clears the counter
+ * minimum.
  */
 export const pageCapacity = (opts: {
-  widthPx: number;
-  heightPx: number;
+  widthMm: number;
+  heightMm: number;
   posture: Posture;
-  /** Rendered tile edge. Defaults to the posture minimum — the ceiling, not a design. */
-  tilePx?: number;
-  gapPx?: number;
+  /** Rendered tile edge in mm. Defaults to the posture minimum — the ceiling, not a design. */
+  tileMm?: number;
+  gapMm?: number;
 }): number => {
-  const min = targetFor(opts.posture);
-  const tile = opts.tilePx ?? min;
+  const min = targetMm(opts.posture);
+  const tile = opts.tileMm ?? min;
   if (tile < min) {
     throw new RangeError(
-      `tile ${tile}px is below the ${opts.posture} posture minimum of ${min}px (27-F8)`,
+      `tile ${tile}mm is below the ${opts.posture} posture minimum of ${min}mm (27-F8)`,
     );
   }
-  const gap = opts.gapPx ?? space["space-2"];
-  const cols = Math.floor((opts.widthPx + gap) / (tile + gap));
-  const rows = Math.floor((opts.heightPx + gap) / (tile + gap));
+  const gap = opts.gapMm ?? mmFromDp(space["space-2"]);
+  const cols = Math.floor((opts.widthMm + gap) / (tile + gap));
+  const rows = Math.floor((opts.heightMm + gap) / (tile + gap));
   // A surface too small for even one tile still owes the operator one tile — returning 0
   // would page forever over an empty grid, which is a worse failure than an overflowing one.
   return Math.max(1, cols * rows);
@@ -69,11 +85,20 @@ export const pageCapacity = (opts: {
 export type ItemGridProps = {
   items: readonly GridItem[];
   posture: Posture;
-  /** Usable area, measured by the caller from its own layout — never guessed here. */
-  widthPx: number;
-  heightPx: number;
-  /** Rendered tile edge; must be ≥ the posture minimum. Defaults to that minimum. */
-  tilePx?: number | undefined;
+  /**
+   * Usable area **in millimetres**, measured by the caller from its own layout. 27-F11c:
+   * capacity is a physical question, so this is the unit the answer is computed in.
+   */
+  widthMm: number;
+  heightMm: number;
+  /**
+   * Pixels per inch of the surface this renders on — the only place resolution enters, and it
+   * buys sharpness, never room. It converts the millimetre design to the pixels a browser
+   * draws; it is deliberately not an input to `pageCapacity`.
+   */
+  ppi: number;
+  /** Rendered tile edge in mm; must be ≥ the posture minimum. Defaults to that minimum. */
+  tileMm?: number | undefined;
   page: number;
   onPageChange: (page: number) => void;
   onSelect: (id: string) => void;
@@ -82,15 +107,18 @@ export type ItemGridProps = {
 export const ItemGrid = ({
   items,
   posture,
-  widthPx,
-  heightPx,
-  tilePx,
+  widthMm,
+  heightMm,
+  ppi,
+  tileMm,
   page,
   onPageChange,
   onSelect,
 }: ItemGridProps) => {
-  const tile = tilePx ?? targetFor(posture);
-  const perPage = pageCapacity({ widthPx, heightPx, posture, tilePx: tile });
+  const tile = tileMm ?? targetMm(posture);
+  const perPage = pageCapacity({ widthMm, heightMm, posture, tileMm: tile });
+  /** mm → px. The render step, and the only step that knows what a pixel is. */
+  const px = (mm: number): number => Math.round((mm / 25.4) * ppi);
   const pages = Math.max(1, Math.ceil(items.length / perPage));
   const current = Math.min(Math.max(0, page), pages - 1);
   const shown = items.slice(current * perPage, current * perPage + perPage);
@@ -103,9 +131,9 @@ export const ItemGrid = ({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: `repeat(auto-fill, minmax(${tile}px, 1fr))`,
+          gridTemplateColumns: `repeat(auto-fill, minmax(${px(tile)}px, 1fr))`,
           gap: space["space-2"],
-          width: widthPx,
+          width: px(widthMm),
           // No overflow: paging replaces scrolling entirely (27-F2). If content would spill,
           // the page size is wrong, and that is a bug to see rather than to hide.
           overflow: "hidden",

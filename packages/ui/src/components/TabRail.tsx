@@ -45,7 +45,11 @@ export const TabRail = ({ tabs, activeId, onSelect }: TabRailProps) => {
       aria-label="Main"
       style={{
         display: "flex",
-        gap: space["space-1"],
+        // 27-F8 requires >= 8 dp between adjacent touch targets, and every tab here is a
+        // 76 dp target. This was `space-1` (4 px) — half the floor, on the one container in
+        // the package whose children are all full-size targets side by side. Nothing in the
+        // package had ever checked a gap.
+        gap: space["space-2"],
         padding: space["space-1"],
         background: color["bgColor-surface-sunken"],
         borderBottom: `1px solid ${color["borderColor-default"]}`,
