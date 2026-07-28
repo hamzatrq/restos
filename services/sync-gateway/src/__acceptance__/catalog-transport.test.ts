@@ -15,8 +15,14 @@
 // are DEVICE-side properties and belong with T-C4.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { catalogPage, catalogVersion, publishCatalog } from "../catalog.js";
-import { createGateway, type Gateway } from "../index.js";
+import {
+  CATALOG_PAGE_SIZE,
+  type CatalogEntry,
+  catalogPage,
+  catalogVersion,
+  publishCatalog,
+} from "../catalog.js";
+import { createGateway, type Gateway, revokeDevice } from "../index.js";
 import {
   BASE_T,
   closeDb,
@@ -30,7 +36,7 @@ import {
   TEST_TOKEN_SECRET,
 } from "./helpers.js";
 
-const item = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
+const item = (id: string, name: string, extra: Record<string, unknown> = {}): CatalogEntry => ({
   kind: "item",
   id,
   name,
@@ -179,6 +185,95 @@ describe("T-C2 — the published catalog (01-F52, founder §6 Q1: the API publis
   it("refuses an empty publish — a version with no changes is not a version", async () => {
     const org = freshIdentity().org_id;
     await expect(publishCatalog(db, org, [], { now: BASE_T })).rejects.toThrow(/empty change set/);
+  });
+
+  it("ORACLE ROUND 2 / A3 — refuses an entry the WIRE could not carry", async () => {
+    // THE DEFECT: this stored anything Postgres accepted, so the read path applied the rules
+    // first — by throwing inside `dispatch`, where the server closes the socket. One blank name
+    // from a bulk import (15 §42) put every device in the org into a permanent reconnect loop
+    // and took the ledger push path with it, un-self-healing.
+    const org = freshIdentity().org_id;
+    await expect(
+      publishCatalog(db, org, [item("I1", "Roti"), item("I2", "")], { now: BASE_T }),
+    ).rejects.toThrow(/entry 1 .*is not servable/);
+    // And nothing was stored — the refusal is before the transaction, so there is no partial
+    // version to recover from.
+    expect(await catalogVersion(db, org)).toBe(0);
+  });
+
+  it("A3 — the refusal names the offending index, because bulk import is where this arrives", async () => {
+    const org = freshIdentity().org_id;
+    const bulk = Array.from({ length: 40 }, (_, i) => item(`I${i}`, `Dish ${i}`));
+    bulk[37] = { kind: "item", id: "I37", name: "x", kitchen_name: "" };
+    await expect(publishCatalog(db, org, bulk, { now: BASE_T })).rejects.toThrow(/entry 37/);
+  });
+
+  it("A4 — a paged SNAPSHOT tiles with no gap and no duplicate", async () => {
+    // The reviewers found NOT ONE paging test in this file, while the plan's §5.4 is entirely
+    // about paging. This is that test, and it is what A4's pin is guarding.
+    const org = freshIdentity().org_id;
+    const many = Array.from({ length: CATALOG_PAGE_SIZE + 120 }, (_, i) =>
+      item(`I${String(i).padStart(5, "0")}`, `Dish ${i}`),
+    );
+    const v = await publishCatalog(db, org, many, { now: BASE_T });
+
+    const seen: string[] = [];
+    let from = 0;
+    for (let guard = 0; guard < 10; guard++) {
+      const p = await catalogPage(db, org, 0, from, from === 0 ? undefined : v);
+      seen.push(...p.entries.map((e) => e.id));
+      if (p.complete) break;
+      from = p.next_from;
+    }
+    expect(seen).toHaveLength(many.length);
+    expect(new Set(seen).size, "a paged snapshot delivered duplicates").toBe(many.length);
+    expect(seen).toEqual([...many.map((m) => m.id)].sort());
+  });
+
+  it("A4 — a publish MID-FETCH cannot change the version a pinned continuation is served", async () => {
+    // THE DEFECT: `catalogPage` re-read the current version on every page, so a publish between
+    // pages changed both the version and the ordering the offset indexes into. The device
+    // committed page 1's stale rows at page 2's version, `hello_ack` matched forever, and the
+    // edit was never re-fetched.
+    const org = freshIdentity().org_id;
+    const many = Array.from({ length: CATALOG_PAGE_SIZE + 10 }, (_, i) =>
+      item(`I${String(i).padStart(5, "0")}`, `Dish ${i}`),
+    );
+    const v1 = await publishCatalog(db, org, many, { now: BASE_T });
+
+    const first = await catalogPage(db, org, 0, 0);
+    expect(first.complete).toBe(false);
+    expect(first.version).toBe(v1);
+
+    // The owner renames an item that is IN PAGE 1, while the device is still paging.
+    await publishCatalog(db, org, [item("I00000", "RENAMED")], { now: BASE_T + 1 });
+
+    // The pinned continuation is still serving v1 — the fetch describes one menu.
+    const second = await catalogPage(db, org, 0, first.next_from, first.version);
+    expect(second.version, "the continuation drifted to a newer version mid-fetch").toBe(v1);
+
+    // And an UNPINNED request now correctly reports the newer version, so the device's next
+    // reconcile picks the rename up rather than believing it is current.
+    const fresh = await catalogPage(db, org, 0, 0);
+    expect(fresh.version).toBe(v1 + 1);
+  });
+
+  it("§5.6 — a REVOKED device gets no catalog (01-F25/01-F48)", async () => {
+    // The reviewers found this clause claimed as covered and tested NOWHERE in the repo, though
+    // the code was correct. Revocation blocks reads, and a catalog fetch is a read.
+    const id = freshIdentity();
+    await publishCatalog(db, id.org_id, [item("I1", "Chapli Kebab")], { now: BASE_T });
+    const gw = createGateway({ db, clock: makeClock(), auth: { token_secret: TEST_TOKEN_SECRET } });
+    const session = await openSession(gw, id);
+    await revokeDevice(db, { org_id: id.org_id, device_id: id.device_id });
+    await expect(
+      session.conn.handle({ v: 1, kind: "catalog_request", have_version: 0 }),
+    ).rejects.toThrow();
+    expect(
+      ofKind(session.rec.all, "catalog_response"),
+      "a revoked device received catalog rows",
+    ).toEqual([]);
+    await gw.close();
   });
 
   it("versions are per-ORG, so one org's publishing never moves another's version", async () => {

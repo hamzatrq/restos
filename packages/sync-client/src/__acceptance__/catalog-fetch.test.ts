@@ -56,7 +56,13 @@ describe("T-C4 — accumulating catalog pages (§5.4: a snapshot applies WHOLE o
       page({ version: 3, entries: [entry("I1", "A")], complete: false, next_from: 1 }),
     );
     expect(first.done, "a partial snapshot was applied").toBe(false);
-    expect(first.done === false && first.fetchMore).toEqual({ have_version: 0, from: 1 });
+    // `at_version` joined this shape in the round-2 fix: a continuation must name the version
+    // page 1 was serving, or the server is free to answer from a newer one mid-fetch.
+    expect(first.done === false && first.fetchMore).toEqual({
+      have_version: 0,
+      from: 1,
+      at_version: 3,
+    });
 
     const second = fetch.accept(page({ version: 3, entries: [entry("I2", "B")] }));
     expect(second.done).toBe(true);
@@ -128,6 +134,59 @@ describe("T-C4 — accumulating catalog pages (§5.4: a snapshot applies WHOLE o
     const fetch = createCatalogFetch(4);
     const step = fetch.accept(page({ form: "delta", version: 4, base_version: 4, entries: [] }));
     expect(step.done && step.update).toBeNull();
+  });
+
+  it("ORACLE ROUND 2 / A4 — refuses pages that disagree about which version they are", () => {
+    // THE DEFECT: the accumulator took entries from every page and `version` from the LAST one.
+    // The server re-read the current version per page, so a publish landing between page 1 and
+    // page 2 committed page 1's rows FROM THE OLD MENU under the NEW version number — after
+    // which `hello_ack` matched forever and the edit was never re-fetched. Silent, permanent,
+    // and 01-F56's named failure: "diverges one device's menu from every other's, undetectable
+    // at the till, surfacing days later as a mispriced item".
+    const fetch = createCatalogFetch(0);
+    const first = fetch.accept(
+      page({ version: 5, entries: [entry("I1", "old-menu")], complete: false, next_from: 1 }),
+    );
+    expect(first.done).toBe(false);
+    // The continuation must carry the pin, so the server can serve the SAME version.
+    expect(first.done === false && first.fetchMore.at_version).toBe(5);
+
+    // A page from a different version: refused outright rather than spliced.
+    const second = fetch.accept(page({ version: 6, entries: [entry("I2", "new-menu")] }));
+    expect(second.done).toBe(true);
+    expect(
+      second.done ? second.update : "not done",
+      "pages from two versions were combined into one commit",
+    ).toBeNull();
+  });
+
+  it("A4 — a form or base change is refused too, not only a version change", () => {
+    const fetch = createCatalogFetch(3);
+    fetch.accept(
+      page({
+        form: "delta",
+        version: 9,
+        base_version: 3,
+        entries: [],
+        complete: false,
+        next_from: 1,
+      }),
+    );
+    // Same version, different base — page 1 applied to base 3 and this one claims base 7.
+    const step = fetch.accept(page({ form: "delta", version: 9, base_version: 7, entries: [] }));
+    expect(step.done && step.update).toBeNull();
+  });
+
+  it("A4 — a consistent multi-page fetch still completes, so the guard is not a blanket refusal", () => {
+    // The guard must reject disagreement WITHOUT rejecting ordinary paging — otherwise it would
+    // "fix" the splice by making every large menu unfetchable.
+    const fetch = createCatalogFetch(0);
+    fetch.accept(page({ version: 5, entries: [entry("I1", "A")], complete: false, next_from: 1 }));
+    const done = fetch.accept(page({ version: 5, entries: [entry("I2", "B")] }));
+    const update = must(finished(done), "update");
+    if (update.kind !== "snapshot") throw new Error("expected a snapshot");
+    expect(update.version).toBe(5);
+    expect(update.entries.map((e) => e.id)).toEqual(["I1", "I2"]);
   });
 });
 

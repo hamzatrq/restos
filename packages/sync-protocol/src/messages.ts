@@ -14,6 +14,48 @@ const seq = z.number().int().nonnegative();
 /** Envelope as carried in merged streams — cloud may have stamped global_seq (01-F3). */
 export const WireEnvelope = EventEnvelope.extend({ global_seq: seq.optional() });
 
+/**
+ * One catalog entity on the wire — **exported so the WRITER can validate against it.**
+ *
+ * It has to be one definition. When this lived inline in `catalog_response`, only the read path
+ * knew the rules: `publishCatalog` stored anything the Postgres column accepted, and an entry
+ * with an empty `name` then made the whole frame unserialisable. The throw landed on the SERVER,
+ * inside dispatch, where the handler closes the socket — so one blank name from a bulk import
+ * (`15 §42` names that path) put every device in the org into a permanent reconnect loop, taking
+ * the ledger push path down with it. Not self-healing either: a corrective publish does not help
+ * a device asking for a delta whose range still spans the poisoned version.
+ *
+ * Validating at the writer is the fix; this export is what makes "the same rules" literal
+ * rather than a comment asking two files to agree.
+ */
+export const CatalogEntryWire = z.object({
+  kind: z.string().min(1),
+  id: z.string().min(1),
+  name: z.string().min(1),
+  /** 03-F38 — a short kitchen name, so long item names stop being a KOT layout problem. */
+  kitchen_name: z.union([z.string().min(1), z.null()]).optional(),
+  parent_id: z.union([z.string().min(1), z.null()]).optional(),
+  /**
+   * Display order. Bounded to a safe integer because the column is `bigint`: a value past 2^53
+   * round-trips lossily through `Number()`, which would silently reorder a menu.
+   */
+  sort: z
+    .number()
+    .int()
+    .min(-(2 ** 53) + 1)
+    .max(2 ** 53 - 1)
+    .optional(),
+  /**
+   * `01-F55` — deletion is a TOMBSTONE. A reprint of an order placed before an item was
+   * deleted must still render its name, so a delete travels as a marked entry rather
+   * than as an absence. This is also why a snapshot carries its tombstones: the oracle
+   * round found that clearing and re-inserting destroyed every one of them, and made
+   * `01-F55` fail on its own named scenario after any recovery.
+   */
+  deleted: z.boolean().optional(),
+});
+export type CatalogEntryWireT = z.infer<typeof CatalogEntryWire>;
+
 export const messageSchemas = {
   hello: z.object({
     v,
@@ -105,6 +147,22 @@ export const messageSchemas = {
     kind: z.literal("catalog_request"),
     /** What the device has now. `0` means "nothing", and gets a snapshot. */
     have_version: seq,
+    /**
+     * **The version this fetch is TOWARD**, echoed from the first page's `catalog_response`.
+     * Absent on the first request; required on every continuation.
+     *
+     * Without it a paged fetch has no identity. The server re-reads the current version on
+     * every page, so a publish landing between page 1 and page 2 changed both the version AND
+     * the row set the offset indexes into — the device accumulated page 1's stale rows and
+     * committed them at page 2's version, after which `hello_ack` matched forever and the edit
+     * was never re-fetched. Silent, permanent, and `01-F56`'s named failure verbatim: "diverges
+     * one device's menu from every other's, undetectable at the till, surfacing days later as a
+     * mispriced item".
+     *
+     * With it the server serves that exact version or refuses; the fetch is atomic in the
+     * version dimension as well as the row dimension.
+     */
+    at_version: seq.optional(),
     /** Paging cursor, echoed from a previous `catalog_response.next_from`. */
     from: seq.optional(),
   }),
@@ -116,25 +174,7 @@ export const messageSchemas = {
     version: seq,
     /** For a delta, the exact base it applies to. A device holding anything else refuses. */
     base_version: seq.optional(),
-    entries: z.array(
-      z.object({
-        kind: z.string().min(1),
-        id: z.string().min(1),
-        name: z.string().min(1),
-        /** 03-F38 — a short kitchen name, so long item names stop being a KOT layout problem. */
-        kitchen_name: z.union([z.string().min(1), z.null()]).optional(),
-        parent_id: z.union([z.string().min(1), z.null()]).optional(),
-        sort: z.number().int().optional(),
-        /**
-         * `01-F55` — deletion is a TOMBSTONE. A reprint of an order placed before an item was
-         * deleted must still render its name, so a delete travels as a marked entry rather
-         * than as an absence. This is also why a snapshot carries its tombstones: the oracle
-         * round found that clearing and re-inserting destroyed every one of them, and made
-         * `01-F55` fail on its own named scenario after any recovery.
-         */
-        deleted: z.boolean().optional(),
-      }),
-    ),
+    entries: z.array(CatalogEntryWire),
     /**
      * Paging, in `catchup_response`'s vocabulary rather than a second idiom. A large org's
      * catalog will exceed one frame. **A snapshot must apply ATOMICALLY** — the device must

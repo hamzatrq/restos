@@ -151,6 +151,17 @@ export const createCloudSession = (options: {
    * catalog that has silently stopped updating looks exactly like a catalog nobody has edited.
    */
   let catalogRefusal: { reason: string; have_version: number } | null = null;
+  /**
+   * Retries spent on the CURRENT fetch. `01-F17` says a sale is never blocked, and an unbounded
+   * receive-path loop is one of the few things in this session that could break that: each
+   * iteration costs the gateway a fold over the org's whole entry table, so a buggy or hostile
+   * server could turn one till into a hot loop against org-scoped state. Three refusals is
+   * enough for a transient disagreement and few enough to stop being a loop; the device then
+   * reports the refusal and waits for the next `hello_ack`, which is the mechanism that repairs
+   * everything else here anyway.
+   */
+  let catalogRetries = 0;
+  const CATALOG_MAX_RETRIES = 3;
   // ---- hub-relay state (DEC-SYNC-009, T-01-12; all volatile) ---------------
   // relayAuthorized: the gateway's hello_ack advertisement — without it this
   // session NEVER pushes third-party events (an unadvertised attempt would
@@ -226,12 +237,13 @@ export const createCloudSession = (options: {
    * work for a device that has been offline for a week and could not have heard an
    * announcement it was not connected for.
    */
-  const requestCatalog = (have_version: number, from = 0): void => {
+  const requestCatalog = (have_version: number, from = 0, at_version?: number): void => {
     transport.send({
       v: 1,
       kind: "catalog_request",
       have_version,
       ...(from === 0 ? {} : { from }),
+      ...(at_version === undefined ? {} : { at_version }),
     });
   };
 
@@ -242,12 +254,28 @@ export const createCloudSession = (options: {
    */
   const reconcileCatalog = (serverVersion: number | undefined): void => {
     if (serverVersion === undefined) return; // an older gateway that serves no catalog
+    /**
+     * **A FETCH IN FLIGHT IS NEVER RESTARTED.** This used to overwrite `catalogFetch`
+     * unconditionally, and the gateway broadcasts a notice to every org session on publish — so
+     * a notice landing between pages destroyed the accumulated pages and started a second,
+     * concurrent request chain. The next `complete` page, belonging to the ORIGINAL chain, then
+     * landed in the FRESH accumulator and committed a tail-only snapshot at the full version.
+     * Half the menu missing from the till, `catalog_refusal` null, and permanent — because the
+     * early return below then sees parity forever. Only the org's next edit could repair it.
+     *
+     * Letting the running fetch finish is correct rather than merely safe: it is already
+     * pinned to a version, and if a newer one exists the very next `hello_ack` reconciles.
+     * Dropping a notice costs freshness and never correctness — the property the whole design
+     * rests on.
+     */
+    if (catalogFetch !== null) return;
     const have = store.catalog.version();
     if (serverVersion <= have) return;
     // A fresh accumulator per fetch. A half-accumulated snapshot from a dead session must
     // never merge with pages from the next one — that would splice two menus together and
     // commit the result under one version number, which is undetectable at the till.
     catalogFetch = createCatalogFetch(have);
+    catalogRetries = 0;
     requestCatalog(have);
   };
 
@@ -512,7 +540,18 @@ export const createCloudSession = (options: {
         if (catalogFetch === null) return;
         const step = catalogFetch.accept(message);
         if (!step.done) {
-          requestCatalog(step.fetchMore.have_version, step.fetchMore.from);
+          // NO FORWARD PROGRESS means the server is not paging. Without this a `next_from` that
+          // never advances is an unbounded request loop with `pending` growing on the till.
+          if (message.next_from <= 0 && message.entries.length === 0) {
+            catalogFetch = null;
+            catalogRefusal = { reason: "no_progress", have_version: store.catalog.version() };
+            return;
+          }
+          requestCatalog(
+            step.fetchMore.have_version,
+            step.fetchMore.from,
+            step.fetchMore.at_version,
+          );
           return;
         }
         catalogFetch = null;
@@ -520,15 +559,23 @@ export const createCloudSession = (options: {
         const result = store.catalog.apply(step.update);
         if (result.applied) {
           catalogRefusal = null;
+          catalogRetries = 0;
           return;
         }
         // `01-F56` + DEC-SYNC-011: a refusal is OBSERVABLE. `stale` is not a fault — it means a
         // redelivery we already have — so only the three real refusals are surfaced.
         if (result.reason === "needs_snapshot") {
           // The belt to the server's braces: it decided a delta was constructible and this
-          // device disagrees about the base. Ask again from where we actually are, which forces
-          // a snapshot. Bounded by construction — a snapshot has no base to disagree about.
+          // device disagrees about the base. Ask again from where we actually are.
+          //
+          // BOUNDED BY A COUNTER, not "by construction" as an earlier comment claimed — the
+          // frame has no way to REQUEST a form, so nothing here forces a snapshot and a server
+          // that keeps answering with the same bad delta would be asked forever. `01-F56`'s
+          // text is "the device asks for a snapshot instead"; the protocol cannot express that
+          // request, so the honest fallback is to stop asking and say so.
           catalogRefusal = { reason: result.reason, have_version: result.version };
+          if (catalogRetries >= CATALOG_MAX_RETRIES) return;
+          catalogRetries += 1;
           catalogFetch = createCatalogFetch(result.version);
           requestCatalog(result.version);
           return;
@@ -586,6 +633,7 @@ export const createCloudSession = (options: {
       // — which would splice two menus together and commit the result under one version
       // number, undetectable at the till. The next hello_ack starts a fresh fetch if needed.
       catalogFetch = null;
+      catalogRetries = 0;
     },
     onMessage: (message) => {
       if (running) dispatch(message);

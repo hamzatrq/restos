@@ -1161,7 +1161,11 @@ export const createGateway = ({
    * org-scope reference data" — promised this capability and nobody had built it.
    *
    * It is a READ in the `01-F47` sense, so it takes both of the read gates: refused for a
-   * revoked device (`sec-F1` — revocation blocks reads) and refused for a draining session.
+   * revoked device (`01-F25` registry authority / `01-F48` — revocation blocks participation,
+   * and the read side of it is `requireUnrevoked`) and refused for a draining session.
+   *
+   * The earlier citation here said `sec-F1`, which greps to nothing anywhere in `specs/` — an
+   * invented ID, which Commandment 2 makes a defect regardless of the behaviour being right.
    */
   const handleCatalog = async (
     record: ConnectionRecord,
@@ -1175,7 +1179,13 @@ export const createGateway = ({
           "renewal lands (01-F47 sole purpose; push to renew)",
       );
     }
-    const page = await catalogPage(db, session.orgId, message.have_version, message.from ?? 0);
+    const page = await catalogPage(
+      db,
+      session.orgId,
+      message.have_version,
+      message.from ?? 0,
+      message.at_version,
+    );
     record.sink(
       parseMessage({
         v: 1,

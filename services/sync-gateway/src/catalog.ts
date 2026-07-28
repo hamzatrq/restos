@@ -1,3 +1,4 @@
+import { CatalogEntryWire } from "@restos/sync-protocol";
 import { sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
@@ -72,11 +73,14 @@ export const catalogVersion = async (db: Db, org_id: string): Promise<number> =>
  * Publish a set of changes as the next version. Called by the back office (`14`), never by a
  * device — `01-F52` makes catalog edits a back-office act and this is its one write path.
  *
- * **Ordering is the atomicity story.** Entry rows are written first and the version row last,
- * inside one transaction, so a concurrent reader either sees nothing of version N or sees all
- * of it. A reader that observed the version row before the entries could serve a device a
- * version number it cannot actually fetch, and the device would then sit reporting itself
- * up-to-date with a menu it never received.
+ * **THE TRANSACTION is the atomicity story — not the statement order.** A reader either sees
+ * nothing of version N or sees all of it, because both writes commit together; reversing them
+ * would change nothing observable, since statement order inside a transaction is invisible from
+ * outside it. An earlier version of this comment credited the ordering, which is a mental model
+ * wrong in a load-bearing direction: a future session told "order is what guarantees this" could
+ * split the publish into two transactions, preserve the stated invariant and destroy the real
+ * one. The entries-then-version order is kept anyway because it is the order that stays correct
+ * if this is ever split, not because it is doing the work today.
  *
  * `14-F28`'s day-end timing resolves ABOVE this function, not in it: a pending edit lives in
  * the back office where it can still be cancelled, and only lands here at the `01-F46`
@@ -94,6 +98,32 @@ export const publishCatalog = async (
   if (entries.length === 0) {
     throw new RangeError("publishCatalog: an empty change set is not a version (01-F52)");
   }
+  /**
+   * **VALIDATE AT THE WRITER, against the schema the WIRE will enforce.**
+   *
+   * This used to store whatever Postgres accepted, which meant the read path was the first
+   * thing to apply the rules — and it applied them by throwing inside `dispatch`, where the
+   * server closes the socket. One entry with an empty `name` from a bulk import (`15 §42`)
+   * therefore put every device in the org into a permanent reconnect loop and took the ledger
+   * push path down with it: `hello_ack` kept advertising the version, the device kept asking,
+   * the socket kept dying. Not self-healing — a corrective publish leaves any device on the
+   * prior version still asking for a delta whose range spans the poisoned one.
+   *
+   * Refusing here turns an org-wide outage into one failed save with a message. The error names
+   * the offending index because a bulk import is exactly where this arrives and "one of your
+   * 4,000 rows is bad" is not an actionable answer.
+   */
+  entries.forEach((entry, index) => {
+    const parsed = CatalogEntryWire.safeParse(entry);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      throw new RangeError(
+        `publishCatalog: entry ${index} (${String(entry.kind)}/${String(entry.id)}) is not ` +
+          `servable — ${issue?.path.join(".") ?? "?"}: ${issue?.message ?? "invalid"}. ` +
+          `Storing it would make every catalog_response for this org unparseable (01-F56).`,
+      );
+    }
+  });
   return db.transaction(async (tx: Db) => {
     // Serialized per org. Two concurrent publishes must not both claim version N and leave two
     // different menus at one number — the hazard the oracle round found on the DEVICE side
@@ -147,8 +177,23 @@ export const catalogPage = async (
   org_id: string,
   have_version: number,
   from: number,
+  /**
+   * The version a CONTINUATION page is toward, echoed by the device from page 1. Absent on a
+   * first request, where the server picks the current version and tells the device what it is.
+   *
+   * This is what makes a paged fetch atomic in the version dimension. Without it the current
+   * version was re-read per page, so a publish between pages changed both the version and the
+   * ordering the offset indexes into — and the device committed a mixture of two menus under
+   * one number, permanently (`01-F56`).
+   */
+  at_version?: number,
 ): Promise<CatalogPage> => {
-  const version = await catalogVersion(db, org_id);
+  const current = await catalogVersion(db, org_id);
+  // Serve the pinned version if the device named one and we still have it. `version <= current`
+  // because a device must never be handed a version from the future — after a restore
+  // (`22`) the org can legitimately be BEHIND a device, and pinning forward would serve rows
+  // that no longer exist.
+  const version = at_version !== undefined && at_version <= current ? at_version : current;
   if (version === 0) {
     // Nothing published. An honest empty snapshot rather than a refusal: `01-F54` says an
     // unknown item degrades to its id and never blocks a sale, so a till with no catalog is a
@@ -209,14 +254,19 @@ export const catalogPage = async (
   // exact defect the oracle round found on the device side, and it is fixed by carrying them
   // rather than by the device inferring them.
   const rows = await db.execute(
-    sql`select distinct on (kind, entry_id) kind, entry_id, name, kitchen_name, parent_id, sort, deleted
-        from kernel.catalog_entries
-        where org_id = ${org_id} and version <= ${version}
-        order by kind asc, entry_id asc, version desc`,
+    sql`select kind, entry_id, name, kitchen_name, parent_id, sort, deleted from (
+          select distinct on (kind, entry_id)
+                 kind, entry_id, name, kitchen_name, parent_id, sort, deleted
+          from kernel.catalog_entries
+          where org_id = ${org_id} and version <= ${version}
+          order by kind asc, entry_id asc, version desc
+        ) folded
+        order by kind asc, entry_id asc
+        offset ${from} limit ${CATALOG_PAGE_SIZE + 1}`,
   );
-  const all = [...rows];
-  const page = all.slice(from, from + CATALOG_PAGE_SIZE);
-  const complete = from + page.length >= all.length;
+  const fetched = [...rows];
+  const page = fetched.slice(0, CATALOG_PAGE_SIZE);
+  const complete = fetched.length <= CATALOG_PAGE_SIZE;
   return {
     form: "snapshot",
     version,

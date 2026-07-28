@@ -68,7 +68,7 @@ const toRef = (w: WireEntry): CatalogRef => ({ kind: w.kind as CatalogKind, id: 
  * `catalog_request`; `update` is present exactly when there is something to apply.
  */
 export type FetchStep =
-  | { done: false; fetchMore: { have_version: number; from: number } }
+  | { done: false; fetchMore: { have_version: number; from: number; at_version: number } }
   | { done: true; update: CatalogUpdate }
   | { done: true; update: null };
 
@@ -80,14 +80,51 @@ export type FetchStep =
  */
 export const createCatalogFetch = (have_version: number) => {
   let pending: WireEntry[] = [];
+  /**
+   * What page 1 said this fetch is. Every later page must agree, or the pages do not describe
+   * one menu and combining them fabricates a third that never existed.
+   */
+  let shape: { form: "snapshot" | "delta"; version: number; base_version?: number } | null = null;
 
   return {
     /** Feed one frame. Returns whether to ask for more, and what to apply when finished. */
     accept(response: WireCatalogResponse): FetchStep {
+      /**
+       * **EVERY PAGE OF A FETCH MUST AGREE ON WHAT IT IS.** The server pins the version now, so
+       * a disagreement means something went wrong upstream — but the device is where the damage
+       * would land, so it refuses rather than trusting.
+       *
+       * Without this the accumulator took `version`/`base_version` from the LAST page and the
+       * entries from all of them. A publish between pages therefore committed page 1's rows
+       * from the old menu at the new version number, after which `hello_ack` matched forever
+       * and the edit was never re-fetched: silent, permanent, and undetectable at the till.
+       * Discarding is safe because nothing has been applied — the next reconcile starts clean.
+       */
+      if (shape === null) {
+        shape = {
+          form: response.form,
+          version: response.version,
+          ...(response.base_version === undefined ? {} : { base_version: response.base_version }),
+        };
+      } else if (
+        shape.form !== response.form ||
+        shape.version !== response.version ||
+        shape.base_version !== response.base_version
+      ) {
+        pending = [];
+        shape = null;
+        return { done: true, update: null };
+      }
+
       pending = [...pending, ...response.entries];
       if (!response.complete) {
-        return { done: false, fetchMore: { have_version, from: response.next_from } };
+        return {
+          done: false,
+          // `at_version` pins the continuation to the version page 1 was serving.
+          fetchMore: { have_version, from: response.next_from, at_version: response.version },
+        };
       }
+      shape = null;
 
       const entries = pending;
       pending = [];
