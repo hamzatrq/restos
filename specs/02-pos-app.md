@@ -110,6 +110,10 @@ All tiers run it. In **T1 the POS is the entire restaurant** — one device, pri
 
 - 02-F41 **Attribution is whoever's PIN is in, with no "acting for" concept (gap G12, founder ruling July 2026).** `27-F51` makes second-order usability a design requirement — a shift lead driving the terminal for a junior who is stuck — and no FR owned it. **Ruled: no mechanism.** The supervisor's PIN means the supervisor is accountable, which is true anyway the moment they choose to take over, and modelling dual identity would add a concept to the permission matrix that must be got right under exactly the time pressure that caused the takeover. `27-F51` still binds the *design* — a screen must be operable by someone standing beside its owner — but not the *ledger*.
 
+- 02-F42 **`channel` is a CLOSED set and it is a price key.** The channel tags `02-F1` already names — **`counter`, `phone`, `storefront`, `whatsapp`, `foodpanda`** — are the whole set; `order.created.channel` accepts nothing else and an unknown value is an `01-F4` error at emit. **`channel` and `order_type` are different axes and neither substitutes for the other**: `dine_in`, `takeaway` and `delivery` are order *types* (`02-F1`), and a channel value drawn from that vocabulary is invalid.
+  - **Why it must be closed now.** A channel selects the price (`01-F60`), so a typo is not a mislabelled report row — it is a **wrong price**, snapshotted into the line by `01-F53` and frozen in an append-only ledger where it cannot be corrected in place. This is the argument that closed `payment.recorded.method` (`02-F12`, `01-F32`): an open string fails nowhere and quietly becomes a category no report counts. With money attached, it fails as silent mispricing instead.
+  - **The order's channel is the resolution key**, set at creation and never inferred later (`02-F1`). So a foodpanda order keyed in at the counter (`C21`, `02-F30`) bills at foodpanda prices — which is the entire point of pricing per channel, and would be lost if the price resolved from the *device* rather than the *order*.
+
 ## 4. Key flows
 
 **Dine-in order (happy + print failure)**
