@@ -1,5 +1,5 @@
 import { newId, paisa } from "@restos/domain";
-import { AppShell, Cart, ItemGrid, type Tab, TenderPanel, usePhysicalSize } from "@restos/ui";
+import { AppShell, Cart, ItemGrid, type Tab, TenderPanel, Tile, usePhysicalSize } from "@restos/ui";
 import { useCallback, useEffect, useState } from "react";
 import type { DeviceState, MenuItem, OpenOrder } from "../shared/ipc";
 
@@ -28,6 +28,35 @@ const TABS: readonly Tab[] = [
   { id: "payments", label: "Payments", unavailable: true, unavailableReason: "not built yet" },
   { id: "shift", label: "Shift", unavailable: true, unavailableReason: "not built yet" },
 ];
+
+/**
+ * `C4` — the three order types `02-F1` names, and **there is no default** (founder ruling,
+ * `plans/wave-1/channel-pricing-and-the-counter-loop.md §3.6`).
+ *
+ * `02-F1` requires `order_type` at creation and forbids inferring it later, so the tap that
+ * starts an order has to carry one. Pre-selecting a type would save one tap on ~75 orders a
+ * shift and would silently corrupt the axis: a takeaway recorded as dine-in because nobody
+ * looked at a pre-selected chip is wrong in a ledger `01-F1` allows no edits to, and
+ * `order_type` feeds tax posture (doc 16) and channel economics (doc 12).
+ *
+ * **`order_type` is still an open string in the registry**, unlike `channel` which `02-F42`
+ * just closed. That asymmetry is now the *only* one left on this event, and it is exactly the
+ * confusion that let `dine_in` sit in the `channel` field since Wave 0. Closing it is a
+ * `domain` change needing its own FR, so it is named here and not done here.
+ */
+const ORDER_TYPES: readonly { id: string; label: string }[] = [
+  { id: "dine_in", label: "Dine-in" },
+  { id: "takeaway", label: "Takeaway" },
+  { id: "delivery", label: "Delivery" },
+];
+
+/**
+ * `02-F1` — the counter app is the `counter` channel, always. Written as a named constant
+ * rather than inline because `02-F42` makes this a **price key**: it selects which of the
+ * catalog's per-channel prices a line snapshots (`01-F60`), so it is a money-bearing value
+ * and not a label. A phone order taken at this till is `phone` and is `C18`, not this path.
+ */
+const COUNTER_CHANNEL = "counter";
 
 export const Counter = () => {
   const [device, setDevice] = useState<DeviceState | null>(null);
@@ -73,6 +102,41 @@ export const Counter = () => {
 
   const current = orders[0];
 
+  /**
+   * `C4` — start an order. One append, and every field it carries is a decision made HERE and
+   * never inferred later (`02-F1`).
+   *
+   * `order_id` is minted in the renderer, which looks like it contradicts the seam's rule that
+   * main stamps identity — it does not. `01-F1`'s stamped identity is the ENVELOPE's (`id`,
+   * `device_id`, `branch_created_at`), all of which main still owns. An `order_id` is a payload
+   * key, and it has to be minted by whoever will reference it in the same breath.
+   */
+  const startOrder = (order_type: string) => {
+    void window.restos
+      .append({
+        type: "order.created",
+        payload: { order_id: newId(), channel: COUNTER_CHANNEL, order_type },
+        refs: [],
+      })
+      .then(reload);
+  };
+
+  /**
+   * `C9` — send it to the kitchen. `02-F8`/`03-F2`: confirming is what makes the order real to
+   * everyone downstream, and in the fold it is what makes the queue row EXIST at all (the
+   * projection's own rule is "row exists iff confirmed"). So this one append is the whole
+   * handoff — there is no "send to kitchen" message, and `screen-map §4` is explicit that
+   * screens observe the same ledger rather than navigating to each other.
+   *
+   * The KOT print that `03-F5` hangs off this is NOT here: `packages/escpos` is a stub, and a
+   * confirm that silently failed to print would be worse than one that never claimed to.
+   */
+  const sendToKitchen = (order_id: string) => {
+    void window.restos
+      .append({ type: "order.confirmed", payload: { order_id }, refs: [] })
+      .then(reload);
+  };
+
   return (
     <AppShell
       actor={device.actor}
@@ -94,25 +158,100 @@ export const Counter = () => {
           is filled are the same element — a grid sized from one box and placed in another is
           how the cart got pushed off screen.
         */}
-        <div ref={surfaceRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex" }}>
+        <div
+          style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}
+        >
           {/*
-            Nothing is drawn until the first measurement. `usePhysicalSize` deliberately returns
-            null rather than a default, because a default is a guessed panel by another name and
-            a grid costed for the wrong surface puts tiles off-page where no pager can reach
-            them — on a counter, an item that cannot be sold.
+            C4 — the order-type row. It holds this position ALWAYS (`27-F4` positional memory,
+            `27-F5` no controls that change with context): when an order is open the three
+            choices are greyed in place with the reason, never removed and never replaced by
+            something else. A row that vanished once work started would move the grid under a
+            cashier mid-order, which is the one thing `27-F4` calls a breaking change.
           */}
-          {gridMm === null ? null : (
-            <ItemGrid
-              items={items}
+          <div style={{ display: "flex", gap: 8 }}>
+            {ORDER_TYPES.map((t) => (
+              <Tile
+                key={t.id}
+                posture="counter"
+                label={t.label}
+                onPress={current === undefined ? () => startOrder(t.id) : undefined}
+                unavailable={current !== undefined}
+                {...(current !== undefined ? { unavailableReason: "order in progress" } : {})}
+              />
+            ))}
+            {/*
+              C9 — one tap, and it is the whole kitchen handoff (`21 §4`'s 2-tap law counts
+              grid → confirm). Greyed with its reason until there is an order to send, rather
+              than absent, for the same positional reason as the row above.
+            */}
+            <Tile
               posture="counter"
-              widthMm={gridMm.widthMm}
-              heightMm={gridMm.heightMm}
-              tileMm={28}
-              page={page}
-              onPageChange={setPage}
-              onSelect={() => {}}
+              label="Send to kitchen"
+              onPress={current === undefined ? undefined : () => sendToKitchen(current.order_id)}
+              unavailable={current === undefined}
+              {...(current === undefined ? { unavailableReason: "no order started" } : {})}
             />
-          )}
+          </div>
+          {/*
+            The measured surface. The grid renders INSIDE this box, so what is measured and what
+            is filled are the same element — a grid sized from one box and placed in another is
+            how the cart got pushed off screen.
+          */}
+          <div ref={surfaceRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex" }}>
+            {/*
+              Nothing is drawn until the first measurement. `usePhysicalSize` deliberately returns
+              null rather than a default, because a default is a guessed panel by another name and
+              a grid costed for the wrong surface puts tiles off-page where no pager can reach
+              them — on a counter, an item that cannot be sold.
+            */}
+            {gridMm === null ? null : (
+              <ItemGrid
+                items={
+                  /*
+                    The grid is DISABLED IN PLACE until an order exists (founder ruling, §3.6) —
+                    greyed with the reason, never emptied, so the tile an operator reaches for by
+                    position is still where they learned it.
+
+                    Note what this is NOT: `01-F59`'s 86 uses the same visual and stays
+                    deliberately SELLABLE, so `Tile` fires `onPress` even when unavailable and
+                    the two cases cannot be told apart by the flag alone. The refusal therefore
+                    lives in `onSelect` below, where it can distinguish them — a `disabled`
+                    attribute here would break `01-F59` for the 86 case, which is the exact
+                    defect `8b28a72` removed.
+                  */
+                  current === undefined
+                    ? items.map((i) => ({
+                        ...i,
+                        unavailable: true,
+                        unavailableReason: "choose an order type first",
+                      }))
+                    : items
+                }
+                posture="counter"
+                widthMm={gridMm.widthMm}
+                heightMm={gridMm.heightMm}
+                tileMm={28}
+                page={page}
+                onPageChange={setPage}
+                /*
+                  C5 IS NOT BUILT. It needs `unit_price_paisa`, and the catalog carries no price
+                  until `01-F60` reaches the wire and the store (T-2/T-3).
+
+                  This is a no-op and NOT a guard. An `if (current === undefined) return;` here
+                  would read as a refusal while being indistinguishable from this — the branch
+                  cannot change what happens, because nothing happens either way. Writing one
+                  would be the "comment was the defect" pattern in its purest form: a guard that
+                  exists to be read rather than to run.
+
+                  When C5 lands the guard becomes real and belongs here, because `Tile` fires
+                  `onPress` even when unavailable (`01-F59` — greyed is not disabled), so the
+                  greying above cannot stop an append on its own. `counter.dom.test.tsx` carries
+                  the tripwire that fails the moment an append is added without it.
+                */
+                onSelect={() => {}}
+              />
+            )}
+          </div>
         </div>
         {/*
           02-F12 — settling is on the counter, beside the cart, not behind a mode switch.
