@@ -90,6 +90,18 @@ const parseFixture = (): Case[] => {
 const CASES = parseFixture();
 const of = (verdict: Verdict) => CASES.filter((c) => c.verdict === verdict);
 
+/**
+ * Every case in this file SPAWNS BIOME as a subprocess, so its wall time is dominated by process
+ * startup and is a function of machine load, not of the assertion. Vitest's 5 s default was
+ * never the right budget for that: under `pnpm test`'s 24 concurrent package tasks the FLAG leg
+ * measured 5150 ms and failed as a timeout — an intermittent red that looked like a defect in
+ * the money ban and was a defect in the budget.
+ *
+ * 60 s is not a licence for it to get slow; it is the difference between "this test is broken"
+ * and "this machine is busy", which are the two things a timeout must be able to tell apart.
+ */
+const LINT_TIMEOUT_MS = 60_000;
+
 describe("F1 — the money-arithmetic ban reaches RUPEE values (18 §4 / DEC-MONEY-005)", () => {
   it("mechanism anchor (GREEN): biome with the repo config flags a rule violation in an out-of-tree fixture", () => {
     const { exitCode, output } = lintSource(
@@ -112,14 +124,18 @@ describe("F1 — the money-arithmetic ban reaches RUPEE values (18 §4 / DEC-MON
   // The missing class (RED for every rupee-named case).
   // -------------------------------------------------------------------------
 
-  it("every FLAG case is reported by the ban", () => {
-    for (const { label, source } of of("FLAG")) {
-      const { banned, output } = lintSource(source);
-      expect
-        .soft(banned, `FLAG "${label}" must be reported by the money ban.\n${output}`)
-        .toBe(true);
-    }
-  });
+  it(
+    "every FLAG case is reported by the ban",
+    () => {
+      for (const { label, source } of of("FLAG")) {
+        const { banned, output } = lintSource(source);
+        expect
+          .soft(banned, `FLAG "${label}" must be reported by the money ban.\n${output}`)
+          .toBe(true);
+      }
+    },
+    LINT_TIMEOUT_MS,
+  );
 
   // -------------------------------------------------------------------------
   // False-positive controls (GREEN, must stay green). A rule that cries wolf gets
@@ -127,14 +143,18 @@ describe("F1 — the money-arithmetic ban reaches RUPEE values (18 §4 / DEC-MON
   // message, not the exit code, so an unrelated diagnostic cannot fake a pass here.
   // -------------------------------------------------------------------------
 
-  it("every CLEAN control is left alone by the ban", () => {
-    for (const { label, source } of of("CLEAN")) {
-      const { banned, output } = lintSource(source);
-      expect
-        .soft(banned, `CLEAN "${label}" must NOT be reported by the money ban.\n${output}`)
-        .toBe(false);
-    }
-  });
+  it(
+    "every CLEAN control is left alone by the ban",
+    () => {
+      for (const { label, source } of of("CLEAN")) {
+        const { banned, output } = lintSource(source);
+        expect
+          .soft(banned, `CLEAN "${label}" must NOT be reported by the money ban.\n${output}`)
+          .toBe(false);
+      }
+    },
+    LINT_TIMEOUT_MS,
+  );
 
   // -------------------------------------------------------------------------
   // Recorded limitations. These document that a name-based rule cannot survive a
@@ -144,12 +164,16 @@ describe("F1 — the money-arithmetic ban reaches RUPEE values (18 §4 / DEC-MON
   // session's call, not the implementer's).
   // -------------------------------------------------------------------------
 
-  it("GAP cases stay clean — a name-based ban cannot see a renamed value, and that is recorded, not hidden", () => {
-    for (const { label, source } of of("GAP")) {
-      const { banned } = lintSource(source);
-      expect.soft(banned, `GAP "${label}" changed verdict — update the fixture NOTE`).toBe(false);
-    }
-  });
+  it(
+    "GAP cases stay clean — a name-based ban cannot see a renamed value, and that is recorded, not hidden",
+    () => {
+      for (const { label, source } of of("GAP")) {
+        const { banned } = lintSource(source);
+        expect.soft(banned, `GAP "${label}" changed verdict — update the fixture NOTE`).toBe(false);
+      }
+    },
+    LINT_TIMEOUT_MS,
+  );
 
   // -------------------------------------------------------------------------
   // The extension must not break the code that legitimately handles rupees today.
@@ -157,21 +181,25 @@ describe("F1 — the money-arithmetic ban reaches RUPEE values (18 §4 / DEC-MON
   // on every render, and money.ts is where the divide lives.
   // -------------------------------------------------------------------------
 
-  it("GREEN REGRESSION GUARD: the shipped money and display sources still lint clean under the extended ban", () => {
-    const shipped = [
-      "packages/domain/src/money.ts",
-      "packages/domain/src/invariants.ts",
-      "packages/ui/src/components/MoneyValue.tsx",
-    ];
-    for (const rel of shipped) {
-      const run = spawnSync(BIOME_BIN, ["lint", join(REPO_ROOT, rel)], {
-        cwd: REPO_ROOT,
-        encoding: "utf8",
-      });
-      const output = `${run.stdout}\n${run.stderr}`;
-      expect
-        .soft(output.includes(BAN), `${rel} must not trip the money ban:\n${output}`)
-        .toBe(false);
-    }
-  });
+  it(
+    "GREEN REGRESSION GUARD: the shipped money and display sources still lint clean under the extended ban",
+    () => {
+      const shipped = [
+        "packages/domain/src/money.ts",
+        "packages/domain/src/invariants.ts",
+        "packages/ui/src/components/MoneyValue.tsx",
+      ];
+      for (const rel of shipped) {
+        const run = spawnSync(BIOME_BIN, ["lint", join(REPO_ROOT, rel)], {
+          cwd: REPO_ROOT,
+          encoding: "utf8",
+        });
+        const output = `${run.stdout}\n${run.stderr}`;
+        expect
+          .soft(output.includes(BAN), `${rel} must not trip the money ban:\n${output}`)
+          .toBe(false);
+      }
+    },
+    LINT_TIMEOUT_MS,
+  );
 });
