@@ -10,7 +10,8 @@ printing next"), the verification posture ("no printer yet — golden fixtures, 
 owed"), the paper floor (**`03-F49`: a type declares `min_columns`; the KOT declares 42 and is
 refused below it**), and that **station filtering (`03-F18`) is pulled into Wave 1** from Wave 4.
 
-**The station ruling has a dependency this plan did not anticipate — see §7.**
+**Station data rides the CATALOG (`03-F50`), not a config plane — see §7 for why that question
+arose and how it resolved.**
 
 `packages/escpos` is a **protected path** (`20 §4.4`), so the `24 §3` step-2 split binds for
 every task that touches it: acceptance tests authored by a different session, committed red.
@@ -254,17 +255,35 @@ Three facts, each verified:
   channel) pair, and "channels enabled" is `00 §7` layer-2 config. §3.3 of the pricing plan
   passes those sets in from the caller precisely because there is nowhere to read them from.
 
-**So the layer-2 config plane is a shared dependency of two Wave-1 modules, and it is unbuilt.**
-That is a bigger finding than either module, and it should be planned as its own piece of work
-rather than smuggled into whichever one hits it first.
+### The two needs turned out to be different, which is what resolved it
 
-**One cheaper alternative deserves stating**, because it may be right: put `station` **on the
-catalog entry**, beside `kitchen_name` and the per-channel visibility flags that already live
-there (`14-F5`). Item→station is the inverse of `03-F18`'s station→items map and carries the same
-information. It would ride the catalog transport — built, tested, versioned, already delivering —
-and could land inside T-3's wire change rather than waiting for a config plane. The cost is that
-it contradicts `03-F18`'s "layer-2 config" wording, and that a station map refining *categories*
-(rather than items) is more natural as config than as a per-item field.
+The apparent shared dependency dissolved on inspection, and the distinction is worth keeping:
 
-**This needs a ruling before K-5, and it is the same question `01-F60`'s enabled-channels set
-raises.** Answering it once answers both.
+- **`01-F60`'s enabled-channels set is needed at PUBLISH time, on the server.** A device never
+  asks which channels are enabled — it reads the price for its order's channel and nothing else.
+  So pricing needs no device-facing config at all; the back office passes the set to
+  `publishCatalog`. §3.3's "from the caller" is the right shape, not a stopgap.
+- **Station routing IS device-facing.** The device renders the KOT, so it must resolve
+  item → station locally, offline, with no WAN (`00 §5.1`).
+
+Only the second needed a delivery channel, and one already exists.
+
+**RULED (`03-F50`): `station` is CATALOG data.** It joins `kitchen_name` and `14-F5`'s
+per-channel visibility flags on the catalog entry, rides the built and tested transport, and
+lands inside T-3's wire change rather than waiting on anything. Two refinements came with it:
+
+- **It inherits down the `01-F21` chain.** `03-F18`'s map is "station → categories/items" and the
+  category form is how a kitchen actually thinks — all breads to the tandoor. An entry with no
+  `station` takes its parent's; an item that belongs elsewhere overrides. The common case is a
+  handful of values on categories, not one per dish.
+- **An unrouted item prints on the default station rather than vanishing.** A line absent from
+  every ticket is the one kitchen failure paper cannot reveal, and `03-F34`'s refusal covers
+  documents that cannot be RENDERED, never lines that cannot be ROUTED.
+
+**The config plane is deferred** (founder ruling), and nothing in Wave 1 now blocks on it. What
+remains genuinely layer-2 — aging thresholds (`03-F14`), ready-signal ownership (`03-F24`),
+KDS-vs-printer per station — ships with defaults and becomes editable when doc 14 needs it.
+
+**Still latent, and recorded so it is not rediscovered as a defect:** `config.changed` is named in
+`01 §4`'s event catalog with **no payload schema in the registry**, so `01-F4` makes emitting it a
+runtime error for whoever tries first. Not closed here — nothing emits it yet.

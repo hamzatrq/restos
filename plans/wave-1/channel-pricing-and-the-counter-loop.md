@@ -131,6 +131,13 @@ export type CatalogEntry = {
    * no price. A single-branch org carries exactly one row.
    */
   prices?: Readonly<Record<string, Readonly<Partial<Record<OrderChannel, number>>>>>;
+  /**
+   * `03-F50` — which kitchen station cooks this. Added to THIS wire change rather than a second
+   * one: the founder pulled `03-F18` station routing into Wave 1, and the device must resolve
+   * item → station locally to filter a KOT. Inherits from `parent_id` when absent, so the usual
+   * case is a few values on categories.
+   */
+  station?: string | null;
 };
 ```
 
@@ -304,7 +311,7 @@ passing, never my judgement).
 |---|---|---|---|
 | **T-1** | The three spec PRs in §4 | `specs/` | — (`pnpm verify` docs-lint) |
 | **T-2** | `ORDER_CHANNELS` closed; `order.created.channel` becomes the enum; the `dine_in` drift in the builders corrected to a real channel + `order_type` | `domain` ⚠ | **separate session** |
-| **T-3** | `prices` on the catalog entry at all three layers; `publishCatalog` validates every enabled (branch, channel) pair on every sellable entry; the three `15 §42` citations corrected to `15-F8` | `sync-protocol` ⚠, `sync-client` ⚠, `sync-gateway` ⚠ | **separate session** |
+| **T-3** | `prices` **and `station`** (`03-F50`) on the catalog entry at all three layers; `publishCatalog` validates every enabled (branch, channel) pair on every sellable entry; the three `15 §42` citations corrected to `15-F8` | `sync-protocol` ⚠, `sync-client` ⚠, `sync-gateway` ⚠ | **separate session** |
 | **T-4** | `addLine` IPC channel; main resolves the price from its own branch + the order's channel and stamps it | `pos-electron` | same session |
 | **T-5** | The counter loop: `C4` start an order (order-type gate, §3.6), `C5` add an item, `C9` send to kitchen | `pos-electron`, `ui` | same session |
 
@@ -348,6 +355,10 @@ listed here and not tested is a defect in the delivery, not in this list.**
    assert the happy path are how A15's `.nonnegative()` claim survived while executing nothing.
 10. Money never crosses a float: the price is integer paisa end to end, and the line total is
     BigInt in the fold (`01-F17`, `DEC-MONEY-005`).
+10b. **`station` resolves by inheritance**: an entry with no station takes its parent's through
+    the `01-F21` chain, an explicit value overrides its parent, and an entry with none anywhere
+    up the chain resolves to the default station rather than to null — `03-F50`'s rule that an
+    unrouted line prints somewhere rather than vanishing.
 11. **The grid does not unlock without an order type** (§3.6): with no order open, every tile is
     disabled with its reason and fires no `onPress`; tapping a type creates the order and the
     same tile then adds a line. Asserted on the real DOM, since `ff7b750` gave `packages/ui`
