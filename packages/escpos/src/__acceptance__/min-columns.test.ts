@@ -46,6 +46,7 @@
 import { describe, expect, it } from "vitest";
 import * as escpos from "../index.js";
 import {
+  COLUMN_REFUSAL_KEYS,
   type ColumnDecision,
   checkColumns,
   DOCUMENT_TYPES_PER_03_F31,
@@ -151,13 +152,40 @@ describe("03-F49/03-F34 — below the minimum the document is REFUSED, and the r
     // "never silent degradation". A refusal that also handed back a width would let a caller
     // print anyway at whatever it was given, which is the degradation the FR bans; a refusal that
     // carried bytes would be the same thing one layer down.
+    //
+    // ASSERTED AS AN ALLOWLIST, NOT A DENYLIST, and the reason is a defect this test itself had:
+    // it originally scanned for `/bytes|payload|buffer|data|blocks|document/i`, which banned
+    // `document_type` — a field the S1 band REQUIRES in order to say WHICH document was refused —
+    // while still admitting any renderable field whose name nobody thought to list. An absence
+    // cannot be stated completely by guessing names. `COLUMN_REFUSAL_KEYS` is the declared
+    // contract; anything outside it is a leak whatever it is called.
     const refusal = checkColumns(api, "kot", capsAt(32, "FIFTY-EIGHT-MM"));
     expect(refusal.ok).toBe(false);
-    expect(Object.keys(refusal)).not.toContain("columns");
-    const leaked = Object.keys(refusal).filter((key) =>
-      /bytes|payload|buffer|data|blocks|document/i.test(key),
+    expect([...Object.keys(refusal)].sort(), "the refusal's shape is not the declared one").toEqual(
+      [...COLUMN_REFUSAL_KEYS].sort(),
     );
-    expect(leaked, "the refusal leaks something renderable").toEqual([]);
+    // Named separately because it is the specific degradation `03-F49` bans in words — "refused,
+    // never squeezed" — and it should fail by that name rather than as an anonymous extra key.
+    expect(Object.keys(refusal), "the refusal hands back a width to print at").not.toContain(
+      "columns",
+    );
+  });
+
+  it("03-F49/03-F34: the leak guard itself FIRES — a refusal carrying a fallback width or rendered blocks is rejected", () => {
+    // A positive control, because the assertion above is about ABSENCE and an absence check that
+    // cannot fail is worth nothing (oracle round 2 §C pattern 2). These are the two concrete
+    // shapes `03-F34` bans: a caller-usable width, and a payload one layer down. Both are
+    // synthesised HERE — no implementation is asked to produce them — and both must be caught.
+    const refusal = checkColumns(api, "kot", capsAt(32, "FIFTY-EIGHT-MM"));
+    expect(refusal.ok).toBe(false);
+
+    const undeclared = (value: object): string[] =>
+      Object.keys(value).filter((key) => !(COLUMN_REFUSAL_KEYS as readonly string[]).includes(key));
+
+    expect(undeclared(refusal), "the real refusal must be clean").toEqual([]);
+    expect(undeclared({ ...refusal, columns: 32 })).toEqual(["columns"]);
+    expect(undeclared({ ...refusal, blocks: [{ text: "1 x Karahi" }] })).toEqual(["blocks"]);
+    expect(undeclared({ ...refusal, bytes: new Uint8Array([0x1b, 0x40]) })).toEqual(["bytes"]);
   });
 
   it("03-F49/03-F36: EXACTLY the declared minimum prints — the minimum is a floor the layout must survive, not a boundary to refuse", () => {
@@ -267,6 +295,9 @@ describe("03-F49/03-F34 — totality: over every record and every declared type,
           expect(refusal.model_id, label).toBe(caps.model_id);
           expect(refusal.required_columns, label).toBe(required);
           expect(refusal.available_columns, label).toBe(caps.cols_font_a);
+          // The no-degradation shape guard, applied to EVERY refusal rather than to one example —
+          // a leak that only appeared for, say, the `bill` path would otherwise go unseen.
+          expect([...Object.keys(refusal)].sort(), label).toEqual([...COLUMN_REFUSAL_KEYS].sort());
           refusals++;
         } else {
           expect(decision.ok, label).toBe(true);

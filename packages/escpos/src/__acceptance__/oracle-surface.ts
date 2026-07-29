@@ -85,6 +85,36 @@ export type ColumnRefusal = {
 };
 
 /**
+ * Every key a `ColumnRefusal` is permitted to carry, as runtime data.
+ *
+ * This exists because `03-F34`'s "never a silent degradation" is an assertion about ABSENCE, and
+ * absence is the one thing a denylist cannot state completely — the first version of this suite
+ * tried, with a `/bytes|payload|buffer|data|blocks|document/i` scan, and it was wrong in both
+ * directions at once: it banned `document_type` (an identifying field the S1 band REQUIRES) while
+ * still admitting any renderable field whose name nobody happened to guess. An allowlist inverts
+ * that: every field on a refusal must be justified against an FR to appear here at all, and
+ * anything else is caught whatever it is called.
+ *
+ * The two guards below keep this list and the type provably identical in both directions —
+ * `satisfies` rejects a key the type does not declare, and `_KeysAreExhaustive` fails to compile
+ * if the type gains a key this list does not name.
+ */
+export const COLUMN_REFUSAL_KEYS = [
+  "ok",
+  "reason",
+  "severity",
+  "document_type",
+  "model_id",
+  "required_columns",
+  "available_columns",
+] as const satisfies readonly (keyof ColumnRefusal)[];
+
+type _KeysAreExhaustive =
+  Exclude<keyof ColumnRefusal, (typeof COLUMN_REFUSAL_KEYS)[number]> extends never ? true : never;
+const _keysAreExhaustive: _KeysAreExhaustive = true;
+void _keysAreExhaustive;
+
+/**
  * The decision. There are exactly TWO branches on purpose: `03-F49` says "refused, never
  * squeezed" and `03-F34` says "never a silent degradation", so there is no third outcome that
  * both proceeds and reduces. The success branch carries the printer's OWN column count — not the
