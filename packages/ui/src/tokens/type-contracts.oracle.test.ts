@@ -66,6 +66,24 @@ const typecheck = (name: string, code: string): string => {
 const rejects = (name: string, code: string): boolean =>
   typecheck(name, code).includes("fixture.ts");
 
+/**
+ * Every case that calls the typecheck helper above SPAWNS `tsc` AS A SUBPROCESS, so its wall
+ * time is dominated by process startup and machine load, not by the assertion. Vitest's 5 s
+ * default was never the right budget for that, and it fired: a full `pnpm test --force
+ * --continue` — which keeps all eight package suites running concurrently instead of letting
+ * turbo kill the siblings of the first failure — timed this file out at 5000 ms on an unchanged
+ * tree that had passed four consecutive runs.
+ *
+ * This is the same defect `money-rupee-lint` documents and `ff7b750` fixed there, and the same
+ * one `fold-brand-lint` and `money-helpers` inherited unfixed. `tsc` is a HEAVIER subprocess
+ * than `biome lint`, so this file was always the more exposed of the two classes; it survived
+ * only because the load never peaked here first.
+ *
+ * 60 s is not a licence to get slow. It is the difference between "this test is broken" and
+ * "this machine is busy", which are the two things a timeout has to be able to tell apart.
+ */
+const TYPECHECK_TIMEOUT_MS = 60_000;
+
 describe("F5 / 00 §6 — MoneyValue takes BRANDED paisa, so the `as` cast can die", () => {
   // `packages/ui/CLAUDE.md`: "MoneyValue takes integer paisa, never a formatted string and
   // never a signed amount — money has no sign here". Today `MoneyValueProps.paisa` is a plain
@@ -74,61 +92,83 @@ describe("F5 / 00 §6 — MoneyValue takes BRANDED paisa, so the `as` cast can d
   // enforced only by a RUNTIME throw inside `domain` — and a RangeError during render takes
   // the cart down, which is the one thing 01-F17 says must never happen to a sale.
 
-  it("rejects a raw number where paisa is required", () => {
-    const rejected = rejects(
-      "money-raw-number",
-      `import type { MoneyValue } from "@restos/ui";
+  it(
+    "rejects a raw number where paisa is required",
+    () => {
+      const rejected = rejects(
+        "money-raw-number",
+        `import type { MoneyValue } from "@restos/ui";
        type P = Parameters<typeof MoneyValue>[0];
        const total: number = 12345;
        export const bad: P["paisa"] = total;`,
-    );
-    expect(rejected, "a plain number is accepted as paisa — the brand is not enforced").toBe(true);
-  });
+      );
+      expect(rejected, "a plain number is accepted as paisa — the brand is not enforced").toBe(
+        true,
+      );
+    },
+    TYPECHECK_TIMEOUT_MS,
+  );
 
-  it("rejects a negative literal, because money has no sign here", () => {
-    expect(
-      rejects(
-        "money-negative",
-        `import type { MoneyValue } from "@restos/ui";
+  it(
+    "rejects a negative literal, because money has no sign here",
+    () => {
+      expect(
+        rejects(
+          "money-negative",
+          `import type { MoneyValue } from "@restos/ui";
          type P = Parameters<typeof MoneyValue>[0];
          export const bad: P["paisa"] = -500;`,
-      ),
-    ).toBe(true);
-  });
+        ),
+      ).toBe(true);
+    },
+    TYPECHECK_TIMEOUT_MS,
+  );
 
-  it("accepts a value constructed through domain's `paisa()`", () => {
-    const out = typecheck(
-      "money-branded-ok",
-      `import type { MoneyValue } from "@restos/ui";
+  it(
+    "accepts a value constructed through domain's `paisa()`",
+    () => {
+      const out = typecheck(
+        "money-branded-ok",
+        `import type { MoneyValue } from "@restos/ui";
        import { paisa } from "@restos/domain";
        type P = Parameters<typeof MoneyValue>[0];
        export const good: P["paisa"] = paisa(12345);`,
-    );
-    expect(out, "the sanctioned constructor must still typecheck").toBe("");
-  });
+      );
+      expect(out, "the sanctioned constructor must still typecheck").toBe("");
+    },
+    TYPECHECK_TIMEOUT_MS,
+  );
 
-  it("sources direction from `directedPaisa`, not from a loose string", () => {
-    // Post money-round, `domain` exports `directedPaisa(value) -> { magnitudePaisa, sign }`.
-    // A screen that renders a variance must take the sign from there rather than the caller
-    // deciding a word, or the display edge starts writing `residual < 0 ? ... : ...` again.
-    const out = typecheck(
-      "money-direction",
-      `import type { MoneyValue } from "@restos/ui";
+  it(
+    "sources direction from `directedPaisa`, not from a loose string",
+    () => {
+      // Post money-round, `domain` exports `directedPaisa(value) -> { magnitudePaisa, sign }`.
+      // A screen that renders a variance must take the sign from there rather than the caller
+      // deciding a word, or the display edge starts writing `residual < 0 ? ... : ...` again.
+      const out = typecheck(
+        "money-direction",
+        `import type { MoneyValue } from "@restos/ui";
        import { directedPaisa } from "@restos/domain";
        type P = Parameters<typeof MoneyValue>[0];
        const d = directedPaisa(-4200);
        export const amount: P["paisa"] = d.magnitudePaisa;
        export const sign: -1 | 0 | 1 = d.sign;`,
-    );
-    expect(out, "MoneyValue must accept directedPaisa's magnitude directly").toBe("");
-  });
+      );
+      expect(out, "MoneyValue must accept directedPaisa's magnitude directly").toBe("");
+    },
+    TYPECHECK_TIMEOUT_MS,
+  );
 
-  it("no longer casts through the brand in MoneyValue's own source", async () => {
-    const src = await import("node:fs").then((fs) =>
-      fs.readFileSync(join(UI_ROOT, "src", "components", "MoneyValue.tsx"), "utf8"),
-    );
-    expect(src).not.toMatch(/as\s+Parameters<typeof\s+rupeesFromPaisa>/);
-  });
+  it(
+    "no longer casts through the brand in MoneyValue's own source",
+    async () => {
+      const src = await import("node:fs").then((fs) =>
+        fs.readFileSync(join(UI_ROOT, "src", "components", "MoneyValue.tsx"), "utf8"),
+      );
+      expect(src).not.toMatch(/as\s+Parameters<typeof\s+rupeesFromPaisa>/);
+    },
+    TYPECHECK_TIMEOUT_MS,
+  );
 });
 
 describe("F9 / 27-F8 — `floor` is a floor, not a design posture", () => {
@@ -138,48 +178,64 @@ describe("F9 / 27-F8 — `floor` is a floor, not a design posture", () => {
   // and `pageCapacity` validates that violation as correct, because it checks the tile
   // against whatever posture it was handed.
 
-  it("rejects `floor` where a grid posture is required", () => {
-    const rejected = rejects(
-      "posture-floor-grid",
-      `import type { ItemGrid } from "@restos/ui";
+  it(
+    "rejects `floor` where a grid posture is required",
+    () => {
+      const rejected = rejects(
+        "posture-floor-grid",
+        `import type { ItemGrid } from "@restos/ui";
        type P = Parameters<typeof ItemGrid>[0];
        export const bad: P["posture"] = "floor";`,
-    );
-    expect(rejected, "`floor` is accepted as an ItemGrid posture").toBe(true);
-  });
+      );
+      expect(rejected, "`floor` is accepted as an ItemGrid posture").toBe(true);
+    },
+    TYPECHECK_TIMEOUT_MS,
+  );
 
-  it("rejects `floor` where a Tile posture is required", () => {
-    expect(
-      rejects(
-        "posture-floor-tile",
-        `import type { Tile } from "@restos/ui";
+  it(
+    "rejects `floor` where a Tile posture is required",
+    () => {
+      expect(
+        rejects(
+          "posture-floor-tile",
+          `import type { Tile } from "@restos/ui";
          type P = Parameters<typeof Tile>[0];
          export const bad: P["posture"] = "floor";`,
-      ),
-    ).toBe(true);
-  });
+        ),
+      ).toBe(true);
+    },
+    TYPECHECK_TIMEOUT_MS,
+  );
 
-  it("still accepts every real design posture", () => {
-    const out = typecheck(
-      "posture-designs-ok",
-      `import type { ItemGrid } from "@restos/ui";
+  it(
+    "still accepts every real design posture",
+    () => {
+      const out = typecheck(
+        "posture-designs-ok",
+        `import type { ItemGrid } from "@restos/ui";
        type P = Parameters<typeof ItemGrid>[0];
        export const ok: P["posture"][] = ["counter", "keypad", "kitchen", "handheld"];`,
-    );
-    expect(out).toBe("");
-  });
+      );
+      expect(out).toBe("");
+    },
+    TYPECHECK_TIMEOUT_MS,
+  );
 
-  it("keeps `floor` reachable for the things that legitimately sit at the floor", () => {
-    // Cart's remove control and ItemGrid's page buttons are at 48 dp today and 27-F8 permits
-    // that under "absolute floor, anything". Splitting the union must not delete the floor —
-    // only stop it being passed where a POSTURE is asked for.
-    const out = typecheck(
-      "posture-floor-still-exists",
-      `import { targetFor } from "@restos/ui";
+  it(
+    "keeps `floor` reachable for the things that legitimately sit at the floor",
+    () => {
+      // Cart's remove control and ItemGrid's page buttons are at 48 dp today and 27-F8 permits
+      // that under "absolute floor, anything". Splitting the union must not delete the floor —
+      // only stop it being passed where a POSTURE is asked for.
+      const out = typecheck(
+        "posture-floor-still-exists",
+        `import { targetFor } from "@restos/ui";
        export const n: number = targetFor("floor");`,
-    );
-    expect(out, "targetFor must still accept the floor").toBe("");
-  });
+      );
+      expect(out, "targetFor must still accept the floor").toBe("");
+    },
+    TYPECHECK_TIMEOUT_MS,
+  );
 });
 
 describe("F7 / 27-F43 — the pairing is structural, not prose", () => {
@@ -187,25 +243,33 @@ describe("F7 / 27-F43 — the pairing is structural, not prose", () => {
   // intent; THE COMPONENT MAKES IT STRUCTURAL. Leaving the pairing in prose produced a
   // publicly-reported failure that remains unfixed years later." Only the naming half shipped.
 
-  it("exports a Surface component", () => {
-    const out = typecheck(
-      "surface-exists",
-      `import { Surface } from "@restos/ui";
+  it(
+    "exports a Surface component",
+    () => {
+      const out = typecheck(
+        "surface-exists",
+        `import { Surface } from "@restos/ui";
        export const x: unknown = Surface;`,
-    );
-    expect(out, "27-F43's <Surface> does not exist").toBe("");
-  });
+      );
+      expect(out, "27-F43's <Surface> does not exist").toBe("");
+    },
+    TYPECHECK_TIMEOUT_MS,
+  );
 
-  it("binds a foreground to its surface rather than letting a caller choose one", () => {
-    // The failure this prevents, concretely: `fgColor-status-fault` on `bgColor-status-fault`
-    // measures 1.00:1. Nothing today stops a component composing exactly that, because every
-    // component picks its foreground out of a flat global `color` record by hand.
-    const rejected = rejects(
-      "surface-rejects-mismatch",
-      `import type { Surface } from "@restos/ui";
+  it(
+    "binds a foreground to its surface rather than letting a caller choose one",
+    () => {
+      // The failure this prevents, concretely: `fgColor-status-fault` on `bgColor-status-fault`
+      // measures 1.00:1. Nothing today stops a component composing exactly that, because every
+      // component picks its foreground out of a flat global `color` record by hand.
+      const rejected = rejects(
+        "surface-rejects-mismatch",
+        `import type { Surface } from "@restos/ui";
        type P = Parameters<typeof Surface>[0];
        export const bad: P = { fill: "bgColor-status-fault", fg: "fgColor-status-fault" };`,
-    );
-    expect(rejected, "a mismatched fill/foreground pair is accepted").toBe(true);
-  });
+      );
+      expect(rejected, "a mismatched fill/foreground pair is accepted").toBe(true);
+    },
+    TYPECHECK_TIMEOUT_MS,
+  );
 });
