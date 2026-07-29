@@ -2,10 +2,11 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { businessDate } from "@restos/domain";
-import { type BlockedCursor, openStore, wallClock } from "@restos/sync-client";
+import { openStore, wallClock } from "@restos/sync-client";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { CHANNELS } from "../shared/ipc";
 import { type CatalogResolver, createGateway } from "./gateway";
+import { createUplink } from "./sync";
 
 /**
  * The main process: the only thing in this app that touches SQLite, and the only thing that
@@ -162,12 +163,30 @@ app.whenReady().then(() => {
     nativeBinding: electronAddonPath(),
   });
 
+  const window = createWindow();
+  load(window);
+
+  // The renderer re-reads on this; it carries no data (`shared/ipc.ts`). Pushing the rows
+  // themselves would make the push a second source of truth for what the folds already hold.
+  const notifyChanged = (): void => {
+    if (!window.isDestroyed()) window.webContents.send(CHANNELS.changed);
+  };
+
   /**
-   * No mesh or cloud session yet, so all three facts are honestly `down` rather than
-   * optimistically `ok`. `00 §5.7` requires the strip to report what is true; a shell that
-   * claims a hub it has never contacted is the exact dishonesty that FR exists to prevent.
+   * The cloud uplink (`01-F9`). Configured by environment because admission (`01-F47`) has not
+   * landed and is what will carry both of these — a device learns its gateway and its token at
+   * admission, not from a shell variable.
+   *
+   * Absent ⇒ the device runs offline, which is `00 §5.1`'s normal state and not an error: no
+   * in-branch feature may require WAN, and the till sells either way (`01-F17`).
    */
-  const blockedCursor = (): BlockedCursor | null => null;
+  const uplink = createUplink({
+    store,
+    url: process.env["RESTOS_CLOUD_URL"],
+    token: process.env["RESTOS_DEVICE_TOKEN"],
+    onChanged: notifyChanged,
+  });
+  app.on("will-quit", () => uplink.stop());
 
   const gateway = createGateway({
     store,
@@ -181,22 +200,17 @@ app.whenReady().then(() => {
     // 01-F49 — bound at admission from the branch class, never a UI toggle. Admission has not
     // landed, so this is false and the 27-F67 training inversion is exercised by its story.
     training: false,
-    reachability: () => ({ lan: "down", hub: "down", cloud: "down" }),
-    blockedCursor,
+    // 00 §5.7 — three separate facts, each REPORTED rather than asserted. These were two
+    // hardcoded constants until the uplink existed: `cloud: "down"` unconditionally, and a
+    // blocked cursor that was always null, so DEC-SYNC-011 was satisfied at the API and
+    // nowhere a human could see it.
+    reachability: uplink.reachability,
+    blockedCursor: uplink.blockedCursor,
     // 01-F46 via `domain`, and computed from BRANCH time (01-F43), not the device clock: a
     // till whose clock is an hour fast must not roll the business day an hour early. The
     // offset is 0 until a hub is contacted, which the strip reports honestly as `down`.
     businessDay: () => businessDate(wallClock.now() + store.branchTimeStatus().offset_ms),
   });
-
-  const window = createWindow();
-  load(window);
-
-  // The renderer re-reads on this; it carries no data (`shared/ipc.ts`). Pushing the rows
-  // themselves would make the push a second source of truth for what the folds already hold.
-  const notifyChanged = (): void => {
-    if (!window.isDestroyed()) window.webContents.send(CHANNELS.changed);
-  };
 
   // One channel, one gateway method, no dispatcher. A generic handler that switched on a
   // channel name would reintroduce exactly the free-form surface `18 §9` bans.
