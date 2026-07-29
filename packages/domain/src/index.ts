@@ -57,6 +57,8 @@ export {
   eventRegistry,
   isAuditEvent,
   type KnownEventType,
+  ORDER_CHANNELS,
+  type OrderChannel,
   PAYMENT_METHODS,
   type ParsedEvent,
   type PaymentMethod,

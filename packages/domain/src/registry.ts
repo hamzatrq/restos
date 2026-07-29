@@ -22,6 +22,24 @@ export class UnknownEventTypeError extends Error {
  * - `aggregator_receivable` — `01-F32`; the order is settled but the money arrives later from
  *   the aggregator, and doc 08 reconciles it against payouts.
  */
+/**
+ * Order channels (`02-F42`, the tags `02-F1` already names). Declared once, here, for the same
+ * `18 §4` reason as `PAYMENT_METHODS` below.
+ *
+ * **This is a PRICE KEY, not a report category** — which is why it is closed. `01-F60` resolves a
+ * line's `unit_price_paisa` from the order's channel, and `01-F53` snapshots that into the event
+ * at line-add, so a typo is not a mislabelled row: it is a **wrong price frozen in an append-only
+ * ledger** where `01-F1` allows no edit, only a linked correction. An open string fails nowhere
+ * and is discovered as thin margin months later.
+ *
+ * **`channel` and `order_type` are different axes and neither substitutes for the other**
+ * (`02-F1`). `dine_in`/`takeaway`/`delivery` are *types*; a channel drawn from that vocabulary is
+ * invalid. That confusion is not hypothetical — `channel: "dine_in"` sat in 45 fixture sites
+ * across 26 files from Wave 0 until `59d601a`, invisible because the field accepted any string.
+ */
+export const ORDER_CHANNELS = ["counter", "phone", "storefront", "whatsapp", "foodpanda"] as const;
+export type OrderChannel = (typeof ORDER_CHANNELS)[number];
+
 export const PAYMENT_METHODS = [
   "cash",
   "card",
@@ -36,7 +54,9 @@ export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 const payloadSchemas = {
   "order.created": z.looseObject({
     order_id: z.string().min(1),
-    channel: z.string().min(1),
+    // 02-F42 — a CLOSED set, because 01-F60 makes this the key a line's price resolves from.
+    // Required, and deliberately so: an order with no channel has no resolvable price at all.
+    channel: z.enum(ORDER_CHANNELS),
     // Optional declared fields, additive under schema_version 1 (00 §6; T-01-04).
     order_type: z.string().min(1).optional(),
     table_id: z.string().min(1).optional(),
