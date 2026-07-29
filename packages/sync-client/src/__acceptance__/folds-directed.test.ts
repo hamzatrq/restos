@@ -138,7 +138,7 @@ describe("store.ingest — branch-stream entry point (01-F4/01-F8/18 §4)", () =
     const store = foldStore(id);
     const peer = peerIdentity(id);
     expect(() =>
-      store.ingest(peerEnvelope(peer, 0, { payload: { channel: "dine_in" } })),
+      store.ingest(peerEnvelope(peer, 0, { payload: { channel: "counter" } })),
     ).toThrow();
     expect(tables(store)).toEqual({ orders: [], queue: [], parked: [] });
     store.close();
@@ -201,11 +201,22 @@ describe("open_orders fold (01-F6)", () => {
   it("01-F6: order.created materializes a row with the T-01-15 defaults and empty canonical json_lines", () => {
     const id = identity();
     const store = foldStore(id);
-    store.append(appendInput(id, { ...orderCreated("O1"), ...at(0) }));
+    // T-2 (02-F42): the payload is spelled out rather than taken from `orderCreated`, which now
+    // carries `order_type: "dine_in"` (see ./builders.ts ORDINARY_ORDER). This test's subject is
+    // the DEFAULT row — `order_type: null` when the optional field is absent — and the next test
+    // covers the supplied case. Letting the builder supply it would have deleted the null
+    // branch's only coverage while leaving the test green.
+    store.append(
+      appendInput(id, {
+        type: "order.created",
+        payload: { order_id: "O1", channel: "counter" },
+        ...at(0),
+      }),
+    );
     expect(store.openOrders()).toEqual([
       {
         order_id: "O1",
-        channel: "dine_in",
+        channel: "counter",
         order_type: null,
         confirmed_at: null,
         settled: 0,
@@ -249,8 +260,11 @@ describe("open_orders fold (01-F6)", () => {
   it("01-F20/01-F34: a second divergent order.created keeps both members — register defaults to the min-payloadHash payload and order_identity_conflict is raised", () => {
     const id = identity();
     const store = foldStore(id);
-    const payloadA = { order_id: "O1", channel: "dine_in" };
-    const payloadB = { order_id: "O1", channel: "takeaway", order_type: "delivery" };
+    const payloadA = { order_id: "O1", channel: "counter" };
+    // T-2 (02-F42): `takeaway` was an order TYPE in the `channel` field; `phone` is a real
+    // channel and still differs from payloadA's `counter`. payloadA deliberately carries NO
+    // `order_type` — the assertion below pins the null branch, so it must stay absent there.
+    const payloadB = { order_id: "O1", channel: "phone", order_type: "delivery" };
     store.append(appendInput(id, { type: "order.created", payload: payloadA, ...at(0) }));
     store.append(appendInput(id, { type: "order.created", payload: payloadB, ...at(5000) }));
     const expected = sha256Canonical(payloadA) < sha256Canonical(payloadB) ? payloadA : payloadB;
@@ -519,7 +533,7 @@ describe("kitchen_queue fold (01-F6)", () => {
       {
         order_id: "O1",
         confirm_at: T0 + 500,
-        channel: "dine_in",
+        channel: "counter",
         age_basis: T0 + 500,
         lines_ready: 0,
         lines_total: 1,

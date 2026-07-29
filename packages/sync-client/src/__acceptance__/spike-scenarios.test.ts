@@ -145,7 +145,7 @@ const runReorder = (seed: number): ReorderRun => {
     a,
     eventInput("dev-a", `x1b-created-${seed}`, "order.created", {
       order_id: order,
-      channel: "dine_in",
+      channel: "counter",
     }),
   );
   record(created.id, "dev-a");
@@ -365,7 +365,7 @@ describe("X4 — plug-pull mid-print (01-F2): kill-seed survival + no phantom KO
     const l1 = `held-l1-${seed}`;
     const l2 = `held-l2-${seed}`;
     const held: [string, Record<string, unknown>][] = [
-      ["order.created", { order_id: order, channel: "dine_in" }],
+      ["order.created", { order_id: order, channel: "counter" }],
       ["order.confirmed", { order_id: order }],
       [
         "order.line_added",

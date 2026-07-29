@@ -167,9 +167,13 @@ describe("F2 divergent duplicate ingest (01-F34)", () => {
 
     // Same id, different device-authored content — pre-fix this was a silent no-op
     // and the two devices disagreed under one id forever.
+    // T-2 (02-F42): was `channel: "takeaway"`, an order TYPE. `phone` is a real channel and
+    // differs from the original's `counter`, so the divergence is now single-variable — the
+    // old fixture also diverged by omitting `order_type`, which made "which field diverged"
+    // ambiguous.
     const divergent = {
       ...original,
-      payload: { order_id: "order-diverge", channel: "takeaway" },
+      payload: { order_id: "order-diverge", order_type: "dine_in", channel: "phone" },
     };
     expect(() => store.ingest(divergent)).toThrow(DivergentDuplicateError);
 
@@ -179,8 +183,12 @@ describe("F2 divergent duplicate ingest (01-F34)", () => {
       store.readAllEvents().find((e) => e.id === original.id),
       "the stored original",
     );
-    expect(stored.payload).toEqual({ order_id: "order-diverge", channel: "dine_in" });
-    expect(must(store.openOrders()[0], "the order row").channel).toBe("dine_in");
+    expect(stored.payload).toEqual({
+      order_id: "order-diverge",
+      order_type: "dine_in",
+      channel: "counter",
+    });
+    expect(must(store.openOrders()[0], "the order row").channel).toBe("counter");
 
     store.close();
   });
@@ -234,9 +242,10 @@ describe("F2 divergent duplicate ingest (01-F34)", () => {
     link.deliver(eventBatch([withGlobalSeq(original, 1)]));
     expect(store.status().last_global_seq).toBe(1);
 
+    // T-2 (02-F42): as above — a real channel that differs from the original's `counter`.
     const divergent = {
       ...original,
-      payload: { order_id: "order-batch-diverge", channel: "takeaway" },
+      payload: { order_id: "order-batch-diverge", order_type: "dine_in", channel: "phone" },
     };
     const clean = peerEnvelope(peer, 1);
     link.deliver(eventBatch([withGlobalSeq(divergent, 2), withGlobalSeq(clean, 3)]));
@@ -252,7 +261,7 @@ describe("F2 divergent duplicate ingest (01-F34)", () => {
     expect(new Set(store.readAllEvents().map((e) => e.id)).has(clean.id)).toBe(true);
     // The stored row still holds the original content.
     expect(must(store.openOrders().find((o) => o.order_id === "order-batch-diverge")).channel).toBe(
-      "dine_in",
+      "counter",
     );
 
     session.stop();

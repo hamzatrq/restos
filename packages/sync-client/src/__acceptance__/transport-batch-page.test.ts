@@ -85,7 +85,7 @@ const failed = (r: PageResult | undefined): { ok: false; error: unknown } => {
   return rr;
 };
 
-const orderPayload = (order_id: string) => ({ order_id, channel: "dine_in" });
+const orderPayload = (order_id: string) => ({ order_id, channel: "counter" });
 const ids = (store: DeviceStore): Set<string> => new Set(store.readAllEvents().map((e) => e.id));
 
 describe("T-01-16 batched page — THE per-event-granularity guard (26 §6.4 warning; 01-F17/01-F1/01-F9)", () => {

@@ -262,7 +262,8 @@ describe("order.settlement_closed — the new 01 §4 event type (01-F33)", () =>
 describe("payloadHash — the clock-neutral tiebreak primitive (01-F34, matrix conventions)", () => {
   it("01-F34: payloadHash(payload) = sha256 hex over canonicalJson(payload)", () => {
     const payloadHash = mustExport(maybeExports.payloadHash, "payloadHash");
-    const payload = { order_id: "O1", channel: "dine_in", nested: { b: 2, a: 1 } };
+    // T-2 (02-F42): `counter` is a real channel; the payload is opaque hash input either way.
+    const payload = { order_id: "O1", channel: "counter", nested: { b: 2, a: 1 } };
     const expected = createHash("sha256").update(canonicalJson(payload), "utf8").digest("hex");
     expect(payloadHash(payload)).toBe(expected);
   });

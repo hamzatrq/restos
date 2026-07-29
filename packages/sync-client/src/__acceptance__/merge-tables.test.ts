@@ -167,8 +167,10 @@ describe("duplicate creates — MVR with a clock-free default (matrix row 52; 01
     const id = identity();
     const peerA = peerIdentity(id);
     const peerB = peerIdentity(id);
-    const payloadA = { order_id: "O1", channel: "dine_in" };
-    const payloadB = { order_id: "O1", channel: "takeaway" };
+    const payloadA = { order_id: "O1", channel: "counter" };
+    // T-2 (02-F42): `takeaway` is an order TYPE; `phone` is a real channel and still differs
+    // from payloadA's `counter`, so the two creates genuinely diverge.
+    const payloadB = { order_id: "O1", channel: "phone" };
     const createA = peerEnvelope(peerA, 0, { type: "order.created", payload: payloadA, ...at(0) });
     const createB = peerEnvelope(peerB, 0, {
       type: "order.created",
@@ -197,7 +199,7 @@ describe("duplicate creates — MVR with a clock-free default (matrix row 52; 01
     store.ingest(peerEnvelope(peerA, 0, { ...created("O1"), ...at(0) }));
     store.ingest(peerEnvelope(peerB, 0, { ...created("O1"), ...at(700) }));
     const row = onlyOrder(store);
-    expect(row.channel).toBe("dine_in");
+    expect(row.channel).toBe("counter");
     expect(JSON.parse(row.exceptions_json)).not.toContain("order_identity_conflict");
     store.close();
   });
@@ -357,7 +359,9 @@ describe("retention shrink — matrix-B CE (no resurrection) + matrix-C CE (slic
     // key under a new envelope id — exactly F2's resurrection vector (a settled,
     // dropped order reappearing as open on the floor).
     const straggler = peerEnvelope(peerIdentity(id), 0, {
-      ...created("O1", { channel: "takeaway" }),
+      // T-2 (02-F42): a real channel, still different from the dropped order's `counter`, so
+      // the straggler stays a divergent-payload create and not an identical-value duplicate.
+      ...created("O1", { channel: "phone" }),
       ...at(4000),
     });
     expect(store.ingest(straggler)).toEqual({ stored: true }); // the LEDGER keeps it (01-F1)

@@ -46,7 +46,7 @@ describe("device store append (01-F2)", () => {
   it("01-F4: an invalid payload for a known type throws and persists nothing", () => {
     const id = identity();
     const store = openStore({ path: ":memory:", identity: id });
-    expect(() => store.append(appendInput(id, { payload: { channel: "dine_in" } }))).toThrow();
+    expect(() => store.append(appendInput(id, { payload: { channel: "counter" } }))).toThrow();
     expect(store.status().queue_depth).toBe(0);
     store.close();
   });
@@ -80,7 +80,9 @@ describe("device store append (01-F2)", () => {
     const input = appendInput(id);
     const first = store.append(input);
     expect(() =>
-      store.append({ ...input, payload: { order_id: "other", channel: "takeaway" } }),
+      // T-2 (02-F42): `phone` is a real channel; the payload still diverges from `input`'s on
+      // both fields, which is what the re-append must refuse.
+      store.append({ ...input, payload: { order_id: "other", channel: "phone" } }),
     ).toThrow();
     expect(() => store.append({ ...input, type: "order.teleported" })).toThrow();
     expect(store.readOwnEvents()).toEqual([first]);

@@ -66,7 +66,10 @@ const pingMsg = (t: number): ProtocolMessage => ({ v: PROTOCOL_VERSION, kind: "p
 /** Poison envelope: registry-valid, but a U+0000 in a payload string (storage_reject). */
 const poisonEnvelope = (device_id: string, lamport_seq: number) => ({
   ...envelope(device_id, lamport_seq),
-  payload: { order_id: `order-${NUL}-poison`, channel: "dine_in" },
+  // T-2 (02-F42): `counter` is a real channel; `dine_in` was an order TYPE. `order_type` rides
+  // along so this payload keeps the same SHAPE as `envelope()`'s — the poison differs from a
+  // clean event in exactly one way, the U+0000, which is what the quarantine is being tested on.
+  payload: { order_id: `order-${NUL}-poison`, order_type: "dine_in", channel: "counter" },
 });
 
 const run = (sim: ReturnType<typeof createSim>) => sim.runToQuiescence({ maxVirtualMs: 60_000 });

@@ -116,7 +116,14 @@
 // from the fix-round file in their test names.
 import { createHash } from "node:crypto";
 import { openStore } from "../index.js";
-import { canonicalJson, type Identity, must, peerEnvelope, seededRng } from "./builders.js";
+import {
+  canonicalJson,
+  type Identity,
+  must,
+  ORDINARY_ORDER,
+  peerEnvelope,
+  seededRng,
+} from "./builders.js";
 
 export type FoldStats = {
   full_rebuilds: number;
@@ -225,7 +232,9 @@ export const foldStats = (store: MergeStore): FoldStats => {
 
 export const created = (order_id: string, extra: Record<string, unknown> = {}) => ({
   type: "order.created",
-  payload: { order_id, channel: "dine_in", ...extra },
+  // T-2 (02-F42): `dine_in` was in the `channel` field and is an order TYPE (02-F1).
+  // Corrected onto both axes — see ./builders.ts ORDINARY_ORDER for the full reasoning.
+  payload: { order_id, ...ORDINARY_ORDER, ...extra },
 });
 
 export const confirmed = (order_id: string) => ({
@@ -547,7 +556,10 @@ export const generateMergeSet = (seed: number): MergeSet => {
     const birthTable = chance(0.4) ? `T${int(1, 3)}` : undefined;
     const createdId = emit(created(orderId, birthTable ? { table_id: birthTable } : {}));
     if (chance(0.2))
-      emit(created(orderId, { channel: "takeaway" })); // divergent duplicate create
+      // T-2 (02-F42): `takeaway` is an order TYPE, so it was never a divergence in the
+      // `channel` axis at all — it was a wrong value that happened to differ. `phone` is a real
+      // channel and differs from ORDINARY_ORDER's `counter`, so the divergence survives.
+      emit(created(orderId, { channel: "phone" })); // divergent duplicate create
     else if (chance(0.15)) emit(created(orderId, birthTable ? { table_id: birthTable } : {})); // identical-value duplicate
 
     const lineIds: string[] = [];

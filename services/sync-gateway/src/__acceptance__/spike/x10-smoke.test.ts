@@ -192,7 +192,7 @@ const mkInput = (
   refs: [],
 });
 const created = (device: string, id: string, order: string): AppendInput =>
-  mkInput(device, id, "order.created", { order_id: order, channel: "dine_in" });
+  mkInput(device, id, "order.created", { order_id: order, channel: "counter" });
 const confirmed = (device: string, id: string, order: string): AppendInput =>
   mkInput(device, id, "order.confirmed", { order_id: order });
 
@@ -337,7 +337,7 @@ describe("X10 — real-process smoke over real WS + Testcontainers PG (01 §9-Q1
       // ── Phase 1: rush while WAN is up (incl. the U+0000 event) ─────────
       const nulEvent = mkInput(F1.id, "evt-b-nul", "order.created", {
         order_id: `order-${NUL}poison`,
-        channel: "dine_in",
+        channel: "counter",
       });
       await appendOn(hub, created(HUB.id, "evt-a-x-created", "order-X"));
       await appendOn(hub, confirmed(HUB.id, "evt-a-x-confirmed", "order-X"));

@@ -39,7 +39,7 @@ const CONVERGE_MS = 2_000;
 const SETTLE_MS = 20_000;
 
 const order = (device_id: string, id: string, order_id: string) =>
-  eventInput(device_id, id, "order.created", { order_id, channel: "dine_in" });
+  eventInput(device_id, id, "order.created", { order_id, channel: "counter" });
 
 type NoticeDelivery = Extract<TraceEntry, { kind: "delivery" }> & {
   message: Extract<ProtocolMessage, { kind: "quarantine_notice" }>;

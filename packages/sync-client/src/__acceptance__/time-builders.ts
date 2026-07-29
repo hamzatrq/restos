@@ -214,7 +214,9 @@ export const timeScenario = (): TimeSet => {
   emit(1, settlementClosed("O1", { settlement_attempt_ids: ["sa-K"] }), 700);
 
   // O2 — two competing confirms from two devices (anchor SELECTION is clock-free).
-  emit(1, created("O2", { channel: "takeaway" }), 800);
+  // T-2 (02-F42): `takeaway` is an order TYPE. O2 is created once, so this is variety and not
+  // divergence — `phone` keeps it distinguishable from O1's `counter` and is a real channel.
+  emit(1, created("O2", { channel: "phone" }), 800);
   emit(1, lineAdded("O2", "M1"), 850);
   emit(1, confirmed("O2"), 900);
   emit(2, confirmed("O2"), 1200);

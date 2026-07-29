@@ -67,7 +67,8 @@ const richScenario = () => {
   };
 
   const createdId = emit(0, created("O1", { table_id: "T1" }), 0);
-  emit(1, created("O1", { channel: "takeaway" }), 50); // divergent duplicate create
+  // T-2 (02-F42): `phone` is a real channel and differs from ORDINARY_ORDER's `counter`.
+  emit(1, created("O1", { channel: "phone" }), 50); // divergent duplicate create
   emit(0, lineAdded("O1", "L1"), 100);
   emit(1, lineAdded("O1", "L2", { qty: 2, unit_price_paisa: 700 }), 150);
   const c1 = emit(0, edge("O1", "L1", "confirmed", ["placed"]), 200);

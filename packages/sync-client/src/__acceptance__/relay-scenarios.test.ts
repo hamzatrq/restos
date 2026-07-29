@@ -55,7 +55,7 @@ const CONVERGE_MS = 2_000;
 const SETTLE_MS = 20_000;
 
 const order = (device_id: string, id: string, order_id: string) =>
-  eventInput(device_id, id, "order.created", { order_id, channel: "dine_in" });
+  eventInput(device_id, id, "order.created", { order_id, channel: "counter" });
 
 describe("R1 — LAN-only device converges through the hub relay (01-F13 / DEC-SYNC-009)", () => {
   it("R1/01-F13/01-F9/01-F1/DEC-SYNC-009: a device with NO cloud transport reaches the merged cloud log via the hub — origin device_id/lamport_seq/payload verbatim — and its outbox drains on the LAN-propagated cloud ack (01-F8)", () => {

@@ -46,7 +46,8 @@
           "schema_version": 1,
           "payload": {
             "order_id": "xp-order-0",
-            "channel": "dine_in"
+            "order_type": "dine_in",
+            "channel": "counter"
           },
           "refs": []
         },
@@ -65,7 +66,8 @@
           "schema_version": 1,
           "payload": {
             "order_id": "xp-order-1",
-            "channel": "dine_in"
+            "order_type": "dine_in",
+            "channel": "counter"
           },
           "refs": []
         }
@@ -104,7 +106,8 @@
           "schema_version": 1,
           "payload": {
             "order_id": "xp-order-0",
-            "channel": "dine_in"
+            "order_type": "dine_in",
+            "channel": "counter"
           },
           "refs": [],
           "global_seq": 1
@@ -124,7 +127,8 @@
           "schema_version": 1,
           "payload": {
             "order_id": "xp-order-1",
-            "channel": "dine_in"
+            "order_type": "dine_in",
+            "channel": "counter"
           },
           "refs": [],
           "global_seq": 2
@@ -154,7 +158,8 @@
           "schema_version": 1,
           "payload": {
             "order_id": "xp-order-0",
-            "channel": "dine_in"
+            "order_type": "dine_in",
+            "channel": "counter"
           },
           "refs": []
         },
@@ -173,7 +178,8 @@
           "schema_version": 1,
           "payload": {
             "order_id": "xp-order-1",
-            "channel": "dine_in"
+            "order_type": "dine_in",
+            "channel": "counter"
           },
           "refs": []
         }
@@ -212,7 +218,8 @@
           "schema_version": 1,
           "payload": {
             "order_id": "xp-order-\u0000-2",
-            "channel": "dine_in"
+            "order_type": "dine_in",
+            "channel": "counter"
           },
           "refs": []
         }
@@ -270,7 +277,8 @@
           "schema_version": 1,
           "payload": {
             "order_id": "xp-order-0",
-            "channel": "dine_in"
+            "order_type": "dine_in",
+            "channel": "counter"
           },
           "refs": [],
           "global_seq": 1
@@ -290,7 +298,8 @@
           "schema_version": 1,
           "payload": {
             "order_id": "xp-order-1",
-            "channel": "dine_in"
+            "order_type": "dine_in",
+            "channel": "counter"
           },
           "refs": [],
           "global_seq": 2
