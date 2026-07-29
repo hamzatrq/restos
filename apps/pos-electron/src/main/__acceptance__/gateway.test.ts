@@ -17,7 +17,9 @@ const JSON_LINES = JSON.stringify({
 const stubStore = (over: Partial<DeviceStore> = {}) =>
   ({
     identity: { org_id: "org1", branch_id: "br1", device_id: "dev1" },
-    openOrders: () => [{ order_id: "order-1234abcd", json_lines: JSON_LINES }],
+    // `pay_total` is the fold's keyed sum (01-F30/F31) and the seam now REQUIRES it —
+    // the schema enforcement added for A15 caught this stub the moment the field landed.
+    openOrders: () => [{ order_id: "order-1234abcd", json_lines: JSON_LINES, pay_total: 0 }],
     kitchenQueue: () => [{ order_id: "order-1234abcd", age_basis: 0 }],
     availability: () => [],
     branchTimeStatus: () => ({ offset_ms: 0, basis: "branch", skew_ms: null, skew_flagged: false }),
@@ -273,6 +275,7 @@ describe("ORACLE ROUND 2 / A15 — the money guard is EXECUTED, not merely decla
       openOrders: () => [
         {
           order_id: "order-bad",
+          pay_total: 0,
           json_lines: JSON.stringify({
             "line-a": {
               item_id: "i-karahi",

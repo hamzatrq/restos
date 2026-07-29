@@ -10,5 +10,6 @@ export { QuantityItemLine, type QuantityItemLineProps } from "./QuantityItemLine
 export { StatusStrip } from "./StatusStrip";
 export { Surface, type SurfaceProps } from "./Surface";
 export { type Tab, TabRail } from "./TabRail";
+export { TenderPanel, type TenderPanelProps } from "./TenderPanel";
 export { TicketCard } from "./TicketCard";
 export { Tile } from "./Tile";

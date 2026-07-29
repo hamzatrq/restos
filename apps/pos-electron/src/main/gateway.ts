@@ -146,6 +146,9 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
           // precisely because two implementations of one sum is how a money anomaly becomes a
           // false conservation finding.
           total_paisa: billedEffectiveFromJsonLines(row.json_lines),
+          // The fold's keyed sum (01-F30/01-F31), never re-derived here — same rule as the
+          // billed total directly above, and for the same reason.
+          paid_paisa: row.pay_total,
           lines: linesFrom(row.json_lines, deps.catalog),
         },
         `open order ${row.order_id}`,

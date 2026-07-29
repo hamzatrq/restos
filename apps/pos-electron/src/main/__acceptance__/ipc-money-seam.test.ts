@@ -51,6 +51,9 @@ const order = (total: number) => ({
   order_id: "order-1234abcd",
   reference: "order-12",
   total_paisa: total,
+  // Required since the tender surface landed (02-F12): the fold's keyed sum of what has been
+  // paid. Zero here because this file is about the TOTAL's legal range, not about settlement.
+  paid_paisa: 0,
   lines: [
     {
       line_id: "line-a",

@@ -57,7 +57,9 @@ export {
   eventRegistry,
   isAuditEvent,
   type KnownEventType,
+  PAYMENT_METHODS,
   type ParsedEvent,
+  type PaymentMethod,
   parseEvent,
   UnknownEventTypeError,
 } from "./registry.js";

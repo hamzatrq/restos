@@ -1,5 +1,5 @@
-import { paisa } from "@restos/domain";
-import { AppShell, Cart, ItemGrid, type Tab, usePhysicalSize } from "@restos/ui";
+import { newId, paisa } from "@restos/domain";
+import { AppShell, Cart, ItemGrid, type Tab, TenderPanel, usePhysicalSize } from "@restos/ui";
 import { useCallback, useEffect, useState } from "react";
 import type { DeviceState, MenuItem, OpenOrder } from "../shared/ipc";
 
@@ -114,6 +114,39 @@ export const Counter = () => {
             />
           )}
         </div>
+        {/*
+          02-F12 — settling is on the counter, beside the cart, not behind a mode switch.
+          `27-F1` caps layout depth at ONE and `27-F5` forbids controls that change with
+          context: a payment panel that appeared only after pressing SETTLE would be depth two
+          and a moving target, on the surface where an operator is most interrupted.
+        */}
+        {current === undefined ? null : (
+          <TenderPanel
+            dueP={paisa(current.total_paisa)}
+            takenP={paisa(current.paid_paisa)}
+            onTender={({ amountP, method }) => {
+              void window.restos
+                .append({
+                  type: "payment.recorded",
+                  payload: {
+                    order_id: current.order_id,
+                    amount_paisa: amountP,
+                    method,
+                    // 01-F31 — the attempt key is what makes a double-tap idempotent. Minted
+                    // per TENDER, not per order: 02-F13's split is several payments against one
+                    // order, and sharing a key would collapse them into one.
+                    settlement_attempt_id: newId(),
+                    // DEC-MONEY-007 — this settles the order. A khata REPAYMENT later carries
+                    // `repays_receivable`, and without the discriminator the two double-count
+                    // under full observation.
+                    purpose: "settles_order",
+                  },
+                  refs: [],
+                })
+                .then(reload);
+            }}
+          />
+        )}
         <Cart
           lines={(current?.lines ?? []).map((l) => ({
             id: l.line_id,

@@ -12,6 +12,25 @@ export class UnknownEventTypeError extends Error {
   }
 }
 
+/**
+ * Tender methods (`02-F12` + `01-F32`). Declared once, here, because `18 §4` says a domain type
+ * is declared in `domain` and redeclaring it elsewhere is a violation rather than a convenience.
+ *
+ * - `cash` · `card` · `raast` — `02-F12`'s three tenders. Card is a manual record at launch.
+ * - `khata_credit` — `02-F14`; needs a linked customer, and `DEC-MONEY-007` makes its later
+ *   repayment a `repays_receivable` payment so a repaid tab can never read as overpaid.
+ * - `aggregator_receivable` — `01-F32`; the order is settled but the money arrives later from
+ *   the aggregator, and doc 08 reconciles it against payouts.
+ */
+export const PAYMENT_METHODS = [
+  "cash",
+  "card",
+  "raast",
+  "khata_credit",
+  "aggregator_receivable",
+] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
 // Payloads are loose objects: required fields are law; extra fields pass through
 // (additive evolution, 00 §6) and are preserved for consumers.
 const payloadSchemas = {
@@ -101,7 +120,19 @@ const payloadSchemas = {
   "payment.recorded": z.looseObject({
     order_id: z.string().min(1),
     amount_paisa: z.number().int().nonnegative(),
-    method: z.string().min(1),
+    /**
+     * A CLOSED set, not a free string. `02-F12` names four tender methods and `01-F32` names
+     * the fifth; `payment.refunded` next door has been a closed enum since it was written, and
+     * a settlement method that is open while a refund method is closed is an asymmetry with no
+     * justification behind it.
+     *
+     * It matters more than tidiness because the method is not decoration: `02-F17` feeds it to
+     * channel economics (docs 12/13) and to tax posture (doc 16), and `01-F32`/`DEC-MONEY-007`
+     * make `aggregator_receivable` and `khata_credit` behave DIFFERENTLY in conservation. A
+     * typo'd method would not fail anywhere — it would quietly become a sixth category that no
+     * report knows to count, in an append-only ledger where it cannot be corrected in place.
+     */
+    method: z.enum(PAYMENT_METHODS),
     settlement_attempt_id: z.string().min(1), // 01-F31: double-taps cannot double-record
     // T-01-15 (01-F30/01-F32, DEC-MONEY-007): the khata discriminator — without it the
     // settlement and its later repayment double-count under full observation (matrix §3).

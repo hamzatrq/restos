@@ -68,6 +68,17 @@ export const OpenOrderSchema = z.object({
    * indistinguishable from a hung app.
    */
   total_paisa: z.number().int().nonnegative(),
+  /**
+   * `01-F30` — what has been TENDERED against this order, from the fold's own keyed sum. The
+   * screen never adds payments up: `01-F31`'s attempt keys are what make a double-tap
+   * idempotent, and a renderer summing a list would lose that and re-introduce the double-count
+   * the keys exist to prevent.
+   *
+   * Excludes `repays_receivable` (`DEC-MONEY-007`), so a repaid khata tab can never read as
+   * overpaid — which is why this is the fold's number and not a sum of everything named
+   * "payment".
+   */
+  paid_paisa: z.number().int().nonnegative(),
   lines: z.array(
     z.object({
       line_id: z.string(),

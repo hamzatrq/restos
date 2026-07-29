@@ -329,6 +329,11 @@ describe("the guard suite actually covers the package", () => {
         "components/QuantityItemLine.tsx",
         "components/StatusStrip.stories.tsx",
         "components/StatusStrip.tsx",
+        // ADDED with the payment surface (02-F12/F13). It is the highest-consequence entry
+        // screen on the counter, so being under the guards is exactly the acknowledgement this
+        // pin exists to force.
+        "components/TenderPanel.tsx",
+        "components/TenderPanel.stories.tsx",
         "components/Surface.tsx",
         "components/TabRail.stories.tsx",
         "components/TabRail.tsx",
