@@ -123,9 +123,16 @@ gate, and where the pilot contradicts this section, **this section loses**.
   a number to the thing it quantifies — is where comprehension collapses in every study we
   have (readers who *decode* a line at ~71% *execute* it correctly at ~35%). Quantity sits
   **immediately left of the item name on the same line**, at the same size, never in a
-  right-aligned column and never on its own row. This single constraint is the reason
-  `03-F30`'s 80 mm floor is mandatory: at 32 columns, after the flag, quantity and code
-  there are ~10 characters left, and the pairing breaks.
+  right-aligned column and never on its own row. This single constraint is the reason the
+  KOT declares a **minimum of 42 columns** and is **refused below it** rather than wrapped
+  (`03-F49`, founder ruling July 2026).
+  - **Correction, July 2026.** This FR previously cited *"`03-F30`'s 80 mm floor"*. `03-F30`
+    has no floor — it governs the Spec/Profile split only — and the supporting figure
+    ("~10 characters left" at 32 columns) carries no derivation: a two-digit quantity at
+    `27-F56`'s 2× width costs 4 columns, leaving ~27 for the name, not ~10. **The conclusion
+    stands and the arithmetic did not support it.** What binds is `03-F49`'s declared
+    per-type minimum, expressed in columns like every other layout figure (`03 §7`), not a
+    millimetre count and not a character estimate.
 - 27-F58 **Vertical position encodes urgency; whitespace encodes grouping.** The reading
   order is fixed and never configurable: **identifier → timing → items → modifiers →
   notes**. A cook who reads nothing must still be able to point at the top line and be

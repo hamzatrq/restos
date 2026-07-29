@@ -5,10 +5,12 @@
 §2b` (`27-F55`..`27-F59`), `18 §10` (the printing stack), `00 §5.6` (English-only UI, Unicode
 user content), `01-F1` (paper is never the record).
 
-**Status: DRAFT — BLOCKED on §2 before any KOT layout can be written.** Founder has ruled the
-module ("KOT printing next") and the verification posture ("no printer yet — golden fixtures,
-physical pass owed"). What is not ruled is a live contradiction between `03-F36` and `27-F57`
-about the paper width a KOT may assume.
+**Status: APPROVED July 2026, and §2's blocker is RESOLVED.** Founder ruled the module ("KOT
+printing next"), the verification posture ("no printer yet — golden fixtures, physical pass
+owed"), the paper floor (**`03-F49`: a type declares `min_columns`; the KOT declares 42 and is
+refused below it**), and that **station filtering (`03-F18`) is pulled into Wave 1** from Wave 4.
+
+**The station ruling has a dependency this plan did not anticipate — see §7.**
 
 `packages/escpos` is a **protected path** (`20 §4.4`), so the `24 §3` step-2 split binds for
 every task that touches it: acceptance tests authored by a different session, committed red.
@@ -34,7 +36,7 @@ is a large build against an unusually complete spec.
 Native. Everything up to the bytes is verifiable on a laptop. Only what happens *after* the
 bytes needs a printer.
 
-## 2. THE BLOCKER — two floors, and they contradict
+## 2. The blocker — two floors that contradicted — RESOLVED (`03-F49`)
 
 | FR | Says |
 |---|---|
@@ -214,9 +216,13 @@ different products:
   says ~27 characters remain for the name, not ~10. If that is right, `27-F57`'s conclusion
   should be corrected rather than implemented, and `03-F36` stands unamended.
 
-**I cannot choose between these**, because (iii) is a claim about a doc that admits it is the
-corpus's most likely to be wrong, and (i) is a hardware-purchasing consequence for real
-restaurants.
+**RULED: (i).** `03-F49` now declares `min_columns` per type — `kot` 42, `receipt`/`bill` 32 —
+and a printer below it triggers `03-F34`'s existing hard refusal + S1 rather than a squeeze.
+`03-F36`'s gate is rescoped to each type's declared minimum, and `27-F57`'s citation is
+corrected: `03-F30` has no 80 mm floor, and the "~10 characters" figure had no derivation (~27
+remain by `27-F56`'s own sizing). The conclusion stood; the arithmetic never supported it. The
+purchasing consequence — a 58 mm printer cannot print kitchen tickets — is stated in the FR so
+doc 14 surfaces it at printer assignment, not at 20:40 on a Friday.
 
 **Q2 (not blocking, but decide before K-2) — does whole-document rasterisation fit `03-N1`?**
 `18 §10` names this explicitly as *"open, and not to be specified before it is measured (`00 §4`
@@ -226,7 +232,39 @@ column grid, the one row whose alignment carries meaning. Wave 1's KOT is Englis
 (`00 §5.6`), so this can be deferred until user content (customer names, addresses) reaches
 paper — but it decides the encoder's shape, so deferring it is a decision to revisit K-2.
 
-**Q3 — does Wave 1's KOT need station filtering (`03-F18`)?** `screen-map §7` records station
-routing as currently Wave 4 and flags it as *"the largest low-literacy lever in the product"*,
-awaiting a founder call. A single-station KOT is much simpler and is what a pilot restaurant
-with one pass actually needs.
+**Q3 — station filtering — RULED IN.** `03-F18` is pulled from Wave 4 into Wave 1. What that
+costs is not what it looks like: see §7.
+
+## 7. What the station ruling actually costs
+
+`03-F18` reads: *"a station map (station → categories/items, **layer-2 config**, mirroring or
+refining printer routing)"*, and `§7` puts "category→printer routing, station map" in layer 2.
+So station filtering is not a filter — **it is org configuration that has to reach a device**,
+and this repo has no way to do that.
+
+Three facts, each verified:
+
+- **`packages/config` is not the config plane.** It is `defineEnv` — process-environment parsing
+  so services crash at boot on bad values (`18 §5`). There is no org-config model, no store, no
+  distribution path. One function, one consumer.
+- **`config.changed` cannot be emitted.** It is named in `01 §4`'s event catalog and has **no
+  payload schema in `packages/domain`'s registry**, so `01-F4` makes emitting it a runtime error.
+  This is exactly the gap `catalog.changed` had until `6cb7a34` closed it.
+- **Pricing already needs this too.** `01-F60` requires a price for every *enabled* (branch,
+  channel) pair, and "channels enabled" is `00 §7` layer-2 config. §3.3 of the pricing plan
+  passes those sets in from the caller precisely because there is nowhere to read them from.
+
+**So the layer-2 config plane is a shared dependency of two Wave-1 modules, and it is unbuilt.**
+That is a bigger finding than either module, and it should be planned as its own piece of work
+rather than smuggled into whichever one hits it first.
+
+**One cheaper alternative deserves stating**, because it may be right: put `station` **on the
+catalog entry**, beside `kitchen_name` and the per-channel visibility flags that already live
+there (`14-F5`). Item→station is the inverse of `03-F18`'s station→items map and carries the same
+information. It would ride the catalog transport — built, tested, versioned, already delivering —
+and could land inside T-3's wire change rather than waiting for a config plane. The cost is that
+it contradicts `03-F18`'s "layer-2 config" wording, and that a station map refining *categories*
+(rather than items) is more natural as config than as a per-item field.
+
+**This needs a ruling before K-5, and it is the same question `01-F60`'s enabled-channels set
+raises.** Answering it once answers both.
