@@ -31,7 +31,23 @@ export type CatalogEntry = {
   sort?: number;
   /** `01-F55` — a tombstone, so a reprint of an older order still renders the name. */
   deleted?: boolean;
+  /** `01-F60` — integer paisa per `(branch, channel)` pair. */
+  prices?: readonly { branch_id: string; channel: string; price_paisa: number }[];
+  /** `03-F50` — the kitchen station; absent means inherit from the parent. */
+  station?: string | null;
 };
+
+/**
+ * `01-F60` — the kinds a price is REQUIRED on. The FR names `item` and `variant` sellable and
+ * `category`/`modifier_group` as carrying none.
+ *
+ * **`modifier` is deliberately absent from both lists**, because `01-F60` classifies neither way
+ * and a paid add-on is priced in every real menu. Treating it as sellable would refuse publishes
+ * the FR permits; treating it as non-sellable would let a priced modifier through unchecked.
+ * Neither is a reading of the FR, so the gap is left open and named rather than closed by guess
+ * (commandment 2). Recorded in `plans/wave-1/channel-pricing-and-the-counter-loop.md`.
+ */
+const SELLABLE_KINDS: readonly string[] = ["item", "variant"];
 
 export type CatalogPage = {
   form: "snapshot" | "delta";
@@ -59,6 +75,10 @@ const rowToEntry = (row: Record<string, unknown>): CatalogEntry => ({
   ...(row.parent_id === null ? {} : { parent_id: String(row.parent_id) }),
   ...(row.sort === null ? {} : { sort: toNumber(row.sort) }),
   ...(toNumber(row.deleted) === 1 ? { deleted: true } : {}),
+  ...(row.prices === null || row.prices === undefined
+    ? {}
+    : { prices: row.prices as NonNullable<CatalogEntry["prices"]> }),
+  ...(row.station === null || row.station === undefined ? {} : { station: String(row.station) }),
 });
 
 /** The org's current authoritative version. `0` means nothing has ever been published. */
@@ -93,7 +113,25 @@ export const publishCatalog = async (
   db: Db,
   org_id: string,
   entries: readonly CatalogEntry[],
-  opts: { actor_user_id?: string | null; now: number } = { now: 0 },
+  opts: {
+    actor_user_id?: string | null;
+    now: number;
+    /**
+     * `01-F60`'s enabled `(branch, channel)` pairs, as the full cross product `14-F29`'s editor
+     * grid presents.
+     *
+     * **Supplied by the caller, and that is a known gap rather than a design choice.** `01-F60`
+     * sources this from `00 §7` layer 2 — and `03-F50` established that the org-config plane does
+     * not exist, so there is nowhere here to read it from. Absent therefore means "nothing
+     * enabled", which refuses nothing and keeps every pre-`01-F60` publish legal.
+     *
+     * The hazard that leaves is real and is named in the plan: **a caller who forgets this
+     * argument gets no completeness check at all**, which is precisely the class of silent
+     * omission `01-F60` refuses a fallback in order to prevent. It closes when the back office
+     * owns org config (`plans/wave-1/backoffice-catalog.md`).
+     */
+    enabled?: { branches: readonly string[]; channels: readonly string[] };
+  } = { now: 0 },
 ): Promise<number> => {
   if (entries.length === 0) {
     throw new RangeError("publishCatalog: an empty change set is not a version (01-F52)");
@@ -113,13 +151,59 @@ export const publishCatalog = async (
    * the offending index because a bulk import is exactly where this arrives and "one of your
    * 4,000 rows is bad" is not an actionable answer.
    */
+  /**
+   * `01-F60` — every enabled `(branch, channel)` cell is priced on every sellable, non-tombstoned
+   * entry. **There is deliberately NO FALLBACK to a house price**: a fallback makes a forgotten
+   * aggregator price sell at the in-restaurant rate while commission still takes 25–35%, which is
+   * invisible at the till, frozen by `01-F53`, and surfaces months later as unattributable thin
+   * margin. Refusing here turns that into one failed save with a message.
+   *
+   * A tombstone is exempt because `01-F55` keeps it resolvable for display and off the sellable
+   * grid — requiring a price on a deleted item would make deletion impossible once channels grow.
+   */
+  const missingCell = (entry: CatalogEntry): string | null => {
+    if (!SELLABLE_KINDS.includes(entry.kind) || entry.deleted === true) return null;
+    const enabled = opts.enabled;
+    if (enabled === undefined) return null;
+    const have = new Set((entry.prices ?? []).map((p) => `${p.branch_id}\u0000${p.channel}`));
+    for (const branch_id of enabled.branches) {
+      for (const channel of enabled.channels) {
+        if (!have.has(`${branch_id}\u0000${channel}`))
+          return `branch ${branch_id}, channel ${channel}`;
+      }
+    }
+    return null;
+  };
+
   entries.forEach((entry, index) => {
+    const cell = missingCell(entry);
+    if (cell !== null) {
+      throw new RangeError(
+        `publishCatalog: entry ${index} (${String(entry.kind)}/${String(entry.id)}) is not ` +
+          `sellable — no price for ${cell} (01-F60). Publishing it would put an item on the ` +
+          `grid that the counter cannot price, and 01-F53 would freeze whatever it guessed.`,
+      );
+    }
     const parsed = CatalogEntryWire.safeParse(entry);
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
+      const path = issue?.path ?? [];
+      // Name the offending VALUE, not just its path. A bulk import (`15-F8`) is where these
+      // arrive, and "prices.7.channel: invalid option" does not tell an operator which of 4,000
+      // rows to fix or what is wrong with it — whereas `dine_in` names the mistake outright
+      // (an order TYPE in a channel field, `02-F42`). `01-F60` requires the refusal to name the
+      // channel, and this is where a surplus cell gets named at all.
+      const at = path.reduce<unknown>(
+        (node, key) =>
+          typeof node === "object" && node !== null
+            ? (node as Record<PropertyKey, unknown>)[key as PropertyKey]
+            : undefined,
+        entry,
+      );
+      const shown = at === undefined ? "" : ` (got ${JSON.stringify(at)})`;
       throw new RangeError(
         `publishCatalog: entry ${index} (${String(entry.kind)}/${String(entry.id)}) is not ` +
-          `servable — ${issue?.path.join(".") ?? "?"}: ${issue?.message ?? "invalid"}. ` +
+          `servable — ${path.join(".") || "?"}: ${issue?.message ?? "invalid"}${shown}. ` +
           `Storing it would make every catalog_response for this org unparseable (01-F56).`,
       );
     }
@@ -148,10 +232,13 @@ export const publishCatalog = async (
     for (const e of entries) {
       await tx.execute(
         sql`insert into kernel.catalog_entries
-              (org_id, version, kind, entry_id, name, kitchen_name, parent_id, sort, deleted)
+              (org_id, version, kind, entry_id, name, kitchen_name, parent_id, sort, deleted,
+               prices, station)
             values (${org_id}, ${version}, ${e.kind}, ${e.id}, ${e.name},
                     ${e.kitchen_name ?? null}, ${e.parent_id ?? null}, ${e.sort ?? null},
-                    ${e.deleted === true ? 1 : 0})`,
+                    ${e.deleted === true ? 1 : 0},
+                    ${e.prices === undefined ? null : JSON.stringify(e.prices)}::jsonb,
+                    ${e.station ?? null})`,
       );
     }
     // LAST, deliberately — see the note above.
@@ -229,7 +316,7 @@ export const catalogPage = async (
     // DELTA — every change strictly after the device's base. Ordered by version so a paged
     // delta applies in publication order, which is what makes a partial page safe to apply.
     const rows = await db.execute(
-      sql`select kind, entry_id, name, kitchen_name, parent_id, sort, deleted
+      sql`select kind, entry_id, name, kitchen_name, parent_id, sort, deleted, prices, station
           from kernel.catalog_entries
           where org_id = ${org_id} and version > ${have_version} and version <= ${version}
           order by version asc, kind asc, entry_id asc
@@ -254,9 +341,9 @@ export const catalogPage = async (
   // exact defect the oracle round found on the device side, and it is fixed by carrying them
   // rather than by the device inferring them.
   const rows = await db.execute(
-    sql`select kind, entry_id, name, kitchen_name, parent_id, sort, deleted from (
+    sql`select kind, entry_id, name, kitchen_name, parent_id, sort, deleted, prices, station from (
           select distinct on (kind, entry_id)
-                 kind, entry_id, name, kitchen_name, parent_id, sort, deleted
+                 kind, entry_id, name, kitchen_name, parent_id, sort, deleted, prices, station
           from kernel.catalog_entries
           where org_id = ${org_id} and version <= ${version}
           order by kind asc, entry_id asc, version desc

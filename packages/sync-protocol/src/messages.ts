@@ -3,7 +3,7 @@
 // sender-enforced; a client can never smuggle one in). Contract fixtures:
 // src/__acceptance__/fixtures (20 §2.7 — changing them is a spec-review event).
 import { constants as zlibConstants, zstdCompressSync, zstdDecompressSync } from "node:zlib";
-import { DEVICE_CLASSES, EventEnvelope } from "@restos/domain";
+import { DEVICE_CLASSES, EventEnvelope, ORDER_CHANNELS } from "@restos/domain";
 import { z } from "zod";
 
 export const PROTOCOL_VERSION = 1;
@@ -53,6 +53,53 @@ export const CatalogEntryWire = z.object({
    * `01-F55` fail on its own named scenario after any recovery.
    */
   deleted: z.boolean().optional(),
+  /**
+   * `01-F60` — the price, per `(branch, channel)` pair, in integer paisa (`00 §6`).
+   *
+   * A flat list rather than a nested map because a map key must be a string and a `branch_id`
+   * is data, not a shape: nesting would make the wire's structure depend on which branches an
+   * org happens to have, and JSON object key order is not something a golden fixture can pin.
+   *
+   * **Optional on the wire, and that is not a relaxation.** `01-F60` puts completeness "at the
+   * WRITER", so `publishCatalog` refuses an entry that omits an enabled pair; the wire must
+   * still carry categories and modifier groups, which are priced by nothing.
+   *
+   * `price_paisa` is bounded to a safe integer for the same reason `sort` is: the column is
+   * `bigint`, and a value past 2^53 round-trips lossily through `Number()` — which for a price
+   * is a silently wrong bill rather than a reordered menu.
+   */
+  prices: z
+    .array(
+      z.object({
+        branch_id: z.string().min(1),
+        /**
+         * `02-F42`'s CLOSED set, not a free string — declared once in `domain` and reused here
+         * rather than restated (`18 §4`).
+         *
+         * A price keyed to a channel that does not exist is money nobody can resolve: `01-F60`
+         * looks a price up by the ORDER's channel, so a `dine_in` key (an order TYPE, `02-F1`)
+         * matches no lookup ever and the item reads as unpriced on every real channel. Refusing
+         * it here is what stops that reaching a device — and this is the wire, so it is also
+         * what stops it being stored.
+         */
+        channel: z.enum(ORDER_CHANNELS),
+        price_paisa: z
+          .number()
+          .int()
+          .min(0)
+          .max(2 ** 53 - 1),
+      }),
+    )
+    .optional(),
+  /**
+   * `03-F50` — the kitchen station that cooks this, joining `kitchen_name` as catalog data
+   * rather than layer-2 config.
+   *
+   * Optional because absence is **inheritance**, not "no station": an entry with none takes its
+   * parent's through the `01-F21` chain, and one with none anywhere up the chain resolves to the
+   * default station rather than vanishing from every ticket.
+   */
+  station: z.union([z.string().min(1), z.null()]).optional(),
 });
 export type CatalogEntryWireT = z.infer<typeof CatalogEntryWire>;
 

@@ -409,7 +409,10 @@ export const openStore = (options: {
   // 01-F52: reference data, constructed alongside the ledger but deliberately separate from
   // it. Nothing in `folds/` may reach for this — a projected value that read a name would
   // depend on catalog sync state at fold time, which is the 01-F34 break.
-  const catalog = createCatalogStore(db as never);
+  // The branch is passed in, not looked up: 01-F60 resolves a price from "the `branch_id`
+  // already in its identity", and taking it as a call argument would let a caller price an
+  // order against a branch this device is not in.
+  const catalog = createCatalogStore(db as never, identity.branch_id);
 
   const byId = db.prepare<[string], { envelope: string }>(
     "SELECT envelope FROM events WHERE id = ?",

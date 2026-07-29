@@ -28,8 +28,20 @@ export type CatalogEntry = {
   /** 03-F38 — a short kitchen name, so long item names stop being a KOT layout problem. */
   kitchen_name?: string | null;
   parent_id?: string | null;
-  /** Display order within its parent. NOT a price — money lives in events (01-F53). */
+  /**
+   * Display order within its parent. **Not** a price — see `prices` below, and note that the
+   * comment which used to end "NOT a price — money lives in events (01-F53)" was the defect that
+   * kept a price off this type for two waves. `01-F53` governs what happens AFTER capture; the
+   * price the capture reads comes from here (`01-F60`).
+   */
   sort?: number;
+  /**
+   * `01-F60` — integer paisa per `(branch, channel)` pair. Every branch's prices travel in one
+   * org-scoped artifact and the device resolves its own; see `priceOf`.
+   */
+  prices?: readonly { branch_id: string; channel: string; price_paisa: number }[];
+  /** `03-F50` — the kitchen station. Absent means INHERIT from the parent, not "none". */
+  station?: string | null;
 };
 
 /** A full replacement at `version` (`01-F56`). */
@@ -87,7 +99,54 @@ export type CatalogStore = {
   lookup(kind: CatalogKind, id: string): CatalogEntry | null;
   /** The grid's source: live entries of a kind, in display order. Excludes tombstones. */
   list(kind: CatalogKind, parent_id?: string | null): CatalogEntry[];
+  /**
+   * `01-F60` — the price this device would snapshot for `channel`, in integer paisa, or `null`
+   * when the entry carries none for this device's `(branch, channel)` pair.
+   *
+   * **The branch is NOT a parameter.** `01-F60`: the device "resolves its own row from the
+   * `branch_id` already in its identity". Taking it as an argument would let a caller price an
+   * order against a branch it is not in — and `01-F53` freezes whatever comes back.
+   *
+   * **`null` is not zero and must never be coerced to it.** An unpriced item cannot be sold
+   * (`01-F60`); free food is the one wrong answer that looks like a working one.
+   */
+  priceOf(kind: CatalogKind, id: string, channel: string): number | null;
+  /**
+   * `03-F50` — the station that cooks this, walking the `01-F21` parent chain: an explicit value
+   * wins, absence inherits, and nothing anywhere up the chain resolves to `DEFAULT_STATION`.
+   *
+   * Total by construction: it never returns null, because a line absent from every ticket is the
+   * one kitchen failure paper cannot reveal.
+   */
+  stationOf(kind: CatalogKind, id: string): string;
 };
+
+/**
+ * `03-F50` — where a line goes when nothing routes it.
+ *
+ * The FR requires the fallback and names no value, so this is a **pinned interpretation, not a
+ * spec fact** (see the plan's open questions). What matters is that it exists, is non-empty and
+ * is stable: `03-F34`'s refusal covers documents that cannot be RENDERED, never lines that cannot
+ * be ROUTED, so an unrouted line must still print somewhere a human will look.
+ */
+export const DEFAULT_STATION = "kitchen";
+
+/**
+ * `01-F21`'s catalog chain — Category → MenuItem → Variant → ModifierGroup/Modifier — read
+ * upward, so `03-F50`'s inheritance walk knows which kind a `parent_id` names.
+ *
+ * `category → category` because categories nest; the walk terminates when the parent row is
+ * absent, so a top-level category ends the chain without needing a null case here.
+ */
+const PARENT_KIND: Readonly<Record<CatalogKind, CatalogKind>> = {
+  category: "category",
+  item: "category",
+  variant: "item",
+  modifier_group: "item",
+  modifier: "modifier_group",
+};
+
+const parentKindOf = (kind: CatalogKind): CatalogKind => PARENT_KIND[kind];
 
 type Row = { kind: string; id: string; json: string; deleted: number; sort: number };
 
@@ -154,7 +213,37 @@ const isEntry = (e: unknown): boolean => {
   if (typeof o.name !== "string") return false;
   if (o.sort !== undefined && !(typeof o.sort === "number" && Number.isSafeInteger(o.sort)))
     return false;
-  return isOptionalString(o.parent_id) && isOptionalString(o.kitchen_name);
+  if (!isOptionalString(o.parent_id) || !isOptionalString(o.kitchen_name)) return false;
+  if (!isOptionalString(o.station)) return false;
+  return o.prices === undefined || (Array.isArray(o.prices) && o.prices.every(isPrice));
+};
+
+/**
+ * `01-F60` — one `(branch, channel) → paisa` cell, validated at the device boundary.
+ *
+ * **`Number.isSafeInteger` is the load-bearing part.** A fractional `price_paisa` is not a
+ * rounding nuisance: paisa is the atomic unit (`00 §6`), so 45000.5 is a quantity of money that
+ * cannot exist, and storing it would put a float into a total the folds accumulate in BigInt.
+ * Refused as `malformed` rather than thrown, because this arrives off a wire and `01-F17` makes
+ * a stopped till the one unacceptable outcome — the device keeps the menu it already had.
+ *
+ * The channel is checked as a non-empty string only. The CLOSED set (`02-F42`) is enforced at
+ * the wire and at the writer, which is where an invalid one can still be corrected; re-checking
+ * it here would make a device reject a menu it could otherwise still sell from, which is the
+ * wrong direction for `01-F17`.
+ */
+const isPrice = (p: unknown): boolean => {
+  if (typeof p !== "object" || p === null) return false;
+  const o = p as Record<string, unknown>;
+  return (
+    typeof o.branch_id === "string" &&
+    o.branch_id.length > 0 &&
+    typeof o.channel === "string" &&
+    o.channel.length > 0 &&
+    typeof o.price_paisa === "number" &&
+    Number.isSafeInteger(o.price_paisa) &&
+    o.price_paisa >= 0
+  );
 };
 
 /**
@@ -181,7 +270,7 @@ const isValidUpdate = (u: unknown): u is CatalogUpdate => {
   return false;
 };
 
-export const createCatalogStore = (db: Db): CatalogStore => {
+export const createCatalogStore = (db: Db, branch_id = ""): CatalogStore => {
   const readState = db.prepare(
     "SELECT version, last_kind, last_from, last_form FROM catalog_state WHERE id = 0",
   );
@@ -318,6 +407,42 @@ export const createCatalogStore = (db: Db): CatalogStore => {
       return parent_id === undefined
         ? rows
         : rows.filter((e) => (e.parent_id ?? null) === parent_id);
+    },
+    /**
+     * `01-F60`. Reads THIS device's branch — never a caller-supplied one — and returns `null`
+     * rather than 0 when no row matches, because zero is a sellable price and "unpriced" is not.
+     */
+    priceOf(kind, id, channel) {
+      // A tombstoned item is still resolvable for DISPLAY (01-F55) and must not be SOLD, so this
+      // goes through the same read `lookup` uses and then refuses a deleted row explicitly.
+      const row = readOne.get(kind, id) as Row | undefined;
+      if (row === undefined || row.deleted === 1) return null;
+      const entry = JSON.parse(row.json) as CatalogEntry;
+      const hit = entry.prices?.find((p) => p.branch_id === branch_id && p.channel === channel);
+      return hit?.price_paisa ?? null;
+    },
+    /**
+     * `03-F50`'s inheritance walk. Bounded by the number of catalog rows: a malformed chain that
+     * points at itself, or a cycle introduced upstream, must not hang the till (`01-F17`) — so
+     * the walk carries a seen-set and falls back rather than looping.
+     */
+    stationOf(kind, id) {
+      const seen = new Set<string>();
+      let cursor: { kind: CatalogKind; id: string } | null = { kind, id };
+      while (cursor !== null) {
+        const key = `${cursor.kind}:${cursor.id}`;
+        if (seen.has(key)) break; // a cycle is upstream corruption, not a reason to stop selling
+        seen.add(key);
+        const row = readOne.get(cursor.kind, cursor.id) as Row | undefined;
+        if (row === undefined) break; // 01-F54: an unsynced parent degrades, never blocks
+        const entry = JSON.parse(row.json) as CatalogEntry;
+        if (typeof entry.station === "string" && entry.station.length > 0) return entry.station;
+        cursor =
+          typeof entry.parent_id === "string" && entry.parent_id.length > 0
+            ? { kind: parentKindOf(cursor.kind), id: entry.parent_id }
+            : null;
+      }
+      return DEFAULT_STATION;
     },
   };
 };

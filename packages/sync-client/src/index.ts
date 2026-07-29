@@ -14,6 +14,7 @@ export {
   type CatalogStore,
   type CatalogUpdate,
   createCatalogStore,
+  DEFAULT_STATION,
 } from "./catalog.js";
 export {
   type CatalogFetch,

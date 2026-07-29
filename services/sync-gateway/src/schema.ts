@@ -186,6 +186,18 @@ export const catalogEntries = kernel.table(
     parent_id: text("parent_id"),
     sort: bigint("sort", { mode: "number" }),
     deleted: bigint("deleted", { mode: "number" }).notNull(),
+    /**
+     * `01-F60` — the `(branch, channel) → integer paisa` grid, stored as jsonb.
+     *
+     * jsonb rather than a side table because the gateway is forbidden an opinion about menu
+     * structure (the founder ruling this service is built on: "the API publishes, the gateway
+     * serves"). A `catalog_prices` table would make this service join, filter and therefore
+     * UNDERSTAND pricing; a column it passes through keeps it a store. The completeness rule
+     * lives at the writer, in `publishCatalog`, which is where `01-F60` puts it.
+     */
+    prices: jsonb("prices"),
+    /** `03-F50` — the kitchen station. Null means INHERIT from the parent, not "none". */
+    station: text("station"),
   },
   (t) => [
     primaryKey({ columns: [t.org_id, t.version, t.kind, t.entry_id] }),
