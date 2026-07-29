@@ -16,3 +16,10 @@ storybook-static/
 
 # Electron build output (apps/pos-electron) — three bundles, all generated
 out/
+
+# Compile-time oracle fixtures (packages/ui, type-contracts.oracle.test.ts).
+# Written INSIDE the package and removed in afterAll — which does not run when the task is
+# KILLED, and turbo kills sibling tasks the moment another package's suite fails. The residue
+# then makes `pnpm verify` red on generated fixtures, pointing at the wrong defect entirely.
+# Same class as the `out/` entry above (9ca0189: "verify was linting generated bundles").
+.oracle-typecheck/

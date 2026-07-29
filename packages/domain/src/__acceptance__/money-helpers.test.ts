@@ -233,132 +233,180 @@ const lintSource = (source: string): { exitCode: number; output: string } => {
 
 type BiomeConfigLike = { extends?: string[]; plugins?: string[] };
 
+/**
+ * Every case in the lint block below SPAWNS BIOME as a subprocess, so its wall time is dominated
+ * by process startup and machine load, not by the assertion. `money-rupee-lint` documents this
+ * and was given a 60 s budget in `ff7b750`; that commit fixed ONE of the THREE files carrying the
+ * harness, and this is one of the two it missed. Only the lint block takes it — the `splitPaisa`
+ * and `applyRateBps` blocks above are pure arithmetic and stay on the default, because a budget
+ * granted where it is not needed is how a genuinely hung test stops being visible.
+ */
+const LINT_TIMEOUT_MS = 60_000;
+
 describe("lint enforcement — raw arithmetic on money is banned (18 §4 / DEC-MONEY-005)", () => {
-  it("mechanism anchor (GREEN): biome with the repo config flags a rule violation in an out-of-tree fixture", () => {
-    const { exitCode, output } = lintSource(
-      "export const f = (): number => {\n  debugger;\n  return 1;\n};\n",
-    );
-    expect(exitCode, "the lint channel these pins rely on must itself work").not.toBe(0);
-    expect(output).toContain("noDebugger");
-  });
+  it(
+    "mechanism anchor (GREEN): biome with the repo config flags a rule violation in an out-of-tree fixture",
+    () => {
+      const { exitCode, output } = lintSource(
+        "export const f = (): number => {\n  debugger;\n  return 1;\n};\n",
+      );
+      expect(exitCode, "the lint channel these pins rely on must itself work").not.toBe(0);
+      expect(output).toContain("noDebugger");
+    },
+    LINT_TIMEOUT_MS,
+  );
 
-  it("18 §4 / DEC-MONEY-005 (GREEN, must stay green): money flowing through the domain helpers lints clean — the ban must never flag the blessed path", () => {
-    const { exitCode } = lintSource(
-      [
-        'import { applyRateBps, paisa, splitPaisa } from "@restos/domain";',
-        "",
-        "export const shares = splitPaisa(paisa(10000), 3);",
-        "export const tax = applyRateBps(paisa(10000), 1700);",
-        "",
-      ].join("\n"),
-    );
-    expect(exitCode).toBe(0);
-  });
-
-  it("18 §4 / DEC-MONEY-005: raw DIVISION on a money value fails the lint gate", () => {
-    const { exitCode } = lintSource(
-      "export const perGuest = (total_paisa: number, guests: number): number => total_paisa / guests;\n",
-    );
-    expect(
-      exitCode,
-      "convention is not enforcement — split without splitPaisa must not lint",
-    ).not.toBe(0);
-  });
-
-  it("18 §4 / DEC-MONEY-005: raw RATE MULTIPLICATION on a money value fails the lint gate", () => {
-    const { exitCode } = lintSource(
-      "export const withTax = (amountPaisa: number): number => amountPaisa * 1.17;\n",
-    );
-    expect(exitCode, "a float rate literal on money must not lint").not.toBe(0);
-  });
-
-  it("18 §4 / DEC-MONEY-005: raw ADDITION/SUBTRACTION on money values fails the lint gate (addPaisa/subPaisa are the blessed path)", () => {
-    const { exitCode } = lintSource(
-      "export const owed = (billPaisa: number, paidPaisa: number): number => billPaisa - paidPaisa;\n",
-    );
-    expect(exitCode, "18 §4 bans raw number arithmetic on money categorically").not.toBe(0);
-  });
-
-  it("18 §4 / DEC-MONEY-005 (M2): COMPOUND assignment on a money value fails the lint gate — accumulation is the idiom the ban exists for", () => {
-    const cases: Array<{ op: string; params: string; statement: string }> = [
-      { op: "+=", params: "tip_paisa: number", statement: "total_paisa += tip_paisa;" },
-      { op: "-=", params: "refund_paisa: number", statement: "total_paisa -= refund_paisa;" },
-      { op: "*=", params: "", statement: "total_paisa *= 2;" },
-      { op: "/=", params: "guests: number", statement: "total_paisa /= guests;" },
-      { op: "%=", params: "", statement: "total_paisa %= 100;" },
-    ];
-    for (const { op, params, statement } of cases) {
+  it(
+    "18 §4 / DEC-MONEY-005 (GREEN, must stay green): money flowing through the domain helpers lints clean — the ban must never flag the blessed path",
+    () => {
       const { exitCode } = lintSource(
         [
-          `export const mutate = (${params}): number => {`,
-          "  let total_paisa = 0;",
-          `  ${statement}`,
-          "  return total_paisa;",
+          'import { applyRateBps, paisa, splitPaisa } from "@restos/domain";',
+          "",
+          "export const shares = splitPaisa(paisa(10000), 3);",
+          "export const tax = applyRateBps(paisa(10000), 1700);",
+          "",
+        ].join("\n"),
+      );
+      expect(exitCode).toBe(0);
+    },
+    LINT_TIMEOUT_MS,
+  );
+
+  it(
+    "18 §4 / DEC-MONEY-005: raw DIVISION on a money value fails the lint gate",
+    () => {
+      const { exitCode } = lintSource(
+        "export const perGuest = (total_paisa: number, guests: number): number => total_paisa / guests;\n",
+      );
+      expect(
+        exitCode,
+        "convention is not enforcement — split without splitPaisa must not lint",
+      ).not.toBe(0);
+    },
+    LINT_TIMEOUT_MS,
+  );
+
+  it(
+    "18 §4 / DEC-MONEY-005: raw RATE MULTIPLICATION on a money value fails the lint gate",
+    () => {
+      const { exitCode } = lintSource(
+        "export const withTax = (amountPaisa: number): number => amountPaisa * 1.17;\n",
+      );
+      expect(exitCode, "a float rate literal on money must not lint").not.toBe(0);
+    },
+    LINT_TIMEOUT_MS,
+  );
+
+  it(
+    "18 §4 / DEC-MONEY-005: raw ADDITION/SUBTRACTION on money values fails the lint gate (addPaisa/subPaisa are the blessed path)",
+    () => {
+      const { exitCode } = lintSource(
+        "export const owed = (billPaisa: number, paidPaisa: number): number => billPaisa - paidPaisa;\n",
+      );
+      expect(exitCode, "18 §4 bans raw number arithmetic on money categorically").not.toBe(0);
+    },
+    LINT_TIMEOUT_MS,
+  );
+
+  it(
+    "18 §4 / DEC-MONEY-005 (M2): COMPOUND assignment on a money value fails the lint gate — accumulation is the idiom the ban exists for",
+    () => {
+      const cases: Array<{ op: string; params: string; statement: string }> = [
+        { op: "+=", params: "tip_paisa: number", statement: "total_paisa += tip_paisa;" },
+        { op: "-=", params: "refund_paisa: number", statement: "total_paisa -= refund_paisa;" },
+        { op: "*=", params: "", statement: "total_paisa *= 2;" },
+        { op: "/=", params: "guests: number", statement: "total_paisa /= guests;" },
+        { op: "%=", params: "", statement: "total_paisa %= 100;" },
+      ];
+      for (const { op, params, statement } of cases) {
+        const { exitCode } = lintSource(
+          [
+            `export const mutate = (${params}): number => {`,
+            "  let total_paisa = 0;",
+            `  ${statement}`,
+            "  return total_paisa;",
+            "};",
+            "",
+          ].join("\n"),
+        );
+        expect.soft(exitCode, `\`${op}\` on a money identifier must not lint (M2)`).not.toBe(0);
+      }
+    },
+    LINT_TIMEOUT_MS,
+  );
+
+  it(
+    "18 §4 / DEC-MONEY-005 (M2): UPDATE expressions on a money value fail the lint gate (++/--, prefix and postfix)",
+    () => {
+      const statements = ["total_paisa++;", "total_paisa--;", "++total_paisa;", "--total_paisa;"];
+      for (const statement of statements) {
+        const { exitCode } = lintSource(
+          [
+            "export const tick = (): number => {",
+            "  let total_paisa = 0;",
+            `  ${statement}`,
+            "  return total_paisa;",
+            "};",
+            "",
+          ].join("\n"),
+        );
+        expect.soft(exitCode, `\`${statement}\` must not lint (M2)`).not.toBe(0);
+      }
+    },
+    LINT_TIMEOUT_MS,
+  );
+
+  it(
+    "18 §4 / DEC-MONEY-005 (M2, GREEN, must stay green): compound assignment and updates on a NON-money identifier lint clean — the new arms stay scoped to money names",
+    () => {
+      const { exitCode } = lintSource(
+        [
+          "export const bump = (step: number): number => {",
+          "  let count = 0;",
+          "  count += step;",
+          "  count++;",
+          "  return count;",
           "};",
           "",
         ].join("\n"),
       );
-      expect.soft(exitCode, `\`${op}\` on a money identifier must not lint (M2)`).not.toBe(0);
-    }
-  });
+      expect(exitCode).toBe(0);
+    },
+    LINT_TIMEOUT_MS,
+  );
 
-  it("18 §4 / DEC-MONEY-005 (M2): UPDATE expressions on a money value fail the lint gate (++/--, prefix and postfix)", () => {
-    const statements = ["total_paisa++;", "total_paisa--;", "++total_paisa;", "--total_paisa;"];
-    for (const statement of statements) {
-      const { exitCode } = lintSource(
-        [
-          "export const tick = (): number => {",
-          "  let total_paisa = 0;",
-          `  ${statement}`,
-          "  return total_paisa;",
-          "};",
-          "",
-        ].join("\n"),
+  it(
+    "18 §4 / DEC-MONEY-005: the biome config `pnpm lint` resolves declares a money-arithmetic lint plugin",
+    () => {
+      const root = JSON.parse(
+        readFileSync(join(REPO_ROOT, "biome.json"), "utf8"),
+      ) as BiomeConfigLike;
+      const configs: Array<{ dir: string; config: BiomeConfigLike }> = [
+        { dir: REPO_ROOT, config: root },
+      ];
+      for (const rel of root.extends ?? []) {
+        const p = resolve(REPO_ROOT, rel);
+        configs.push({
+          dir: dirname(p),
+          config: JSON.parse(readFileSync(p, "utf8")) as BiomeConfigLike,
+        });
+      }
+      const declared = configs.flatMap(({ dir, config }) =>
+        (config.plugins ?? []).map((rel) => resolve(dir, rel)),
       );
-      expect.soft(exitCode, `\`${statement}\` must not lint (M2)`).not.toBe(0);
-    }
-  });
-
-  it("18 §4 / DEC-MONEY-005 (M2, GREEN, must stay green): compound assignment and updates on a NON-money identifier lint clean — the new arms stay scoped to money names", () => {
-    const { exitCode } = lintSource(
-      [
-        "export const bump = (step: number): number => {",
-        "  let count = 0;",
-        "  count += step;",
-        "  count++;",
-        "  return count;",
-        "};",
-        "",
-      ].join("\n"),
-    );
-    expect(exitCode).toBe(0);
-  });
-
-  it("18 §4 / DEC-MONEY-005: the biome config `pnpm lint` resolves declares a money-arithmetic lint plugin", () => {
-    const root = JSON.parse(readFileSync(join(REPO_ROOT, "biome.json"), "utf8")) as BiomeConfigLike;
-    const configs: Array<{ dir: string; config: BiomeConfigLike }> = [
-      { dir: REPO_ROOT, config: root },
-    ];
-    for (const rel of root.extends ?? []) {
-      const p = resolve(REPO_ROOT, rel);
-      configs.push({
-        dir: dirname(p),
-        config: JSON.parse(readFileSync(p, "utf8")) as BiomeConfigLike,
-      });
-    }
-    const declared = configs.flatMap(({ dir, config }) =>
-      (config.plugins ?? []).map((rel) => resolve(dir, rel)),
-    );
-    expect(
-      declared.length,
-      "DEC-MONEY-005: the ban lives in the lint config, not in convention",
-    ).toBeGreaterThan(0);
-    const moneyPlugins = declared.filter(
-      (p) => existsSync(p) && /paisa|money/i.test(readFileSync(p, "utf8")),
-    );
-    expect(
-      moneyPlugins.length,
-      "at least one declared plugin bans money arithmetic",
-    ).toBeGreaterThan(0);
-  });
+      expect(
+        declared.length,
+        "DEC-MONEY-005: the ban lives in the lint config, not in convention",
+      ).toBeGreaterThan(0);
+      const moneyPlugins = declared.filter(
+        (p) => existsSync(p) && /paisa|money/i.test(readFileSync(p, "utf8")),
+      );
+      expect(
+        moneyPlugins.length,
+        "at least one declared plugin bans money arithmetic",
+      ).toBeGreaterThan(0);
+    },
+    LINT_TIMEOUT_MS,
+  );
 });
