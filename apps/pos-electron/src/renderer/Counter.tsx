@@ -21,12 +21,28 @@ import type { DeviceState, MenuItem, OpenOrder } from "../shared/ipc";
  * ready is DISABLED IN PLACE with its reason, never absent. Every tab past the first is
  * unbuilt, and saying so is more honest than a rail that grows as the product does and
  * destroys the muscle memory of everyone who learned it early.
+ *
+ * **These are `screen-map §3.1`'s FIVE surfaces, corrected July 2026.** The rail shipped with
+ * four, under three different names, and with **`Me` missing entirely** — and that is not a
+ * cosmetic drift: `27-F4` makes adding, removing or reordering an operational item a BREAKING
+ * CHANGE, so a tab added after the pilot costs every operator who learned the layout without it.
+ * Free to fix now, expensive the day after go-live. Each earns its place in the map:
+ *
+ *   Order   the default surface — grid + cart, ~150–300 visits a shift
+ *   Orders  open and parked orders, and the cloud queue (chronological, paged, `03-F46`)
+ *   Pay     separate because `27-F8` puts numeric entry at 126 dp and it cannot share a
+ *           layout with 76 dp tiles
+ *   Cash    drawer, paid-outs, shift open/close — isolated so a mis-tap on Order can never
+ *           reach it. Low frequency, high consequence.
+ *   Me      `02-F23`'s "I'm clean" — the cashier's own reconciliation. A PROTECTION surface,
+ *           not an admin one, which is why it is a peer tab and not buried in Cash.
  */
 const TABS: readonly Tab[] = [
-  { id: "counter", label: "Counter" },
+  { id: "order", label: "Order" },
   { id: "orders", label: "Orders", unavailable: true, unavailableReason: "not built yet" },
-  { id: "payments", label: "Payments", unavailable: true, unavailableReason: "not built yet" },
-  { id: "shift", label: "Shift", unavailable: true, unavailableReason: "not built yet" },
+  { id: "pay", label: "Pay", unavailable: true, unavailableReason: "not built yet" },
+  { id: "cash", label: "Cash", unavailable: true, unavailableReason: "not built yet" },
+  { id: "me", label: "Me", unavailable: true, unavailableReason: "not built yet" },
 ];
 
 /**
@@ -63,7 +79,7 @@ export const Counter = () => {
   const [orders, setOrders] = useState<readonly OpenOrder[]>([]);
   const [items, setItems] = useState<readonly MenuItem[]>([]);
   const [page, setPage] = useState(0);
-  const [activeTab, setActiveTab] = useState("counter");
+  const [activeTab, setActiveTab] = useState(TABS[0]?.id ?? "order");
   /**
    * `27-F11c` — capacity is a PHYSICAL question, so the grid's surface is MEASURED.
    *

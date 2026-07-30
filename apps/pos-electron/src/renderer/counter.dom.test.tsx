@@ -109,6 +109,36 @@ beforeEach(() => {
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
 });
 
+describe("the tab rail is screen-map §3.1's five surfaces (27-F4)", () => {
+  it("carries all five, in order, and none is absent because it is unbuilt", async () => {
+    // 27-F4 makes adding, removing or reordering an operational item a BREAKING CHANGE, so the
+    // rail has to be complete before an operator learns it — an unbuilt surface is DISABLED IN
+    // PLACE with its reason, never missing. This shipped with four tabs and no `Me`; pinning the
+    // set here is what stops the next unbuilt surface being added the cheap way instead.
+    mountWith([]);
+    render(<Counter />);
+    await screen.findByText("Order", { exact: true });
+    // Exact text, not an accessible-name regex: an unbuilt tab folds its reason into the name, so
+    // `/^Orders$/` misses it — and an unanchored `/Order/` matches `Orders` too, which would let
+    // a missing tab pass. The label's own text node is the unambiguous thing.
+    for (const label of ["Order", "Orders", "Pay", "Cash", "Me"]) {
+      expect(
+        screen.getAllByText(label, { exact: true }).length,
+        `screen-map §3.1 names a ${label} tab`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it("only Order is reachable — the other four say why, rather than going nowhere", async () => {
+    mountWith([]);
+    render(<Counter />);
+    await screen.findByRole("button", { name: /^Order$/i });
+    // Four unbuilt surfaces, four reasons. A dead tab with no explanation reads as a broken app
+    // to an operator who cannot read the rest of the screen for context.
+    expect(screen.getAllByText(/not built yet/i).length).toBe(4);
+  });
+});
+
 describe("C4 — starting an order (02-F1, founder ruling: no default type)", () => {
   it("offers all three order types and NONE is pre-selected", async () => {
     mountWith([]);
