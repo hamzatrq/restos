@@ -190,10 +190,32 @@ predicate means the second consumer widens it. **My inclination is the narrow on
 encoded as data, with exactly the predicates the callers need — but it is a `domain` change on a
 protected path, so it should be ruled rather than assumed.
 
-**Q2 — how does an owner authenticate?** `01-F47` admission covers *devices*. There is no user
-auth anywhere: no session, no password, no OAuth. `18 §5` says authz is server-side and says
-nothing about which authn mechanism. This is a real decision (and a security one) that no FR
-currently owns.
+**Q2 — how does an owner authenticate? — RULED (founder, July 2026): email + password, our own
+implementation.** `01-F47` admission covers *devices*; there was no user auth anywhere in the
+corpus, and `18 §5` specifies authorisation while staying silent on authentication.
+
+**Argon2id**, which is not a new choice — `01-F26` already specifies it for staff PINs on shared
+devices, so the hashing story stays single. Sessions live in `services/api`.
+
+What this ruling BUYS is one fewer vendor in the login path of a system holding a restaurant's
+money. What it COSTS is that password reset, lockout, rate limiting and session rotation are ours
+to get right, and each is a way in. They are named here so they are scoped as work rather than
+discovered as gaps:
+
+- reset flow (and the fact that a reset email is an account-takeover path if it is sloppy),
+- lockout and rate limiting on the login endpoint,
+- session expiry/rotation, and revocation when a user is removed,
+- `audit.login` already exists in `01-F5`'s five audit subtypes — user login is an audit event
+  from day one, not an afterthought.
+
+**The POS is untouched.** `02-F41` rules attribution there is whoever's PIN is in, and this is a
+cloud-plane surface (`18 §6`) that always has WAN — so nothing about this reaches the till or
+`00 §5.1`'s offline law.
+
+**Still open under this ruling:** whether a user belongs to one org or many (a vendor-onboarding
+team member legitimately touches several), and whether email is the identifier at all for an
+owner who has one shared phone and no email — `07`'s WhatsApp channel exists and `01-F23` keys
+customers by phone, so the precedent for phone-as-identity is in the corpus already.
 
 **Q3 — is the staged edit itself an event?** `14-F28` makes pending edits *"visible and
 cancellable until they land"*. If staging is ledger state it inherits durability and audit for
