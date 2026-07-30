@@ -14,6 +14,17 @@ export {
   UNKNOWN_PRINTER_CAPABILITY,
 } from "./capability.js";
 export {
+  type EncodeRefusal,
+  type EncodeRefusalReason,
+  type EncodeResult,
+  type EncoderPart,
+  encode,
+  INK_LEVELS,
+  INK_SCOPES,
+  type InkLevel,
+  type InkScope,
+} from "./encoder.js";
+export {
   type ColumnDecision,
   type ColumnRefusal,
   checkColumns,
