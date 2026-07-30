@@ -31,10 +31,13 @@
 //
 // ── WHAT IS GREEN ON THE RED RUN, AND WHY (stated so the count is not read as coverage) ──
 //
-// 36 of this file's 45 tests fail on the RED run, each with a named "not implemented yet" error
-// rather than a crash. NINE PASS, and none of them observes the encoder:
-//   * seven are ORACLE SELF-TESTS — they feed hand-built byte streams to the walker and assert it
-//     reports what it should. A scanner whose failures nobody has demonstrated is worth nothing.
+// Most of this file fails on the RED run, each failure carrying a named "not implemented yet"
+// error rather than a crash. A MINORITY PASS, and none of them observes the encoder:
+//   * ORACLE SELF-TESTS feed hand-built byte streams to the walker and hand-built symbols to the
+//     QR decoder, and assert each reports what it should. A scanner whose failures nobody has
+//     demonstrated is worth nothing — and for the QR decoder that is not a general principle but
+//     the specific reason it was added, so its controls (a correctly-sized all-black and all-white
+//     rectangle must NOT decode) are the load-bearing ones in this file.
 //   * one is the `03-F36` positive control, for the same reason.
 //   * one — "BOLD IS NOT A LEVEL … no bold or emphasis surface" — is a scan over the package's
 //     EXISTING exports and is green because K-1's nine exports contain no such name. It carries
@@ -106,16 +109,30 @@
 //     computes "a two-digit quantity at `27-F56`'s 2× width costs 4 columns, leaving ~27 for the
 //     name" out of 32, which is arithmetic only the quantity-doubled reading produces. Reported;
 //     the layout is K-5's, so nothing here asserts it.
-//  5. **`03-F8`'s per-field raster vs `18 §10`'s open question.** `03-F8` mandates per-field
-//     rasterisation; `18 §10` says per-field "breaks the `name | price` column grid — the one row
-//     whose alignment carries the meaning" and leaves whole-document rasterisation "open, and not
-//     to be specified before it is measured". This suite implements `03-F8` (doc 03 owns printing)
-//     and reports the tension: a rasterised field cannot share a text line, so `03-F8` forces a
-//     line-level consequence that no FR states.
+//  5. **RULED: Wave 1 does not walk the raster TEXT path (`f3316b3`).** The first version of this
+//     suite asserted that a non-Latin user field was rasterised, not transliterated and not
+//     dropped — and every one of those is satisfied by a correctly-sized blank containing no
+//     legible glyphs. Identical to the QR trap below, found the same way. The founder verified
+//     that no Wave-1 input path can produce non-Latin text (item names are back-office English,
+//     `note` is unwired, customer names arrive only with docs `06`/`07`/`C18`) and ruled the
+//     encoder REFUSES the field — `raster_font_unavailable`, distinct from `raster_unavailable`.
+//     `00 §5.6` is untouched and still binds, so this is a SEQUENCING state and not a policy.
+//     The tension with `18 §10` is thereby postponed rather than resolved: `18 §10` says per-field
+//     rasterisation "breaks the `name | price` column grid — the one row whose alignment carries
+//     the meaning" and leaves whole-document rasterisation "open, and not to be specified before
+//     it is measured". Whoever builds the font path owns that, not this suite.
 //  6. **`03-F35` states no maximum payload.** Physical size is fixed at 18–25 mm while a QR's
 //     module count grows with data, so above some payload length no integer module size lands in
 //     the band. The FR gives no bound and no behaviour there. Untested; the fixtures below are
-//     realistic invoice payloads.
+//     realistic invoice payloads. The decode assertion makes this reachable rather than
+//     theoretical — a payload large enough to force sub-dot modules will now fail loudly.
+//  6b. **`03-F35` says nothing about the QUIET ZONE, and this suite cannot catch a missing one.**
+//     A QR needs a 4-module white border to be locatable by a real scanner. `decodeQr` pads with
+//     32 white dots because on paper the surrounding stock IS that border. Measured while writing
+//     this: `jsqr` decodes the fixture with the padding set to ZERO as well, so the suite would
+//     not catch a QR printed flush against a text line either way — the padding is faithful to
+//     paper, not load-bearing for the assertion. The border belongs to whatever composes the
+//     fiscal block around the symbol, i.e. K-4/K-5. Named in DEFERRED so it is not read as covered.
 //  7. **`has_native_qr` has no sanctioned reader — RULED: it STAYS (`9416265`).** `03 §7` declares
 //     it and `03-F35` forbids the only regulated use of a native QR. The founder ruled the record
 //     describes what a printer CAN do while `03-F35` decides what we DO, so a later non-fiscal QR
@@ -146,6 +163,7 @@
 //     to K-4/K-5. K-2 asserts only the encoder-level half: the encoder never inserts a space the
 //     caller did not supply.
 
+import jsQR from "jsqr";
 import { describe, expect, it } from "vitest";
 import * as escpos from "../index.js";
 import {
@@ -210,9 +228,11 @@ const BANNED: readonly { seq: readonly number[]; name: string; why: string }[] =
  *                                     opcode ("`GS B` solid-fill fidelity, rig-calibrated").
  *   `GS V m`  cut                   — `03 §7`'s `has_cutter`, `03-F10`'s "cut and drawer kick".
  *   `GS v 0`  raster bit image      — `03-F8`'s raster path, `03 §8` "rasterized at the target dot
- *                                     width". Declares its own dimensions, which is what makes
- *                                     `03-F35`'s size law checkable.
- *   `ESC *`   bit image             — the same path in column format.
+ *                                     width". Declares its own dimensions AND carries its payload
+ *                                     contiguously, which is what makes `03-F35`'s size law and
+ *                                     its DECODE assertion checkable at all.
+ *   `ESC *`   bit image             — the same path in column format. Admitted for logos; the QR
+ *                                     decode path requires `GS v 0` (see `decodeQr`).
  *   `GS ( D`  real-time enable      — `03-F42`'s raster corruption clause.
  *
  * Deliberately NOT admitted, with reasons: `GS ( L` / `GS 8 L` graphics (an Epson-family
@@ -225,7 +245,12 @@ type Size = { w: number; h: number };
 
 type WalkEvent =
   | { t: "text"; value: string; size: Size; reverse: boolean; emphasis: boolean }
-  | { t: "raster"; command: string; width_dots: number; height_dots: number }
+  /**
+   * `bits` is the command's payload, sliced out verbatim. It is carried because `03-F35`'s decode
+   * assertion needs the actual modules, not only the symbol's size — see `decodeQr`. For `GS v 0`
+   * the layout is row-major, MSB first, one bit per dot, 1 = black.
+   */
+  | { t: "raster"; command: string; width_dots: number; height_dots: number; bits: Uint8Array }
   | { t: "cut"; command: string }
   | { t: "feed"; lines: number }
   | { t: "command"; name: string };
@@ -359,7 +384,13 @@ const walk = (bytes: Uint8Array): Walk => {
         const rows = mode === 32 || mode === 33 ? 24 : 8;
         const payload = columns * (rows / 8);
         if (truncated(i, 5 + payload, "ESC * data")) break;
-        events.push({ t: "raster", command: "ESC *", width_dots: columns, height_dots: rows });
+        events.push({
+          t: "raster",
+          command: "ESC *",
+          width_dots: columns,
+          height_dots: rows,
+          bits: bytes.slice(i + 5, i + 5 + payload),
+        });
         i += 5 + payload;
         continue;
       }
@@ -405,6 +436,7 @@ const walk = (bytes: Uint8Array): Walk => {
           command: "GS v 0",
           width_dots: width_bytes * 8,
           height_dots,
+          bits: bytes.slice(i + 8, i + 8 + payload),
         });
         i += 8 + payload;
         continue;
@@ -449,6 +481,130 @@ const rasters = (w: Walk): Extract<WalkEvent, { t: "raster" }>[] =>
 
 const cuts = (w: Walk): Extract<WalkEvent, { t: "cut" }>[] =>
   w.events.filter((e): e is Extract<WalkEvent, { t: "cut" }> => e.t === "cut");
+
+type Raster = Extract<WalkEvent, { t: "raster" }>;
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// THE SECOND ORACLE: a QR DECODER.
+//
+// ── WHY THIS EXISTS (founder ruling, July 2026) ──
+//
+// `03-F35` makes the fiscal invoice number an OPAQUE token — "never parsed, reconstructed or
+// shape-validated" — and this suite honoured that. The consequence, found while preparing to
+// implement against it, is that every other QR assertion here (rasterised not native, square,
+// 18–25 mm at the target dpi, byte-identical across `has_native_qr`) IS SATISFIED BY A CORRECTLY
+// SIZED BLACK RECTANGLE. On a QR whose absence "is an offence that can seal the premises", a
+// document that looks compliant, passes CI and does not scan is the worst failure available —
+// the same class `03-F35` already refuses to accept for the native command. Ruled: take a decoder
+// dependency and assert the symbol decodes.
+//
+// ── WHY `jsqr` ──
+//
+// `jsqr@1.4.0` is pure JavaScript, takes an RGBA buffer directly (`data`, `width`, `height`) and
+// needs no canvas, DOM or native binding, so it runs in the plain node vitest environment this
+// package already uses — no new environment, no new global setup. It is also a DECODER ONLY,
+// which is the property that matters for an oracle: it cannot become a reference implementation
+// that a future edit compares the encoder against byte-for-byte. `packages/escpos` also carries
+// `qrcode` (the implementing session's encoder-side dependency) and this file DELIBERATELY does
+// not import it — encoding with the same library the implementation encodes with would make the
+// assertion a tautology.
+
+/** A generous white border. QR requires a 4-module quiet zone; at these module sizes 32 dots
+ *  clears it comfortably. See the DEFERRED note — supplying it here is also what makes this
+ *  suite unable to catch a QR printed flush against a text line. */
+const QR_QUIET_DOTS = 32;
+
+/**
+ * Expand a `GS v 0` raster (row-major, MSB first, 1 = black) into RGBA and decode it.
+ *
+ * Returns `null` when nothing decodes, which is the answer the positive controls below require —
+ * a decoder that threw instead would make "a blank does not decode" indistinguishable from "the
+ * test crashed".
+ */
+const decodeQr = (symbol: Raster): { data: string; binaryData: number[] } | null => {
+  if (symbol.command !== "GS v 0") return null;
+  const width = symbol.width_dots + QR_QUIET_DOTS * 2;
+  const height = symbol.height_dots + QR_QUIET_DOTS * 2;
+  const rgba = new Uint8ClampedArray(width * height * 4).fill(255);
+  const bytes_per_row = symbol.width_dots / 8;
+  for (let y = 0; y < symbol.height_dots; y++) {
+    for (let x = 0; x < symbol.width_dots; x++) {
+      const byte = symbol.bits[y * bytes_per_row + (x >> 3)] ?? 0;
+      if (((byte >> (7 - (x & 7))) & 1) !== 1) continue;
+      const offset = ((y + QR_QUIET_DOTS) * width + (x + QR_QUIET_DOTS)) * 4;
+      rgba[offset] = 0;
+      rgba[offset + 1] = 0;
+      rgba[offset + 2] = 0;
+    }
+  }
+  const result = jsQR(rgba, width, height);
+  return result === null ? null : { data: result.data, binaryData: result.binaryData };
+};
+
+/**
+ * A version-1 (21×21) QR for `QR_FIXTURE_PAYLOAD`, as a static matrix.
+ *
+ * It is a FIXTURE, not a reference encoder: its only job is to prove that `decodeQr`'s bit
+ * expansion, quiet zone and RGBA conversion are correct, so that when the real assertion fails
+ * everyone knows the encoder is at fault rather than this file. Its correctness is asserted by the
+ * suite itself (it must decode to the payload below), so it needs no trust and no provenance
+ * beyond that. Generated once at authoring time and pasted here precisely so that no QR ENCODER is
+ * a test-time dependency.
+ */
+const QR_FIXTURE_PAYLOAD = "RESTOS-K2-ORACLE";
+const QR_FIXTURE_MATRIX = [
+  "#######.####..#######",
+  "#.....#.#..##.#.....#",
+  "#.###.#.#..##.#.###.#",
+  "#.###.#.#..##.#.###.#",
+  "#.###.#..#....#.###.#",
+  "#.....#..##...#.....#",
+  "#######.#.#.#.#######",
+  ".........#.#.........",
+  "#.###.#.#..###...####",
+  "##..#..#.#####.#.....",
+  "..#.#.###.##.##.##.##",
+  "...#........##..#...#",
+  "###...#..###...#...##",
+  "........#....#..####.",
+  "#######..#..###..#...",
+  "#.....#..#.##..#.....",
+  "#.###.#.#.#.....##.#.",
+  "#.###.#.#.#.###..####",
+  "#.###.#.#.#.#.##..#.#",
+  "#.....#..####....#..#",
+  "#######.#...##.......",
+];
+
+/**
+ * Pack a module matrix into the `GS v 0` layout at `scale` dots per module — the same layout the
+ * walker reads back, so the controls exercise the identical path the real assertion does.
+ *
+ * Note the width rounding: 21 modules × 7 dots = 147, which is NOT a byte multiple, so the row is
+ * padded to 152 dots with 5 white columns. That is the awkward case the encoder will hit at
+ * 203 dpi, and the control below covers it on purpose.
+ */
+const packMatrix = (matrix: readonly string[], scale: number): Raster => {
+  const modules = matrix.length;
+  const content_dots = modules * scale;
+  const width_bytes = Math.ceil(content_dots / 8);
+  const bits = new Uint8Array(width_bytes * content_dots);
+  for (let y = 0; y < content_dots; y++) {
+    const row = matrix[Math.floor(y / scale)] ?? "";
+    for (let x = 0; x < content_dots; x++) {
+      if (row[Math.floor(x / scale)] !== "#") continue;
+      const index = y * width_bytes + (x >> 3);
+      bits[index] = (bits[index] ?? 0) | (0x80 >> (x & 7));
+    }
+  }
+  return {
+    t: "raster",
+    command: "GS v 0",
+    width_dots: width_bytes * 8,
+    height_dots: content_dots,
+    bits,
+  };
+};
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // FIXTURES
@@ -589,8 +745,10 @@ const CORPUS: readonly { name: string; parts: EncoderPart[]; record: PrinterCapa
     record: caps({ model_id: "FISCAL-576" }),
   },
   {
-    name: "a document mixing a Latin field and an Urdu field",
-    parts: [normal("Name: "), userText(LATIN_NAME), feed(), userText(URDU_NAME), feed(2)],
+    // Latin only, since `03-F8`'s July 2026 ruling refuses a non-Latin field and the corpus holds
+    // documents that ENCODE. The refusal has its own tests in the `03-F8` block.
+    name: "a document carrying Latin user-content fields",
+    parts: [normal("Name: "), userText(LATIN_NAME), feed(), userText("Bilal Ahmed"), feed(2)],
     record: caps(),
   },
   {
@@ -743,6 +901,69 @@ describe("the oracle itself — the walker can fail, and it skips raster payload
     expect(runs[2]?.emphasis).toBe(true);
     expect(w.reverse_starts).toBe(1);
     expect(w.emphasis_ever_on).toBe(true);
+  });
+
+  it("oracle: the QR decode path reads a real symbol back, at three module scales", () => {
+    // Proves `decodeQr` itself — bit expansion, the byte-boundary row padding, the quiet zone and
+    // the RGBA conversion. Without this, a bug in the expander is indistinguishable from a bug in
+    // the encoder, and on a RED run there is no encoder to rule out.
+    //
+    // 7 dots/module is the awkward one and the one the encoder will actually hit at 203 dpi:
+    // 21 × 7 = 147 content dots padded to 152 (19 bytes), i.e. five white columns the decoder must
+    // not read as modules.
+    for (const scale of [4, 7, 9]) {
+      const symbol = packMatrix(QR_FIXTURE_MATRIX, scale);
+      const decoded = decodeQr(symbol);
+      expect(decoded?.data, `the fixture did not decode at ${scale} dots per module`).toBe(
+        QR_FIXTURE_PAYLOAD,
+      );
+    }
+    expect(packMatrix(QR_FIXTURE_MATRIX, 7).width_dots).toBe(152);
+    expect(packMatrix(QR_FIXTURE_MATRIX, 7).height_dots).toBe(147);
+  });
+
+  it("oracle: A CORRECTLY SIZED BLANK DOES NOT DECODE — all-black and all-white both fail", () => {
+    // THE CONTROL THE WHOLE DECODE ASSERTION RESTS ON. Every other QR property in this file is
+    // satisfied by a black rectangle of the right dimensions, so unless a blank of exactly those
+    // dimensions provably fails to decode, the decode assertion is decoration.
+    const good = packMatrix(QR_FIXTURE_MATRIX, 7);
+    const blank = (fill: number): Raster => ({
+      ...good,
+      bits: new Uint8Array(good.bits.length).fill(fill),
+    });
+
+    // The blanks are the same size as a symbol that DOES decode — asserted, so the control cannot
+    // pass by being some other shape entirely.
+    expect(decodeQr(good)?.data).toBe(QR_FIXTURE_PAYLOAD);
+    for (const [name, fill] of [
+      ["all-black", 0xff],
+      ["all-white", 0x00],
+    ] as const) {
+      const rectangle = blank(fill);
+      expect(rectangle.width_dots).toBe(good.width_dots);
+      expect(rectangle.height_dots).toBe(good.height_dots);
+      expect(decodeQr(rectangle), `a ${name} rectangle decoded as a QR`).toBeNull();
+    }
+  });
+
+  it("oracle: a symbol with one finder pattern erased does not decode — structure is not enough", () => {
+    // The blanks above are the extremes. This is the near-miss: a symbol that has the right size,
+    // the right module grid and most of its data, and is still not a QR. It rules out a decoder
+    // that returns something for anything sufficiently textured.
+    const good = packMatrix(QR_FIXTURE_MATRIX, 7);
+    const damaged: Raster = { ...good, bits: Uint8Array.from(good.bits) };
+    const bytes_per_row = good.width_dots / 8;
+    for (let y = 0; y < 7 * 7; y++) {
+      for (let bx = 0; bx < 7; bx++) damaged.bits[y * bytes_per_row + bx] = 0;
+    }
+    expect(decodeQr(damaged), "a symbol missing its top-left finder decoded anyway").toBeNull();
+  });
+
+  it("oracle: a raster that is not GS v 0 is refused by the decode path rather than misread", () => {
+    // `ESC *` is admitted for logos and has a different payload geometry. Feeding it to `decodeQr`
+    // must fail loudly-by-null rather than produce a plausible wrong answer.
+    const good = packMatrix(QR_FIXTURE_MATRIX, 7);
+    expect(decodeQr({ ...good, command: "ESC *" })).toBeNull();
   });
 
   it("oracle: it counts inversion USES, not GS B bytes — two bands are two, a re-assert is one", () => {
@@ -1049,7 +1270,7 @@ describe("27-F56 — the ink budget is per SCOPE, and there are exactly two", ()
     // opaque bits and cannot know whether they are a logo, a customer's name in Urdu, or a VOID
     // band; only a document knows what role a block plays. See DEFERRED: the clause is K-4's and
     // K-5's, and this assertion is what makes the gap visible instead of assumed.
-    const w = walkOf([logo(), feed(), userText(URDU_NAME), feed(), fiscalQr(FISCAL_TOKEN)], caps());
+    const w = walkOf([logo(), feed(2), fiscalQr(FISCAL_TOKEN)], caps());
     expect(rasters(w).length, "the raster-only document produced no raster").toBeGreaterThan(0);
     expect(w.reverse_starts, "a raster part spent the GS B budget the guards count").toBe(0);
   });
@@ -1071,53 +1292,71 @@ describe("03-F8 — printer fonts for interface text, the raster path for everyt
     expect(rasters(w)).toEqual([]);
   });
 
-  it("03-F8: an URDU user-content field is RASTERISED — never dropped, never transliterated", () => {
-    // "no ESC/POS code page can print Urdu … Any proposal to print Urdu as text is therefore wrong
-    // by construction; raster is the only path." The three failures the FR names are each asserted:
-    // dropped (no raster at all), transliterated (Latin letters appear that were never supplied),
-    // and substituted (the classic `?`).
-    const w = walkOf([userText(URDU_NAME)], caps());
-    expect(rasters(w).length, "the Urdu field produced no raster — it was dropped").toBeGreaterThan(
-      0,
-    );
-    expect(
-      printedText(w),
-      "the Urdu field came back as printable characters — transliterated or substituted",
-    ).not.toMatch(/[A-Za-z0-9?]/);
-    // The fourth failure, which the two assertions above cannot see: emitting CP1256 bytes and a
-    // code-page switch. Those bytes are not printable ASCII, so they never enter a text run — they
-    // land in the violation list, named.
-    expect(w.violations, "the Urdu field was emitted as code-page bytes").toEqual([]);
+  it("03-F8: a NON-LATIN user-content field is REFUSED — Wave 1 does not walk the raster text path", () => {
+    // Founder ruling July 2026 (`f3316b3`), and it exists because of the same trap the fiscal QR
+    // had. The assertion this replaces required a raster, no transliteration and no code-page
+    // bytes — and **all three are satisfied by a correctly-sized blank containing no legible
+    // glyphs.** Rendering Urdu needs a font AND a shaping engine because the script is positional
+    // (`03-F8`'s own argument for why character mode cannot do it), and nothing at the encoder
+    // layer can stand in for legibility. Until a font is chosen the honest behaviour is `03-F34`'s
+    // hard refusal, so that is what is asserted.
+    const refusal = refusalOf([userText(URDU_NAME)], caps({ model_id: "NO-URDU-FONT" }));
+    expect(refusal.reason).toBe("raster_font_unavailable");
+    expect(refusal.severity).toBe("S1");
+    expect(refusal.model_id).toBe("NO-URDU-FONT");
   });
 
-  it("03-F8: the Urdu field is not dropped — its presence changes the emitted document", () => {
-    // The cheapest way to pass the test above is to emit nothing at all for the field. This is the
-    // control for that: `03-F50` names the failure class — "a line silently absent from every
-    // ticket is the one failure the paper cannot reveal".
-    const withField = expectBytes([normal("Name"), feed(), userText(URDU_NAME)], caps());
+  it("03-F8/03-F50: the non-Latin field never vanishes into a SUCCESSFUL document", () => {
+    // `03-F50`'s failure class survives the ruling unchanged — "a line silently absent from every
+    // ticket is the one failure the paper cannot reveal" — it is just satisfied by a loud refusal
+    // now instead of by a raster. The defect this rules out is an encoder that skips the field it
+    // cannot render and prints the rest: the ticket would look complete and be missing a name.
+    //
+    // Asserted as BOTH halves, because either alone is weak: the document must not encode, and it
+    // must specifically not encode to the same bytes as the document without the field, which is
+    // the signature of a silent drop.
+    const parts = [normal("Name"), feed(), userText(URDU_NAME)];
+    const result: EncodeResult = encode(api, parts, caps());
+    expect(result.ok, "the non-Latin field was skipped and the rest printed").toBe(false);
+
     const without = expectBytes([normal("Name"), feed()], caps());
-    expect([...withField].join(","), "the Urdu field emitted nothing").not.toBe(
-      [...without].join(","),
-    );
+    if (result.ok) {
+      expect(
+        [...result.bytes].join(","),
+        "the field vanished — byte-identical without it",
+      ).not.toBe([...without].join(","));
+    }
   });
 
-  it("03-F8/00 §5.6: Arabic-Indic numerals in user content are rasterised, never converted to Western", () => {
+  it("03-F8/00 §5.6: Arabic-Indic numerals in user content are refused too — never converted to Western", () => {
     // `03-F8` ends "Numerals Western", which governs interface numerals. `00 §5.6` governs user
-    // content: "never transliterated or rejected for its script". So a customer note carrying ٢٥
-    // takes the raster path and does not come back as "25". `18 §10` records the corroborating
-    // hardware report: Arabic-Indic numerals render as placeholder characters on real hardware.
-    const w = walkOf([userText(ARABIC_INDIC_DIGITS)], caps());
-    expect(rasters(w).length).toBeGreaterThan(0);
-    expect(printedText(w), "the numerals were converted to Western digits").not.toMatch(/[0-9]/);
+    // content and is UNTOUCHED by the ruling: "never transliterated or rejected for its script".
+    // So a customer note carrying ٢٥ must not come back as "25" — and since the raster path is not
+    // walked in Wave 1, the remaining honest outcome is the same refusal. Named separately from
+    // the Urdu case because the tempting shortcut here is different and much easier to reach: a
+    // digit transliteration table is three lines of code and looks harmless.
+    const refusal = refusalOf([userText(ARABIC_INDIC_DIGITS)], caps());
+    expect(refusal.reason).toBe("raster_font_unavailable");
   });
 
-  it("03-F8: routing is PER FIELD — one document, a Latin field as text and an Urdu field as raster", () => {
-    const w = walkOf(
+  it("03-F8: routing is still PER FIELD — a Latin field prints and one non-Latin field refuses the document", () => {
+    // The ruling did NOT collapse the two paths. The distinction is now the load-bearing one in
+    // this area: a document of Latin user fields encodes through the printer font, and adding ONE
+    // non-Latin field to that same document refuses it. A refusal that swallowed Latin too would
+    // strand every customer name in the system, and nothing else in this file would catch it.
+    const latinOnly = walkOf(
+      [normal("Name: "), userText(LATIN_NAME), feed(), userText("Bilal Ahmed"), feed()],
+      caps(),
+    );
+    expect(printedText(latinOnly)).toContain(LATIN_NAME);
+    expect(printedText(latinOnly)).toContain("Bilal Ahmed");
+    expect(rasters(latinOnly), "a Latin user field was rasterised").toEqual([]);
+
+    const withOneNonLatin = refusalOf(
       [normal("Name: "), userText(LATIN_NAME), feed(), userText(URDU_NAME), feed()],
       caps(),
     );
-    expect(printedText(w)).toContain(LATIN_NAME);
-    expect(rasters(w).length, "per-field routing produced the wrong number of rasters").toBe(1);
+    expect(withOneNonLatin.reason).toBe("raster_font_unavailable");
   });
 
   it("03-F8: no code-page byte reaches the wire — every document, scanned raw where it can be", () => {
@@ -1156,18 +1395,24 @@ describe("03-F8 — printer fonts for interface text, the raster path for everyt
     expect(scannedAroundRaster, "no raster-bearing document in the corpus").toBeGreaterThan(0);
   });
 
-  it("03-F8/03-F34: a printer that cannot raster REFUSES an Urdu field — it does not drop it", () => {
-    // `03 §7`'s `raster_ok` is false. `03-F8` says such a field is "never dropped or
-    // transliterated" and there is no other path, so `03-F34`'s hard refusal is the only remaining
-    // outcome. (What `raster_ok` should DEFAULT to for an unknown model is still K-1's open
-    // question — this pins the consequence, not the default.)
-    const refusal = refusalOf(
-      [userText(URDU_NAME)],
-      caps({ model_id: "NO-RASTER", raster_ok: false }),
+  it("03-F8/03-F34: a MISSING FONT and a printer that CANNOT RASTER are told apart, not conflated", () => {
+    // Two different failures with two different fixes: one is a dependency nobody shipped, the
+    // other is a printer whose `03 §7` record says `raster_ok: false`. An S1 band that conflated
+    // them would send a manager to check the cable over a missing font. Same argument that split
+    // `banner_budget_exceeded` from `item_marker_budget_exceeded`.
+    expect(refusalOf([userText(URDU_NAME)], caps({ raster_ok: true })).reason).toBe(
+      "raster_font_unavailable",
     );
-    expect(refusal.reason).toBe("raster_unavailable");
-    expect(refusal.severity).toBe("S1");
-    expect(refusal.model_id).toBe("NO-RASTER");
+    expect(refusalOf([fiscalQr(FISCAL_TOKEN)], caps({ raster_ok: false })).reason).toBe(
+      "raster_unavailable",
+    );
+
+    // Where BOTH hold, the reason must be one of the two and not a third thing. No FR states a
+    // priority between them, so pinning one would be a test written to pass — the same call made
+    // for a document that overspends both ink scopes.
+    const both = refusalOf([userText(URDU_NAME)], caps({ raster_ok: false }));
+    expect(["raster_font_unavailable", "raster_unavailable"]).toContain(both.reason);
+    expect(both.severity).toBe("S1");
   });
 
   it("03-F8/00 §5.6/03-F34: a non-ASCII INTERFACE string is refused, not silently substituted", () => {
@@ -1271,6 +1516,47 @@ describe("03-F35 — the fiscal QR is ALWAYS rasterised, never the native comman
       dots[dots.length - 1],
       "400 dpi emits no more dots than 180 dpi — the size is a constant",
     ).toBeGreaterThan(dots[0] ?? 0);
+  });
+
+  it("03-F35: THE EMITTED FISCAL QR ACTUALLY DECODES, back to its exact payload — every token", () => {
+    // The assertion the rest of this block cannot make. Size, squareness, never-native and
+    // byte-identical-across-`has_native_qr` are all satisfied by a correctly sized black rectangle;
+    // this is the one that says the symbol is a QR and says the right thing. Founder ruling,
+    // July 2026, after the gap was found while preparing to implement against this suite.
+    //
+    // Every token is checked, not one, so the assertion cannot pass by an encoder embedding a
+    // single hardcoded symbol — and the decoded values are compared to the tokens, so it cannot
+    // pass by embedding a valid QR of the WRONG payload either.
+    expect(OPAQUE_FISCAL_TOKENS.length, "one token proves nothing").toBeGreaterThan(1);
+    for (const token of OPAQUE_FISCAL_TOKENS) {
+      const symbol = rasters(walkOf([fiscalQr(token)], caps()))[0];
+      expect(symbol, `no raster emitted for ${token}`).toBeDefined();
+      if (!symbol) continue;
+      const decoded = decodeQr(symbol);
+      expect(decoded, `the fiscal QR for "${token}" did not decode at all`).not.toBeNull();
+      expect(decoded?.data, `the fiscal QR decoded to the wrong payload`).toBe(token);
+      // "Byte for byte": `data` is the decoder's string reading, `binaryData` is the raw octets it
+      // recovered. `03-F35`'s token is opaque, so the octets are what a regulator's scanner reads.
+      expect(decoded?.binaryData, `the fiscal QR's octets differ from the token`).toEqual([
+        ...new TextEncoder().encode(token),
+      ]);
+    }
+  });
+
+  it("03-F35: the QR still decodes at every dpi — module scaling does not destroy the symbol", () => {
+    // The size law and the decode law interact: the encoder picks a module size in whole dots to
+    // land inside 18–25 mm, and a bad rounding produces a symbol that measures correctly and
+    // scans as nothing. Neither assertion catches that alone.
+    for (const dpi of [180, 203, 300]) {
+      const symbol = rasters(
+        walkOf([fiscalQr(FISCAL_TOKEN)], caps({ dpi, model_id: `D${dpi}` })),
+      )[0];
+      expect(symbol, `no raster emitted at ${dpi} dpi`).toBeDefined();
+      if (!symbol) continue;
+      expect(decodeQr(symbol)?.data, `the QR emitted at ${dpi} dpi did not decode`).toBe(
+        FISCAL_TOKEN,
+      );
+    }
   });
 
   it("03-F35: the invoice token is OPAQUE — three formats, none parsed, none rejected, none reshaped", () => {
@@ -1431,10 +1717,11 @@ describe("27-F56/03-F30/03-F42 — laws that hold over every document", () => {
     const reasons = [
       refusalOf([banner("A"), normal("x"), banner("B")], caps()).reason,
       refusalOf([removal("A", "item-1"), normal("x"), removal("B", "item-1")], caps()).reason,
-      refusalOf([userText(URDU_NAME)], caps({ raster_ok: false })).reason,
+      refusalOf([fiscalQr(FISCAL_TOKEN)], caps({ raster_ok: false })).reason,
+      refusalOf([userText(URDU_NAME)], caps({ raster_ok: true })).reason,
       refusalOf([normal(URDU_NAME)], caps()).reason,
     ];
-    expect(new Set(reasons).size, "two encoder refusals share a reason code").toBe(4);
+    expect(new Set(reasons).size, "two encoder refusals share a reason code").toBe(5);
     expect(reasons).not.toContain("min_columns_not_met");
   });
 });
@@ -1461,6 +1748,20 @@ describe("27-F56/03-F30/03-F42 — laws that hold over every document", () => {
 //   states. **K-4 owns it**, because a `03-F30` block declares its own role and is therefore the
 //   first layer that knows a raster block IS a band; **K-5 owns the KOT's half** — that its layout
 //   reaches inversion only through the ink ladder. Neither may leave it to the encoder.
+// * THE RASTER TEXT PATH IS OWED, AND `03-F8` NAMES WHERE. The FR's July 2026 ruling refuses a
+//   non-Latin user field because Wave 1 has no font and no shaping engine, and it names the first
+//   real consumer — the storefront (`06`) and WhatsApp (`07`), where customer names and addresses
+//   actually arrive — as "where the font question must be answered rather than deferred again".
+//   `27-F61` comes with it: "Print a test sheet on the 48 GSM stock actually sold in Pakistan and
+//   have an Urdu reader judge it; do not validate on screen." Whoever builds that path inherits
+//   `18 §10`'s open per-field-vs-whole-document question too, and must NOT settle for this suite's
+//   shape of assertion — a raster was emitted proves nothing about legibility, which is the whole
+//   reason the refusal exists. `00 §5.6` binds throughout: user content is never transliterated or
+//   rejected for its script, so the refusal is a sequencing state with an expiry, not a policy.
+// * THE FISCAL QR'S QUIET ZONE. See header ambiguity 6b: a QR printed flush against a text line
+//   decodes in this suite (measured — `jsqr` reads the fixture with zero padding) and would not
+//   scan reliably on paper. `03-F35` does not mention the border at all. K-4/K-5 own it, because
+//   they compose the block around the symbol; a decode assertion cannot reach it.
 // * WHAT AN OVER-WIDE IMAGE DOES. `03 §8` says logos are "rasterized at the target dot width",
 //   which reads as scaling; `03-F36`'s off-paper argument reads as refusal. The FRs do not say
 //   which, so nothing here asserts either. K-4 owns it (it is the layer that knows the block's

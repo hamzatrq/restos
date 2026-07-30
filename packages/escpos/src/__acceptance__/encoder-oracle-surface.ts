@@ -141,11 +141,26 @@ export type EncodeRefusalReason =
   /** `27-F56` item scope via `27-F59`: two inverted markers inside one item block. */
   | "item_marker_budget_exceeded"
   /**
-   * `03 §7`'s `raster_ok` is false and the document needs the raster path — `03-F35`'s fiscal QR
-   * or `03-F8`'s non-Latin user field. Neither may be silently dropped, and `03-F35` forbids
-   * falling back to the native QR command, so there is no remaining way to render the document.
+   * THE PRINTER cannot raster: `03 §7`'s `raster_ok` is false and the document needs the raster
+   * path — `03-F35`'s fiscal QR. It may not be silently dropped and `03-F35` forbids falling back
+   * to the native QR command, so there is no remaining way to render the document.
    */
   | "raster_unavailable"
+  /**
+   * THE PLATFORM has no font: `03-F8`'s non-Latin user field, under the founder ruling of July
+   * 2026 (`f3316b3`). "Wave 1 does not walk it … Rendering Urdu needs a font **and** a shaping
+   * engine, because the script is positional, which is this FR's own argument; until one is chosen
+   * the encoder REFUSES a non-Latin user field rather than emitting a raster with no legible
+   * glyphs."
+   *
+   * DISTINCT FROM `raster_unavailable` on purpose, for the reason that split the two ink-budget
+   * codes: one is a printer that cannot raster and the other is a missing dependency, and an S1
+   * band that conflated them would send someone to check the cable over a font that was never
+   * shipped. `00 §5.6` is untouched and still binds — user content is never transliterated or
+   * rejected for its script — so this refusal is a SEQUENCING state, not a policy: docs `06`/`07`
+   * are the first real consumers and are where the font question must be answered.
+   */
+  | "raster_font_unavailable"
   /**
    * `03-F8` + `00 §5.6`: interface text is English. A non-ASCII byte in a `text` part cannot be
    * printed by a printer font (`03-F8` proves no code page renders Urdu) and substituting `?` for
