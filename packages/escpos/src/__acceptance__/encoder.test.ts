@@ -69,22 +69,37 @@
 //
 // ── FR AMBIGUITIES AND CONFLICTS, REPORTED RATHER THAN FILLED ──
 //
-//  1. **`27-F56` and `27-F59` cannot both hold, and the KOT is where both live.** `27-F56`
-//     reserves inversion for "the single most consequential fact on the ticket and nothing else"
-//     and says a ticket using it twice has used it zero times. `27-F59` says a modifier that is a
-//     REMOVAL "carries the inverted marker of `27-F56`" — and an order can contain two removals,
-//     or one removal on a REPRINT. This suite implements `27-F56` (it is the FR that allocates the
-//     budget, and `27-F59` spends from it). If the conflict resolves the other way, the
-//     enumeration in "the whole-document inversion property" is the test that must change, and
-//     that is a spec PR to `27 §2b`, not a test edit.
-//  2. **What counts as ONE use of inversion.** `27-F56`'s own examples (`CANCEL`, `VOID`,
-//     `REPRINT`, allergen) are BANDS, and a band can need two lines. So "twice" is read here as
-//     two non-contiguous inverted SPANS, not two inverted parts — the simpler alternative
-//     (count parts) is named and rejected because it would refuse a two-line REPRINT band that no
-//     FR bans.
+//  1. **RULED, and this file was rewritten to follow it (`9416265`).** The first version of this
+//     suite reported that `27-F56` and `27-F59` could not both hold: `27-F56` reserved inversion
+//     for "the single most consequential fact on the ticket and nothing else" while `27-F59` gave
+//     EVERY removal modifier the inverted marker, and an order with two removals — or one removal
+//     on a REPRINT — satisfied neither. The founder ruled the budget is **per SCOPE, and there are
+//     exactly two**: a banner (`CANCEL`/`VOID`/`REPRINT`) at most once per DOCUMENT, a removal
+//     marker at most once per ITEM BLOCK. The ruling's *reason* is what the assertions encode,
+//     because it is what makes the rule predict cases nobody has enumerated: **"used it twice" is
+//     about competing for the SAME GLANCE**, and `27-F58` fixes the reading order so a cook reads
+//     one dish at a time. So the budget is not a count over a document — it is a count within a
+//     glance, and a glance needs a KEY. That is why an item-scoped part carries an opaque
+//     `item_block` and a banner does not.
+//     **Nothing the ruling left strict was widened.** Two banners and two markers inside one item
+//     block are still refused, each with its own reason code, each with its own named test, and
+//     the enumeration asserts that both refusal classes were actually exercised — a ruling that
+//     widens a rule is the easiest place to widen a test past it by accident.
+//  2. **What counts as ONE use of inversion.** Still not stated in words. `27-F56`'s own examples
+//     are BANDS and a band can need two lines, so a use is read here as a maximal CONTIGUOUS run
+//     of parts sharing one scope key (`feed` transparent), not as a part. The ruling supports this
+//     from the other side: `27-F59` now says "an item with two removals carries one marker
+//     covering both", which is exactly two adjacent item-scoped parts printing as one band.
 //  3. **May an inverted run also be 2×2?** `27-F56` says "exactly three levels" and gives each a
 //     distinct allocation, so they are read here as mutually exclusive rungs — combining two
 //     makes a fourth. Not stated in words.
+//  3b. **Adjacent inversions of DIFFERENT scope.** A banner immediately followed by a removal
+//     marker with nothing between them is two facts; an encoder that left `GS B` on across both
+//     would print one continuous black band, i.e. two facts read as one — the exact failure
+//     `27-F56` is about. So the byte law below is "one `GS B` region per USE", which requires the
+//     encoder to break the region at a scope change. `27-F58`'s reading order means this never
+//     arises on a real ticket; it arises in the enumeration, and a test cannot be left undefined
+//     on a case it generates.
 //  4. **`27-F56` vs `27-F57` on the quantity's size.** `27-F56` puts the quantity at 2×2;
 //     `27-F57` says it sits "immediately left of the item name on the same line, **at the same
 //     size**". Read literally the name would also be 2×2 — but `27-F57`'s own July 2026 correction
@@ -101,8 +116,12 @@
 //     module count grows with data, so above some payload length no integer module size lands in
 //     the band. The FR gives no bound and no behaviour there. Untested; the fixtures below are
 //     realistic invoice payloads.
-//  7. **`has_native_qr` has no sanctioned reader.** `03 §7` declares it in the record and `03-F35`
-//     forbids the only regulated use of a native QR. No FR names another consumer. Reported.
+//  7. **`has_native_qr` has no sanctioned reader — RULED: it STAYS (`9416265`).** `03 §7` declares
+//     it and `03-F35` forbids the only regulated use of a native QR. The founder ruled the record
+//     describes what a printer CAN do while `03-F35` decides what we DO, so a later non-fiscal QR
+//     can read it without re-deriving the capability. The safety property that makes an unread
+//     field harmless is asserted below and must stay: two records differing ONLY in that flag emit
+//     byte-identical output, so the field cannot change behaviour by accident.
 //  8. **`raster_ok: false` — K-1 deliberately left the direction unpinned.** K-2 pins the
 //     CONSEQUENCE only, and derives it: `03-F35` forbids the native fallback and `03-F34` forbids
 //     silent degradation, so a document needing raster on a printer that cannot raster has no
@@ -136,7 +155,9 @@ import {
   type EscposK2Api,
   encode,
   INK_LEVELS_PER_27_F56,
+  INK_SCOPES_PER_27_F56,
   inkLevels,
+  inkScopes,
 } from "./encoder-oracle-surface.js";
 import { type EscposK1Api, type PrinterCapability, printerCapabilities } from "./oracle-surface.js";
 
@@ -466,7 +487,21 @@ const OPAQUE_FISCAL_TOKENS = [
 
 const normal = (value: string): EncoderPart => ({ kind: "text", value, ink: "normal" });
 const big = (value: string): EncoderPart => ({ kind: "text", value, ink: "size_2x2" });
-const inverted = (value: string): EncoderPart => ({ kind: "text", value, ink: "inverted" });
+/** `27-F56` banner scope — `CANCEL`, `VOID`, `REPRINT`. One per DOCUMENT. */
+const banner = (value: string): EncoderPart => ({
+  kind: "text",
+  value,
+  ink: "inverted",
+  scope: "banner",
+});
+/** `27-F56` item scope via `27-F59` — a removal marker. One per ITEM BLOCK. */
+const removal = (value: string, item_block: string): EncoderPart => ({
+  kind: "text",
+  value,
+  ink: "inverted",
+  scope: "item",
+  item_block,
+});
 const feed = (lines = 1): EncoderPart => ({ kind: "feed", lines });
 const userText = (value: string): EncoderPart => ({ kind: "user_text", value });
 const fiscalQr = (payload: string): EncoderPart => ({ kind: "fiscal_qr", payload });
@@ -521,9 +556,32 @@ const CORPUS: readonly { name: string; parts: EncoderPart[]; record: PrinterCapa
     record: caps({ model_id: "WIDE-576" }),
   },
   {
-    name: "a ticket with one inverted band",
-    parts: [inverted("REPRINT"), feed(2), normal("1 Naan"), feed(3), { kind: "cut" }],
+    name: "a ticket with one inverted banner",
+    parts: [banner("REPRINT"), feed(2), normal("1 Naan"), feed(3), { kind: "cut" }],
     record: caps(),
+  },
+  {
+    // The document the two-scope ruling exists for, and which NO reading of the old FRs accepted:
+    // a REPRINT band plus a removal marker on each of two dishes. Three inversions, three glances,
+    // legal. It is in the corpus so the cross-cutting laws (bold off, clean walk, purity, default
+    // end state) are checked against the shape the ruling introduced, not only against the old one.
+    name: "a reprinted ticket with a removal on each of two items",
+    parts: [
+      banner("REPRINT"),
+      feed(2),
+      big("2"),
+      normal(" Chicken Karahi"),
+      feed(),
+      removal("  NO PEANUT", "item-1"),
+      feed(2),
+      big("1"),
+      normal(" Daal"),
+      feed(),
+      removal("  NO DAIRY", "item-2"),
+      feed(3),
+      { kind: "cut" },
+    ],
+    record: caps({ model_id: "TWO-SCOPES-576" }),
   },
   {
     name: "a receipt carrying a fiscal QR",
@@ -553,20 +611,47 @@ const CORPUS: readonly { name: string; parts: EncoderPart[]; record: PrinterCapa
 ];
 
 /**
- * `27-F56`'s budget as an oracle: the number of non-contiguous inverted SPANS in a part list.
- * `feed` is transparent because a band can span lines (ambiguity 2 in the header).
+ * The GLANCE a part competes in, or `null` if it is not inverted. This is the whole of the
+ * two-scope ruling in one function: a banner competes with every other banner on the document, and
+ * a removal marker competes only with the other markers on ITS item.
  */
-const invertedSpans = (parts: readonly EncoderPart[]): number => {
-  let spans = 0;
-  let inside = false;
+const glanceKey = (part: EncoderPart): string | null => {
+  if (part.kind !== "text" || part.ink !== "inverted") return null;
+  return part.scope === "banner" ? "banner" : `item:${part.item_block}`;
+};
+
+/**
+ * `27-F56`'s budget as an oracle: one entry per USE of inversion, in order. A use is a maximal
+ * CONTIGUOUS run of parts sharing one glance key, with `feed` transparent — so a two-line REPRINT
+ * band is one use, and `27-F59`'s "an item with two removals carries one marker covering both" is
+ * one use (ambiguity 2 in the header).
+ */
+const inversionUses = (parts: readonly EncoderPart[]): string[] => {
+  const uses: string[] = [];
+  let previous: string | null = null;
   for (const part of parts) {
     if (part.kind === "feed") continue;
-    const isInverted = part.kind === "text" && part.ink === "inverted";
-    if (isInverted && !inside) spans += 1;
-    inside = isInverted;
+    const key = glanceKey(part);
+    if (key !== null && key !== previous) uses.push(key);
+    previous = key;
   }
-  return spans;
+  return uses;
 };
+
+/** Every glance the document spends inversion in more than once — i.e. every budget breach. */
+const overspentGlances = (parts: readonly EncoderPart[]): string[] => {
+  const counts = new Map<string, number>();
+  for (const key of inversionUses(parts)) counts.set(key, (counts.get(key) ?? 0) + 1);
+  return [...counts].filter(([, n]) => n > 1).map(([key]) => key);
+};
+
+/**
+ * The reason each breach must produce. Where a document breaches BOTH scopes the suite asserts the
+ * reason is one of them rather than pinning a priority — no FR states an order, and inventing one
+ * would be a test written to pass.
+ */
+const reasonForGlance = (key: string): string =>
+  key === "banner" ? "banner_budget_exceeded" : "item_marker_budget_exceeded";
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -719,7 +804,7 @@ describe("27-F56 — the three levels at the byte level", () => {
 
   it("27-F56: the inverted rung prints reversed, and is a DISTINCT rung from 2×2, not a combination", () => {
     // Ambiguity 3 in the header: "exactly three levels" is read as three mutually exclusive rungs.
-    const runs = textRuns(walkOf([inverted("VOID")], caps()));
+    const runs = textRuns(walkOf([banner("VOID")], caps()));
     expect(runs.length).toBe(1);
     expect(runs[0]?.value).toBe("VOID");
     expect(runs[0]?.reverse).toBe(true);
@@ -731,11 +816,15 @@ describe("27-F56 — the three levels at the byte level", () => {
 
   it("27-F56: the three rungs are three DIFFERENT byte streams — a rung that encodes to nothing is not a rung", () => {
     // The failure this catches is an encoder that accepts `ink` and ignores it. Same text, three
-    // levels, three streams — and none of them equal.
-    const streams = INK_LEVELS_PER_27_F56.map((ink) =>
-      [...expectBytes([{ kind: "text", value: "SAME", ink }], caps())].join(","),
+    // levels, three streams — and none of them equal. The rungs are listed here rather than mapped
+    // over `INK_LEVELS_PER_27_F56` because the two-scope ruling made `inverted` a part SHAPE and
+    // not a bare tag: an inversion cannot be written without saying which glance it competes in.
+    const rungs: readonly EncoderPart[] = [normal("SAME"), big("SAME"), banner("SAME")];
+    expect(rungs.length, "a rung was dropped from the comparison").toBe(
+      INK_LEVELS_PER_27_F56.length,
     );
-    expect(new Set(streams).size, "two ink levels encode identically").toBe(3);
+    const streams = rungs.map((part) => [...expectBytes([part], caps())].join(","));
+    expect(new Set(streams).size, "two ink levels encode identically").toBe(rungs.length);
   });
 
   it("27-F56: two ink levels can share one line, which is what 27-F57's item line requires", () => {
@@ -761,28 +850,105 @@ describe("27-F56 — the three levels at the byte level", () => {
   });
 });
 
-describe("27-F56 — the whole-document inversion property", () => {
-  it("27-F56: one inverted band produces exactly one inversion in the bytes", () => {
-    const w = walkOf([inverted("REPRINT"), feed(2), normal("1 Naan")], caps());
+describe("27-F56 — the ink budget is per SCOPE, and there are exactly two", () => {
+  it("27-F56: the package declares exactly two ink scopes — banner and item", () => {
+    // The ruling's words: "the budget is *per scope*, and there are exactly two". A third scope
+    // would be a third glance nobody allocated, which is `27-F14`'s "the first module to ship
+    // cannot spend it by accident" applied to paper.
+    expect([...inkScopes(api)].sort()).toEqual([...INK_SCOPES_PER_27_F56].sort());
+  });
+
+  it("27-F56: one banner produces exactly one inversion in the bytes", () => {
+    const w = walkOf([banner("REPRINT"), feed(2), normal("1 Naan")], caps());
     expect(w.reverse_starts).toBe(1);
   });
 
-  it("27-F56: a band spanning two lines is ONE use, not two", () => {
+  it("27-F56: a banner spanning two lines is ONE use, not two", () => {
     // Ambiguity 2 in the header, asserted so the reading is visible: `27-F56`'s own examples are
-    // bands (`CANCEL`, `VOID`, `REPRINT`, allergen) and a band can need two lines. The rejected
-    // alternative — counting inverted PARTS — would refuse this document, which no FR asks for.
-    const w = walkOf([inverted("ALLERGEN"), feed(), inverted("NO PEANUT")], caps());
+    // BANDS and a band can need two lines. The rejected alternative — counting inverted PARTS —
+    // would refuse this document, which no FR asks for and which the ruling's "one marker covering
+    // both" now contradicts outright.
+    const w = walkOf([banner("VOID — DO NOT"), feed(), banner("MAKE THIS")], caps());
     expect(w.reverse_starts).toBe(1);
   });
 
-  it('27-F56: "a ticket that uses inversion twice has used it zero times" — the second band is REFUSED', () => {
+  it('27-F56 BANNER SCOPE, STILL STRICT: "a ticket with two banners has none" — the second is REFUSED', () => {
+    // The half of the original rule the ruling did NOT relax, and the FR restates it in exactly
+    // those words. Two banners are in one glance no matter where they sit on the ticket.
     const refusal = refusalOf(
-      [inverted("REPRINT"), feed(), normal("1 Naan"), feed(), inverted("VOID")],
-      caps({ model_id: "TWO-BANDS" }),
+      [banner("REPRINT"), feed(), normal("1 Naan"), feed(), banner("VOID")],
+      caps({ model_id: "TWO-BANNERS" }),
     );
-    expect(refusal.reason).toBe("ink_budget_exceeded");
+    expect(refusal.reason).toBe("banner_budget_exceeded");
     expect(refusal.severity).toBe("S1"); // 03-F34: a hard refusal plus an S1 band
-    expect(refusal.model_id).toBe("TWO-BANDS");
+    expect(refusal.model_id).toBe("TWO-BANNERS");
+  });
+
+  it("27-F59 ITEM SCOPE, STILL STRICT: two separate markers inside ONE item block are REFUSED", () => {
+    // The other half the ruling did not relax: "two inversions inside one item block are in a
+    // single glance, which is the case `27-F56`'s budget actually forbids." Same item key, two
+    // non-contiguous markers — which is what an encoder produces if it renders each removal as its
+    // own band instead of composing one, and it is precisely the shape `27-F59` now names.
+    const refusal = refusalOf(
+      [
+        big("2"),
+        normal(" Chicken Karahi"),
+        feed(),
+        removal("  NO PEANUT", "item-1"),
+        feed(),
+        normal("  extra raita"),
+        feed(),
+        removal("  NO DAIRY", "item-1"),
+      ],
+      caps({ model_id: "TWO-MARKERS-ONE-DISH" }),
+    );
+    expect(refusal.reason).toBe("item_marker_budget_exceeded");
+    expect(refusal.severity).toBe("S1");
+    expect(refusal.model_id).toBe("TWO-MARKERS-ONE-DISH");
+  });
+
+  it("27-F59: an item with two removals carries ONE marker covering both — contiguous, so one use", () => {
+    // The FR's own sentence, and the reason the strict test above is about SEPARATE markers rather
+    // than about two removals. Composed into one band, the same two removals are legal.
+    const w = walkOf(
+      [big("2"), normal(" Chicken Karahi"), feed(), removal("  NO PEANUT, NO DAIRY", "item-1")],
+      caps(),
+    );
+    expect(w.reverse_starts).toBe(1);
+  });
+
+  it("27-F56 THE RELAXATION: a removal on each of two DIFFERENT items is legal — they are not one glance", () => {
+    // The ruling's reason, asserted rather than paraphrased: "a cook reads one dish at a time, so a
+    // removal on the second dish is never in the same glance as a removal on the first". Under the
+    // pre-ruling reading this document was refused; under the ruling it must print, and the bytes
+    // must carry BOTH markers — an encoder that accepted the document and dropped one inversion
+    // would satisfy a decision-only assertion.
+    const w = walkOf(
+      [
+        big("2"),
+        normal(" Chicken Karahi"),
+        feed(),
+        removal("  NO PEANUT", "item-1"),
+        feed(2),
+        big("1"),
+        normal(" Daal"),
+        feed(),
+        removal("  NO DAIRY", "item-2"),
+      ],
+      caps(),
+    );
+    expect(w.reverse_starts, "one of the two removal markers was dropped").toBe(2);
+  });
+
+  it("27-F56 THE RELAXATION: a REPRINT banner and a removal marker coexist — different scopes, different glances", () => {
+    // The exact document that satisfied NEITHER FR before the ruling, named because it is the one
+    // that forced it: "an order with two removals — or one removal on a reprint — satisfied
+    // neither."
+    const w = walkOf(
+      [banner("REPRINT"), feed(2), normal("1 Daal"), feed(), removal("  NO DAIRY", "item-1")],
+      caps(),
+    );
+    expect(w.reverse_starts).toBe(2);
   });
 
   it("27-F56/03-F34: the refusal hands back NO BYTES — there is no degraded ticket to print anyway", () => {
@@ -790,8 +956,8 @@ describe("27-F56 — the whole-document inversion property", () => {
     // ABSENCE, and a denylist of field names cannot state an absence completely. The specific leak
     // is a refusal that also carries `bytes`, which lets a caller print the over-inked ticket.
     const refusal = refusalOf(
-      [inverted("A"), normal("x"), inverted("B")],
-      caps({ model_id: "TWO-BANDS" }),
+      [banner("A"), normal("x"), banner("B")],
+      caps({ model_id: "TWO-BANNERS" }),
     );
     expect([...Object.keys(refusal)].sort()).toEqual([...ENCODE_REFUSAL_KEYS].sort());
     expect(Object.keys(refusal), "the refusal carries a printable payload").not.toContain("bytes");
@@ -801,7 +967,7 @@ describe("27-F56 — the whole-document inversion property", () => {
     // A positive control, because the assertion above is about absence and an absence check that
     // cannot fail is worth nothing. Both shapes are synthesised HERE; no implementation is asked
     // to produce them.
-    const refusal = refusalOf([inverted("A"), normal("x"), inverted("B")], caps());
+    const refusal = refusalOf([banner("A"), normal("x"), banner("B")], caps());
     const undeclared = (value: object): string[] =>
       Object.keys(value).filter((key) => !(ENCODE_REFUSAL_KEYS as readonly string[]).includes(key));
 
@@ -810,39 +976,82 @@ describe("27-F56 — the whole-document inversion property", () => {
     expect(undeclared({ ...refusal, parts: [{ kind: "text" }] })).toEqual(["parts"]);
   });
 
-  it("27-F56: enumerated over every document of four parts, the budget holds — bytes and decision agree", () => {
-    // The property the FR states is about a DOCUMENT, so it is asserted over documents rather than
-    // over calls: 3^4 = 81 of them, built from a normal run, an inverted run and a line feed. For
-    // each, `encode` must accept exactly when the document uses inversion at most once, and where
-    // it accepts, the emitted bytes must contain exactly as many inversions as the document used.
-    const alphabet: readonly EncoderPart[] = [normal("ITEM"), inverted("VOID"), feed()];
+  it("27-F56: enumerated over every document of four parts, the two-scope budget holds — bytes and decision agree", () => {
+    // The FR states a property of a DOCUMENT, so it is asserted over documents: 5^4 = 625 of them,
+    // built from a normal run, a line feed, a banner, and a removal marker on each of two items.
+    // The alphabet is chosen so the enumeration generates all four classes the ruling distinguishes
+    // — two banners (refused), two markers on one item (refused), markers on two items (accepted),
+    // and a banner beside a marker (accepted) — and the counters below assert each class was
+    // actually generated, because a ruling that widens a rule is the easiest place to widen a test
+    // past it by accident.
+    //
+    // Two independent laws per document, not one: the DECISION must match the budget, and where the
+    // document is accepted the BYTES must carry exactly one `GS B` region per use. Checking only
+    // the decision would let an encoder accept a legal document and silently drop an inversion.
+    const alphabet: readonly EncoderPart[] = [
+      normal("ITEM"),
+      feed(),
+      banner("REPRINT"),
+      removal("NO PEANUT", "item-1"),
+      removal("NO DAIRY", "item-2"),
+    ];
+    let refusedBanner = 0;
+    let refusedItem = 0;
+    let acceptedWithTwoOrMoreUses = 0;
     let accepted = 0;
-    let refused = 0;
 
-    for (let code = 0; code < 81; code++) {
+    for (let code = 0; code < 625; code++) {
       const parts: EncoderPart[] = [];
       let n = code;
       for (let slot = 0; slot < 4; slot++) {
-        const choice = alphabet[n % 3];
+        const choice = alphabet[n % 5];
         if (choice) parts.push(choice);
-        n = Math.floor(n / 3);
+        n = Math.floor(n / 5);
       }
-      const spans = invertedSpans(parts);
-      const label = `document ${code} (${spans} inverted spans)`;
+      const uses = inversionUses(parts);
+      const overspent = overspentGlances(parts);
+      const label = `document ${code} (uses ${JSON.stringify(uses)})`;
       const result: EncodeResult = encode(api, parts, caps());
 
-      expect(result.ok, label).toBe(spans <= 1);
+      expect(result.ok, label).toBe(overspent.length === 0);
       if (result.ok) {
-        expect(walk(result.bytes).reverse_starts, label).toBe(spans);
+        expect(walk(result.bytes).reverse_starts, label).toBe(uses.length);
         accepted += 1;
+        if (uses.length >= 2) acceptedWithTwoOrMoreUses += 1;
       } else {
-        expect(result.reason, label).toBe("ink_budget_exceeded");
-        refused += 1;
+        expect(overspent.map(reasonForGlance), label).toContain(result.reason);
+        if (result.reason === "banner_budget_exceeded") refusedBanner += 1;
+        if (result.reason === "item_marker_budget_exceeded") refusedItem += 1;
       }
     }
-    // Both arms must have run. An enumeration that only ever took one is oracle round 2's A13.
-    expect(accepted, "no document was accepted by the enumeration").toBeGreaterThan(0);
-    expect(refused, "no document was refused by the enumeration").toBeGreaterThan(0);
+    // Every class the ruling distinguishes must actually have been exercised. An enumeration that
+    // only ever took one arm is oracle round 2's A13, and one that stopped generating the newly
+    // legal shape would silently stop testing the ruling at all.
+    expect(accepted, "no document was accepted").toBeGreaterThan(0);
+    expect(refusedBanner, "the two-banner refusal was never exercised").toBeGreaterThan(0);
+    expect(refusedItem, "the two-markers-on-one-item refusal was never exercised").toBeGreaterThan(
+      0,
+    );
+    expect(
+      acceptedWithTwoOrMoreUses,
+      "no document with two legal inversions — the ruling is untested",
+    ).toBeGreaterThan(0);
+  });
+
+  it("27-F56: a raster part spends NO inversion budget — which is why the document-scope clause is not enforceable here", () => {
+    // `27-F56`'s July 2026 clause: "the budget is a property of the DOCUMENT, not of a command. An
+    // inverted band drawn as a raster image rather than through `GS B` spends the same attention
+    // and must count against the same scope."
+    //
+    // This test PINS THE BOUNDARY rather than closing the clause, and says so: a document made
+    // only of raster parts emits zero `GS B` transitions, so every guard in this file — and every
+    // guard an encoder could write — is blind to a mostly-black bitmap. The encoder receives
+    // opaque bits and cannot know whether they are a logo, a customer's name in Urdu, or a VOID
+    // band; only a document knows what role a block plays. See DEFERRED: the clause is K-4's and
+    // K-5's, and this assertion is what makes the gap visible instead of assumed.
+    const w = walkOf([logo(), feed(), userText(URDU_NAME), feed(), fiscalQr(FISCAL_TOKEN)], caps());
+    expect(rasters(w).length, "the raster-only document produced no raster").toBeGreaterThan(0);
+    expect(w.reverse_starts, "a raster part spent the GS B budget the guards count").toBe(0);
   });
 });
 
@@ -1215,13 +1424,17 @@ describe("27-F56/03-F30/03-F42 — laws that hold over every document", () => {
   it("03-F34: the encoder's refusal reasons are DISTINCT from K-1's, so an S1 band can say what is wrong", () => {
     // K-1's deferred note asks for exactly this: "K-4 must assert that their `reason` codes are
     // DISTINCT from `min_columns_not_met` — a shared code would make the S1 band unable to say
-    // what is actually wrong." K-2's three are named here for the same reason.
+    // what is actually wrong." K-2's four are named here for the same reason, and the first two
+    // are the reason the two-scope ruling did not collapse into one code: an S1 band that cannot
+    // tell "this ticket has two banners" from "this dish has two markers" sends the operator to
+    // the wrong line of the ticket.
     const reasons = [
-      refusalOf([inverted("A"), normal("x"), inverted("B")], caps()).reason,
+      refusalOf([banner("A"), normal("x"), banner("B")], caps()).reason,
+      refusalOf([removal("A", "item-1"), normal("x"), removal("B", "item-1")], caps()).reason,
       refusalOf([userText(URDU_NAME)], caps({ raster_ok: false })).reason,
       refusalOf([normal(URDU_NAME)], caps()).reason,
     ];
-    expect(new Set(reasons).size, "two encoder refusals share a reason code").toBe(3);
+    expect(new Set(reasons).size, "two encoder refusals share a reason code").toBe(4);
     expect(reasons).not.toContain("min_columns_not_met");
   });
 });
@@ -1235,11 +1448,19 @@ describe("27-F56/03-F30/03-F42 — laws that hold over every document", () => {
 //   the encoder can observe. The walker ADMITS `GS ( D` so an implementer is not blocked; nothing
 //   requires it. Whoever owns `03-F42` must assert that raster payloads are bracketed, and must
 //   do it here rather than in the transport, because the transport cannot see inside a buffer.
-// * AN INVERTED BAND DRAWN AS A RASTER IMAGE BYPASSES `27-F56` ENTIRELY. The budget is counted
-//   from `GS B` transitions and from the parts list; an all-black bitmap with knocked-out letters
-//   is an inversion the guard cannot see. No FR closes this, and `03-F8` makes the raster path
-//   freely available. K-5 should assert that the KOT's own layout reaches inversion only through
-//   the ink ladder.
+// * `27-F56`'s RASTER CLAUSE — NOW AN FR, AND DELIBERATELY NOT CLOSED HERE. The clause exists
+//   because this suite reported the hole; the founder wrote it into `27-F56` (`9416265`): "the
+//   budget is a property of the DOCUMENT, not of a command. An inverted band drawn as a raster
+//   image rather than through `GS B` spends the same attention and must count against the same
+//   scope." K-2 does what the encoder layer can and no more:
+//     — the `image` part carries NO ink level, so inversion is not offered as a raster option;
+//     — a test above pins the boundary by asserting a raster-only document spends zero `GS B`
+//       budget, which is the gap made visible rather than assumed.
+//   It cannot do the rest. The encoder receives opaque bits and cannot tell a VOID band from a
+//   logo from a customer's name in Urdu — and an ink-coverage threshold would be a number no FR
+//   states. **K-4 owns it**, because a `03-F30` block declares its own role and is therefore the
+//   first layer that knows a raster block IS a band; **K-5 owns the KOT's half** — that its layout
+//   reaches inversion only through the ink ladder. Neither may leave it to the encoder.
 // * WHAT AN OVER-WIDE IMAGE DOES. `03 §8` says logos are "rasterized at the target dot width",
 //   which reads as scaling; `03-F36`'s off-paper argument reads as refusal. The FRs do not say
 //   which, so nothing here asserts either. K-4 owns it (it is the layer that knows the block's

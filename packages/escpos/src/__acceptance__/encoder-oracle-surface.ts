@@ -42,6 +42,23 @@ export const INK_LEVELS_PER_27_F56 = ["normal", "size_2x2", "inverted"] as const
 export type InkLevel = (typeof INK_LEVELS_PER_27_F56)[number];
 
 /**
+ * `27-F56`'s two-scope ruling (founder, July 2026 — `9416265`), which resolved `27-F56` against
+ * `27-F59`. The ladder still has THREE levels; the inverted level has TWO SCOPES, and the budget
+ * is one inversion per scope:
+ *
+ *   - **banner** — "at most ONE per document. `CANCEL`, `VOID`, `REPRINT`. These compete with each
+ *     other and the FR's rule binds absolutely: a ticket with two banners has none."
+ *   - **item** — "at most ONE per item block", `27-F59`'s removal marker.
+ *
+ * The ruling's reason is what these types encode: *"used it twice" is about competing for the SAME
+ * glance*, and `27-F58` fixes the reading order so that a cook reads one dish at a time. So the
+ * budget is not a count over a document; it is a count within a glance, and a glance needs a KEY.
+ */
+export const INK_SCOPES_PER_27_F56 = ["banner", "item"] as const;
+
+export type InkScope = (typeof INK_SCOPES_PER_27_F56)[number];
+
+/**
  * The encoder's input. This is NOT `03-F30`'s `DocumentSpec` — that is K-4's type, it carries
  * regions, slots and degradation forms, and it sits above this layer. These are the emittable
  * units `18 §10`'s "document model → encoder → Transport" pipeline hands the encoder.
@@ -58,7 +75,30 @@ export type EncoderPart =
    * Interface text (`00 §5.6`: English only). `03-F8`: "Text prints via printer fonts (English +
    * numerals)". Not user content — see `user_text`.
    */
-  | { kind: "text"; value: string; ink: InkLevel }
+  | { kind: "text"; value: string; ink: "normal" | "size_2x2" }
+  /**
+   * `27-F56` banner scope: `CANCEL`, `VOID`, `REPRINT`. At most one per document.
+   *
+   * DECLARED INTERPRETATION (24 §3b): the inverted level is split into two PART SHAPES rather than
+   * carrying an optional `scope` field, so three illegal states cannot be written down at all — an
+   * inversion with no scope, a banner carrying an item key, and a normal run carrying a scope.
+   * `03-F32`'s precedent is explicit that this is the stronger form: "enforced structurally … not
+   * by a runtime check on a value the owner supplied".
+   */
+  | { kind: "text"; value: string; ink: "inverted"; scope: "banner" }
+  /**
+   * `27-F56` item scope via `27-F59`: the removal marker, "indented under its item", at most one
+   * per ITEM BLOCK.
+   *
+   * `item_block` is an OPAQUE key and the encoder must not interpret it — it exists only so the
+   * "per item block" budget is expressible over a flat part list. The caller (K-5's layout) is the
+   * layer that knows which block a marker hangs under; the encoder only needs to know which
+   * markers share a glance. The named alternative — the encoder inferring blocks from the part
+   * order — is rejected because an item block is a `03-F30` `DocumentSpec` block and the encoder
+   * is deliberately below that layer. See the DEFERRED note in `encoder.test.ts` for the half of
+   * `27-F56` that this key still cannot reach.
+   */
+  | { kind: "text"; value: string; ink: "inverted"; scope: "item"; item_block: string }
   /**
    * A user-content field (`00 §5.6`: "customer-entered data … is uncontrolled Unicode and may
    * contain Urdu script"). `03-F8` routes these per FIELD: printer fonts where the field is
@@ -67,7 +107,14 @@ export type EncoderPart =
   | { kind: "user_text"; value: string }
   /** `27-F58`: "Groups are separated by blank lines, not rules". `lines` ≥ 1. */
   | { kind: "feed"; lines: number }
-  /** `03-F8`'s first raster consumer: logos. `03 §8`: "rasterized at the target dot width". */
+  /**
+   * `03-F8`'s first raster consumer: logos. `03 §8`: "rasterized at the target dot width".
+   *
+   * Note what this part deliberately does NOT carry: an ink level. `27-F56`'s July 2026 clause
+   * says the budget "is a property of the DOCUMENT, not of a command" and that an inverted band
+   * drawn as a raster counts against the same scope — so the encoder must at least not offer
+   * inversion as a raster OPTION. It cannot do more than that, because the bits are opaque to it.
+   */
   | { kind: "image"; width_dots: number; height_dots: number; bits: Uint8Array }
   /**
    * `03-F35`. The payload is an OPAQUE token — "never parsed, reconstructed or shape-validated,
@@ -84,8 +131,15 @@ export type EncoderPart =
  * say what is actually wrong — K-1's own deferred note).
  */
 export type EncodeRefusalReason =
-  /** `27-F56`: "A ticket that uses inversion twice has used it zero times." */
-  | "ink_budget_exceeded"
+  /**
+   * `27-F56` banner scope: "a ticket with two banners has none". Two reason codes and not one
+   * `ink_budget_exceeded`, because the two scopes fail for genuinely different reasons and an S1
+   * band that cannot tell "this ticket has two banners" from "this dish has two markers" sends
+   * the operator to the wrong line of the ticket.
+   */
+  | "banner_budget_exceeded"
+  /** `27-F56` item scope via `27-F59`: two inverted markers inside one item block. */
+  | "item_marker_budget_exceeded"
   /**
    * `03 §7`'s `raster_ok` is false and the document needs the raster path — `03-F35`'s fiscal QR
    * or `03-F8`'s non-Latin user field. Neither may be silently dropped, and `03-F35` forbids
@@ -145,6 +199,8 @@ export type EncodeResult = { ok: true; bytes: Uint8Array } | EncodeRefusal;
 export type EscposK2Api = {
   /** `27-F56`: the ladder, "allocated once, platform-wide". Exactly three levels. */
   INK_LEVELS?: readonly InkLevel[];
+  /** `27-F56`'s two-scope ruling: "there are exactly two". */
+  INK_SCOPES?: readonly InkScope[];
   /** `18 §10`: "document model … → encoder → `Transport` interface". */
   encode?: (parts: readonly EncoderPart[], caps: PrinterCapability) => EncodeResult;
 };
@@ -155,6 +211,9 @@ const missing = (name: string, fr: string): never => {
 
 export const inkLevels = (api: EscposK2Api): readonly InkLevel[] =>
   api.INK_LEVELS ?? missing("INK_LEVELS", "27-F56");
+
+export const inkScopes = (api: EscposK2Api): readonly InkScope[] =>
+  api.INK_SCOPES ?? missing("INK_SCOPES", "27-F56 two-scope ruling");
 
 export const encode = (
   api: EscposK2Api,
