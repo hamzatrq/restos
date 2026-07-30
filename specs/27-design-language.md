@@ -119,6 +119,24 @@ gate, and where the pilot contradicts this section, **this section loses**.
   unreliable across the printers we actually support, and a distinction the hardware may
   not render is worse than no distinction. A ticket that uses inversion twice has used it
   zero times.
+  - **Two SCOPES, one inversion each (founder ruling July 2026 — resolves `27-F56` against
+    `27-F59`).** As written, this FR reserved inversion for "the single most consequential fact
+    on the ticket and nothing else" while `27-F59` gave **every** removal modifier the inverted
+    marker. A KOT is where both live, and an order with two removals — or one removal on a
+    reprint — satisfied neither. **Ruled:** the budget is *per scope*, and there are exactly two.
+    - **Banner scope — at most ONE per document.** `CANCEL`, `VOID`, `REPRINT`. These compete
+      with each other and the FR's rule binds absolutely: a ticket with two banners has none.
+    - **Item scope — at most ONE per item block.** `27-F59`'s removal marker, indented under
+      its item.
+    The reason this is not a relaxation: **"used it twice" is about competing for the SAME
+    glance.** `27-F58` already fixes the reading order — identifier → timing → items →
+    modifiers → notes — and a cook reads one dish at a time, so a removal on the second dish is
+    never in the same glance as a removal on the first, nor as the banner above them both. Two
+    banners *are* in one glance, and two removals on ONE item are too; both stay banned.
+  - **The budget is a property of the DOCUMENT, not of a command.** An inverted band drawn as a
+    raster image rather than through `GS B` spends the same attention and must count against the
+    same scope. Stated because a guard that counts the command alone can be bypassed without
+    anyone intending to.
 - 27-F57 **Quantity is never separated from the item it counts.** The mapping step — pairing
   a number to the thing it quantifies — is where comprehension collapses in every study we
   have (readers who *decode* a line at ~71% *execute* it correctly at ~35%). Quantity sits
@@ -143,7 +161,10 @@ gate, and where the pilot contradicts this section, **this section loses**.
   turns one scannable line into a wrapped paragraph, and wrapping destroys the vertical
   alignment that `27-F57` and `27-F58` depend on. Where a modifier is a *removal* it
   carries the inverted marker of `27-F56`, because a removal that is missed is an allergen
-  incident, not a preference miss.
+  incident, not a preference miss. **Scoped July 2026 (`27-F56`'s two-scope ruling): one inverted
+  removal marker per ITEM BLOCK.** An item with two removals carries one marker covering both —
+  two inversions inside one item block are in a single glance, which is the case `27-F56`'s
+  budget actually forbids.
 - 27-F60 **Icons on paper are permitted but never load-bearing alone.** The raster path
   (`03-F8`) makes glyphs available, so `27-F26`'s icon-plus-label law applies unchanged:
   an icon may accompany a word, never replace it. `27-F27`'s prohibition on inventing
