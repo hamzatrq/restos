@@ -2,6 +2,8 @@ import { newId } from "@restos/domain";
 import type { BlockedCursor, DeviceStore } from "@restos/sync-client";
 import { billedEffectiveFromJsonLines, wallClock } from "@restos/sync-client";
 import {
+  type AddLineRequest,
+  AddLineRequestSchema,
   type AppendRequest,
   AppendRequestSchema,
   type AppendResult,
@@ -28,6 +30,8 @@ export type Gateway = {
   kitchenQueue: () => KitchenTicket[];
   menu: () => MenuItem[];
   append: (req: unknown) => AppendResult;
+  /** `C5` — `01-F60`'s resolution and `01-F53`'s capture, both on the trusted side. */
+  addLine: (req: unknown) => AppendResult;
 };
 
 /**
@@ -51,10 +55,25 @@ export type CatalogResolver = (item_id: string) => { name: string } | null;
  */
 export type CatalogList = () => { id: string; name: string }[];
 
+/**
+ * `01-F60` — the price this device would snapshot for `channel`, or `null` if the item carries
+ * none for this device's branch on that channel.
+ *
+ * Injected for the same reason as the two seams above, and separate from them because it answers
+ * a third question: `catalog` NAMES an id (tombstones included, so a reprint renders), `menu`
+ * lists what may be SOLD, and this says what it COSTS. `01-F55` and `01-F60` make those three
+ * sets genuinely different.
+ */
+export type PriceResolver = (item_id: string, channel: string) => number | null;
+
+/** The counter app is the `counter` channel (`02-F1`, `02-F42`). */
+const COUNTER_CHANNEL = "counter";
+
 export type GatewayDeps = {
   store: DeviceStore;
   catalog: CatalogResolver;
   menu: CatalogList;
+  priceOf: PriceResolver;
   actor: string;
   /** 02-F19 — attribution is whoever's PIN is in (02-F41); there is no "acting for". */
   actorUserId: string | null;
@@ -203,11 +222,16 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
       // 27-F4 — an unavailable item is DISABLED IN PLACE with its reason, never removed from
       // the grid. Removing it would move every tile after it and destroy the positional memory
       // an operator who cannot read depends on entirely.
+      // 01-F60 — an UNPRICED item is not an 86'd item, and the two must not be conflated. An
+      // 86'd item stays deliberately sellable (01-F59): its price is known and 02-F31 owns the
+      // oversell path. An unpriced one has no number to sell at, and inventing one is worse than
+      // refusing — so it is greyed for a DIFFERENT reason and the counter cannot add it.
+      const unpriced = deps.priceOf(entry.id, COUNTER_CHANNEL) === null;
+      const reason = off ? (contested ? "86 — disputed" : "86") : unpriced ? "no price set" : null;
       return {
         id: entry.id,
         label: entry.name,
-        ...(off ? { unavailable: true } : {}),
-        ...(off ? { unavailableReason: contested ? "86 — disputed" : "86" } : {}),
+        ...(reason === null ? {} : { unavailable: true, unavailableReason: reason }),
       };
     });
   },
@@ -231,6 +255,58 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
       schema_version: 1,
       payload: parsed.payload,
       refs: parsed.refs,
+    });
+    return { id: envelope.id };
+  },
+
+  /**
+   * `C5` — the counter's highest-frequency act (~300×/shift), and the one place a price enters
+   * the ledger.
+   *
+   * Everything money-bearing is decided HERE: the channel comes from the ORDER (`02-F1`, fixed at
+   * creation and never inferred), the branch from this device's own identity (`01-F60`), and the
+   * price from the catalog those two key into. The renderer supplied none of it.
+   */
+  addLine: (req: unknown): AppendResult => {
+    const parsed: AddLineRequest = AddLineRequestSchema.parse(req);
+    const order = deps.store.openOrders().find((row) => row.order_id === parsed.order_id);
+    if (order === undefined) {
+      // An orphan line is unremovable under 01-F1, so this refuses rather than appending against
+      // an order id nothing holds.
+      throw new Error(
+        `addLine: no open order ${parsed.order_id} (01-F1 — a line cannot be orphaned)`,
+      );
+    }
+    const unit_price_paisa = deps.priceOf(parsed.item_id, order.channel);
+    if (unit_price_paisa === null) {
+      // 01-F60: selling requires a number and inventing one is worse than refusing. NOT an
+      // 01-F17 violation — the sale is not blocked, this one item is, and the rest of the order
+      // completes normally. `menu()` has already greyed it with this reason.
+      throw new Error(
+        `addLine: ${parsed.item_id} has no price for channel ${order.channel} on this branch ` +
+          `(01-F60) — it cannot be sold until the menu prices it`,
+      );
+    }
+    const identity = deps.store.identity;
+    const envelope = deps.store.append({
+      id: newId(),
+      org_id: identity.org_id,
+      branch_id: identity.branch_id,
+      device_id: identity.device_id,
+      actor_user_id: deps.actorUserId,
+      device_created_at: wallClock.now(),
+      type: "order.line_added",
+      schema_version: 1,
+      payload: {
+        order_id: parsed.order_id,
+        line_id: newId(),
+        item_id: parsed.item_id,
+        qty: parsed.qty,
+        // 01-F53 — captured at line-add and never re-read. A later price edit cannot retro-price
+        // this order, which is what 14-F6 promises the owner as "open orders keep their price".
+        unit_price_paisa,
+      },
+      refs: [],
     });
     return { id: envelope.id };
   },

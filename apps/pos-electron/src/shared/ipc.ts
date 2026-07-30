@@ -143,6 +143,26 @@ export const AppendRequestSchema = z.object({
 });
 export type AppendRequest = z.infer<typeof AppendRequestSchema>;
 
+/**
+ * `C5` — add a line. **Carries no money**, and that absence is the whole design.
+ *
+ * `01-F53` captures `unit_price_paisa` into the event at line-add, and `01-F60` resolves it from
+ * the device's branch and the order's channel. Both of those live in main. A renderer that
+ * supplied the price could supply `0` — and this file's own header calls the renderer "the
+ * untrusted end of this bridge even though we ship it", a threat model `fc2f69f` made concrete
+ * when a remote origin held this exact bridge.
+ *
+ * So the renderer names WHAT to add and main decides what it costs — the same split that already
+ * governs identity, event id and `branch_created_at`.
+ */
+export const AddLineRequestSchema = z.object({
+  order_id: z.string().min(1),
+  item_id: z.string().min(1),
+  /** Integer units (`00 §6`). Positive: removing a line is `order.line_removed`, not a qty of 0. */
+  qty: z.number().int().positive(),
+});
+export type AddLineRequest = z.infer<typeof AddLineRequestSchema>;
+
 export const AppendResultSchema = z.object({ id: z.string() });
 export type AppendResult = z.infer<typeof AppendResultSchema>;
 
@@ -153,6 +173,7 @@ export const CHANNELS = {
   kitchenQueue: "restos:kitchen-queue",
   menu: "restos:menu",
   append: "restos:append",
+  addLine: "restos:add-line",
   /** Push: main tells the renderer the folds moved. Carries no data — the renderer re-reads. */
   changed: "restos:changed",
 } as const;
@@ -164,6 +185,8 @@ export type RestosBridge = {
   kitchenQueue: () => Promise<KitchenTicket[]>;
   menu: () => Promise<MenuItem[]>;
   append: (req: AppendRequest) => Promise<AppendResult>;
+  /** `C5`/`01-F60` — main resolves the price; no money crosses this call. */
+  addLine: (req: AddLineRequest) => Promise<AppendResult>;
   /** Subscribe to fold changes. Returns an unsubscribe. */
   onChanged: (fn: () => void) => () => void;
 };

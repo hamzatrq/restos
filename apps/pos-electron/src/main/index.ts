@@ -194,6 +194,9 @@ app.whenReady().then(() => {
     // 01-F55 — the SELLABLE set, which excludes tombstones. `catalog.lookup` above still
     // resolves them, because a reprint of an older order must render a deleted item's name.
     menu: () => store.catalog.list("item").map((e) => ({ id: e.id, name: e.name })),
+    // 01-F60 — the device resolves its OWN branch's row; `priceOf` takes no branch parameter
+    // precisely so this call cannot ask for another branch's price.
+    priceOf: (item_id, channel) => store.catalog.priceOf("item", item_id, channel),
     actor: "dev",
     actorUserId: null,
     deviceLabel: "Counter 1",
@@ -218,6 +221,12 @@ app.whenReady().then(() => {
   ipcMain.handle(CHANNELS.openOrders, () => gateway.openOrders());
   ipcMain.handle(CHANNELS.kitchenQueue, () => gateway.kitchenQueue());
   ipcMain.handle(CHANNELS.menu, () => gateway.menu());
+  // C5 — same notify-from-inside-the-handler rule as `append` below, and for the same reason.
+  ipcMain.handle(CHANNELS.addLine, (_event, req: unknown) => {
+    const result = gateway.addLine(req);
+    notifyChanged();
+    return result;
+  });
   ipcMain.handle(CHANNELS.append, (_event, req: unknown) => {
     const result = gateway.append(req);
     // NOTIFY FROM INSIDE THE HANDLER. This was `ipcMain.on(CHANNELS.append, notifyChanged)`,

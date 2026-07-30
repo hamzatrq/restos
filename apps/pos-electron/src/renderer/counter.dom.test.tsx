@@ -11,7 +11,13 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AppendRequest, DeviceState, MenuItem, OpenOrder } from "../shared/ipc";
+import type {
+  AddLineRequest,
+  AppendRequest,
+  DeviceState,
+  MenuItem,
+  OpenOrder,
+} from "../shared/ipc";
 import { Counter } from "./Counter";
 
 afterEach(cleanup);
@@ -66,9 +72,17 @@ const openOrder = (over: Partial<OpenOrder> = {}): OpenOrder => ({
 
 /** Every append the screen makes, in order, so a test can assert what was NOT sent too. */
 let appended: AppendRequest[];
+/**
+ * Every `addLine` the screen makes. Tracked SEPARATELY from `appended` because they are
+ * different channels, and the distinction is the point of `C5`'s design: `addLine` carries no
+ * money and `append` would have. A harness that folded them together could not tell a line added
+ * through the trusted path from one the renderer priced itself.
+ */
+let lines: AddLineRequest[];
 
-const mountWith = (orders: OpenOrder[]) => {
+const mountWith = (orders: OpenOrder[], overrides: Partial<{ addLineThrows: string }> = {}) => {
   appended = [];
+  lines = [];
   const bridge = {
     deviceState: vi.fn(async () => DEVICE),
     openOrders: vi.fn(async () => orders),
@@ -77,6 +91,13 @@ const mountWith = (orders: OpenOrder[]) => {
     append: vi.fn(async (req: AppendRequest) => {
       appended.push(req);
       return { id: `evt-${appended.length}` };
+    }),
+    addLine: vi.fn(async (req: AddLineRequest) => {
+      lines.push(req);
+      // 01-F60 — main refuses an unpriced item, so the renderer must survive a rejected addLine
+      // without taking the till down (01-F17). Simulated here because the refusal lives in main.
+      if (overrides.addLineThrows !== undefined) throw new Error(overrides.addLineThrows);
+      return { id: `evt-line-${lines.length}` };
     }),
     onChanged: vi.fn(() => () => {}),
   };
@@ -161,24 +182,12 @@ describe("the grid before an order exists (founder ruling §3.6)", () => {
     expect(screen.getAllByText(/choose an order type first/i).length).toBeGreaterThan(0);
   });
 
-  /**
-   * **A TRIPWIRE, AND IT CANNOT FAIL TODAY. Saying so is the point.**
-   *
-   * `onSelect` is a no-op because `C5` is unbuilt, so "appends nothing" is true of every
-   * implementation — including a broken one. Mutation-checked: removing the grid's greying
-   * fails this test only through the reason text, which the test above already owns. The
-   * `appended` assertion below is currently vacuous.
-   *
-   * It is kept, labelled, because it becomes load-bearing the instant `C5` lands: `Tile` fires
-   * `onPress` even when unavailable (`01-F59`), so an implementer who adds the append without a
-   * guard gets an `order.line_added` naming an `order_id` that does not exist — unremovable
-   * under `01-F1`. This fails at that moment and not before.
-   *
-   * `A13` is the reason for the label rather than for deleting it: that round's defect was
-   * three tests that *claimed* to assert something they never reached. A vacuous test that says
-   * it is vacuous costs a reader nothing; one that does not is how a suite lies.
-   */
-  it("tripwire (vacuous until C5): tapping an item with no order open appends NOTHING", async () => {
+  it("C5: tapping an item with no order open adds NOTHING — no line, no append", async () => {
+    // This was a labelled tripwire while `C5` was unbuilt, and it is load-bearing now.
+    // `Tile` fires `onPress` even when unavailable (`01-F59` — greyed is not disabled), so the
+    // greying above cannot refuse the tap. Without the handler's guard this appends an
+    // `order.line_added` naming an `order_id` that does not exist, which `01-F1` makes
+    // unremovable. Mutation-checked: deleting the guard fails this.
     mountWith([]);
     render(<Counter />);
     fireEvent.click(await screen.findByRole("button", { name: /Karahi/i }));
@@ -186,6 +195,53 @@ describe("the grid before an order exists (founder ruling §3.6)", () => {
     await waitFor(() =>
       expect(screen.getAllByText(/choose an order type first/i).length).toBeGreaterThan(0),
     );
+    expect(lines).toHaveLength(0);
     expect(appended).toHaveLength(0);
+  });
+});
+
+describe("C5 — adding a line (01-F60, 01-F53)", () => {
+  it("ONE tap adds the item to the open order, at quantity 1", async () => {
+    mountWith([openOrder({ order_id: "order-7" })]);
+    render(<Counter />);
+    fireEvent.click(await screen.findByRole("button", { name: /Karahi/i }));
+
+    await waitFor(() => expect(lines).toHaveLength(1));
+    expect(lines[0]).toEqual({ order_id: "order-7", item_id: "item-karahi", qty: 1 });
+  });
+
+  it("NO MONEY crosses the seam — the renderer names an item, never a price", async () => {
+    // The load-bearing assertion of C5's whole design. `01-F60` resolves the price from the
+    // device's branch and the ORDER's channel, both of which live in main; `shared/ipc.ts` calls
+    // the renderer "the untrusted end of this bridge", and `fc2f69f` made that concrete when a
+    // remote origin held it. A renderer that could send a price could send zero.
+    mountWith([openOrder({ order_id: "order-7" })]);
+    render(<Counter />);
+    fireEvent.click(await screen.findByRole("button", { name: /Biryani/i }));
+
+    await waitFor(() => expect(lines).toHaveLength(1));
+    const keys = Object.keys(lines[0] ?? {}).sort();
+    expect(keys).toEqual(["item_id", "order_id", "qty"]);
+    const money = keys.filter((k) => /price|paisa|amount|total|cost/i.test(k));
+    expect(money, "the renderer sent a money field").toEqual([]);
+    // And it goes through `addLine`, never the generic append — which is what makes the above
+    // structural rather than incidental. `append` cannot be given a price it did not carry.
+    expect(appended).toHaveLength(0);
+  });
+
+  it("a REFUSED line does not take the till down (01-F17, 01-F60)", async () => {
+    // Main refuses an unpriced item. `01-F60`: selling requires a number and inventing one is
+    // worse than refusing — but `01-F17` means the SALE is not blocked, only this item, so the
+    // screen must survive the rejection and still be usable. React 19 unmounts the root on a
+    // render throw, so an unhandled rejection here would blank a counter mid-service.
+    mountWith([openOrder({ order_id: "order-7" })], { addLineThrows: "no price for counter" });
+    render(<Counter />);
+    fireEvent.click(await screen.findByRole("button", { name: /Karahi/i }));
+
+    await waitFor(() => expect(lines).toHaveLength(1));
+    // The rest of the counter is still there and still working.
+    expect(await screen.findByRole("button", { name: /Send to kitchen/i })).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: /Biryani/i }));
+    await waitFor(() => expect(lines).toHaveLength(2));
   });
 });

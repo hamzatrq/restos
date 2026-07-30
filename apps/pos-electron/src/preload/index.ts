@@ -16,6 +16,7 @@ const bridge: RestosBridge = {
   kitchenQueue: () => ipcRenderer.invoke(CHANNELS.kitchenQueue),
   menu: () => ipcRenderer.invoke(CHANNELS.menu),
   append: (req) => ipcRenderer.invoke(CHANNELS.append, req),
+  addLine: (req) => ipcRenderer.invoke(CHANNELS.addLine, req),
   onChanged: (fn) => {
     const handler = () => fn();
     ipcRenderer.on(CHANNELS.changed, handler);

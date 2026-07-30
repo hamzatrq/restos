@@ -103,6 +103,28 @@ export const Counter = () => {
   const current = orders[0];
 
   /**
+   * Every write goes through here, and the `catch` is the point.
+   *
+   * `void promise.then(reload)` leaves a REJECTION UNHANDLED, which in a renderer is not a tidy
+   * -up matter: main legitimately refuses things (`01-F60`'s unpriced item, `01-F1`'s orphan
+   * line, any schema violation at the seam), and an unhandled rejection in Electron surfaces as a
+   * process-level error rather than as anything the cashier can act on. A test caught this
+   * exactly once, by passing while vitest reported the escape — the shape of a false positive.
+   *
+   * `reload()` runs either way, so the screen re-reads what is actually true after a refusal
+   * rather than holding whatever it optimistically assumed. `01-F17`: the sale is never blocked,
+   * so one refused item must leave the rest of the counter working.
+   *
+   * **What is deliberately NOT here: a visible alarm.** `03-F5`'s S1 band is the surface a
+   * refusal should reach, and `AppShell` already takes `alarms` — but nothing constructs one yet,
+   * and inventing a local error banner would put a second, competing error surface on the screen
+   * that the alarm model is meant to own. Recorded rather than improvised.
+   */
+  const write = (op: Promise<unknown>) => {
+    void op.catch(() => {}).then(reload);
+  };
+
+  /**
    * `C4` — start an order. One append, and every field it carries is a decision made HERE and
    * never inferred later (`02-F1`).
    *
@@ -112,13 +134,13 @@ export const Counter = () => {
    * key, and it has to be minted by whoever will reference it in the same breath.
    */
   const startOrder = (order_type: string) => {
-    void window.restos
-      .append({
+    write(
+      window.restos.append({
         type: "order.created",
         payload: { order_id: newId(), channel: COUNTER_CHANNEL, order_type },
         refs: [],
-      })
-      .then(reload);
+      }),
+    );
   };
 
   /**
@@ -132,9 +154,7 @@ export const Counter = () => {
    * confirm that silently failed to print would be worse than one that never claimed to.
    */
   const sendToKitchen = (order_id: string) => {
-    void window.restos
-      .append({ type: "order.confirmed", payload: { order_id }, refs: [] })
-      .then(reload);
+    write(window.restos.append({ type: "order.confirmed", payload: { order_id }, refs: [] }));
   };
 
   return (
@@ -234,21 +254,23 @@ export const Counter = () => {
                 page={page}
                 onPageChange={setPage}
                 /*
-                  C5 IS NOT BUILT. It needs `unit_price_paisa`, and the catalog carries no price
-                  until `01-F60` reaches the wire and the store (T-2/T-3).
+                  C5 — the counter's highest-frequency act, ~300x a shift, and now one tap.
 
-                  This is a no-op and NOT a guard. An `if (current === undefined) return;` here
-                  would read as a refusal while being indistinguishable from this — the branch
-                  cannot change what happens, because nothing happens either way. Writing one
-                  would be the "comment was the defect" pattern in its purest form: a guard that
-                  exists to be read rather than to run.
+                  THE GUARD IS REAL NOW, and it has to be here rather than in the greying above:
+                  `Tile` fires `onPress` even when unavailable, because `01-F59` rules that an
+                  86'd item stays deliberately sellable and `8b28a72` removed the `disabled`
+                  attribute for exactly that reason. So "greyed" cannot refuse a tap, and without
+                  this line a tap with no order open would append an `order.line_added` naming an
+                  `order_id` that does not exist — unremovable under `01-F1`.
 
-                  When C5 lands the guard becomes real and belongs here, because `Tile` fires
-                  `onPress` even when unavailable (`01-F59` — greyed is not disabled), so the
-                  greying above cannot stop an append on its own. `counter.dom.test.tsx` carries
-                  the tripwire that fails the moment an append is added without it.
+                  No price crosses this call. `addLine` names an order, an item and a quantity;
+                  main resolves the price from this device's branch and the ORDER's channel
+                  (`01-F60`) and captures it into the event (`01-F53`).
                 */
-                onSelect={() => {}}
+                onSelect={(item_id) => {
+                  if (current === undefined) return;
+                  write(window.restos.addLine({ order_id: current.order_id, item_id, qty: 1 }));
+                }}
               />
             )}
           </div>

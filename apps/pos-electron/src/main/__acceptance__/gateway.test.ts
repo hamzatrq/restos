@@ -31,6 +31,9 @@ const deps = (over: Partial<GatewayDeps> = {}): GatewayDeps => ({
   store: stubStore(),
   catalog: (id) => (id === "i-karahi" ? { name: "Chicken Karahi" } : null),
   menu: () => [{ id: "i-karahi", name: "Chicken Karahi" }],
+  // 01-F60 — priced on the counter channel by default, so existing cases keep exercising a
+  // sellable item; the unpriced path is asserted explicitly where it is the subject.
+  priceOf: (_item_id, channel) => (channel === "counter" ? 145_000 : null),
   actor: "Ayesha",
   actorUserId: "user-1",
   deviceLabel: "Counter 1",
@@ -54,7 +57,16 @@ describe("18 §6 / 18 §9 — the renderer's whole surface", () => {
     //
     // What makes it still a CLOSED vocabulary: `menu` takes no arguments, names no table and
     // accepts no filter. It is one more fixed answer, not a query.
+    // SIX since C5, and the widening is again acknowledged rather than quiet. `addLine` exists
+    // because `01-F60` resolves a price from the device's branch and the ORDER's channel — both
+    // of which live on this side — and `01-F53` freezes the result into the event. Routing it
+    // through the generic `append` would have meant the RENDERER supplying `unit_price_paisa`,
+    // and this file's own header calls the renderer the untrusted end of the bridge.
+    //
+    // Still a CLOSED vocabulary: `addLine` names an order, an item and a quantity. It carries no
+    // money, no table name and no filter.
     expect(Object.keys(createGateway(deps())).sort()).toEqual([
+      "addLine",
       "append",
       "deviceState",
       "kitchenQueue",
