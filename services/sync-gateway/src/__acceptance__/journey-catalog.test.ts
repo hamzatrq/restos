@@ -25,7 +25,7 @@ import type {
 } from "@restos/sync-protocol";
 import { parseMessage } from "@restos/sync-protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { CATALOG_PAGE_SIZE, publishCatalog } from "../catalog.js";
+import { CATALOG_PAGE_SIZE, type CatalogEntry, publishCatalog } from "../catalog.js";
 import { createGateway, type Gateway, issueDeviceToken, registerDevice } from "../index.js";
 import {
   BASE_T,
@@ -38,6 +38,24 @@ import {
   openDb,
   TEST_TOKEN_SECRET,
 } from "./helpers.js";
+
+// ── 01-F60's enabled grid, required on every publish since the July 2026 founder ruling ──────
+//
+// "**The enabled set is a REQUIRED input to the publish** ... not an optional one defaulting to
+// 'check nothing'." This journey is about the TRANSPORT reaching a real device, not about
+// pricing (`catalog-pricing.test.ts` owns `01-F60`), so it declares the smallest REAL grid — one
+// branch × one of `02-F42`'s five channels — and `dish()` prices that single cell. The
+// completeness check therefore RUNS on every publish below and passes.
+//
+// Deliberately NOT `{ branches: [], channels: [] }`: whether an empty enabled set is legal is an
+// open question on `01-F60` (recorded in `catalog-pricing.test.ts`'s header), and passing it
+// would leave every publish here unchecked — the silence the ruling exists to remove.
+const BRANCH = "br-journey";
+const ENABLED = { branches: [BRANCH], channels: ["counter"] };
+const PRICED = [{ branch_id: BRANCH, channel: "counter", price_paisa: 145_000 }];
+
+const dish = (id: string, name: string, extra: Record<string, unknown> = {}): CatalogEntry =>
+  ({ kind: "item", id, name, prices: PRICED, ...extra }) as CatalogEntry;
 
 type Link = {
   transport: CloudTransport;
@@ -155,10 +173,10 @@ describe("JOURNEY — a device fetches its org's catalog over the wire (01-F9, T
       db,
       id.org_id,
       [
-        { kind: "item", id: "i-karahi", name: "Chicken Karahi", sort: 1 },
-        { kind: "item", id: "i-chapli", name: "Chapli Kebab", sort: 2 },
+        dish("i-karahi", "Chicken Karahi", { sort: 1 }),
+        dish("i-chapli", "Chapli Kebab", { sort: 2 }),
       ],
-      { now: BASE_T },
+      { enabled: ENABLED, now: BASE_T },
     );
 
     const { store } = await deviceFor(id);
@@ -172,11 +190,12 @@ describe("JOURNEY — a device fetches its org's catalog over the wire (01-F9, T
 
   it("takes a DELTA on reconnect, not the whole menu again", async () => {
     const id = freshIdentity();
-    await publishCatalog(db, id.org_id, [{ kind: "item", id: "i-a", name: "A" }], { now: BASE_T });
+    await publishCatalog(db, id.org_id, [dish("i-a", "A")], { enabled: ENABLED, now: BASE_T });
     const { store, link } = await deviceFor(id);
     expect(store.catalog.version()).toBe(1);
 
-    await publishCatalog(db, id.org_id, [{ kind: "item", id: "i-b", name: "B" }], {
+    await publishCatalog(db, id.org_id, [dish("i-b", "B")], {
+      enabled: ENABLED,
       now: BASE_T + 1,
     });
     // A reconnect: the same session hellos again on the transport edge.
@@ -204,12 +223,10 @@ describe("JOURNEY — a device fetches its org's catalog over the wire (01-F9, T
     // The multi-frame path, end to end. Every page is a real request/response pair, and the
     // device commits once — the property that stops a till holding half a menu mid-service.
     const id = freshIdentity();
-    const many = Array.from({ length: CATALOG_PAGE_SIZE + 40 }, (_, i) => ({
-      kind: "item",
-      id: `i-${String(i).padStart(4, "0")}`,
-      name: `Dish ${i}`,
-    }));
-    await publishCatalog(db, id.org_id, many, { now: BASE_T });
+    const many = Array.from({ length: CATALOG_PAGE_SIZE + 40 }, (_, i) =>
+      dish(`i-${String(i).padStart(4, "0")}`, `Dish ${i}`),
+    );
+    await publishCatalog(db, id.org_id, many, { enabled: ENABLED, now: BASE_T });
 
     const { store, link } = await deviceFor(id);
 
@@ -224,7 +241,8 @@ describe("JOURNEY — a device fetches its org's catalog over the wire (01-F9, T
     // read-only without a special case anywhere. This is the test that makes "worth a test, not
     // worth a mechanism" true rather than asserted.
     const prod = freshIdentity();
-    await publishCatalog(db, prod.org_id, [{ kind: "item", id: "i-x", name: "Nihari" }], {
+    await publishCatalog(db, prod.org_id, [dish("i-x", "Nihari")], {
+      enabled: ENABLED,
       now: BASE_T,
     });
     const { store } = await deviceFor({ ...freshIdentity(), org_id: prod.org_id });
@@ -247,13 +265,15 @@ describe("JOURNEY — a device fetches its org's catalog over the wire (01-F9, T
     // by comparing versions at hello. That is the property that makes a notice safe to lose,
     // which a lossy link will do.
     const id = freshIdentity();
-    await publishCatalog(db, id.org_id, [{ kind: "item", id: "i-1", name: "One" }], {
+    await publishCatalog(db, id.org_id, [dish("i-1", "One")], {
+      enabled: ENABLED,
       now: BASE_T,
     });
     const { store, link } = await deviceFor(id);
     expect(store.catalog.version()).toBe(1);
 
-    await publishCatalog(db, id.org_id, [{ kind: "item", id: "i-2", name: "Two" }], {
+    await publishCatalog(db, id.org_id, [dish("i-2", "Two")], {
+      enabled: ENABLED,
       now: BASE_T + 1,
     });
     expect(
@@ -268,12 +288,14 @@ describe("JOURNEY — a device fetches its org's catalog over the wire (01-F9, T
   it("a live NOTICE brings the edit forward without waiting for a reconnect", async () => {
     // The freshness half, which is all the notice is for.
     const id = freshIdentity();
-    await publishCatalog(db, id.org_id, [{ kind: "item", id: "i-1", name: "One" }], {
+    await publishCatalog(db, id.org_id, [dish("i-1", "One")], {
+      enabled: ENABLED,
       now: BASE_T,
     });
     const { store, link } = await deviceFor(id);
 
-    await publishCatalog(db, id.org_id, [{ kind: "item", id: "i-2", name: "Two" }], {
+    await publishCatalog(db, id.org_id, [dish("i-2", "Two")], {
+      enabled: ENABLED,
       now: BASE_T + 1,
     });
     gateway.notifyCatalogVersion(id.org_id, 2);

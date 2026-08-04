@@ -36,12 +36,34 @@ import {
   TEST_TOKEN_SECRET,
 } from "./helpers.js";
 
-const item = (id: string, name: string, extra: Record<string, unknown> = {}): CatalogEntry => ({
-  kind: "item",
-  id,
-  name,
-  ...extra,
-});
+// ── 01-F60's enabled grid, required on every publish since the July 2026 founder ruling ──────
+//
+// "**The enabled set is a REQUIRED input to the publish** ... not an optional one defaulting to
+// 'check nothing'... making it optional would mean a caller who simply forgot the argument
+// silently received no completeness check at all, which is precisely the omission this FR
+// refuses a fallback in order to prevent."
+//
+// This file is about the TRANSPORT, not about pricing — `catalog-pricing.test.ts` owns `01-F60`.
+// So it declares the smallest REAL grid (one branch × one of `02-F42`'s five channels) and
+// `item()` prices that single cell on every fixture, which means `01-F60`'s completeness check
+// actually RUNS on all twenty-nine publishes below and passes, rather than being skipped.
+//
+// Deliberately NOT `{ branches: [], channels: [] }`. Whether an empty enabled set is a legal
+// value is an OPEN question on `01-F60` (recorded as a finding in `catalog-pricing.test.ts`'s
+// header), and passing it here would leave every publish in this file with no completeness check
+// at all — the exact silence the ruling exists to remove, reintroduced through the fixtures.
+const BRANCH = "br-transport";
+const ENABLED = { branches: [BRANCH], channels: ["counter"] };
+const PRICED = [{ branch_id: BRANCH, channel: "counter", price_paisa: 145_000 }];
+
+const item = (id: string, name: string, extra: Record<string, unknown> = {}): CatalogEntry =>
+  ({
+    kind: "item",
+    id,
+    name,
+    prices: PRICED,
+    ...extra,
+  }) as CatalogEntry;
 
 describe("T-C2 — the published catalog (01-F52, founder §6 Q1: the API publishes)", () => {
   let db: Db;
@@ -70,6 +92,7 @@ describe("T-C2 — the published catalog (01-F52, founder §6 Q1: the API publis
   it("§5.1 — a device with version 0 and no catalog reaches parity in ONE exchange", async () => {
     const org = freshIdentity().org_id;
     await publishCatalog(db, org, [item("I1", "Chapli Kebab"), item("I2", "Chicken Karahi")], {
+      enabled: ENABLED,
       now: BASE_T,
     });
     const page = await catalogPage(db, org, 0, 0);
@@ -81,9 +104,15 @@ describe("T-C2 — the published catalog (01-F52, founder §6 Q1: the API publis
 
   it("§5.2 — a device N versions behind receives a DELTA from its exact base", async () => {
     const org = freshIdentity().org_id;
-    await publishCatalog(db, org, [item("I1", "Chapli Kebab")], { now: BASE_T });
-    await publishCatalog(db, org, [item("I2", "Chicken Karahi")], { now: BASE_T + 1 });
-    const v3 = await publishCatalog(db, org, [item("I3", "Daal")], { now: BASE_T + 2 });
+    await publishCatalog(db, org, [item("I1", "Chapli Kebab")], { enabled: ENABLED, now: BASE_T });
+    await publishCatalog(db, org, [item("I2", "Chicken Karahi")], {
+      enabled: ENABLED,
+      now: BASE_T + 1,
+    });
+    const v3 = await publishCatalog(db, org, [item("I3", "Daal")], {
+      enabled: ENABLED,
+      now: BASE_T + 2,
+    });
 
     const page = await catalogPage(db, org, 1, 0);
     expect(page.form).toBe("delta");
@@ -101,7 +130,7 @@ describe("T-C2 — the published catalog (01-F52, founder §6 Q1: the API publis
     // diverge that one device's menu from every other's and surface days later as a mispriced
     // item.
     const org = freshIdentity().org_id;
-    await publishCatalog(db, org, [item("I1", "Chapli Kebab")], { now: BASE_T });
+    await publishCatalog(db, org, [item("I1", "Chapli Kebab")], { enabled: ENABLED, now: BASE_T });
     const page = await catalogPage(db, org, 99, 0);
     expect(page.form).toBe("snapshot");
     expect(page.version).toBe(1);
@@ -109,7 +138,10 @@ describe("T-C2 — the published catalog (01-F52, founder §6 Q1: the API publis
 
   it("a device already at the current version gets an EMPTY delta, not a whole menu", async () => {
     const org = freshIdentity().org_id;
-    const v = await publishCatalog(db, org, [item("I1", "Chapli Kebab")], { now: BASE_T });
+    const v = await publishCatalog(db, org, [item("I1", "Chapli Kebab")], {
+      enabled: ENABLED,
+      now: BASE_T,
+    });
     const page = await catalogPage(db, org, v, 0);
     expect(page.form).toBe("delta");
     expect(page.version).toBe(v);
@@ -122,8 +154,8 @@ describe("T-C2 — the published catalog (01-F52, founder §6 Q1: the API publis
     // names a base, and that base is exactly what the device asked with. A delta whose
     // base_version differed from have_version would apply to a menu the device does not hold.
     const org = freshIdentity().org_id;
-    await publishCatalog(db, org, [item("I1", "A")], { now: BASE_T });
-    await publishCatalog(db, org, [item("I2", "B")], { now: BASE_T + 1 });
+    await publishCatalog(db, org, [item("I1", "A")], { enabled: ENABLED, now: BASE_T });
+    await publishCatalog(db, org, [item("I2", "B")], { enabled: ENABLED, now: BASE_T + 1 });
     for (const have of [1, 2]) {
       const page = await catalogPage(db, org, have, 0);
       if (page.form === "delta") expect(page.base_version).toBe(have);
@@ -138,9 +170,13 @@ describe("T-C2 — the published catalog (01-F52, founder §6 Q1: the API publis
     // asked to infer one.
     const org = freshIdentity().org_id;
     await publishCatalog(db, org, [item("I1", "Chapli Kebab"), item("I2", "Daal")], {
+      enabled: ENABLED,
       now: BASE_T,
     });
-    await publishCatalog(db, org, [item("I2", "Daal", { deleted: true })], { now: BASE_T + 1 });
+    await publishCatalog(db, org, [item("I2", "Daal", { deleted: true })], {
+      enabled: ENABLED,
+      now: BASE_T + 1,
+    });
 
     const snap = await catalogPage(db, org, 0, 0);
     expect(snap.form).toBe("snapshot");
@@ -154,8 +190,11 @@ describe("T-C2 — the published catalog (01-F52, founder §6 Q1: the API publis
 
   it("folds to the LATEST row per entity, so a renamed item appears once", async () => {
     const org = freshIdentity().org_id;
-    await publishCatalog(db, org, [item("I1", "Chapli Kebab")], { now: BASE_T });
-    await publishCatalog(db, org, [item("I1", "Chapli Kabab")], { now: BASE_T + 1 });
+    await publishCatalog(db, org, [item("I1", "Chapli Kebab")], { enabled: ENABLED, now: BASE_T });
+    await publishCatalog(db, org, [item("I1", "Chapli Kabab")], {
+      enabled: ENABLED,
+      now: BASE_T + 1,
+    });
     const snap = await catalogPage(db, org, 0, 0);
     expect(snap.entries.filter((e) => e.id === "I1")).toHaveLength(1);
     expect(must(snap.entries[0], "entry").name).toBe("Chapli Kabab");
@@ -167,8 +206,14 @@ describe("T-C2 — the published catalog (01-F52, founder §6 Q1: the API publis
     // menu — the property a version number is supposed to guarantee and the thing A12 found
     // broken on the device side.
     const org = freshIdentity().org_id;
-    await publishCatalog(db, org, [item("I1", "A"), item("I2", "B")], { now: BASE_T });
-    await publishCatalog(db, org, [item("I2", "B2"), item("I3", "C")], { now: BASE_T + 1 });
+    await publishCatalog(db, org, [item("I1", "A"), item("I2", "B")], {
+      enabled: ENABLED,
+      now: BASE_T,
+    });
+    await publishCatalog(db, org, [item("I2", "B2"), item("I3", "C")], {
+      enabled: ENABLED,
+      now: BASE_T + 1,
+    });
 
     const fromScratch = await catalogPage(db, org, 0, 0);
     const fromV1 = await catalogPage(db, org, 1, 0);
@@ -184,7 +229,9 @@ describe("T-C2 — the published catalog (01-F52, founder §6 Q1: the API publis
 
   it("refuses an empty publish — a version with no changes is not a version", async () => {
     const org = freshIdentity().org_id;
-    await expect(publishCatalog(db, org, [], { now: BASE_T })).rejects.toThrow(/empty change set/);
+    await expect(publishCatalog(db, org, [], { enabled: ENABLED, now: BASE_T })).rejects.toThrow(
+      /empty change set/,
+    );
   });
 
   it("ORACLE ROUND 2 / A3 — refuses an entry the WIRE could not carry", async () => {
@@ -194,7 +241,10 @@ describe("T-C2 — the published catalog (01-F52, founder §6 Q1: the API publis
     // and took the ledger push path with it, un-self-healing.
     const org = freshIdentity().org_id;
     await expect(
-      publishCatalog(db, org, [item("I1", "Roti"), item("I2", "")], { now: BASE_T }),
+      publishCatalog(db, org, [item("I1", "Roti"), item("I2", "")], {
+        enabled: ENABLED,
+        now: BASE_T,
+      }),
     ).rejects.toThrow(/entry 1 .*is not servable/);
     // And nothing was stored — the refusal is before the transaction, so there is no partial
     // version to recover from.
@@ -204,8 +254,12 @@ describe("T-C2 — the published catalog (01-F52, founder §6 Q1: the API publis
   it("A3 — the refusal names the offending index, because bulk import is where this arrives", async () => {
     const org = freshIdentity().org_id;
     const bulk = Array.from({ length: 40 }, (_, i) => item(`I${i}`, `Dish ${i}`));
-    bulk[37] = { kind: "item", id: "I37", name: "x", kitchen_name: "" };
-    await expect(publishCatalog(db, org, bulk, { now: BASE_T })).rejects.toThrow(/entry 37/);
+    // Priced like every other row, so the BLANK `kitchen_name` is the only thing wrong with
+    // entry 37 and `01-F60`'s completeness check cannot be what this refusal reports.
+    bulk[37] = item("I37", "x", { kitchen_name: "" });
+    await expect(publishCatalog(db, org, bulk, { enabled: ENABLED, now: BASE_T })).rejects.toThrow(
+      /entry 37/,
+    );
   });
 
   it("A4 — a paged SNAPSHOT tiles with no gap and no duplicate", async () => {
@@ -215,7 +269,7 @@ describe("T-C2 — the published catalog (01-F52, founder §6 Q1: the API publis
     const many = Array.from({ length: CATALOG_PAGE_SIZE + 120 }, (_, i) =>
       item(`I${String(i).padStart(5, "0")}`, `Dish ${i}`),
     );
-    const v = await publishCatalog(db, org, many, { now: BASE_T });
+    const v = await publishCatalog(db, org, many, { enabled: ENABLED, now: BASE_T });
 
     const seen: string[] = [];
     let from = 0;
@@ -239,14 +293,17 @@ describe("T-C2 — the published catalog (01-F52, founder §6 Q1: the API publis
     const many = Array.from({ length: CATALOG_PAGE_SIZE + 10 }, (_, i) =>
       item(`I${String(i).padStart(5, "0")}`, `Dish ${i}`),
     );
-    const v1 = await publishCatalog(db, org, many, { now: BASE_T });
+    const v1 = await publishCatalog(db, org, many, { enabled: ENABLED, now: BASE_T });
 
     const first = await catalogPage(db, org, 0, 0);
     expect(first.complete).toBe(false);
     expect(first.version).toBe(v1);
 
     // The owner renames an item that is IN PAGE 1, while the device is still paging.
-    await publishCatalog(db, org, [item("I00000", "RENAMED")], { now: BASE_T + 1 });
+    await publishCatalog(db, org, [item("I00000", "RENAMED")], {
+      enabled: ENABLED,
+      now: BASE_T + 1,
+    });
 
     // The pinned continuation is still serving v1 — the fetch describes one menu.
     const second = await catalogPage(db, org, 0, first.next_from, first.version);
@@ -262,7 +319,10 @@ describe("T-C2 — the published catalog (01-F52, founder §6 Q1: the API publis
     // The reviewers found this clause claimed as covered and tested NOWHERE in the repo, though
     // the code was correct. Revocation blocks reads, and a catalog fetch is a read.
     const id = freshIdentity();
-    await publishCatalog(db, id.org_id, [item("I1", "Chapli Kebab")], { now: BASE_T });
+    await publishCatalog(db, id.org_id, [item("I1", "Chapli Kebab")], {
+      enabled: ENABLED,
+      now: BASE_T,
+    });
     const gw = createGateway({ db, clock: makeClock(), auth: { token_secret: TEST_TOKEN_SECRET } });
     const session = await openSession(gw, id);
     await revokeDevice(db, { org_id: id.org_id, device_id: id.device_id });
@@ -282,9 +342,9 @@ describe("T-C2 — the published catalog (01-F52, founder §6 Q1: the API publis
     // meaningless across orgs.
     const a = freshIdentity().org_id;
     const b = freshIdentity().org_id;
-    await publishCatalog(db, a, [item("I1", "A")], { now: BASE_T });
-    await publishCatalog(db, a, [item("I2", "B")], { now: BASE_T + 1 });
-    await publishCatalog(db, b, [item("I1", "Z")], { now: BASE_T + 2 });
+    await publishCatalog(db, a, [item("I1", "A")], { enabled: ENABLED, now: BASE_T });
+    await publishCatalog(db, a, [item("I2", "B")], { enabled: ENABLED, now: BASE_T + 1 });
+    await publishCatalog(db, b, [item("I1", "Z")], { enabled: ENABLED, now: BASE_T + 2 });
     expect(await catalogVersion(db, a)).toBe(2);
     expect(await catalogVersion(db, b)).toBe(1);
   });
@@ -307,7 +367,10 @@ describe("T-C3 — serving it over the session (01-F9 org-scope reference data)"
     // because every reconnection reconciles. A device offline for a week has no hope of
     // replaying an announcement it was not connected for; it compares versions instead.
     const id = freshIdentity();
-    await publishCatalog(db, id.org_id, [item("I1", "Chapli Kebab")], { now: BASE_T });
+    await publishCatalog(db, id.org_id, [item("I1", "Chapli Kebab")], {
+      enabled: ENABLED,
+      now: BASE_T,
+    });
     const session = await openSession(gateway, id);
     expect(session.helloAck.catalog_version).toBe(1);
   });
@@ -321,7 +384,10 @@ describe("T-C3 — serving it over the session (01-F9 org-scope reference data)"
 
   it("answers catalog_request over the session", async () => {
     const id = freshIdentity();
-    await publishCatalog(db, id.org_id, [item("I1", "Chapli Kebab")], { now: BASE_T });
+    await publishCatalog(db, id.org_id, [item("I1", "Chapli Kebab")], {
+      enabled: ENABLED,
+      now: BASE_T,
+    });
     const session = await openSession(gateway, id);
     await session.conn.handle({ v: 1, kind: "catalog_request", have_version: 0 });
     const response = must(ofKind(session.rec.all, "catalog_response")[0], "catalog_response");
@@ -335,7 +401,10 @@ describe("T-C3 — serving it over the session (01-F9 org-scope reference data)"
     // gets the production menu with no special case. Worth a test, not worth a mechanism — and
     // this is the test.
     const prod = freshIdentity();
-    await publishCatalog(db, prod.org_id, [item("I1", "Chapli Kebab")], { now: BASE_T });
+    await publishCatalog(db, prod.org_id, [item("I1", "Chapli Kebab")], {
+      enabled: ENABLED,
+      now: BASE_T,
+    });
     const training = { ...freshIdentity(), org_id: prod.org_id };
     const session = await openSession(gateway, training);
     expect(session.helloAck.catalog_version).toBe(1);
@@ -347,8 +416,11 @@ describe("T-C3 — serving it over the session (01-F9 org-scope reference data)"
   it("scopes the answer by ORG — a device never sees another org's menu", async () => {
     const a = freshIdentity();
     const b = freshIdentity();
-    await publishCatalog(db, a.org_id, [item("I1", "A-only")], { now: BASE_T });
-    await publishCatalog(db, b.org_id, [item("I1", "B-only")], { now: BASE_T + 1 });
+    await publishCatalog(db, a.org_id, [item("I1", "A-only")], { enabled: ENABLED, now: BASE_T });
+    await publishCatalog(db, b.org_id, [item("I1", "B-only")], {
+      enabled: ENABLED,
+      now: BASE_T + 1,
+    });
     const session = await openSession(gateway, b);
     await session.conn.handle({ v: 1, kind: "catalog_request", have_version: 0 });
     const response = must(ofKind(session.rec.all, "catalog_response")[0], "catalog_response");
