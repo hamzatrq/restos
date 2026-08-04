@@ -298,6 +298,10 @@ export const payment = (
     method: opts.method ?? "cash",
     purpose: opts.purpose ?? "settles_order",
     settlement_attempt_id: opts.attempt,
+    // 26 §7 / 02-F37: the carried shift key, required and nullable. Null here — this suite
+    // opens no shift, and a minted id would be a fresh random value on every rebuild of the
+    // same logical set, which the relabel/clock-invariance properties compare byte-for-byte.
+    shift_id: null,
   },
 });
 

@@ -43,6 +43,16 @@ import {
   type ParkedRow,
   type ProjectedOrder,
 } from "./folds/merge.js";
+import {
+  type DayRow,
+  emptyShiftCash,
+  foldShiftCash,
+  projectShiftCash,
+  type ShiftCashState,
+  type ShiftRow,
+  type UnboundDrawerRow,
+  type UnboundRow,
+} from "./folds/shift-cash.js";
 
 export class AckBeyondAppendedError extends Error {
   constructor(watermark: number, ownHighWater: number | null) {
@@ -165,6 +175,13 @@ export type DeviceStore = {
   parked(): ParkedRow[];
   /** Item availability rows (01-F22, 01-F6) — the 26 §3 item-keyed projection. */
   availability(): AvailabilityRow[];
+  /** `shift_cash` rows (FOLDS.md line 15): the cashier's shift reconciliation (02-F23),
+   * the business day (02-F22/02-F24), and 02-F37's settlements taken with no shift open. */
+  shifts(): ShiftRow[];
+  days(): DayRow[];
+  unboundSettlements(): UnboundRow[];
+  /** `02-F43`: the drawer opens and paid-outs that named no shift — counted, never dropped. */
+  unboundDrawer(): UnboundDrawerRow;
   refold(): void;
   /** Fold work counters (T-01-15 contract; events_folded is the real quantity). */
   foldStats(): FoldStats;
@@ -587,6 +604,14 @@ export const openStore = (options: {
   // open by full replay of the surviving set (order-free, 01-F6).
   const engine = createMergeEngine();
 
+  // The `shift_cash` accumulator (S-2, FOLDS.md line 15). Held in memory and projected on
+  // read rather than materialized into its own STRICT tables: nothing in the store queries
+  // shift state through SQL, and the reopen self-heal below (`refoldTx()`) rebuilds it from
+  // the surviving ledger by the SAME replay that rebuilds every other fold table — so
+  // durability across a reopen is identical, and a mirrored table would be write-only data
+  // that silently goes stale (the reason the cloud-order mirror column was cut in review).
+  let shiftCash: ShiftCashState = emptyShiftCash();
+
   const readAllParsed = (): ParsedEvent[] =>
     // Audit events are fold-inert (01-F5/01-F6): they carry no order/line/money
     // state, so they never enter the fold feed.
@@ -641,7 +666,10 @@ export const openStore = (options: {
   // peer_events — replay order irrelevant, the fold is a pure function of the
   // set. The reopen self-heal and the refold() surface (01-F6).
   const recomputeFolds = (): void => {
-    engine.rebuild(readAllParsed());
+    const events = readAllParsed();
+    engine.rebuild(events);
+    shiftCash = emptyShiftCash();
+    for (const event of events) shiftCash = foldShiftCash(shiftCash, event.envelope);
     writeFullTables(engine.snapshot());
   };
 
@@ -728,6 +756,10 @@ export const openStore = (options: {
     // reaching this writer while it still expected a bare id would leave the lattice right
     // and SQLite stale, visible only on a read BETWEEN deliveries with no refold.
     for (const itemId of result.dirtyItems) upsertAvailability(engine.projectItemKey(itemId));
+    // The `shift_cash` fold (S-2, FOLDS.md line 15). It runs INSIDE ingest with no try/catch
+    // between, which is why it never throws: a bucket it cannot represent contributes zero
+    // and raises `money_overflow` — the bucket refuses, the till does not (01-F17).
+    shiftCash = foldShiftCash(shiftCash, parsed.envelope);
   };
 
   // Lamport assignment and the durable insert are one transaction (01-F3): a
@@ -1110,6 +1142,22 @@ export const openStore = (options: {
 
     availability() {
       return selectAvailability.all();
+    },
+
+    shifts() {
+      return projectShiftCash(shiftCash).shifts;
+    },
+
+    days() {
+      return projectShiftCash(shiftCash).days;
+    },
+
+    unboundSettlements() {
+      return projectShiftCash(shiftCash).unbound;
+    },
+
+    unboundDrawer() {
+      return projectShiftCash(shiftCash).unbound_drawer;
     },
 
     refold() {

@@ -23,3 +23,8 @@ out/
 # then makes `pnpm verify` red on generated fixtures, pointing at the wrong defect entirely.
 # Same class as the `out/` entry above (9ca0189: "verify was linting generated bundles").
 .oracle-typecheck/
+# Same pattern, same hazard: layout-physical.oracle.test.ts writes fixtures to
+# packages/ui/.oracle-layout and removes them in afterAll — so a KILLED run leaves
+# them in the tree, where they red `pnpm verify` on generated files. Ignored for
+# the same reason its sibling above is.
+.oracle-layout/

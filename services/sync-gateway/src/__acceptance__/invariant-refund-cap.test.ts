@@ -97,6 +97,8 @@ const paymentEnv = (
       method: "cash",
       purpose: "settles_order",
       settlement_attempt_id: opts.attempt,
+      // 26 §7 / 02-F37: the carried shift key, required and nullable.
+      shift_id: null,
     },
   });
 

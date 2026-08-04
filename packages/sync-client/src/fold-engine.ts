@@ -21,3 +21,17 @@ export {
   type ParkedRow,
   type ProjectedOrder,
 } from "./folds/merge.js";
+// The `shift_cash` fold (S-2, FOLDS.md line 15) exposed on the SAME pure subpath and for the
+// same reason: a money fold the cloud Auditor cannot refold without the better-sqlite3 addon
+// is unauditable (26 §8 / 01-F34 — fold logic is never reimplemented outside this package).
+export {
+  type DayRow,
+  emptyShiftCash,
+  foldShiftCash,
+  projectShiftCash,
+  type ShiftCashProjection,
+  type ShiftCashState,
+  type ShiftRow,
+  type UnboundDrawerRow,
+  type UnboundRow,
+} from "./folds/shift-cash.js";

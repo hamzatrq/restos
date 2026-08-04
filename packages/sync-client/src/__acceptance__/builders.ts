@@ -157,6 +157,9 @@ export const paymentRecorded = (order_id: string, amount_paisa: number) => ({
     method: "cash",
     purpose: "settles_order",
     settlement_attempt_id: newId(),
+    // 26 §7 / 02-F37: the carried shift key, required and nullable. Null — no shift is open
+    // in this suite, which is exactly the case 02-F37 makes legal.
+    shift_id: null,
   },
 });
 

@@ -101,9 +101,35 @@ describe("registry growth must fail this suite before it can silently no-op (fix
    * So the partition is gone and the pin is back to its original, stronger shape: EVERY
    * registry type is consumed by THIS engine. The disjointness assertion and the
    * `folds/.+\.ts` module-name string check went with it — neither describes anything
-   * real once there is one engine. */
+   * real once there is one engine.
+   *
+   * ── AMENDED August 2026 (S-1's seven service-surface types) ─────────────────────────
+   * WIDENED, and a widening is what a weakening looks like from the diff alone, so read the
+   * reason. `01 §4` grew by seven: `shift.opened`/`shift.closed`, `day.opened`/`day.closed`,
+   * `cash.drawer_opened`, `cash.paid_out`, `cash.deposit_recorded`. All seven ARE folded —
+   * `folds/merge.ts`'s `OTHER_FOLD_TYPES` routes each one to `folds/shift-cash.ts` (the
+   * `shift_cash` fold, `FOLDS.md` line 15), which is also why this engine's `26 §3` sidecar
+   * answers the EMPTY key list for them: they carry neither an order key nor an item key —
+   * not that nothing reads them.
+   *
+   * `PINNED_FOLD_CONSUMED` is therefore the only honest side. `PINNED_NOT_FOLDED` states
+   * `01-F52` — "not an input to ANY fold" — so filing a money-bearing shift event there would
+   * assert the cash reconciliation is unfoldable, and this pin would then be defending the
+   * opposite of the truth (the failure this file was rewritten to make impossible).
+   *
+   * The consequence for the paragraph above, stated rather than left to be inferred: this
+   * set's claim is now "folded by a fold in this package", NOT "folded by the order-keyed
+   * engine in this file" — "EVERY registry type is consumed by THIS engine" is SUPERSEDED as
+   * of these seven. Kept, not deleted, because the July reversal it records still binds every
+   * ORDER- and ITEM-keyed type. No assertion changed meaning: the two below are the union and
+   * the disjointness, and neither ever read the narrower sense. */
   const PINNED_FOLD_CONSUMED = [
     "availability.changed",
+    "cash.deposit_recorded",
+    "cash.drawer_opened",
+    "cash.paid_out",
+    "day.closed",
+    "day.opened",
     "kot.printed",
     "order.confirmed",
     "order.created",
@@ -113,6 +139,8 @@ describe("registry growth must fail this suite before it can silently no-op (fix
     "order.table_assigned",
     "payment.recorded",
     "payment.refunded",
+    "shift.closed",
+    "shift.opened",
   ] as const;
 
   /**

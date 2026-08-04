@@ -13,6 +13,23 @@ export {
   printerCapability,
   UNKNOWN_PRINTER_CAPABILITY,
 } from "./capability.js";
+// `BLOCK_RENDERERS` is deliberately NOT exported: 03-F34 enforces "before bytes reach the
+// spooler", and a caller that could render blocks directly would walk past all four assertions.
+export {
+  DOCUMENT_SPECS,
+  type DocumentProfile,
+  type DocumentSpec,
+  type FiscalBlock,
+  type KotData,
+  LOCKED_REGIONS,
+  type ProfileFor,
+  REGIONS,
+  type Region,
+  type SlotDeclaration,
+  type SlotValue,
+  type SpecBlock,
+  type SpecRegion,
+} from "./document.js";
 export {
   type EncodeRefusal,
   type EncodeRefusalReason,
@@ -32,3 +49,25 @@ export {
   type DocumentType,
   MIN_COLUMNS,
 } from "./min-columns.js";
+export {
+  type ProfileFinding,
+  type ProfileValidation,
+  type RenderedBlock,
+  type RenderRefusal,
+  type RenderRefusalReason,
+  type RenderResult,
+  render,
+  validateProfile,
+} from "./render.js";
+export {
+  classifyTransmit,
+  createRealtimeQueryWindow,
+  decodePaperStatus,
+  ERROR_RECOVERY_REQUEST,
+  PAPER_STATUS_QUERY,
+  type PaperStatus,
+  REALTIME_QUERY_CAP,
+  type RealtimeQueryWindow,
+  type TransmitEvidence,
+  type TransmitOutcome,
+} from "./status.js";

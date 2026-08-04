@@ -152,6 +152,15 @@ describe("attempt-id idempotence across the delivery seams (01-F31/01-F8/01-F1)"
       expect(row.pay_total).toBe(40000); // once, not twice — intent-level idempotence
       expect(exceptions(row)).not.toContain("attempt_divergence"); // agreement is not divergence
       const attempts = JSON.parse(row.pay_attempts_json) as Record<string, unknown[]>;
+      // `shift_id: null` RESTORES this assertion; it does not relax it (August 2026, S-1).
+      // The literal is a hand-copy of the payload `payment()` builds, and the fold stores a
+      // `payment.recorded` member VERBATIM — the per-type superseded-tolerated exclusion set is
+      // `payment.refunded`'s `{payment_id}` and nothing else (fix-round F8, asserted below at
+      // the refund case). S-1 made `shift_id` a REQUIRED, nullable field (`26 §7`'s carried
+      // shift key; `02-F37`'s null shift reference), so the stored member gained the key and
+      // the hand-copy had to gain it too. This keeps the comparison EXACT — the alternative
+      // reading of the same red, loosening `toEqual` to a subset/`objectContaining` match, is
+      // the weakening this note exists to rule out.
       expect(attempts["sa-dup"]).toEqual([
         JSON.parse(
           canonicalJson({
@@ -159,6 +168,7 @@ describe("attempt-id idempotence across the delivery seams (01-F31/01-F8/01-F1)"
             method: "cash",
             order_id: "O1",
             purpose: "settles_order",
+            shift_id: null,
           }),
         ),
       ]);

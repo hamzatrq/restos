@@ -191,6 +191,8 @@ export const payment = (
     method: opts.method ?? "cash",
     settlement_attempt_id: opts.attempt,
     purpose: opts.purpose ?? "settles_order",
+    // 26 §7 / 02-F37: the carried shift key, required and nullable.
+    shift_id: null,
   },
 });
 

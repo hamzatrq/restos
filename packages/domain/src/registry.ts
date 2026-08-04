@@ -49,6 +49,26 @@ export const PAYMENT_METHODS = [
 ] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
+/**
+ * `02-F23`'s "system-expected cash (by method)" — EXHAUSTIVE over the closed tender set, with
+ * explicit zeros. Derived from `PAYMENT_METHODS` rather than transcribed, so a sixth tender
+ * cannot be added to the enum and silently skipped here.
+ *
+ * Exhaustive because a partial map cannot tell "no card sales this shift" from "the card figure
+ * was never computed", and `01-F32`/`DEC-MONEY-007` make `khata_credit` and
+ * `aggregator_receivable` behave differently in `01-F30` conservation — a dropped bucket is
+ * money that vanishes from the reconciliation the cashier signs. Strict for the same reason
+ * `02-F42` closed `payment.recorded.method`: a sixth key is a category no report knows to count.
+ *
+ * Signed integers: a method's expected figure nets `payment.refunded` against `payment.recorded`.
+ */
+const expectedPaisaByMethod = z.strictObject(
+  Object.fromEntries(PAYMENT_METHODS.map((method) => [method, z.number().int()])) as Record<
+    PaymentMethod,
+    z.ZodNumber
+  >,
+);
+
 // Payloads are loose objects: required fields are law; extra fields pass through
 // (additive evolution, 00 §6) and are preserved for consumers.
 const payloadSchemas = {
@@ -154,6 +174,20 @@ const payloadSchemas = {
      */
     method: z.enum(PAYMENT_METHODS),
     settlement_attempt_id: z.string().min(1), // 01-F31: double-taps cannot double-record
+    /**
+     * The shift this settlement buckets to (`26 §7`: shift/day/drawer bucketing of a payment is
+     * "a **carried key**", explicitly not an ordering question). Carried because the alternative
+     * — a fold asking "which shift was open when this payment arrived?" — reads the READING
+     * device's state, so two devices project different money from the same event set: the
+     * `01-F34` break law 1 exists to prevent.
+     *
+     * REQUIRED AND NULLABLE. `null` is `02-F37`'s "null shift reference": settling with no shift
+     * open **succeeds** (`01-F17` forbids blocking the sale — a customer is standing there), and
+     * the null is the record that it happened. Required rather than optional because `null` is a
+     * stated fact and `undefined` is a forgotten field, and an optional field cannot tell them
+     * apart.
+     */
+    shift_id: z.union([z.string().min(1), z.null()]),
     // T-01-15 (01-F30/01-F32, DEC-MONEY-007): the khata discriminator — without it the
     // settlement and its later repayment double-count under full observation (matrix §3).
     // Required: an unpurposed payment is neither tendering nor repayment.
@@ -180,6 +214,70 @@ const payloadSchemas = {
   // addendum: proposed in the implementer's report, pinned in a follow-up).
   "order.settlement_closed": z.looseObject({
     order_id: z.string().min(1),
+  }),
+  // ── The service surface (02-F21..F26): shifts, the business day, the drawer. ──────────
+  // `26 §7` decides the shape of all seven: bucketing is a CARRIED KEY, duplicate shift/day
+  // open needs a CARRIED CAUSAL LINK (`prev_shift_id`), and over/short is a CARRIED FACT.
+  // Nothing here may be resolved at fold time from the reading device's state (01-F34).
+  "shift.opened": z.looseObject({
+    // 02-F22: the shift a cashier's subsequent settlements and drawer events bind to.
+    shift_id: z.string().min(1),
+    // 26 §7's carried causal link for "duplicate shift/day open". Two devices opening a shift
+    // after a partition both name the same predecessor, so the fork is visible IN THE EVENT SET
+    // instead of needing a clock or an id comparison (01-F45, 01-F34). Required; null is the
+    // branch's first shift ever, which a non-nullable link would make unemittable.
+    prev_shift_id: z.union([z.string().min(1), z.null()]),
+  }),
+  "shift.closed": z.looseObject({
+    shift_id: z.string().min(1),
+    // 02-F23: "system-expected cash (by method)" — see `expectedPaisaByMethod`.
+    expected_paisa_by_method: expectedPaisaByMethod,
+    counted_cash_paisa: z.number().int().nonnegative(),
+    // 02-F23's over/short, SIGNED: "over/short" is two directions, and a magnitude-only field
+    // can record an over but not a short — the half that costs a cashier their job. Carried,
+    // not recomputed: re-deriving "expected" at read time silently changes a number the cashier
+    // already signed once a late payment arrives, which `01-F1` forbids.
+    variance_paisa: z.number().int(),
+  }),
+  "day.opened": z.looseObject({
+    day_id: z.string().min(1),
+    // 02-F22: "opening float entry → day.opened" — the float IS the entry. A magnitude: cash is
+    // physically placed in the drawer, and 0 (an empty drawer) is legal and distinct from absent.
+    opening_float_paisa: z.number().int().nonnegative(),
+    // 26 §7 names duplicate shift/day open as ONE row — the day carries the same link.
+    prev_day_id: z.union([z.string().min(1), z.null()]),
+  }),
+  "day.closed": z.looseObject({
+    day_id: z.string().min(1),
+    // 02-F24: "manager cash count + deposit record" — the count is the act.
+    counted_cash_paisa: z.number().int().nonnegative(),
+  }),
+  "cash.drawer_opened": z.looseObject({
+    // 02-F21: "cash.drawer_opened with reason=no_sale, logged and counted (classic theft
+    // vector)". The set is NOT closed: the FR names one value and implies others exist, and
+    // closing it here would be inventing an FR.
+    reason: z.string().min(1),
+    // 02-F22: "a shift binds subsequent cash settlements AND DRAWER EVENTS to that cashier";
+    // 26 §7: drawer bucketing is a carried key. Nullable for 02-F21's own reason — an unbound
+    // drawer open that the schema refused would go UNLOGGED, which is the theft vector itself.
+    shift_id: z.union([z.string().min(1), z.null()]),
+  }),
+  "cash.paid_out": z.looseObject({
+    // 02-F26 names reason + receipt ref but not the amount. Required anyway: `02-F23`'s
+    // system-expected cash cannot be computed if cash may leave the drawer without saying how
+    // much. A magnitude — direction comes from the event type, and a negative paid-out is a
+    // deposit in disguise that would net the drawer the wrong way.
+    amount_paisa: z.number().int().nonnegative(),
+    reason: z.string().min(1),
+    // 02-F26: "receipt photo (object storage ref)".
+    receipt_photo_ref: z.string().min(1),
+    // Petty cash leaves a particular cashier's drawer (02-F22, 26 §7); nullable as above.
+    shift_id: z.union([z.string().min(1), z.null()]),
+  }),
+  "cash.deposit_recorded": z.looseObject({
+    amount_paisa: z.number().int().nonnegative(),
+    // 02-F24 emits the deposit record with the day close, so it buckets to a day (26 §7).
+    day_id: z.string().min(1),
   }),
 } as const;
 

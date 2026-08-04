@@ -249,6 +249,9 @@ export const generateSpikeRush = (params: {
       method: "cash",
       purpose: "settles_order",
       settlement_attempt_id: `pay-${params.seed}-${o}`,
+      // 26 §7 / 02-F37: the carried shift key, required and nullable. Null — no shift is
+      // open in the spike, which is exactly the case 02-F37 makes legal.
+      shift_id: null,
     });
   }
   return steps;

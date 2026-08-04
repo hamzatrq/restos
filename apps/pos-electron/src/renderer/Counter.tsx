@@ -317,6 +317,13 @@ export const Counter = () => {
                     // `repays_receivable`, and without the discriminator the two double-count
                     // under full observation.
                     purpose: "settles_order",
+                    // 26 §7 — the shift this settlement buckets to is CARRIED, never resolved
+                    // at fold time from the reading device's state (01-F34). Null because no
+                    // shift is open: the POS has no shift concept yet, and `02-F37` makes that
+                    // the legal outcome — "settling with no shift open succeeds ... recorded
+                    // with a null shift reference ... Never a modal, never a block", because
+                    // `01-F17` forbids stopping a sale with a customer standing there.
+                    shift_id: null,
                   },
                   refs: [],
                 })

@@ -27,6 +27,14 @@ export type PrinterCapability = {
   has_cutter: boolean;
   /** `03-F8`/`03-F35`: whether the raster path is usable — logos, QR, non-Latin user content. */
   raster_ok: boolean;
+  /**
+   * `03-F40`: "A **near-end** sensor is not universal (the TM-T88VII lists paper-end + cover-open
+   * only) — model-gate the feature from the 03-F10 capability record rather than assuming it."
+   *
+   * This is one of the two growths the field list above predicted. Its value per model is a rig
+   * measurement (`03-F10`), which nothing here has performed — see the table's own note.
+   */
+  has_near_end_sensor: boolean;
 };
 
 /**
@@ -69,6 +77,12 @@ export const deriveColumns = (print_dots: number, font: FontId): number =>
  * compatibility target and carries **no auto-cutter** — the FR is explicit that it has a manual
  * tear bar, "i.e. a human action and a mis-tear vector per ticket; it stays a compatibility
  * target, never a recommendation."
+ *
+ * **`has_near_end_sensor` is `false` on every row and that is an UNDER-CLAIM, not a measurement.**
+ * `03-F40` model-gates the feature from this record and names one model's answer (the TM-T88VII
+ * has paper-end + cover-open only); no row here has been on a rig (`03-F10`), and the direction
+ * that is safe is the one where a warning cannot fire rather than the one where a warning can
+ * never become true. A row turns `true` when the rig says so.
  */
 export const PRINTER_CAPABILITIES: readonly PrinterCapability[] = [
   {
@@ -80,6 +94,7 @@ export const PRINTER_CAPABILITIES: readonly PrinterCapability[] = [
     has_native_qr: false,
     has_cutter: true,
     raster_ok: true,
+    has_near_end_sensor: false,
   },
   {
     model_id: "TM-P80",
@@ -90,6 +105,7 @@ export const PRINTER_CAPABILITIES: readonly PrinterCapability[] = [
     has_native_qr: true,
     has_cutter: true,
     raster_ok: true,
+    has_near_end_sensor: false,
   },
   {
     model_id: "TM-T20II",
@@ -100,6 +116,7 @@ export const PRINTER_CAPABILITIES: readonly PrinterCapability[] = [
     has_native_qr: true,
     has_cutter: true,
     raster_ok: true,
+    has_near_end_sensor: false,
   },
   {
     // 03-F10's baseline target. 58 mm, and the one that cannot print a KOT (03-F49).
@@ -111,6 +128,7 @@ export const PRINTER_CAPABILITIES: readonly PrinterCapability[] = [
     has_native_qr: false,
     has_cutter: false,
     raster_ok: true,
+    has_near_end_sensor: false,
   },
 ];
 
@@ -137,6 +155,7 @@ export const UNKNOWN_PRINTER_CAPABILITY: PrinterCapability = {
   has_native_qr: false,
   has_cutter: false,
   raster_ok: true,
+  has_near_end_sensor: false,
 };
 
 /**

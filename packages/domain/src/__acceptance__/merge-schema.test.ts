@@ -72,6 +72,8 @@ const recordedPayload = () => ({
   method: "cash",
   purpose: "settles_order",
   settlement_attempt_id: newId(),
+  // 26 §7 / 02-F37: the carried shift key, required and nullable.
+  shift_id: newId(),
 });
 
 const refundedPayload = () => ({

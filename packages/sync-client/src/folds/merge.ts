@@ -420,11 +420,42 @@ const NON_FOLD_TYPES = { "catalog.changed": "01-F52" } as const satisfies Partia
 type NonFoldEventType = keyof typeof NON_FOLD_TYPES;
 const isNonFold = (t: string): t is NonFoldEventType => t in NON_FOLD_TYPES;
 
+/**
+ * Registry types this engine does not fold because ANOTHER fold in this package owns them,
+ * with the FR each one closes. `folds/shift-cash.ts` (the `shift_cash` fold, `FOLDS.md`
+ * line 15) consumes `shift.*` / `day.*` / `cash.*`; they carry neither an order key nor an
+ * item key, so this engine's sidecar answers with the empty list for them.
+ *
+ * A SEPARATE set from `NON_FOLD_TYPES` on purpose, because the two make different claims and
+ * conflating them would be a lie in the direction that matters: `NON_FOLD_TYPES` says NO fold
+ * may read the type (`01-F52`), and putting a money-bearing shift event under that banner
+ * would assert the cash reconciliation is unfoldable. This set says the opposite — the type
+ * IS folded, by a fold whose projections this engine does not own.
+ *
+ * `payment.recorded` is deliberately absent: it is order-keyed HERE (`01-F31` keyed sums into
+ * `pay_total`) *and* shift-keyed there (`02-F23` expected cash), which is exactly the
+ * two-planes case `DEC-MONEY-007` describes — one event legitimately reaching two totals.
+ */
+const OTHER_FOLD_TYPES = {
+  "shift.opened": "02-F22",
+  "shift.closed": "02-F23",
+  "day.opened": "02-F22",
+  "day.closed": "02-F24",
+  "cash.drawer_opened": "02-F21",
+  "cash.paid_out": "02-F26",
+  "cash.deposit_recorded": "02-F24",
+} as const satisfies Partial<Record<KnownEventType, string>>;
+type OtherFoldEventType = keyof typeof OTHER_FOLD_TYPES;
+const isOtherFold = (t: string): t is OtherFoldEventType => t in OTHER_FOLD_TYPES;
+
 /** Every registry type the ORDER-keyed switch handles — i.e. all of them except the
- * item-keyed ones and the ones no fold may read. Declared as an Exclude so adding a new
- * item-keyed or non-fold event is a compile error in exactly one place (the sidecar) rather
- * than a silent fall-through here. */
-type OrderKeyedEventType = Exclude<KnownEventType, "availability.changed" | NonFoldEventType>;
+ * item-keyed ones, the ones no fold may read, and the ones another fold owns. Declared as an
+ * Exclude so adding a new item-keyed, non-fold or other-fold event is a compile error in
+ * exactly one place (the sidecar) rather than a silent fall-through here. */
+type OrderKeyedEventType = Exclude<
+  KnownEventType,
+  "availability.changed" | NonFoldEventType | OtherFoldEventType
+>;
 
 const ORDER_NS = "order:";
 const ITEM_NS = "item:";
@@ -445,6 +476,9 @@ const keysFor = (event: ParsedEvent): readonly string[] => {
   // `catalog.changed` the answer is none, and saying so here is what keeps the engine from
   // having to special-case it downstream.
   if (isNonFold(event.type)) return [];
+  // Same empty answer, different claim (see OTHER_FOLD_TYPES): the `shift_cash` fold reads
+  // these, and none of them touches an order or item projection.
+  if (isOtherFold(event.type)) return [];
   if (event.type === "availability.changed") {
     return [`${ITEM_NS}${(event.payload as AvailabilityChangedP).item_id}`];
   }

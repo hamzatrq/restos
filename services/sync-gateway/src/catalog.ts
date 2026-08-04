@@ -38,16 +38,22 @@ export type CatalogEntry = {
 };
 
 /**
- * `01-F60` — the kinds a price is REQUIRED on. The FR names `item` and `variant` sellable and
- * `category`/`modifier_group` as carrying none.
+ * `01-F60` — the kinds a price is REQUIRED on: `item`, `variant` and **`modifier`**.
  *
- * **`modifier` is deliberately absent from both lists**, because `01-F60` classifies neither way
- * and a paid add-on is priced in every real menu. Treating it as sellable would refuse publishes
- * the FR permits; treating it as non-sellable would let a priced modifier through unchecked.
- * Neither is a reading of the FR, so the gap is left open and named rather than closed by guess
- * (commandment 2). Recorded in `plans/wave-1/channel-pricing-and-the-counter-loop.md`.
+ * `modifier` was left off this list while the FR classified it neither way. **The founder ruled
+ * it SELLABLE (July 2026)** and the FR now says so outright: "a paid add-on carries the same
+ * commission exposure as the dish it sits on, so 'extra raita' is priced per `(branch, channel)`
+ * like anything else and falls under the writer's completeness check."
+ *
+ * The consequence the FR states rather than leaves to be discovered: **a free modifier carries an
+ * explicit `0` on every enabled pair.** So the completeness check below must test for the CELL's
+ * presence, never for a truthy price — `if (!price)` refuses a legal free add-on, and its mirror
+ * gives a paid one away. `01-F53` snapshots either mistake into the ledger permanently.
+ *
+ * `category` and `modifier_group` remain non-sellable and carry none — one underscore from
+ * `modifier`, and on the opposite side of this list.
  */
-const SELLABLE_KINDS: readonly string[] = ["item", "variant"];
+const SELLABLE_KINDS: readonly string[] = ["item", "variant", "modifier"];
 
 export type CatalogPage = {
   form: "snapshot" | "delta";
@@ -120,19 +126,32 @@ export const publishCatalog = async (
      * `01-F60`'s enabled `(branch, channel)` pairs, as the full cross product `14-F29`'s editor
      * grid presents.
      *
-     * **Supplied by the caller, and that is a known gap rather than a design choice.** `01-F60`
-     * sources this from `00 §7` layer 2 — and `03-F50` established that the org-config plane does
-     * not exist, so there is nowhere here to read it from. Absent therefore means "nothing
-     * enabled", which refuses nothing and keeps every pre-`01-F60` publish legal.
+     * **REQUIRED — "not an optional one defaulting to 'check nothing'" (founder ruling July
+     * 2026).** Caller-supplied is the DESIGN, not a gap: `00 §7`'s config plane does not exist,
+     * so "the caller states the set explicitly, even where that is a constant".
      *
-     * The hazard that leaves is real and is named in the plan: **a caller who forgets this
-     * argument gets no completeness check at all**, which is precisely the class of silent
-     * omission `01-F60` refuses a fallback in order to prevent. It closes when the back office
-     * owns org config (`plans/wave-1/backoffice-catalog.md`).
+     * An earlier version of this comment called the optional argument "a known gap rather than a
+     * design choice" and said absent means "nothing enabled". The founder overruled exactly that:
+     * a caller who simply forgot the argument silently received no completeness check at all,
+     * "which is precisely the omission this FR refuses a fallback in order to prevent". Absent is
+     * now not a legal call — it is refused below, before anything is written.
      */
-    enabled?: { branches: readonly string[]; channels: readonly string[] };
-  } = { now: 0 },
+    enabled: { branches: readonly string[]; channels: readonly string[] };
+  },
 ): Promise<number> => {
+  // Ruling B at runtime as well as in the type. The type above is the strong form of "required",
+  // but a bulk import (`15-F8`) or an API client reaches this from JavaScript, where a type
+  // forbids nothing — so the check is written through a cast, which is the only honest way to ask
+  // a question the type says cannot arise. The message names `enabled` because a refusal that
+  // does not say what is missing is indistinguishable from a refusal for any other reason.
+  if ((opts as { enabled?: unknown }).enabled === undefined) {
+    throw new RangeError(
+      "publishCatalog: no `enabled` (branch, channel) set was declared. It is a REQUIRED input, " +
+        'not an optional one defaulting to "check nothing" (01-F60) — a publish that declares ' +
+        "none gets no completeness check, which is the omission the FR refuses a fallback to " +
+        "prevent.",
+    );
+  }
   if (entries.length === 0) {
     throw new RangeError("publishCatalog: an empty change set is not a version (01-F52)");
   }
@@ -164,7 +183,8 @@ export const publishCatalog = async (
   const missingCell = (entry: CatalogEntry): string | null => {
     if (!SELLABLE_KINDS.includes(entry.kind) || entry.deleted === true) return null;
     const enabled = opts.enabled;
-    if (enabled === undefined) return null;
+    // Membership of the CELL, never truthiness of the price: `0` is a price (`01-F60`'s free
+    // modifier), and a falsy test would refuse it while letting a forgotten cell sell for nothing.
     const have = new Set((entry.prices ?? []).map((p) => `${p.branch_id}\u0000${p.channel}`));
     for (const branch_id of enabled.branches) {
       for (const channel of enabled.channels) {

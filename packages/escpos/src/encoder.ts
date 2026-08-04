@@ -124,12 +124,33 @@ const rasterImage = (widthDots: number, heightDots: number, bits: Uint8Array): n
   ];
 };
 
+/**
+ * `03-F35`'s error-correction level, in ONE place.
+ *
+ * The size query below has to describe the symbol `qrRaster` actually emits: `03-F34` refuses a
+ * document whose "QR's computed physical size" misses the adapter's declared minimum, and a
+ * second copy of these parameters is a number that can disagree with the symbol on the paper.
+ */
+const QR_ERROR_CORRECTION = "M" as const;
+
+/**
+ * `03-F34`: "the QR's **computed physical size** … for the target dpi", in millimetres.
+ *
+ * Exported for the render layer (`03-F34` enforces before bytes reach the spooler); the symbol is
+ * measured through the same `QRCode.create` and the same `modulesScale` that produce it.
+ */
+export const fiscalQrMm = (payload: string, dpi: number): number => {
+  const modules = QRCode.create(payload, { errorCorrectionLevel: QR_ERROR_CORRECTION }).modules
+    .size;
+  return mmOf(modules * modulesScale(modules, dpi), dpi);
+};
+
 /** A QR symbol as a byte-aligned 1-bpp bitmap. Set bit = black module. */
 const qrRaster = (
   payload: string,
   dpi: number,
 ): { width: number; height: number; bits: number[] } => {
-  const symbol = QRCode.create(payload, { errorCorrectionLevel: "M" });
+  const symbol = QRCode.create(payload, { errorCorrectionLevel: QR_ERROR_CORRECTION });
   const modules = symbol.modules.size;
   const data = symbol.modules.data;
   const scale = modulesScale(modules, dpi);

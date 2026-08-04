@@ -38,12 +38,19 @@ export type DocumentType = (typeof DOCUMENT_TYPES)[number];
  * and no others. Inventing floors for `refund_slip`, `shift_close_slip`, `rider_settlement_slip`,
  * `day_summary` and `test_page` would be filling a gap with plausible behaviour, which
  * Commandment 2 forbids; they get a floor when their `DocumentSpec` is written.
+ *
+ * **`as const` is load-bearing, not decoration.** `03-F49` puts `min_columns` on the
+ * `DocumentSpec` too, and two declarations of one number is the defect — so a spec SOURCES its
+ * floor from this table (`DOCUMENT_SPECS`), which needs the value to survive as a literal.
  */
-export const MIN_COLUMNS: Readonly<Partial<Record<DocumentType, number>>> = {
+export const MIN_COLUMNS = {
   kot: 42,
   receipt: 32,
   bill: 32,
-};
+} as const satisfies Readonly<Partial<Record<DocumentType, number>>>;
+
+/** The same table, widened for lookup by an arbitrary `DocumentType`. */
+const MIN_COLUMNS_BY_TYPE: Readonly<Partial<Record<DocumentType, number>>> = MIN_COLUMNS;
 
 /**
  * `03-F34`'s refusal, as a VALUE rather than a thrown thing.
@@ -88,7 +95,7 @@ export const checkColumns = (
   document_type: DocumentType,
   caps: PrinterCapability,
 ): ColumnDecision => {
-  const required = MIN_COLUMNS[document_type];
+  const required = MIN_COLUMNS_BY_TYPE[document_type];
   const available = caps.cols_font_a;
   if (required !== undefined && available < required) {
     return {
