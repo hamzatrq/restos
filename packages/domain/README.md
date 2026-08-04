@@ -34,6 +34,7 @@ synchronous append path where `node:crypto`/WebCrypto are not), and `uuidv7` (id
 | `states.ts` | Order-line state machine + legality table | `ORDER_LINE_STATES`, `OrderLineState`, `TERMINAL_LINE_STATES`, `LEGAL_NEXT`, `applyLineState`, `LineStateResult` |
 | `invariants.ts` | Executable money-conservation invariants (`01-F29/F30`) | `refundRemainderExceeded`, `settledConservationResidualPaisa`, `RefundRemainderArgs`, `SettledConservationArgs` |
 | `product-constants.ts` | Four **ratified** founder-owned merge-policy constants | `CONTESTED_LINE_BILLABLE`, `AVAILABILITY_FALSE_WINS`, `KOT_TWO_HEAD_TABLE_HEADER`, `EXCESS_TENDER_IS_EXCEPTION` |
+| `permissions.ts` | The Appendix A permission matrix (`01-F26`) + the one `can()` helper (`18 §`) | `ROLES`, `Role`, `RoleAssignment`, `PERMISSION_ACTIONS`, `PermissionAction`, `AuthSubject`, `AuthScope`, `AuthOutcome`, `AuthDecision`, `can`, `reportScope`, `ReportReach` |
 | `device-classes.ts` | Fixed device-class slice + hub-election priority | `DEVICE_CLASSES`, `DeviceClass`, `HUB_ELIGIBLE_CLASSES` |
 | `ids.ts` | Single platform id source | `newId` |
 

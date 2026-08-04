@@ -80,27 +80,58 @@ marketing, …) but the seed *matrix* gives four columns, and encoding rows for 
 action is performed by is exactly the speculative generality `24-F23` forbids. Widening is
 cheap and additive; an over-general matrix shipped early is not.
 
-**Actions: only what Wave 1 performs.** Each maps to a live FR:
+**Actions: one per Appendix A row, and the ids are the SHIPPED ones.**
 
-| Action | Cashier | Mgr | Store | Owner | FR |
-|---|---|---|---|---|---|
-| `order.create` | ✔ | ✔ | — | ✔ | `02-F1` |
-| `order.settle` | ✔ | ✔ | — | ✔ | `02-F12` |
-| `shift.open_close` | ✔ | ✔ | — | ✔ | `02-F22` |
-| `day.open_close` | — | ✔ | — | ✔ | `02-F22` role guard |
-| `cash.count` | — | ✔ | — | ✔ | `02-F24` |
-| `cash.drawer_no_sale` | ✔ | ✔ | — | ✔ | `02-F21` |
-| `cash.paid_out` | escalate | ✔ | — | ✔ | `02-F26` + `05-F19` threshold |
-| `void.after_kot` | escalate | ✔ | — | ✔ | `02-F20` |
-| `comp.item` | escalate | ✔ | — | ✔ | `02-F20` |
-| `discount.above_threshold` | escalate | ✔ | — | ✔ | `02-F20` |
-| `price.override` | escalate | ✔ | — | ✔ | `02-F20` |
-| `refund.issue` | escalate | ✔ | — | ✔ | `01-F29` (*always* manager) |
-| `catalog.edit` | — | optional | — | ✔ | `14-F1`; the back office's one predicate |
+> **⚠ CORRECTED August 2026 — the earlier draft of this table invented its own ids** (`order.settle`,
+> `void.after_kot`, `comp.item`, `discount.above_threshold`, `price.override`, `catalog.edit`) and
+> the oracle independently derived ids from Appendix A's row *names*. The oracle won and shipped.
+> The stale table is corrected here rather than left to be coded from — that is precisely the drift
+> that made `screen-map.md`'s tab rail send a session to build the wrong screen.
 
-**Deliberately NOT in scope:** per-user permission overrides (`01-F26` names them; nothing in
-Wave 1 sets one), per-location assignment beyond a single branch scope, and the seven roles with
-no seed column. Each is additive.
+Shipped in `packages/domain/src/permissions.ts` as `PERMISSION_ACTIONS`:
+
+| Action | Cashier | Mgr | Store | Owner |
+|---|---|---|---|---|
+| `order.create` | allow | allow | deny | allow |
+| `payment.settle` | allow | allow | deny | allow |
+| `order.discount_within_threshold` | allow | allow | deny | allow |
+| `order.discount_above_threshold` | **escalate** | allow | deny | allow |
+| `order.void_after_kot` | **escalate** | allow | deny | allow |
+| `order.comp_item` | **escalate** | allow | deny | allow |
+| `order.price_override` | **escalate** | allow | deny | allow |
+| `receipt.reprint` | allow | allow | deny | allow |
+| `day.open_close` | deny | allow | deny | allow |
+| `stock.receive` · `stock.count_entry` | deny | allow | allow | allow |
+| `stock.wastage_record` | allow | allow | allow | allow |
+| `catalog.edit_menu_prices` | deny | **deny** | deny | allow |
+| `catalog.edit_recipes` | deny | deny | deny | allow |
+| `history.edit_delete` | deny | deny | deny | **deny** |
+| `approval.grant` | deny | allow | deny | allow |
+| `report.sales_view` | own shift | own branch | none | org |
+
+Three resolutions worth keeping visible:
+
+- **`day.open_close` for a cashier is `deny`, not `escalate`.** `02-F22`'s clause *"where no
+  manager device exists, the local manager-PIN path satisfies the guard"* reads like escalation and
+  is not: it is a manager PIN **unlocking a session** (`02-F18`), after which the subject *is* a
+  manager. `02-F20`'s in-session escalation enumerates its actions and day open is not among them.
+- **`catalog.edit_menu_prices` for a branch manager is Appendix A's `optional`, shipped as `deny`.**
+  No config plane exists (`00 §7` layer 2) and no FR states the default, so it **fails closed** —
+  widening later is additive, while guessing the other way is an unauthorised price change frozen
+  by `01-F53` in a ledger `01-F1` forbids correcting. Recorded as a finding, not settled.
+- **`history.edit_delete` needed no special case.** Appendix A's hard rule (*"no role, including
+  owner, can silently edit or delete historical transactions"*) falls out of the exhaustive
+  `Record<Role, …>`: every row must state every cell, so owner's `deny` is written like any other.
+
+**Deliberately NOT in scope:** per-user overrides (`01-F26` names them; nothing in Wave 1 sets
+one), per-location assignment beyond a single branch scope, and the seven roles with no Appendix A
+column. Each is additive.
+
+**OWED — the cash-screen session adds these rows**, because none is an Appendix A row and none is
+in the shipped `PERMISSION_ACTIONS`: `shift.open_close`, `cash.count`, `cash.drawer_no_sale`,
+`cash.paid_out`, `refund.issue`. One row each, additive. **`cash.paid_out` also needs `05-F19`'s
+threshold as a required explicit input** — see §7, following the founder's `01-F60` enabled-set
+precedent that optional-means-skip is how silent omissions get in.
 
 ---
 

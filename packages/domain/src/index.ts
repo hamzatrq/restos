@@ -46,6 +46,20 @@ export {
 } from "./money.js";
 export { payloadHash } from "./payload-hash.js";
 export {
+  type AuthDecision,
+  type AuthOutcome,
+  type AuthScope,
+  type AuthSubject,
+  can,
+  PERMISSION_ACTIONS,
+  type PermissionAction,
+  type ReportReach,
+  ROLES,
+  type Role,
+  type RoleAssignment,
+  reportScope,
+} from "./permissions.js";
+export {
   AVAILABILITY_FALSE_WINS,
   CONTESTED_LINE_BILLABLE,
   EXCESS_TENDER_IS_EXCEPTION,
