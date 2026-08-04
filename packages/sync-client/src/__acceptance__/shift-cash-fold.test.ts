@@ -18,9 +18,25 @@
 // ── THE ORCHESTRATOR RULINGS THIS FILE FOLLOWS (S-1 ↔ S-2 contract conflict) ─────────────
 // `shift.closed` carries `expected_paisa_by_method` (RULING 1 — money fields name their unit),
 // EXHAUSTIVE over `PAYMENT_METHODS` with an explicit `0` (RULING 2 — the `01-F60` free-modifier
-// precedent: "no RAAST this shift" and "the RAAST bucket was dropped" must not look alike). Both
-// derivations are in ./shift-cash-builders.ts's header. The fold's LIVE `expected_json` is
-// UNAFFECTED and stays grow-only — different object, different rule, see §1 and §3 below.
+// precedent: "no RAAST this shift" and "the RAAST bucket was dropped" must not look alike), and
+// a required `variance_paisa` that the fold READS and never re-derives (RULING 3, August 2026 —
+// `26 §7` classifies over/short as a CARRIED FACT and `01-F1` forbids the mutation a read-time
+// recompute performs in effect). Every derivation is in ./shift-cash-builders.ts's header. The
+// fold's LIVE `expected_json` is UNAFFECTED and stays grow-only — different object, different
+// rule, see §1 and §3 below.
+//
+// ── WHAT THE AUGUST 2026 ROUND ADDED, AND WHY ──────────────────────────────────────────
+// Five branches of the shipped fold had NO fixture anywhere in this suite that reached them, so
+// each would have passed with the branch deleted. Every one of them now has a directed section
+// AND a place inside `shiftCashScenario()`, where the invariance file's three nets fold it:
+//   §9   `01-F45` basis precedence — no fixture had ever passed `basis: "branch_provisional"`.
+//   §7b  `02-F43`'s unbound drawer bucket — asserted on the COUNT and the TOTAL, because
+//        "logged and counted" is defeated by an implementation that logs and counts nothing.
+//   §4b  the disputed-unbound rendering (`01-F31`) — no fixture produced a divergent unbound key.
+//   §8b  `day_open_fork` — no fixture carried a non-null `prev_day_id`.
+//   §3   the CARRIED variance, with fixtures whose carried value a recompute CONTRADICTS.
+// Measured by mutation, not asserted: each section was re-run against a copy of the fold with
+// that one branch deleted or inverted, and confirmed RED. Kill counts are in the session report.
 //
 // ── ⚠ TWO ASSERTIONS IN THIS FILE REST ON PINS, NOT ON QUOTED FR TEXT ───────────────────
 // Both are interpretations the implementer may contest as contract-clarification events rather
@@ -37,6 +53,10 @@
 //    envelope id nor delivery order) is asserted in the NEXT test and in
 //    ./shift-cash-invariance.test.ts §1b, so the min-id kill never rests on this pin.
 //
+// (Two more pins were added in August 2026 and are documented at their own tests: PIN #3, the
+//  `unbound_settlement_divergence` code spelling in §4b, and PIN #4, that the day fork and the
+//  shift fork carry DISTINCT codes in §8b. Both are contract-clarification events if contested.)
+//
 //  PIN #2 — THE CASHIER SOURCE. §8's "`cashier` is carried and keyed PER SHIFT" does NOT decide
 //    whether the fold reads `payload.cashier` or the envelope's `actor_user_id`: 02-F19 puts
 //    attribution on the envelope, FOLDS.md line 15 names a `cashier` column, and nothing chooses.
@@ -52,7 +72,9 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  BOUND_PAID_OUT,
   BRANCH_T0,
+  basisPrecedenceSet,
   branchEmitter,
   businessDate,
   CASHIER_A,
@@ -60,12 +82,15 @@ import {
   DIVERGENT_FLOAT_A,
   DIVERGENT_FLOAT_B,
   dayClosed,
+  dayForkSet,
   dayOpened,
   dayRow,
   depositRecorded,
   divergentDayOpenSet,
+  divergentUnboundSet,
   drawerOpened,
   exactSum,
+  exceptionsOf,
   expectedAtCloseOf,
   expectedOf,
   generateShiftCashSet,
@@ -73,6 +98,7 @@ import {
   MAX_SAFE,
   NOT_NO_SALE_REASON,
   PAYMENT_METHODS,
+  PROVISIONAL_BACKDATE_MS,
   paidOut,
   projectionBytes,
   reversedIds,
@@ -82,6 +108,9 @@ import {
   shiftOpened,
   shiftPayment,
   shiftRow,
+  UNBOUND_PAID_OUT,
+  unboundDrawerSet,
+  unboundRow,
 } from "./shift-cash-builders.js";
 
 // ===========================================================================
@@ -267,7 +296,11 @@ describe("§2 bucketing a payment is a CARRIED KEY, not an ordering question (26
     emit(0, shiftPayment("O1", 100000, { attempt: "sa-1", shift_id: "S1" }), 1000);
     emit(
       0,
-      shiftClosed("S1", { counted_cash_paisa: 100000, expected_paisa_by_method: { cash: 100000 } }),
+      shiftClosed("S1", {
+        counted_cash_paisa: 100000,
+        expected_paisa_by_method: { cash: 100000 },
+        variance_paisa: 0,
+      }),
       2000,
     );
     emit(1, shiftOpened("S2", { prev_shift_id: "S1" }), 2100);
@@ -310,13 +343,27 @@ describe("§3 over/short is a CARRIED FACT, never a read-time recompute (26 §7,
     const { emit, envelopes } = branchEmitter("c1");
     emit(0, shiftOpened("S1"), 0);
     emit(0, shiftPayment("O1", 100000, { attempt: "sa-1", shift_id: "S1" }), 1000);
+    // Rs 25 of petty cash left the drawer before the close (02-F26), so the expected DRAWER
+    // figure the cashier signed against is not `expected.cash` — and the carried variance is
+    // therefore NOT `counted − expected.cash`. This suite pins no derivation whatever: the only
+    // obligation is that the fold carries the number the close carries.
+    emit(0, paidOut("S1", 2500), 1500);
     emit(
       0,
-      shiftClosed("S1", { counted_cash_paisa: 99000, expected_paisa_by_method: { cash: 100000 } }),
+      shiftClosed("S1", {
+        counted_cash_paisa: 99000,
+        expected_paisa_by_method: { cash: 100000 },
+        variance_paisa: 1500,
+      }),
       2000,
     );
     const atClose = shiftRow(fold.projectAll(envelopes), "S1");
-    expect(atClose.variance_paisa).toBe(-1000);
+    // ORCHESTRATOR RULING 3 (August 2026): the CARRIED value wins. A fold recomputing
+    // `counted − expected_at_close.cash` reads −1000 and reports the shift SHORT where the
+    // cashier signed it OVER — a sign flip on the number that costs a cashier their job.
+    expect(atClose.variance_paisa).toBe(1500);
+    expect(99000 - 100000).not.toBe(1500); // the fixture really does disagree with the recompute
+    expect(atClose.variance_paisa).not.toBe(-1000);
     // Written out LITERALLY rather than through `expectedPaisaByMethod(…)`, because building the
     // expectation with the same helper that built the fixture would move both together if the
     // helper ever stopped filling ruling 2's zeros. Spelt out, this is also the test that
@@ -342,39 +389,52 @@ describe("§3 over/short is a CARRIED FACT, never a read-time recompute (26 §7,
       khata_credit: 0,
       aggregator_receivable: 0,
     });
-    expect(afterLate.variance_paisa).toBe(-1000);
+    expect(afterLate.variance_paisa).toBe(1500);
     // … while the ledger stays honest about what was actually tendered against the shift.
     expect(expectedOf(afterLate).cash).toBe(105000);
     expect(afterLate.closed).toBe(1);
   });
 
-  it("02-F23: over is positive and short is negative — variance is counted minus the expected CASH figure the cashier was shown", () => {
+  it("02-F23/26 §7: over is positive and short is negative — the carried SIGNED fact, which a recompute of `counted − expected.cash` gets wrong in both directions", () => {
     const fold = shiftCash();
     const { emit, envelopes } = branchEmitter("c2");
     emit(0, shiftOpened("S-short"), 0);
     emit(0, shiftOpened("S-over"), 10);
+    // Both shifts paid cash OUT before closing (02-F26), so on both of them the figure the
+    // cashier was reconciling against is below `expected.cash` and the carried variance differs
+    // from the naive subtraction. On S-over it differs in SIGN, which is the whole point of
+    // 02-F23's "over/short" being two directions.
+    emit(0, paidOut("S-short", 3000), 500);
+    emit(1, paidOut("S-over", 5000), 510);
     emit(
       0,
       shiftClosed("S-short", {
-        counted_cash_paisa: 99000,
+        counted_cash_paisa: 96000,
         // A by-method figure whose non-cash buckets must NOT enter the variance. Under ruling 2
         // the map is exhaustive, so `raast` and `aggregator_receivable` are carried here as
         // explicit zeros — the non-zero non-cash buckets that give this test its teeth stay.
         expected_paisa_by_method: { cash: 100000, card: 250000, khata_credit: 185000 },
+        variance_paisa: -1000,
       }),
       1000,
     );
     emit(
       1,
       shiftClosed("S-over", {
-        counted_cash_paisa: 101500,
+        counted_cash_paisa: 96500,
         expected_paisa_by_method: { cash: 100000, aggregator_receivable: 90000 },
+        variance_paisa: 1500,
       }),
       1100,
     );
     const proj = fold.projectAll(envelopes);
     expect(shiftRow(proj, "S-short").variance_paisa).toBe(-1000);
     expect(shiftRow(proj, "S-over").variance_paisa).toBe(1500);
+    // Non-vacuity: a fold recomputing from the two other carried facts reads −4000 and −3500 —
+    // the second of which calls an OVER shift short. Neither number may appear.
+    expect(shiftRow(proj, "S-short").variance_paisa).not.toBe(96000 - 100000);
+    expect(shiftRow(proj, "S-over").variance_paisa).not.toBe(96500 - 100000);
+    expect(shiftRow(proj, "S-over").variance_paisa).toBeGreaterThan(0);
   });
 
   it("02-F23/01-F1: `closed` is monotone — a duplicate close and every later event leave the shift closed with its carried facts intact", () => {
@@ -382,9 +442,13 @@ describe("§3 over/short is a CARRIED FACT, never a read-time recompute (26 §7,
     const { emit, envelopes } = branchEmitter("c3");
     emit(0, shiftOpened("S1"), 0);
     emit(0, shiftPayment("O1", 100000, { attempt: "sa-1", shift_id: "S1" }), 1000);
+    emit(0, paidOut("S1", 1000), 1500); // out of the drawer BEFORE the count
+    // A shift that reconciles exactly: Rs 990 counted against Rs 1000 expected less the Rs 10
+    // paid out. A recompute reads −1000 and tells a clean cashier they are short.
     const close = shiftClosed("S1", {
-      counted_cash_paisa: 100000,
+      counted_cash_paisa: 99000,
       expected_paisa_by_method: { cash: 100000 },
+      variance_paisa: 0,
     });
     emit(0, close, 2000);
     emit(1, close, 2001); // the same close redelivered from a second device
@@ -393,8 +457,9 @@ describe("§3 over/short is a CARRIED FACT, never a read-time recompute (26 §7,
     emit(2, shiftPayment("O9", 5000, { attempt: "sa-late", shift_id: "S1" }), 3000);
     const row = shiftRow(fold.projectAll(envelopes), "S1");
     expect(row.closed).toBe(1);
-    expect(row.counted_cash_paisa).toBe(100000);
+    expect(row.counted_cash_paisa).toBe(99000);
     expect(row.variance_paisa).toBe(0);
+    expect(row.variance_paisa).not.toBe(99000 - 100000);
     expect(expectedAtCloseOf(row)).toEqual({
       cash: 100000,
       card: 0,
@@ -402,6 +467,57 @@ describe("§3 over/short is a CARRIED FACT, never a read-time recompute (26 §7,
       khata_credit: 0,
       aggregator_receivable: 0,
     });
+  });
+
+  it("26 §7/01-F1 (ruling 3): the carried variance survives a recompute that CONTRADICTS it — the fold reads the signed fact, it does not re-derive one", () => {
+    const fold = shiftCash();
+    const { emit, envelopes } = branchEmitter("c4");
+    emit(0, shiftOpened("S1", { cashier: CASHIER_A }), 0, { actor_user_id: CASHIER_A });
+    emit(0, shiftPayment("O1", 100000, { attempt: "sa-1", shift_id: "S1" }), 1000);
+    // Rs 125 of petty cash out (02-F26), so the drawer is legitimately Rs 125 lighter than the
+    // Rs 1000 tendered. The cashier counts Rs 880 and the till is Rs 5 OVER.
+    emit(0, paidOut("S1", 12500), 1500);
+    emit(
+      0,
+      shiftClosed("S1", {
+        counted_cash_paisa: 88000,
+        expected_paisa_by_method: { cash: 100000 },
+        variance_paisa: 500,
+      }),
+      2000,
+    );
+    const row = shiftRow(fold.projectAll(envelopes), "S1");
+
+    // The fixture is non-vacuous BY CONSTRUCTION: carried and recomputed disagree, and they
+    // disagree in sign. Without this the assertion below cannot distinguish "carried" from
+    // "derived and coincidentally equal".
+    const recompute = 88000 - 100000;
+    expect(recompute).toBe(-12000);
+    expect(recompute).not.toBe(500);
+
+    expect(row.variance_paisa).toBe(500);
+    expect(row.variance_paisa).not.toBe(recompute);
+    // The two facts the recompute is built from are themselves carried and unchanged, so a red
+    // above can only be the derivation and never a moved input.
+    expect(row.counted_cash_paisa).toBe(88000);
+    expect(expectedAtCloseOf(row)?.cash).toBe(100000);
+    expect(row.paid_out_paisa).toBe(12500);
+
+    // …and the same close delivered on its own, with no other event in the set, still carries.
+    // A `carried ?? derived` fallback is only reachable when the field is ABSENT, and under
+    // `registry.ts` (which makes `variance_paisa` required on `shift.closed`) it never is.
+    const { emit: emit2, envelopes: alone } = branchEmitter("c5");
+    emit2(0, shiftOpened("S1"), 0);
+    emit2(
+      0,
+      shiftClosed("S1", {
+        counted_cash_paisa: 0,
+        expected_paisa_by_method: {},
+        variance_paisa: -7500,
+      }),
+      100,
+    );
+    expect(shiftRow(fold.projectAll(alone), "S1").variance_paisa).toBe(-7500);
   });
 });
 
@@ -445,6 +561,111 @@ describe("§4 02-F37 — a settlement with no shift open SUCCEEDS, carries a nul
     expect(expectedOf(row)).toEqual({ cash: 20000 });
     expect(proj.unbound.map((u) => u.settlement_attempt_id)).toEqual(["sa-unbound"]);
     expect(must(proj.unbound[0]).anomaly).toBe("unbound_settlement");
+  });
+});
+
+// ===========================================================================
+// §4b — A DISPUTED UNBOUND ATTEMPT KEY (01-F31 × 02-F37).
+// The rendering rule is the one every other contested register in this fold obeys: money to
+// ZERO, the carried scalars to null, the anomaly raised, all members retained, and a fold
+// never picks a winner. Nothing in this suite produced the shape until August 2026, so the
+// branch existed and was never pointed at an input that reached it.
+// ===========================================================================
+
+describe("§4b a DISPUTED attempt key with an unbound member (01-F31, 02-F37)", () => {
+  it("01-F31: divergent unbound members render order_id/method NULL at ZERO money under `unbound_settlement_divergence` — neither member is picked", () => {
+    const fold = shiftCash();
+    const { envelopes } = divergentUnboundSet();
+    const proj = fold.projectAll(envelopes);
+
+    // Non-vacuity of the fixture: `du-a` really is two members of ONE key that disagree.
+    const duA = envelopes.filter(
+      (e) => (e.payload as { settlement_attempt_id?: string }).settlement_attempt_id === "du-a",
+    );
+    expect(duA).toHaveLength(2);
+    expect(duA.map((e) => (e.payload as { amount_paisa: number }).amount_paisa)).toEqual([
+      75000, 90000,
+    ]);
+
+    // Rendered EXACTLY, row by row, so a fold that pushed one row per member (banking the money
+    // twice) or that named a "winning" order/method fails on the shape and not only on a total.
+    //
+    // ⚠ PIN #3 — THE CODE SPELLING. `02-F37` writes `unbound_settlement` and NO FR names a code
+    // for the disputed case; this file's own policy (./shift-cash-builders.ts, "ANOMALY CODES")
+    // makes /diverg/ a CLASS. `unbound_settlement_divergence` is the ORCHESTRATOR-PINNED
+    // spelling and is asserted verbatim on instruction. A rename is a contract-clarification
+    // event, not a test defect — the behaviour under test is the three values beside it.
+    expect(proj.unbound).toEqual([
+      {
+        settlement_attempt_id: "du-a",
+        order_id: null,
+        method: null,
+        amount_paisa: 0,
+        anomaly: "unbound_settlement_divergence",
+      },
+      {
+        settlement_attempt_id: "du-b",
+        order_id: null,
+        method: null,
+        amount_paisa: 0,
+        anomaly: "unbound_settlement_divergence",
+      },
+      {
+        settlement_attempt_id: "du-unbound",
+        order_id: "O4",
+        method: "cash",
+        amount_paisa: 25000,
+        anomaly: "unbound_settlement",
+      },
+    ]);
+    // THE MONEY CONTRIBUTION IS ZERO, stated as money and not only as a field: only the one
+    // AGREED unbound settlement carries value. A fold picking the min-`payloadHash` member (or
+    // the min envelope id) banks Rs 750 or Rs 900 that no two devices agree was ever tendered.
+    expect(unboundRow(proj, "du-a").amount_paisa).toBe(0);
+    expect(unboundRow(proj, "du-b").amount_paisa).toBe(0);
+    expect(exactSum(proj.unbound.map((r) => r.amount_paisa)).toString()).toBe("25000");
+  });
+
+  it("01-F31/26 §7: a key whose members disagree about the CARRIED SHIFT is ONE disputed key, not two agreed ones — the shift banks zero and is flagged", () => {
+    const fold = shiftCash();
+    const { envelopes } = divergentUnboundSet();
+    const proj = fold.projectAll(envelopes);
+    const row = shiftRow(proj, "S1");
+
+    // Non-vacuity: `du-b`'s two members carry the SAME amount and DIFFERENT shift references —
+    // the only field they disagree on is where the money belongs.
+    const duB = envelopes
+      .filter(
+        (e) => (e.payload as { settlement_attempt_id?: string }).settlement_attempt_id === "du-b",
+      )
+      .map((e) => e.payload as { amount_paisa: number; shift_id: string | null });
+    expect(duB.map((p) => p.amount_paisa)).toEqual([60000, 60000]);
+    expect(duB.map((p) => p.shift_id)).toEqual([null, "S1"]);
+
+    // An attempt map nested inside a shift bucket sees two AGREED keys in two different maps
+    // and banks Rs 600 twice — once unbound, once in S1. Org-globally (01-F31's ratified
+    // uniqueness scope) it is one disputed key that contributes zero to both.
+    expect(expectedOf(row)).toEqual({ cash: 5000 });
+    expect(expectedOf(row).cash).not.toBe(65000);
+    expect(hasCode(row, /diverg/)).toBe(true);
+    // The agreed traffic around it is untouched — a fold that flagged the whole projection on
+    // one divergence is as wrong as one that flagged nothing.
+    expect(unboundRow(proj, "du-unbound").anomaly).toBe("unbound_settlement");
+  });
+
+  it("01-F34/26 §8: the disputed-unbound rendering is invariant under an ORDER-REVERSING id bijection and under a reversed delivery", () => {
+    const fold = shiftCash();
+    const { envelopes } = divergentUnboundSet();
+    const baseline = fold.projectAll(envelopes);
+    const relabelled = reversedIds(envelopes);
+    expect(relabelled.reversing).toBe(true);
+    expect(relabelled.bijective).toBe(true);
+    // A min-id tiebreak over the disputed members reads the Rs 750 member off the raw set and
+    // the Rs 900 one off the relabelled set — convergent on every device, and wrong.
+    expect(projectionBytes(fold.projectAll(relabelled.envelopes))).toBe(projectionBytes(baseline));
+    expect(projectionBytes(fold.projectAll([...envelopes].reverse()))).toBe(
+      projectionBytes(baseline),
+    );
   });
 });
 
@@ -592,6 +813,140 @@ describe("§7 drawer opens and paid-outs bind to their carried shift (02-F21, 02
     expect(String(shiftRow(proj, "S1").paid_out_paisa)).toBe(exactSum(s1).toString());
     expect(shiftRow(proj, "S2").paid_out_paisa).toBe(1000);
     expect(shiftRow(proj, "S2").no_sale_count).toBe(0);
+  });
+});
+
+// ===========================================================================
+// §7b — 02-F43: DRAWER EVENTS WITH NO SHIFT OPEN ARE COUNTED (August 2026).
+// The FR does not say "accepted" and stop there. 02-F21 requires a no-sale open to be "logged
+// AND COUNTED", so an implementation that stores the event and drops it from every total
+// satisfies the word *logged* while defeating the theft detection the FR exists for — the
+// silent path 02-F43 names and forbids. Every assertion here is therefore on the COUNT and
+// the TOTAL, never on the row merely existing.
+// ===========================================================================
+
+describe("§7b 02-F43 — an unbound drawer open / paid-out is accepted, COUNTED, and flagged", () => {
+  it("02-F43/02-F21: the unbound bucket carries the no-sale COUNT and the paid-out TOTAL, and raises the two codes the FR names", () => {
+    const fold = shiftCash();
+    const { envelopes } = unboundDrawerSet();
+    const project = () => fold.projectAll(envelopes);
+    // "Never a modal, never a block" (02-F43, via 01-F17).
+    expect(project).not.toThrow();
+    const proj = project();
+
+    // Non-vacuity of the fixture: three drawer opens and two paid-outs really do carry a NULL
+    // shift reference, and two of the opens are byte-identical in their payloads.
+    const unboundEvents = envelopes.filter(
+      (e) => (e.payload as { shift_id?: unknown }).shift_id === null,
+    );
+    expect(unboundEvents.filter((e) => e.type === "cash.drawer_opened")).toHaveLength(3);
+    expect(unboundEvents.filter((e) => e.type === "cash.paid_out")).toHaveLength(2);
+
+    // THE COUNT — two no-sale opens, not one. They carry identical payloads, so a bucket keyed
+    // by payload value reads 1 and the classic theft vector collapses to a single event.
+    expect(proj.unbound_drawer.no_sale_count).toBe(2);
+    // 02-F21's discriminator governs this path exactly as it does a shift row: the third open
+    // is not a no-sale and must not be counted.
+    expect(NOT_NO_SALE_REASON).not.toBe("no_sale");
+
+    // THE TOTAL — the petty cash really left the drawer, so it is money accounted for HERE or
+    // money accounted for nowhere.
+    expect(String(proj.unbound_drawer.paid_out_paisa)).toBe(
+      exactSum([...UNBOUND_PAID_OUT]).toString(),
+    );
+    expect(proj.unbound_drawer.paid_out_paisa).not.toBe(0);
+
+    // 02-F43 writes both codes, so they are asserted by name and not merely as a class.
+    expect(exceptionsOf(proj.unbound_drawer).sort()).toEqual([
+      "unbound_drawer_open",
+      "unbound_paid_out",
+    ]);
+  });
+
+  it("02-F43/02-F22: the open shift beside them absorbs none of it — bound and unbound are different buckets, and the money is in exactly one", () => {
+    const fold = shiftCash();
+    const { envelopes } = unboundDrawerSet();
+    const row = shiftRow(fold.projectAll(envelopes), "S1");
+    // A fold that bucketed an unbound event into "whichever shift is open" reads 3 and 22500
+    // here — which is the 26 §7 break (the reading device's state deciding the money) wearing
+    // the costume of a helpful default.
+    expect(row.no_sale_count).toBe(1);
+    expect(row.paid_out_paisa).toBe(BOUND_PAID_OUT);
+    expect(hasCode(row, /unbound/)).toBe(false);
+  });
+
+  it("02-F43/01-F1: opening a shift afterwards does NOT retro-bind the unbound drawer activity", () => {
+    const fold = shiftCash();
+    const { emit, envelopes } = branchEmitter("ud2");
+    emit(0, drawerOpened(null), 100);
+    emit(1, paidOut(null, 4500), 200);
+    const before = fold.projectAll(envelopes);
+    emit(2, shiftOpened("S9"), 1000); // opened later — a retro-bind would be a mutation
+    emit(2, drawerOpened("S9"), 1100);
+    const after = fold.projectAll(envelopes);
+    expect(after.unbound_drawer).toEqual(before.unbound_drawer);
+    expect(after.unbound_drawer.no_sale_count).toBe(1);
+    expect(after.unbound_drawer.paid_out_paisa).toBe(4500);
+    expect(shiftRow(after, "S9").no_sale_count).toBe(1);
+    expect(shiftRow(after, "S9").paid_out_paisa).toBe(0);
+  });
+
+  it("02-F43 (the negative case): a branch whose drawer activity is all bound has an EMPTY unbound bucket and raises neither code", () => {
+    const fold = shiftCash();
+    const { emit, envelopes } = branchEmitter("ud3");
+    emit(0, shiftOpened("S1"), 0);
+    emit(0, drawerOpened("S1"), 100);
+    emit(1, paidOut("S1", 2500), 200);
+    const proj = fold.projectAll(envelopes);
+    // Without this, "raise the anomaly unconditionally" passes every assertion above and every
+    // ordinary evening in the branch is flagged for theft.
+    expect(proj.unbound_drawer).toEqual({
+      no_sale_count: 0,
+      paid_out_paisa: 0,
+      exceptions_json: "[]",
+    });
+  });
+
+  it("02-F43/01-F34: the unbound bucket is idempotent per envelope and invariant under an ORDER-REVERSING id bijection", () => {
+    const fold = shiftCash();
+    const { envelopes } = unboundDrawerSet();
+    const baseline = fold.projectAll(envelopes);
+    // Two identical no-sale payloads count 2 only if the bucket is keyed by ENVELOPE — which
+    // makes the same delivery twice the case that would double it if it were keyed by nothing.
+    expect(projectionBytes(fold.projectAll([...envelopes, ...envelopes]))).toBe(
+      projectionBytes(baseline),
+    );
+    const relabelled = reversedIds(envelopes);
+    expect(relabelled.reversing).toBe(true);
+    expect(relabelled.bijective).toBe(true);
+    expect(projectionBytes(fold.projectAll(relabelled.envelopes))).toBe(projectionBytes(baseline));
+  });
+
+  it("00 §6/02-F43: drawer activity naming a shift whose open has NOT arrived is HELD, not unbound — it projects no row and surfaces with its money when the open lands", () => {
+    const fold = shiftCash();
+    const { emit, envelopes } = branchEmitter("gh");
+    emit(0, paidOut("S-ghost", 4200), 100);
+    emit(1, drawerOpened("S-ghost"), 200);
+    emit(2, depositRecorded("D-ghost", 1000), 300);
+    const held = fold.projectAll(envelopes);
+    // No row, and no projection HOLE either: a fold that emitted a row for a shift it has never
+    // seen opened invents an entity, and one that dropped the events loses the money.
+    expect(held.shifts).toEqual([]);
+    expect(held.days).toEqual([]);
+    // …and emphatically NOT 02-F43's bucket: these events carry a shift key, it merely resolves
+    // to nothing yet. Conflating the two turns every out-of-order delivery into a theft alarm.
+    expect(held.unbound_drawer).toEqual({
+      no_sale_count: 0,
+      paid_out_paisa: 0,
+      exceptions_json: "[]",
+    });
+
+    emit(0, shiftOpened("S-ghost"), 50);
+    emit(1, dayOpened("D-ghost", { opening_float_paisa: 500000 }), 60);
+    const landed = fold.projectAll(envelopes);
+    expect(shiftRow(landed, "S-ghost").paid_out_paisa).toBe(4200);
+    expect(shiftRow(landed, "S-ghost").no_sale_count).toBe(1);
+    expect(dayRow(landed, "D-ghost").deposit_paisa).toBe(1000);
   });
 });
 
@@ -759,6 +1114,186 @@ describe("§8 the day lifecycle and the 05:00 Asia/Karachi business day (02-F22,
     expect(row.open_at).toBe(BRANCH_T0 + 4200);
     expect(row.open_at).toBe(env.branch_created_at);
     expect(row.open_at).not.toBe(env.device_created_at);
+  });
+});
+
+// ===========================================================================
+// §8b — THE DAY FORK (26 §7's carried causal link, on the day).
+// 26 §7 lists "duplicate shift/day open" as ONE row of its matrix and `prev_day_id` exists for
+// exactly that reason, so the day gets the SAME detector rather than a second, subtly different
+// one. A fork detector covering only shifts leaves a duplicate DAY open — which is the whole
+// branch's opening cash and its 01-F46 boundary — unflagged. No fixture in this suite carried a
+// non-null `prev_day_id` until August 2026, so the day half was never exercised at all.
+// ===========================================================================
+
+describe("§8b two `day.opened` naming ONE predecessor is a fork (26 §7, 01-F31)", () => {
+  it("26 §7: both day rows stand with their carried links and BOTH are flagged — a fold never picks a winner", () => {
+    const fold = shiftCash();
+    const { envelopes } = dayForkSet();
+    const proj = fold.projectAll(envelopes);
+
+    // Non-vacuity: the fixture really carries two DISTINCT day ids naming one predecessor.
+    const links = envelopes
+      .filter((e) => e.type === "day.opened")
+      .map((e) => e.payload as { day_id: string; prev_day_id: string | null });
+    expect(links.filter((p) => p.prev_day_id === "D0").map((p) => p.day_id)).toEqual([
+      "D1a",
+      "D1b",
+    ]);
+
+    expect(proj.days.map((r) => r.day_id)).toEqual(["D0", "D1a", "D1b", "D9"]);
+    expect(dayRow(proj, "D1a").prev_day_id).toBe("D0");
+    expect(dayRow(proj, "D1b").prev_day_id).toBe("D0");
+    expect(hasCode(dayRow(proj, "D1a"), /fork/)).toBe(true);
+    expect(hasCode(dayRow(proj, "D1b"), /fork/)).toBe(true);
+
+    // A FORK is two distinct ids naming one predecessor; a DIVERGENCE is one id under two
+    // payloads. Neither day here diverges, so a fold raising the divergence code has caught the
+    // wrong thing with the right alarm.
+    expect(hasCode(dayRow(proj, "D1a"), /diverg/)).toBe(false);
+    // Both floats are retained in full — the fork flags the lineage, it does not dispute money.
+    expect(dayRow(proj, "D1a").opening_float_paisa).toBe(600000);
+    expect(dayRow(proj, "D1b").opening_float_paisa).toBe(700000);
+    expect(dayRow(proj, "D1a").deposit_paisa).toBe(200000);
+    expect(dayRow(proj, "D1b").deposit_paisa).toBe(0);
+  });
+
+  it("26 §7 (the negative case): a NON-NULL predecessor with a single successor is an ordinary rollover and is NOT flagged", () => {
+    const fold = shiftCash();
+    const { envelopes } = dayForkSet();
+    const proj = fold.projectAll(envelopes);
+    // D0's `prev_day_id` is null by construction, so on its own it cannot distinguish the
+    // correct rule from "raise the fork iff prev_day_id !== null" — which passes while flagging
+    // every day rollover the branch will ever do. D9 names D1a and is D1a's only successor.
+    expect(dayRow(proj, "D9").prev_day_id).toBe("D1a");
+    expect(hasCode(dayRow(proj, "D9"), /fork/)).toBe(false);
+    expect(hasCode(dayRow(proj, "D0"), /fork/)).toBe(false);
+  });
+
+  it("01-F34: the day fork is invariant under an ORDER-REVERSING id bijection and a reversed delivery", () => {
+    const fold = shiftCash();
+    const { envelopes } = dayForkSet();
+    const baseline = fold.projectAll(envelopes);
+    const relabelled = reversedIds(envelopes);
+    expect(relabelled.reversing).toBe(true);
+    expect(relabelled.bijective).toBe(true);
+    expect(projectionBytes(fold.projectAll(relabelled.envelopes))).toBe(projectionBytes(baseline));
+    expect(projectionBytes(fold.projectAll([...envelopes].reverse()))).toBe(
+      projectionBytes(baseline),
+    );
+  });
+
+  // ⚠ PIN #4 — TWO DISTINCT FORK CODES. `26 §7` mandates the carried causal link and names no
+  // code at all, so this file's policy makes /fork/ a CLASS and only RECOMMENDS
+  // `shift_open_fork` / `day_open_fork`. This test pins that the two are DISTINCT (not their
+  // spelling): an alarm that does not say whether the shift or the whole day forked is not
+  // actionable, and the two have different remediations. An implementer who wants one generic
+  // code should contest this as a contract clarification rather than treat it as a defect.
+  it("26 §7: a day fork and a shift fork in ONE projection are told apart — a manager cannot act on an alarm that does not name what forked", () => {
+    const fold = shiftCash();
+    const { emit, envelopes } = branchEmitter("df2");
+    emit(0, dayOpened("D0", { opening_float_paisa: 500000 }), 0);
+    emit(1, dayOpened("D1a", { opening_float_paisa: 600000, prev_day_id: "D0" }), 100);
+    emit(2, dayOpened("D1b", { opening_float_paisa: 700000, prev_day_id: "D0" }), 100);
+    emit(0, shiftOpened("S0"), 200);
+    emit(1, shiftOpened("S1a", { prev_shift_id: "S0" }), 300);
+    emit(2, shiftOpened("S1b", { prev_shift_id: "S0" }), 300);
+    const proj = fold.projectAll(envelopes);
+    const dayCodes = exceptionsOf(dayRow(proj, "D1a")).filter((c) => /fork/.test(c));
+    const shiftCodes = exceptionsOf(shiftRow(proj, "S1a")).filter((c) => /fork/.test(c));
+    expect(dayCodes).toHaveLength(1);
+    expect(shiftCodes).toHaveLength(1);
+    expect(dayCodes).not.toEqual(shiftCodes);
+  });
+});
+
+// ===========================================================================
+// §9 — 01-F45 BASIS PRECEDENCE (amended July 2026, adversarial review H2).
+// `shiftEnvelope` has accepted `basis: "branch_provisional"` since the suite was written and
+// NO fixture ever passed it, so every envelope in every set was `branch` and the precedence
+// rule was a dead knob: the fold would project identically with the tier logic deleted. The
+// discriminating case is a PROVISIONAL stamp that is EARLIER than a branch one.
+// ===========================================================================
+
+describe("§9 `open_at` / `business_date` take the strongest delivered BASIS TIER (01-F45, 01-F43, 01-F46)", () => {
+  it("01-F45: a `branch` open BEATS an earlier `branch_provisional` one — the branch tier wins DESPITE being later", () => {
+    const fold = shiftCash();
+    const { envelopes } = basisPrecedenceSet();
+
+    // Non-vacuity of the fixture, and of the knob itself: the set really does mix both bases,
+    // and the provisional member really is the earlier one. Without this the whole section is
+    // a test of the default.
+    const bases = envelopes.map((e) => e.time_basis);
+    expect(bases).toContain("branch");
+    expect(bases).toContain("branch_provisional");
+    const mixed = envelopes.filter(
+      (e) => (e.payload as { shift_id?: string }).shift_id === "S-mixed",
+    );
+    expect(mixed).toHaveLength(2);
+    expect(mixed.map((e) => e.time_basis)).toEqual(["branch", "branch_provisional"]);
+    expect(Number(must(mixed[1]).branch_created_at)).toBeLessThan(
+      Number(must(mixed[0]).branch_created_at),
+    );
+
+    const proj = fold.projectAll(envelopes);
+    // A plain earliest-wins min over every delivered open hands `open_at` to whichever device's
+    // clock is furthest BEHIND — a `branch_provisional` stamp IS the raw device clock at offset
+    // 0 (01-F44), which is the same class of break as reading `device_created_at` outright.
+    expect(shiftRow(proj, "S-mixed").open_at).toBe(BRANCH_T0 + 1000);
+    expect(shiftRow(proj, "S-mixed").open_at).not.toBe(BRANCH_T0 - PROVISIONAL_BACKDATE_MS);
+    // Identical payloads, so this is a redelivery and not two contested heads: nothing here may
+    // be flagged, and the tier rule is what is under test rather than 01-F31's.
+    expect(hasCode(shiftRow(proj, "S-mixed"), /diverg/)).toBe(false);
+    expect(shiftRow(proj, "S-mixed").cashier).toBe(CASHIER_A);
+  });
+
+  it("01-F46/01-F45: the business day inherits the tier — a backdated provisional open must not bank a whole evening to the wrong date", () => {
+    const fold = shiftCash();
+    const { envelopes } = basisPrecedenceSet();
+    const proj = fold.projectAll(envelopes);
+    // The two candidate stamps are three days apart, so the precondition of this test is that
+    // they genuinely fall on different business dates under the shipped helper.
+    expect(businessDate(BRANCH_T0 + 1000)).not.toBe(
+      businessDate(BRANCH_T0 - PROVISIONAL_BACKDATE_MS),
+    );
+    expect(dayRow(proj, "D-mixed").business_date).toBe(businessDate(BRANCH_T0 + 1000));
+    expect(dayRow(proj, "D-mixed").business_date).not.toBe(
+      businessDate(BRANCH_T0 - PROVISIONAL_BACKDATE_MS),
+    );
+  });
+
+  it("01-F45: a provisional stamp IS used when no `branch` member exists — the fallback tier, which is the only case the FR allows it in", () => {
+    const fold = shiftCash();
+    const { envelopes } = basisPrecedenceSet();
+    const proj = fold.projectAll(envelopes);
+    // A fold that discarded provisional members outright has no stamp to project here at all,
+    // and a fold that projected 0 (or the reading device's clock) is reading no time.
+    expect(shiftRow(proj, "S-prov-only").open_at).toBe(BRANCH_T0 + 7000);
+    expect(dayRow(proj, "D-prov-only").business_date).toBe(businessDate(BRANCH_T0 + 8000));
+  });
+
+  it("01-F45 (the CONTROL): when the provisional stamp is LATER, precedence and a plain min agree — this case alone proves nothing, and it catches the opposite mutation", () => {
+    const fold = shiftCash();
+    const { envelopes } = basisPrecedenceSet();
+    const proj = fold.projectAll(envelopes);
+    // Earliest-wins is still earliest-wins INSIDE the chosen tier: a fold that "preferred
+    // branch" by taking the branch member's stamp only when it is later, or that inverted the
+    // precedence to prefer provisional, reads BRANCH_T0 + 2000 + the backdate here.
+    expect(shiftRow(proj, "S-late-prov").open_at).toBe(BRANCH_T0 + 2000);
+  });
+
+  it("01-F34: tier selection is a PARTITION of the delivered set — reversed delivery and an order-reversing id bijection project byte-identically", () => {
+    const fold = shiftCash();
+    const { envelopes } = basisPrecedenceSet();
+    const baseline = fold.projectAll(envelopes);
+    // The rule must be set-determined, not "whichever basis the fold saw first wins".
+    expect(projectionBytes(fold.projectAll([...envelopes].reverse()))).toBe(
+      projectionBytes(baseline),
+    );
+    const relabelled = reversedIds(envelopes);
+    expect(relabelled.reversing).toBe(true);
+    expect(relabelled.bijective).toBe(true);
+    expect(projectionBytes(fold.projectAll(relabelled.envelopes))).toBe(projectionBytes(baseline));
   });
 });
 

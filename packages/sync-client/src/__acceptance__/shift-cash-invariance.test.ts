@@ -32,6 +32,14 @@
 // carried by `shiftCashScenario()` (so all three nets above run over it) and isolated in §1b
 // (so the red names the float rather than "a 25-event projection moved").
 //
+// **August 2026: FIVE more shapes moved into the same set, and §0b now ASSERTS they are there.**
+// The `01-F45` basis tier, `02-F43`'s unbound drawer bucket, a disputed unbound attempt key,
+// the `26 §7` DAY fork and the carried `variance_paisa` were all branches the fold had and no
+// fixture in this suite ever produced — so every net below was a correct net over a set that
+// could not reach them. §0b is the tripwire that keeps that true under future fixture edits;
+// without it, "does this net cover anything?" is answered by reading the fixture, which is
+// exactly how the round-3 defect survived five parallel reviews.
+//
 // RED-AWAITING-IMPLEMENTATION — `@restos/sync-client/fold-engine` exports none of the three
 // shift_cash symbols yet.
 
@@ -86,6 +94,104 @@ describe("§0 the Proxy poison is a LIVE tripwire, not decoration (26 §8)", () 
     const copy = { ...env } as Record<string, unknown>;
     for (const field of BANNED_METADATA) expect(copy[field]).toBeUndefined();
     expect(copy.payload).toEqual(raw.payload);
+  });
+});
+
+// ===========================================================================
+// §0b — THE HARNESS MUST RUN OVER THE DANGEROUS CASES, AND THIS IS THE TRIPWIRE THAT SAYS SO.
+//
+// The round-3 law: five suites were returned broken for the SAME defect — the mechanism was
+// built correctly and never aimed at the input that matters. This file's three nets all fold
+// `shiftCashScenario()`, so the question "is this net coverage?" is entirely the question "does
+// that set contain the dangerous shapes?". Reading the fixture answers it today and answers it
+// wrongly the moment someone edits the fixture, so it is asserted instead.
+//
+// Five shapes, each of which had NO fixture anywhere in this suite before August 2026 and each
+// of which the fold has a live branch for. A fold could delete any of those branches and pass
+// every net in this file if the set stopped carrying them.
+// ===========================================================================
+
+describe("§0b `shiftCashScenario()` carries every case the nets exist to cover (round-3 law)", () => {
+  const payloadsOf = (type: string) =>
+    shiftCashScenario()
+      .envelopes.filter((e) => e.type === type)
+      .map((e) => e.payload as Record<string, unknown>);
+
+  it("01-F45: the set mixes BOTH time bases, including a provisional stamp EARLIER than a branch one", () => {
+    const { envelopes } = shiftCashScenario();
+    const bases = new Set(envelopes.map((e) => e.time_basis));
+    expect([...bases].sort()).toEqual(["branch", "branch_provisional"]);
+    const provisional = envelopes.filter((e) => e.time_basis === "branch_provisional");
+    const earliestBranch = Math.min(
+      ...envelopes.filter((e) => e.time_basis === "branch").map((e) => Number(e.branch_created_at)),
+    );
+    // Non-vacuity of the tier rule itself: at least one provisional stamp must be earlier than
+    // every branch stamp, or a plain min agrees with precedence and the nets prove nothing.
+    expect(
+      provisional.some((e) => Number(e.branch_created_at) < earliestBranch),
+      "a provisional stamp earlier than every branch stamp",
+    ).toBe(true);
+    // …and a shift with NO branch member at all, so 01-F45's fallback tier is exercised too.
+    const provOnlyShifts = new Set(
+      provisional
+        .filter((e) => e.type === "shift.opened")
+        .map((e) => (e.payload as { shift_id: string }).shift_id),
+    );
+    const branchShifts = new Set(
+      envelopes
+        .filter((e) => e.type === "shift.opened" && e.time_basis === "branch")
+        .map((e) => (e.payload as { shift_id: string }).shift_id),
+    );
+    expect([...provOnlyShifts].some((id) => !branchShifts.has(id))).toBe(true);
+  });
+
+  it("02-F43: the set carries unbound drawer opens (no-sale AND another reason) and unbound paid-outs", () => {
+    const opens = payloadsOf("cash.drawer_opened").filter((p) => p.shift_id === null);
+    expect(opens.filter((p) => p.reason === "no_sale").length).toBeGreaterThan(1);
+    expect(opens.some((p) => p.reason !== "no_sale")).toBe(true);
+    expect(payloadsOf("cash.paid_out").filter((p) => p.shift_id === null).length).toBeGreaterThan(
+      0,
+    );
+  });
+
+  it("01-F31: the set carries a DISPUTED attempt key whose members disagree about the carried shift", () => {
+    const byKey = new Map<string, Set<string | null>>();
+    for (const p of payloadsOf("payment.recorded")) {
+      const key = p.settlement_attempt_id as string;
+      const shifts = byKey.get(key) ?? new Set<string | null>();
+      shifts.add(p.shift_id as string | null);
+      byKey.set(key, shifts);
+    }
+    const crossBucket = [...byKey.values()].filter((s) => s.size > 1 && s.has(null));
+    expect(crossBucket.length).toBeGreaterThan(0);
+  });
+
+  it("26 §7: the set carries a DAY fork — two distinct day_ids naming one prev_day_id — and an ordinary sole successor beside it", () => {
+    const successors = new Map<string, Set<string>>();
+    for (const p of payloadsOf("day.opened")) {
+      const prev = p.prev_day_id as string | null;
+      if (prev === null) continue;
+      const ids = successors.get(prev) ?? new Set<string>();
+      ids.add(p.day_id as string);
+      successors.set(prev, ids);
+    }
+    expect([...successors.values()].some((ids) => ids.size > 1)).toBe(true);
+    // The negative case has to be in the set too, or "flag every non-null prev_day_id" survives.
+    expect([...successors.values()].some((ids) => ids.size === 1)).toBe(true);
+  });
+
+  it("26 §7 (ruling 3): every `shift.closed` in the set carries a variance the naive recompute CONTRADICTS", () => {
+    const closes = payloadsOf("shift.closed");
+    expect(closes.length).toBeGreaterThan(0);
+    for (const p of closes) {
+      const carried = p.variance_paisa as number;
+      const expected = p.expected_paisa_by_method as Record<string, number>;
+      const counted = p.counted_cash_paisa as number;
+      expect(typeof carried).toBe("number");
+      // A fixture whose carried value happens to equal `counted − expected.cash` cannot tell a
+      // fold that CARRIES from one that RE-DERIVES.
+      expect(carried).not.toBe(counted - (expected.cash ?? 0));
+    }
   });
 });
 

@@ -537,16 +537,19 @@ const shiftRowOf = (
   let variance: number | null = null;
   if (atClose !== undefined) {
     atCloseJson = canonicalJson(atClose);
-    // Over/short is `26 §7`'s CARRIED FACT and `registry.ts` requires it on the close, so it
-    // is READ, not re-derived: recomputing it here would silently move a number the cashier
-    // already signed the moment a late payment arrived (`01-F1`). The derivation survives
-    // ONLY as the fallback for a close that carries no variance — over is POSITIVE, short is
-    // negative, against the expected CASH figure the cashier was shown (the non-cash buckets
-    // are reconciled elsewhere and never enter the drawer variance).
-    variance =
-      typeof close.variance_paisa === "number"
-        ? close.variance_paisa
-        : renderTotal(BigInt(counted as number) - BigInt(atClose.cash as number), exceptions);
+    // Over/short is `26 §7`'s CARRIED FACT: it is READ, never re-derived. Recomputing it here
+    // would silently move a number the cashier already signed, the moment a late payment
+    // arrived — `01-F1` forbids that mutation and a read-time recompute performs it in effect.
+    //
+    // There is deliberately NO derived fallback. One stood here until August 2026 and was
+    // measured dead: `registry.ts` makes `variance_paisa` REQUIRED on `shift.closed`, so no
+    // emittable close can reach the derived arm (carried arm 323 hits, derived arm 0). Keeping
+    // it would have been worse than dead — it re-creates the exact read-time recompute this FR
+    // exists to remove, on the one path where the numbers legitimately disagree. The oracle
+    // pins that disagreement: every close fixture carries a variance the naive subtraction
+    // contradicts (a `02-F26` paid-out is drawer cash the subtraction never sees), and on one
+    // it flips the SIGN.
+    variance = close.variance_paisa as number;
   }
 
   return {

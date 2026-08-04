@@ -31,11 +31,16 @@ import { identity, peerEnvelope, peerIdentity } from "./builders.js";
 import { created, ingestAll, type MergeOpenOrderRow } from "./merge-builders.js";
 import {
   BRANCH_T0,
+  drawerOpened,
+  exceptionsOf,
   expectedOf,
   hasCode,
   MAX_SAFE,
+  NOT_NO_SALE_REASON,
+  paidOut,
   requireShiftRows,
   requireUnbound,
+  requireUnboundDrawer,
   shiftCashStore,
   shiftEnvelope,
   shiftOpened,
@@ -102,6 +107,47 @@ describe("02-F37 through the ingest path — the sale is never blocked", () => {
     if (!row) throw new Error("expected the S1 shift row");
     expect(expectedOf(row).cash).toBe(0);
     expect(hasCode(row, /overflow/)).toBe(true);
+    store.close();
+  });
+
+  it("02-F43/01-F17: drawer opens and petty cash with NO shift open INGEST, are COUNTED, and carry the two codes the FR names", () => {
+    const id = identity();
+    const peer = peerIdentity(id);
+    const store = shiftCashStore(id);
+    // Resolved BEFORE the behavioural assertions so a missing projection is a distinct red
+    // rather than a false green on "it didn't throw".
+    const unboundDrawer = requireUnboundDrawer(store);
+    // Unblocked by S-1: `cash.drawer_opened` and `cash.paid_out` are BOTH registered, and both
+    // carry a nullable `shift_id` (02-F43). No `shift.opened` is ingested here on purpose —
+    // "no shift open" is the whole premise, so the fixture must not quietly open one.
+    const envelopes = [
+      shiftEnvelope(peer, 0, drawerOpened(null), { branch_at: BRANCH_T0 + 100 }),
+      shiftEnvelope(peer, 1, drawerOpened(null), { branch_at: BRANCH_T0 + 200 }),
+      shiftEnvelope(peer, 2, drawerOpened(null, NOT_NO_SALE_REASON), {
+        branch_at: BRANCH_T0 + 300,
+      }),
+      shiftEnvelope(peer, 3, paidOut(null, 4500), { branch_at: BRANCH_T0 + 400 }),
+    ];
+    const results: { stored: boolean }[] = [];
+    expect(() => {
+      for (const env of envelopes) results.push(store.ingest(env));
+    }).not.toThrow();
+    // "Never a modal, never a block" reaches the STORE, not only the pure fold: an event the
+    // ingest path refuses is an event the theft detection never sees.
+    expect(results).toEqual([
+      { stored: true },
+      { stored: true },
+      { stored: true },
+      { stored: true },
+    ]);
+    const bucket = unboundDrawer();
+    // Two no-sale opens with identical payloads count TWO (02-F21 "logged and counted"), the
+    // third open is not a no-sale, and the petty cash is a total rather than a row that exists.
+    expect(bucket.no_sale_count).toBe(2);
+    expect(bucket.paid_out_paisa).toBe(4500);
+    expect(exceptionsOf(bucket).sort()).toEqual(["unbound_drawer_open", "unbound_paid_out"]);
+    // …and no shift was invented to hold any of it.
+    expect(requireShiftRows(store)()).toEqual([]);
     store.close();
   });
 });

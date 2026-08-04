@@ -651,8 +651,12 @@ export const createMergeEngine = (): MergeEngine => {
 
   /** Availability rows, keyed by item. Untoggled items never appear (01-F52: the catalog
    * says what exists; availability is an operational override, never catalog-driven). */
+  // The `id`s come from `items.keys()`, so every `get` hits — the `?? new Map()` that stood here
+  // was an unreachable branch (0/546) and the last thing blocking `20 §2.2`'s 100% branch gate on
+  // `src/folds/**`. Removed rather than covered: a test can only "exercise" it by pretending, and
+  // a defensive default on a key we just enumerated hides a real bug rather than guarding one.
   const availabilitySnapshot = (): AvailabilityRow[] =>
-    [...items.keys()].sort().map((id) => availabilityRowOf(id, items.get(id) ?? new Map()));
+    [...items.keys()].sort().map((id) => availabilityRowOf(id, items.get(id) as ItemEntity));
   const lineKey = (orderId: string, lineId: string): string => `${orderId}\u0000${lineId}`;
 
   const entity = (orderId: string): Entity => {

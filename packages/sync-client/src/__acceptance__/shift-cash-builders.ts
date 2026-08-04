@@ -128,9 +128,14 @@
 //                                explicit zeros) while the live `expected_json` is grow-only, so
 //                                a column filled by copying the live map at close time no longer
 //                                matches.
-//     variance_paisa           — over/short: `counted_cash_paisa − expected_at_close.cash`,
-//                                a pure function of two CARRIED facts and therefore frozen at
-//                                close. PINNED sign convention: counted ABOVE expected is
+//     variance_paisa           — over/short, a THIRD CARRIED FACT read verbatim off the close
+//                                (ORCHESTRATOR RULING 3, August 2026 — `registry.ts` makes it
+//                                required and `26 §7` classifies it as carried). It is NOT
+//                                derived: this suite's fixtures deliberately carry a value that
+//                                `counted − expected_at_close.cash` contradicts, so an
+//                                implementation that recomputes reads a different number and,
+//                                in the `S-over` fixture, a different SIGN. PINNED sign
+//                                convention: counted ABOVE the expected DRAWER figure is
 //                                POSITIVE (over), below is negative (short). Null until closed.
 //     exceptions_json          — canonical JSON sorted distinct string[] (the house anomaly
 //                                vector, as on openOrders()).
@@ -177,6 +182,19 @@
 //     { settlement_attempt_id, order_id, method, amount_paisa, anomaly } where `anomaly` is
 //     the string `unbound_settlement` — the FR names that code, so this suite asserts the
 //     name and not merely that something was flagged.
+//     `order_id`/`method` are NULLABLE, and only for the DISPUTED key (01-F31): when the
+//     members of one attempt key disagree there is no agreed order or method to name, a fold
+//     never picks a winner, so the row renders money → 0, the carried scalars → null and the
+//     anomaly `unbound_settlement_divergence`. Asserted in ./shift-cash-fold.test.ts §4b.
+//
+//   unbound_drawer (02-F43, August 2026 — `{ no_sale_count, paid_out_paisa, exceptions_json }`):
+//     ONE bucket, not one row per event — an unbound drawer open has no key of its own (a shift
+//     id is exactly what it lacks) and the FR asks for a count and a total, not an inventory.
+//     Anomaly codes `unbound_drawer_open` / `unbound_paid_out` are EXACT: 02-F43 writes both.
+//     02-F21's `no_sale` discriminator governs the COUNT on this path exactly as it does on a
+//     shift row, and the count is the assertion — "logged and counted" is defeated by an
+//     implementation that stores the event and drops it from every total, which is the silent
+//     path 02-F43 names and forbids. Asserted in ./shift-cash-fold.test.ts §7b.
 //
 //   Row ORDER is part of the projection: `shifts` by shift_id, `days` by day_id, `unbound`
 //   by settlement_attempt_id, each by UTF-16 code unit. A fold that returns rows in
@@ -256,18 +274,36 @@ export type DayRow = {
   exceptions_json: string;
 };
 
+/**
+ * `order_id`/`method` are NULLABLE for exactly one reason (`01-F31`): when the attempt key is
+ * DISPUTED there is no agreed value to carry and a fold never picks a winner, so the row renders
+ * the way every other contested register does — money to zero, the carried scalars to null, the
+ * anomaly raised, all members retained. See `divergentUnboundSet()`.
+ */
 export type UnboundRow = {
   settlement_attempt_id: string;
-  order_id: string;
-  method: string;
+  order_id: string | null;
+  method: string | null;
   amount_paisa: number;
   anomaly: string;
+};
+
+/**
+ * `02-F43` — the drawer opens and paid-outs that named NO shift, counted rather than dropped.
+ * ONE bucket, not one row per event: an unbound drawer open has no key of its own (a shift id is
+ * exactly what it lacks), and the FR asks for a count and a total, not an inventory.
+ */
+export type UnboundDrawerRow = {
+  no_sale_count: number;
+  paid_out_paisa: number;
+  exceptions_json: string;
 };
 
 export type ShiftCashProjection = {
   shifts: ShiftRow[];
   days: DayRow[];
   unbound: UnboundRow[];
+  unbound_drawer: UnboundDrawerRow;
 };
 
 /** Opaque — the fold's internal accumulator is an implementation choice (18 §4). */
@@ -323,6 +359,7 @@ export type ShiftCashStore = MergeStore & {
   shifts(): ShiftRow[];
   days(): DayRow[];
   unboundSettlements(): UnboundRow[];
+  unboundDrawer(): UnboundDrawerRow;
 };
 
 export const shiftCashStore = (id: Identity, path = ":memory:"): ShiftCashStore =>
@@ -342,6 +379,16 @@ export const requireUnbound = (store: ShiftCashStore): (() => UnboundRow[]) => {
   if (typeof fn !== "function")
     throw new Error(
       "S-2 red-awaiting-implementation: store.unboundSettlements() is not implemented yet",
+    );
+  return fn.bind(store);
+};
+
+/** `02-F43`'s bucket through the store, resolved the same way and for the same reason. */
+export const requireUnboundDrawer = (store: ShiftCashStore): (() => UnboundDrawerRow) => {
+  const fn = store.unboundDrawer;
+  if (typeof fn !== "function")
+    throw new Error(
+      "S-2 red-awaiting-implementation: store.unboundDrawer() is not implemented yet",
     );
   return fn.bind(store);
 };
@@ -393,19 +440,42 @@ export const expectedPaisaByMethod = (
   return exhaustive;
 };
 
-/** 02-F23 / 26 §7: BOTH facts travel on the close — what was counted, and the by-method
- * figure the cashier was shown. The field name is ORCHESTRATOR RULING 1's
- * `expected_paisa_by_method` (S-1's name; the unit belongs in a money field's name) and the map
- * is ruling 2's exhaustive one. */
+/**
+ * 02-F23 / 26 §7: THREE facts travel on the close — what was counted, the by-method figure the
+ * cashier was shown, and the over/short the cashier SIGNED. The field name is ORCHESTRATOR
+ * RULING 1's `expected_paisa_by_method` (S-1's name; the unit belongs in a money field's name)
+ * and the map is ruling 2's exhaustive one.
+ *
+ * ORCHESTRATOR RULING 3 (August 2026) — `variance_paisa` IS CARRIED AND IS REQUIRED HERE.
+ *   `registry.ts` makes it required on `shift.closed` and S-1's oracle refuses a close without
+ *   it, while this builder used to omit it and five assertions below pinned a DERIVED value —
+ *   so no implementation could satisfy both suites and the fold kept a `carried ?? derived`
+ *   fallback to stay green against each. The ruling went the carried way: `26 §7` classifies
+ *   over/short as a CARRIED FACT precisely because a read-time recompute silently moves a
+ *   number the cashier already signed the moment a late payment arrives, which `01-F1` forbids
+ *   — and a fallback that recomputes when the field is absent re-creates that hazard on the one
+ *   path where it matters. Required (not defaulted) on purpose: a default would let a fixture
+ *   drift back into omitting it, which is exactly how the conflict survived a whole round.
+ *
+ * ⚠ THIS SUITE PINS NO DERIVATION. The fixtures deliberately carry variances that a
+ *   `counted − expected.cash` recompute CONTRADICTS (a paid-out is drawer cash that the naive
+ *   subtraction never sees, `02-F26`), so an implementation that recomputes reads a different
+ *   number — and in one fixture a different SIGN. The fold's only obligation is to carry.
+ */
 export const shiftClosed = (
   shift_id: string,
-  opts: { counted_cash_paisa: number; expected_paisa_by_method: Record<string, number> },
+  opts: {
+    counted_cash_paisa: number;
+    expected_paisa_by_method: Record<string, number>;
+    variance_paisa: number;
+  },
 ) => ({
   type: "shift.closed",
   payload: {
     shift_id,
     counted_cash_paisa: opts.counted_cash_paisa,
     expected_paisa_by_method: expectedPaisaByMethod(opts.expected_paisa_by_method),
+    variance_paisa: opts.variance_paisa,
   },
 });
 
@@ -431,8 +501,19 @@ export const depositRecorded = (day_id: string, amount_paisa: number) => ({
   payload: { day_id, amount_paisa },
 });
 
+/**
+ * `02-F26` petty cash. `shift_id: null` is `02-F43`'s path and is a first-class legal value:
+ * "unbound petty cash that leaves the drawer accounted for in no shift, no day, and no anomaly"
+ * is the silent path the FR names and forbids.
+ *
+ * ⚠ FIXTURE FIX (August 2026): the field is `receipt_photo_ref`, the name `registry.ts` landed
+ * from `02-F26`'s "receipt photo (object storage ref)". This builder emitted `receipt_ref`,
+ * which the schema's required `receipt_photo_ref` refuses — so every `cash.paid_out` in this
+ * suite was UNEMITTABLE through the store's ingest path, and the defect was invisible because
+ * no test had ever ingested one. Reported as a finding.
+ */
 export const paidOut = (
-  shift_id: string,
+  shift_id: string | null,
   amount_paisa: number,
   extra: Record<string, unknown> = {},
 ) => ({
@@ -441,7 +522,7 @@ export const paidOut = (
     shift_id,
     amount_paisa,
     reason: "petty_cash",
-    receipt_ref: "obj://receipt",
+    receipt_photo_ref: "obj://receipt",
     ...extra,
   },
 });
@@ -455,8 +536,15 @@ export const paidOut = (
  */
 export const NOT_NO_SALE_REASON = "cash_settlement";
 
-/** 02-F21: the classic theft vector — logged and COUNTED, but only for `reason=no_sale`. */
-export const drawerOpened = (shift_id: string, reason = "no_sale") => ({
+/**
+ * 02-F21: the classic theft vector — logged and COUNTED, but only for `reason=no_sale`.
+ *
+ * `shift_id: null` is 02-F43's path: a drawer legitimately opens before the day's first shift
+ * (making change, a supplier at the door), so the schema accepts it and the fold COUNTS it into
+ * an unbound bucket. An implementation that stores it and drops it from every total satisfies
+ * 02-F21's word "logged" while defeating the theft detection the FR exists for.
+ */
+export const drawerOpened = (shift_id: string | null, reason = "no_sale") => ({
   type: "cash.drawer_opened",
   payload: { shift_id, reason },
 });
@@ -500,6 +588,15 @@ export const shiftPayment = (
 export const BRANCH_T0 = 1752800000000;
 
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+
+/**
+ * How far a `branch_provisional` stamp is BACKDATED in the basis fixtures. Three days, not three
+ * seconds, for two reasons: `01-F45` describes the failure as "a tablet powered on before the
+ * counter" (a whole device's clock being behind, not jitter), and it has to cross `01-F46`'s
+ * 05:00 Asia/Karachi boundary so `days.business_date` — not merely `open_at` — visibly moves
+ * when the precedence rule is deleted.
+ */
+export const PROVISIONAL_BACKDATE_MS = 3 * 24 * 60 * 60 * 1000;
 
 export const shiftEnvelope = (
   peer: Identity,
@@ -552,6 +649,12 @@ export const expectedAtCloseOf = (row: ShiftRow): Record<string, number> | null 
   row.expected_at_close_json === null
     ? null
     : (JSON.parse(row.expected_at_close_json) as Record<string, number>);
+
+export const unboundRow = (proj: ShiftCashProjection, attempt: string): UnboundRow =>
+  must(
+    proj.unbound.find((r) => r.settlement_attempt_id === attempt),
+    `unbound row ${attempt}`,
+  );
 
 export const exceptionsOf = (row: { exceptions_json: string }): string[] =>
   JSON.parse(row.exceptions_json) as string[];
@@ -678,12 +781,12 @@ export type ShiftCashSet = {
 
 export type BranchEmitter = ShiftCashSet & {
   /** `emit(deviceIndex, payloadFragment, msAfterBRANCH_T0)` → the envelope id. The optional
-   * fourth argument sets the envelope's 02-F19 attribution. */
+   * fourth argument sets the envelope's 02-F19 attribution and its 01-F44 TIME BASIS. */
   emit: (
     peerIdx: number,
     typed: { type: string; payload: Record<string, unknown> },
     offsetMs: number,
-    opts?: { actor_user_id?: string | null },
+    opts?: { actor_user_id?: string | null; basis?: "branch" | "branch_provisional" },
   ) => string;
 };
 
@@ -702,7 +805,7 @@ export const branchEmitter = (tag: string): BranchEmitter => {
     peerIdx: number,
     typed: { type: string; payload: Record<string, unknown> },
     offsetMs: number,
-    opts: { actor_user_id?: string | null } = {},
+    opts: { actor_user_id?: string | null; basis?: "branch" | "branch_provisional" } = {},
   ): string => {
     const peer = must(peers[peerIdx], "peer");
     const lamport = must(lamports[peerIdx], "lamport");
@@ -713,6 +816,7 @@ export const branchEmitter = (tag: string): BranchEmitter => {
         branch_at: BRANCH_T0 + offsetMs,
         id,
         ...(opts.actor_user_id === undefined ? {} : { actor_user_id: opts.actor_user_id }),
+        ...(opts.basis === undefined ? {} : { basis: opts.basis }),
       }),
     );
     return id;
@@ -739,6 +843,24 @@ export const CASHIER_B = "u-bilal";
  * ./shift-cash-invariance.test.ts runs over, because a divergent-money case that sits outside
  * the harness is precisely what a `min(envelope.id)` fold walks through: it is convergent (so
  * plain shuffling never sees it) and wrong (so only a bijective id relabel does).
+ *
+ * ── AUGUST 2026: FIVE MORE DANGEROUS CASES MOVED **INTO** THIS SET ──────────
+ * The round-3 law is that a net which never runs over the dangerous fixture is a correct net
+ * over a safe one. Each of the following was previously exercised (if at all) only by a
+ * directed test outside the harness, so the relabel / injection / poison / shuffle nets — and
+ * the whole `§5` property — were blind to it. They are now inside the set every net folds:
+ *   * `01-F45` BASIS PRECEDENCE — a `branch_provisional` REDELIVERY of S1's open, backdated
+ *     three days, plus a provisional-ONLY shift (S4) that has no `branch` member at all.
+ *   * `02-F43` the unbound drawer bucket — two unbound no-sale opens (identical payloads, so
+ *     they are only distinct by envelope id), one unbound open for another reason, and two
+ *     unbound paid-outs.
+ *   * `01-F31` a DISPUTED unbound attempt key whose members disagree about the carried
+ *     `shift_id` — the one divergence a per-shift attempt map cannot see.
+ *   * `26 §7` the DAY fork — two `day.opened` for distinct `day_id`s naming one `prev_day_id`,
+ *     with an ordinary sole-successor day beside it as the negative case.
+ *   * `00 §6` soft refs — drawer and deposit activity for a shift/day whose open never lands.
+ * Each is ALSO isolated in its own set below, so a red names the case instead of reporting that
+ * a forty-event evening moved.
  */
 export const shiftCashScenario = (): ShiftCashSet => {
   const { identity, envelopes, emit } = branchEmitter("sc");
@@ -782,7 +904,15 @@ export const shiftCashScenario = (): ShiftCashSet => {
     // Only `cash` saw activity by close time; ruling 2's four explicit zeros are filled by the
     // builder, so this close carries the full five-key map (and is the set's non-vacuity witness
     // that an exhaustive map really does contain zeros).
-    shiftClosed("S1", { counted_cash_paisa: 139000, expected_paisa_by_method: { cash: 140000 } }),
+    //
+    // The carried variance DISAGREES with `counted − expected.cash` (= −1000) on purpose: the
+    // Rs 125 paid out above left the drawer, so the figure the cashier signed against was
+    // 140000 − 12500 and the shift is Rs 115 OVER. Ruling 3 — the fold carries, never recomputes.
+    shiftClosed("S1", {
+      counted_cash_paisa: 139000,
+      expected_paisa_by_method: { cash: 140000 },
+      variance_paisa: 11500,
+    }),
     3000,
   );
   emit(1, shiftOpened("S2", { prev_shift_id: "S1", cashier: CASHIER_B }), 3100, {
@@ -796,6 +926,46 @@ export const shiftCashScenario = (): ShiftCashSet => {
   emit(0, depositRecorded("D1", 200000), 3600);
   emit(1, depositRecorded("D1", 300000), 3650);
   emit(0, dayClosed("D1", { counted_cash_paisa: 750000 }), 3700);
+
+  // 01-F45 basis precedence, INSIDE the harness. A redelivery of S1's open — IDENTICAL payload,
+  // so it is one member and raises no divergence — stamped `branch_provisional` and backdated
+  // three days. A plain earliest-wins min over the delivered opens dates S1 to the tablet's raw
+  // clock; the branch tier must win despite being later.
+  emit(2, shiftOpened("S1", { cashier: CASHIER_A }), -PROVISIONAL_BACKDATE_MS, {
+    actor_user_id: CASHIER_A,
+    basis: "branch_provisional",
+  });
+  // …and a shift with NO branch member at all: 01-F45's fallback tier, which is the only case
+  // in which a provisional stamp may be used.
+  emit(2, shiftOpened("S4", { prev_shift_id: "S3a" }), 3800, { basis: "branch_provisional" });
+
+  // 02-F43 — the drawer before the day's first shift, and petty cash out with no shift open.
+  // Two of the no-sale opens carry IDENTICAL payloads, so a bucket keyed by payload value
+  // collapses the classic theft vector to one event.
+  emit(1, drawerOpened(null), 30);
+  emit(2, drawerOpened(null), 40);
+  emit(1, drawerOpened(null, NOT_NO_SALE_REASON), 50);
+  emit(0, paidOut(null, 4500), 60);
+  emit(2, paidOut(null, 5500), 70);
+
+  // 01-F31 — a DISPUTED unbound attempt key whose two members disagree about the carried
+  // `shift_id`. Nested inside a per-shift attempt map these are two AGREED keys in two
+  // different maps and the Rs 600 banks twice; org-globally they are one disputed key.
+  emit(0, shiftPayment("O10", 60000, { attempt: "sa-11", shift_id: null }), 3900);
+  emit(2, shiftPayment("O10", 60000, { attempt: "sa-11", shift_id: "S2" }), 3950);
+
+  // 26 §7 — the DAY fork, with its negative case beside it: D2a/D2b both name D1, while D9 is
+  // an ordinary handover (a non-null predecessor with a single successor).
+  emit(1, dayOpened("D2a", { opening_float_paisa: 300000, prev_day_id: "D1" }), 4000);
+  emit(2, dayOpened("D2b", { opening_float_paisa: 400000, prev_day_id: "D1" }), 4000);
+  emit(0, dayOpened("D9", { opening_float_paisa: 100000, prev_day_id: "D2a" }), 4100);
+
+  // 00 §6 soft refs — activity for a shift and a day whose `*.opened` never arrives. Held in
+  // the lattice with its money, never projected into a hole, and NOT the same thing as 02-F43's
+  // unbound bucket: these carry a key, it just resolves to nothing yet.
+  emit(0, paidOut("S-ghost", 4200), 4200);
+  emit(1, drawerOpened("S-ghost"), 4250);
+  emit(2, depositRecorded("D-ghost", 1000), 4300);
 
   return { identity, envelopes };
 };
@@ -828,6 +998,135 @@ export const divergentDayOpenSet = (): ShiftCashSet => {
   return { identity, envelopes };
 };
 
+// ---------------------------------------------------------------------------
+// The four fixtures the August 2026 round added. Each isolates one case that the shipped fold
+// handles and that NO fixture in this suite previously produced — so the guard existed and was
+// never pointed at the dangerous input. Each is ALSO carried by `shiftCashScenario()`.
+// ---------------------------------------------------------------------------
+
+/**
+ * `01-F45` BASIS PRECEDENCE (amended July 2026, adversarial review H2), isolated.
+ *
+ * Three shapes, and only the first one discriminates:
+ *   S-mixed / D-mixed  a `branch` open and a `branch_provisional` REDELIVERY of the identical
+ *                      payload, the provisional stamp EARLIER. Precedence says the branch value
+ *                      wins DESPITE being later; a plain earliest-wins min reads the provisional
+ *                      one. This is the whole test.
+ *   S-late-prov        the CONTROL: the provisional stamp is later, so a plain min and the
+ *                      precedence rule agree. On its own it proves nothing, and it is here to
+ *                      catch the opposite mutation — a fold that PREFERS provisional.
+ *   S-prov-only /      no `branch` member exists at all, which is the one case in which a
+ *   D-prov-only        provisional stamp may be used (`01-F45`: "a provisional stamp is used
+ *                      only when no `branch` member exists"). A fold that discarded provisional
+ *                      members outright would have no stamp to project here.
+ *
+ * The payloads within each entity are IDENTICAL, so these are redeliveries and not divergent
+ * heads: the tier rule is under test, not the `01-F31` contested-register rule.
+ */
+export const basisPrecedenceSet = (): ShiftCashSet => {
+  const { identity, envelopes, emit } = branchEmitter("bp");
+  emit(0, shiftOpened("S-mixed", { cashier: CASHIER_A }), 1000, { actor_user_id: CASHIER_A });
+  emit(1, shiftOpened("S-mixed", { cashier: CASHIER_A }), -PROVISIONAL_BACKDATE_MS, {
+    actor_user_id: CASHIER_A,
+    basis: "branch_provisional",
+  });
+  emit(0, shiftOpened("S-late-prov"), 2000);
+  emit(2, shiftOpened("S-late-prov"), 2000 + PROVISIONAL_BACKDATE_MS, {
+    basis: "branch_provisional",
+  });
+  emit(1, shiftOpened("S-prov-only"), 7000, { basis: "branch_provisional" });
+  emit(0, dayOpened("D-mixed", { opening_float_paisa: 500000 }), 1000);
+  emit(2, dayOpened("D-mixed", { opening_float_paisa: 500000 }), -PROVISIONAL_BACKDATE_MS, {
+    basis: "branch_provisional",
+  });
+  emit(1, dayOpened("D-prov-only", { opening_float_paisa: 400000 }), 8000, {
+    basis: "branch_provisional",
+  });
+  return { identity, envelopes };
+};
+
+/** The two unbound paid-outs in `unboundDrawerSet()`, exported so the total is asserted against
+ * the fixture's own numbers rather than a re-typed literal. */
+export const UNBOUND_PAID_OUT = [4500, 5500] as const;
+/** The paid-out and no-sale open that DO carry a shift key, for the same reason. */
+export const BOUND_PAID_OUT = 12500;
+
+/**
+ * `02-F43`, isolated — drawer opens and paid-outs carrying NO shift reference.
+ *
+ * The set deliberately runs a live shift ALONGSIDE them, because the defect the FR names is not
+ * "the event is rejected" (nothing rejects it) but "the event is stored and dropped from every
+ * total". Distinguishing that from the correct behaviour needs both buckets populated at once:
+ * a fold that quietly banked the unbound events into the open shift, and one that dropped them
+ * on the floor, both leave the unbound bucket at zero.
+ *
+ * Two of the unbound no-sale opens carry IDENTICAL payloads. `02-F21` counts EVENTS ("logged and
+ * counted"), so those are two, not one — a bucket keyed by payload value collapses the classic
+ * theft vector to a single open, which is the whole thing the count exists to see.
+ */
+export const unboundDrawerSet = (): ShiftCashSet => {
+  const { identity, envelopes, emit } = branchEmitter("ud");
+  // Before the first shift of the day: making change, a supplier at the door.
+  emit(1, drawerOpened(null), 100);
+  emit(2, drawerOpened(null), 200);
+  emit(1, drawerOpened(null, NOT_NO_SALE_REASON), 300);
+  emit(0, paidOut(null, must(UNBOUND_PAID_OUT[0], "unbound paid-out")), 400);
+  emit(2, paidOut(null, must(UNBOUND_PAID_OUT[1], "unbound paid-out")), 500);
+  // …and the ordinary bound traffic that must not absorb any of it.
+  emit(0, shiftOpened("S1", { cashier: CASHIER_A }), 1000, { actor_user_id: CASHIER_A });
+  emit(0, drawerOpened("S1"), 1100);
+  emit(0, paidOut("S1", BOUND_PAID_OUT), 1200);
+  emit(1, shiftPayment("O1", 40000, { attempt: "ud-sa-1", shift_id: "S1" }), 1300);
+  return { identity, envelopes };
+};
+
+/**
+ * `01-F31` + `02-F37`, isolated — a DISPUTED attempt key at least one of whose members carries
+ * no shift.
+ *
+ * Two shapes, and the second is the one a per-shift attempt map cannot see:
+ *   du-a   both members unbound, disagreeing on amount.
+ *   du-b   one member says NO shift, the other says S1. Nested inside a shift bucket these are
+ *          two AGREED keys in two different maps and the money banks TWICE; resolved
+ *          org-globally (`01-F31`'s ratified uniqueness scope) they are one disputed key that
+ *          contributes zero everywhere.
+ * `du-ok` and `du-unbound` are the agreed traffic around them, which must be untouched — a fold
+ * that flagged the whole projection on one divergence is as wrong as one that flagged nothing.
+ */
+export const divergentUnboundSet = (): ShiftCashSet => {
+  const { identity, envelopes, emit } = branchEmitter("du");
+  emit(0, shiftOpened("S1", { cashier: CASHIER_A }), 0, { actor_user_id: CASHIER_A });
+  emit(0, shiftPayment("O1", 75000, { attempt: "du-a", shift_id: null }), 1000);
+  emit(1, shiftPayment("O1", 90000, { attempt: "du-a", shift_id: null }), 1010);
+  emit(0, shiftPayment("O2", 60000, { attempt: "du-b", shift_id: null }), 1100);
+  emit(2, shiftPayment("O2", 60000, { attempt: "du-b", shift_id: "S1" }), 1110);
+  emit(1, shiftPayment("O3", 5000, { attempt: "du-ok", shift_id: "S1" }), 1200);
+  emit(2, shiftPayment("O4", 25000, { attempt: "du-unbound", shift_id: null }), 1300);
+  return { identity, envelopes };
+};
+
+/**
+ * `26 §7`'s carried causal link on the DAY, isolated — two `day.opened` for DISTINCT `day_id`s
+ * naming ONE `prev_day_id`. Ordinary offline behaviour: two devices heal after a partition.
+ *
+ * D9 is the NEGATIVE case and it has to carry a NON-NULL predecessor. With D0 (whose
+ * `prev_day_id` is null by construction) as the only fork-free row, the rule "raise the fork iff
+ * `prev_day_id !== null`" passes while flagging every ordinary day rollover in the branch — the
+ * same trap the shift-fork test already guards against, which is why this one mirrors it.
+ *
+ * A FORK is two distinct ids naming one predecessor; a DIVERGENCE is one id under two payloads.
+ * They are different anomalies, so D0..D9 all carry DISTINCT floats and none of them diverges.
+ */
+export const dayForkSet = (): ShiftCashSet => {
+  const { identity, envelopes, emit } = branchEmitter("df");
+  emit(0, dayOpened("D0", { opening_float_paisa: 500000 }), 0);
+  emit(1, dayOpened("D1a", { opening_float_paisa: 600000, prev_day_id: "D0" }), 1000);
+  emit(2, dayOpened("D1b", { opening_float_paisa: 700000, prev_day_id: "D0" }), 1000);
+  emit(0, dayOpened("D9", { opening_float_paisa: 800000, prev_day_id: "D1a" }), 2000);
+  emit(1, depositRecorded("D1a", 200000), 3000);
+  return { identity, envelopes };
+};
+
 /** Named seeded generator (20 §2.3) — registry-valid shift/day/cash/payment sets with forks,
  * unbound settlements, duplicate and divergent attempt keys, divergent day opens, and
  * out-of-order soft refs. */
@@ -847,14 +1146,23 @@ export const generateShiftCashSet = (seed: number): ShiftCashSet => {
 
   const envelopes: Array<Record<string, unknown> & { id: string }> = [];
   let offset = 0;
-  const emit = (typed: { type: string; payload: Record<string, unknown> }): string => {
+  const emit = (
+    typed: { type: string; payload: Record<string, unknown> },
+    opts: { basis?: "branch" | "branch_provisional"; backdate_ms?: number } = {},
+  ): string => {
     const idx = int(0, peers.length - 1);
     const peer = must(peers[idx], "peer");
     const lamport = must(lamports[idx], "lamport");
     lamports[idx] = lamport + 1;
     offset += int(0, 3) * 100; // zero steps keep cross-device branch-stamp ties present
     const id = `g-${String(envelopes.length).padStart(3, "0")}`;
-    envelopes.push(shiftEnvelope(peer, lamport, typed, { branch_at: BRANCH_T0 + offset, id }));
+    envelopes.push(
+      shiftEnvelope(peer, lamport, typed, {
+        branch_at: BRANCH_T0 + offset - (opts.backdate_ms ?? 0),
+        id,
+        ...(opts.basis === undefined ? {} : { basis: opts.basis }),
+      }),
+    );
     return id;
   };
 
@@ -871,6 +1179,15 @@ export const generateShiftCashSet = (seed: number): ShiftCashSet => {
     const shiftId = `S${s}`;
     const cashier = chance(0.5) ? CASHIER_A : CASHIER_B;
     emit(shiftOpened(shiftId, { prev_shift_id: prevShift, cashier }));
+    // 01-F45 basis precedence, under the property: a REDELIVERY of the same open (identical
+    // payload, so one member and no divergence) stamped `branch_provisional` and backdated. The
+    // branch tier must still decide `open_at`, and the tier choice must not depend on which of
+    // the two the delivery happens to hand the fold first.
+    if (chance(0.3))
+      emit(shiftOpened(shiftId, { prev_shift_id: prevShift, cashier }), {
+        basis: "branch_provisional",
+        backdate_ms: PROVISIONAL_BACKDATE_MS,
+      });
     if (chance(0.25)) emit(shiftOpened(`${shiftId}-fork`, { prev_shift_id: prevShift })); // 26 §7
     prevShift = shiftId;
 
@@ -899,30 +1216,67 @@ export const generateShiftCashSet = (seed: number): ShiftCashSet => {
         expected[method] = (expected[method] ?? 0) + amount;
       }
     }
-    if (chance(0.4)) emit(paidOut(shiftId, int(1, 10) * 1000));
+    let paid = 0;
+    if (chance(0.4)) {
+      paid = int(1, 10) * 1000;
+      emit(paidOut(shiftId, paid));
+    }
     for (let d = int(0, 2); d > 0; d--) emit(drawerOpened(shiftId));
     // 02-F21 counts `no_sale` and nothing else; the generator carries the other reason too so
     // the discriminator is under the property, not only under the directed tests.
     if (chance(0.4)) emit(drawerOpened(shiftId, NOT_NO_SALE_REASON));
+    // 02-F43: the drawer half of the same rule — opens and petty cash carrying NO shift key.
+    if (chance(0.4)) emit(drawerOpened(null));
+    if (chance(0.3)) emit(drawerOpened(null, NOT_NO_SALE_REASON));
+    if (chance(0.3)) emit(paidOut(null, int(1, 8) * 500));
     if (chance(0.3))
       // 02-F37: a settlement with NO shift open. Legal, flagged, never retro-bound.
       emit(shiftPayment("Ox", int(1, 20) * 500, { attempt: nextAttempt(), shift_id: null }));
-    if (chance(0.7))
+    if (chance(0.25)) {
+      // 01-F31: a DISPUTED attempt key with an unbound member. Half the time the second member
+      // claims THIS shift instead — the cross-bucket divergence a per-shift attempt map resolves
+      // twice and banks twice.
+      const contested = nextAttempt();
+      const amount = int(1, 20) * 500;
+      emit(shiftPayment("Ou", amount, { attempt: contested, shift_id: null }));
+      emit(
+        shiftPayment("Ou", amount + 500, {
+          attempt: contested,
+          shift_id: chance(0.5) ? null : shiftId,
+        }),
+      );
+    }
+    if (chance(0.7)) {
+      const counted = (expected.cash ?? 0) + int(-5, 5) * 100;
       emit(
         shiftClosed(shiftId, {
-          counted_cash_paisa: (expected.cash ?? 0) + int(-5, 5) * 100,
+          counted_cash_paisa: counted,
           // `expected` accumulates only the methods this seed actually tendered; the builder
           // completes it to ruling 2's exhaustive map, so a generated close is the same shape as
           // a directed one and the property tests never fold a partial map.
           expected_paisa_by_method: expected,
+          // Ruling 3: the CARRIED over/short. Netting the paid-out makes it disagree with
+          // `counted − expected.cash` on every seed that had one, so a generated close is the
+          // same shape as the directed killer rather than a case where carry and recompute
+          // happen to coincide.
+          variance_paisa: counted - ((expected.cash ?? 0) - paid),
         }),
       );
+    }
     if (chance(0.3))
       // A payment keyed to a shift that is already closed — the 26 §7 carried-key case.
       emit(shiftPayment("Oz", int(1, 10) * 500, { attempt: nextAttempt(), shift_id: shiftId }));
   }
   if (chance(0.5)) emit(depositRecorded("D1", int(1, 30) * 10000));
   if (chance(0.5)) emit(dayClosed("D1", { counted_cash_paisa: int(1, 100) * 10000 }));
+  // 26 §7's carried causal link on the DAY: two distinct day_ids naming one predecessor is a
+  // fork; the third names one of them and is an ordinary rollover.
+  if (chance(0.35)) {
+    emit(dayOpened("D2a", { opening_float_paisa: int(1, 20) * 10000, prev_day_id: "D1" }));
+    emit(dayOpened("D2b", { opening_float_paisa: int(1, 20) * 10000, prev_day_id: "D1" }));
+    if (chance(0.5))
+      emit(dayOpened("D3", { opening_float_paisa: int(1, 20) * 10000, prev_day_id: "D2a" }));
+  }
   // A payment for a shift whose `shift.opened` is NOT in the set at all — 00 §6 soft refs:
   // tolerated, never dropped, never parked into a projection hole.
   if (chance(0.4)) emit(shiftPayment("Og", 3500, { attempt: nextAttempt(), shift_id: "S-ghost" }));
