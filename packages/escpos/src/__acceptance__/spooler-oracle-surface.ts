@@ -242,8 +242,140 @@ export type Spooler = {
   jobs(): readonly JobRecord[];
 };
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 03-F4's OTHER half — the store seam, and why this file grew one.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A job as it is WRITTEN DOWN. `JobRecord` plus the bytes.
+ *
+ * The bytes are here because `03-F4`'s second sentence needs them: "a crash or power loss
+ * mid-print **resumes or reprints** the job on restart". Nothing can reprint a ticket it no longer
+ * has, so a store that persists the state machine and drops the document satisfies the first half
+ * of the FR and loses the kitchen's ticket anyway. It is the one field a metadata-only row is
+ * missing and it is asserted downstream.
+ *
+ * Everything else is `JobRecord`, verbatim, because `03-F4` says what is persisted: "every print
+ * job is persisted … **with an explicit state machine**". The state and the attempt count are
+ * PART of what is written down, not derived on load.
+ */
+export type PersistedJob = JobRecord & {
+  /** `03-F42`'s whole unit, kept so a restart can re-transmit it. */
+  document: Uint8Array;
+};
+
+/**
+ * The durable seam. `03-F4`: "every print job is **persisted (SQLite, WAL)** … **before the first
+ * transmit attempt**; a crash or power loss mid-print resumes or reprints the job on restart —
+ * never drops it."
+ *
+ * WHY THIS EXISTS AT ALL (it did not, when `spooler.test.ts` was written): that suite's PIN 4 and
+ * its DEFERRED block both record the same hole — with only a transport on `SpoolerOptions`,
+ * "persisted" could be asserted as an ORDER (recorded before the transport is touched) and never
+ * as durability, so **a spooler holding its jobs in a `Map` passed all 32 tests and lost the
+ * kitchen's tickets on a power cut.** The FR names the storage technology AND the crash behaviour,
+ * so closing that is transcription, not design.
+ *
+ * MODELLED ON `packages/sync-client/src/pin-attempts.ts` (`PinAttemptStore`), the repo's existing
+ * "durable state behind a narrow seam, memory fallback beside it" precedent — same two-verb shape,
+ * same reason (an in-memory counter is defeated by relaunching the app).
+ *
+ * `put` is SYNCHRONOUS, and that is forced rather than chosen: `enqueue` is synchronous (`01-F17`
+ * — a sale is never blocked), and `03-F4` puts the write BEFORE the first transmit. A `Promise`
+ * here would put an await between the two, which is the window a power cut loses the ticket in.
+ *
+ * DECLARED INTERPRETATION (24 §3b): there is **no `delete`**. `03-F4` says "never drops it" and
+ * `spooler.test.ts` already asserts a `failed` job stays listed, so nothing in the FR asks for a
+ * row to be removed. The named alternative — a `delete` on terminal — is rejected because a
+ * `printed` row that has been deleted is indistinguishable on restart from a job that was never
+ * enqueued, which is the duplicate KOT `03-F41` is written about, arriving by a third route.
+ */
+export type SpoolerJobStore = {
+  /** Every persisted job, in the order it was first written. Read at construction. */
+  load(): readonly PersistedJob[];
+  /** Write (or overwrite) one job's row. Synchronous — see above. */
+  put(job: PersistedJob): void;
+};
+
 export type SpoolerOptions = {
   transport: SpoolerTransport;
+  /**
+   * `03-F4`'s durable store.
+   *
+   * OPTIONAL, and the cost of that is stated rather than hidden: a host that forgets this argument
+   * gets whatever the implementation falls back to, and no test anywhere goes red. That is exactly
+   * the defect `pin-attempt-persistence.test.ts` records against `createPinSession`'s `attempts`
+   * argument, and the mitigation is the same one — the seam is asserted here, the CALLER is K-7's
+   * to assert once a caller exists. It is optional because `spooler.test.ts`'s 32 landed tests
+   * construct spoolers without it and an oracle does not rewrite the oracle beside it (`24-F5`).
+   */
+  store?: SpoolerJobStore;
+};
+
+/** An open handle on the durable store: the test's model of one launch of the app. */
+export type OpenJobStore = SpoolerJobStore & {
+  /**
+   * The power cut. Writes after this point do not reach the disk — which is what a power cut IS,
+   * and why this drops them silently instead of throwing: a process that has lost power does not
+   * get to observe an error, and a throw here would surface inside whatever floating promise the
+   * abandoned spooler still had in flight.
+   */
+  close(): void;
+  /** Writes that arrived after the power cut. For the oracle self-test only. */
+  droppedWrites(): number;
+};
+
+type SerialisedJob = Omit<PersistedJob, "document"> & { document: number[] };
+
+/**
+ * A REAL on-disk store, opened over a REAL path — the shape
+ * `pin-attempt-persistence.test.ts` proves durability with (`openStore` → act → `close` →
+ * `openStore`), because an in-memory database cannot fail that test.
+ *
+ * DECLARED INTERPRETATION (24 §3b) — **this is a file, not SQLite, and that is a limit of the
+ * seam rather than a disagreement with `03-F4`.** The FR names SQLite/WAL for the store; the
+ * moment the store is a seam the HOST supplies, the engine behind it stops being observable from
+ * here and only the durability is. `18 §4` says this queue is one implementation shared with
+ * `01-F8` and `16-F11`, and that shared implementation is where "SQLite, WAL" is a testable claim.
+ * The named alternative — taking a `better-sqlite3` devDependency in `@restos/escpos` purely to
+ * back a test fixture — buys nothing this file can assert and adds a native build to a package
+ * that has none. What IS asserted below is the property the FR's storage clause exists to buy:
+ * the bytes outlive the object that wrote them.
+ *
+ * `load()` and `put()` both COPY. A store that handed out its own row objects would let a spooler
+ * mutate them in place and never call `put` at all, and every assertion here would pass against a
+ * spooler that writes nothing.
+ */
+export const openJobStore = (path: string): OpenJobStore => {
+  const rows = new Map<string, PersistedJob>();
+  let closed = false;
+  let dropped = 0;
+
+  if (existsSync(path)) {
+    for (const row of JSON.parse(readFileSync(path, "utf8")) as SerialisedJob[]) {
+      rows.set(row.job_id, { ...row, document: Uint8Array.from(row.document) });
+    }
+  }
+
+  return {
+    load: () => [...rows.values()].map((row) => ({ ...row, document: row.document.slice() })),
+    put: (job) => {
+      if (closed) {
+        dropped += 1;
+        return;
+      }
+      rows.set(job.job_id, { ...job, document: job.document.slice() });
+      const serialised: SerialisedJob[] = [...rows.values()].map((row) => ({
+        ...row,
+        document: [...row.document],
+      }));
+      writeFileSync(path, JSON.stringify(serialised));
+    },
+    close: () => {
+      closed = true;
+    },
+    droppedWrites: () => dropped,
+  };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
