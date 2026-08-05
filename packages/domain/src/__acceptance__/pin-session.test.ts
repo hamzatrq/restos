@@ -57,6 +57,12 @@
 //      forbids duration assertions and this file makes none. Cost-parameter STRENGTH is
 //      therefore untested here — a conforming-but-weak `m=8,t=1,p=1` passes. Reported as a
 //      finding: the cost floor is a spec gap, not something a test may invent.
+//      **P5 IS NOW CLOSED (August 2026).** `01-F61` states the floor and states its form: it is
+//      asserted as PARAMETERS, never as elapsed time — a duration assertion is a timing test
+//      (`24-F12` flakiness) and a fast machine reads as a weak one. The last describe block in
+//      this file is that assertion, and it is still the only thing in here that reads no clock.
+//      Measured before it existed: mutating `PIN_ARGON2ID_PARAMS` to `m=8,t=1,p=1` left all
+//      16 tests in this file green in 34 ms, exactly as P5 predicted.
 
 import { describe, expect, it } from "vitest";
 import * as domainNs from "../index.js";
@@ -66,6 +72,7 @@ import * as domainNs from "../index.js";
 const maybeExports = domainNs as unknown as {
   hashPin?: (pin: string) => Promise<string>;
   verifyPin?: (hash: string, pin: string) => Promise<boolean>;
+  PIN_ARGON2ID_PARAMS?: { m: number; t: number; p: number };
 };
 
 const hashPin = (pin: string): Promise<string> => {
@@ -175,6 +182,86 @@ describe("01-F1 — the raw PIN is not recoverable from what gets stored", () =>
     // at all: a credential that leaks into a permanent record cannot be redacted later.
     expect(hash).not.toContain(ENROLLED_PIN);
     expect(hash).not.toEqual(ENROLLED_PIN);
+  });
+});
+
+describe("01-F61 — the Argon2id cost floor, asserted as PARAMETERS and never as time", () => {
+  // `01-F61`: "Argon2id parameters carry an explicit floor, asserted as *parameters*, never as
+  // elapsed time — a duration assertion is a timing test (`24-F12` flakiness) and a fast machine
+  // reads as a weak one. Without a stated floor a conforming-but-worthless `m=8,t=1,p=1`
+  // satisfies every test that checks only the algorithm name."
+  //
+  // The numbers are the OWASP Argon2id minimum and they are written as LITERALS here on purpose.
+  // Comparing the shipped constant against itself is the vacuous form of this test: it survives
+  // every mutation of the value it is supposed to be guarding.
+  const FLOOR = { m: 19_456, t: 2, p: 1 } as const;
+
+  const params = (): { m: number; t: number; p: number } => {
+    const value = maybeExports.PIN_ARGON2ID_PARAMS;
+    if (value === undefined) {
+      throw new Error(
+        "@restos/domain exports no `PIN_ARGON2ID_PARAMS` — `01-F61` requires the cost floor be " +
+          "assertable as a parameter, which means it has to be reachable from a test.",
+      );
+    }
+    return value;
+  };
+
+  /** The PHC header, read back off a real enrolment. */
+  const header = (encoded: string): { m: number; t: number; p: number } => {
+    const m = /^\$argon2id\$v=\d+\$m=(\d+),t=(\d+),p=(\d+)\$/.exec(encoded);
+    if (m === null) throw new Error(`not a PHC argon2id string: ${encoded.slice(0, 40)}`);
+    return { m: Number(m[1]), t: Number(m[2]), p: Number(m[3]) };
+  };
+
+  it("ships parameters at or above the floor", () => {
+    const { m, t, p } = params();
+    // Memory and iterations are the two strength levers, so they carry the assertion.
+    expect(
+      m,
+      `memory cost ${m} KiB is below the 01-F61 floor of ${FLOOR.m} KiB`,
+    ).toBeGreaterThanOrEqual(FLOOR.m);
+    expect(t, `time cost ${t} is below the 01-F61 floor of ${FLOOR.t}`).toBeGreaterThanOrEqual(
+      FLOOR.t,
+    );
+    // Parallelism is well-formedness, not strength — stated as such rather than dressed up as
+    // a third lever it is not.
+    expect(p, `parallelism ${p} is not a positive lane count`).toBeGreaterThanOrEqual(FLOOR.p);
+  });
+
+  it("enrols at those parameters — the floor is what the hash was actually minted with", async () => {
+    // The constant above is inert on its own: an implementation that exported the OWASP numbers
+    // and then called argon2id with something cheaper would pass the previous test. `01-F28`
+    // makes the encoded header the only thing a verifying device ever sees, so this is also the
+    // only place the shipped cost is observable at all.
+    const { m, t, p } = header(await hashPin(ENROLLED_PIN));
+    expect(m, `enrolled at m=${m} KiB, below the 01-F61 floor`).toBeGreaterThanOrEqual(FLOOR.m);
+    expect(t, `enrolled at t=${t}, below the 01-F61 floor`).toBeGreaterThanOrEqual(FLOOR.t);
+    expect({ m, t, p }).toEqual(params());
+  });
+
+  it("cannot masquerade: a digest does not verify under parameters it was not minted under", async () => {
+    // The floor is worth nothing if the header is decoration. `verifyPin` reads the cost out of
+    // the string (`01-F28`, P3), so the digest must be BOUND to the claimed cost — otherwise a
+    // hash minted at `m=8,t=1,p=1` re-labelled `m=19456,t=2,p=1` reads as a strong credential to
+    // every device on the branch, and the floor is asserted about a number nobody uses.
+    const real = await hashPin(ENROLLED_PIN);
+    const { m, t, p } = header(real);
+    expect(await verifyPin(real, ENROLLED_PIN)).toBe(true);
+
+    const relabel = (claim: string): string => real.replace(`$m=${m},t=${t},p=${p}$`, `$${claim}$`);
+
+    expect(await verifyPin(relabel("m=8,t=1,p=1"), ENROLLED_PIN), "weak claim accepted").toBe(
+      false,
+    );
+    expect(
+      await verifyPin(relabel(`m=${m * 2},t=${t},p=${p}`), ENROLLED_PIN),
+      "inflated memory claim accepted",
+    ).toBe(false);
+    expect(
+      await verifyPin(relabel(`m=${m},t=${t + 1},p=${p}`), ENROLLED_PIN),
+      "inflated iteration claim accepted",
+    ).toBe(false);
   });
 });
 
