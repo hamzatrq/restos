@@ -44,6 +44,17 @@
 // two copies nothing ties together drift silently, and an implementation shipping a wrong
 // `Transport` passed both suites.
 //
+// ── THE SECOND SEAM (added after `spooler.test.ts` landed): THE STORE ──
+//
+// `SpoolerOptions` originally declared one member, `transport`, and `spooler.test.ts`'s PIN 4 and
+// DEFERRED block both record what that cost: `03-F4`'s durability clause — "persisted (SQLite,
+// WAL) … a crash or power loss mid-print resumes or reprints the job on restart" — could not be
+// asserted at all, so "persisted" meant only an ORDER, and a spooler holding its jobs in a `Map`
+// passed every one of those 32 tests. `SpoolerJobStore` + `openJobStore` below close that, and
+// `spooler-durability.test.ts` is what drives them. The FR names the storage AND the crash
+// behaviour, so this is transcription rather than design — with one limit declared at
+// `openJobStore` itself.
+//
 // This file does not make that mistake again and does not pretend it can avoid the problem either.
 // `@restos/escpos` does not depend on `@restos/testing`, and a test author may not add the edge.
 // So what is declared below is `SpoolerTransport` — the two members the SPOOLER is observed to
@@ -52,6 +63,7 @@
 // The consequence is stated rather than hidden: a rename on the canonical `Transport` does NOT red
 // this suite. That is a real gap and `18 §16` is where closing it belongs.
 
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import type {
   PaperStatus,
   PrinterCapabilityWithSensors,

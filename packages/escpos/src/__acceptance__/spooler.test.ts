@@ -78,10 +78,13 @@
 //     transport-observed totals (`attempts().length`, `received().length`) at the END of the
 //     scenario, where both readings agree on ONE, and never a count mid-scenario, where they
 //     disagree.
-//  4. **PIN — `03-F4`'s crash/restart half is NOT asserted and cannot be from this surface.**
-//     "a crash or power loss mid-print resumes or reprints the job on restart" needs a store seam,
-//     and `SpoolerOptions` declares only a transport. See DEFERRED: this is the FR's own durability
-//     clause and it is untested, not covered.
+//  4. **PIN — `03-F4`'s crash/restart half is NOT asserted BY THIS FILE.** "a crash or power loss
+//     mid-print resumes or reprints the job on restart" needs a store seam, and when this suite was
+//     written `SpoolerOptions` declared only a transport. **That gap is now closed next door:**
+//     `spooler-durability.test.ts` added `SpoolerJobStore` to the surface and drives it. Nothing
+//     below changed, and the measurement is the reason to say so out loud — a spooler holding its
+//     jobs in a `Map` still passes ALL 32 tests in this file and fails 8 in that one. Read the two
+//     together before calling `03-F4` covered.
 //  5. **PIN — `RETRY_WINDOW_MS`'s 30 s is asserted as a CONSTANT and never as elapsed time.** The
 //     oracle surface's `pump()` puts the schedule in the caller (K-7); a timing assertion here
 //     would be flaky by construction (`24-F12`). The BUDGET is asserted; the SPACING is not.
@@ -666,16 +669,18 @@ describe("03-F4 — the state machine is WALKED, not decorated", () => {
 
 // ── DEFERRED: what this suite could NOT assert, and who owns it ──────────────────────────────────
 //
-// * **`03-F4`'s CRASH/RESTART CLAUSE IS NOT ASSERTED AT ALL.** "every print job is persisted
-//   (SQLite, WAL) … a crash or power loss mid-print resumes or reprints the job on restart — never
-//   drops it" is half of this FR and NOTHING below observes it. `SpoolerOptions` declares one
-//   member, `transport`; there is no store seam to hand a second spooler the first one's rows, so
-//   "persisted" is asserted only as an ORDER (recorded before the transport is touched) and never
-//   as durability. This is a REAL GAP, not a covered one: a spooler holding its jobs in a `Map`
-//   passes every test in this file and loses the kitchen's tickets on a power cut. Closing it needs
-//   either a store seam on `SpoolerOptions` or `18 §4`'s shared durable-local-queue (the FR says
-//   this is an INSTANCE of that pattern, one implementation with `01-F8` and `16-F11`) — and the
-//   choice is a design decision, not a test author's.
+// * **`03-F4`'s CRASH/RESTART CLAUSE IS NOT ASSERTED BY THIS FILE — see `spooler-durability.
+//   test.ts`, which now does.** "every print job is persisted (SQLite, WAL) … a crash or power loss
+//   mid-print resumes or reprints the job on restart — never drops it" is half of this FR and
+//   NOTHING below observes it: when this suite was written `SpoolerOptions` declared one member,
+//   `transport`, so there was no store seam to hand a second spooler the first one's rows and
+//   "persisted" could be asserted only as an ORDER (recorded before the transport is touched),
+//   never as durability. A later session added `SpoolerJobStore` to the oracle surface and the
+//   restart tests beside it; the report on that gap stands unchanged for THIS file, and it was
+//   measured — a spooler holding its jobs in a `Map` still passes all 32 tests here. What is still
+//   open either way is the ENGINE: `03-F4` names SQLite/WAL and a seam the host supplies cannot
+//   show it, so `18 §4`'s shared durable-local-queue (one implementation with `01-F8` and `16-F11`)
+//   remains where that clause becomes testable.
 // * **THE BACKOFF SCHEDULE IS NOT ASSERTED.** `03-F4` says "3 attempts over 30 s". The budget is
 //   asserted exactly; the SPACING is not asserted at all, because the oracle surface's `pump()`
 //   puts the clock in the caller and `24-F12` bans the flaky timing test that would follow. Whoever
