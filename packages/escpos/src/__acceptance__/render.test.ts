@@ -313,6 +313,49 @@ const leafLabel = (leaf: DataLeaf): string =>
   leaf.path.map((step) => (typeof step === "number" ? `[${step}]` : `.${step}`)).join("") || "$";
 
 /**
+ * The deltas a NUMBER leaf is probed by: `1`, `7`, and then `7 × 10ᵏ` at every order of magnitude
+ * strictly below the value's own.
+ *
+ * ONE SMALL DELTA IS NOT ENOUGH, AND THAT WAS MEASURED, NOT FEARED. A leaf that is FORMATTED before
+ * it is printed is invariant to any delta finer than the format's own granularity: `27-F62` stamps
+ * a chit with `branch_created_at`, an integer MILLISECOND quantity, and a ticket that prints it at
+ * any human granularity is unmoved by 7 ms. With `[value + 1, value + 7]` as the whole probe set,
+ * the walk below reported `kot.branch_created_at` as a leaf that never reaches paper AGAINST A
+ * LAYOUT THAT PLAINLY READS IT — an assertion that cannot go green under a correct implementation,
+ * which blocks the implementer indefinitely and is as damaging as a vacuous test. The probe was the
+ * defect, so the probe is what changed.
+ *
+ * The escape hatch was the wrong repair for the same reason and is deliberately NOT used here:
+ * a `DATA_LEAVES_NOT_ON_PAPER` row would state in the oracle that the ticket does not print this
+ * leaf, which is false, and it would then swallow the real regression on the day the renderer stops
+ * reading the stamp.
+ *
+ * A LADDER AND NOT ONE BIG DELTA, because the renderer's granularity is exactly what this file may
+ * not know — `03-F31` says each document type declares its OWN data contract, and naming a unit
+ * here would be writing that contract instead of checking it. Whatever unit `U` a leaf happens to
+ * be formatted in — paisa printed as rupees, milliseconds printed as minutes, milligrams printed as
+ * kilos — some rung is ≥ `U` while still being smaller than the value itself, so the mutant stays a
+ * plausible value of the same field rather than a marker.
+ *
+ * EVERY RUNG IS `7 × 10ᵏ`, WHICH CARRIES NO FACTOR OF 3, so no rung can be a whole number of minutes
+ * (60 000 ms), hours (3 600 000 ms) or days (86 400 000 ms). That is not decoration — it is the trap
+ * in the obvious repair. "Probe a timestamp by a DAY" leaves an `HH:MM` render byte-identical,
+ * because a clock-of-day format is periodic and a day is its period; the same holds for an hour and
+ * a minute on coarser clocks. A rung that cannot be a whole period of any of the three cannot be
+ * swallowed by a cyclic format either.
+ *
+ * Small values keep the small deltas ALONE — a quantity of `2` is probed with `3` and `9`, never
+ * with `7 000 002` — so the ladder never puts on the ticket a number the field could not hold, and
+ * a leaf's mutant stays inside its own order of magnitude.
+ */
+const numericProbeDeltas = (value: number): number[] => {
+  const deltas = [1, 7];
+  const magnitude = Math.floor(Math.log10(Math.abs(value)));
+  for (let k = 1; k <= magnitude - 1; k += 1) deltas.push(7 * 10 ** k);
+  return deltas;
+};
+
+/**
  * Distinct values for a data leaf, SHAPE-PRESERVING on purpose.
  *
  * A string leaf is mutated one character at a time and only within its own character class
@@ -324,7 +367,10 @@ const leafLabel = (leaf: DataLeaf): string =>
  * `MONEY_TOKEN_PATTERNS`' tokens out of a leaf that did not already contain one.
  */
 const dataProbes = (value: string | number): (string | number)[] => {
-  if (typeof value === "number") return [value + 1, value + 7].filter((next) => next !== value);
+  if (typeof value === "number")
+    return numericProbeDeltas(value)
+      .map((delta) => value + delta)
+      .filter((next, index, all) => next !== value && all.indexOf(next) === index);
   const chars = [...value];
   const swap = (char: string): string => {
     if (/[0-9]/.test(char)) return char === "7" ? "3" : "7";
