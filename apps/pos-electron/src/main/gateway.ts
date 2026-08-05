@@ -14,6 +14,7 @@ import {
   type MenuItem,
   type OpenOrder,
   OpenOrderSchema,
+  type Session,
 } from "../shared/ipc";
 
 /**
@@ -75,8 +76,20 @@ export type GatewayDeps = {
   menu: CatalogList;
   priceOf: PriceResolver;
   actor: string;
-  /** 02-F19 — attribution is whoever's PIN is in (02-F41); there is no "acting for". */
-  actorUserId: string | null;
+  /**
+   * `02-F41` — attribution is whoever's PIN is in, and there is no "acting for".
+   *
+   * A GETTER, not a value: this identity changes 20–60× a shift (`01-F26`'s unlock/auto-lock
+   * cycle) while ONE gateway instance serves the whole process life — `ipcMain.handle` admits
+   * a single handler per channel, so the handlers are bound once and must read the session at
+   * each append rather than close over whoever was in when the app booted. `null` is LOCKED,
+   * and a locked device attributes to NOBODY (`01-F27` — a device identity is never promoted
+   * into a user identity).
+   *
+   * ONE dep rather than an id plus a display name, on `02-F45`'s own argument: two sources for
+   * one fact can disagree, and an append-only ledger has no rule for which wins.
+   */
+  session: () => Session | null;
   deviceLabel: string;
   /** 01-F49 — bound at admission from the branch class, never a UI toggle. */
   training: boolean;
@@ -148,6 +161,10 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
         blocked: b
           ? { global_seq: b.global_seq, event_type: b.event_type, reason: b.reason }
           : null,
+        // `18 §6` — the lock surface reads the session through THIS seam and no other, and it
+        // is the same read the envelope is stamped from below. A strip naming one cashier over
+        // a ledger attributing another is `02-F45`'s disagreement with no rule for which wins.
+        user: deps.session(),
       },
       "device state",
     );
@@ -247,7 +264,10 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
       org_id: identity.org_id,
       branch_id: identity.branch_id,
       device_id: identity.device_id,
-      actor_user_id: deps.actorUserId,
+      // 02-F41/02-F45 — read at APPEND from the session, never from the payload and never
+      // cached: a device that auto-locked (01-F26) must attribute to nobody rather than to
+      // whoever walked away, and 01-F1 makes a false attribution permanent.
+      actor_user_id: deps.session()?.user_id ?? null,
       // An untrusted forensic hint with exactly one sanctioned reader (01-F45, 01-N2 skew
       // detection). The store stamps the authoritative `branch_created_at` itself.
       device_created_at: wallClock.now(),
@@ -293,7 +313,9 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
       org_id: identity.org_id,
       branch_id: identity.branch_id,
       device_id: identity.device_id,
-      actor_user_id: deps.actorUserId,
+      // The SECOND append site, and it needs the same read as the first: `02-F19` names "line
+      // added" an attributed action, and it is the counter's highest-frequency one (~300×/shift).
+      actor_user_id: deps.session()?.user_id ?? null,
       device_created_at: wallClock.now(),
       type: "order.line_added",
       schema_version: 1,

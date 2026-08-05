@@ -53,6 +53,12 @@ import {
   type UnboundDrawerRow,
   type UnboundRow,
 } from "./folds/shift-cash.js";
+import {
+  createPinAttemptStore,
+  PIN_ATTEMPTS_SCHEMA,
+  type PinAttemptStore,
+} from "./pin-attempts.js";
+import { createStaffRegistry, STAFF_SCHEMA, type StaffRegistry } from "./staff.js";
 
 export class AckBeyondAppendedError extends Error {
   constructor(watermark: number, ownHighWater: number | null) {
@@ -201,6 +207,18 @@ export type DeviceStore = {
   /** Device catalog — reference data, display only (01-F52..F56). Never read by a fold. */
   readonly catalog: CatalogStore;
   /**
+   * Synced staff credentials + role assignments (01-F26/F28) — reference data on the same
+   * `01-F21` chain as the catalog, and never read by a fold for the same reason. This is what
+   * makes offline PIN verification possible after a reboot with the WAN down.
+   */
+  readonly staff: StaffRegistry;
+  /**
+   * The durable PIN failure counter (01-F61), scoped per (device, user). Handed to
+   * `createPinSession` by the host: a counter that lives only in the process is defeated by
+   * relaunching the app, by the attacker standing at the device.
+   */
+  readonly pinAttempts: PinAttemptStore;
+  /**
    * The token to present on the next connection (01-F47): the most recent renewal the
    * cloud has issued, or null before any renewal — in which case the caller uses the
    * token it was constructed with.
@@ -276,6 +294,8 @@ export type DeviceStore = {
 
 const SCHEMA = `
 ${CATALOG_SCHEMA}
+${STAFF_SCHEMA}
+${PIN_ATTEMPTS_SCHEMA}
 CREATE TABLE IF NOT EXISTS events (
   id TEXT PRIMARY KEY,
   lamport_seq INTEGER NOT NULL UNIQUE,
@@ -430,6 +450,13 @@ export const openStore = (options: {
   // already in its identity", and taking it as a call argument would let a caller price an
   // order against a branch this device is not in.
   const catalog = createCatalogStore(db as never, identity.branch_id);
+
+  // 01-F28: the staff registry rides the same reference-data chain, for the same reason and
+  // with the same separation from the ledger — `01-F1` makes a credential hash written into an
+  // event permanent and therefore unrotatable. 01-F61: the PIN failure counter is durable
+  // because an in-memory one is defeated by relaunching the app.
+  const staff = createStaffRegistry(db as never);
+  const pinAttempts = createPinAttemptStore(db as never);
 
   const byId = db.prepare<[string], { envelope: string }>(
     "SELECT envelope FROM events WHERE id = ?",
@@ -1234,6 +1261,8 @@ export const openStore = (options: {
     },
 
     catalog,
+    staff,
+    pinAttempts,
     branchTimeStatus() {
       const { offset_ms, acquired } = branchTime();
       // Skew is |offset|: branch time is device clock + offset, so the offset IS how far

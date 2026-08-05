@@ -59,6 +59,9 @@ export {
   type RoleAssignment,
   reportScope,
 } from "./permissions.js";
+// 01-F26 / 01-F61 — the PIN credential primitive. `01-F28` verifies against these hashes
+// on-device, offline, so the algorithm is platform law and lives here (18 §2).
+export { hashPin, PIN_ARGON2ID_PARAMS, verifyPin } from "./pin.js";
 export {
   AVAILABILITY_FALSE_WINS,
   CONTESTED_LINE_BILLABLE,

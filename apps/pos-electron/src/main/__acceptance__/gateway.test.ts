@@ -35,7 +35,11 @@ const deps = (over: Partial<GatewayDeps> = {}): GatewayDeps => ({
   // sellable item; the unpriced path is asserted explicitly where it is the subject.
   priceOf: (_item_id, channel) => (channel === "counter" ? 145_000 : null),
   actor: "Ayesha",
-  actorUserId: "user-1",
+  // The `02-F41` rename prescribed by `identity-attribution.test.ts`'s own header ("KNOWN
+  // RIPPLE"): `actorUserId: "user-1"` became a session getter, because attribution moves while
+  // one gateway instance lives. Every assertion in this file — including
+  // `expect(arg.actor_user_id).toBe("user-1")` — still asserts exactly what it asserted before.
+  session: () => ({ user_id: "user-1", display_name: "Ayesha" }),
   deviceLabel: "Counter 1",
   training: false,
   reachability: () => ({ lan: "ok", hub: "ok", cloud: "down" }),

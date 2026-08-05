@@ -127,47 +127,153 @@ export type BlockRenderer = (
 ) => readonly EncoderPart[];
 
 /**
+ * One modifier on one line (`03-F3`: "one line per item with qty/variant/**modifiers**").
+ *
+ * `removal` is a BOOLEAN and not a string kind because `27-F59` names exactly two behaviours and
+ * makes the ink depend on which: "where a modifier is a *removal* it carries the inverted marker of
+ * `27-F56`, because a removal that is missed is an allergen incident, not a preference miss". A
+ * renderer that cannot tell the two apart cannot satisfy the FR at all.
+ */
+export type KotModifier = {
+  readonly name: string;
+  readonly removal: boolean;
+};
+
+/** One item line (`03-F3`: "one line per item with qty/variant/modifiers"). */
+export type KotLine = {
+  readonly quantity: number;
+  /** `03-F38`'s `kitchen_name`, resolved up the `01-F21` chain before it reaches here. */
+  readonly name: string;
+  /** `27-F59`: "Modifiers are indented under their item and never inlined." */
+  readonly modifiers: readonly KotModifier[];
+};
+
+/**
  * `03-F31`'s data contract for the kitchen chit.
  *
  * **There is no money field and there is no field a money value could hide in** — `03-F32`: "the
  * deepest POS in the market has **no price option anywhere** in its kitchen-printer configuration:
  * prices are simply not in the chit data model." `27-F57` is why `quantity` sits beside `name`.
+ * Every field below is a fact about FOOD, IDENTITY or TIME.
  */
 export type KotData = {
   /** `03-F3`'s ticket identity — the number the pass and the counter both say out loud. */
   readonly ticket_no: string;
+  /**
+   * `03-F3`: "order number + **table/channel** in large type". ONE field, because `03-F3` writes
+   * the two as one slot: a takeaway ticket's value is its channel, a dine-in ticket's is its table.
+   */
+  readonly table: string;
   /** `03-F18`/`03-F50`: the station this chit was routed to. */
   readonly station: string;
-  readonly lines: readonly {
-    readonly quantity: number;
-    /** `03-F38`'s `kitchen_name`, resolved up the `01-F21` chain before it reaches here. */
-    readonly name: string;
-  }[];
+  /**
+   * `27-F62`: "Print what was true at **append** time, stamped with `branch_created_at`, and let
+   * the ledger own the present"; `03-F3` asks the layout for a "timestamp". An integer millisecond
+   * quantity, which is what `01-F43` computes.
+   */
+  readonly branch_created_at: number;
+  /**
+   * `03-F3`: "reprints carry a 'REPRINT' band"; `03-F37`: "Reprint markers are mandatory per type,
+   * **in a locked region**". On the DATA and not in the profile, because `03-F32` says "type
+   * invariants override configuration" and a fact an owner could switch off is not a mandatory
+   * marker — whether THIS print is a reprint is a property of the print job (`03-F7`).
+   */
+  readonly reprint: boolean;
+  readonly lines: readonly KotLine[];
 };
 
 /** `03-F31`: the document type IS the data contract, so the cast is at the type's own boundary. */
 const kotOf = (data: unknown): KotData => data as KotData;
 
 /**
- * The `kot`'s blocks.
+ * `27-F62`'s stamp as a wall clock, and the reason it is integer arithmetic rather than `Date`.
  *
- * **This is the MINIMUM layout that closes K-4's FRs, not `27 §2b`'s ticket.** `27-F57`'s pairing
- * and `27-F58`'s grouping are the KOT's own design and belong to the task that owns the layout;
- * what is here is a block per region the FRs require to exist, so that `03-F30`'s slot mechanism,
- * `03-F33`'s regions and `03-F34`'s locked-region rule have a real document to be true about.
- * `03-F37`'s reprint band is not here — it needs a reprint fact in the data contract, which the
- * layout task owns.
+ * `01-F46` anchors the business to Asia/Karachi ("the timezone anchor is not configurable"), which
+ * has been a fixed UTC+5 with no daylight saving since 2009 — so the offset is a constant and not a
+ * zone lookup. `Date`, `Intl` and `toLocale*` all read the HOST's zone and locale, and `03-F30`
+ * makes byte-identity across an Electron POS and an RN handheld a law: a chit formatted through the
+ * reading device's zone is two different tickets for one order.
+ *
+ * `03-F3` asks for a "timestamp" and states no format; `27-F55` says the chit must carry LESS, so
+ * this is the hour and minute the line was appended and no date. DECLARED INTERPRETATION (`24 §3b`)
+ * — the named alternative is a date-and-time stamp, rejected because a KOT is read minutes after it
+ * is cut and the date costs a channel-3 group for a fact nobody on the line uses.
+ */
+const KARACHI_UTC_OFFSET_MS = 5 * 60 * 60 * 1000;
+
+const clockOf = (branch_created_at: number): string => {
+  const minute_of_day = Math.floor((branch_created_at + KARACHI_UTC_OFFSET_MS) / 60_000) % 1440;
+  const hours = Math.floor(minute_of_day / 60);
+  return `${String(hours).padStart(2, "0")}:${String(minute_of_day % 60).padStart(2, "0")}`;
+};
+
+/**
+ * `27-F59`: "Modifiers are indented under their item". With `03-F36` banning absolute dot
+ * positioning in the same corpus, a leading run of spaces is the only indent mechanism left — and
+ * the same FR's space-as-layout ban is about INTERIOR padding that carries a value to a right-hand
+ * column and makes a document unreflowable, which a leading indent is not.
+ */
+const MODIFIER_INDENT = "  ";
+
+/**
+ * `27-F59`'s inverted removal marker. The word is this layer's — no FR states one — and it is a
+ * word rather than a glyph because `27-F60` forbids a pictogram carrying meaning alone and
+ * `27 §2b` records that no Pakistan-specific pictogram comprehension data exists at all.
+ */
+const REMOVAL_MARKER = "NO";
+
+/**
+ * The `kot`'s layout — `27 §2b`'s ticket, one block per group.
+ *
+ * `27-F58` fixes the reading order and forbids configuring it: **identifier → timing → items →
+ * modifiers**, separated by blank lines and never by a rule ("a full-width rule costs a line of
+ * paper and reads as a *boundary between documents* to someone who parses shape rather than text").
+ * The order is the order of the blocks below, which is why nothing here reads a slot to decide
+ * where something goes.
+ *
+ * `27-F56`'s ladder is spent exactly twice per glance: **2×2** on the order/table identifier and on
+ * each item's quantity, **inverted** on the one banner and on one marker per item block. Everything
+ * else is normal — "bold is not a level".
  */
 const KOT_BLOCK_RENDERERS: Readonly<Record<string, BlockRenderer>> = {
-  KOT_HEAD: (data) => [
-    { kind: "text", value: "KOT ", ink: "normal" },
-    // `27-F56`: the 2×2 rung is allocated to "the item line's quantity and the order/table
-    // identifier" — this is the second of those two.
-    { kind: "text", value: kotOf(data).ticket_no, ink: "size_2x2" },
-    { kind: "feed", lines: 1 },
-    { kind: "text", value: kotOf(data).station, ink: "normal" },
-    { kind: "feed", lines: 1 },
-  ],
+  /**
+   * `03-F37`: "Reprint markers are mandatory per type, **in a locked region** … Reprints are
+   * already a named fraud vector — the paper must say so." `27-F56` gives it the document's ONE
+   * banner.
+   *
+   * The block declares no slot, and that is what makes the band unsuppressible rather than merely
+   * unsuppressed: `03-F33` puts owner content only outside a locked block and `03-F34` refuses any
+   * document that breaks that, so there is no profile an owner could write which reaches this band.
+   */
+  KOT_REPRINT_BAND: (data) =>
+    kotOf(data).reprint
+      ? [
+          { kind: "text", value: "REPRINT", ink: "inverted", scope: "banner" },
+          { kind: "feed", lines: 1 },
+        ]
+      : [],
+  KOT_HEAD: (data) => {
+    const kot = kotOf(data);
+    return [
+      { kind: "text", value: "KOT ", ink: "normal" },
+      // `27-F56`: the 2×2 rung is allocated to "the item line's quantity and the order/table
+      // identifier"; `03-F3` wants "order number + table/channel in large type". Two parts and one
+      // line, because `03-F3` states no order between them and `27-F58` reads them as one group.
+      { kind: "text", value: kot.ticket_no, ink: "size_2x2" },
+      { kind: "text", value: " ", ink: "normal" },
+      { kind: "text", value: kot.table, ink: "size_2x2" },
+      { kind: "feed", lines: 1 },
+      // `27-F58`'s timing step. The station rides it rather than taking a line of its own:
+      // `03-F18`/`03-F50` make it the routing key a cook uses to recognise their own chit, and
+      // `27-F55` says the KOT must carry LESS, not the same facts spread over more paper. It is
+      // deliberately NOT at 2×2 — `27-F56` allocated that rung elsewhere.
+      { kind: "text", value: `${kot.station} `, ink: "normal" },
+      { kind: "text", value: clockOf(kot.branch_created_at), ink: "normal" },
+      // `27-F58`: "Groups are separated by blank lines, not rules" — the identifier/timing group
+      // ends here and the items begin.
+      { kind: "feed", lines: 2 },
+    ];
+  },
   // The two owner notes emit `user_text`, not `text`. DECLARED INTERPRETATION (`24 §3b`) — no FR
   // classifies an owner-typed slot value, and K-4's oracle records that openly (its ambiguity 7).
   // The named alternative is `text`, which is what these were: SYSTEM text, `00 §5.6`'s
@@ -185,12 +291,50 @@ const KOT_BLOCK_RENDERERS: Readonly<Record<string, BlockRenderer>> = {
     { kind: "feed", lines: 1 },
   ],
   KOT_ITEMS: (data) =>
-    kotOf(data).lines.flatMap((line): readonly EncoderPart[] => [
-      // `27-F57`: the quantity sits immediately left of the item name, on the same line.
-      { kind: "text", value: String(line.quantity), ink: "size_2x2" },
-      { kind: "text", value: ` ${line.name}`, ink: "normal" },
-      { kind: "feed", lines: 1 },
-    ]),
+    kotOf(data).lines.flatMap((line, index): readonly EncoderPart[] => {
+      // `27-F59`, scoped by `27-F56`'s two-scope ruling: "an item with two removals carries ONE
+      // marker covering both — two inversions inside one item block are in a single glance, which
+      // is the case `27-F56`'s budget actually forbids". So the removals of one item share a
+      // marker, a line and an `item_block` key, and two items never share the key: "a removal on
+      // the second dish is never in the same glance as a removal on the first".
+      const removals = line.modifiers.filter((modifier) => modifier.removal);
+      const preferences = line.modifiers.filter((modifier) => !modifier.removal);
+      return [
+        // `27-F57`: the quantity sits immediately left of the item name, on the same line, "never
+        // in a right-aligned column and never on its own row" — so it is never padded to align
+        // with the line above it.
+        { kind: "text", value: String(line.quantity), ink: "size_2x2" },
+        { kind: "text", value: ` ${line.name}`, ink: "normal" },
+        { kind: "feed", lines: 1 },
+        // The removal band leads the modifiers because `27-F59` is explicit about why it is
+        // inverted at all: "a removal that is missed is an allergen incident, not a preference
+        // miss". No FR states an order among an item's modifiers.
+        ...(removals.length === 0
+          ? []
+          : ([
+              { kind: "text", value: MODIFIER_INDENT, ink: "normal" },
+              {
+                kind: "text",
+                value: REMOVAL_MARKER,
+                ink: "inverted",
+                scope: "item",
+                item_block: `KOT_ITEM_${index}`,
+              },
+              {
+                kind: "text",
+                value: ` ${removals.map((modifier) => modifier.name).join(", ")}`,
+                ink: "normal",
+              },
+              { kind: "feed", lines: 1 },
+            ] as const)),
+        // A preference is indented under its item like a removal and spends no ink: `27-F56`
+        // reserves inversion, and "a ticket that uses inversion twice has used it zero times".
+        ...preferences.flatMap((modifier): readonly EncoderPart[] => [
+          { kind: "text", value: `${MODIFIER_INDENT}${modifier.name}`, ink: "normal" },
+          { kind: "feed", lines: 1 },
+        ]),
+      ];
+    }),
   KOT_FOOT_NOTE: (_data, slot) => [
     { kind: "user_text", value: String(slot("footer_note")) },
     { kind: "feed", lines: 1 },
@@ -215,6 +359,7 @@ const KOT_SPEC = {
   version: 1,
   min_columns: MIN_COLUMNS.kot,
   blocks: [
+    { block_id: "KOT_REPRINT_BAND", region: "HEAD_LOCKED", slots: [] },
     { block_id: "KOT_HEAD", region: "HEAD_LOCKED", slots: [] },
     {
       block_id: "KOT_HEAD_NOTE",
@@ -231,10 +376,17 @@ const KOT_SPEC = {
   ],
   example_data: {
     ticket_no: "142",
+    table: "T4",
     station: "GRILL",
+    branch_created_at: 1_754_300_000_000,
+    reprint: false,
     lines: [
-      { quantity: 2, name: "Chicken Karahi" },
-      { quantity: 1, name: "Garlic Naan" },
+      {
+        quantity: 2,
+        name: "Chicken Karahi",
+        modifiers: [{ name: "Onion", removal: true }],
+      },
+      { quantity: 1, name: "Garlic Naan", modifiers: [] },
     ],
   },
 } as const satisfies DocumentSpec<KotData>;

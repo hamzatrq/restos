@@ -59,6 +59,29 @@ const DEV_IDENTITY = {
 } as const;
 
 /**
+ * **A DEV SEED, exactly like `DEV_IDENTITY` above, and it VERIFIES NOTHING.**
+ *
+ * `01-F28` puts PIN verification on-device against synced credential hashes, and `01-F61` fixes
+ * the Argon2id floor and the per-(device, user) lockout. None of that exists yet — there are no
+ * synced credentials to check a PIN against, because `01-F47`'s admission admits *devices, not
+ * people*. So this is a string comparison against a constant, and it is written here rather
+ * than in `gateway.ts` for the same reason `DEV_IDENTITY` is: a seed a reviewer can find and
+ * delete in one place, not a policy threaded through the seam.
+ *
+ * What it does buy, and why it is not simply `() => null`: the `02-F41` attribution path is
+ * real from here down — the session moves, `deviceState()` reports it, and every envelope is
+ * stamped from it. A device that could never unlock would leave that whole path unexercised
+ * and would make `pnpm start` unusable.
+ *
+ * **Delete this the moment S-0b lands**, and pass its verifier in its place.
+ */
+const DEV_PIN = "1234";
+const DEV_SESSION = {
+  user_id: "00000000-0000-7000-8000-000000000004",
+  display_name: "Dev Cashier",
+} as const;
+
+/**
  * `01-F52`..`01-F56` — names come from the device catalog, and `01-F54` says a miss degrades
  * to the identifier rather than blocking. The catalog transport does not exist yet
  * (`plans/wave-1/catalog-transport.md`), so this reads the local store, which is correct and
@@ -180,6 +203,13 @@ app.whenReady().then(() => {
    * Absent ⇒ the device runs offline, which is `00 §5.1`'s normal state and not an error: no
    * in-branch feature may require WAN, and the till sells either way (`01-F17`).
    */
+  /**
+   * `01-F26` — the PIN session, and `null` is LOCKED. Process-local and deliberately not
+   * persisted: a relaunch is a locked till, which is the honest state for a device nobody has
+   * identified themselves to.
+   */
+  let session: typeof DEV_SESSION | null = null;
+
   const uplink = createUplink({
     store,
     url: process.env["RESTOS_CLOUD_URL"],
@@ -198,7 +228,10 @@ app.whenReady().then(() => {
     // precisely so this call cannot ask for another branch's price.
     priceOf: (item_id, channel) => store.catalog.priceOf("item", item_id, channel),
     actor: "dev",
-    actorUserId: null,
+    // 02-F41 — read at every append, never captured here. `session` is the mutable holder
+    // above; closing over its VALUE would freeze attribution at boot, which is the defect this
+    // dep replaced.
+    session: () => session,
     deviceLabel: "Counter 1",
     // 01-F49 — bound at admission from the branch class, never a UI toggle. Admission has not
     // landed, so this is false and the 27-F67 training inversion is exercised by its story.
@@ -221,6 +254,23 @@ app.whenReady().then(() => {
   ipcMain.handle(CHANNELS.openOrders, () => gateway.openOrders());
   ipcMain.handle(CHANNELS.kitchenQueue, () => gateway.kitchenQueue());
   ipcMain.handle(CHANNELS.menu, () => gateway.menu());
+  /**
+   * `C1`/`01-F28` — the one channel that is not a gateway method, because it does not touch the
+   * ledger: it moves the session the gateway READS. `01-F1` is why it appends nothing — a PIN
+   * in an event is permanent and unredactable.
+   *
+   * The push matters as much as the answer: the renderer decides lock state from
+   * `deviceState()`, never from the boolean below, so the surface only follows if it is told to
+   * re-read. That is also what makes an auto-lock decided anywhere else reach the screen.
+   */
+  ipcMain.handle(CHANNELS.unlock, (_event, pin: unknown) => {
+    const unlocked = typeof pin === "string" && pin === DEV_PIN;
+    // Only a SUCCESS moves the session. A refused attempt must not end the session that is
+    // already in — `01-F17`: a wrong keystroke may not stop the till.
+    if (unlocked) session = DEV_SESSION;
+    notifyChanged();
+    return { unlocked };
+  });
   // C5 — same notify-from-inside-the-handler rule as `append` below, and for the same reason.
   ipcMain.handle(CHANNELS.addLine, (_event, req: unknown) => {
     const result = gateway.addLine(req);

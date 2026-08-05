@@ -54,6 +54,10 @@ const DEVICE: DeviceState = {
   hub: "ok",
   cloud: "down",
   blocked: null,
+  // `02-F18`/`01-F26` — the counter is only reachable on an UNLOCKED device, so this fixture
+  // names the session it has always implied. Required by `DeviceState` since S-0c; the value
+  // matches `actor` above and nothing in this file reads it.
+  user: { user_id: "user-ayesha", display_name: "Ayesha" },
 };
 
 const MENU: MenuItem[] = [

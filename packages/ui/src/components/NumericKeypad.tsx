@@ -29,7 +29,22 @@ export type NumericKeypadProps = {
   maxDigits?: number;
 };
 
-/** Exported so the blocking rule is testable without a DOM. */
+/**
+ * Exported so the blocking rule is testable without a DOM.
+ *
+ * ⚠ **THIS IS A MONEY KEYPAD. DO NOT USE IT FOR A PIN** (found the hard way, August 2026, while
+ * building `C1`'s unlock surface). Two of its rules are correct for money and wrong for a secret:
+ *
+ * - `current === "0" ? key : current + key` suppresses a leading zero, because `07` is not a
+ *   rupee amount anyone types. It makes a PIN beginning with `0` **impossible to enter** — a
+ *   silent, permanent lockout of roughly a tenth of all enrolled staff.
+ * - `Number(next) > max` bounds the entry by MAGNITUDE (`27-F29`, "impossible numbers"). A PIN
+ *   has no magnitude; `9999` is not larger than `0001` in any sense that matters, and comparing
+ *   them numerically would refuse valid credentials.
+ *
+ * A PIN pad is composed from `Tile posture="keypad"` instead — same `27-F8` target size, none of
+ * the money semantics.
+ */
 export const acceptKeystroke = (
   current: string,
   key: string,

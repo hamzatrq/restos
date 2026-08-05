@@ -71,5 +71,34 @@ export {
   type MeshSessionStatus,
   REELECTION_BUDGET_MS,
 } from "./mesh-session.js";
+// 01-F26/F27/F28/F61 — the PIN session and the reference data it verifies against.
+export {
+  createMemoryPinAttemptStore,
+  createPinAttemptStore,
+  NO_ATTEMPTS,
+  PIN_ATTEMPTS_SCHEMA,
+  type PinAttemptRecord,
+  type PinAttemptStore,
+} from "./pin-attempts.js";
+export {
+  createPinSession,
+  PIN_LOCKOUT_COOLDOWN_MS,
+  type PinAuditRecord,
+  type PinSession,
+  type PinSessionOptions,
+  type UnlockRefusal,
+  type UnlockResult,
+} from "./pin-session.js";
+export {
+  createStaffRegistry,
+  STAFF_SCHEMA,
+  type StaffApplyResult,
+  type StaffAssignment,
+  type StaffDelta,
+  type StaffMember,
+  type StaffRegistry,
+  type StaffSnapshot,
+  type StaffUpdate,
+} from "./staff.js";
 export { createWsCloudTransport, createWsLanTransport } from "./transport-ws.js";
 export { wallClock } from "./wall-clock.js";

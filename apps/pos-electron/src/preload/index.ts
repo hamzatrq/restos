@@ -17,6 +17,8 @@ const bridge: RestosBridge = {
   menu: () => ipcRenderer.invoke(CHANNELS.menu),
   append: (req) => ipcRenderer.invoke(CHANNELS.append, req),
   addLine: (req) => ipcRenderer.invoke(CHANNELS.addLine, req),
+  // `01-F28` — the digits go one way and a yes/no comes back. Verification is main's.
+  unlock: (pin) => ipcRenderer.invoke(CHANNELS.unlock, pin),
   onChanged: (fn) => {
     const handler = () => fn();
     ipcRenderer.on(CHANNELS.changed, handler);

@@ -48,8 +48,30 @@ export const DeviceStateSchema = z.object({
   blocked: z
     .object({ global_seq: z.number(), event_type: z.string(), reason: z.string() })
     .nullable(),
+  /**
+   * `01-F26` — the PIN session on this device, and **`null` is LOCKED**. Nullable-required
+   * rather than optional for the same reason as `blocked` directly above: an absent key would
+   * be a third state with no meaning, on the one field that decides whether the counter is
+   * reachable at all.
+   *
+   * `02-F41` — attribution is whoever's PIN is in, so this is the same fact main stamps into
+   * every envelope as `actor_user_id`, read through the same seam (`18 §6`). `02-F45`'s
+   * argument is why it is one field and not two: a strip naming one cashier over a ledger
+   * attributing another is a disagreement with no rule for which wins.
+   *
+   * `01-F27` — a device identity is never promoted into a user identity, which is why this is
+   * separate from `deviceLabel` and stays null on an unattended till.
+   */
+  user: z.object({ user_id: z.string().min(1), display_name: z.string().min(1) }).nullable(),
 });
 export type DeviceState = z.infer<typeof DeviceStateSchema>;
+
+/**
+ * The `01-F26` PIN session, as both planes see it. Derived from the schema above rather than
+ * restated, so main's stamp and the screen's read cannot drift into two shapes of one fact
+ * (`02-F45`). `null` — the absence of one of these — is LOCKED.
+ */
+export type Session = NonNullable<DeviceState["user"]>;
 
 /** One open order, as the fold projects it. The renderer never assembles this itself. */
 export const OpenOrderSchema = z.object({
@@ -174,6 +196,15 @@ export const CHANNELS = {
   menu: "restos:menu",
   append: "restos:append",
   addLine: "restos:add-line",
+  /**
+   * `01-F28` — the PIN is verified ON DEVICE, in main, and the renderer is told yes or no.
+   *
+   * Note what does NOT happen on this channel: no append. `01-F1` makes a PIN written into an
+   * event permanent and unredactable, and `01-F5`'s `audit.login` is main's to write against a
+   * store-owned chain. The renderer hands over digits and learns nothing else — not a user id,
+   * not a role. It re-reads `deviceState` for that, so lock state has ONE source (`02-F45`).
+   */
+  unlock: "restos:unlock",
   /** Push: main tells the renderer the folds moved. Carries no data — the renderer re-reads. */
   changed: "restos:changed",
 } as const;
@@ -187,6 +218,13 @@ export type RestosBridge = {
   append: (req: AppendRequest) => Promise<AppendResult>;
   /** `C5`/`01-F60` — main resolves the price; no money crosses this call. */
   addLine: (req: AddLineRequest) => Promise<AppendResult>;
+  /**
+   * `C1`/`01-F28` — hand main the typed digits and be told whether the device is now unlocked.
+   * The boolean is a RESULT, never the lock state: `01-F26`'s idle auto-lock happens with no
+   * call in sight, so the screen reads `deviceState().user` for that and this answers only
+   * "did that attempt work".
+   */
+  unlock: (pin: string) => Promise<{ unlocked: boolean }>;
   /** Subscribe to fold changes. Returns an unsubscribe. */
   onChanged: (fn: () => void) => () => void;
 };
