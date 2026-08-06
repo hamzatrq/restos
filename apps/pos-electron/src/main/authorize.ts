@@ -6,9 +6,15 @@ import {
   type PermissionAction,
   ROLES,
   type Role,
+  reportScope,
 } from "@restos/domain";
 import type { DeviceStore } from "@restos/sync-client";
-import { AppendRequestSchema, type AppendResult, type Session } from "../shared/ipc";
+import {
+  AppendRequestSchema,
+  type AppendResult,
+  type CashState,
+  type Session,
+} from "../shared/ipc";
 import type { Gateway } from "./gateway";
 
 /**
@@ -192,11 +198,22 @@ const refused = (refusal: WriteRefusal): WriteRefusedError => {
 const roleOf = (name: string): Role | null => ROLES.find((role) => role === name) ?? null;
 
 /**
+ * The two facts a subject is built from, named separately so the WRITE guard and the READ guard
+ * below share one construction. `02-F45`'s argument, applied to authorization: two sources for
+ * one fact can disagree, and a second `AuthSubject` assembled beside this one is exactly that —
+ * a session that could be denied a write and granted the read of its result.
+ */
+type SubjectDeps = {
+  store: Pick<DeviceStore, "identity" | "staff">;
+  session: () => Session | null;
+};
+
+/**
  * Who is asking (`01-F27`). `null` is a LOCKED device, and a locked device is a subject with no
  * authority at all — `01-F27` is explicit that a device identity is never promoted into a user
  * identity, so the answer is not "the device may do it".
  */
-const subjectOf = (deps: AuthorizedWritesDeps): AuthSubject | null => {
+const subjectOf = (deps: SubjectDeps): AuthSubject | null => {
   const session = deps.session();
   if (session === null) return null;
   const member = deps.store.staff.lookup(session.user_id);
@@ -302,3 +319,106 @@ export const authorizeWrites = (deps: AuthorizedWritesDeps): AuthorizedWrites =>
     },
   };
 };
+
+/**
+ * **Commandment 8 applied to a READ** — `02-F23`'s *"cashiers see only their own shifts
+ * (`restaurant-os.md` Appendix A); cross-cashier views belong to manager/owner surfaces (docs
+ * 05/12)."*
+ *
+ * The counterpart of `authorizeWrites`, and it lives here for the reason that file header gives:
+ * `18 §9` gives the renderer no Node access, so MAIN is what "server-side" means on this app.
+ * The renderer may draw less than it is handed — but it must not be able to ask for more, and a
+ * filter drawn in `CashSurfaces.tsx` would be a client role claim deciding a privacy rule.
+ *
+ * ── Why a REACH and not a decision ──────────────────────────────────────────────────────────
+ *
+ * Appendix A's `View sales reports` row holds SCOPES, not verdicts: *own shift only* · *own
+ * branch* · *stock reports* · *everything*. `domain`'s `reportScope` is the predicate that
+ * resolves them, and this is its first caller anywhere in the product. Nothing below decides a
+ * cell — it applies the one the matrix returned.
+ *
+ * `can(subject, "report.sales_view", …)` is deliberately NOT used: it answers a per-record
+ * question by comparing `scope.subject_user_id`, which collapses `own_shift` and the null case
+ * into one refusal. See the filter's own note.
+ */
+export type AuthorizedReads = {
+  /** `02-F23`/`02-F37`/`02-F43` — the `shift_cash` projection, scoped to the asking subject. */
+  cashState: () => CashState;
+};
+
+export type AuthorizedReadsDeps = SubjectDeps & {
+  /** The unscoped read this wraps. Narrowed to one method so nothing else can slip past. */
+  reads: Pick<Gateway, "cashState">;
+};
+
+/**
+ * `02-F23`'s row test, and it is TWO clauses of one FR rather than one.
+ *
+ * The leak clause — "cashiers see only their own shifts" — is what hides `theirs`. The
+ * protection clause in the same FR — "the cashier sees their own reconciliation on-screen at
+ * close ('I'm clean') — the staff-protection framing" — is what forbids hiding `mine`, and it is
+ * the half a narrowing inverts by accident: a filter that satisfies the first by hiding
+ * everything satisfies it perfectly and leaves a protection surface showing a cashier nothing
+ * about herself.
+ *
+ * **An UNATTRIBUTED row (`cashier: null`) is served.** It is not a colleague's shift, so the
+ * leak clause does not reach it; and the fold projects null on exactly the case that most needs
+ * to be seen — `01-F31`'s contested open, where the delivered members disagree, a fold never
+ * picks a winner and `shift_open_divergence` is raised. Hiding a contested shift from the
+ * cashier it is about is `02-F23`'s framing inverted, and `02-F37`/`02-F43` name this very
+ * screen ("the cashier's own day view (`02-F23`)") as one of the two places an anomaly must
+ * appear. **Reported as an interpretation, not settled:** the narrower reading of "only their
+ * own" would hide it, and `can()`'s `own_shift` arm takes that narrower one.
+ *
+ * It is also the LIVE case and the reason the narrower reading cannot ship today. `shift_cash`
+ * reads its `cashier` column from `payload.cashier`, and `02-F45` forbids that field — the
+ * shipped counter emits no such payload and `cash-tab.dom.test.tsx` fails the build on one — so
+ * EVERY production row projects null. Hiding nulls would blank the Me tab and make "Close my
+ * shift" unreachable for every cashier. The owed fix belongs to the fold, not to this seam:
+ * `02-F45` already names the envelope's `actor_user_id` as the single source of attribution,
+ * and `shift-cash-fold.test.ts`'s PIN #2 records that no FR yet says the fold must read it.
+ */
+const isOwnShift = (cashier: string | null, user_id: string): boolean =>
+  cashier === null || cashier === user_id;
+
+export const authorizeReads = (deps: AuthorizedReadsDeps): AuthorizedReads => ({
+  cashState: (): CashState => {
+    const state = deps.reads.cashState();
+    // Re-resolved on EVERY call, never at construction: `ipcMain.handle` admits one handler per
+    // channel for the whole process life while `01-F26`'s unlock/auto-lock cycle moves the
+    // signed-in identity 20–60× a shift. A reach computed once would be correct until the first
+    // auto-lock and wrong for the rest of the day.
+    const subject = subjectOf(deps);
+    // A locked device is a subject with no authority (`01-F27`), so it gets no shift — not the
+    // device's, not the last user's.
+    if (subject === null) return { ...state, shifts: [] };
+
+    const reach = reportScope(subject, {
+      org_id: deps.store.identity.org_id,
+      branch_id: deps.store.identity.branch_id,
+    });
+
+    switch (reach) {
+      // "own branch" and "everything" are already resolved against THIS location by the matrix's
+      // own per-assignment filter, so there is nothing left to narrow. `05-F20`: the console
+      // ADDS the manager's cross-cashier view, it does not replace the cashier's own screen —
+      // narrowing a manager here would delete the reconciliation doc 05 is built on.
+      case "own_branch":
+      case "org":
+        return state;
+      case "own_shift":
+        return {
+          ...state,
+          // A new array; the fold's own projection is never mutated (`26 §8` owns it) and the
+          // rows keep the order the fold gave them (`27-F4` — a row never moves under her).
+          shifts: state.shifts.filter((shift) => isOwnShift(shift.cashier, subject.user_id)),
+        };
+      // `none` — Appendix A's storekeeper column reads "stock reports", i.e. no sales rows, and
+      // a subject holding no assignment at this branch is a stranger here (`01-F26`). Written as
+      // the default arm so a reach added to `ReportReach` later fails CLOSED rather than
+      // inheriting the widest answer by silence.
+      default:
+        return { ...state, shifts: [] };
+    }
+  },
+});
