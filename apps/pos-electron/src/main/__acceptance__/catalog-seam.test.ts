@@ -294,6 +294,36 @@ describe("the dev menu seed — env-gated, version-0, and never over a real menu
     }
   });
 
+  it("C5: the seeded grid is what the RENDERER receives, and a tile on it can be rung up", () => {
+    // The task's own acceptance criterion, driven as far as this process can drive it: not
+    // `sellableMenu` in isolation but `gateway.menu()` — the exact payload `CHANNELS.menu`
+    // hands the counter, availability join and `01-F60` greying included. A launch is the only
+    // thing that can show a screen; this is everything short of one.
+    seedDevMenu(store, { RESTOS_DEV_MENU: "1" });
+    const gateway = gatewayOver(store);
+    const grid = gateway.menu();
+    expect(grid.length).toBeGreaterThan(0);
+    // NOT ONE GREYED TILE. `menu()` marks an unpriced item `unavailable: true` with reason
+    // "no price set", and a grid of those is a full-looking grid that sells nothing — which is
+    // indistinguishable from success unless something asserts it.
+    expect(grid.filter((tile) => tile.unavailable === true)).toEqual([]);
+    expect(grid.every((tile) => tile.label !== tile.id)).toBe(true);
+
+    // And the loop closes: tap the first tile, get a priced line in the ledger.
+    const order_id = newId();
+    gateway.append({
+      type: "order.created",
+      payload: { order_id, channel: "counter", order_type: "dine_in" },
+      refs: [],
+    });
+    const first = grid[0];
+    if (first === undefined) throw new Error("the seeded grid is empty");
+    gateway.addLine({ order_id, item_id: first.id, qty: 1 });
+    const cells = lineCells(store, order_id);
+    expect(cells).toHaveLength(1);
+    expect(cells[0]?.unit_price_paisa).toBeGreaterThan(0);
+  });
+
   it("03-F50: the seeded chain routes to real stations, not all to the fallback", () => {
     seedDevMenu(store, { RESTOS_DEV_MENU: "1" });
     const stationOf = stationResolver(store);
@@ -393,9 +423,26 @@ describe("the wave's recurring defect — the catalog subsystem has a PRODUCTION
     // `store.catalog`; a session constructed without the store would speak the whole protocol
     // and land the menu nowhere — the same defect one argument along that K-7 shipped with the
     // spooler's missing `store`.
-    expect(syncSrc, "01-F52 — a cloud session with no store applies the catalog nowhere").toMatch(
-      /createCloudSession\s*\(\s*\{[\s\S]{0,400}?\bstore\s*:/,
-    );
+    //
+    // WHAT IS PASSED IS EXTRACTED AND INSPECTED, not pattern-matched for presence — because
+    // the presence version of this assertion did not bite, measured rather than supposed.
+    // `expect(syncSrc).toMatch(/store\s*:/)` is satisfied by `store: undefined as never`, which
+    // TYPECHECKS (`never` is assignable to anything), constructs a session that speaks the whole
+    // protocol and applies the catalog nowhere, and passed. `CloudSessionOptions.store` is
+    // REQUIRED, so tsc rejects a missing key and cannot see a present-but-empty one — which is
+    // this wave's defect exactly, one argument along.
+    const storeArg = /createCloudSession\s*\(\s*\{[\s\S]{0,400}?\bstore\s*:\s*([^,\n]+)/
+      .exec(syncSrc)?.[1]
+      ?.trim();
+    expect(storeArg, "createCloudSession must be given a store").toBeDefined();
+    expect(
+      storeArg,
+      `01-F52 — the cloud session's store must be a real reference, got \`${storeArg}\``,
+      // An identifier or a member expression: `store`, `opts.store`. Not `undefined`, not
+      // `null`, not `{}`, not `undefined as never`.
+    ).toMatch(/^[A-Za-z_$][\w$]*(?:\.[\w$]+)*$/);
+    expect(storeArg).not.toBe("undefined");
+    expect(storeArg).not.toBe("null");
     expect(syncSrc).toMatch(/\.start\s*\(\s*\)/);
   });
 
