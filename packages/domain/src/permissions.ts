@@ -26,12 +26,12 @@
 // and both widenings are additive.
 
 /** The four Appendix A columns (`01-F26`: the seed matrix). Widening is additive. */
-// @unreached-owed COMMANDMENT 8 IS NOT ENFORCED ANYWHERE YET. `18 §` names `can(user, action,
-// scope)` as the platform's only authorization consumer, and this whole file — matrix, roles,
-// actions, `can`, `canPayOut`, `reportScope` — has ZERO production callers: the gateway
-// authenticates DEVICES (`01-F47`) and no surface authorizes a PERSON. The caller is owed with
-// the back office (`plans/wave-1/backoffice-catalog.md` Q1, and user auth ruled in `dac8747`).
-// This marker covers every export below and must be DELETED the day the first one is wired.
+// The file-level debt marker that stood here is DELETED, on its own instruction: it said it
+// covered every export below and had to go the day the first one was wired. That day is B-2
+// (`plans/wave-1/backoffice-catalog.md`) — `services/api/src/trpc.ts` puts every non-exempt tRPC
+// procedure through `can()`, so Commandment 8 is enforced on the cloud plane and `ROLES`,
+// `PERMISSION_ACTIONS` and `reportScope` are all reached through it. `canPayOut` is the one
+// export still waiting for a caller, and carries its own marker at its declaration.
 export const ROLES = ["cashier", "branch_manager", "storekeeper", "owner"] as const;
 
 export type Role = (typeof ROLES)[number];
@@ -465,6 +465,9 @@ export type PaidOutRequest = {
   readonly threshold_paisa: number;
 };
 
+// @unreached-owed The POS paid-out path owes this caller. `02-F26`/`05-F19` put the act at the
+// till and `plans/wave-1/service-surface.md` owns the cash/drawer work; B-2 wired `can()` on the
+// CLOUD plane, which is not a plane a drawer opens on, so this predicate is still uncalled.
 export const canPayOut = (
   subject: AuthSubject,
   scope: AuthScope,

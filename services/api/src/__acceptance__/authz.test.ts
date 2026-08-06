@@ -28,6 +28,7 @@ import superjson from "superjson";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   appRouter,
+  assertEveryProcedureIsGated,
   createApiServer,
   createMemoryUserStore,
   PUBLIC_PROCEDURES,
@@ -49,19 +50,33 @@ const T0 = 1_760_000_000_000;
 type Server = Awaited<ReturnType<typeof createApiServer>>;
 type Rpc = { status: number; body: Record<string, unknown> };
 
-/** tRPC v11 HTTP RPC with the superjson transformer: POST, body = `superjson.serialize(input)`. */
+/**
+ * tRPC v11's HTTP RPC contract, with the superjson transformer: a mutation is a POST carrying
+ * `superjson.serialize(input)` as its body; a query is a GET carrying the same under `?input=`.
+ * The verb is read off the router rather than passed in, so the generic seam walk below can call
+ * a procedure it has never heard of — including one written after this file.
+ */
 const call = async (
   server: Server,
   path: string,
   input: unknown,
   headers: Record<string, string> = {},
 ): Promise<Rpc> => {
-  const res = await server.inject({
-    method: "POST",
-    url: `/trpc/${path}`,
-    headers: { "content-type": "application/json", ...headers },
-    payload: JSON.stringify(superjson.serialize(input)),
-  });
+  const procedures = appRouter._def.procedures as Record<string, { _def?: { type?: string } }>;
+  const serialised = JSON.stringify(superjson.serialize(input));
+  const res =
+    procedures[path]?._def?.type === "query"
+      ? await server.inject({
+          method: "GET",
+          url: `/trpc/${path}?input=${encodeURIComponent(serialised)}`,
+          headers,
+        })
+      : await server.inject({
+          method: "POST",
+          url: `/trpc/${path}`,
+          headers: { "content-type": "application/json", ...headers },
+          payload: serialised,
+        });
   return { status: res.statusCode, body: JSON.parse(res.body) as Record<string, unknown> };
 };
 
@@ -499,6 +514,25 @@ describe("the seam — no procedure may be reachable without the middleware", ()
     }
   });
 
+  it("accepts the real router at boot", () => {
+    // The CONTROL for the two boot-gate tests below: without it, a check that threw on
+    // everything would look identical to a check that works.
+    expect(() => assertEveryProcedureIsGated(appRouter)).not.toThrow();
+  });
+
+  it("refuses to boot a router carrying an ungated procedure", () => {
+    // The failing case, reachable — a gate only ever pointed at the correct router is a gate
+    // nothing has verified. `meta.authz` absent is exactly what a forgotten `authorized(...)`
+    // leaves behind.
+    const ungated = { _def: { procedures: { "catalog.publish": { _def: { meta: undefined } } } } };
+    expect(() => assertEveryProcedureIsGated(ungated)).toThrow(/catalog\.publish/);
+  });
+
+  it("does not mistake an exempted procedure for an ungated one", () => {
+    const exempted = { _def: { procedures: { "session.whoami": { _def: { meta: undefined } } } } };
+    expect(() => assertEveryProcedureIsGated(exempted)).not.toThrow();
+  });
+
   it("refuses EVERY authorized procedure to a subject with no assignment", async () => {
     // A real, logged-in user holding nothing. Any procedure that forgot `authorized(...)` — the
     // seam mutant — answers this request instead of refusing it, and this walk finds it on a
@@ -528,8 +562,11 @@ describe("the two-plane law (`18 §6`, plan §6.8)", () => {
       f.endsWith(".ts"),
     );
     expect(files.length).toBeGreaterThan(3);
+    // The IMPORT, not the bare name: this file mentions the package to forbid it, and a
+    // substring scan would have matched itself and been unfixable without exempting the suite —
+    // which would then stop covering the suite.
     for (const file of files) {
-      expect(readFileSync(file, "utf8"), file).not.toContain("@restos/sync-client");
+      expect(readFileSync(file, "utf8"), file).not.toMatch(/from\s+"@restos\/sync-client/);
     }
   });
 });
