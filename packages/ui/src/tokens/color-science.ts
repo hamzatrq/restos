@@ -6,6 +6,10 @@
 // Sources: CIEDE2000 per Sharma, Wu & Dalal 2005; dichromacy simulation per Machado,
 // Oliveira & Fernandes 2009 (severity 1.0, applied in linear RGB).
 
+// @unreached-by-design DESIGN-TIME MATH, never rendered. `tokens.json` is the shipped artifact
+// (`27-F45`); these functions exist so `tokens.test.ts` can RE-DERIVE the ΔE00 ladder and the AA
+// pairings on every commit instead of trusting the numbers. Shipping code reaching this file
+// would mean a component was computing contrast at runtime, which `27-F44` forbids.
 export type Triple = readonly [number, number, number];
 
 export const hexToRgb = (h: string): Triple => {

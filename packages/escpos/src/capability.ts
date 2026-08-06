@@ -56,6 +56,9 @@ export type PrinterCapability = {
  * This is a **finding against `03 §7`, not a resolution of it**: either the record needs a
  * `print_dots` field or the prose needs to stop calling all three "576 dots". Recorded here
  * rather than silently patched, per Commandment 2.
+ *
+ * @unreached-by-design A FINDING recorded as a string constant, addressed to a spec reader, not a
+ * runtime. Nothing should print it. It is exported so the oracle can assert the finding survives.
  */
 export const PRINTABLE_DOTS_NOTE =
   "03 §7: `dots` is the head width; column counts are measured per model (see PRINTABLE_DOTS_NOTE)";
@@ -66,6 +69,10 @@ export const PRINTABLE_DOTS_NOTE =
  * Floors, and that is the whole safety property: a partial cell is not a column, and rounding up
  * would lay out one column that prints off the paper — silently, which is the failure both
  * `03-F36` and the withdrawn `58 | 80` enum are about.
+ *
+ * @unreached-owed The shipped path takes MEASURED column counts off `PRINTER_CAPABILITIES`, so
+ * this formula runs only for the two cases the comment above names — an unknown model and a
+ * technician override — and neither has a surface yet (K-8, and the `specs/14` printer editor).
  */
 export const deriveColumns = (print_dots: number, font: FontId): number =>
   Math.floor(print_dots / FONT_CELL_DOTS[font]);

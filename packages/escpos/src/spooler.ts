@@ -279,6 +279,9 @@ export const createSpooler = ({ transport, store }: SpoolerOptions): Spooler => 
  * copies nothing ties together drift, and one of the two drifting into `GS r` is the whole of this
  * FR: paper-end takes the printer offline, an offline printer "does not execute `GS r` at all", so a
  * health check built on it reports "paper present" forever.
+ *
+ * @unreached-owed With `checkPrinterHealth` — K-8. No transport has ever sent a real-time query,
+ * because no printer is attached (`main/printing.ts` ships `unattachedPrinter`).
  */
 export const PRINTER_HEALTH_QUERY = PAPER_STATUS_QUERY;
 
@@ -308,6 +311,10 @@ export type PrinterHealth = {
  * is the pre-flight a host runs before it hands over a document (K-7), and it does not go through
  * `03-F40`'s 4-query cap either — `createRealtimeQueryWindow` is still waiting for the transport
  * that ties them together.
+ *
+ * @unreached-owed K-8, the physical pass (`plans/wave-1/kot-printing.md`). The comment above
+ * already names the missing caller — a host pre-flight — and this marker is what makes a gate
+ * agree with it, instead of the comment being the only place that knows.
  */
 export const checkPrinterHealth = (
   response: number | null,

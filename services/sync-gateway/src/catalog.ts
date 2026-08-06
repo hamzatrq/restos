@@ -114,6 +114,13 @@ export const catalogVersion = async (db: Db, org_id: string): Promise<number> =>
  * concept — the alternative (ship an `effective_at` and let each device apply it) would need a
  * device-side scheduler, a second version axis, a clock read on the application path, and
  * would apply an edit the owner had since cancelled.
+ *
+ * @unreached-owed THIS IS INSTANCE 6 OF THE WAVE'S NAMED DEFECT, recorded rather than hidden —
+ * the catalog transport was built and tested at both ends (`createCatalogFetch` here's
+ * counterpart) with zero production callers, which is why `apps/pos-electron`'s CLAUDE.md says
+ * "The item grid is empty" and the till cannot sell anything. `plans/wave-1/catalog-transport.md`
+ * owes the caller: the back-office write path (`01-F52`) that this function exists to serve.
+ * DELETE THIS MARKER when it lands — a marker on something reached fails this check.
  */
 export const publishCatalog = async (
   db: Db,

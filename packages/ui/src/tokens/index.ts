@@ -126,6 +126,9 @@ export const mmFromDp = (dp: number): number => (dp / 160) * 25.4;
  * 27-F27 — KDS type is specified in cap-millimetres at a stated viewing distance, never in
  * dp, because the same dp renders 2.3× larger on a 32" 69-PPI panel than on a phone.
  */
+// @unreached-owed `27-F27` is a KDS law, and there is no KDS (`apps/pass-kds` is a one-file stub).
+// The counter is a touch surface at arm's length and sizes type in dp; this arrives with the pass
+// screen, where the viewing distance is metres and dp stops meaning anything.
 export const capHeightMm = (
   arcmin: number,
   distanceMm: number = must(kds, "kds-reference-distance-mm"),

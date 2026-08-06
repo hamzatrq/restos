@@ -42,7 +42,13 @@ type SqlExecutor = Pick<GatewayDb, "execute">;
 const isDeviceClass = (value: string): value is DeviceClass =>
   (DEVICE_CLASSES as readonly string[]).includes(value);
 
-/** Layer-1 provisioning seam (01 §7). Unknown class throws, nothing written (01-F39). */
+/**
+ * Layer-1 provisioning seam (01 §7). Unknown class throws, nothing written (01-F39).
+ *
+ * @unreached-owed `01-F47` device admission has no operator surface — `apps/platform-admin` is a
+ * one-file stub — so a device is provisioned only by a test or by hand-written SQL. This is why
+ * `apps/pos-electron` ships a "marked DEV SEED" identity: nothing can register it for real.
+ */
 export const registerDevice = async (
   db: GatewayDb,
   registration: DeviceRegistration,
@@ -79,6 +85,10 @@ export const registerDevice = async (
  * proposed, unpinned): the DATABASE clock — registry bookkeeping is not domain
  * logic, and using Postgres `now()` keeps `Date.now()` out of gateway src
  * (18 §4 spirit). Only the FIRST revocation stamps; a re-revoke is a no-op.
+ *
+ * @unreached-owed With `registerDevice` — no platform-admin surface exists. Worth stating plainly:
+ * a stolen till cannot be revoked by any shipped path today. The ENFORCEMENT of `revoked_at` is
+ * live in the gateway; only the act of setting it has no caller.
  */
 export const revokeDevice = async (
   db: GatewayDb,

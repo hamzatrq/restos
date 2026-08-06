@@ -48,6 +48,9 @@ export const PAPER_STATUS_QUERY = Uint8Array.from([0x10, 0x04, 0x04]);
  * Real-time for the same reason the query is: the printer needing recovery is by definition not
  * processing its ordinary buffer, so a recovery sent as an ordinary command would queue behind the
  * job it exists to release. Who sends it, and when, is the spooler's policy and is unspecified.
+ *
+ * @unreached-owed K-8. The comment above says it outright — "who sends it, and when, is
+ * unspecified" — and no transport can reach a cutter error with no printer attached.
  */
 export const ERROR_RECOVERY_REQUEST = Uint8Array.from([0x10, 0x05, 0x02]);
 
@@ -129,6 +132,9 @@ export type RealtimeQueryWindow = {
  *
  * **This window has no caller yet.** `18 §10`'s three transports are unbuilt; the first one to
  * land must be tested against this, or the cap is a number in a file.
+ *
+ * @unreached-owed K-8 / `18 §10` — the first real transport owes this its caller. "The cap is a
+ * number in a file" is this rail's defect stated in the author's own words, one round early.
  */
 export const createRealtimeQueryWindow = (): RealtimeQueryWindow => {
   let outstanding = 0;

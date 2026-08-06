@@ -52,5 +52,7 @@ export const inverse = (p: Polarity): Polarity => (p === "light" ? "dark" : "lig
  * Both palettes as a flat list, for a surface that must render a swatch of each. Memoised
  * only to keep referential identity stable across renders; there is no cost to compute.
  */
+// @unreached-owed The comment above names the caller — "a surface that must render a swatch of
+// each" — and no such surface exists. It arrives with the back-office theme preview (`specs/14`).
 export const usePalettes = (): Record<Polarity, Record<ColorName, string>> =>
   useMemo(() => palette, []);

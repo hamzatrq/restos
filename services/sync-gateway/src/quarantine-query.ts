@@ -36,6 +36,9 @@ export type QuarantineFilter = {
   limit?: number;
 };
 
+// @unreached-owed The quarantine READ surface with no reader. `services/api` (tRPC) and the
+// manager console (`specs/05`) are both stubs, so nothing exposes it — a device's rejected events
+// are recorded correctly and no human can see them. Owed with the first admin surface.
 export const listQuarantine = async (
   db: GatewayDb,
   filter: QuarantineFilter,

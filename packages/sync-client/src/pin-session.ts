@@ -89,7 +89,15 @@ export type PinSessionOptions = {
    * durable one.
    */
   attempts?: PinAttemptStore;
-  /** `01-F61`: a lockout ends on a time cooldown. Defaults to `PIN_LOCKOUT_COOLDOWN_MS`. */
+  /**
+   * `01-F61`: a lockout ends on a time cooldown. Defaults to `PIN_LOCKOUT_COOLDOWN_MS`.
+   *
+   * @unreached-by-design A TUNING DEFAULT, and the contrast with `attempts` directly above is the
+   * whole reason this opt-out is per property. Omitting `attempts` silently downgrades `01-F61`
+   * from a durable counter to a process-lifetime one — instance 2 of the wave's named defect.
+   * Omitting this one takes the pinned five minutes, which is the value the FR is satisfied by.
+   * A host overrides it when a branch asks; none has.
+   */
   lockout_cooldown_ms?: number;
 };
 

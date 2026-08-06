@@ -14,6 +14,10 @@
 // relay seam after ingesting follower events (the hub is the branch's cloud
 // uplink for WAN-less peers) and (b) forwards each origin's recorded cloud ack
 // over LAN on the heartbeat.
+// @unreached-owed NO HOST RUNS THE LAN MESH YET. `apps/pos-electron`'s own CLAUDE.md says it:
+// "Reachability reports `down` for all three facts, because no mesh or cloud session exists."
+// `01-F12`/`F13`/`F15` are implemented and property-tested here; the caller is owed with the
+// branch-hub work. Covers every export in this file — delete it when a host constructs one.
 import type { DeviceClass, EventEnvelopeT } from "@restos/domain";
 import type {
   Clock,

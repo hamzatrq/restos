@@ -97,6 +97,9 @@ export const pageGrid = (opts: {
   return { cols, rows, capacity: cols * rows };
 };
 
+// @unreached-owed The counter renders `ItemGrid` and lets it page internally; nothing asks how
+// many tiles a page HOLDS. The caller is the back-office menu editor (`specs/14`), which needs the
+// number to warn that a category overflows its page before a cashier finds out at the till.
 export const pageCapacity = (opts: Parameters<typeof pageGrid>[0]): number =>
   pageGrid(opts).capacity;
 

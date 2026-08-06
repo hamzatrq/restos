@@ -221,6 +221,10 @@ export type ProfileValidation = { findings: readonly ProfileFinding[] };
  * declared", so a key no slot declares changes nothing when the document renders. Saying so at
  * save time is feedback; refusing the save would be the banned behaviour. No FR states any other
  * lint rule, and inventing one here would be policy this layer does not own.
+ *
+ * @unreached-owed The EDITING surface owns this caller and `14` owns that surface (routing table:
+ * "`03` owns the renderer; `14` owns only the editing surface"). No back office exists, so the
+ * save-time feedback this returns has nowhere to appear yet.
  */
 export const validateProfile = (
   spec: DocumentSpec,

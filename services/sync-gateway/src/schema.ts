@@ -9,6 +9,10 @@
 // uuid — the storage layer must not tighten the wire contract (assumption 11).
 // envelope jsonb is verbatim-as-received; the two cloud-stamped values live in
 // their own columns and are merged into the envelope at serve time (assumption 12).
+// @unreached-by-design CONSUMED AT BUILD TIME, not at runtime. `drizzle.config.ts` points
+// drizzle-kit at this file to generate `./drizzle/*.sql`; the gateway itself issues raw SQL
+// through `postgres`, so no runtime module imports these table objects. The consumer is real and
+// outside `src/`, which is why this reads as unreached.
 import { bigint, index, jsonb, pgSchema, primaryKey, text, unique } from "drizzle-orm/pg-core";
 
 export const kernel = pgSchema("kernel");

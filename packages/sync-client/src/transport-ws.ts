@@ -53,6 +53,9 @@ const toBytes = (raw: RawData): Uint8Array =>
 // WebSocket is used bidirectionally: the dialer and the acceptor both talk over it.
 type LanFrame = { t: "announce"; peer: PeerInfo } | { t: "wire"; message: ProtocolMessage };
 
+// @unreached-owed With `mesh-session.ts` and `electHub`: the LAN leg has no host. The CLOUD
+// transport below IS reached (`main/sync.ts`), which is why this is a per-symbol marker and not a
+// file-level one — the two halves of this file are in genuinely different states.
 export const createWsLanTransport = (config: {
   self: PeerInfo;
   listen_port: number;
@@ -194,6 +197,12 @@ export const createWsLanTransport = (config: {
 export const createWsCloudTransport = (config: {
   url: string;
   clock: Clock;
+  /**
+   * @unreached-by-design A TUNING DEFAULT, not a capability. `DEFAULT_RECONNECT_MS` is the right
+   * value for every host we have, and an unsupplied default is only a defect when omitting it
+   * silently drops a REQUIREMENT — which is `createSpooler({ store })`'s case (`03-F4`'s crash
+   * clause) and not this one. The distinction is the reason this opt-out exists per property.
+   */
   reconnect_ms?: number;
 }): CloudTransport => {
   const { url, clock } = config;

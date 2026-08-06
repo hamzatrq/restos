@@ -109,6 +109,9 @@ type LineCell = { anomalies: Record<string, string> };
  * org"). Branches and devices are discovered from the data; `read_model` is the
  * optional diff-leg snapshot. ok ⇔ findings empty, always.
  */
+// @unreached-owed `20 §4.2` calls this a "nightly cloud job per org" and `services/jobs` is a
+// one-file stub, so nothing schedules it — the Auditor runs only when a suite calls it. It is a
+// read-only job with no route, which is why it never reads as broken.
 export const runAuditor = async (args: RunAuditorArgs): Promise<AuditorReport> => {
   const { db, org_id } = args;
   const findings: AuditorFinding[] = [];
