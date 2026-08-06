@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { businessDate, hashPin } from "@restos/domain";
-import { createPinSession, openStore, wallClock } from "@restos/sync-client";
+import { createPinAuditSink, createPinSession, openStore, wallClock } from "@restos/sync-client";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { CHANNELS, type Session } from "../shared/ipc";
 import { type CatalogResolver, createGateway } from "./gateway";
@@ -280,13 +280,19 @@ app.whenReady().then(async () => {
     now: () => wallClock.now(),
     /**
      * **OWED, and named here rather than left to look intentional.** `01-F5` puts `audit.login`
-     * in the ledger on a store-owned chain, and this sink drops it. Wiring it is S-0b's — the
-     * unlock oracle scopes "what `audit.login` carries" out explicitly — and appending an
-     * untested event type on every failed keystroke is not a thing to add on the way past.
-     * The record carries no PIN either way (`pin-session.ts` builds it from ids and an
-     * outcome), so nothing here is a `01-F1` hazard; what is missing is the audit trail.
+     * in the ledger on a store-owned chain. **Wired August 2026** — it was a no-op sink for one
+     * day, during which an unlock, a wrong PIN and a lockout left no trail at all and `01-F5`
+     * was unsatisfied on the only path that produces `audit.login`. That is this wave's
+     * recurring defect (AGENTS.md): a correct subsystem — here `pin-audit.ts`, 15 tests, seven
+     * mutants killed — with no seam to the product, green everywhere and reaching nothing.
+     *
+     * The sink NAMES its fields rather than spreading the record, because `01-F1` has no
+     * redaction path: a PIN that reached an append would be a credential published to every
+     * device that syncs and never retractable. It also swallows its own append failure
+     * (`01-F17` — a sale is never blocked), which is why a failed audit write is currently
+     * SILENT: no FR names a surface that owns "the trail could not be written".
      */
-    audit: () => {},
+    audit: createPinAuditSink({ store, now: () => wallClock.now() }),
     attempts: store.pinAttempts,
   });
 
