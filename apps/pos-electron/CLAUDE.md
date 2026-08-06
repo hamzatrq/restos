@@ -66,3 +66,18 @@ bundle is ESM and `__dirname` does not exist there.
 - **The item grid is empty.** The device catalog stores and versions correctly and nothing
   delivers to it yet (`plans/wave-1/catalog-transport.md`). So `01-F54`'s degrade-to-identifier
   path is what every launch exercises — the failure mode gets the mileage.
+- **The staff roster is a marked DEV SEED, and it is off by default.** PIN verification itself
+  is real — `createPinSession` against Argon2id hashes in `store.staff` (`01-F28`), with
+  `01-F61`'s durable per-(device, user) lockout — but nothing *populates* that registry yet, so
+  a plain `pnpm start` shows an empty identification grid and nobody can unlock. That is the
+  honest state of a device no roster has reached (`00 §5.7`). To get a usable till:
+
+  ```
+  RESTOS_DEV_PIN=<digits> pnpm start
+  ```
+
+  which seeds three cashiers **sharing that one PIN** — deliberately, because `01-F61` names a
+  shared 4-digit PIN as the ordinary case that makes the identification step load-bearing.
+  **The PIN is not in the source and must not be put there:** a constant under `src/main` is
+  the device-wide secret `01-F61` refuses, and `unlock-gate.dom.test.tsx` fails the build on
+  one.

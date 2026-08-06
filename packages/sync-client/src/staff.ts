@@ -29,6 +29,23 @@ export type StaffAssignment = {
 export type StaffMember = {
   readonly user_id: string;
   readonly pin_hash: string;
+  /**
+   * `01-F61` (August 2026) — "**A staff record carries a `display_name`, because the
+   * identification tile must render something.** … a grid of tiles labelled by opaque id is
+   * unusable." It rides this chain rather than a second one for the same `01-F21` reason the
+   * hashes do.
+   *
+   * OPTIONAL, and the reason is stated rather than left to look like laziness: this field was
+   * added to a registry already carrying rows, and a device that has not yet received a
+   * snapshot from a writer that knows about it would have **every** member refused as
+   * `malformed` — a whole roster unable to unlock, which is `01-F17`'s stopped till arriving
+   * through a validator. A reader that needs a label degrades to the identifier (`01-F54`).
+   *
+   * `01-F61` also records what is owed: `21 §5`'s non-reader evidence makes a *name* "the
+   * weakest possible label for this population — a photo or a fixed per-person mark would be
+   * materially better, and that is `27`'s to specify. The name is the floor, not the target."
+   */
+  readonly display_name?: string;
   readonly assignments: readonly StaffAssignment[];
 };
 
@@ -73,6 +90,19 @@ export type StaffRegistry = {
   version(): number;
   apply(update: StaffUpdate): StaffApplyResult;
   lookup(user_id: string): StaffMember | null;
+  /**
+   * The whole roster, for `01-F61`'s identification grid — `lookup` answers "is this user
+   * real", and a surface that must *offer* the choice cannot ask that question without
+   * already knowing the answer.
+   *
+   * **The order is the contract's, not the caller's** (`27-F4`): keyed on `user_id`, which is
+   * the one column that cannot change under a member, so a grid rendered from this does not
+   * re-rank when a display name is edited. What it does NOT survive is a hire — a new id sorts
+   * where it sorts and shifts everyone after it. `01-F61` requires that "positions never
+   * move" and specifies no position field to carry it; that gap is reported, not papered over
+   * with an invented column (commandment 2).
+   */
+  list(): StaffMember[];
 };
 
 type Db = {
@@ -119,6 +149,11 @@ const isMember = (m: unknown): boolean => {
     typeof o.user_id === "string" &&
     o.user_id.length > 0 &&
     typeof o.pin_hash === "string" &&
+    // `01-F61`'s label. Absent is accepted (see the field's own note); PRESENT AND EMPTY is
+    // not — an empty tile is worse than a tile showing an id, because it is indistinguishable
+    // from a rendering failure on a surface an operator taps 20–60× a shift.
+    (o.display_name === undefined ||
+      (typeof o.display_name === "string" && o.display_name.length > 0)) &&
     Array.isArray(o.assignments) &&
     o.assignments.every(isAssignment)
   );
@@ -153,6 +188,16 @@ export const createStaffRegistry = (db: Db): StaffRegistry => {
   );
   const remove = db.prepare("DELETE FROM staff WHERE user_id = ?");
   const readOne = db.prepare("SELECT json FROM staff WHERE user_id = ?");
+  const readAll = db.prepare("SELECT json FROM staff ORDER BY user_id");
+
+  /** One row's member, or null if it cannot be read (see `lookup`'s reasoning — `01-F17`). */
+  const parse = (json: string): StaffMember | null => {
+    try {
+      return JSON.parse(json) as StaffMember;
+    } catch {
+      return null;
+    }
+  };
 
   // `?? 0` rather than a non-null assertion: `version()` runs on every apply, and a missing
   // singleton row must not be the thing that throws on the till's path (01-F17).
@@ -203,15 +248,18 @@ export const createStaffRegistry = (db: Db): StaffRegistry => {
 
     lookup: (user_id) => {
       const row = readOne.get(user_id) as { json: string } | undefined;
-      if (row === undefined) return null;
-      try {
-        return JSON.parse(row.json) as StaffMember;
-      } catch {
-        // `STRICT` constrains the column's TYPE, not the validity of what is in it, so a
-        // truncated write is reachable. An unreadable row means that user cannot unlock —
-        // never that the whole registry throws (01-F17).
-        return null;
-      }
+      // `STRICT` constrains the column's TYPE, not the validity of what is in it, so a
+      // truncated write is reachable. An unreadable row means that user cannot unlock —
+      // never that the whole registry throws (01-F17).
+      return row === undefined ? null : parse(row.json);
     },
+
+    // One unreadable row costs THAT member their tile, not the whole grid: a roster that
+    // refuses to render because one JSON blob is truncated is a locked till (`01-F17`), and
+    // every other member on the device can still get in.
+    list: () =>
+      (readAll.all() as { json: string }[])
+        .map((row) => parse(row.json))
+        .filter((m): m is StaffMember => m !== null),
   };
 };
