@@ -63,6 +63,16 @@ bundle is ESM and `__dirname` does not exist there.
 - **Reachability reports `down` for all three facts**, because no mesh or cloud session exists.
   `00 §5.7` requires the strip to report what is true; claiming a hub never contacted is the
   exact dishonesty that FR exists to prevent.
+- **NO PRINTER IS ATTACHED, and the counter says so loudly.** K-7 wired `order.confirmed` →
+  spooler → `03-F5`'s S1 band, and the transport it ships with (`unattachedPrinter`) reports
+  that the printer did not answer on every transmit — because no USB, Bluetooth or TCP-9100
+  transport exists (`18 §10`, K-8 owed). So **every confirm raises a print-failure band about
+  20 s later**, naming the printer and the order. That is the honest state of this device, not
+  a bug: `03-F5` forbids a silent KOT failure, and the alternative is a till that claims to
+  have printed. The printer model is `RESTOS_KOT_PRINTER` (default `TH230`, a PINNED value and
+  not a measurement — see `main/index.ts`). The queue is **process-lifetime**: `createSpooler`
+  is given no `SpoolerJobStore` yet, so `03-F4`'s crash clause is unmet and a relaunch loses
+  queued tickets. OWED.
 - **The item grid is empty.** The device catalog stores and versions correctly and nothing
   delivers to it yet (`plans/wave-1/catalog-transport.md`). So `01-F54`'s degrade-to-identifier
   path is what every launch exercises — the failure mode gets the mileage.

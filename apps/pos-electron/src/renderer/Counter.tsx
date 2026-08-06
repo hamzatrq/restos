@@ -1,7 +1,7 @@
 import { newId, paisa } from "@restos/domain";
 import { AppShell, Cart, ItemGrid, type Tab, TenderPanel, Tile, usePhysicalSize } from "@restos/ui";
 import { useCallback, useEffect, useState } from "react";
-import type { CashState, DeviceState, MenuItem, OpenOrder } from "../shared/ipc";
+import type { Alarm, CashState, DeviceState, MenuItem, OpenOrder } from "../shared/ipc";
 import { CashSurface, MeSurface } from "./CashSurfaces";
 
 /**
@@ -89,6 +89,15 @@ export const Counter = () => {
    * keeps selling and the two surfaces show nothing, rather than the till going blank.
    */
   const [cash, setCash] = useState<CashState | null>(null);
+  /**
+   * `03-F5`'s S1s (`27-F11d`: a BAND, never the screen).
+   *
+   * Empty — not `null` — until the seam answers, and that asymmetry with `cash` above is
+   * deliberate: an unread reconciliation must say "reading the day…" because a blank one reads
+   * as a clean one, whereas an unread alarm list has nothing to draw either way. A host that
+   * does not serve the channel leaves this empty and the counter keeps selling (`01-F17`).
+   */
+  const [alarms, setAlarms] = useState<readonly Alarm[]>([]);
   const [page, setPage] = useState(0);
   const [activeTab, setActiveTab] = useState(TABS[0]?.id ?? "order");
   /**
@@ -105,18 +114,23 @@ export const Counter = () => {
     // Three reads, never a join in the renderer: the folds already hold these projections and
     // assembling a fourth shape here would be fold logic reimplemented outside the engine
     // (26 §8). The gateway does the one join the queue genuinely needs.
-    const [d, o, m, c] = await Promise.all([
+    const [d, o, m, c, a] = await Promise.all([
       window.restos.deviceState(),
       window.restos.openOrders(),
       window.restos.menu(),
       // A FOURTH read, and optional-chained because the member is optional on the contract —
       // see `RestosBridge.cashState` for why that asymmetry exists and what it owes.
       window.restos.cashState?.(),
+      // A FIFTH — `03-F5`'s print-failure band. Optional-chained for the same recorded reason,
+      // and it is the read where that optionality costs the most: `27-F11g` makes this band the
+      // ONLY signal that food is not being cooked. See `RestosBridge.alarms`.
+      window.restos.alarms?.(),
     ]);
     setDevice(d);
     setOrders(o);
     setItems(m);
     setCash(c ?? null);
+    setAlarms(a ?? []);
   }, []);
 
   useEffect(() => {
@@ -215,8 +229,22 @@ export const Counter = () => {
       lan={device.lan}
       hub={device.hub}
       cloud={device.cloud}
-      alarms={[]}
-      onAcknowledgeAlarm={() => {}}
+      /*
+        `03-F5`/`27-F11d` — the print-failure band, and it is REAL now. This was `[]` with a
+        recorded reason ("nothing constructs one yet"), which was honest then and would be the
+        silent KOT failure the FR forbids now that K-7's spooler does construct them.
+
+        Note where it renders: `AppShell` puts the band in the chrome, above a work area that
+        does not move. That is `27-F11d`'s whole ruling — a half-built cart is never taken away
+        from a cashier with a customer waiting, so everything below stays visible and usable.
+      */
+      alarms={alarms}
+      onAcknowledgeAlarm={(id) => {
+        // `03-F5`: acknowledgement is main's to record — the alarm lives beside the spooler, and
+        // a screen that dismissed only its own copy would leave the band on every other surface
+        // reading this device. `reload` follows so the band goes when main says it went.
+        void window.restos.acknowledgeAlarm?.(id).then(reload);
+      }}
       tabs={TABS}
       activeTabId={activeTab}
       onSelectTab={setActiveTab}

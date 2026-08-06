@@ -2,10 +2,12 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { businessDate, hashPin } from "@restos/domain";
+import { createSpooler, printerCapability } from "@restos/escpos";
 import { createPinAuditSink, createPinSession, openStore, wallClock } from "@restos/sync-client";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
-import { CHANNELS, type Session } from "../shared/ipc";
+import { AppendRequestSchema, CHANNELS, type Session } from "../shared/ipc";
 import { type CatalogResolver, createGateway } from "./gateway";
+import { createKotPrinter, PUMP_INTERVAL_MS, unattachedPrinter } from "./printing";
 import { createUplink } from "./sync";
 
 /**
@@ -139,6 +141,28 @@ const catalogResolver =
     const entry = store.catalog.lookup("item", item_id);
     return entry ? { name: entry.name } : null;
   };
+
+/**
+ * The kitchen printer this device believes it has (`03 §7` layer 3).
+ *
+ * **PINNED, not measured, and env-overridable for the same reason `RESTOS_CLOUD_URL` is:** the
+ * printer registry `03-F2` routes through is doc-14 work and admission (`01-F47`) is what will
+ * carry the assignment, so there is nowhere else for this to come from yet. Nothing has verified
+ * that a TH230 is attached to this device — nothing is attached at all (K-8).
+ *
+ * `TH230` rather than `UNKNOWN_PRINTER_CAPABILITY` because the conservative default reports 32
+ * Font-A columns, `03-F49` gives `kot` a floor of 42, and every confirm would then take
+ * `03-F34`'s refusal path — which is correct behaviour for a 58 mm printer and the wrong SENTENCE
+ * for a device that simply has none. It is also the only shipped 80 mm row that claims no feature
+ * (`has_native_qr: false`, `cols_font_a: 44`), so the pin under-claims in every direction it can.
+ *
+ * The value doubles as `03-F5`'s printer NAME (`printerCapability` keeps the requested id
+ * precisely so "the alert can name the printer the operator is actually standing at"), so
+ * `RESTOS_KOT_PRINTER="grill printer"` is a legal and useful setting — it names the band and
+ * takes the conservative record, which then refuses the KOT under `03-F49` until a real model id
+ * is supplied. Both halves are honest; neither invents a capability.
+ */
+const kotCapability = () => printerCapability(process.env["RESTOS_KOT_PRINTER"] ?? "TH230");
 
 const createWindow = (): BrowserWindow => {
   const window = new BrowserWindow({
@@ -349,6 +373,52 @@ app.whenReady().then(async () => {
     businessDay: () => businessDate(wallClock.now() + store.branchTimeStatus().offset_ms),
   });
 
+  /**
+   * `03-F4`/`03-F5` — the durable print spooler and the thing that feeds it.
+   *
+   * **This is K-7's whole point, and it is four lines.** `packages/escpos` shipped the encoder,
+   * the KOT layout, the pure `render()` and a 244-test spooler with NO production caller — the
+   * defect AGENTS.md names, in its fifth instance. `createSpooler` is called here, once, at
+   * startup, unconditionally: a spooler constructed only when some option is set is the same
+   * defect wearing the `store.pinAttempts` hat.
+   *
+   * `unattachedPrinter` is the transport, and it is the honest one: no USB, Bluetooth or
+   * TCP-9100 transport exists (`18 §10`), so every transmit reports that the printer did not
+   * answer, the retry budget exhausts, and the counter gets `03-F5`'s band naming the printer and
+   * the order. That is exactly true of this device today. K-8 replaces this ONE argument.
+   *
+   * No `store` is passed to `createSpooler` yet, and saying so is cheaper than a comment that
+   * implies otherwise: `03-F4`'s crash clause needs a `SpoolerJobStore` on top of the device
+   * SQLite, which is `18 §4`'s canonical durable-local-queue and not something to improvise
+   * here. Until it lands, the queue is process-lifetime — a relaunch loses queued tickets, which
+   * is precisely the durability `03-F4` demands and this device does not yet have. OWED.
+   */
+  const spooler = createSpooler({ transport: unattachedPrinter(kotCapability()) });
+  const kot = createKotPrinter({
+    spooler,
+    store,
+    catalog: catalogResolver(store),
+    // 03-F50 — the station cooks the line, resolved up the 01-F21 chain by the catalog itself.
+    // An unrouted line lands on DEFAULT_STATION rather than vanishing off every ticket.
+    station: (item_id) => store.catalog.stationOf("item", item_id),
+    capability: kotCapability(),
+    // 03-F5's `kot.print_failed` and 02-F31's `kot.printed`, through the gateway so the envelope
+    // is stamped exactly like every other append (02-F41's read-at-append attribution included).
+    // The push is what makes the band appear without the renderer polling.
+    append: (type, payload) => {
+      gateway.append({ type, payload, refs: [] });
+      notifyChanged();
+    },
+  });
+  /**
+   * `03-F4`'s retry SPACING, which the spooler deliberately does not own ("the BUDGET is
+   * enforced here; the SPACING is not enforced anywhere yet" — `RETRY_WINDOW_MS`). Without this
+   * interval a queued job sits queued forever: no bytes, no exhaustion, no band — a silent KOT
+   * failure produced by an absent timer, which is the shape `03-F5` forbids.
+   */
+  const pumping = setInterval(() => void kot.pump(), PUMP_INTERVAL_MS);
+  app.on("will-quit", () => clearInterval(pumping));
+
   // One channel, one gateway method, no dispatcher. A generic handler that switched on a
   // channel name would reintroduce exactly the free-form surface `18 §9` bans.
   ipcMain.handle(CHANNELS.deviceState, () => gateway.deviceState());
@@ -357,6 +427,27 @@ app.whenReady().then(async () => {
   ipcMain.handle(CHANNELS.menu, () => gateway.menu());
   // `02-F23`/`02-F37`/`02-F43` — the Cash and Me surfaces' one read.
   ipcMain.handle(CHANNELS.cashState, () => gateway.cashState());
+  /**
+   * `03-F5`/`27-F11d` — the S1 band, and NOT a gateway method.
+   *
+   * It reads nothing in the ledger: a print failure is a fact about this device's paper, held
+   * beside the spooler that produced it. Routing it through `createGateway` would also widen the
+   * two-plane surface `gateway.test.ts` pins at exactly seven operations, for a read that is not
+   * a fold projection at all.
+   *
+   * `27-F11g` is why it is here rather than on the pass screen: where paper is the only kitchen
+   * channel there is no screen fallback, and the counter is the only human who can react.
+   */
+  ipcMain.handle(CHANNELS.alarms, () => kot.alarms());
+  ipcMain.handle(CHANNELS.acknowledgeAlarm, (_event, alarm_id: unknown) => {
+    // Type-checked rather than trusted — the renderer is the untrusted end of this bridge
+    // (`shared/ipc.ts`), and a non-string here would throw inside the handler on the one surface
+    // whose job is to be dismissable.
+    if (typeof alarm_id !== "string") return;
+    kot.acknowledge(alarm_id);
+    // `03-F5`: the alert repeats until acknowledged, so the screen has to be told it stopped.
+    notifyChanged();
+  });
   /**
    * `01-F61` — the identification grid's roster. **Mapped, not forwarded**: `StaffMember`
    * carries the Argon2id `pin_hash`, and `01-F28` puts verification in this process, so the
@@ -419,6 +510,19 @@ app.whenReady().then(async () => {
   ipcMain.handle(CHANNELS.append, (_event, req: unknown) => {
     touch();
     const result = gateway.append(req);
+    // `C9`/`03-F2` — THE KITCHEN HANDOFF. The confirm is already in the ledger by the line
+    // above, and only then does paper get involved: `01-F17` says a sale is never blocked by a
+    // printer, so the print hangs off a completed append rather than gating one. `confirmed()`
+    // is synchronous and `void`, so there is nothing here to await even by accident.
+    //
+    // Re-parsed rather than read raw: `req` is `unknown` from an untrusted renderer, and
+    // `gateway.append` does not hand back what it parsed. It has already thrown on anything
+    // malformed, so `safeParse` here is a narrowing, not a second validation.
+    const confirm = AppendRequestSchema.safeParse(req);
+    if (confirm.success && confirm.data.type === "order.confirmed") {
+      const order_id = confirm.data.payload.order_id;
+      if (typeof order_id === "string") kot.confirmed(order_id);
+    }
     // NOTIFY FROM INSIDE THE HANDLER. This was `ipcMain.on(CHANNELS.append, notifyChanged)`,
     // which never fired once: `invoke` dispatches only to the `handle` table, and `.on` is the
     // `send`/`sendSync` table — two different registries on one channel name. So the renderer
