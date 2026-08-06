@@ -140,10 +140,19 @@ export const createKotPrinter = ({
     }
   };
 
-  const raise = (id: string, order_ref: string, why: string): void => {
-    // Keyed by job, so a pump that runs every 10 s cannot multiply one failure into a band that
-    // "has become the screen" (`27-F11d`), and an acknowledged one stays acknowledged.
-    if (raised.has(id)) return;
+  /**
+   * Raise an S1 for a job, and answer whether this call is the one that raised it.
+   *
+   * The boolean is load-bearing rather than convenience: the refusal path uses it to decide
+   * whether to append `kot.print_failed`. Tapping "Send to kitchen" twice appends two
+   * `order.confirmed`s (the order stays open until it is settled), and on the refusal path there
+   * is no spooler row to de-duplicate against — so without this the ledger collects one
+   * `kot.print_failed` per tap, permanently, under `01-F1`. Found by mutation: the guard below
+   * survived removal because the `Map` key already de-duplicates the BAND, which is exactly how
+   * a dead-looking line hides a live defect one caller over.
+   */
+  const raise = (id: string, order_ref: string, why: string): boolean => {
+    if (raised.has(id)) return false;
     raised.set(id, {
       // `03-F5`'s own sentence: "KOT #142 did not print — grill printer offline". Both nouns in
       // the line a cashier reads first, because either one alone is unactionable — the order
@@ -153,6 +162,7 @@ export const createKotPrinter = ({
       subject: why,
       id,
     });
+    return true;
   };
 
   const confirmed = (order_id: string): void => {
@@ -213,8 +223,11 @@ export const createKotPrinter = ({
           result.required_columns === undefined || result.available_columns === undefined
             ? ""
             : ` — needs ${result.required_columns} columns, this printer has ${result.available_columns}`;
-        emit("kot.print_failed", { order_id, printer_name });
-        raise(job_id, order_id, `refused: ${result.reason}${measured}`);
+        // The band FIRST, and the ledger record only if the band is new: `raise` is what makes a
+        // repeated confirm idempotent here, the way `spooler.job(job_id)` does on the path below.
+        if (raise(job_id, order_id, `refused: ${result.reason}${measured}`)) {
+          emit("kot.print_failed", { order_id, printer_name });
+        }
         continue;
       }
       spooler.enqueue({

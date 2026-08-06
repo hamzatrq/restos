@@ -59,6 +59,8 @@ import {
 // ── the fixture ─────────────────────────────────────────────────────────────────────────────
 
 const ORDER_ID = "0199aaaa-0000-7000-8000-00000000abcd";
+/** A SECOND order, for the rush case: a confirm landing while a pump is already in flight. */
+const ORDER_ID_2 = "0199bbbb-0000-7000-8000-00000000ef01";
 /** The same `reference` rule `gateway.ts` already applies — the counter's own short handle. */
 const TICKET = ORDER_ID.slice(0, 8);
 /** The confirm anchor `01-F43`/`27-F62` want stamped on the chit: branch time at APPEND. */
@@ -88,24 +90,27 @@ type StoreOver = {
   channel?: string;
   table_ids_json?: string;
   queue?: boolean;
+  /** A second confirmed order on the till — the rush case. */
+  second?: boolean;
 };
 
-const stubStore = (over: StoreOver = {}): Pick<DeviceStore, "openOrders" | "kitchenQueue"> =>
-  ({
-    openOrders: () => [
-      {
-        order_id: ORDER_ID,
+const stubStore = (over: StoreOver = {}): Pick<DeviceStore, "openOrders" | "kitchenQueue"> => {
+  const ids = over.second === true ? [ORDER_ID, ORDER_ID_2] : [ORDER_ID];
+  return {
+    openOrders: () =>
+      ids.map((order_id) => ({
+        order_id,
         channel: over.channel ?? "counter",
         table_ids_json: over.table_ids_json ?? "[]",
         json_lines: over.json_lines ?? ONE_STATION,
         pay_total: 0,
-      },
-    ],
+      })),
     kitchenQueue: () =>
       over.queue === false
         ? []
-        : [{ order_id: ORDER_ID, age_basis: CONFIRM_AT, channel: "counter" }],
-  }) as unknown as Pick<DeviceStore, "openOrders" | "kitchenQueue">;
+        : ids.map((order_id) => ({ order_id, age_basis: CONFIRM_AT, channel: "counter" })),
+  } as unknown as Pick<DeviceStore, "openOrders" | "kitchenQueue">;
+};
 
 /**
  * A transport whose behaviour a test drives directly. Three modes and nothing else, because
@@ -360,6 +365,25 @@ describe("03-F2/03-F4 — a confirm puts the KOT in the durable spooler", () => 
     await pumpTo(h);
     expect(h.transport.sent).toHaveLength(1);
   });
+
+  it("does not REPRINT a ticket that has already printed, when the confirm is repeated", async () => {
+    // ADDED BY MUTATION (the guard above survived its own removal): a deterministic `job_id`
+    // already collapses two confirms that arrive BEFORE the first attempt, so the assertion
+    // above passed with the duplicate check deleted. The case that needs the check is the one
+    // after the paper has moved — `enqueue` overwrites its row unconditionally, so a re-confirm
+    // would reset a `printed` job to `queued` and print the ticket a second time WITH NO REPRINT
+    // BAND (`03-F3`/`03-F37`). "Send to kitchen" is tappable twice, because an order stays open
+    // until it is settled, so this is an ordinary mis-tap and not an exotic one.
+    const h = harness({ mode: "ok" });
+    h.printer.confirmed(ORDER_ID);
+    await pumpTo(h);
+    expect(jobsOf(h.spooler)[0]?.state).toBe("printed");
+
+    h.printer.confirmed(ORDER_ID);
+    await pumpTo(h);
+    expect(h.transport.sent).toHaveLength(1);
+    expect(h.appended.filter((e) => e.type === "kot.printed")).toHaveLength(1);
+  });
 });
 
 // ── B. 01-F17 — a sale is never blocked ──────────────────────────────────────────────────────
@@ -420,6 +444,35 @@ describe("03-F5 — a silent KOT failure is forbidden", () => {
       expect(h.appended.filter((e) => e.type === "kot.print_failed")).toHaveLength(0);
     }
     expect(jobsOf(h.spooler)[0]?.state).toBe("queued");
+  });
+
+  it("a ticket queued while a pump is IN FLIGHT does not raise a band of its own", async () => {
+    // ADDED BY MUTATION. The test above compares each job's state before and after a pump, so an
+    // implementation that raised on `queued` as well as `failed` still passed it — a job that
+    // was queued and is queued again never registers as a change. The escape is the rush case:
+    // a confirm landing mid-pump is a job the previous snapshot has never seen, and a band
+    // naming an order that has not even been attempted yet is `27-F11d`'s alarm staff learn to
+    // ignore, arriving on the busiest surface in the building.
+    const h = harness({ mode: "fail", store: { second: true } });
+    h.printer.confirmed(ORDER_ID);
+    const inflight = h.printer.pump();
+    h.printer.confirmed(ORDER_ID_2);
+    await inflight;
+    expect(jobsOf(h.spooler)).toHaveLength(2);
+    expect(h.printer.alarms()).toHaveLength(0);
+  });
+
+  it("a repeated confirm on a REFUSING printer does not append a second kot.print_failed", async () => {
+    // ADDED BY MUTATION, and it found a live defect rather than only a weak assertion: the
+    // refusal path enqueues nothing, so it has no spooler row to de-duplicate against, and every
+    // tap of "Send to kitchen" wrote another `kot.print_failed` into a ledger `01-F1` forbids
+    // correcting in place. The band was always single (a `Map` key), which is exactly why
+    // reading the code did not show it.
+    const h = harness({ model: "BC-58U" });
+    h.printer.confirmed(ORDER_ID);
+    h.printer.confirmed(ORDER_ID);
+    expect(h.printer.alarms()).toHaveLength(1);
+    expect(h.appended.filter((e) => e.type === "kot.print_failed")).toHaveLength(1);
   });
 
   it("when retries exhaust: ONE alarm naming the printer AND the order, and kot.print_failed", async () => {
