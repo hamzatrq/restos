@@ -20,8 +20,13 @@ export const asPaisaInt = (n: number, label: string): number => {
 };
 
 export const paisa = (n: number): Paisa => asPaisaInt(n, "paisa") as Paisa;
+// @unreached-owed The QUANTITY constructors land with inventory (`specs/10`), which no app or
+// service touches yet — nothing in Wave 1 records a milligram. Commandment 3 requires them to
+// exist here and nowhere else, so they are written before their caller on purpose.
 export const mg = (n: number): Milligrams => asPaisaInt(n, "mg") as Milligrams;
+// @unreached-owed With `mg` — inventory (`specs/10`), no Wave-1 caller.
 export const ml = (n: number): Millilitres => asPaisaInt(n, "ml") as Millilitres;
+// @unreached-owed With `mg` — inventory (`specs/10`), no Wave-1 caller.
 export const units = (n: number): Units => asPaisaInt(n, "units") as Units;
 
 export const addPaisa = (a: Paisa, b: Paisa): Paisa => paisa(a + b);
@@ -52,7 +57,14 @@ export const totalPaisaOrNull = (values: readonly number[]): number | null => {
   return total > SAFE || total < -SAFE ? null : Number(total);
 };
 
-/** Bigint-exact accumulation; throws rather than drift past Number.MAX_SAFE_INTEGER. */
+/**
+ * Bigint-exact accumulation; throws rather than drift past Number.MAX_SAFE_INTEGER.
+ *
+ * @unreached-owed The THROWING sibling has no shipping caller — every live total runs the
+ * ingest path through `totalPaisaOrNull` (which is reached), because `01-F17` forbids a throw
+ * there. A caller appears where a throw is correct: back-office and report arithmetic (`specs/14`,
+ * `specs/12`). Until then this is a tested primitive with no seam, and saying so beats pretending.
+ */
 export const sumPaisa = (values: readonly Paisa[]): Paisa => {
   const total = totalPaisaOrNull(values as readonly number[]);
   if (total === null) throw new RangeError("sumPaisa overflow");
@@ -66,6 +78,10 @@ export const sumPaisa = (values: readonly Paisa[]): Paisa => {
  * max − min ≤ 1, and the parts sum back to the total exactly (no rounding leak).
  * Exact float-free on all safe integers: q is computed as (total − r) / n, which is
  * an exactly representable integer division.
+ *
+ * @unreached-owed Nothing in Wave 1 DIVIDES money. Split-bill (`02`), tip pooling (blocked on
+ * `DEC-MONEY-004`'s catalog entries) and service charge are the callers, and none is built. Law 3
+ * says division goes through here when it arrives — this marker is what makes that a decision.
  */
 export const splitPaisa = (total: Paisa, n: number): Paisa[] => {
   const t = asPaisaInt(total, "splitPaisa total"); // brands are compile-time only (18 §4)
@@ -82,6 +98,10 @@ export const splitPaisa = (total: Paisa, n: number): Paisa[] => {
  * integer-exactly in BigInt (amount·bps routinely exceeds 2^53; the naive float path is
  * off by one). bps has no upper cap (markups above 100% are legal). A result past
  * Number.MAX_SAFE_INTEGER throws — the sumPaisa overflow idiom, never a drifted double.
+ *
+ * @unreached-owed Nothing in Wave 1 applies a RATE. Tax (`specs/16`), aggregator commission
+ * (`specs/08`) and percentage discounts are the callers; the till currently sells at the priced
+ * line and settles it. Law 3 routes every future rate through here.
  */
 export const applyRateBps = (amount: Paisa, bps: number): Paisa => {
   const a = asPaisaInt(amount, "applyRateBps amount"); // brands are compile-time only (18 §4)

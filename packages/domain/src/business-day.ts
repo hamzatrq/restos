@@ -119,6 +119,10 @@ export const businessDate = (
  * Half-open by construction so consecutive days TILE — every instant lands in exactly
  * one business day, with no gap and no double-count. A closed upper bound would put the
  * cutover instant itself in two days at once, and double-count a sale rung exactly on it.
+ *
+ * @unreached-owed The till reaches `businessDate` (a single day's label) but never a RANGE — no
+ * shipped surface queries "the sales of a business day" yet. The callers are the day-close
+ * reconciliation and every report in `specs/12`/`specs/13`.
  */
 export const businessDayBounds = (
   at_ms: number,

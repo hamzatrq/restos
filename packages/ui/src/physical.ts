@@ -30,6 +30,9 @@ import { useCallback, useRef, useState } from "react";
 export const CSS_PX_PER_INCH = 96;
 
 export const mmFromCssPx = (px: number): number => (px / CSS_PX_PER_INCH) * 25.4;
+// @unreached-owed The INVERSE direction. Everything shipped measures the panel and converts px →
+// mm (`mmFromCssPx`, which is reached); nothing yet lays out a component at a stated physical
+// size, which is what `27-F27`'s cap-millimetre type on the KDS will need.
 export const cssPxFromMm = (mm: number): number => (mm / 25.4) * CSS_PX_PER_INCH;
 
 export type PhysicalSize = { widthMm: number; heightMm: number };

@@ -337,6 +337,11 @@ const ALL_PAYLOAD_SCHEMAS: Record<string, z.ZodType> = {
   ...auditPayloadSchemas,
 };
 
+/**
+ * @unreached-owed The `01 §4` catalog as a queryable thing — "is this a known type", "list the
+ * types". Every shipping path validates a CONCRETE event through `parseEvent` instead, so nothing
+ * enumerates. The callers are the back office and the Auditor's report surface, both unbuilt.
+ */
 export const eventRegistry = {
   has: (type: string): type is KnownEventType => type in payloadSchemas,
   types: (): readonly KnownEventType[] => Object.keys(payloadSchemas) as KnownEventType[],

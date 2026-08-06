@@ -38,6 +38,10 @@
  * step 3, not a drive-by.
  */
 
+// @unreached-by-design TEST-SUPPORT PACKAGE (`18 §12`). The virtual printer renders emitted
+// bytes to a PNG for snapshot tests; the shipped transport is `unattachedPrinter` in
+// `apps/pos-electron/src/main/printing.ts`, and a till that "printed" to a PNG would be exactly
+// the dishonesty `03-F5` forbids. K-8 replaces the shipped transport with hardware, not this.
 import { deflateSync } from "node:zlib";
 
 /**

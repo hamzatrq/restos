@@ -258,6 +258,11 @@ export const messageSchemas = {
   pong: z.object({ v, kind: z.literal("pong"), t: z.number().int() }),
 } as const;
 
+/**
+ * @unreached-owed The wire vocabulary as a LIST. Both ends dispatch on a concrete `kind` through
+ * `decodeMessage`, so nothing enumerates the set in production; the golden-fixture suites do. A
+ * caller arrives with protocol-version negotiation or an admin/inspection surface.
+ */
 export const MESSAGE_KINDS = Object.keys(
   messageSchemas,
 ) as readonly (keyof typeof messageSchemas)[];

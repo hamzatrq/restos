@@ -23,6 +23,8 @@ export type AgeBadgeProps = {
 
 type Level = "normal" | "abnormal" | "fault";
 
+// @unreached-owed With `AgeBadge` below — `apps/pass-kds` is a one-file stub, so `03-F47`'s aging
+// badge has no screen to appear on. Both exports land together when the pass screen does.
 export const ageLevel = (minutes: number, amberAt: number, redAt: number): Level =>
   minutes >= redAt ? "fault" : minutes >= amberAt ? "abnormal" : "normal";
 
@@ -49,6 +51,8 @@ const ON: Record<Level, ColorName> = {
   fault: "fgColor-on-status-fault",
 };
 
+// @unreached-owed `03-F47`'s aging badge, waiting on the pass/KDS screen (`apps/pass-kds` is a
+// one-file stub; `plans/wave-1/screen-map.md`). Stories and the happy-dom suite exercise it.
 export const AgeBadge = ({ minutes, amberAt, redAt }: AgeBadgeProps) => {
   const color = useColor();
   const level = ageLevel(minutes, amberAt, redAt);

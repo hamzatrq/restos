@@ -36,6 +36,10 @@ import { type ColorName, space } from "../tokens/index";
  * The restatement is checked against the manifest in `tokens/tokens.test.ts`, so a pairing
  * added or changed there fails a test rather than silently missing from this union.
  */
+// @unreached-owed The legal fill/foreground pairs, restated for the type system. No shipped
+// screen renders a `Surface` yet (the counter builds from `AppShell`, `Cart`, `ItemGrid`,
+// `TenderPanel`, `Tile`), so both this table and the component below are waiting on the screens
+// `plans/wave-1/screen-map.md` still owes. `tokens.test.ts` checks the table against the manifest.
 export const PAIRING = {
   "bgColor-status-abnormal": "fgColor-on-status-abnormal",
   "bgColor-status-fault": "fgColor-on-status-fault",
@@ -67,6 +71,7 @@ export type SurfaceProps = Pairing & {
  * NOT do is accept a foreground and trust it, which is why `fg` is read for its name only and
  * the value is resolved from the manifest.
  */
+// @unreached-owed With `PAIRING` above — no shipped screen renders a `Surface` yet.
 export const Surface = ({ fill, fg, children, as = "div", padding }: SurfaceProps) => {
   const color = useColor();
   const Tag = as;

@@ -26,6 +26,12 @@
 // and both widenings are additive.
 
 /** The four Appendix A columns (`01-F26`: the seed matrix). Widening is additive. */
+// @unreached-owed COMMANDMENT 8 IS NOT ENFORCED ANYWHERE YET. `18 §` names `can(user, action,
+// scope)` as the platform's only authorization consumer, and this whole file — matrix, roles,
+// actions, `can`, `canPayOut`, `reportScope` — has ZERO production callers: the gateway
+// authenticates DEVICES (`01-F47`) and no surface authorizes a PERSON. The caller is owed with
+// the back office (`plans/wave-1/backoffice-catalog.md` Q1, and user auth ruled in `dac8747`).
+// This marker covers every export below and must be DELETED the day the first one is wired.
 export const ROLES = ["cashier", "branch_manager", "storekeeper", "owner"] as const;
 
 export type Role = (typeof ROLES)[number];

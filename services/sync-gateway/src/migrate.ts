@@ -9,6 +9,9 @@ import { migrate } from "drizzle-orm/postgres-js/migrator";
 
 const MIGRATIONS_FOLDER = fileURLToPath(new URL("../drizzle", import.meta.url));
 
+// @unreached-by-design A DEPLOY step, not a request path. Its callers are `global-setup.ts` (which
+// is why every suite exercises the migrations) and whatever runs the deploy — never the running
+// server, because a service that migrates its own database on boot races its own replicas.
 export const applyMigrations = async (databaseUrl: string): Promise<void> => {
   const db = drizzle(databaseUrl);
   try {

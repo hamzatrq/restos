@@ -33,6 +33,8 @@ export type TicketCardProps = {
   onBump: () => void;
 };
 
+// @unreached-owed The KDS ticket, waiting on the same screen as `AgeBadge` — `apps/pass-kds` is a
+// one-file stub. `03-F3`'s reprint marking is built and has nowhere to be seen.
 export const TicketCard = ({
   reference,
   minutes,
