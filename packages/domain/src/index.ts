@@ -51,6 +51,9 @@ export {
   type AuthScope,
   type AuthSubject,
   can,
+  // `05-F19` — the paid-out threshold decision, with both figures as required inputs.
+  canPayOut,
+  type PaidOutRequest,
   PERMISSION_ACTIONS,
   type PermissionAction,
   type ReportReach,

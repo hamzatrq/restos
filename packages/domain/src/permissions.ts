@@ -100,6 +100,14 @@ export const PERMISSION_ACTIONS = [
   "order.price_override",
   "receipt.reprint",
   "day.open_close",
+  // ── The service surface (`02-F21`..`F26`, `02-F36`, `02-F43`, `05-F19`). ────────────────
+  // Appendix A has ONE cash row — "Day open / close, cash count" — and it is `day.open_close`
+  // above. These five are the acts that row does not decide, each named by an FR that does.
+  "shift.open_close",
+  "cash.count",
+  "cash.drawer_no_sale",
+  "cash.paid_out",
+  "refund.issue",
   "stock.receive",
   "stock.count_entry",
   "stock.wastage_record",
@@ -195,6 +203,65 @@ const VERDICTS: Readonly<Record<VerdictAction, Readonly<Record<Role, AuthOutcome
   // escalating actions are enumerated there and do not include day open.
   "day.open_close": {
     cashier: "deny",
+    branch_manager: "allow",
+    storekeeper: "deny",
+    owner: "allow",
+  },
+  // No Appendix A row. `02-F22` — "Shift open **per cashier** → `shift.opened`" — and `02-F23`
+  // — "Shift close **per cashier**" — put both acts in the cashier's own hands, which is the
+  // half of `02-F22` its role guard deliberately does NOT cover: that guard names "day open/close
+  // and float entry", and folding the shift into it would leave a cashier unable to start her
+  // own shift on the device she is standing at. The storekeeper is `—` on every till row in
+  // Appendix A and gets the same cell here.
+  "shift.open_close": {
+    cashier: "allow",
+    branch_manager: "allow",
+    storekeeper: "deny",
+    owner: "allow",
+  },
+  // No Appendix A row of its own — and the near-miss is the reason this one is stated
+  // separately. Appendix A's `Day open / close, cash count` is the MANAGER'S day-close count
+  // (`02-F24`, "manager cash count + deposit record"), and `05 §3` splits the two explicitly:
+  // "Doc 02 owns: shift open/close per cashier, **cashier drawer counts** … Doc 05 owns: … **the
+  // manager's day-close count entry**". So this row is the cashier counting HER OWN drawer at
+  // shift close, which `02-F23` requires of her ("system-expected cash vs counted cash") and
+  // which the whole "I'm clean" framing rests on her being able to do.
+  "cash.count": {
+    cashier: "allow",
+    branch_manager: "allow",
+    storekeeper: "deny",
+    owner: "allow",
+  },
+  // `02-F21` + `02-F43` + `01-F17`, and the all-allow row is the RULING, not a shrug.
+  //
+  // `02-F21`'s control on the classic theft vector is that the open is "logged and counted" —
+  // logging, not refusal — and `02-F43` says in terms what a refusal produces: "an unbound
+  // no-sale that is stored and uncounted … money vanishing from `02-F23`'s expected cash and
+  // `02-F24`'s day close with nothing to point at". A denied role does not stop needing change
+  // for a customer; it opens the drawer with a key and the ledger learns nothing, which is
+  // strictly worse than the act this row permits. `05-F19`'s own worked scenario puts a
+  // storekeeper at the POS taking cash out, so that cell is allow too.
+  "cash.drawer_no_sale": {
+    cashier: "allow",
+    branch_manager: "allow",
+    storekeeper: "allow",
+    owner: "allow",
+  },
+  // `02-F26`/`05-F19`, and this row is only HALF the decision — see `canPayOut`, which is the
+  // only route to it. The cells below are the BELOW-THRESHOLD verdict: who may take cash out of
+  // the drawer at all. `05 §3` gives paid-out capture to doc 02 at the POS and `05-F19`'s
+  // scenario has a storekeeper performing one, so every till-reachable role is allowed.
+  "cash.paid_out": {
+    cashier: "allow",
+    branch_manager: "allow",
+    storekeeper: "allow",
+    owner: "allow",
+  },
+  // No Appendix A row. `02-F36` decides it alone and decides it flatly: a refund needs "manager
+  // approval **always** (remote interrupt or local PIN)" — so the cashier cell is `escalate` on
+  // exactly `02-F20`'s terms, and the storekeeper, who is `—` on settle, cannot reach it.
+  "refund.issue": {
+    cashier: "escalate",
     branch_manager: "allow",
     storekeeper: "deny",
     owner: "allow",
@@ -354,6 +421,15 @@ export const can = (
     return { outcome: "deny", action };
   }
 
+  // `05-F19` — a paid-out's verdict depends on the AMOUNT against the org threshold, and
+  // `AuthScope` carries neither. Answering here would be answering without the input that
+  // decides the question, so this route refuses and `canPayOut` is the only one that resolves.
+  //
+  // It fails CLOSED rather than taking an optional pair of numbers, on `01-F60`'s precedent: an
+  // optional completeness input means a forgetful caller silently skips the check, which is
+  // exactly how a Rs 4,000 paid-out walks past the approval `05-F19` exists to require.
+  if (action === "cash.paid_out") return { outcome: "deny", action };
+
   const verdicts = VERDICTS[action];
   const outcome = rolesAt(subject, scope.branch_id).reduce<AuthOutcome>((best, role) => {
     const verdict = verdicts[role];
@@ -364,4 +440,54 @@ export const can = (
   // Derived from the row, so `02-F20`'s path always resolves: every role named here is a role
   // this same matrix allows the action outright.
   return { outcome, action, satisfied_by: ROLES.filter((role) => verdicts[role] === "allow") };
+};
+
+/**
+ * `05-F19` — "`cash.paid_out` above the org threshold requires approval".
+ *
+ * A SEPARATE predicate for the same reason `reportScope` is one: its cells are not plain
+ * verdicts, and the input that decides them is not something `AuthScope` can carry. Both
+ * figures are REQUIRED POSITIONAL parameters — `01-F60`'s enabled-set precedent, where the
+ * completeness input was made required precisely because optional-means-skip is how a silent
+ * omission gets in. `can(subject, "cash.paid_out", scope)` refuses on purpose, so there is no
+ * second route that answers this question with the threshold missing.
+ */
+export type PaidOutRequest = {
+  /** What is leaving the drawer, integer paisa (`02-F44` — a magnitude, never signed). */
+  readonly amount_paisa: number;
+  /** The org threshold (`05-F19`; `00 §7` layer 2), integer paisa. */
+  readonly threshold_paisa: number;
+};
+
+export const canPayOut = (
+  subject: AuthSubject,
+  scope: AuthScope,
+  request: PaidOutRequest,
+): AuthDecision => {
+  const action = "cash.paid_out" as const;
+  if (subject.org_id !== scope.org_id) return { outcome: "deny", action };
+
+  const verdicts = VERDICTS[action];
+  const base = rolesAt(subject, scope.branch_id).reduce<AuthOutcome>((best, role) => {
+    const verdict = verdicts[role];
+    return OUTCOME_RANK[verdict] > OUTCOME_RANK[best] ? verdict : best;
+  }, "deny");
+  // A role that may not take cash out of the drawer at all is refused before the amount is
+  // looked at — the threshold widens no cell, it only narrows one.
+  if (base !== "allow") return { outcome: base, action };
+
+  // A comparison, not arithmetic: `DEC-MONEY-005` bans the operators, not the predicate.
+  // At the threshold is still within it — `05-F19` says "above".
+  if (request.amount_paisa <= request.threshold_paisa) return { outcome: base, action };
+
+  return {
+    outcome: "escalate",
+    action,
+    // Derived from the matrix like every other `satisfied_by`, but from `approval.grant`'s row
+    // rather than this one: `05-F19` routes the excess to "approve/deny per `05-F6`/`F7`", so
+    // the credential that closes the gap is one that may GRANT an approval, not one that may
+    // record a paid-out. `02-F38`'s self-approval refusal is applied at the grant, where the
+    // requester is known.
+    satisfied_by: ROLES.filter((role) => VERDICTS["approval.grant"][role] === "allow"),
+  };
 };
