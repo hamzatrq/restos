@@ -36,6 +36,9 @@ importers:
       '@restos/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@restos/escpos':
+        specifier: workspace:*
+        version: link:../../packages/escpos
       '@restos/sync-client':
         specifier: workspace:*
         version: link:../../packages/sync-client

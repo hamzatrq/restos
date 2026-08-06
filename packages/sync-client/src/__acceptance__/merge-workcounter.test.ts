@@ -130,6 +130,14 @@ describe("registry growth must fail this suite before it can silently no-op (fix
     "cash.paid_out",
     "day.closed",
     "day.opened",
+    // ── AMENDED August 2026 (K-7) ────────────────────────────────────────────────────────
+    // `kot.print_failed` is `03-F5`'s third consequence and entered the registry with it.
+    // Pinned HERE and not in `PINNED_NOT_FOLDED` because that set states `01-F52` — "not an
+    // input to ANY fold" — and this event is consumed by the order-keyed engine exactly as
+    // `kot.printed` beside it is: counted, projection-inert, no device projection in `26`'s
+    // ratified matrix. This line is the "spec-PR + oracle-pin event" the assertion below
+    // demands; without it the compile-level pin reds, which is the design working.
+    "kot.print_failed",
     "kot.printed",
     "order.confirmed",
     "order.created",

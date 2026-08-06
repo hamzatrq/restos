@@ -139,6 +139,22 @@ const payloadSchemas = {
   "kot.printed": z.looseObject({
     order_id: z.string().min(1),
   }),
+  /**
+   * `03-F5`'s third consequence: "`kot.print_failed` is emitted (consumed by doc 05 alarms)".
+   * The type is `01 §4` catalog vocabulary already; this is its payload, and without it the
+   * emission `03-F5` requires is a `01-F4` runtime error rather than a ledger record.
+   *
+   * TWO fields, because `03-F5` names exactly two nouns and rests its whole design on them —
+   * "naming the printer and order ('KOT #142 did not print — grill printer offline')". `05-F3`
+   * raises the same fact on the manager console ("the kitchen can't print" must reach the
+   * manager off the floor), and a console alarm that cannot say WHICH printer sends someone
+   * walking. `printer_name` rather than a printer id because no printer registry exists yet
+   * (`03-F2`'s routing table is doc-14 work) and an id nothing resolves is worse than a name.
+   */
+  "kot.print_failed": z.looseObject({
+    order_id: z.string().min(1),
+    printer_name: z.string().min(1),
+  }),
   "order.line_state_changed": z.looseObject({
     order_id: z.string().min(1),
     line_ids: z.array(z.string().min(1)).min(1),

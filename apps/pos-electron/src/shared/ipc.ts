@@ -222,6 +222,27 @@ export const CashStateSchema = z.object({
 export type CashState = z.infer<typeof CashStateSchema>;
 
 /**
+ * `03-F5`'s S1, as it crosses to the screen — the shape `packages/ui`'s `AlarmBand` takes, and
+ * deliberately the SAME three fields rather than a richer main-side record projected down.
+ *
+ * `03-F5` requires the alert to name "the printer and order"; `27-F11d` renders the head and
+ * counts the tail. So the two nouns are already inside `message`/`subject` when they cross, and
+ * the renderer formats nothing: a band assembled in the renderer from a reason code would put
+ * the operator-facing wording on the untrusted side of `18 §9`'s bridge, one copy per screen.
+ *
+ * `27-F11g` is why this channel exists at all: where paper is the only kitchen channel, this
+ * band is the ONLY signal that food is not being cooked.
+ */
+export const AlarmSchema = z.object({
+  id: z.string().min(1),
+  /** What is wrong, in the operator's words — not an error code. */
+  message: z.string().min(1),
+  /** Who or what it concerns: the printer, the order. */
+  subject: z.string().min(1),
+});
+export type Alarm = z.infer<typeof AlarmSchema>;
+
+/**
  * The append surface, and note how little of it the renderer controls: it supplies a type,
  * a payload and refs. **Identity, event id, lamport sequence and every timestamp are stamped
  * in main** — `01-F43`'s branch-consensus time is stamped at APPEND, and a renderer that
@@ -287,6 +308,24 @@ export const CHANNELS = {
    * its own (`18 §6`).
    */
   cashState: "restos:cash-state",
+  /**
+   * `03-F5` — the unacknowledged S1s on this device. **A channel of its own, not a field on
+   * `DeviceState`**, on the same argument `staff` records above it and with the opposite cost
+   * profile stated honestly: `DeviceState` is re-read on every `changed` push, so riding on it
+   * would be free to deliver and would also make a required field on a schema three read-only
+   * harnesses construct by hand. The push is what carries it instead — main appends
+   * `kot.print_failed` and notifies, and the renderer re-reads both.
+   *
+   * It is also a different FACT. `DeviceState` is what the shell KNOWS about itself; an alarm is
+   * something that HAPPENED and stays until a human acknowledges it.
+   */
+  alarms: "restos:alarms",
+  /**
+   * `03-F5`: the alert repeats "until acknowledged". Acknowledgement is main's to record because
+   * the alarm lives beside the spooler, not in the renderer — a screen that dismissed its own
+   * copy would leave the band on every other surface reading the same device.
+   */
+  acknowledgeAlarm: "restos:acknowledge-alarm",
   append: "restos:append",
   addLine: "restos:add-line",
   /**
@@ -337,6 +376,23 @@ export type RestosBridge = {
    * as a finding, because "required" is where this belongs once those harnesses catch up.
    */
   cashState?: () => Promise<CashState>;
+  /**
+   * `03-F5`'s S1s, and `03-F5`'s acknowledgement.
+   *
+   * **OPTIONAL, for exactly the reason `cashState` above is, and it is a WORSE fit here — which
+   * is why it is reported rather than quietly accepted.** `unlock-gate.dom.test.tsx` closes its
+   * harness with `satisfies RestosBridge`, and `counter.dom.test.tsx` /
+   * `unbound-settlement.dom.test.tsx` stub the bridge as plain objects; all three are oracles
+   * this session may not edit (`24 §3` step 2) and all three predate this channel, so a REQUIRED
+   * member reds a typecheck and three suites for a surface none of them exercises.
+   *
+   * The cost is real and named: `03-F5` forbids a silent KOT failure, and an optional channel
+   * means a host that does not serve it shows no band at all. The shipped preload DOES serve it
+   * (`preload/index.ts`), and `main/__acceptance__/kot-printing.test.ts` fails if it stops — that
+   * assertion is what stands in for the type, until those harnesses catch up.
+   */
+  alarms?: () => Promise<Alarm[]>;
+  acknowledgeAlarm?: (alarm_id: string) => Promise<void>;
   append: (req: AppendRequest) => Promise<AppendResult>;
   /** `C5`/`01-F60` — main resolves the price; no money crosses this call. */
   addLine: (req: AddLineRequest) => Promise<AppendResult>;

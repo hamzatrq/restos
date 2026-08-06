@@ -730,6 +730,19 @@ export const createMergeEngine = (): MergeEngine => {
         // carry yet (doc-03 work).
         return;
       }
+      case "kot.print_failed": {
+        // K-7 (03-F5): emitted when the 03-F4 retry budget exhausts. Consumed and
+        // projection-inert for the same reason as kot.printed directly above — 26's
+        // ratified matrix has no device projection for a print fact, and the anchor
+        // this event might otherwise touch (age_basis) is deliberately the CONFIRM,
+        // so "a failed print never hides a late order" (03-F14). Its reader is doc
+        // 05's alarm console (05-F3), a cloud read model (01-F7), not a fold here.
+        //
+        // Deliberately NOT in `PARKING_TYPES`: parking is for bare order facts that must wait
+        // for their order key, and this case touches no entity at all, so an early straggler
+        // costs one counted no-op rather than a phantom order row.
+        return;
+      }
       case "order.table_assigned": {
         const p = event.payload as TableAssignedP;
         const e = entity(p.order_id);

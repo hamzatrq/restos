@@ -153,6 +153,14 @@ const mountWith = (cash: CashState) => {
     kitchenQueue: vi.fn(async () => []),
     menu: vi.fn(async () => MENU),
     cashState: vi.fn(async () => cash),
+    // ── AMENDED August 2026 (K-7) ────────────────────────────────────────────────────────
+    // `03-F5`'s print-failure band. Added to the KNOWN map, which does NOT weaken the guard
+    // below: the assertion is "reached for an *unknown* bridge member", and `alarms` is now a
+    // member of `RestosBridge` read by the SHELL's own reload — the same class as `deviceState`
+    // and `menu`, which have always been here for the same reason. This harness could never
+    // distinguish a shell read from a Me-surface read; what it catches is a surface inventing a
+    // channel, and every other name still trips it.
+    alarms: vi.fn(async () => []),
     append: vi.fn(async (req: AppendRequest) => {
       appended.push(req);
       return { id: `evt-${appended.length}` };
