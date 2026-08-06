@@ -70,9 +70,15 @@ bundle is ESM and `__dirname` does not exist there.
   20 s later**, naming the printer and the order. That is the honest state of this device, not
   a bug: `03-F5` forbids a silent KOT failure, and the alternative is a till that claims to
   have printed. The printer model is `RESTOS_KOT_PRINTER` (default `TH230`, a PINNED value and
-  not a measurement — see `main/index.ts`). The queue is **process-lifetime**: `createSpooler`
-  is given no `SpoolerJobStore` yet, so `03-F4`'s crash clause is unmet and a relaunch loses
-  queued tickets. OWED.
+  not a measurement — see `main/index.ts`). The queue is **DURABLE as of August 2026**:
+  `createSpooler` is handed `openJobStore` (`main/job-store.ts` — SQLite + WAL, `print-spool.db`
+  in `userData`), so `03-F4`'s crash clause holds and a relaunch keeps its queued tickets, their
+  bytes, their state and their attempt counts. It was process-lifetime for one round, because K-7
+  wired the spooler and passed no store — the wave's named defect one argument along — and the
+  assertion that would have caught it now lives in `__acceptance__/kot-printing.test.ts` §G.
+  **Still unproven against hardware:** every "power cut" in
+  `__acceptance__/spooler-job-store.test.ts` is `close()`, and fsync, torn writes and WAL recovery
+  from a real plug-pull belong to K-8 / D3.
 - **The item grid is empty.** The device catalog stores and versions correctly and nothing
   delivers to it yet (`plans/wave-1/catalog-transport.md`). So `01-F54`'s degrade-to-identifier
   path is what every launch exercises — the failure mode gets the mileage.

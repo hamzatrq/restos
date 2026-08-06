@@ -314,6 +314,79 @@ describe("26 §7 — over/short is a CARRIED fact, read here and never re-derive
     ).toEqual([]);
   });
 
+  /**
+   * ADDED August 2026 — the NEGATIVE carried variance, which nothing rendered.
+   *
+   * `variance_paisa: +50_000` is covered above and `0` below, and `cash-tab.dom.test.tsx`
+   * asserts a live-computed SHORT reaches the payload as `-10_000`. The gap between those is the
+   * hazard path: a shift whose variance arrives NEGATIVE **through the seam**, already signed,
+   * already signed-off — the read side of the write that suite covers. It is the dangerous case
+   * for two independent reasons and neither is theoretical:
+   *
+   *   1. `Paisa` is non-negative and `rupeesFromPaisa` THROWS on a negative — during render,
+   *      which in React 19 unmounts the root and blanks the till (`MoneyValue`'s own doc says
+   *      so). A signed value reaching `MoneyValue.paisa` does not show a wrong number; it shows
+   *      nothing at all, on the counter, mid-shift.
+   *   2. The obvious defensive fix — take the magnitude and move on — silently turns a SHORT
+   *      drawer into an OVER one. The fixture below is built so that mistake is VISIBLE: the
+   *      at-close recompute lands on `OVER Rs 500`, the same magnitude as the carried fact and
+   *      the opposite word. A cashier told she is Rs 500 over when she is Rs 500 short signs off
+   *      on a discrepancy that is now hers.
+   *
+   * `directedPaisa` is the only correct route (`27-F12`): one call, both halves, magnitude to
+   * `MoneyValue` and direction as a WORD.
+   *
+   *   carried               `variance_paisa`               → SHORT Rs 500  ← the only correct one
+   *   magnitude-only        `abs(variance_paisa)`          → OVER  Rs 500
+   *   recomputed at close   counted + paid_out − at_close  → OVER  Rs 500
+   *   recomputed live       counted + paid_out − expected  → SHORT Rs 300
+   */
+  const CLOSED_SHORT = aShift({
+    shift_id: "shift-78",
+    closed: 1,
+    expected_json: JSON.stringify({ cash: 180_000 }),
+    expected_at_close_json: JSON.stringify(byMethod({ cash: 100_000 })),
+    paid_out_paisa: 30_000,
+    counted_cash_paisa: 120_000,
+    variance_paisa: -50_000,
+  });
+
+  it("renders a carried NEGATIVE variance as a SHORT, in words and without a minus sign", async () => {
+    mountWith(aCashState({ shifts: [CLOSED_SHORT], days: [aDay()] }));
+    render(<Counter />);
+    await goToTab("Me");
+
+    // `27-F23` — `Rs`, symbol-first, no decimals on an operational screen. `27-F12`/`27-F24` —
+    // the direction is a word she reads, not a sign she has to interpret.
+    expect(screen.getAllByText("SHORT Rs 500").length).toBeGreaterThan(0);
+    expect(
+      screen.queryAllByText("OVER Rs 500"),
+      "27-F12 — the magnitude was taken and the direction dropped: a short drawer read as over",
+    ).toEqual([]);
+    expect(
+      screen.queryAllByText("SHORT Rs 300"),
+      "26 §7 — the screen re-derived the variance from the live expectation",
+    ).toEqual([]);
+
+    const rendered = document.body.textContent ?? "";
+    expect(
+      rendered.length,
+      "the surface rendered at all — a blanked till passes every not-match",
+    ).toBeGreaterThan(100);
+    // `MoneyValue.paisa` took the signed value: `rupeesFromPaisa` throws mid-render and React 19
+    // unmounts the root, so this catches the blank-till failure by its output rather than by an
+    // exception nobody is listening for.
+    expect(screen.getAllByText("Rs 1,200").length, "what she counted").toBeGreaterThan(0);
+    for (const wrong of ["-500", "−500", "500.00", "Rs -", "(500)"]) {
+      expect(
+        rendered,
+        `27-F12/27-F23 — ${wrong} is not how a short drawer is stated`,
+      ).not.toContain(wrong);
+    }
+    // `27-F22` — Western digits everywhere, never Arabic-Indic or Eastern Arabic.
+    expect(rendered).not.toMatch(/[٠-٩۰-۹]/);
+  });
+
   it("shows the expectation AS AT CLOSE beside it, not the one that has since moved", async () => {
     // The two numbers are one fact: a variance is meaningless without the expectation it was
     // measured against, and pairing a carried variance with a live expectation would show her
