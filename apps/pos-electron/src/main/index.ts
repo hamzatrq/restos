@@ -349,6 +349,8 @@ app.whenReady().then(async () => {
   ipcMain.handle(CHANNELS.openOrders, () => gateway.openOrders());
   ipcMain.handle(CHANNELS.kitchenQueue, () => gateway.kitchenQueue());
   ipcMain.handle(CHANNELS.menu, () => gateway.menu());
+  // `02-F23`/`02-F37`/`02-F43` — the Cash and Me surfaces' one read.
+  ipcMain.handle(CHANNELS.cashState, () => gateway.cashState());
   /**
    * `01-F61` — the identification grid's roster. **Mapped, not forwarded**: `StaffMember`
    * carries the Argon2id `pin_hash`, and `01-F28` puts verification in this process, so the

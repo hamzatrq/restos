@@ -7,6 +7,8 @@ import {
   type AppendRequest,
   AppendRequestSchema,
   type AppendResult,
+  type CashState,
+  CashStateSchema,
   type DeviceState,
   DeviceStateSchema,
   type KitchenTicket,
@@ -30,6 +32,8 @@ export type Gateway = {
   openOrders: () => OpenOrder[];
   kitchenQueue: () => KitchenTicket[];
   menu: () => MenuItem[];
+  /** `02-F23`/`02-F37`/`02-F43` — the `shift_cash` fold, for the Cash and Me surfaces. */
+  cashState: () => CashState;
   append: (req: unknown) => AppendResult;
   /** `C5` — `01-F60`'s resolution and `01-F53`'s capture, both on the trusted side. */
   addLine: (req: unknown) => AppendResult;
@@ -252,6 +256,33 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
       };
     });
   },
+
+  /**
+   * `02-F23`'s reconciliation, `02-F37`'s unbound settlements and `02-F43`'s unbound drawer
+   * activity, as the store's own `shift_cash` projection already holds them.
+   *
+   * FOUR store reads assembled into one payload and nothing else — no filtering, no sum, no
+   * join. `26 §8` puts fold logic in one module, and the shape below is the fold's own four
+   * projections under their own names.
+   *
+   * **What this does NOT yet do: scope the shifts to the asking cashier.** `02-F23` says
+   * "cashiers see only their own shifts" and `permissions.ts` already resolves it
+   * (`report.sales_view` → `own_shift`, checked against `scope.subject_user_id`) — but
+   * `02-F45` makes the fold's `cashier` column project `null` until an identity reaches the
+   * envelope, so there is no "own" to scope BY. Commandment 8 puts that filter here, on the
+   * trusted side, never in the renderer. Owed, and reported rather than faked.
+   */
+  cashState: () =>
+    checked(
+      CashStateSchema,
+      {
+        shifts: deps.store.shifts(),
+        days: deps.store.days(),
+        unbound: deps.store.unboundSettlements(),
+        unbound_drawer: deps.store.unboundDrawer(),
+      },
+      "cash state",
+    ),
 
   append: (req: unknown): AppendResult => {
     // Validated HERE, on the trusted side. The renderer is the untrusted end of this bridge

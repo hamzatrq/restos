@@ -1,7 +1,8 @@
 import { newId, paisa } from "@restos/domain";
 import { AppShell, Cart, ItemGrid, type Tab, TenderPanel, Tile, usePhysicalSize } from "@restos/ui";
 import { useCallback, useEffect, useState } from "react";
-import type { DeviceState, MenuItem, OpenOrder } from "../shared/ipc";
+import type { CashState, DeviceState, MenuItem, OpenOrder } from "../shared/ipc";
+import { CashSurface, MeSurface } from "./CashSurfaces";
 
 /**
  * The counter screen — the first RestOS surface that renders on a device.
@@ -41,8 +42,11 @@ const TABS: readonly Tab[] = [
   { id: "order", label: "Order" },
   { id: "orders", label: "Orders", unavailable: true, unavailableReason: "not built yet" },
   { id: "pay", label: "Pay", unavailable: true, unavailableReason: "not built yet" },
-  { id: "cash", label: "Cash", unavailable: true, unavailableReason: "not built yet" },
-  { id: "me", label: "Me", unavailable: true, unavailableReason: "not built yet" },
+  // `S-3`/`S-4`/`S-5` — these two SHIP. `27-F4` makes the rail positional memory, so building
+  // them changes exactly one thing each: `unavailable` goes away. Nothing is added, removed or
+  // reordered, which is what that FR calls a breaking change.
+  { id: "cash", label: "Cash" },
+  { id: "me", label: "Me" },
 ];
 
 /**
@@ -78,6 +82,13 @@ export const Counter = () => {
   const [device, setDevice] = useState<DeviceState | null>(null);
   const [orders, setOrders] = useState<readonly OpenOrder[]>([]);
   const [items, setItems] = useState<readonly MenuItem[]>([]);
+  /**
+   * The `shift_cash` projection behind the Cash and Me surfaces (`02-F23`, `02-F37`, `02-F43`).
+   * `null` until the seam answers — and it stays null against a host that does not serve this
+   * channel, which is the degrade `01-F54`/`01-F17` require of a read that fails: the counter
+   * keeps selling and the two surfaces show nothing, rather than the till going blank.
+   */
+  const [cash, setCash] = useState<CashState | null>(null);
   const [page, setPage] = useState(0);
   const [activeTab, setActiveTab] = useState(TABS[0]?.id ?? "order");
   /**
@@ -94,14 +105,18 @@ export const Counter = () => {
     // Three reads, never a join in the renderer: the folds already hold these projections and
     // assembling a fourth shape here would be fold logic reimplemented outside the engine
     // (26 §8). The gateway does the one join the queue genuinely needs.
-    const [d, o, m] = await Promise.all([
+    const [d, o, m, c] = await Promise.all([
       window.restos.deviceState(),
       window.restos.openOrders(),
       window.restos.menu(),
+      // A FOURTH read, and optional-chained because the member is optional on the contract —
+      // see `RestosBridge.cashState` for why that asymmetry exists and what it owes.
+      window.restos.cashState?.(),
     ]);
     setDevice(d);
     setOrders(o);
     setItems(m);
+    setCash(c ?? null);
   }, []);
 
   useEffect(() => {
@@ -173,6 +188,25 @@ export const Counter = () => {
     write(window.restos.append({ type: "order.confirmed", payload: { order_id }, refs: [] }));
   };
 
+  /**
+   * `S-3`/`S-4` (Cash) and `S-5` (Me), both fed by the one `shift_cash` read.
+   *
+   * Every write goes through `write` above, so a refusal is caught and the screen re-reads what
+   * is actually true rather than holding what it assumed — which is the whole of `02-F37`'s
+   * "succeed and lie" applied to a day that did not open.
+   */
+  const cashSurface =
+    cash === null ? (
+      // `00 §5.7` — the device reports what it knows. An empty reconciliation drawn before the
+      // seam answered is indistinguishable from a clean one, which on this surface is the
+      // single most expensive thing to get wrong.
+      <p>Reading the day…</p>
+    ) : activeTab === "cash" ? (
+      <CashSurface cash={cash} onAppend={(req) => write(window.restos.append(req))} />
+    ) : (
+      <MeSurface cash={cash} />
+    );
+
   return (
     <AppShell
       actor={device.actor}
@@ -188,62 +222,70 @@ export const Counter = () => {
       onSelectTab={setActiveTab}
       training={device.training}
     >
-      <div style={{ display: "flex", gap: 16, height: "100%", minHeight: 0 }}>
-        {/*
+      {/*
+        `27-F1` — the tabs are PEER surfaces one act apart, so the work area swaps and the
+        chrome never moves. `Orders` and `Pay` are still unbuilt and are unreachable from the
+        rail, so they cannot be selected here.
+      */}
+      {activeTab === "cash" || activeTab === "me" ? (
+        cashSurface
+      ) : (
+        <div style={{ display: "flex", gap: 16, height: "100%", minHeight: 0 }}>
+          {/*
           The measured surface. The grid renders INSIDE this box, so what is measured and what
           is filled are the same element — a grid sized from one box and placed in another is
           how the cart got pushed off screen.
         */}
-        <div
-          style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}
-        >
-          {/*
+          <div
+            style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}
+          >
+            {/*
             C4 — the order-type row. It holds this position ALWAYS (`27-F4` positional memory,
             `27-F5` no controls that change with context): when an order is open the three
             choices are greyed in place with the reason, never removed and never replaced by
             something else. A row that vanished once work started would move the grid under a
             cashier mid-order, which is the one thing `27-F4` calls a breaking change.
           */}
-          <div style={{ display: "flex", gap: 8 }}>
-            {ORDER_TYPES.map((t) => (
-              <Tile
-                key={t.id}
-                posture="counter"
-                label={t.label}
-                onPress={current === undefined ? () => startOrder(t.id) : undefined}
-                unavailable={current !== undefined}
-                {...(current !== undefined ? { unavailableReason: "order in progress" } : {})}
-              />
-            ))}
-            {/*
+            <div style={{ display: "flex", gap: 8 }}>
+              {ORDER_TYPES.map((t) => (
+                <Tile
+                  key={t.id}
+                  posture="counter"
+                  label={t.label}
+                  onPress={current === undefined ? () => startOrder(t.id) : undefined}
+                  unavailable={current !== undefined}
+                  {...(current !== undefined ? { unavailableReason: "order in progress" } : {})}
+                />
+              ))}
+              {/*
               C9 — one tap, and it is the whole kitchen handoff (`21 §4`'s 2-tap law counts
               grid → confirm). Greyed with its reason until there is an order to send, rather
               than absent, for the same positional reason as the row above.
             */}
-            <Tile
-              posture="counter"
-              label="Send to kitchen"
-              onPress={current === undefined ? undefined : () => sendToKitchen(current.order_id)}
-              unavailable={current === undefined}
-              {...(current === undefined ? { unavailableReason: "no order started" } : {})}
-            />
-          </div>
-          {/*
+              <Tile
+                posture="counter"
+                label="Send to kitchen"
+                onPress={current === undefined ? undefined : () => sendToKitchen(current.order_id)}
+                unavailable={current === undefined}
+                {...(current === undefined ? { unavailableReason: "no order started" } : {})}
+              />
+            </div>
+            {/*
             The measured surface. The grid renders INSIDE this box, so what is measured and what
             is filled are the same element — a grid sized from one box and placed in another is
             how the cart got pushed off screen.
           */}
-          <div ref={surfaceRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex" }}>
-            {/*
+            <div ref={surfaceRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex" }}>
+              {/*
               Nothing is drawn until the first measurement. `usePhysicalSize` deliberately returns
               null rather than a default, because a default is a guessed panel by another name and
               a grid costed for the wrong surface puts tiles off-page where no pager can reach
               them — on a counter, an item that cannot be sold.
             */}
-            {gridMm === null ? null : (
-              <ItemGrid
-                items={
-                  /*
+              {gridMm === null ? null : (
+                <ItemGrid
+                  items={
+                    /*
                     The grid is DISABLED IN PLACE until an order exists (founder ruling, §3.6) —
                     greyed with the reason, never emptied, so the tile an operator reaches for by
                     position is still where they learned it.
@@ -255,21 +297,21 @@ export const Counter = () => {
                     attribute here would break `01-F59` for the 86 case, which is the exact
                     defect `8b28a72` removed.
                   */
-                  current === undefined
-                    ? items.map((i) => ({
-                        ...i,
-                        unavailable: true,
-                        unavailableReason: "choose an order type first",
-                      }))
-                    : items
-                }
-                posture="counter"
-                widthMm={gridMm.widthMm}
-                heightMm={gridMm.heightMm}
-                tileMm={28}
-                page={page}
-                onPageChange={setPage}
-                /*
+                    current === undefined
+                      ? items.map((i) => ({
+                          ...i,
+                          unavailable: true,
+                          unavailableReason: "choose an order type first",
+                        }))
+                      : items
+                  }
+                  posture="counter"
+                  widthMm={gridMm.widthMm}
+                  heightMm={gridMm.heightMm}
+                  tileMm={28}
+                  page={page}
+                  onPageChange={setPage}
+                  /*
                   C5 — the counter's highest-frequency act, ~300x a shift, and now one tap.
 
                   THE GUARD IS REAL NOW, and it has to be here rather than in the greying above:
@@ -283,68 +325,69 @@ export const Counter = () => {
                   main resolves the price from this device's branch and the ORDER's channel
                   (`01-F60`) and captures it into the event (`01-F53`).
                 */
-                onSelect={(item_id) => {
-                  if (current === undefined) return;
-                  write(window.restos.addLine({ order_id: current.order_id, item_id, qty: 1 }));
-                }}
-              />
-            )}
+                  onSelect={(item_id) => {
+                    if (current === undefined) return;
+                    write(window.restos.addLine({ order_id: current.order_id, item_id, qty: 1 }));
+                  }}
+                />
+              )}
+            </div>
           </div>
-        </div>
-        {/*
+          {/*
           02-F12 — settling is on the counter, beside the cart, not behind a mode switch.
           `27-F1` caps layout depth at ONE and `27-F5` forbids controls that change with
           context: a payment panel that appeared only after pressing SETTLE would be depth two
           and a moving target, on the surface where an operator is most interrupted.
         */}
-        {current === undefined ? null : (
-          <TenderPanel
-            dueP={paisa(current.total_paisa)}
-            takenP={paisa(current.paid_paisa)}
-            onTender={({ amountP, method }) => {
-              void window.restos
-                .append({
-                  type: "payment.recorded",
-                  payload: {
-                    order_id: current.order_id,
-                    amount_paisa: amountP,
-                    method,
-                    // 01-F31 — the attempt key is what makes a double-tap idempotent. Minted
-                    // per TENDER, not per order: 02-F13's split is several payments against one
-                    // order, and sharing a key would collapse them into one.
-                    settlement_attempt_id: newId(),
-                    // DEC-MONEY-007 — this settles the order. A khata REPAYMENT later carries
-                    // `repays_receivable`, and without the discriminator the two double-count
-                    // under full observation.
-                    purpose: "settles_order",
-                    // 26 §7 — the shift this settlement buckets to is CARRIED, never resolved
-                    // at fold time from the reading device's state (01-F34). Null because no
-                    // shift is open: the POS has no shift concept yet, and `02-F37` makes that
-                    // the legal outcome — "settling with no shift open succeeds ... recorded
-                    // with a null shift reference ... Never a modal, never a block", because
-                    // `01-F17` forbids stopping a sale with a customer standing there.
-                    shift_id: null,
-                  },
-                  refs: [],
-                })
-                .then(reload);
-            }}
+          {current === undefined ? null : (
+            <TenderPanel
+              dueP={paisa(current.total_paisa)}
+              takenP={paisa(current.paid_paisa)}
+              onTender={({ amountP, method }) => {
+                void window.restos
+                  .append({
+                    type: "payment.recorded",
+                    payload: {
+                      order_id: current.order_id,
+                      amount_paisa: amountP,
+                      method,
+                      // 01-F31 — the attempt key is what makes a double-tap idempotent. Minted
+                      // per TENDER, not per order: 02-F13's split is several payments against one
+                      // order, and sharing a key would collapse them into one.
+                      settlement_attempt_id: newId(),
+                      // DEC-MONEY-007 — this settles the order. A khata REPAYMENT later carries
+                      // `repays_receivable`, and without the discriminator the two double-count
+                      // under full observation.
+                      purpose: "settles_order",
+                      // 26 §7 — the shift this settlement buckets to is CARRIED, never resolved
+                      // at fold time from the reading device's state (01-F34). Null because no
+                      // shift is open: the POS has no shift concept yet, and `02-F37` makes that
+                      // the legal outcome — "settling with no shift open succeeds ... recorded
+                      // with a null shift reference ... Never a modal, never a block", because
+                      // `01-F17` forbids stopping a sale with a customer standing there.
+                      shift_id: null,
+                    },
+                    refs: [],
+                  })
+                  .then(reload);
+              }}
+            />
+          )}
+          <Cart
+            lines={(current?.lines ?? []).map((l) => ({
+              id: l.line_id,
+              name: l.name,
+              quantity: l.quantity,
+              modifiers: l.modifiers,
+              removals: l.removals,
+              ...(l.note === null ? {} : { note: l.note }),
+            }))}
+            // The total is the ENGINE's own derivation, carried across the IPC seam as branded
+            // integer paisa and never re-summed here (00 §6, 26 §8).
+            totalPaisa={paisa(current?.total_paisa ?? 0)}
           />
-        )}
-        <Cart
-          lines={(current?.lines ?? []).map((l) => ({
-            id: l.line_id,
-            name: l.name,
-            quantity: l.quantity,
-            modifiers: l.modifiers,
-            removals: l.removals,
-            ...(l.note === null ? {} : { note: l.note }),
-          }))}
-          // The total is the ENGINE's own derivation, carried across the IPC seam as branded
-          // integer paisa and never re-summed here (00 §6, 26 §8).
-          totalPaisa={paisa(current?.total_paisa ?? 0)}
-        />
-      </div>
+        </div>
+      )}
     </AppShell>
   );
 };

@@ -17,6 +17,9 @@ const bridge: RestosBridge = {
   menu: () => ipcRenderer.invoke(CHANNELS.menu),
   // `01-F61` — the identification grid's roster, in the order main supplies it (`27-F4`).
   staff: () => ipcRenderer.invoke(CHANNELS.staff),
+  // `02-F23`/`02-F37`/`02-F43` — the `shift_cash` projection behind Cash and Me. Optional on
+  // the contract, always served here: this bridge is the one main actually ships.
+  cashState: () => ipcRenderer.invoke(CHANNELS.cashState),
   append: (req) => ipcRenderer.invoke(CHANNELS.append, req),
   addLine: (req) => ipcRenderer.invoke(CHANNELS.addLine, req),
   // `01-F28` — an identity and the digits go one way and a yes/no comes back. Verification is

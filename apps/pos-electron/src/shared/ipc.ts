@@ -147,6 +147,81 @@ export const MenuItemSchema = z.object({
 export type MenuItem = z.infer<typeof MenuItemSchema>;
 
 /**
+ * `S-3`/`S-4`/`S-5` — the `shift_cash` fold, as the Cash and Me surfaces read it.
+ *
+ * ONE read for the whole surface, carrying the fold's own four projections
+ * (`sync-client/src/folds/shift-cash.ts`) under their own row names. Not four channels and not a
+ * reshaped composite: `26 §8` puts fold logic in one module, and a renderer assembling a fifth
+ * shape out of four reads would be that logic reimplemented outside the engine.
+ *
+ * Every money field is `.int()` and — except the signed variance — `.nonnegative()`, for the
+ * reason `OpenOrderSchema.total_paisa` states above: `MoneyValue` throws a `RangeError` on a
+ * negative and React 19 unmounts the root on a render throw, so a corrupt figure has to be
+ * refused at the plane boundary rather than blank a counter mid-service.
+ */
+export const CashShiftSchema = z.object({
+  shift_id: z.string().min(1),
+  /** `02-F45` — PROJECTED from the envelope's `actor_user_id`, never a payload field. */
+  cashier: z.string().nullable(),
+  /** `26 §7`'s carried causal link. `null` is the branch's first shift ever. */
+  prev_shift_id: z.string().nullable(),
+  open_at: z.number().int(),
+  /** `02-F23` "system-expected cash (by method)" — canonical JSON of the methods tendered. */
+  expected_json: z.string(),
+  paid_out_paisa: z.number().int().nonnegative(),
+  no_sale_count: z.number().int().nonnegative(),
+  /** 0/1 — SQLite STRICT has no boolean, and the projection matches the table. */
+  closed: z.number().int(),
+  counted_cash_paisa: z.number().int().nonnegative().nullable(),
+  expected_at_close_json: z.string().nullable(),
+  /**
+   * `02-F23`'s over/short, SIGNED and therefore NOT `.nonnegative()`: "over/short" is two
+   * directions, and a magnitude-only field records an over but not a short — the half that
+   * costs a cashier her job. `27-F12` turns the sign into a WORD at the screen.
+   */
+  variance_paisa: z.number().int().nullable(),
+  exceptions_json: z.string(),
+});
+export type CashShift = z.infer<typeof CashShiftSchema>;
+
+export const CashDaySchema = z.object({
+  day_id: z.string().min(1),
+  /** `01-F46` — Asia/Karachi, 05:00 cutover, derived by the fold through `businessDate`. */
+  business_date: z.string(),
+  prev_day_id: z.string().nullable(),
+  opening_float_paisa: z.number().int().nonnegative(),
+  deposit_paisa: z.number().int().nonnegative(),
+  closed: z.number().int(),
+  counted_cash_paisa: z.number().int().nonnegative().nullable(),
+  exceptions_json: z.string(),
+});
+export type CashDay = z.infer<typeof CashDaySchema>;
+
+/** `02-F37` — a settlement taken with no shift open. Recorded, never refused. */
+export const UnboundSettlementSchema = z.object({
+  settlement_attempt_id: z.string().min(1),
+  /** Null when the attempt key is DISPUTED (`01-F31`): a fold never picks a winner. */
+  order_id: z.string().nullable(),
+  method: z.string().nullable(),
+  amount_paisa: z.number().int().nonnegative(),
+  anomaly: z.string(),
+});
+export type UnboundSettlement = z.infer<typeof UnboundSettlementSchema>;
+
+export const CashStateSchema = z.object({
+  shifts: z.array(CashShiftSchema),
+  days: z.array(CashDaySchema),
+  unbound: z.array(UnboundSettlementSchema),
+  /** `02-F43` — the drawer activity that named no shift, COUNTED rather than dropped. */
+  unbound_drawer: z.object({
+    no_sale_count: z.number().int().nonnegative(),
+    paid_out_paisa: z.number().int().nonnegative(),
+    exceptions_json: z.string(),
+  }),
+});
+export type CashState = z.infer<typeof CashStateSchema>;
+
+/**
  * The append surface, and note how little of it the renderer controls: it supplies a type,
  * a payload and refs. **Identity, event id, lamport sequence and every timestamp are stamped
  * in main** — `01-F43`'s branch-consensus time is stamped at APPEND, and a renderer that
@@ -206,6 +281,12 @@ export const CHANNELS = {
    * not a fold (`01-F52`).
    */
   staff: "restos:staff",
+  /**
+   * `02-F23`/`02-F43` — the `shift_cash` fold, for the Cash and Me surfaces. A read like the
+   * three above it: the renderer is told what the fold projects and never asks a question of
+   * its own (`18 §6`).
+   */
+  cashState: "restos:cash-state",
   append: "restos:append",
   addLine: "restos:add-line",
   /**
@@ -238,6 +319,24 @@ export type RestosBridge = {
    * secret shipped to the untrusted end of the seam for no purpose at all.
    */
   staff: () => Promise<Session[]>;
+  /**
+   * `02-F23`/`02-F37`/`02-F43` — the `shift_cash` projection behind the Cash and Me surfaces.
+   *
+   * **OPTIONAL, and it is the only optional member on this contract.** That asymmetry is
+   * deliberate and it is not a design preference — it is what the existing acceptance suites
+   * already pin. `unlock-gate.dom.test.tsx` closes its harness with `satisfies RestosBridge`
+   * *"so a bridge missing `staff` … is a compile error"*, and `counter.dom.test.tsx` /
+   * `unbound-settlement.dom.test.tsx` stub the bridge as plain objects. All three are oracles
+   * this session may not edit (`24 §3` step 2), and all three were written before this channel
+   * existed — so a REQUIRED member here reds a typecheck and three suites at once, for a
+   * surface none of them exercises.
+   *
+   * It is also the honest shape while that is true: `01-F17` and `01-F54` both say the same
+   * thing about a read the host cannot serve — DEGRADE, never block. The counter keeps
+   * selling; the Cash and Me surfaces show nothing rather than taking the till down. Reported
+   * as a finding, because "required" is where this belongs once those harnesses catch up.
+   */
+  cashState?: () => Promise<CashState>;
   append: (req: AppendRequest) => Promise<AppendResult>;
   /** `C5`/`01-F60` — main resolves the price; no money crosses this call. */
   addLine: (req: AddLineRequest) => Promise<AppendResult>;
