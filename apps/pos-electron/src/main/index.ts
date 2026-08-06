@@ -6,7 +6,7 @@ import { createSpooler, printerCapability } from "@restos/escpos";
 import { createPinAuditSink, createPinSession, openStore, wallClock } from "@restos/sync-client";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { AppendRequestSchema, CHANNELS, type Session } from "../shared/ipc";
-import { authorizeWrites, PAID_OUT_APPROVAL_THRESHOLD_PAISA } from "./authorize";
+import { authorizeReads, authorizeWrites, PAID_OUT_APPROVAL_THRESHOLD_PAISA } from "./authorize";
 import {
   catalogResolver,
   priceResolver,
@@ -422,6 +422,22 @@ app.whenReady().then(async () => {
   });
 
   /**
+   * **Commandment 8 applies to READS too** — `02-F23`: *"cashiers see only their own shifts …
+   * cross-cashier views belong to manager/owner surfaces (docs 05/12)."*
+   *
+   * The `cashState` channel served the whole shift/day fold to whoever asked, so a cashier could
+   * read every colleague's drawer, count and over/short off her own till. `18 §9` makes main the
+   * trusted side, so the narrowing happens HERE: the renderer may show less than it is handed,
+   * but it must not be able to ask for more, and a filter in `CashSurfaces.tsx` would be a
+   * client role claim deciding a privacy rule.
+   *
+   * Same `store` and the same `session` getter as the write guard directly above, deliberately:
+   * one construction, one subject. Two would be `02-F45`'s disagreement with no rule for which
+   * wins — a session refused a write and granted the read of its result.
+   */
+  const reads = authorizeReads({ reads: gateway, store, session });
+
+  /**
    * `03-F4`/`03-F5` — the durable print spooler and the thing that feeds it.
    *
    * **This is K-7's whole point, and it is four lines.** `packages/escpos` shipped the encoder,
@@ -480,8 +496,11 @@ app.whenReady().then(async () => {
   ipcMain.handle(CHANNELS.openOrders, () => gateway.openOrders());
   ipcMain.handle(CHANNELS.kitchenQueue, () => gateway.kitchenQueue());
   ipcMain.handle(CHANNELS.menu, () => gateway.menu());
-  // `02-F23`/`02-F37`/`02-F43` — the Cash and Me surfaces' one read.
-  ipcMain.handle(CHANNELS.cashState, () => gateway.cashState());
+  // `02-F23`/`02-F37`/`02-F43` — the Cash and Me surfaces' one read, SCOPED to the asking
+  // subject (`reportScope`). Never `gateway.cashState()`: that is the unscoped projection, and
+  // serving it here would put every cashier's drawer on the untrusted side of `18 §9`'s bridge
+  // whatever the renderer then chose to draw.
+  ipcMain.handle(CHANNELS.cashState, () => reads.cashState());
   /**
    * `03-F5`/`27-F11d` — the S1 band, and NOT a gateway method.
    *
