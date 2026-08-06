@@ -26,12 +26,11 @@
 // and both widenings are additive.
 
 /** The four Appendix A columns (`01-F26`: the seed matrix). Widening is additive. */
-// @unreached-owed COMMANDMENT 8 IS NOT ENFORCED ANYWHERE YET. `18 §` names `can(user, action,
-// scope)` as the platform's only authorization consumer, and this whole file — matrix, roles,
-// actions, `can`, `canPayOut`, `reportScope` — has ZERO production callers: the gateway
-// authenticates DEVICES (`01-F47`) and no surface authorizes a PERSON. The caller is owed with
-// the back office (`plans/wave-1/backoffice-catalog.md` Q1, and user auth ruled in `dac8747`).
-// This marker covers every export below and must be DELETED the day the first one is wired.
+// The seam-debt marker that stood here is deleted, and its deletion is the news: this file had
+// zero production callers from the day it was written, so Commandment 8 was enforced nowhere in
+// the product. `apps/pos-electron/src/main/authorize.ts` is the first caller — `can` and
+// `canPayOut` now decide every write the counter's renderer asks for. The back office
+// (`plans/wave-1/backoffice-catalog.md`) is the second and is still owed.
 export const ROLES = ["cashier", "branch_manager", "storekeeper", "owner"] as const;
 
 export type Role = (typeof ROLES)[number];

@@ -115,8 +115,24 @@ bundle is ESM and `__dirname` does not exist there.
   RESTOS_DEV_PIN=<digits> pnpm start
   ```
 
-  which seeds three cashiers **sharing that one PIN** — deliberately, because `01-F61` names a
+  which seeds three staff **sharing that one PIN** — deliberately, because `01-F61` names a
   shared 4-digit PIN as the ordinary case that makes the identification step load-bearing.
   **The PIN is not in the source and must not be put there:** a constant under `src/main` is
   the device-wide secret `01-F61` refuses, and `unlock-gate.dom.test.tsx` fails the build on
-  one.
+  one. **The seeded ROLES are two cashiers (Ayesha, Bilal) and one branch manager (Hina)**, and
+  the mix is load-bearing since `main/authorize.ts` landed: `02-F22`'s role guard makes a
+  cashier unable to open the day, so a roster of three cashiers would leave `pnpm start` with a
+  day that can never be opened. Sign in as Ayesha and "Open the day" is refused in main; sign in
+  as Hina and it lands.
+- **COMMANDMENT 8 IS ENFORCED HERE, AND ITS ESCALATION PATH IS NOT BUILT.** `main/authorize.ts`
+  wraps the gateway's two write methods and runs every renderer-originated append through
+  `domain`'s `can` / `canPayOut` before the ledger is touched — that file is the matrix's first
+  production caller in the whole product. What is owed and is named rather than left to look
+  intentional: `can()` returns three outcomes and the third, `escalate`, has **no UI**. `02-F20`
+  gives it two equivalent paths (a local manager PIN on the POS, a remote approval via doc 05)
+  and neither is Wave-1 work, so today an escalation is *refused* at the seam — carrying the
+  outcome and the roles that would satisfy it, so the screen that eventually asks for a manager
+  PIN reads them off the matrix. The live case is `05-F19`: a paid-out above
+  `PAID_OUT_APPROVAL_THRESHOLD_PAISA` (Rs 2,000, **PINNED not specified**) is refused at the
+  counter until that path exists. `02-F20`'s void / comp / price-override rows are mapped ahead
+  of their events, which `domain/registry.ts` does not carry yet.

@@ -6,6 +6,7 @@ import { createSpooler, printerCapability } from "@restos/escpos";
 import { createPinAuditSink, createPinSession, openStore, wallClock } from "@restos/sync-client";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { AppendRequestSchema, CHANNELS, type Session } from "../shared/ipc";
+import { authorizeWrites, PAID_OUT_APPROVAL_THRESHOLD_PAISA } from "./authorize";
 import {
   catalogResolver,
   priceResolver,
@@ -98,10 +99,23 @@ const DEV_IDENTITY = {
  *
  * **Delete this the moment the staff transport lands**, and let the roster sync.
  */
+/**
+ * **The ROLES are part of the seed now, and the mix is deliberate.** `01-F26` makes a role a
+ * per-(user, location) assignment and `main/authorize.ts` reads exactly this registry to answer
+ * Commandment 8 — so a roster of three cashiers would make `02-F22`'s day open unreachable on
+ * a dev launch ("day open/close and float entry require manager/owner permission — a cashier
+ * session cannot execute them"), and the guard would look like a bug rather than the FR. Two
+ * cashiers and one branch manager put both sides of that guard on the same till: sign in as
+ * Ayesha and the day cannot be opened; sign in as Hina and it can.
+ */
 const DEV_STAFF = [
-  { user_id: "00000000-0000-7000-8000-000000000004", display_name: "Ayesha" },
-  { user_id: "00000000-0000-7000-8000-000000000005", display_name: "Bilal" },
-  { user_id: "00000000-0000-7000-8000-000000000006", display_name: "Hina" },
+  { user_id: "00000000-0000-7000-8000-000000000004", display_name: "Ayesha", role: "cashier" },
+  { user_id: "00000000-0000-7000-8000-000000000005", display_name: "Bilal", role: "cashier" },
+  {
+    user_id: "00000000-0000-7000-8000-000000000006",
+    display_name: "Hina",
+    role: "branch_manager",
+  },
 ] as const;
 
 const seedDevStaff = async (store: ReturnType<typeof openStore>): Promise<void> => {
@@ -113,10 +127,11 @@ const seedDevStaff = async (store: ReturnType<typeof openStore>): Promise<void> 
   store.staff.apply({
     kind: "snapshot",
     version: store.staff.version() + 1,
-    members: DEV_STAFF.map((member) => ({
-      ...member,
+    members: DEV_STAFF.map(({ user_id, display_name, role }) => ({
+      user_id,
+      display_name,
       pin_hash,
-      assignments: [{ role: "cashier", branch_id: DEV_IDENTITY.branch_id }],
+      assignments: [{ role, branch_id: DEV_IDENTITY.branch_id }],
     })),
   });
 };
@@ -376,6 +391,37 @@ app.whenReady().then(async () => {
   });
 
   /**
+   * **COMMANDMENT 8, and this is the line that makes it true of this product.**
+   *
+   * `packages/domain/src/permissions.ts` has shipped the matrix, `can`, `canPayOut` and
+   * `reportScope` — 89 tests, 28/28 mutants killed — with ZERO production callers, so a written
+   * and proven authorization matrix decided nothing anywhere. This is its first caller, and it
+   * is deliberately a WRAPPER rather than a change inside `createGateway`: the two objects that
+   * come out of it are the trust boundary, drawn once, where a reader can see it.
+   *
+   * - `writes` is what the RENDERER reaches (the two `ipcMain.handle` write channels below).
+   *   Every request through it is authorized against the matrix before the ledger is touched.
+   *   `18 §9` gives the renderer no Node access and one typed bridge, so main is what
+   *   "server-side" means here — `CashSurfaces.tsx` may hide a control, and this refuses the
+   *   operation whether or not it was ever drawn.
+   * - `gateway` stays raw and is handed to the KOT printer below, whose `kot.printed` /
+   *   `kot.print_failed` are DEVICE facts nobody performs. `02-F19` does not list them, Appendix
+   *   A has no row, and a matrix row invented for them would be the speculative widening
+   *   `24-F23` forbids. Authorizing them would also block `03-F5`'s alarm on a locked till,
+   *   where the whole point is that the counter finds out food is not being cooked.
+   *
+   * The threshold is passed EXPLICITLY: `canPayOut` takes it as a required parameter on
+   * `01-F60`'s precedent (an optional completeness input means a forgetful caller silently skips
+   * the check), and the pin itself is stated and reasoned in `authorize.ts`.
+   */
+  const writes = authorizeWrites({
+    writes: gateway,
+    store,
+    session,
+    paidOutApprovalThresholdPaisa: PAID_OUT_APPROVAL_THRESHOLD_PAISA,
+  });
+
+  /**
    * `03-F4`/`03-F5` — the durable print spooler and the thing that feeds it.
    *
    * **This is K-7's whole point, and it is four lines.** `packages/escpos` shipped the encoder,
@@ -510,15 +556,20 @@ app.whenReady().then(async () => {
   const touch = (): void => pins.touch();
 
   // C5 — same notify-from-inside-the-handler rule as `append` below, and for the same reason.
+  //
+  // `writes`, not `gateway`: this is the renderer's channel, so it takes the authorized object
+  // (Commandment 8). A refusal throws, `invoke` turns it into a rejected promise, and
+  // `Counter.tsx`'s `write` already catches and re-reads — so the screen falls back to what the
+  // folds actually hold rather than showing an act that never happened.
   ipcMain.handle(CHANNELS.addLine, (_event, req: unknown) => {
     touch();
-    const result = gateway.addLine(req);
+    const result = writes.addLine(req);
     notifyChanged();
     return result;
   });
   ipcMain.handle(CHANNELS.append, (_event, req: unknown) => {
     touch();
-    const result = gateway.append(req);
+    const result = writes.append(req);
     // `C9`/`03-F2` — THE KITCHEN HANDOFF. The confirm is already in the ledger by the line
     // above, and only then does paper get involved: `01-F17` says a sale is never blocked by a
     // printer, so the print hangs off a completed append rather than gating one. `confirmed()`
