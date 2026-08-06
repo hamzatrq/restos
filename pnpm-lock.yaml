@@ -266,6 +266,9 @@ importers:
       '@restos/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@restos/sync-protocol':
+        specifier: workspace:*
+        version: link:../../packages/sync-protocol
       '@trpc/server':
         specifier: 11.18.0
         version: 11.18.0(typescript@7.0.2)
