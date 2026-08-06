@@ -26,11 +26,22 @@
 // and both widenings are additive.
 
 /** The four Appendix A columns (`01-F26`: the seed matrix). Widening is additive. */
-// The seam-debt marker that stood here is deleted, and its deletion is the news: this file had
-// zero production callers from the day it was written, so Commandment 8 was enforced nowhere in
-// the product. `apps/pos-electron/src/main/authorize.ts` is the first caller — `can` and
-// `canPayOut` now decide every write the counter's renderer asks for. The back office
-// (`plans/wave-1/backoffice-catalog.md`) is the second and is still owed.
+// The seam-debt marker that stood here is DELETED, and its deletion is the news: this file had
+// ZERO production callers from the day it was written, so Commandment 8 — "server-side
+// authorization always via the `domain` permission matrix" — was enforced NOWHERE in the product.
+// A written, 89-test, 28-mutant-killed authorization matrix that no request passed through.
+//
+// It gained TWO first callers on the same day, on the two planes, each built without knowledge of
+// the other:
+//   * `apps/pos-electron/src/main/authorize.ts` — the OPERATIONAL plane. `18 §9` gives the
+//     renderer no Node access, so main IS the trusted side; it guards every write the renderer
+//     asks for and deliberately does NOT guard `kot.*`, which are device facts nobody performs
+//     (guarding them would silence `03-F5`'s failure band on a locked till).
+//   * `services/api/src/trpc.ts` — the CLOUD plane. Every non-exempt tRPC procedure passes
+//     through `can()`, and a boot assertion refuses to start a host carrying an ungated one.
+//
+// `reportScope` is still uncalled and carries its own marker; `02-F23`'s own-shifts scoping is
+// what will reach it.
 export const ROLES = ["cashier", "branch_manager", "storekeeper", "owner"] as const;
 
 export type Role = (typeof ROLES)[number];
@@ -464,6 +475,10 @@ export type PaidOutRequest = {
   readonly threshold_paisa: number;
 };
 
+// Reached by `apps/pos-electron/src/main/authorize.ts:232` — the counter's paid-out path. The
+// threshold is passed EXPLICITLY as a required parameter rather than defaulted, on `01-F60`'s
+// enabled-set precedent: an optional threshold defaulting to "never escalate" is how a silent
+// omission becomes an unapproved withdrawal.
 export const canPayOut = (
   subject: AuthSubject,
   scope: AuthScope,
