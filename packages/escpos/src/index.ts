@@ -60,6 +60,23 @@ export {
   validateProfile,
 } from "./render.js";
 export {
+  checkPrinterHealth,
+  createSpooler,
+  type JobRecord,
+  type JobState,
+  MAX_TRANSMIT_ATTEMPTS,
+  type PersistedJob,
+  PRINTER_HEALTH_QUERY,
+  type PrinterHealth,
+  type PrintJob,
+  RETRY_WINDOW_MS,
+  SPOOLER_JOB_STATES,
+  type Spooler,
+  type SpoolerJobStore,
+  type SpoolerOptions,
+  type SpoolerTransport,
+} from "./spooler.js";
+export {
   classifyTransmit,
   createRealtimeQueryWindow,
   decodePaperStatus,
