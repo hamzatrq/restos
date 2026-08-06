@@ -13,7 +13,13 @@ process.stdin.on("end", () => {
   } catch {
     process.exit(0);
   }
-  const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  // Run the checks in the tree the FILE lives in, not the session's project dir. Parallel agents
+  // work in git worktrees under `.claude/worktrees/<agent>/`, and using the main root there is
+  // wrong twice over: biome refuses the path ("nested root configuration"), and a spec edit would
+  // lint the MAIN repo's specs instead of the worktree's — a pass about files nobody touched.
+  // That blocked every edit six agents made before it was fixed (August 2026).
+  const wt = filePath.match(/^(.*\/\.claude\/worktrees\/[^/]+)\//);
+  const root = wt?.[1] ?? process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
   const run = (cmd, args) => execFileSync(cmd, args, { cwd: root, stdio: "pipe" }).toString();
   try {
     if (/(^|\/)(specs\/.*\.md|AGENTS\.md|restaurant-os\.md)$/.test(filePath)) {
