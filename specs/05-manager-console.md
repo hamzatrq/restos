@@ -41,7 +41,7 @@ Works in-branch over LAN and remotely over cloud; remote views always carry sync
   - `requester_id`, requesting `device_id`;
   - `context` (order total, channel, photo ref for paid-outs).
   Grants reference the request id, are idempotent, and the first response wins (02-F20).
-- 05-F8 Fallback and timeout: if no manager device responds within N s (default 30, layer 2) or none is reachable, the POS local manager-PIN path (02-F20) remains fully available. Remote approval augments service; it never gates it.
+- 05-F8 Fallback and timeout: if no manager device responds within N s (default 30, layer 2) or none is reachable, the POS local manager-PIN path (02-F20) remains fully available. Remote approval augments service; it never gates it. **⚠ NOT TRUE AS BUILT (August 2026): NEITHER of `02-F20`'s two paths exists.** The manager console is unbuilt, and the POS has no local manager-PIN escalation surface either — so when `can()` returns `escalate` the operation is **refused outright**, and an above-threshold paid-out cannot be performed at all. This FR's "remains fully available" describes a fallback that has never existed, which is worse than a missing feature: it reads as a guarantee and would let a reviewer approve a design that strands the operator. Refusal is the right *interim* behaviour — the alternative is unapproved cash leaving the drawer, and unlike a sale (`01-F17`) a paid-out may be blocked — but the gap is real and is the counter's, not the console's. **Owed: the `02-F20` local-PIN surface, before this sentence is true.**
 - 05-F9 Approvals work remotely over cloud when WAN is up; the remote approval card shows data age (00 §5.7) before the manager commits, and the decision still lands as the same events.
 
 **Wave 4 — floor state**
