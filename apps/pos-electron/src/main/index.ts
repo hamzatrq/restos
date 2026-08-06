@@ -6,7 +6,14 @@ import { createSpooler, printerCapability } from "@restos/escpos";
 import { createPinAuditSink, createPinSession, openStore, wallClock } from "@restos/sync-client";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { AppendRequestSchema, CHANNELS, type Session } from "../shared/ipc";
-import { type CatalogResolver, createGateway } from "./gateway";
+import {
+  catalogResolver,
+  priceResolver,
+  seedDevMenu,
+  sellableMenu,
+  stationResolver,
+} from "./catalog";
+import { createGateway } from "./gateway";
 import { openJobStore } from "./job-store";
 import { createKotPrinter, PUMP_INTERVAL_MS, unattachedPrinter } from "./printing";
 import { createUplink } from "./sync";
@@ -130,20 +137,6 @@ const IDLE_LOCK_MS = 10 * 60_000;
 const MAX_FAILED_ATTEMPTS = 5;
 
 /**
- * `01-F52`..`01-F56` — names come from the device catalog, and `01-F54` says a miss degrades
- * to the identifier rather than blocking. The catalog transport does not exist yet
- * (`plans/wave-1/catalog-transport.md`), so this reads the local store, which is correct and
- * currently always empty. The degradation path is therefore the one being exercised on every
- * launch, which is the right way round: the failure mode gets the mileage.
- */
-const catalogResolver =
-  (store: ReturnType<typeof openStore>): CatalogResolver =>
-  (item_id) => {
-    const entry = store.catalog.lookup("item", item_id);
-    return entry ? { name: entry.name } : null;
-  };
-
-/**
  * The kitchen printer this device believes it has (`03 §7` layer 3).
  *
  * **PINNED, not measured, and env-overridable for the same reason `RESTOS_CLOUD_URL` is:** the
@@ -259,6 +252,14 @@ app.whenReady().then(async () => {
   // Before the window, so the first paint of the identification grid already has a roster to
   // draw: a grid that fills in a moment later would move tiles under a finger (`27-F4`).
   await seedDevStaff(store);
+  /**
+   * T-C6 — and for the same reason and on the same schedule as the roster above: the catalog
+   * TRANSPORT is real and wired (`createUplink` below), but the back office that publishes a
+   * catalog for it to carry has not landed. `RESTOS_DEV_MENU` opt-in, applied at version 0 so a
+   * real gateway still fetches over the top of it, and skipped outright once this device holds a
+   * synced catalog. See `catalog.ts` — and delete it when the back office lands.
+   */
+  seedDevMenu(store);
 
   const window = createWindow();
   load(window);
@@ -346,13 +347,13 @@ app.whenReady().then(async () => {
 
   const gateway = createGateway({
     store,
+    // T-C6 — all three read the device catalog the uplink fills, and all three live in
+    // `catalog.ts` rather than inline here so a test can drive them (this file imports
+    // `electron`, so nothing declared in it is reachable from vitest). `01-F54` display names,
+    // `01-F55`'s sellable set, `01-F60`'s own-branch price.
     catalog: catalogResolver(store),
-    // 01-F55 — the SELLABLE set, which excludes tombstones. `catalog.lookup` above still
-    // resolves them, because a reprint of an older order must render a deleted item's name.
-    menu: () => store.catalog.list("item").map((e) => ({ id: e.id, name: e.name })),
-    // 01-F60 — the device resolves its OWN branch's row; `priceOf` takes no branch parameter
-    // precisely so this call cannot ask for another branch's price.
-    priceOf: (item_id, channel) => store.catalog.priceOf("item", item_id, channel),
+    menu: sellableMenu(store),
+    priceOf: priceResolver(store),
     actor: "dev",
     // 02-F41 — read at every append, never captured here. `session` is the function above;
     // closing over its VALUE would freeze attribution at boot, which is the defect this dep
@@ -408,7 +409,7 @@ app.whenReady().then(async () => {
     catalog: catalogResolver(store),
     // 03-F50 — the station cooks the line, resolved up the 01-F21 chain by the catalog itself.
     // An unrouted line lands on DEFAULT_STATION rather than vanishing off every ticket.
-    station: (item_id) => store.catalog.stationOf("item", item_id),
+    station: stationResolver(store),
     capability: kotCapability(),
     // 03-F5's `kot.print_failed` and 02-F31's `kot.printed`, through the gateway so the envelope
     // is stamped exactly like every other append (02-F41's read-at-append attribution included).
