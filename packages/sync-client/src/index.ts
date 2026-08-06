@@ -80,6 +80,7 @@ export {
   type PinAttemptRecord,
   type PinAttemptStore,
 } from "./pin-attempts.js";
+export { createPinAuditSink, type PinAuditSinkOptions } from "./pin-audit.js";
 export {
   createPinSession,
   PIN_LOCKOUT_COOLDOWN_MS,
