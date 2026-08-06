@@ -194,6 +194,18 @@ export const CHANNELS = {
   openOrders: "restos:open-orders",
   kitchenQueue: "restos:kitchen-queue",
   menu: "restos:menu",
+  /**
+   * `01-F61` — the roster the identification grid is drawn from, and **a channel of its own**
+   * rather than a field on `DeviceState`. `DeviceState` is re-read on every `changed` push
+   * (every line added, every order confirmed), and a list that changes when someone is hired
+   * has no business riding the hottest read on the device. It is also a different FACT:
+   * `DeviceState.user` is who is signed IN, this is who COULD sign in, and `01-F27` exists
+   * because those two axes get conflated when they share a home.
+   *
+   * The same shape and the same reason as `menu` directly above: reference data (`01-F21`),
+   * not a fold (`01-F52`).
+   */
+  staff: "restos:staff",
   append: "restos:append",
   addLine: "restos:add-line",
   /**
@@ -215,16 +227,34 @@ export type RestosBridge = {
   openOrders: () => Promise<OpenOrder[]>;
   kitchenQueue: () => Promise<KitchenTicket[]>;
   menu: () => Promise<MenuItem[]>;
+  /**
+   * `01-F61` — who could sign in on this device. **The ORDER is part of the contract**
+   * (`27-F4`): main supplies it and the renderer renders it unsorted, because a renderer-side
+   * sort cannot be stable — it re-ranks the grid the moment a name changes, and a tile learned
+   * by position is what makes this surface usable to a non-reader (`21 §5`).
+   *
+   * Carries `Session`, so **no `pin_hash` crosses this bridge**. The renderer never verifies
+   * anything (`01-F28` puts that in main), so a credential hash on this side would be a
+   * secret shipped to the untrusted end of the seam for no purpose at all.
+   */
+  staff: () => Promise<Session[]>;
   append: (req: AppendRequest) => Promise<AppendResult>;
   /** `C5`/`01-F60` — main resolves the price; no money crosses this call. */
   addLine: (req: AddLineRequest) => Promise<AppendResult>;
   /**
-   * `C1`/`01-F28` — hand main the typed digits and be told whether the device is now unlocked.
-   * The boolean is a RESULT, never the lock state: `01-F26`'s idle auto-lock happens with no
-   * call in sight, so the screen reads `deviceState().user` for that and this answers only
-   * "did that attempt work".
+   * `C1`/`01-F28` — hand main **an identity and** the typed digits, and be told whether the
+   * device is now unlocked. The boolean is a RESULT, never the lock state: `01-F26`'s idle
+   * auto-lock happens with no call in sight, so the screen reads `deviceState().user` for that
+   * and this answers only "did that attempt work".
+   *
+   * `01-F61` is why `user_id` is here and not derived by main from the PIN alone: a pad that
+   * matched the entry against every hash on the device would leave a failed attempt belonging
+   * to **no** user — so the per-(device, user) counter could not be keyed and would collapse
+   * into the device-wide one that FR refuses — and would make two staff who share a 4-digit
+   * PIN indistinguishable, writing the wrong cashier into a ledger `01-F1` forbids correcting
+   * in place. Positional and in this order, matching `createPinSession.unlock(user_id, pin)`.
    */
-  unlock: (pin: string) => Promise<{ unlocked: boolean }>;
+  unlock: (user_id: string, pin: string) => Promise<{ unlocked: boolean }>;
   /** Subscribe to fold changes. Returns an unsubscribe. */
   onChanged: (fn: () => void) => () => void;
 };

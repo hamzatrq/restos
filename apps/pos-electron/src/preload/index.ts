@@ -15,10 +15,14 @@ const bridge: RestosBridge = {
   openOrders: () => ipcRenderer.invoke(CHANNELS.openOrders),
   kitchenQueue: () => ipcRenderer.invoke(CHANNELS.kitchenQueue),
   menu: () => ipcRenderer.invoke(CHANNELS.menu),
+  // `01-F61` — the identification grid's roster, in the order main supplies it (`27-F4`).
+  staff: () => ipcRenderer.invoke(CHANNELS.staff),
   append: (req) => ipcRenderer.invoke(CHANNELS.append, req),
   addLine: (req) => ipcRenderer.invoke(CHANNELS.addLine, req),
-  // `01-F28` — the digits go one way and a yes/no comes back. Verification is main's.
-  unlock: (pin) => ipcRenderer.invoke(CHANNELS.unlock, pin),
+  // `01-F28` — an identity and the digits go one way and a yes/no comes back. Verification is
+  // main's. `01-F61`: the identity is what the failure counter is keyed on, so it travels with
+  // the attempt rather than being inferred from the PIN at the far end.
+  unlock: (user_id, pin) => ipcRenderer.invoke(CHANNELS.unlock, user_id, pin),
   onChanged: (fn) => {
     const handler = () => fn();
     ipcRenderer.on(CHANNELS.changed, handler);

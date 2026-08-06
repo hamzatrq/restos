@@ -1,10 +1,10 @@
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { businessDate } from "@restos/domain";
-import { openStore, wallClock } from "@restos/sync-client";
+import { businessDate, hashPin } from "@restos/domain";
+import { createPinSession, openStore, wallClock } from "@restos/sync-client";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
-import { CHANNELS } from "../shared/ipc";
+import { CHANNELS, type Session } from "../shared/ipc";
 import { type CatalogResolver, createGateway } from "./gateway";
 import { createUplink } from "./sync";
 
@@ -59,27 +59,72 @@ const DEV_IDENTITY = {
 } as const;
 
 /**
- * **A DEV SEED, exactly like `DEV_IDENTITY` above, and it VERIFIES NOTHING.**
+ * **A DEV SEED ROSTER, exactly like `DEV_IDENTITY` above — and unlike its predecessor it
+ * verifies for real.**
  *
- * `01-F28` puts PIN verification on-device against synced credential hashes, and `01-F61` fixes
- * the Argon2id floor and the per-(device, user) lockout. None of that exists yet — there are no
- * synced credentials to check a PIN against, because `01-F47`'s admission admits *devices, not
- * people*. So this is a string comparison against a constant, and it is written here rather
- * than in `gateway.ts` for the same reason `DEV_IDENTITY` is: a seed a reviewer can find and
- * delete in one place, not a policy threaded through the seam.
+ * What was here was a four-digit dev constant and a string comparison against it, which
+ * `01-F61` has since made unsurvivable in principle: a device-wide constant identifies
+ * **nobody**, so the per-(device, user) lockout cannot be keyed at all. Verification now runs
+ * through
+ * `createPinSession` against Argon2id hashes in `store.staff` (`01-F28`), and this exists only
+ * because **nothing populates that registry yet** — `01-F47`'s admission admits *devices, not
+ * people*, and the staff transport is owed. Without a seed the grid is empty and no one can
+ * unlock, which would make `pnpm start` unusable and leave the whole `02-F41` attribution path
+ * unexercised.
  *
- * What it does buy, and why it is not simply `() => null`: the `02-F41` attribution path is
- * real from here down — the session moves, `deviceState()` reports it, and every envelope is
- * stamped from it. A device that could never unlock would leave that whole path unexercised
- * and would make `pnpm start` unusable.
+ * **The PIN is NOT in this file, and that is deliberate rather than an omission.** It comes
+ * from `RESTOS_DEV_PIN`, the same environment-configured route `RESTOS_CLOUD_URL` and
+ * `RESTOS_DEVICE_TOKEN` already take below and for the same "admission has not landed" reason.
+ * A hardcoded PIN here would be the device-wide constant `01-F61` refuses, wearing a different
+ * name. Unset ⇒ **nothing is seeded**, and an empty grid on a locked till is the honest state
+ * of a device no roster has reached (`00 §5.7`) — which is also what production looks like
+ * until the transport lands.
  *
- * **Delete this the moment S-0b lands**, and pass its verifier in its place.
+ *     RESTOS_DEV_PIN=<digits> pnpm start
+ *
+ * Every seeded member shares that one PIN, which is not a shortcut: `01-F61` names two staff
+ * sharing a 4-digit PIN as the ordinary case that a bare pad cannot tell apart, so the seed
+ * puts the till in exactly that state and the identification step is what resolves it.
+ *
+ * **Delete this the moment the staff transport lands**, and let the roster sync.
  */
-const DEV_PIN = "1234";
-const DEV_SESSION = {
-  user_id: "00000000-0000-7000-8000-000000000004",
-  display_name: "Dev Cashier",
-} as const;
+const DEV_STAFF = [
+  { user_id: "00000000-0000-7000-8000-000000000004", display_name: "Ayesha" },
+  { user_id: "00000000-0000-7000-8000-000000000005", display_name: "Bilal" },
+  { user_id: "00000000-0000-7000-8000-000000000006", display_name: "Hina" },
+] as const;
+
+const seedDevStaff = async (store: ReturnType<typeof openStore>): Promise<void> => {
+  const pin = process.env["RESTOS_DEV_PIN"];
+  if (pin === undefined || pin === "") return;
+  // `01-F28`'s credential, produced by the same `domain` function the cloud writer will use —
+  // the PIN itself is hashed here and never stored, never logged, never appended (`01-F1`).
+  const pin_hash = await hashPin(pin);
+  store.staff.apply({
+    kind: "snapshot",
+    version: store.staff.version() + 1,
+    members: DEV_STAFF.map((member) => ({
+      ...member,
+      pin_hash,
+      assignments: [{ role: "cashier", branch_id: DEV_IDENTITY.branch_id }],
+    })),
+  });
+};
+
+/**
+ * `01-F26` — idle auto-lock is a **device-layer setting** (`00 §7` layer 3), and that config
+ * plane does not exist yet, so this is a pinned interpretation and is marked as one rather
+ * than left to read as a spec fact.
+ */
+const IDLE_LOCK_MS = 10 * 60_000;
+
+/**
+ * `01-F61` — "N consecutive failures tolerated; the (N+1)th attempt is refused". The FR fixes
+ * the scope, the persistence and the cooldown but names no N, so this too is pinned, not
+ * specified. Five leaves room for ordinary typing on a surface used 20–60× a shift while
+ * keeping online guessing at ~13 bits hopeless against the five-minute cooldown.
+ */
+const MAX_FAILED_ATTEMPTS = 5;
 
 /**
  * `01-F52`..`01-F56` — names come from the device catalog, and `01-F54` says a miss degrades
@@ -175,7 +220,7 @@ const fatal = (error: unknown): void => {
   app.exit(1);
 };
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   const store = openStore({
     path: join(app.getPath("userData"), "device.db"),
     identity: DEV_IDENTITY,
@@ -185,6 +230,10 @@ app.whenReady().then(() => {
     // Pointing at ours by name is what lets both exist: `build/Release/` stays Node's.
     nativeBinding: electronAddonPath(),
   });
+
+  // Before the window, so the first paint of the identification grid already has a roster to
+  // draw: a grid that fills in a moment later would move tiles under a finger (`27-F4`).
+  await seedDevStaff(store);
 
   const window = createWindow();
   load(window);
@@ -204,11 +253,57 @@ app.whenReady().then(() => {
    * in-branch feature may require WAN, and the till sells either way (`01-F17`).
    */
   /**
-   * `01-F26` — the PIN session, and `null` is LOCKED. Process-local and deliberately not
-   * persisted: a relaunch is a locked till, which is the honest state for a device nobody has
-   * identified themselves to.
+   * `01-F26`/`01-F28`/`01-F61` — the PIN session, and `null` is LOCKED. **The verifier, not a
+   * comparison**: `createPinSession` looks the identity up in the synced registry, checks the
+   * PIN against *that member's* Argon2id hash, and keys its failure counter on the
+   * (device, user) pair.
+   *
+   * `attempts: store.pinAttempts` is the line that makes `01-F61`'s second decision real —
+   * "the counter PERSISTS across an app restart. A counter held in memory is defeated by
+   * relaunching the app, which makes the lockout theatre — and the attacker who most needs
+   * locking out is standing at the device with physical access to do exactly that." Omitted,
+   * `pin-session.ts` falls back to a process-lifetime counter, which is precisely that
+   * theatre.
+   *
+   * The session itself stays process-local, which is a different question and unchanged: a
+   * relaunch is a locked till, the honest state for a device nobody has identified to.
    */
-  let session: typeof DEV_SESSION | null = null;
+  const pins = createPinSession({
+    // `01-F28` — the synced credential hashes, on disk, verified with the WAN cable pulled.
+    registry: store.staff,
+    // `01-F27`'s other axis. `registered: true` because `DEV_IDENTITY` above stands in for an
+    // admitted device; when `01-F47` lands this reads the real admission state and an
+    // unpaired terminal refuses every PIN (`01-F25`, `01-F48` fail-closed).
+    device: { device_id: DEV_IDENTITY.device_id, registered: true },
+    idle_lock_ms: IDLE_LOCK_MS,
+    max_failed_attempts: MAX_FAILED_ATTEMPTS,
+    now: () => wallClock.now(),
+    /**
+     * **OWED, and named here rather than left to look intentional.** `01-F5` puts `audit.login`
+     * in the ledger on a store-owned chain, and this sink drops it. Wiring it is S-0b's — the
+     * unlock oracle scopes "what `audit.login` carries" out explicitly — and appending an
+     * untested event type on every failed keystroke is not a thing to add on the way past.
+     * The record carries no PIN either way (`pin-session.ts` builds it from ids and an
+     * outcome), so nothing here is a `01-F1` hazard; what is missing is the audit trail.
+     */
+    audit: () => {},
+    attempts: store.pinAttempts,
+  });
+
+  /**
+   * `02-F41`/`02-F45` — one fact, read at every append and at every `deviceState()`, never
+   * captured. `currentUser()` is what evaluates `01-F26`'s idle auto-lock, so a session that
+   * has timed out reads as locked here without anything having to fire a timer.
+   *
+   * The label degrades to the identifier when the roster row carries no `display_name` or has
+   * gone (`01-F42` removes it) — `01-F54`'s rule, and the alternative is a strip that reports
+   * an empty name over a ledger that is attributing correctly.
+   */
+  const session = (): Session | null => {
+    const user_id = pins.currentUser();
+    if (user_id === null) return null;
+    return { user_id, display_name: store.staff.lookup(user_id)?.display_name ?? user_id };
+  };
 
   const uplink = createUplink({
     store,
@@ -228,10 +323,10 @@ app.whenReady().then(() => {
     // precisely so this call cannot ask for another branch's price.
     priceOf: (item_id, channel) => store.catalog.priceOf("item", item_id, channel),
     actor: "dev",
-    // 02-F41 — read at every append, never captured here. `session` is the mutable holder
-    // above; closing over its VALUE would freeze attribution at boot, which is the defect this
-    // dep replaced.
-    session: () => session,
+    // 02-F41 — read at every append, never captured here. `session` is the function above;
+    // closing over its VALUE would freeze attribution at boot, which is the defect this dep
+    // replaced.
+    session,
     deviceLabel: "Counter 1",
     // 01-F49 — bound at admission from the branch class, never a UI toggle. Admission has not
     // landed, so this is false and the 27-F67 training inversion is exercised by its story.
@@ -255,29 +350,66 @@ app.whenReady().then(() => {
   ipcMain.handle(CHANNELS.kitchenQueue, () => gateway.kitchenQueue());
   ipcMain.handle(CHANNELS.menu, () => gateway.menu());
   /**
+   * `01-F61` — the identification grid's roster. **Mapped, not forwarded**: `StaffMember`
+   * carries the Argon2id `pin_hash`, and `01-F28` puts verification in this process, so the
+   * renderer has no use for a credential and must not be handed one. `01-F54`'s degradation
+   * again for a row with no label — an id on a tile is poor, a blank tile reads as broken.
+   *
+   * The registry's order is passed through untouched (`27-F4`).
+   */
+  ipcMain.handle(CHANNELS.staff, () =>
+    store.staff
+      .list()
+      .map((m) => ({ user_id: m.user_id, display_name: m.display_name ?? m.user_id })),
+  );
+  /**
    * `C1`/`01-F28` — the one channel that is not a gateway method, because it does not touch the
    * ledger: it moves the session the gateway READS. `01-F1` is why it appends nothing — a PIN
    * in an event is permanent and unredactable.
+   *
+   * `01-F61`: BOTH arguments are required and the identity is not inferred from the PIN. Each
+   * is type-checked here rather than trusted, because `shared/ipc.ts` calls the renderer "the
+   * untrusted end of this bridge even though we ship it" — and a non-string reaching
+   * `verifyPin` is a throw inside the handler, which `invoke` turns into a rejected promise on
+   * a surface whose whole job is to not be stuck.
+   *
+   * Only the boolean crosses back. The refusal REASON stays here: `bad_pin` versus
+   * `unknown_user` tells anyone holding the device which ids exist, and the grid already shows
+   * them the roster — but `locked_out` is a real gap and is reported, because a cashier who is
+   * locked out is currently told only "that PIN was not accepted" and will keep trying.
    *
    * The push matters as much as the answer: the renderer decides lock state from
    * `deviceState()`, never from the boolean below, so the surface only follows if it is told to
    * re-read. That is also what makes an auto-lock decided anywhere else reach the screen.
    */
-  ipcMain.handle(CHANNELS.unlock, (_event, pin: unknown) => {
-    const unlocked = typeof pin === "string" && pin === DEV_PIN;
-    // Only a SUCCESS moves the session. A refused attempt must not end the session that is
-    // already in — `01-F17`: a wrong keystroke may not stop the till.
-    if (unlocked) session = DEV_SESSION;
+  ipcMain.handle(CHANNELS.unlock, async (_event, user_id: unknown, pin: unknown) => {
+    if (typeof user_id !== "string" || typeof pin !== "string") return { unlocked: false };
+    // Only a SUCCESS moves the session, and `pin-session.ts` owns that — a refused attempt
+    // must not end the session that is already in (`01-F17`: a wrong keystroke may not stop
+    // the till).
+    const result = await pins.unlock(user_id, pin);
     notifyChanged();
-    return { unlocked };
+    return { unlocked: result.ok };
   });
+  /**
+   * `01-F26` — what makes the idle auto-lock IDLE. `createPinSession` evaluates the timeout
+   * against `last_activity`, and `currentUser()` deliberately does not count as activity
+   * ("every POS screen that polls the signed-in user would hold the session open forever"), so
+   * without this the clock would run from the moment of unlock and lock a cashier out mid-shift
+   * while she was ringing up orders. The two append paths are the device's real activity
+   * signal; `deviceState` is a poll and is correctly not one.
+   */
+  const touch = (): void => pins.touch();
+
   // C5 — same notify-from-inside-the-handler rule as `append` below, and for the same reason.
   ipcMain.handle(CHANNELS.addLine, (_event, req: unknown) => {
+    touch();
     const result = gateway.addLine(req);
     notifyChanged();
     return result;
   });
   ipcMain.handle(CHANNELS.append, (_event, req: unknown) => {
+    touch();
     const result = gateway.append(req);
     // NOTIFY FROM INSIDE THE HANDLER. This was `ipcMain.on(CHANNELS.append, notifyChanged)`,
     // which never fired once: `invoke` dispatches only to the `handle` table, and `.on` is the
