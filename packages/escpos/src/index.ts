@@ -1,8 +1,13 @@
 // @restos/escpos — ESC/POS encoder and transports (18 §10, specs/03-kitchen-fulfillment.md).
 //
-// K-1 has landed: the capability record, the column derivation, and 03-F49's per-type minimum
-// with its refusal. The encoder (K-2), transports and virtual printer (K-3), and the
-// DocumentSpec/DocumentProfile render pipeline (K-4) arrive with their own plans/ tasks.
+// K-1..K-6 have landed: the capability record and column derivation with 03-F49's per-type
+// minimum and its refusal (K-1); the encoder and 27-F56's ink ladder (K-2); the `Transport` seam
+// and the virtual printer (K-3); `DocumentSpec`/`DocumentProfile` and the pure `render()` (K-4);
+// the KOT layout (K-5); the durable spooler (K-6).
+//
+// Owed: K-7 wires `order.confirmed` → spooler and raises 03-F5's S1 on the counter. K-8 is the
+// physical pass — NO PRINTER HAS EVER BEEN ATTACHED, so everything here is emitted bytes and a
+// software page, and nothing in this package is evidence about a kitchen.
 export {
   deriveColumns,
   FONT_CELL_DOTS,

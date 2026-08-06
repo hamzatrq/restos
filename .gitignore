@@ -22,6 +22,11 @@ out/
 # KILLED, and turbo kills sibling tasks the moment another package's suite fails. The residue
 # then makes `pnpm verify` red on generated fixtures, pointing at the wrong defect entirely.
 # Same class as the `out/` entry above (9ca0189: "verify was linting generated bundles").
+# Agent worktrees (24 §3 step 8 isolation). Each parallel agent gets its own git worktree here so
+# it cannot capture a sibling's half-written files — the failure that put a protected-path change
+# into 8c03e4d under a message describing none of it. They are working copies of tracked content,
+# never content in their own right, and must never be committed into the tree they were cut from.
+.claude/worktrees/
 .oracle-typecheck/
 # Same pattern, same hazard: layout-physical.oracle.test.ts writes fixtures to
 # packages/ui/.oracle-layout and removes them in afterAll — so a KILLED run leaves
