@@ -656,6 +656,26 @@ describe("the wave's recurring defect — this subsystem has a PRODUCTION caller
     expect(mainSrc).toMatch(/createKotPrinter\s*\(/);
   });
 
+  // ── ADDED August 2026 — the SAME defect, one argument along ────────────────────────────────
+  // K-7 closed "`createSpooler` has no production caller" and opened "the production caller
+  // passes no store": `SpoolerOptions.store` is optional, so the shipped queue was
+  // process-lifetime, `03-F4`'s crash clause was unmet, a relaunch lost every queued ticket, and
+  // every gate stayed green — because a host that forgets the argument is invisible to
+  // `packages/escpos`, which is exactly what K-6's own oracle says about it. Behaviour is
+  // asserted in `spooler-job-store.test.ts`; this is the SEAM, and it is the assertion that
+  // would have caught the four-month-old version of this same mistake in `store.pinAttempts`.
+  it("main/index.ts passes a DURABLE STORE to the spooler — 03-F4's crash clause", () => {
+    expect(
+      mainSrc,
+      "03-F4 — a spooler constructed without a store loses the kitchen's tickets on a power cut",
+    ).toMatch(/createSpooler\s*\(\s*\{[^}]*\bstore\s*:/);
+    // And the store is a real one over a real path, not an object literal that satisfies the
+    // regex above. `userData` is Electron's per-install writable directory; an in-memory or
+    // temp-dir spool is the same defect with a file in front of it.
+    expect(mainSrc).toMatch(/openJobStore\s*\(/);
+    expect(mainSrc).toContain('app.getPath("userData")');
+  });
+
   it("main/index.ts calls the printer FROM the order.confirmed append path", () => {
     expect(mainSrc).toContain("order.confirmed");
     expect(mainSrc).toMatch(/\.confirmed\s*\(/);

@@ -7,6 +7,7 @@ import { createPinAuditSink, createPinSession, openStore, wallClock } from "@res
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { AppendRequestSchema, CHANNELS, type Session } from "../shared/ipc";
 import { type CatalogResolver, createGateway } from "./gateway";
+import { openJobStore } from "./job-store";
 import { createKotPrinter, PUMP_INTERVAL_MS, unattachedPrinter } from "./printing";
 import { createUplink } from "./sync";
 
@@ -387,13 +388,20 @@ app.whenReady().then(async () => {
    * answer, the retry budget exhausts, and the counter gets `03-F5`'s band naming the printer and
    * the order. That is exactly true of this device today. K-8 replaces this ONE argument.
    *
-   * No `store` is passed to `createSpooler` yet, and saying so is cheaper than a comment that
-   * implies otherwise: `03-F4`'s crash clause needs a `SpoolerJobStore` on top of the device
-   * SQLite, which is `18 §4`'s canonical durable-local-queue and not something to improvise
-   * here. Until it lands, the queue is process-lifetime — a relaunch loses queued tickets, which
-   * is precisely the durability `03-F4` demands and this device does not yet have. OWED.
+   * `store` is `03-F4`'s crash clause and it is the OTHER half of the same defect: K-7 wired the
+   * spooler and passed no store, so the queue was process-lifetime and a relaunch lost every
+   * queued ticket — the exact power-cut case the FR names, against a `SpoolerJobStore` seam whose
+   * oracle exists to prevent it. Wired August 2026 (`job-store.ts`, SQLite + WAL). A spooler
+   * without it satisfies `03-F4`'s ORDER ("recorded before the first transmit") and none of its
+   * durability, and no test inside `packages/escpos` can catch a host that forgets — which is why
+   * `__acceptance__/kot-printing.test.ts` §G asserts on THIS construction.
    */
-  const spooler = createSpooler({ transport: unattachedPrinter(kotCapability()) });
+  const jobs = openJobStore({
+    path: join(app.getPath("userData"), "print-spool.db"),
+    nativeBinding: electronAddonPath(),
+  });
+  app.on("will-quit", () => jobs.close());
+  const spooler = createSpooler({ transport: unattachedPrinter(kotCapability()), store: jobs });
   const kot = createKotPrinter({
     spooler,
     store,
