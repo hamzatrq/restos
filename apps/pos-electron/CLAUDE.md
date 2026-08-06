@@ -79,9 +79,32 @@ bundle is ESM and `__dirname` does not exist there.
   **Still unproven against hardware:** every "power cut" in
   `__acceptance__/spooler-job-store.test.ts` is `close()`, and fsync, torn writes and WAL recovery
   from a real plug-pull belong to K-8 / D3.
-- **The item grid is empty.** The device catalog stores and versions correctly and nothing
-  delivers to it yet (`plans/wave-1/catalog-transport.md`). So `01-F54`'s degrade-to-identifier
-  path is what every launch exercises — the failure mode gets the mileage.
+- **The item grid needs a source, and there are exactly two.** The catalog *transport* is real
+  and wired as of T-C6: `main/sync.ts` builds the cloud session, which requests on `hello_ack`
+  version mismatch and on `catalog_notice` and applies into `store.catalog` — so a device with
+  `RESTOS_CLOUD_URL`/`RESTOS_DEVICE_TOKEN` pointed at a gateway gets the org's published menu.
+  Nothing *publishes* one yet, because that is the back office
+  (`plans/wave-1/backoffice-catalog.md`). So for a local launch there is a **marked DEV SEED**,
+  off by default like the roster:
+
+  ```
+  RESTOS_DEV_MENU=1 RESTOS_DEV_PIN=<digits> pnpm start
+  ```
+
+  which seeds three categories and eight priced items (`main/catalog.ts`). It applies as a
+  snapshot **at version 0** deliberately: `cloud-session.ts` fetches when
+  `server_version > catalog.version()`, so a seed claiming version 1 would read as parity to an
+  org whose real catalog *is* version 1 and the dev menu would stick forever. At 0 the device
+  still asks for everything on connect and the real snapshot replaces the seed wholesale; the
+  seed also refuses to run at all once `version() > 0`, so it can never overwrite a synced menu.
+  **Delete it when the back office lands.** Without the flag the grid is empty and `01-F54`'s
+  degrade-to-identifier path is what the launch exercises — the honest state of a device no menu
+  has reached (`00 §5.7`). The seam that keeps this wired lives in
+  `__acceptance__/catalog-seam.test.ts` §D.
+- **A stuck catalog is not yet visible to the cashier.** `Uplink.catalogRefusal` carries
+  `01-F56`'s refusal out of the cloud session and **nothing consumes it**: `DeviceState` has a
+  `blocked` cursor field and no catalog-health field, so `DEC-SYNC-011`'s "observable" holds at
+  the API and nowhere on the counter. Owed, and named rather than left to look intentional.
 - **The staff roster is a marked DEV SEED, and it is off by default.** PIN verification itself
   is real — `createPinSession` against Argon2id hashes in `store.staff` (`01-F28`), with
   `01-F61`'s durable per-(device, user) lockout — but nothing *populates* that registry yet, so
