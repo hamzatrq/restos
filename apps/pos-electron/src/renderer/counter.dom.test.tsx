@@ -9,7 +9,7 @@
 // no price until `01-F60` reaches the wire and the store. What IS asserted about the grid here
 // is the refusal, which is the half of `C5` that exists today.
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AddLineRequest,
@@ -133,13 +133,64 @@ describe("the tab rail is screen-map §3.1's five surfaces (27-F4)", () => {
     }
   });
 
-  it("only Order is reachable — the other four say why, rather than going nowhere", async () => {
+  it("every unavailable tab says WHY, and no tab is both reachable and unavailable", async () => {
+    // This was `getAllByText(/not built yet/i).length === 4` — a snapshot of a SHRINKING set,
+    // and it went red the day `Cash` and `Me` shipped. The count was never the law. `27-F4`
+    // says an unbuilt surface is **disabled in place WITH ITS REASON**, never missing: what
+    // makes a dead tab survivable for an operator who cannot read the rest of the screen for
+    // context is the reason, not how many of them there are. Pinning the number also put this
+    // file in direct contradiction with `cash-tab.dom.test.tsx`'s "the Cash tab stops being
+    // 'not built yet'" — two oracles that could not both be satisfied.
+    //
+    // So it is expressed as the property instead, in both directions. It still fails on a tab
+    // disabled with no reason (mutation-checked), and it cannot go stale as surfaces ship: the
+    // day the last one lands, the first half is vacuously true and the second half — every
+    // reachable tab actually arrives somewhere — is doing all five tabs' worth of work.
     mountWith([]);
     render(<Counter />);
     await screen.findByRole("button", { name: /^Order$/i });
-    // Four unbuilt surfaces, four reasons. A dead tab with no explanation reads as a broken app
-    // to an operator who cannot read the rest of the screen for context.
-    expect(screen.getAllByText(/not built yet/i).length).toBe(4);
+
+    const rail = () =>
+      within(screen.getByRole("navigation", { name: "Main" })).getAllByRole("button");
+    // The label is the tab's first text node; a badge is digits (`27-F25`). Whatever is LEFT is
+    // the reason, which is why this reads the remainder rather than matching "not built yet" —
+    // a different wording is still a reason, and a missing one is still a dead end.
+    const parts = (tab: Element) => {
+      const label = tab.querySelector("span")?.textContent ?? "";
+      return {
+        label,
+        reason: (tab.textContent ?? "").slice(label.length).replace(/\d+/g, "").trim(),
+      };
+    };
+
+    expect(rail().length, "the rail rendered no tabs at all").toBeGreaterThan(0);
+    for (const tab of rail()) {
+      const { label, reason } = parts(tab);
+      if ((tab as HTMLButtonElement).disabled) {
+        expect(reason, `27-F4 — the ${label} tab is unavailable and gives no reason`).not.toBe("");
+      } else {
+        expect(reason, `the ${label} tab is reachable but carries an unavailable reason`).toBe("");
+      }
+    }
+
+    // The other half of `27-F4`'s bargain, and the half a reason-only check cannot see: the mark
+    // has to MEAN something. A tab that is greyed with a reason and still navigates is a lie
+    // about what is built; a tab that looks live and goes nowhere is the dead end the FR names.
+    const currentIndex = () => rail().findIndex((b) => b.getAttribute("aria-current") === "page");
+    for (let i = 0; i < rail().length; i++) {
+      const before = currentIndex();
+      const { label } = parts(rail()[i] as Element);
+      const unavailable = (rail()[i] as HTMLButtonElement).disabled;
+      fireEvent.click(rail()[i] as Element);
+      await waitFor(() =>
+        expect(
+          currentIndex(),
+          unavailable
+            ? `the ${label} tab is marked unavailable and still went somewhere`
+            : `the ${label} tab is available and went nowhere`,
+        ).toBe(unavailable ? before : i),
+      );
+    }
   });
 });
 
