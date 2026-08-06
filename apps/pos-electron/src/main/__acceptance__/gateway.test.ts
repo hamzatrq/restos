@@ -49,7 +49,7 @@ const deps = (over: Partial<GatewayDeps> = {}): GatewayDeps => ({
 });
 
 describe("18 §6 / 18 §9 — the renderer's whole surface", () => {
-  it("exposes exactly five operations and no query channel", () => {
+  it("exposes exactly seven operations and no query channel", () => {
     // 18 §4: "Apps NEVER run SQL directly." The absence of a query channel is the law, not
     // an omission — anything the renderer can ask for is visible by reading this list.
     //
@@ -69,9 +69,28 @@ describe("18 §6 / 18 §9 — the renderer's whole surface", () => {
     //
     // Still a CLOSED vocabulary: `addLine` names an order, an item and a quantity. It carries no
     // money, no table name and no filter.
+    //
+    // SEVEN since the Cash and Me surfaces, and this widening is acknowledged on the same terms
+    // as the two above it. `cashState` exists because `02-F23` (shift close: expected cash by
+    // method, counted cash, over/short, "cashiers see only their own shifts") and `02-F24` (day
+    // close: manager count + deposit) are read off the `shift_cash` fold, and `02-F37`/`02-F43`
+    // put the unbound settlements and unbound drawer activity in that same projection. None of
+    // it is reachable through the other six: `openOrders` and `kitchenQueue` are order-scoped
+    // folds and `menu` is reference data, so a shift's reconciliation had no channel at all.
+    //
+    // ONE read rather than four, for `26 §8`'s reason: fold logic lives in one module, and a
+    // renderer assembling a fifth shape out of four channels would be that logic reimplemented
+    // outside the engine.
+    //
+    // Still a CLOSED vocabulary: `cashState` takes NO ARGUMENTS, names no table and accepts no
+    // filter — one more fixed answer, like `menu`. Note what that costs and where the cost is
+    // paid: `02-F23`'s own-shifts-only scoping is a filter, and because this channel cannot
+    // express one it must be applied on the trusted side (commandment 8), never by the renderer
+    // choosing which rows to draw.
     expect(Object.keys(createGateway(deps())).sort()).toEqual([
       "addLine",
       "append",
+      "cashState",
       "deviceState",
       "kitchenQueue",
       "menu",
