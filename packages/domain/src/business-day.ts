@@ -120,9 +120,11 @@ export const businessDate = (
  * one business day, with no gap and no double-count. A closed upper bound would put the
  * cutover instant itself in two days at once, and double-count a sale rung exactly on it.
  *
- * @unreached-owed The till reaches `businessDate` (a single day's label) but never a RANGE — no
- * shipped surface queries "the sales of a business day" yet. The callers are the day-close
- * reconciliation and every report in `specs/12`/`specs/13`.
+ * **First shipping caller, August 2026: `services/api`'s `dayEndBoundary` (B-4).** `14-F28` lands
+ * a menu edit at the next 05:00 cutover, which is this function's `end_ms` — so the debt marker
+ * that stood here ("no shipped surface queries a business-day RANGE yet") is discharged and gone.
+ * The day-close reconciliation and the `specs/12`/`specs/13` reports are still owed, but they are
+ * no longer what stands between this and a caller.
  */
 export const businessDayBounds = (
   at_ms: number,

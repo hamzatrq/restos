@@ -9,8 +9,17 @@
 
 import { pathToFileURL } from "node:url";
 import { defineEnv } from "@restos/config";
+import { BUSINESS_DAY_CUTOVER_HOUR_DEFAULT } from "@restos/domain";
 import { type CreateFastifyContextOptions, fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import Fastify, { type FastifyInstance } from "fastify";
+import { createMemoryStagedEditStore } from "./catalog.js";
+import {
+  type CatalogDeps,
+  createCatalogRuntime,
+  createDayEndScheduler,
+  createMemoryCatalogPublisher,
+  createMemoryLedgerAppender,
+} from "./publish.js";
 import { appRouter, assertEveryProcedureIsGated } from "./router.js";
 import type { ApiContext } from "./trpc.js";
 import { createMemoryUserStore, type UserRecord, type UserStore } from "./users.js";
@@ -20,7 +29,36 @@ export type ApiServerOptions = {
   readonly sessionSecret: string;
   /** Injected (`18 §4`). `main()` supplies the real one; the suite supplies a fixed instant. */
   readonly now: () => number;
+  /**
+   * B-3/B-4's dependencies. Optional here and REQUIRED once resolved, which is the narrow shape
+   * this needs to be: `start()` always passes one built from env, so the "unsupplied optional
+   * seam" the CI rail catches cannot form — and a host that omits it (the B-2 suite, which
+   * predates the catalog and exercises only authorization) still boots.
+   *
+   * The fallback is deliberately UNUSABLE for saving rather than convenient. See
+   * `unconfiguredCatalog`.
+   */
+  readonly catalog?: CatalogDeps;
 };
+
+/**
+ * The fallback when a host declares no catalog dependencies. **Its enabled set is empty, and that
+ * is the fail-closed direction, not an oversight** — `assertSavable` refuses an empty set outright
+ * rather than treating it as "nothing to check", so a deployment that never stated its
+ * `(branch, channel)` pairs cannot save a menu at all.
+ *
+ * The alternative — a plausible default like "one branch, all channels" — would let an owner
+ * publish a menu priced against branches that do not exist, and `01-F53` would freeze whatever it
+ * guessed. `01-F60` refuses a fallback price for the same reason this refuses a fallback set.
+ */
+const unconfiguredCatalog = (now: () => number): CatalogDeps => ({
+  staged: createMemoryStagedEditStore(),
+  publisher: createMemoryCatalogPublisher(),
+  ledger: createMemoryLedgerAppender(),
+  enabled: { branches: [], channels: [] },
+  now,
+  cutover_hour: BUSINESS_DAY_CUTOVER_HOUR_DEFAULT,
+});
 
 /**
  * The ONLY credential read off the wire. Anything else a client sends about who it is — a role
@@ -39,6 +77,11 @@ export const createApiServer = async (options: ApiServerOptions): Promise<Fastif
 
   const app = Fastify({ logger: false });
 
+  // ONE runtime for the host, not one per request: the day-end scheduler and the staged-edit
+  // store have to be the same objects across every request, or a cancel would reach a different
+  // pending set than the sweep reads (`14-F28`).
+  const catalog = createCatalogRuntime(options.catalog ?? unconfiguredCatalog(options.now));
+
   await app.register(fastifyTRPCPlugin, {
     prefix: "/trpc",
     trpcOptions: {
@@ -48,6 +91,7 @@ export const createApiServer = async (options: ApiServerOptions): Promise<Fastif
         sessionSecret: options.sessionSecret,
         now: options.now,
         bearer: bearerOf(req.headers.authorization),
+        catalog,
       }),
     },
   });
@@ -89,6 +133,22 @@ const bootstrapUsers = (env: {
 const optional = (raw: string | undefined): string | undefined =>
   raw === undefined || raw === "" ? undefined : raw;
 
+const list = (raw: string | undefined): readonly string[] =>
+  raw === undefined
+    ? []
+    : raw
+        .split(",")
+        .map((part) => part.trim())
+        .filter((part) => part !== "");
+
+/**
+ * How often the day-end sweep runs. A minute, because the boundary is a wall-clock instant an
+ * edit is compared against rather than a timer it rides: a sweep that is late publishes the same
+ * edits, one sweep later. Nothing here schedules AT the boundary, which is what makes a cancel
+ * arriving at 04:59:59 still work.
+ */
+const DAY_END_SWEEP_MS = 60_000;
+
 const start = async (): Promise<FastifyInstance> => {
   const env = defineEnv({
     PORT: (raw) => (raw === undefined || raw === "" ? 3001 : Number(raw)),
@@ -99,14 +159,46 @@ const start = async (): Promise<FastifyInstance> => {
     BOOTSTRAP_OWNER_EMAIL: optional,
     BOOTSTRAP_OWNER_PASSWORD_HASH: optional,
     BOOTSTRAP_ORG_ID: optional,
+    /**
+     * `01-F60`'s enabled set, stated explicitly by the operator. `00 §7`'s layer-2 config plane
+     * does not exist, so this is where "the caller states the set, even where that is a constant"
+     * actually lands. Absent leaves it empty, and an empty set REFUSES every save (see
+     * `unconfiguredCatalog`) rather than checking nothing.
+     */
+    ENABLED_BRANCHES: list,
+    ENABLED_CHANNELS: list,
   });
+
+  const now = (): number => Date.now();
+  const catalog: CatalogDeps = {
+    staged: createMemoryStagedEditStore(),
+    publisher: createMemoryCatalogPublisher(),
+    ledger: createMemoryLedgerAppender(),
+    enabled: { branches: env.ENABLED_BRANCHES, channels: env.ENABLED_CHANNELS },
+    now,
+    cutover_hour: BUSINESS_DAY_CUTOVER_HOUR_DEFAULT,
+  };
 
   const app = await createApiServer({
     store: createMemoryUserStore(bootstrapUsers(env)),
     sessionSecret: env.SESSION_SECRET,
     // The real clock, injected here and nowhere else (`18 §4`).
-    now: () => Date.now(),
+    now,
+    catalog,
   });
+
+  // `14-F28`'s day-end landing, in production. `unref` so the sweep never holds the process open.
+  const sweep = setInterval(() => {
+    void createDayEndScheduler(catalog)
+      .runDue()
+      .catch((error: unknown) => {
+        // Loud, never silent: a swallowed sweep failure is a menu edit that never lands and an
+        // owner who is never told, which is the shape `14-F28`'s cancellable window exists to
+        // keep visible.
+        console.error("day-end catalog sweep failed", error);
+      });
+  }, DAY_END_SWEEP_MS);
+  sweep.unref();
 
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
   return app;

@@ -10,6 +10,7 @@
   "dependencies": {
     "@restos/config": "workspace:*",
     "@restos/domain": "workspace:*",
+    "@restos/sync-protocol": "workspace:*",
     "@trpc/server": "11.18.0",
     "fastify": "5.10.0",
     "jose": "6.2.4",

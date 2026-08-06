@@ -37,6 +37,7 @@ import { type AuthDecision, type AuthSubject, can, type PermissionAction } from 
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { z } from "zod";
+import type { CatalogRuntime } from "./publish.js";
 import { verifySessionToken } from "./session.js";
 import type { UserStore } from "./users.js";
 
@@ -50,6 +51,12 @@ export type ApiContext = {
   /** `18 §4` — the clock is injected at the composition root; nothing here reads one. */
   readonly now: () => number;
   readonly bearer: string | null;
+  /**
+   * B-3/B-4. Required, not optional: `createApiServer` always resolves one, so no procedure has
+   * to ask whether the catalog path exists — the shape this wave's "unsupplied seam" defect takes
+   * is exactly an optional dependency that every call site forgets.
+   */
+  readonly catalog: CatalogRuntime;
 };
 
 /**

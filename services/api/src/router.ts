@@ -13,6 +13,7 @@
 import { verifyPin } from "@restos/domain";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { catalogProcedures } from "./catalog-router.js";
 import { issueSessionToken } from "./session.js";
 import {
   type ApiMeta,
@@ -77,7 +78,13 @@ const sessionRouter = router({
  * Appendix A rows differ in the way that matters: `catalog.edit_menu_prices` is owner-only, so it
  * exercises a plain `deny`; `order.void_after_kot` is `allow` for a branch manager at her own
  * branch and `escalate` for a cashier, so it exercises both the per-location scope and the third
- * outcome. B-3 replaces the first with the real catalog router.
+ * outcome.
+ *
+ * **B-3 did NOT replace `editMenuPrices`, and the original note here saying it would was wrong**
+ * about what it is for. It is not a stand-in for the catalog router; it is the B-2 suite's
+ * authorization FIXTURE, used by fifteen assertions that prove a role claim in a body, a header
+ * and a signed token all fail to move the verdict. Deleting it would delete that coverage. The
+ * real catalog procedures are mounted BESIDE it below.
  */
 const echo = (action: string) =>
   scopeInput.transform((input) => ({ branch_id: input.branch_id ?? null, action }));
@@ -86,6 +93,9 @@ const catalogRouter = router({
   editMenuPrices: authorized("catalog.edit_menu_prices")
     .input(echo("catalog.edit_menu_prices"))
     .mutation(({ ctx, input }) => ({ ...input, org_id: ctx.subject.org_id })),
+  // B-3 + B-4 — the real catalog read/write surface and the publish path. Every one of them is
+  // built with `authorized(...)`, so `assertEveryProcedureIsGated` below sees them all.
+  ...catalogProcedures,
 });
 
 const opsRouter = router({
