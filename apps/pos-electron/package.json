@@ -10,6 +10,7 @@
     "rebuild:native": "electron-rebuild -f -w better-sqlite3",
     "start": "electron-vite build && electron out/main/index.js",
     "typecheck": "tsc --noEmit",
+    "layout:check": "electron-vite build && electron out/main/layout-gate.js",
     "test": "vitest run"
   },
   "dependencies": {

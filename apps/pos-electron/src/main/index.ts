@@ -25,6 +25,7 @@ import { createGateway } from "./gateway";
 import { openJobStore } from "./job-store";
 import { createCashPrinter, createKotPrinter, PUMP_INTERVAL_MS } from "./printing";
 import { createUplink } from "./sync";
+import { COUNTER_WINDOW_OPTIONS } from "./window-options";
 
 /**
  * The main process: the only thing in this app that touches SQLite, and the only thing that
@@ -192,33 +193,11 @@ const DEVICE_LABEL = "Counter 1";
 
 const createWindow = (): BrowserWindow => {
   const window = new BrowserWindow({
-    width: 1366,
-    height: 768,
     /**
-     * **`27 §1a`'s panel is 1366x768 of PAGE, and without this line it was 1366x736.**
-     *
-     * `width`/`height` describe the window FRAME by default, so the title bar came out of the
-     * renderer: the counter got 736 css px where the reference hardware promises 768. Losing
-     * 32 px silently is how a layout that was designed against the spec's own panel gets
-     * measured against something smaller than it — and every capacity number in doc 27,
-     * including `27-F11a`'s ~88 tiles, is computed against the panel and not against whatever
-     * the frame leaves over. `27-F11c` is the same argument one level down: physical size sets
-     * capacity, so the surface has to actually BE the size it is designed for.
+     * `27 §1a`'s panel, from the module the LAYOUT GATE also reads (`main/window-options.ts`).
+     * Spread first so nothing below can silently widen the contract without the gate seeing it.
      */
-    useContentSize: true,
-    /**
-     * The 15.6" panel at `27 §1a` is the SMALLEST counter target listed (the other is
-     * 1920x1080), so it is a floor and not a preference. `27-F2` forbids reaching a primary
-     * action by scrolling and `AppShell` clips rather than scrolls to keep that true, which
-     * means a window dragged below the reference panel does not degrade — it HIDES controls,
-     * which on this surface is a cashier who cannot settle. Refusing the resize is the honest
-     * behaviour: `00 §5.7`, a surface reports what is true, and a till too small for its own
-     * layout is not a state the operator can be left to discover by losing a button.
-     *
-     * These are content dimensions, not frame dimensions, because of `useContentSize` above.
-     */
-    minWidth: 1366,
-    minHeight: 768,
+    ...COUNTER_WINDOW_OPTIONS,
     show: false,
     // 27 §1a's counter target is a 15.6" panel, and a POS is never windowed on one.
     autoHideMenuBar: true,
