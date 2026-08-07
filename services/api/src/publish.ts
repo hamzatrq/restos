@@ -12,6 +12,14 @@
  *     bodies, because an event that carried the menu would make the catalog ledger data in the
  *     same breath as `01-F52` says it is not.
  *
+ * **`14-F3` renders its own example now, and it did not before.** The record carried the actor and
+ * two content hashes, so a history row could say *who* and nothing else — the screen printed a
+ * standing apology instead of a date and two numbers. It now also carries `server_received_at`
+ * (`01-F62`: `catalog.changed` is ORG-SCOPED, so server time is its ordering authority and no
+ * branch stamp exists to want) and `price_changes` (`priceChanges` below: the moved CELLS, a delta
+ * and not a body). `01-F53` is unaffected — a line's price is snapshotted from the CATALOG at
+ * line-add, and nothing resolves a price by reading history.
+ *
  * **Both are PORTS**, and that is a stated limitation rather than an oversight. `publishCatalog`
  * lives in `services/sync-gateway` (a protected path, `20 §4.4`) and needs a live Postgres
  * handle, and this service has neither the dependency nor a database. So the adapter binding
@@ -20,7 +28,13 @@
  * a binding and not a redesign.
  */
 
-import { businessDayBounds, newId, payloadHash } from "@restos/domain";
+import {
+  businessDayBounds,
+  type CatalogPriceChangeT,
+  newId,
+  type OrderChannel,
+  payloadHash,
+} from "@restos/domain";
 import {
   type ApplyWhen,
   assertSavable,
@@ -64,21 +78,44 @@ export type CatalogPublisher = {
  * actor" has to be a constructible mistake or no test can prove it does not happen. `14-F3`
  * renders "changed by ???" the day it does.
  *
- * The envelope's other fields (`id`, `lamport_seq`, `branch_created_at`, `time_basis`, …) are the
- * ADAPTER's to mint, and deliberately not this module's: `01-F43` stamps branch-consensus time at
- * append, and a back-office edit has no branch and no hub to ask. That is a genuine gap in the
- * corpus, reported rather than filled with a plausible guess (Commandment 2).
+ * **`01-F62` (August 2026) closed the gap this type used to report.** `catalog.changed` is an
+ * ORG-SCOPED event: it carries `org_id`, **no `branch_id` and no branch stamp**, and it never
+ * enters a branch stream — so there is no envelope to mint and the earlier note ("the adapter's
+ * to mint … a genuine gap in the corpus") is retired rather than merely unresolved. What replaces
+ * it is `server_received_at` below.
  */
 export type LedgerRecord = {
   readonly type: "catalog.changed";
   readonly org_id: string;
   readonly actor_user_id: string | null;
+  /**
+   * `14-F3`'s *"2 Jul"*, and `01-F18`/`01-F62`'s ordering authority for a catalog edit — one
+   * field serving both, because they are the same instant and two would be two answers.
+   *
+   * **This is SERVER time and that is legitimate, not a law-2 exception.** `01-F43`'s
+   * branch-consensus rule exists because a *device* clock is an untrusted input a fold could read;
+   * `01-F62` says an org-scoped event has neither a branch nor a hub to ask, and that its ordering
+   * authority is `server_received_at` precisely because "the cloud plane is the one place a clock
+   * is not a threat — the inverse of the device-clock threat model `01-F43` was written for".
+   *
+   * Stamped **once, at append, by the server** (`deps.now`, injected at the composition root). It
+   * is a stored fact, never a rendering-time convenience: a history screen that formatted its own
+   * `Date.now()` would print today's date beside a change made in July, and be *right* on the day
+   * the record was written — which is what makes that bug survive a demo.
+   */
+  readonly server_received_at: number;
   readonly payload: {
     readonly entity: string;
     readonly entity_id: string;
     readonly version: number;
     readonly before_ref: string | null;
     readonly after_ref: string | null;
+    /**
+     * `14-F3`'s *"450 → 480"* — the cells this edit moved, empty when it moved none. Declared
+     * once in `domain` (`CatalogPriceChange`) and reused here rather than transcribed, on the
+     * same `18 §4` grounds that just consolidated `SELLABLE_KINDS`.
+     */
+    readonly price_changes: readonly CatalogPriceChangeT[];
   };
 };
 
@@ -152,6 +189,51 @@ export const stageEdit = (
 };
 
 /**
+ * `14-F3`'s *"450 → 480"*, computed where both sides are in hand.
+ *
+ * The union of the two grids' cells, keeping only those whose price actually moved — so a rename
+ * yields `[]` and a five-branch org that changed one channel yields one row, not twenty-five. An
+ * entry with no `before` (a brand-new item) yields every cell as `null → price`, which is the
+ * honest reading of "there was nothing to change from" and matches `before_ref === null`.
+ *
+ * **Membership of the cell, never truthiness of the price** — the same rule `01-F60`'s
+ * completeness check runs on, for the same reason: `0` is a price, so a cell added at `0` is a
+ * change (`null → 0`) and a cell that fell from `450` to `0` is a change, and any test shaped like
+ * `if (!price)` erases both. No arithmetic happens here; the two figures are read and compared,
+ * never combined (`DEC-MONEY-005`).
+ *
+ * NUL-joined keys, as every other `(branch, channel)` map in this codebase is: a separator that can
+ * occur inside an id lets `("a b", "c")` and `("a", "b c")` collide, and a moved price would then
+ * read as unchanged.
+ */
+export const priceChanges = (
+  before: CatalogEntry | undefined,
+  after: CatalogEntry,
+): readonly CatalogPriceChangeT[] => {
+  type Cell = { branch_id: string; channel: OrderChannel; price_paisa: number };
+  const cells = (entry: CatalogEntry | undefined): Map<string, Cell> =>
+    new Map(
+      (entry?.prices ?? []).map((price) => [`${price.branch_id} ${price.channel}`, price as Cell]),
+    );
+  const was = cells(before);
+  const is = cells(after);
+
+  const changes: CatalogPriceChangeT[] = [];
+  for (const key of new Set([...was.keys(), ...is.keys()])) {
+    const from = was.get(key);
+    const to = is.get(key);
+    const before_paisa = from === undefined ? null : from.price_paisa;
+    const after_paisa = to === undefined ? null : to.price_paisa;
+    if (before_paisa === after_paisa) continue;
+    // The cell's identity comes from whichever side HAS it, never from re-splitting the joined
+    // key — so the separator stays a detail of this map rather than a parsing contract.
+    const at = (to ?? from) as Cell;
+    changes.push({ branch_id: at.branch_id, channel: at.channel, before_paisa, after_paisa });
+  }
+  return changes;
+};
+
+/**
  * **The one publish path**, reached by apply-now and by the day-end sweep alike. Having two would
  * mean two places for `01-F60`, two places for `catalog.changed`, and a real chance that only one
  * of them appended an actor.
@@ -188,9 +270,15 @@ export const publishEdits = async (
   const actors = new Set(edits.map((edit) => edit.actor_user_id));
   const actor_user_id = actors.size === 1 ? (edits[0] as StagedEdit).actor_user_id : null;
 
+  // `01-F62` — ONE server reading, taken once and used for both writes. The artifact and its audit
+  // records are the same publish, so two `deps.now()` readings would let a history row disagree
+  // with the version it describes, and a bulk edit's five records disagree with each other about
+  // when "the" edit happened. `14-F3` renders this as "2 Jul"; `01-F18` orders by it.
+  const server_received_at = deps.now();
+
   const version = await deps.publisher.publish(org_id, entries, {
     actor_user_id,
-    now: deps.now(),
+    now: server_received_at,
     enabled: deps.enabled,
   });
 
@@ -202,6 +290,7 @@ export const publishEdits = async (
       org_id,
       // `14-F3`: the history is "changed by Ali", so the EDIT's actor, never the publish's.
       actor_user_id: edit.actor_user_id,
+      server_received_at,
       payload: {
         entity: entry.kind,
         entity_id: entry.id,
@@ -210,6 +299,9 @@ export const publishEdits = async (
         // `null` before-ref means the entry is new — there was nothing to change from.
         before_ref: was === undefined ? null : payloadHash(was),
         after_ref: payloadHash(entry),
+        // `14-F3`'s "450 → 480". Computed HERE because this is the one place both sides are in
+        // hand — `previous` is read before the publish for exactly this reason.
+        price_changes: priceChanges(was, entry),
       },
     });
   }
