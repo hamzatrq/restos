@@ -13,7 +13,7 @@
  * light-by-default law is about the COUNTER; this is not one.
  */
 
-import { colorDark, color as colorLight } from "@restos/ui/tokens";
+import { colorDark, color as colorLight, tokens } from "@restos/ui/tokens";
 
 const block = (palette: Record<string, string>): string =>
   Object.entries(palette)
@@ -21,10 +21,31 @@ const block = (palette: Record<string, string>): string =>
     .join("");
 
 /**
+ * `27-F26` — the typeface, taken from the manifest rather than left to the browser's default.
+ *
+ * This app consumed the COLOUR half of the tokens export and silently skipped the type half, so
+ * `27-F26` ("IBM Plex Sans, chosen on fail-safe defaults — tabular digits and distinct `I`/`l`
+ * with no feature flags; Roboto BANNED for numerals") was declared in the manifest, re-derived by
+ * `packages/ui`'s `tokens.test.ts` on every commit, and true of no pixel on this screen. `18 §7`
+ * says web consumes the tokens export; consuming a third of it is how a design language becomes
+ * a document nobody renders.
+ *
+ * `$family` is the manifest's own family handle, deliberately separate from the composite
+ * `text-*` styles — reading it is not the `27-F42` decomposition that rule forbids, which is
+ * about assembling a size/line-height pairing the system never designed.
+ *
+ * **No webfont is bundled and none is fetched.** The token's own fallback chain ends at
+ * `system-ui`, so a machine without IBM Plex Sans installed renders the system face — which is
+ * what this app did before, now stated by the token instead of by omission. Shipping a webfont
+ * is a dependency and a build-time download for an internal tool, which `24-F23` does not buy.
+ */
+const family = tokens.typography.$family;
+
+/**
  * `:root` carries the light palette; the dark one is applied under the viewer's OS preference and
  * under an explicit `.dark` class, so a future in-app toggle needs no change here.
  */
 export const themeCss = (): string =>
-  `:root{${block(colorLight)}}` +
+  `:root{${block(colorLight)}--rx-fontFamily-default:${family};}` +
   `@media (prefers-color-scheme: dark){:root:not(.light){${block(colorDark)}}}` +
   `.dark{${block(colorDark)}}`;

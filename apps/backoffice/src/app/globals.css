@@ -27,6 +27,17 @@
   --destructive-foreground: var(--rx-fgColor-on-status-fault);
   --warning: var(--rx-bgColor-status-abnormal);
   --warning-foreground: var(--rx-fgColor-on-status-abnormal);
+  /*
+   * `27-F40` — the prefix says which property a token belongs to, and `packages/ui`'s own
+   * discipline suite fails a `bgColor-` used as a foreground. These two are the manifest's
+   * standalone abnormal FOREGROUND and OUTLINE; without them the only way to tint a warning
+   * glyph here was `text-warning`, i.e. a fill token on a text property. `27-F64` is why the
+   * outline exists at all: the status surface carries a 3:1 boundary and the fill carries the
+   * state.
+   */
+  --warning-fg: var(--rx-fgColor-status-abnormal);
+  --warning-outline: var(--rx-outlineColor-status-abnormal);
+  --destructive-fg: var(--rx-fgColor-status-fault);
   --success: var(--rx-bgColor-status-confirmed);
   --success-foreground: var(--rx-fgColor-on-status-confirmed);
   --border: var(--rx-borderColor-default);
@@ -34,6 +45,8 @@
   --input: var(--rx-borderColor-strong);
   --ring: var(--rx-outlineColor-interactive);
   --radius: 0.375rem;
+  /* 27-F26 — the typeface, from the manifest. See `theme-css.ts` for why it lives there. */
+  --font-sans: var(--rx-fontFamily-default);
 }
 
 @theme inline {
@@ -51,6 +64,9 @@
   --color-destructive-foreground: var(--destructive-foreground);
   --color-warning: var(--warning);
   --color-warning-foreground: var(--warning-foreground);
+  --color-warning-fg: var(--warning-fg);
+  --color-warning-outline: var(--warning-outline);
+  --color-destructive-fg: var(--destructive-fg);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
   --color-border: var(--border);
@@ -60,6 +76,7 @@
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) + 2px);
+  --font-sans: var(--font-sans);
 }
 
 @layer base {
@@ -70,6 +87,8 @@
   body {
     background-color: var(--background);
     color: var(--foreground);
+    /* 27-F26 — the manifest's typeface, not the browser's default. */
+    font-family: var(--font-sans);
     /* 27-F22 — Western digits everywhere; `tabular-nums` so a price column aligns by place value. */
     font-variant-numeric: tabular-nums;
   }

@@ -18,6 +18,14 @@ export const strings = {
     working: "Signing in…",
     /** One refusal for both halves — the server does not say which, and neither does this. */
     refused: "Invalid email or password.",
+    /**
+     * What is behind the door, in the owner's terms. Three lines, because three is what this
+     * surface actually does today (`14-F29`, `14-F28`, `14-F3`) — a fourth would be a promise.
+     */
+    standfirst: "The menu, the prices and the record of who changed them.",
+    doesPrices: "One price for every branch and every sales channel",
+    doesTiming: "Edits hold until 05:00 so no till moves under a cashier",
+    doesHistory: "Every price change kept, with its before and after",
   },
 
   session: {
@@ -30,6 +38,14 @@ export const strings = {
     publishedVersion: "Published version",
     empty: "No published menu yet. Add the first item below.",
     newEntry: "New item",
+    /** The empty editor pane. An empty screen is an invitation to act. */
+    chooseOne: "Choose anything on the left to edit it, or add a new item.",
+    /**
+     * The money column's heading. `01-F60` prices per `(branch, channel)`, so a list can only
+     * ever quote ONE of them — this names which, once, instead of leaving a bare number to be
+     * read as "the price" or repeating the pair on every row.
+     */
+    pricesShown: "Prices shown for",
     kind: "Type",
     name: "Name",
     kitchenName: "Kitchen name",
@@ -124,5 +140,38 @@ export const strings = {
     /** A refusal from the server is the owner's mistake and names the cell — never "save failed". */
     saveRefused: "The server refused this save:",
     signedOut: "Your session has ended. Sign in again.",
+  },
+
+  /**
+   * **The surface that replaced a raw `error.message` in a red bar.**
+   *
+   * What was there rendered whatever string reached the client — `fetch failed`, and in this
+   * session's own run `Unexpected token 'I', "Internal S"... is not valid JSON`, edge to edge on
+   * an otherwise empty page. That is undici's and `JSON.parse`'s wording, not the product's, and
+   * it tells an owner nothing about what is broken, whether waiting helps, or what to do.
+   *
+   * **These sentences claim only what this client can actually know.** The back office is a front
+   * end with no backend of its own (`apps/backoffice/CLAUDE.md`): every query goes to
+   * `services/api`, so a failed query means that service did not answer usefully — which is true
+   * whether the process is down, the rewrite is misconfigured, or the API's own dependency
+   * failed. It does NOT say which, because this client cannot tell, and a surface that guesses a
+   * cause sends an owner to fix the wrong thing. The server's own words are still shown, demoted
+   * to technical detail and labelled as such, so they remain available to whoever can act on
+   * them.
+   *
+   * Retriability is answered by a CONTROL, not by a sentence: the button is the claim.
+   */
+  unreachable: {
+    heading: "Can't reach the RestOS service",
+    body:
+      "The back office has no data of its own — it reads everything from the RestOS service, and " +
+      "that service did not answer. Nothing has been lost and nothing has changed: this screen " +
+      "cannot show the menu until the service answers again.",
+    /** Named as the thing to check, because it is the one thing an owner can act on. */
+    action: "If this keeps happening, the service needs to be restarted by whoever runs it.",
+    retry: "Try again",
+    retrying: "Trying…",
+    /** The raw string, kept but demoted — never the headline. */
+    detail: "Technical detail",
   },
 } as const;

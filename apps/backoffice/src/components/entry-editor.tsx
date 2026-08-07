@@ -19,6 +19,7 @@
 
 import type { OrderChannel } from "@restos/domain";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Archive } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { type CatalogEntry, type EditReceipt, ENTRY_KINDS } from "../lib/catalog-types";
 import { isWholeRupees, rupeeTextFromPaisa } from "../lib/money";
@@ -35,6 +36,7 @@ import {
 } from "../lib/price-grid";
 import { strings } from "../lib/strings";
 import { refusalMessage, useTRPC } from "../lib/trpc";
+import { formatInstant } from "../lib/when";
 import { type ApplyWhen, ApplyWhenControl, DEFAULT_APPLY_WHEN } from "./apply-when";
 import { ChangeHistory } from "./change-history";
 import { PriceGrid } from "./price-grid";
@@ -260,28 +262,52 @@ export const EntryEditor = ({
           <Note tone="neutral">
             {receipt.apply_when === "now"
               ? `${strings.timing.now} · ${strings.history.version} ${receipt.version ?? "—"}`
-              : `${strings.timing.landsAt} ${new Date(receipt.lands_at).toLocaleString("en-US", { hour12: false })}`}
+              : `${strings.timing.landsAt} ${formatInstant(receipt.lands_at)}`}
           </Note>
         )}
 
-        <div className="flex items-center gap-2">
-          <Button type="button" onClick={onSubmit} disabled={save.isPending}>
-            {save.isPending ? strings.catalog.saving : strings.catalog.save}
-          </Button>
-          {initial === null || archived ? null : (
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={archive.isPending}
-              onClick={() =>
-                archive.mutate({ kind: initial.kind, id: initial.id, apply_when: applyWhen })
-              }
-            >
-              {strings.catalog.archive}
+        {/*
+          **`14-F7` is "archive, never delete" — so archive must not be painted as a deletion.**
+
+          Archive shipped as `variant="destructive"`: the fault fill, the strongest colour in the
+          palette, sitting immediately beside Save at the same size. Two things wrong with that.
+          It misstates the act — `14-F7` archiving *hides an item from menus and POS grids and
+          keeps it resolvable*, which is reversible curation, not destruction. And it spends the
+          `27-F16` alarm channel on the base case, on the same screen where apply-now (an edit
+          that moves every till mid-order) had no colour at all. The two were exactly backwards.
+
+          Archive is now a secondary control, separated from the primary by the layout rather
+          than by hue, with its `14-F7` consequence attached to IT — the help text used to sit
+          under both buttons, so it read as a footnote on Save as well.
+        */}
+        <div className="flex flex-col gap-4 border-t border-border pt-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <Button type="button" onClick={onSubmit} disabled={save.isPending}>
+              {save.isPending ? strings.catalog.saving : strings.catalog.save}
             </Button>
+            {initial === null || archived ? null : (
+              <div className="ml-auto flex flex-col items-end gap-1">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={archive.isPending}
+                  onClick={() =>
+                    archive.mutate({ kind: initial.kind, id: initial.id, apply_when: applyWhen })
+                  }
+                >
+                  <Archive aria-hidden="true" className="size-4" />
+                  {strings.catalog.archive}
+                </Button>
+              </div>
+            )}
+          </div>
+          {initial === null || archived ? null : (
+            <p className="max-w-2xl text-xs leading-relaxed text-muted-foreground">
+              {strings.catalog.archiveHelp}
+            </p>
           )}
         </div>
-        <p className="text-xs text-muted-foreground">{strings.catalog.archiveHelp}</p>
 
         {initial === null ? null : (
           <section className="flex flex-col gap-2 border-t border-border pt-4">
