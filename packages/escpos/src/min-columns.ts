@@ -34,10 +34,39 @@ export type DocumentType = (typeof DOCUMENT_TYPES)[number];
  * alignment the thing modifiers and notes hang off. Wrapping the item line spends exactly the
  * property the ticket exists to deliver.
  *
- * **Only three of `03-F31`'s eight types are declared, deliberately.** The FR states these three
- * and no others. Inventing floors for `refund_slip`, `shift_close_slip`, `rider_settlement_slip`,
- * `day_summary` and `test_page` would be filling a gap with plausible behaviour, which
- * Commandment 2 forbids; they get a floor when their `DocumentSpec` is written.
+ * **Three of `03-F31`'s eight types are declared BY THE FR.** The FR states these three and no
+ * others. Inventing floors for `refund_slip`, `rider_settlement_slip` and `test_page` would be
+ * filling a gap with plausible behaviour, which Commandment 2 forbids; they get a floor when
+ * their `DocumentSpec` is written — which is the rule the two cash documents below follow.
+ *
+ * **`shift_close_slip` and `day_summary` get a floor here because S-7 wrote their specs, and each
+ * one is DERIVED from its own widest full-form line rather than copied from a neighbour.**
+ * `03-F49`'s whole resolution is that "structural differences live in the TYPE", so a cash slip
+ * inheriting the KOT's 42 would refuse on 80 mm-class printers it fits on, and inheriting the
+ * receipt's 32 would print a document whose widest line does not fit. Both are the silent
+ * degradation `03-F34` bans, one in each direction.
+ *
+ * The derivation is stated here and CHECKED in `__acceptance__/cash-documents.test.ts` §A against
+ * what each spec's `example_data` actually renders — `03-F36` makes that example the build-time
+ * witness, so the number below and the paper cannot drift apart. Every line of both documents is
+ * `label` + one space + value, all at normal size (`27-F56` allocates the 2× rung to the KOT's
+ * quantity and order identifier; spending it on a money figure would DOUBLE that figure's column
+ * cost and push both floors past a 32-column printer for no FR that asks for it):
+ *
+ *   * the widest money token is `Rs 99,999,999` = **13 columns** — `27-F23`'s symbol-first `Rs `
+ *     (3) plus `MAX_MONEY_DIGITS` (8) under Western 3-digit grouping (2 separators). Eight digits
+ *     is a PINNED display bound, not a specified one: no FR bounds a money figure, a large
+ *     Pakistani branch's business day is six digits of rupees, and every extra digit costs a
+ *     column on a 58 mm-versus-80 mm purchasing decision. Above it a line takes `03-F36`'s last
+ *     declared degradation and wraps.
+ *   * `shift_close_slip` = **35**: its widest label is 21 columns — `Aggregator receivable`, the
+ *     longest `PAYMENT_METHODS` member `02-F23` requires "by method", tied by `02-F43`'s
+ *     `Unbound no-sale opens` — so 21 + 1 + 13.
+ *   * `day_summary` = **34**: its widest line is `Voids/comps/discounts NOT RECORDED` — 21 + 1 +
+ *     12, a CONSTANT line rather than a money row, because `02-F24` names that group and `01 §4`
+ *     has no event type that records it (`26 §7`: "`void/comp/discount.recorded` … have **no
+ *     payload schema at all**"). Its money rows are narrower: `Storefront` is the longest
+ *     `ORDER_CHANNELS` label at 10, so 10 + 1 + 13 = 24.
  *
  * **`as const` is load-bearing, not decoration.** `03-F49` puts `min_columns` on the
  * `DocumentSpec` too, and two declarations of one number is the defect — so a spec SOURCES its
@@ -47,6 +76,8 @@ export const MIN_COLUMNS = {
   kot: 42,
   receipt: 32,
   bill: 32,
+  shift_close_slip: 35,
+  day_summary: 34,
 } as const satisfies Readonly<Partial<Record<DocumentType, number>>>;
 
 /** The same table, widened for lookup by an arbitrary `DocumentType`. */

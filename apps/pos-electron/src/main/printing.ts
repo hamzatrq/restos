@@ -1,11 +1,21 @@
 import {
+  businessDate,
+  ORDER_CHANNELS,
+  type OrderChannel,
+  PAYMENT_METHODS,
+  type PaymentMethod,
+  totalPaisaOrNull,
+} from "@restos/domain";
+import {
   classifyTransmit,
+  type DaySummaryData,
   DOCUMENT_SPECS,
   type KotData,
   MAX_TRANSMIT_ATTEMPTS,
   type PrinterCapability,
   RETRY_WINDOW_MS,
   render,
+  type ShiftCloseData,
   type Spooler,
   type SpoolerTransport,
 } from "@restos/escpos";
@@ -105,6 +115,55 @@ const tableOf = (table_ids_json: string, channel: string): string => {
   return ids[0] ?? channel;
 };
 
+/**
+ * S-7 — the namespace that tells a CASH job from a KOT job, and it is load-bearing rather than
+ * tidy.
+ *
+ * The three document types share this device's ONE spooler (`03-F42` makes a document the unit,
+ * not the queue), so `reconcile` sees all three states — and `01 §4` has **no print event for a
+ * cash document**. There is no `slip.printed` and no `slip.print_failed`; emitting `kot.printed`
+ * for a shift-close slip would write a KOT fact about an order id that is a shift id, permanently,
+ * into a ledger `01-F1` forbids correcting in place. Commandment 2 forbids inventing the event, so
+ * a cash job's outcome reaches the COUNTER (`03-F5`'s band) and nothing else — an owed gap, named
+ * here rather than papered over with a plausible event type.
+ *
+ * A PREFIX rather than an in-memory set, because the spool is durable (`03-F4`): a relaunch
+ * re-reads jobs it did not enqueue, and a set built at construction would classify every surviving
+ * cash job as a KOT.
+ */
+const CASH_JOB_PREFIX = "cash::";
+const isCashJob = (job_id: string): boolean => job_id.startsWith(CASH_JOB_PREFIX);
+
+/**
+ * `03-F5`'s alert has to name the DOCUMENT as well as the printer and the subject — "KOT #142 did
+ * not print" is unactionable if what failed was the shift-close slip a cashier is waiting to sign.
+ */
+const DOCUMENT_NOUNS = {
+  kot: "KOT",
+  shift_close_slip: "Shift slip",
+  day_summary: "Day summary",
+} as const;
+
+/**
+ * `01-F46`'s business day, applied to a delivered timestamp.
+ *
+ * The arithmetic is `domain`'s and is declared once (`18 §2`) — the same helper the `shift_cash`
+ * fold uses for `days.business_date`, so a shift and the day it is bucketed into cannot disagree
+ * about which night they belong to. It reads a DELIVERED field (`01-F43` stamps branch time at
+ * append), never this device's clock, so `03-F30`/`01-F34` are both intact.
+ */
+const onBusinessDate = (stamp: number, date: string): boolean => businessDate(stamp) === date;
+
+/**
+ * A signed integer-paisa total, BigInt-exact (`DEC-MONEY-005`, standing law 3).
+ *
+ * `totalPaisaOrNull` rather than a running `+`: float `+` is non-associative near 2^53, so a
+ * plain accumulator would let row order decide a printed money figure. `null` (inexact) prints
+ * zero rather than throwing — `01-F17`'s spirit on the print path, where a shift close must
+ * complete whatever the arithmetic says, and the figure it would replace does not exist anyway.
+ */
+const totalOf = (values: readonly number[]): number => totalPaisaOrNull(values) ?? 0;
+
 export const createKotPrinter = ({
   spooler,
   store,
@@ -158,7 +217,7 @@ export const createKotPrinter = ({
       // the line a cashier reads first, because either one alone is unactionable — the order
       // without the printer sends her hunting, the printer without the order does not say which
       // food is not being cooked.
-      message: `KOT ${order_ref.slice(0, 8)} did not print — ${printer_name}`,
+      message: `${DOCUMENT_NOUNS.kot} ${order_ref.slice(0, 8)} did not print — ${printer_name}`,
       subject: why,
       id,
     });
@@ -254,6 +313,15 @@ export const createKotPrinter = ({
   const reconcile = (before: ReadonlyMap<string, string>): void => {
     for (const job of spooler.jobs()) {
       if (before.get(job.job_id) === job.state) continue;
+      // S-7 — THE ONE LINE THAT KEEPS THIS FILE'S TWO PRINTERS APART, and it is not tidiness.
+      //
+      // `03-F42` makes a DOCUMENT the unit, not the queue, so all three types share this device's
+      // one durable spooler and this loop sees all three. But `01 §4` has **no print event for a
+      // cash document** — no `slip.printed`, no `slip.print_failed` — and emitting `kot.printed`
+      // here would append a KOT fact whose `order_id` is a shift id, permanently, into a ledger
+      // `01-F1` forbids correcting in place. Commandment 2 forbids inventing the event. So the
+      // cash printer below owns its own reconciliation and its own band; this one owns the KOT's.
+      if (isCashJob(job.job_id)) continue;
       if (job.state === "printed") {
         // `02-F31`'s precondition — T1 advances lines to `in_prep` off this event. The advance
         // itself needs a branch device registry that does not exist; this is the fact it needs.
@@ -296,6 +364,249 @@ export const createKotPrinter = ({
       // has no subtype for it (`login`, `drawer_opened`, `reprint`, `threshold_override`,
       // `settings_changed`). Inventing one is Commandment 2, so the ack is in-memory only and
       // that half of the FR is OWED, named here rather than left to look intentional.
+      raised.delete(alarm_id);
+    },
+  };
+};
+
+// ── S-7 — 02-F23's shift-close slip and 02-F24's day summary ────────────────────────────────────
+
+export type CashPrinterDeps = {
+  /** The SAME durable spooler the KOT uses — `03-F42` makes a document the unit, not the queue. */
+  spooler: Spooler;
+  /**
+   * The `shift_cash` fold's rows, plus `openOrders` for `02-F24`'s sales by channel.
+   *
+   * `authorizeReads`' scoped `cashState()` is deliberately NOT the source, even though it carries
+   * the same rows. That read is narrowed to `reportScope`'s Appendix A reach so a cashier cannot
+   * read a colleague's drawer off her own till (`02-F23`). A PRINTER is not a subject: the paper
+   * is the shift's own slip and the manager's own day summary, and routing it through a
+   * session-scoped read would make what prints depend on who was signed in when the close landed.
+   */
+  store: Pick<DeviceStore, "openOrders" | "shifts" | "days" | "unboundDrawer">;
+  /** `03 §7` layer 3 — `03-F49`'s per-type floor is checked against this, inside `render()`. */
+  capability: PrinterCapability;
+  /**
+   * The KOT printer's `pump`, injected rather than re-implemented.
+   *
+   * `03-F4`'s budget is "3 attempts over 30 s" and the spooler owns no clock, so the SPACING is
+   * the host's `PUMP_INTERVAL_MS` interval. A second pump loop over the same spooler would spend
+   * that budget twice as fast and turn `03-F5`'s 45 s bound into ~20 s — so there is exactly one
+   * driver on this device and this is how a queued slip reaches it immediately.
+   */
+  pump: () => Promise<void>;
+};
+
+export type CashPrinter = {
+  /**
+   * `02-F23` — a `shift.closed` has landed, so the paper form of *"I'm clean"* is queued.
+   *
+   * Synchronous and `void` for `01-F17`'s reason exactly as `confirmed` is: the close is already
+   * in the ledger when this runs, and a cashier finishing her shift may not be held at the till
+   * by a socket timeout. A device with no printer still closes shifts.
+   */
+  shiftClosed: (shift_id: string) => void;
+  /** `02-F24` — a `day.closed` has landed; the day-summary ticket. Same contract as above. */
+  dayClosed: (day_id: string) => void;
+  /**
+   * Raise `03-F5`'s band for any cash job that has reached `failed` since the last look.
+   *
+   * Separate from `pump` because this printer must not drive the spooler (see `pump` above): the
+   * host calls it after each pump, and it only READS job state.
+   */
+  reconcile: () => void;
+  alarms: () => readonly Alarm[];
+  acknowledge: (alarm_id: string) => void;
+};
+
+export const createCashPrinter = ({
+  spooler,
+  store,
+  capability,
+  pump,
+}: CashPrinterDeps): CashPrinter => {
+  const printer_name = capability.model_id;
+  const raised = new Map<string, Alarm>();
+  const seen = new Map<string, string>();
+
+  /**
+   * Render, enqueue and kick — the same three steps `confirmed()` takes, and the same refusal
+   * path. Shared between the two cash types so `03-F34`'s "hard refusal to print plus an S1 band,
+   * never a silent degradation" cannot hold for one and quietly not hold for the other.
+   */
+  const queue = (
+    kind: "shift_close_slip" | "day_summary",
+    ref: string,
+    data: ShiftCloseData | DaySummaryData,
+  ): void => {
+    const spec = DOCUMENT_SPECS[kind];
+    // `03-F30` ships the specs as code, so this cannot fire. Unlike the KOT's construction-time
+    // throw it is a quiet return: a missing cash spec must not stop the app from starting, and a
+    // shift still closes in the ledger with or without paper (`01-F17`).
+    if (spec === undefined) return;
+    // A shift closes ONCE (`shift.closed` is monotone in the fold — "nothing un-closes"), but the
+    // renderer can re-invoke the handler and the spool is DURABLE across a relaunch. A
+    // deterministic id is what makes a second copy impossible without `03-F7`'s deliberate,
+    // REPRINT-banded reprint act — a duplicate cash slip is a second signature surface.
+    const job_id = `${CASH_JOB_PREFIX}${kind}::${ref}`;
+    if (spooler.job(job_id) !== undefined) return;
+    // No owner profile: doc 14's editing surface does not exist, so every declared slot takes its
+    // shipped default (an empty note) — exactly as the KOT above.
+    const result = render(spec, {}, data, capability);
+    if (!result.ok) {
+      const measured =
+        result.required_columns === undefined || result.available_columns === undefined
+          ? ""
+          : ` — needs ${result.required_columns} columns, this printer has ${result.available_columns}`;
+      // `03-F34`: NOTHING is enqueued. No ledger record either — see `CASH_JOB_PREFIX`.
+      raise(job_id, DOCUMENT_NOUNS[kind], ref, `refused: ${result.reason}${measured}`);
+      return;
+    }
+    spooler.enqueue({ job_id, document: result.bytes, printer_name, order_ref: ref });
+    // `queueMicrotask` for `01-F17`'s reason, not style: `await transport.send(...)` invokes
+    // `send` synchronously before it suspends, so a direct call would reach the socket on the
+    // stack of the IPC handler that has not yet answered the cashier.
+    queueMicrotask(() => void pump());
+  };
+
+  const raise = (id: string, noun: string, ref: string, why: string): void => {
+    if (raised.has(id)) return;
+    raised.set(id, {
+      // `03-F5` requires the alert to name the printer and the subject — and the DOCUMENT, because
+      // "KOT 5f3a9c21 did not print" sends a cashier to the kitchen printer for a slip that is not
+      // a KOT and does not tell her the reconciliation she is waiting to sign never appeared.
+      message: `${noun} ${ref.slice(0, 8)} did not print — ${printer_name}`,
+      subject: why,
+      id,
+    });
+  };
+
+  /**
+   * `02-F23` — the slip, assembled from the `shift_cash` fold.
+   *
+   * **Every money figure here is CARRIED (`26 §7`) and nothing is recomputed.** `variance_paisa`
+   * is the fold's snapshot off `shift.closed` and `expected_at_close_json` is the expectation the
+   * cashier signed against, not the live one — a late payment must not move a number on a slip
+   * that has already been printed, which is what `01-F1` forbids and what a read-time recompute
+   * performs in effect.
+   *
+   * An UNCLOSED shift prints nothing: the three carried facts are null until the close lands, and
+   * a slip with an empty variance says nothing about the drawer.
+   */
+  const shiftClosed = (shift_id: string): void => {
+    const shift = store.shifts().find((row) => row.shift_id === shift_id);
+    if (shift === undefined) return;
+    if (
+      shift.expected_at_close_json === null ||
+      shift.counted_cash_paisa === null ||
+      shift.variance_paisa === null
+    ) {
+      return;
+    }
+    const carried = JSON.parse(shift.expected_at_close_json) as Partial<
+      Record<PaymentMethod, number>
+    >;
+    // `01-F32`'s closed tender set, EXHAUSTIVE. `domain`'s `expectedPaisaByMethod` is a strict
+    // object over all five, so a missing key cannot come off a conforming `shift.closed` — the
+    // `?? 0` is the honest render if a non-conforming writer ever produced one, never a bucket
+    // this device decided to drop (`02-F43`'s silent path).
+    const expected_by_method = Object.fromEntries(
+      PAYMENT_METHODS.map((method) => [method, carried[method] ?? 0]),
+    ) as ShiftCloseData["expected_by_method"];
+    // `02-F43` — the branch's unbound drawer activity, COUNTED onto the slip. Dropping it would
+    // satisfy `02-F21`'s word "logged" while defeating the theft detection the FR exists for.
+    const unbound = store.unboundDrawer();
+    queue("shift_close_slip", shift_id, {
+      // The eight-character handle, as `03-F5`'s band and the KOT's ticket number use: a UUID is
+      // 36 columns and `03-F49`'s floor for this document is 35.
+      shift_id: shift_id.slice(0, 8),
+      cashier: shift.cashier,
+      expected_by_method,
+      counted_cash_paisa: shift.counted_cash_paisa,
+      variance_paisa: shift.variance_paisa,
+      paid_out_paisa: shift.paid_out_paisa,
+      no_sale_count: shift.no_sale_count,
+      unbound_no_sale_count: unbound.no_sale_count,
+      unbound_paid_out_paisa: unbound.paid_out_paisa,
+      // `03-F7`/`03-F37`: a reprint is a deliberate, logged act, and the close that triggers this
+      // is not one. The reprint path is owed with the surface that offers it.
+      reprint: false,
+    });
+  };
+
+  /**
+   * `02-F24` — "a day-summary ticket (sales by channel, voids/comps/discounts, over/short)".
+   *
+   * Two of the three groups are assembled below and the third does not exist: `01 §4` has no
+   * void/comp/discount event (`26 §7` states it outright), so the document names the gap instead
+   * of printing a zero. See `DaySummaryData`.
+   *
+   * **The day's over/short is a SUM of CARRIED shift variances, never a day-level recompute.**
+   * `day.closed` carries a count and no expectation, so "expected minus counted" for a whole day
+   * is not a carried fact at all — deriving one here is the exact defect `26 §7` removes, and the
+   * sum of the figures the cashiers already signed is what is actually true.
+   */
+  const dayClosed = (day_id: string): void => {
+    const day = store.days().find((row) => row.day_id === day_id);
+    if (day === undefined || day.counted_cash_paisa === null) return;
+    // `01-F46` binds a shift and an order to a business day through the SAME `domain` helper the
+    // fold used for `days.business_date`, off a delivered branch-time stamp (`01-F43`). There is
+    // no `day_id` on a shift row or an order row to join by, and `26 §7` is explicit that this
+    // class of question "needs a TIME SOURCE" — not an ordering one, and not this device's clock.
+    const shifts = store.shifts().filter((row) => onBusinessDate(row.open_at, day.business_date));
+    const sales = new Map<OrderChannel, number[]>();
+    for (const channel of ORDER_CHANNELS) sales.set(channel, []);
+    for (const order of store.openOrders()) {
+      if (order.confirmed_at === null) continue;
+      if (!onBusinessDate(order.confirmed_at, day.business_date)) continue;
+      // `02-F42` closed the channel set. A row outside it cannot be bucketed and is NOT folded
+      // into another channel: a mis-bucketed sale is worse than a missing one on a document a
+      // manager reconciles against a deposit.
+      const bucket = sales.get(order.channel as OrderChannel);
+      if (bucket === undefined) continue;
+      bucket.push(order.pay_total);
+    }
+    queue("day_summary", day_id, {
+      business_date: day.business_date,
+      sales_by_channel: Object.fromEntries(
+        ORDER_CHANNELS.map((channel) => [channel, totalOf(sales.get(channel) ?? [])]),
+      ) as DaySummaryData["sales_by_channel"],
+      opening_float_paisa: day.opening_float_paisa,
+      deposit_paisa: day.deposit_paisa,
+      counted_cash_paisa: day.counted_cash_paisa,
+      over_short_paisa: totalOf(
+        shifts
+          .filter((row) => row.variance_paisa !== null)
+          .map((row) => row.variance_paisa as number),
+      ),
+      shifts_closed: shifts.filter((row) => row.closed === 1).length,
+      shifts_open: shifts.filter((row) => row.closed === 0).length,
+      reprint: false,
+    });
+  };
+
+  return {
+    shiftClosed,
+    dayClosed,
+    reconcile: () => {
+      for (const job of spooler.jobs()) {
+        if (!isCashJob(job.job_id)) continue;
+        if (seen.get(job.job_id) === job.state) continue;
+        seen.set(job.job_id, job.state);
+        // `03-F41`: `stalled` is deliberately absent. The printer TOOK the bytes and is holding
+        // them until the roll is replaced, and a band here sends someone to reprint a document
+        // that is about to appear — on a cash slip, a duplicate signature surface.
+        if (job.state !== "failed") continue;
+        const kind = job.job_id.startsWith(`${CASH_JOB_PREFIX}day_summary::`)
+          ? DOCUMENT_NOUNS.day_summary
+          : DOCUMENT_NOUNS.shift_close_slip;
+        raise(job.job_id, kind, job.order_ref, `printing failed after ${job.attempts} attempts`);
+      }
+    },
+    alarms: () => [...raised.values()],
+    acknowledge: (alarm_id) => {
+      // The same owed half as the KOT printer's: `03-F5` says the acknowledgement is logged, and
+      // `01-F5`'s closed `audit.*` set has no subtype for it. Inventing one is Commandment 2.
       raised.delete(alarm_id);
     },
   };
