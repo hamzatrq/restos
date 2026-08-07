@@ -1,4 +1,4 @@
-import { Tile } from "@restos/ui";
+import { space, Tile, typography, useColor } from "@restos/ui";
 import { useCallback, useEffect, useState } from "react";
 import type { DeviceState, Session } from "../shared/ipc";
 import { Counter } from "./Counter";
@@ -36,6 +36,102 @@ import { Counter } from "./Counter";
 const DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"] as const;
 
 /**
+ * The lock surface's layout, found by looking (August 2026).
+ *
+ * What was here: the roster as three 76 dp tiles wrapped into the TOP-LEFT CORNER of an
+ * otherwise blank white page, and the pad as one centred column of `Tile`s with a `maxWidth`
+ * that produced three columns by accident of wrapping. On the `27 §1a` reference counter
+ * (1366x768) that column ran **780 px** before "Unlock" — so the confirming act of the one
+ * surface that gates every other sat below the fold, on a body with `overflow: hidden`, where
+ * `27-F2` says no primary action may be. It was not reachable by scrolling either.
+ *
+ * The fix is a two-column composition — identity on the left, pad on the right — because the
+ * pad's own height (4 rows x 126 dp = 536 px) is the tallest fixed thing on the surface and
+ * everything else fits BESIDE it instead of under it. Nothing is below the fold at 768.
+ */
+const GATE: React.CSSProperties = {
+  height: "100%",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: space["space-8"],
+  padding: space["space-5"],
+};
+
+/** The identity half: who this is about, and what has been keyed so far. */
+const IDENTITY: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: space["space-4"],
+  minWidth: 320,
+};
+
+/**
+ * The pad. An EXPLICIT 3-column grid rather than a wrapping row: `27-F4` calls the keypad the
+ * most position-dependent surface in the product, and a layout that derives its column count
+ * from how the browser happens to wrap is a layout that can silently re-rank on a different
+ * panel. Twelve cells, no hole — 1-9, then Clear, 0, Unlock.
+ */
+const PAD: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, min-content)",
+  alignContent: "center",
+};
+
+const STEP: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  gap: space["space-5"],
+};
+
+/** `27-F42` — composite type tokens, taken whole. Never an assembled size/line-height pairing. */
+const PROMPT: React.CSSProperties = {
+  fontFamily: typography["text-label"].fontFamily,
+  fontSize: typography["text-label"].fontSize,
+  fontWeight: typography["text-label"].fontWeight,
+  letterSpacing: typography["text-label"].letterSpacing,
+  margin: 0,
+};
+
+/**
+ * The identified cashier. `27-F25` puts the operational payload at the top of the size ladder,
+ * and on this surface the payload is WHO the ledger is about to name (`02-F41`) — the one fact
+ * a mis-tap makes wrong and the one an operator must catch before submitting.
+ */
+const NAME: React.CSSProperties = {
+  fontFamily: typography["text-numeric-primary"].fontFamily,
+  fontSize: typography["text-numeric-primary"].fontSize,
+  fontWeight: typography["text-numeric-primary"].fontWeight,
+  margin: 0,
+};
+
+/**
+ * The entry marks, in a box that holds its height at zero characters. Sunken and bounded
+ * (`27-F66` — a neutral state takes a boundary, never a fill step) so it reads as a field the
+ * keys write into rather than as a stray line of dots.
+ */
+const MARKS: React.CSSProperties = {
+  fontFamily: typography["text-numeric-hero"].fontFamily,
+  fontSize: typography["text-numeric-hero"].fontSize,
+  lineHeight: `${typography["text-numeric-hero"].lineHeight}px`,
+  letterSpacing: "0.15em",
+  minHeight: typography["text-numeric-hero"].lineHeight,
+  padding: space["space-2"],
+  borderRadius: space["space-2"],
+  margin: 0,
+};
+
+/** A wrapping row of roster tiles, bounded so a large roster pages down rather than sideways. */
+const ROW: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  justifyContent: "center",
+  gap: space["space-2"],
+  maxWidth: 720,
+};
+
+/**
  * **`packages/ui`'s `NumericKeypad` is not used here, and that is a rule rather than an
  * oversight** — its own header says why. `acceptKeystroke` computes
  * `current === "0" ? key : current + key`, which is right for rupees and makes a PIN beginning
@@ -67,6 +163,7 @@ export const App = () => {
   const [chosen, setChosen] = useState<Session | null>(null);
   const [pin, setPin] = useState("");
   const [refused, setRefused] = useState(false);
+  const color = useColor();
 
   const reload = useCallback(async () => {
     const next = (await window.restos.deviceState()).user;
@@ -137,34 +234,95 @@ export const App = () => {
    */
   if (chosen === null) {
     return (
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, maxWidth: 720 }}>
-        {roster.map((member) => (
-          <Tile
-            key={member.user_id}
-            posture="counter"
-            label={member.display_name}
-            onPress={() => setChosen(member)}
-          />
-        ))}
+      <div style={GATE}>
+        <div style={STEP}>
+          {/*
+            The surface names its own act. `27-F1` gives the operator nowhere to be lost and no
+            back affordance, so the one line of chrome a lock screen gets has to say what this
+            step IS — and `01-F61` makes it a step, not the whole thing: identify, THEN the PIN.
+            Three unlabelled boxes in the corner of a blank page said neither.
+          */}
+          <p style={PROMPT}>Who are you?</p>
+          <div style={ROW}>
+            {roster.map((member) => (
+              <Tile
+                key={member.user_id}
+                posture="counter"
+                label={member.display_name}
+                onPress={() => setChosen(member)}
+              />
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
-      {/*
-        Who the PIN is about to be charged against. `02-F41` makes this the cashier the ledger
-        will name, so an operator who mis-tapped has to be able to see it before submitting.
-      */}
-      <p>{chosen.display_name}</p>
-      {/*
-        One mark per digit, and the digits themselves are never shown: `01-F61` records that
-        shoulder-surfing is the norm on a shared counter. It is feedback, not a readout — an
-        operator has to be able to see that a key registered.
-      */}
-      <p>{"•".repeat(pin.length)}</p>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, maxWidth: 420 }}>
-        {DIGITS.map((d) => (
+    <div style={GATE}>
+      <div style={IDENTITY}>
+        {/*
+          Who the PIN is about to be charged against. `02-F41` makes this the cashier the ledger
+          will name, so an operator who mis-tapped has to be able to see it before submitting —
+          which is why it is the largest word on the surface and no longer a 16 px serif line.
+        */}
+        <p style={{ ...PROMPT, color: color["fgColor-muted"] }}>Signing in as</p>
+        <p style={NAME}>{chosen.display_name}</p>
+        {/*
+          One mark per digit, and the digits themselves are never shown: `01-F61` records that
+          shoulder-surfing is the norm on a shared counter. It is feedback, not a readout — an
+          operator has to be able to see that a key registered.
+
+          It reserves its line whether or not anything is keyed: an element that appears only
+          once entry starts moves everything under it on the first keystroke, and `27-F4` is
+          about exactly that — the surface must not rearrange under a hand already moving.
+        */}
+        <p
+          style={{
+            ...MARKS,
+            background: color["bgColor-surface-sunken"],
+            border: `1px solid ${color["borderColor-default"]}`,
+          }}
+        >
+          {"•".repeat(pin.length)}
+        </p>
+        {/*
+          Back to step one, and `01-F61` requires that this cost NOTHING: "a mis-tap on a grid
+          charges a failed attempt to someone who is not in the building" is the failure it
+          exists to prevent, so re-choosing sends nothing to main and clears the entry rather
+          than submitting it.
+
+          `27-F9` — it sits on the identity side, a column away from the pad. It is the one
+          control here whose mis-tap costs the operator her entry, and a wet hand reaching for
+          `Clear` must not find it.
+        */}
+        <Tile
+          posture="counter"
+          label="Not you?"
+          onPress={() => {
+            setChosen(null);
+            setPin("");
+            setRefused(false);
+          }}
+        />
+        {/*
+          Also invented, and for a reason worth stating: a refusal with no feedback is
+          indistinguishable from a stuck app, so the operator re-enters blindly and walks into
+          `01-F61`'s lockout without ever being told why. `00 §5.7` — the device reports what is
+          true. Cleared on the next keystroke rather than latching.
+
+          `27-F14` — red is the fault slot, and a refused credential is a fault. It is the only
+          colour this surface spends.
+        */}
+        {refused ? (
+          <p style={{ ...PROMPT, color: color["fgColor-status-fault"] }}>
+            That PIN was not accepted.
+          </p>
+        ) : null}
+      </div>
+
+      <div style={PAD}>
+        {DIGITS.slice(0, 9).map((d) => (
           <Tile key={d} posture="keypad" label={d} onPress={() => press(d)} />
         ))}
         {/*
@@ -173,35 +331,18 @@ export const App = () => {
           stop the till on a fat finger.
         */}
         <Tile posture="keypad" label="Clear" onPress={() => setPin("")} />
+        <Tile posture="keypad" label="0" onPress={() => press("0")} />
+        {/*
+          `01-F26` fixes no PIN length, so entry cannot know when it is done and a confirming act
+          has to exist. "Unlock" is an invented string — no FR names one — and is `00 §5.6`
+          English.
+
+          Bottom-right of the pad, which is where `NumericKeypad` puts its own twelfth key: two
+          pads on one device that disagree about which cell closes an entry is the muscle-memory
+          break `27-F4` exists to prevent.
+        */}
+        <Tile posture="keypad" label="Unlock" onPress={() => submit(chosen)} />
       </div>
-      {/*
-        `01-F26` fixes no PIN length, so entry cannot know when it is done and a confirming act
-        has to exist. "Unlock" is an invented string — no FR names one — and is `00 §5.6`
-        English.
-      */}
-      <Tile posture="keypad" label="Unlock" onPress={() => submit(chosen)} />
-      {/*
-        Back to step one, and `01-F61` requires that this cost NOTHING: "a mis-tap on a grid
-        charges a failed attempt to someone who is not in the building" is the failure it exists
-        to prevent, so re-choosing sends nothing to main and clears the entry rather than
-        submitting it.
-      */}
-      <Tile
-        posture="keypad"
-        label="Not you?"
-        onPress={() => {
-          setChosen(null);
-          setPin("");
-          setRefused(false);
-        }}
-      />
-      {/*
-        Also invented, and for a reason worth stating: a refusal with no feedback is
-        indistinguishable from a stuck app, so the operator re-enters blindly and walks into
-        `01-F61`'s lockout without ever being told why. `00 §5.7` — the device reports what is
-        true. Cleared on the next keystroke rather than latching.
-      */}
-      {refused ? <p>That PIN was not accepted.</p> : null}
     </div>
   );
 };

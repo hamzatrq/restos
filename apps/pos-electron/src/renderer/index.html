@@ -38,6 +38,33 @@
         margin: 0;
         overflow: hidden;
       }
+
+      /*
+        BORDER-BOX, and it is a correctness rule rather than a preference.
+
+        `packages/ui` is styled entirely with inline style objects and every component in it
+        declares its box as the number it means: `AlarmBand` is `width: 100%`, `TenderPanel` is
+        `minWidth: 360`, and every touch target is `minWidth/minHeight: targetFor(posture)`
+        (27-F8). Under the CSS default — `content-box` — padding and border are ADDED to all of
+        those, so a declared box is never the box that renders.
+
+        Found by looking, August 2026: the S1 alarm band measured 1418 px inside a 1392 px
+        viewport (100% + 2x12 padding + 2x1 border) and pushed its "I SAW THIS" control 13 px
+        off the right edge of the screen. `03-F5` requires that alert to be acknowledged and
+        `27-F11g` makes it the ONLY signal that food is not being cooked, so an acknowledgement
+        the operator cannot fully reach is the most expensive instance of this bug in the
+        product — but it is the same bug in every component, and fixing it per-component would
+        leave the next one to rediscover it.
+
+        It does not weaken 27-F8. A `minHeight: targetFor("counter")` box is 76 dp of PHYSICAL
+        target either way; content-box was making targets bigger than declared by accident, not
+        by design, and the FR is a floor that border-box meets exactly.
+      */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
     </style>
   </head>
   <body>

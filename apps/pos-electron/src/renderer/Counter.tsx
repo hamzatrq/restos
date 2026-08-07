@@ -1,5 +1,16 @@
 import { newId, paisa } from "@restos/domain";
-import { AppShell, Cart, ItemGrid, type Tab, TenderPanel, Tile, usePhysicalSize } from "@restos/ui";
+import {
+  AppShell,
+  Cart,
+  ItemGrid,
+  space,
+  type Tab,
+  TenderPanel,
+  Tile,
+  typography,
+  useColor,
+  usePhysicalSize,
+} from "@restos/ui";
 import { useCallback, useEffect, useState } from "react";
 import type {
   Alarm,
@@ -75,6 +86,22 @@ const TABS: readonly Tab[] = [
  * confusion that let `dine_in` sit in the `channel` field since Wave 0. Closing it is a
  * `domain` change needing its own FR, so it is named here and not done here.
  */
+/**
+ * The order surface's one-line state, beside the controls that change it. See the comment at
+ * its render site for why this exists and what it replaced (a reason stamped onto 30 tiles).
+ *
+ * `text-label` on purpose: it is a QUALIFIER on the row, and `27-F25` reserves the top of the
+ * size ladder for the operational payload — which on this surface is the money and the item
+ * names, never the chrome explaining why a control is inert.
+ */
+const STATE_LINE: React.CSSProperties = {
+  fontFamily: typography["text-label"].fontFamily,
+  fontSize: typography["text-label"].fontSize,
+  fontWeight: typography["text-label"].fontWeight,
+  letterSpacing: typography["text-label"].letterSpacing,
+  marginLeft: space["space-2"],
+};
+
 const ORDER_TYPES: readonly { id: string; label: string }[] = [
   { id: "dine_in", label: "Dine-in" },
   { id: "takeaway", label: "Takeaway" },
@@ -132,6 +159,13 @@ export const Counter = () => {
   const [roster, setRoster] = useState<readonly Session[]>([]);
   const [page, setPage] = useState(0);
   const [activeTab, setActiveTab] = useState(TABS[0]?.id ?? "order");
+  /**
+   * Read through the hook, never off the static light record: `27-F67` inverts this surface's
+   * polarity for a training branch inside `AppShell`, so a colour baked at module scope would
+   * put light-theme text on the dark training shell — the one place `27-F21`'s AA gate is
+   * hardest to notice, because everything AROUND it inverted correctly.
+   */
+  const color = useColor();
   /**
    * `27-F11c` — capacity is a PHYSICAL question, so the grid's surface is MEASURED.
    *
@@ -386,7 +420,7 @@ export const Counter = () => {
             something else. A row that vanished once work started would move the grid under a
             cashier mid-order, which is the one thing `27-F4` calls a breaking change.
           */}
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               {ORDER_TYPES.map((t) => (
                 <Tile
                   key={t.id}
@@ -394,7 +428,6 @@ export const Counter = () => {
                   label={t.label}
                   onPress={current === undefined ? () => startOrder(t.id) : undefined}
                   unavailable={current !== undefined}
-                  {...(current !== undefined ? { unavailableReason: "order in progress" } : {})}
                 />
               ))}
               {/*
@@ -409,6 +442,35 @@ export const Counter = () => {
                 unavailable={current === undefined}
                 {...(current === undefined ? { unavailableReason: "no order started" } : {})}
               />
+              {/*
+                THE SURFACE'S STATE, SAID ONCE.
+
+                Found by looking, August 2026. `27-F4` requires an unready surface to be
+                "disabled IN PLACE with its reason", and this screen was discharging that by
+                stamping the SAME sentence onto every tile it applied to: "order in progress"
+                three times across the type row, and "choose an order type first" **27 times**
+                across the item grid — where it outweighed the item names themselves, since the
+                reason ran to three lines against the label's one or two.
+
+                That inverts what the grid is for. `21 §5` and `27-F31` put the operator at
+                plausibly non-reading and make the grid a RECOGNITION surface at fixed
+                positions; a wall of identical English boilerplate is the worst channel
+                available to her, and it buried the only thing on the tile she can actually use.
+                `27-F16` makes the same argument about colour — spend the channel on the
+                exception, never on the base case — and repetition is a channel.
+
+                So a reason that is identical for every tile is a property of the SURFACE and is
+                stated here, once, beside the controls that resolve it. A reason that differs
+                per tile stays on the tile, because there it carries information: `01-F59`'s
+                86'd item still reads "86'd" on its own tile, and "no order started" stays on
+                Send-to-kitchen, which is the only control it describes.
+
+                The tiles keep the greyed fill, their labels and their positions — nothing
+                moves, which is the half of `27-F4` that actually protects muscle memory.
+              */}
+              <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
+                {current === undefined ? "Choose an order type first" : "Order in progress"}
+              </p>
             </div>
             {/*
             The measured surface. The grid renders INSIDE this box, so what is measured and what
@@ -441,7 +503,6 @@ export const Counter = () => {
                       ? items.map((i) => ({
                           ...i,
                           unavailable: true,
-                          unavailableReason: "choose an order type first",
                         }))
                       : items
                   }
