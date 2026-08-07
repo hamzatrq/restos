@@ -89,43 +89,79 @@ right-hand column is measured rather than reasoned.
 271 cannot see. M3 in particular: silencing one `console.log` retires the entire startability
 assertion and no other test in this package notices.
 
-## Mutation matrix for the `catalog_notice` publish seam — control 281/281 green
+## Mutation matrix for the `catalog_notice` publish seam — control 282/282 green
 
-`journey-catalog.test.ts`'s `SEAM —` test. Every row is the FULL package suite.
+`journey-catalog.test.ts`'s two seam tests — `SEAM —` (the seam exists) and `SEAM (ORDER) —` (the
+notice follows the commit). Every row is the FULL package suite.
 
-| # | mutant (exactly one branch) | SEAM test killed | pre-existing 280 |
+| # | mutant (exactly one branch) | seam tests killed (of 2) | rest of the suite |
 |---|---|---|---|
-| G1 | **`server.ts` wires `notifyCatalogVersion: () => {}`** — the shipped behaviour before this change | 1 | **all green** |
-| G2 | `publish-http.ts` never calls the seam it was handed | 1 | **all green** |
-| G3 | the notice fires BEFORE the publish commits (ordering) | **0 — SURVIVES** | all green |
-| G4 | **CONTROL: the notice sends `Number(version)` instead of `version`** | **0** | all green |
+| G1 | **`server.ts` wires `notifyCatalogVersion: () => {}`** — the shipped behaviour before this change | **2 — both** | 280 green |
+| G2 | `publish-http.ts` never calls the seam it was handed | 1 (`SEAM —`) | all green † |
+| G3 | **the notice fires BEFORE the publish commits** — announce a predicted version, then write | **1 (`SEAM (ORDER)`)** | **281 green** |
+| G3b | G3 with a 500 ms sleep between the notice and the write | **2 — both** | 280 green |
+| G4 | **CONTROL: the notice sends `Number(version)` instead of `version`** | **0** | all green † |
 
-**G1 is the one to re-run**, and it has a history worth keeping. The FIRST draft of that test
+† G2 and G4 were measured before `SEAM (ORDER)` existed and are carried forward; G1, G3 and G3b
+were re-measured in August 2026 against both.
+
+**G1 and G3 are the two to re-run after any change here.** G1 has a history worth keeping. The FIRST draft of that test
 mounted `registerPublishRoutes` itself, with its own `notifyCatalogVersion` argument — and **G1
 survived it**, because a test that supplies the wiring cannot observe whether the product supplies
 it. That is this wave's named defect reproduced inside the fix for it, and only the mutation run
 found it; reading the test did not. It now builds a real `buildServer`, listens on a real port, and
 drives a real `createCloudSession` over a real WebSocket, calling nothing on the gateway by hand.
 
-**G3 survives, and the reason first recorded here was WRONG — corrected by senior review.** The
-original sentence said "the suite cannot currently distinguish the orders", which would send the
-next session off to build a mechanism. It is not true. **G3b** — the same mutant with the window
-widened to 500 ms — is **killed by the existing SEAM test** (1 failed, 280 green). G3 survives only
-because the loopback notice→request round trip beats a sub-millisecond commit; the guard is not
-vacuous, it is simply never handed a realistic window. The cheap fix is a delay injected into the
-fixture, not a new test mechanism, and it is **owed**.
+**G3 is CLOSED — the ordering is a DEFENDED INVARIANT now, not a reasoned choice (August 2026).**
+The fixture this block recorded as **owed** has landed as `journey-catalog.test.ts`'s `SEAM
+(ORDER) —` test, and G3 moved from SURVIVES to **1 killed, 281 pre-existing green**. Two earlier
+sentences here are now superseded and both are worth keeping as worked examples. The *first*
+version said "the suite cannot currently distinguish the orders" — false, and it would have sent
+the next session off to build a mechanism. The senior review that corrected it was right that no
+mechanism was needed (G3b, the same mutant with a 500 ms window, was already killed by the
+existing test) but named the fix as **"a delay injected into the fixture"**, and that is not what
+shipped, because a 500 ms sleep is both a permanent runtime cost and a window that is only
+*probably* wide enough — the exact shape of a future 3am flake.
 
-**Severity is LOW, and that is traced rather than assumed.** The device never trusts the notice's
-version number: `reconcileCatalog` (`cloud-session.ts`) calls `requestCatalog(have)` with
-`at_version` **undefined**, and `catalogPage` (`catalog.ts`) clamps `at_version <= current ?
-at_version : current`, so the server can never serve a version it has not committed. A premature
-notice therefore yields an empty delta at the held version and `update: null` — no retry, since
-retry engages only on a refusal. The till gets a **stale** menu, never a wrong one, and self-heals
-on the next `hello_ack` reconnect or the next publish. **There is no window in which a till serves
-wrong prices**: `01-F53` freezes a line's price into the event at line-add, and `01-F56`'s
-`at_version` pin prevents any half-menu or mislabeled commit. Worst case equals the pre-fix
-behaviour — freshness lost, correctness never. The ordering in `publish-http.ts` is a reasoned
-choice; do not read it as a defended invariant until the widened-window fixture lands.
+**The window is a LOCK, and the observation is a ROUND TRIP. There is no sleep in the test and no
+wall-clock constant to tune.** `publishCatalog` serializes per org on
+`pg_advisory_xact_lock(hashtext('restos:catalog:' || org_id))`. The fixture takes **that same
+lock** on its own connection before POSTing, so the publish blocks at the top of its transaction
+and cannot commit until the test releases it. That is not a testing contrivance: it is a real
+production condition (a second publish for the same org already in flight), it needs **no change
+to `publish-http.ts`** — nothing shipped slows down to make the test possible — and being
+org-scoped it blocks nothing in any other file (isolation here is by fresh org). Then two
+orderings make the assertion race-free rather than merely likely:
+
+1. `pg_locks` is polled until a backend is provably **waiting** on this exact lock — matched by
+   joining against the lock the fixture's own backend holds, so no advisory-key bit arithmetic is
+   reproduced. **This is the anti-vacuity guard**: without it, a publish that 400'd before ever
+   reaching the database would satisfy "no notice arrived" while proving nothing. Verified by
+   mutating the fixture's own key to a wrong one — the test fails loudly on *that* wait rather
+   than passing (measured: 1 failed of 9, with the "barrier did not engage" message).
+2. The device then pings its **own** socket and waits for the pong. The gateway answers a ping
+   synchronously from the same sink the notice uses, on the same connection, so any notice written
+   before the block is written before the pong and therefore *arrives* before it. When the pong
+   lands, a premature notice is already recorded.
+
+Cost of the whole test: **~160 ms** on a correct tree (152 ms and 167 ms measured on two full runs,
+against a ~12 s package suite). It is also not one-sided — it asserts the notice *does* follow the commit, which is why **G1 kills it too**.
+
+**Severity of the original gap was LOW, and that is traced rather than assumed** — kept because it
+is the reason this was owed rather than urgent. The device never trusts the notice's version
+number: `reconcileCatalog` (`cloud-session.ts`) calls `requestCatalog(have)` with `at_version`
+**undefined**, and `catalogPage` (`catalog.ts`) clamps `at_version <= current ? at_version :
+current`, so the server can never serve a version it has not committed. A premature notice
+therefore yields an empty delta at the held version and `update: null` — no retry, since retry
+engages only on a refusal. The till gets a **stale** menu, never a wrong one, and self-heals on the
+next `hello_ack` reconnect or the next publish. **There is no window in which a till serves wrong
+prices**: `01-F53` freezes a line's price into the event at line-add, and `01-F56`'s `at_version`
+pin prevents any half-menu or mislabeled commit. Worst case equals the pre-fix behaviour —
+freshness lost, correctness never. ⚠ One thing sharpens the picture without changing the verdict,
+and it rules out the "announce early, announce again after" repair: `reconcileCatalog` returns
+early while `catalogFetch !== null`, so a premature notice **burns the reconcile slot** — a
+follow-up notice landing during the futile fetch would be dropped, and the device would wait for
+its next hello anyway.
 
 ⚠ **Mint device tokens for a test that uses `buildServer` with `Date.now()`, never `BASE_T`.** Every
 other test in `journey-catalog.test.ts` injects a frozen clock, but `buildServer` is the production
