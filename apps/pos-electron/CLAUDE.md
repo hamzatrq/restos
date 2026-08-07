@@ -79,6 +79,40 @@ bundle is ESM and `__dirname` does not exist there.
   **Still unproven against hardware:** every "power cut" in
   `__acceptance__/spooler-job-store.test.ts` is `close()`, and fsync, torn writes and WAL recovery
   from a real plug-pull belong to K-8 / D3.
+- **YOU CAN NOW LOOK AT A DOCUMENT WITHOUT BUYING A PRINTER — AND IT DOES NOT CLOSE K-8.**
+  `RESTOS_PRINT_TO_FILE=<directory> pnpm start` swaps `unattachedPrinter` for `filePrinter`
+  (`main/file-printer.ts`), which writes every transmitted document to a **PDF** in that directory
+  — one file per document (`03-F42` makes a document the transmitted unit), one page per **cut**,
+  laid out at the head's physical size (203 dpi → 72 pt/in, so an 80 mm roll measures 80 mm). Names
+  are `0001-<content digest>.pdf`: a sequence, no clock, so two runs of the same fixture produce
+  identical bytes and a duplicate KOT shows up as a repeated digest instead of hiding behind two
+  timestamps. **No dependency was added** — the PDF writer is `node:zlib` scaffolding in
+  `packages/escpos/src/simulate.ts`, per `18 §15` rule 1; `18 §14` lists no PDF library and `pdfkit`
+  + `@types/pdfkit` for a file no customer receives is a poor trade.
+  **What it is NOT, and none of this is hedging:**
+  (1) it renders what **our own encoder** thinks the bytes mean, through the same `simulate()` the
+  snapshot suite uses, so a misconception the encoder and the simulator SHARE is invisible to it by
+  construction — `03-F40`'s two incompatible bit layouts for one sensor is the corpus's own instance;
+  (2) it says **nothing about legibility** — `27-F35`'s ≥85% comprehension / ≤5% critical-confusion
+  gate is a post-training retest with real staff on thermal paper and stays **OWED**;
+  (3) it says **nothing about a real TH230** — cutter, feed and paper-out are `03-F10` rig questions,
+  and note that **paper never runs out in this transport**, so `03-F41`'s hold (whose failure mode is
+  a duplicate KOT) is unreachable through it;
+  (4) **it is not the default and must never become one.** With the variable unset the device still
+  ships `unattachedPrinter` and every confirm still raises `03-F5`'s band ~20 s later. That band is
+  the honest signal that no printer is attached (`00 §5.7`); a simulator that quietly suppressed it
+  would remove the one thing telling an operator the truth. `__acceptance__/file-printer.test.ts` §A
+  is what keeps that true, and the mutant "selected with no env set" is killed by exactly that test.
+  **K-8 — the physical pass — is owed in full, unchanged by this.**
+  **FIRST FINDING FROM ACTUALLY LOOKING (August 2026, unresolved — do not treat as fixed).** The
+  first real KOT rendered through it shows the **quantity column overlapping itself**: `document.ts`
+  gives `line.quantity` the `size_2x2` ink level (double height, 48 dots) while `simulate()` advances
+  a line feed by the size in effect AT the `LF` (normal, 24 dots), so consecutive quantities collide.
+  Two possibilities and **only hardware separates them** — either a real head expands the line to its
+  tallest glyph and the paper is fine while the simulator is wrong, or it does not and the KOT layout
+  is wrong. Nothing in the corpus rules, `simulate()`'s advance was inherited verbatim from K-3's
+  virtual printer (so the same overlap has been in every snapshot since), and changing it would change
+  an oracle's meaning. **Finding for the K-3/K-5 test owners and for K-8's rig, not a fix.**
 - **The item grid needs a source, and there are exactly two.** The catalog *transport* is real
   and wired as of T-C6: `main/sync.ts` builds the cloud session, which requests on `hello_ack`
   version mismatch and on `catalog_notice` and applies into `store.catalog` — so a device with

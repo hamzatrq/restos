@@ -287,6 +287,9 @@ importers:
       '@restos/domain':
         specifier: workspace:*
         version: link:../domain
+      '@restos/escpos':
+        specifier: workspace:*
+        version: link:../escpos
       '@restos/sync-protocol':
         specifier: workspace:*
         version: link:../sync-protocol
