@@ -38,10 +38,10 @@
 // Measured by mutation, not asserted: each section was re-run against a copy of the fold with
 // that one branch deleted or inverted, and confirmed RED. Kill counts are in the session report.
 //
-// ── ⚠ TWO ASSERTIONS IN THIS FILE REST ON PINS, NOT ON QUOTED FR TEXT ───────────────────
-// Both are interpretations the implementer may contest as contract-clarification events rather
-// than test defects. Full derivations and the findings they were reported as: the
-// `opening_float_paisa` and `cashier` bullets in ./shift-cash-builders.ts's pinned-surface block.
+// ── ⚠ ONE ASSERTION IN THIS FILE RESTS ON A PIN, NOT ON QUOTED FR TEXT ──────────────────
+// It is an interpretation the implementer may contest as a contract-clarification event rather
+// than a test defect. Full derivation and the finding it was reported as: the
+// `opening_float_paisa` bullet in ./shift-cash-builders.ts's pinned-surface block.
 //
 //  PIN #1 — THE DIVERGENT DAY FLOAT. §8's "two `day.opened` ... whose floats DISAGREE" asserts
 //    the disputed float contributes ZERO and raises a `/diverg/` anomaly with both members
@@ -57,11 +57,16 @@
 //  `unbound_settlement_divergence` code spelling in §4b, and PIN #4, that the day fork and the
 //  shift fork carry DISTINCT codes in §8b. Both are contract-clarification events if contested.)
 //
-//  PIN #2 — THE CASHIER SOURCE. §8's "`cashier` is carried and keyed PER SHIFT" does NOT decide
-//    whether the fold reads `payload.cashier` or the envelope's `actor_user_id`: 02-F19 puts
-//    attribution on the envelope, FOLDS.md line 15 names a `cashier` column, and nothing chooses.
-//    Every fixture therefore carries the SAME value on BOTH surfaces, so the assertion pins the
-//    CARRY and is satisfiable by either mechanism.
+//  PIN #2 (THE CASHIER SOURCE) IS RETIRED — SUPERSEDED BY `02-F45` (August 2026). It recorded
+//    that no FR chose between `payload.cashier` and the envelope's `actor_user_id`, so every
+//    fixture set the value on BOTH surfaces and NO assertion in this suite could distinguish the
+//    two mechanisms. `02-F45` chose the envelope, and named the reason: `02-F41` rules attribution
+//    is whoever's PIN is in, `01-F27` puts that identity in the PIN session which the envelope
+//    carries as `actor_user_id`, and a `cashier` duplicated into the payload is a SECOND SOURCE
+//    for one fact that an append-only ledger has no rule for reconciling. A source-agnostic pin
+//    left standing in front of a decided FR is the `01-F60` shape — a green test defending a rule
+//    that had already been overruled — so it is gone rather than annotated. §8 now attributes on
+//    the ENVELOPE ONLY and asserts the payload copy is NOT read.
 //
 // ONE 01-F34 assertion lives here rather than there, on purpose: §8's DIVERGENT `day.opened`
 // pair is the fold's only money field decided by a merge rule over two disagreeing heads, and
@@ -71,6 +76,7 @@
 // every net in the invariance file runs over.
 
 import { describe, expect, it } from "vitest";
+import { canonicalJson } from "./builders.js";
 import {
   BOUND_PAID_OUT,
   BRANCH_T0,
@@ -106,6 +112,7 @@ import {
   shiftCashScenario,
   shiftClosed,
   shiftOpened,
+  shiftOpenedWithPayloadCashier,
   shiftPayment,
   shiftRow,
   UNBOUND_PAID_OUT,
@@ -472,7 +479,7 @@ describe("§3 over/short is a CARRIED FACT, never a read-time recompute (26 §7,
   it("26 §7/01-F1 (ruling 3): the carried variance survives a recompute that CONTRADICTS it — the fold reads the signed fact, it does not re-derive one", () => {
     const fold = shiftCash();
     const { emit, envelopes } = branchEmitter("c4");
-    emit(0, shiftOpened("S1", { cashier: CASHIER_A }), 0, { actor_user_id: CASHIER_A });
+    emit(0, shiftOpened("S1"), 0, { actor_user_id: CASHIER_A });
     emit(0, shiftPayment("O1", 100000, { attempt: "sa-1", shift_id: "S1" }), 1000);
     // Rs 125 of petty cash out (02-F26), so the drawer is legitimately Rs 125 lighter than the
     // Rs 1000 tendered. The cashier counts Rs 880 and the till is Rs 5 OVER.
@@ -1074,21 +1081,30 @@ describe("§8 the day lifecycle and the 05:00 Asia/Karachi business day (02-F22,
     expect(expectedOf(shiftRow(proj, "S1b"))).toEqual({});
   });
 
-  it("FOLDS.md line 15/02-F22: `cashier` is carried and keyed PER SHIFT — two cashiers on one evening keep their own rows, and an unattributed shift stays null", () => {
+  it("02-F45/02-F22: `cashier` is projected from the ENVELOPE's `actor_user_id` and keyed PER SHIFT — two cashiers on one evening keep their own rows, and an unattributed shift stays null", () => {
     const fold = shiftCash();
     const { emit, envelopes } = branchEmitter("y5");
-    // Both attribution surfaces carry the same value on purpose: 02-F19 puts attribution on the
-    // ENVELOPE while FOLDS.md line 15 names a `cashier` COLUMN, and no FR says which one the
-    // fold reads. The oracle pins the carry, not the mechanism (builders header, reported).
-    emit(0, shiftOpened("S1", { cashier: CASHIER_A }), 0, { actor_user_id: CASHIER_A });
-    emit(1, shiftOpened("S2", { cashier: CASHIER_B, prev_shift_id: "S1" }), 1000, {
-      actor_user_id: CASHIER_B,
-    });
-    // Nullable by construction — no identity layer exists yet (S-0b/c), so the fold must
-    // tolerate an unattributed open rather than requiring a cashier.
+    // 02-F45: the ENVELOPE is the only attribution surface, and these payloads carry no
+    // `cashier` at all — `registry.ts` does not declare one and a duplicate would be a second
+    // source for one fact.
+    emit(0, shiftOpened("S1"), 0, { actor_user_id: CASHIER_A });
+    emit(1, shiftOpened("S2", { prev_shift_id: "S1" }), 1000, { actor_user_id: CASHIER_B });
+    // Nullable by construction: `01-F27` — a locked device attributes to nobody, so the fold
+    // must tolerate an unattributed open rather than requiring a cashier.
     emit(2, shiftOpened("S3", { prev_shift_id: "S2" }), 2000);
     emit(0, shiftPayment("O1", 40000, { attempt: "sa-a", shift_id: "S1" }), 1500);
     emit(1, shiftPayment("O2", 60000, { attempt: "sa-b", shift_id: "S2" }), 2500);
+
+    // Non-vacuity of the whole section: NO `shift.opened` in this fixture carries a payload
+    // `cashier`. Without this, an implementation reading `payload.cashier` would fail these
+    // assertions for the right reason today and pass them again the moment a fixture drifted
+    // back into setting both — which is exactly how PIN #2 survived a whole round.
+    for (const env of envelopes.filter((e) => e.type === "shift.opened")) {
+      expect(Object.keys(env.payload as Record<string, unknown>).sort()).toEqual([
+        "prev_shift_id",
+        "shift_id",
+      ]);
+    }
 
     const forward = fold.projectAll(envelopes);
     // 02-F22: "a shift binds subsequent cash settlements ... to that cashier". A fold that
@@ -1103,6 +1119,75 @@ describe("§8 the day lifecycle and the 05:00 Asia/Karachi business day (02-F22,
     // …and the attribution is not an artefact of the delivery it arrived in.
     const reversed = fold.projectAll([...envelopes].reverse());
     expect(projectionBytes(reversed)).toBe(projectionBytes(forward));
+  });
+
+  // ⚠ THE REGRESSION THIS SECTION EXISTS TO PREVENT. Until August 2026 the fold projected
+  // `cashier` from `payload.cashier`, the shipped renderer emitted no such payload, and every
+  // live shift row therefore read `null` — so `02-F23`'s own-shifts scoping in `pos-electron`,
+  // correctly built and mutation-proven, narrowed nothing. A privacy rule that filtered no rows.
+  // The test below is the only thing in this suite that can tell the two sources apart.
+  it("02-F45: a payload `cashier` DISAGREEING with the envelope's actor is NOT read — one fact, one source, and the ledger has no rule for which of two wins", () => {
+    const fold = shiftCash();
+    const { emit, envelopes } = branchEmitter("y5b");
+    // `registry.ts` types `shift.opened` as a `z.looseObject`, so this envelope is schema-VALID
+    // and a non-conforming writer can put it on the wire today. That is what makes "the fold
+    // must not read it" a behaviour rather than a convention.
+    emit(0, shiftOpenedWithPayloadCashier("S1", CASHIER_B), 0, { actor_user_id: CASHIER_A });
+    // The mirror image, so neither "always prefer the envelope" nor "always prefer whichever is
+    // non-null" can be told apart from the correct rule by one fixture: here the PAYLOAD names
+    // somebody and the envelope names nobody. `01-F27`'s locked device attributes to NOBODY, and
+    // a fold falling back to the payload copy would attribute this shift to CASHIER_A anyway.
+    emit(1, shiftOpenedWithPayloadCashier("S2", CASHIER_A, { prev_shift_id: "S1" }), 1000, {
+      actor_user_id: null,
+    });
+
+    // Non-vacuity: the fixture really does carry the second source, and it really does disagree.
+    const opens = envelopes.filter((e) => e.type === "shift.opened");
+    expect(opens.map((e) => (e.payload as { cashier: string | null }).cashier)).toEqual([
+      CASHIER_B,
+      CASHIER_A,
+    ]);
+    expect(opens.map((e) => e.actor_user_id)).toEqual([CASHIER_A, null]);
+
+    const proj = fold.projectAll(envelopes);
+    expect(shiftRow(proj, "S1").cashier).toBe(CASHIER_A);
+    expect(shiftRow(proj, "S2").cashier).toBeNull();
+    // A single open is a single member however it was written: the second source is ignored, not
+    // treated as a competing head, so nothing is disputed and the carried link still stands.
+    expect(hasCode(shiftRow(proj, "S1"), /diverg/)).toBe(false);
+    expect(shiftRow(proj, "S2").prev_shift_id).toBe("S1");
+  });
+
+  it("02-F45/01-F31: ONE shift opened twice with identical payloads and DIFFERENT actors is two contested heads — nothing is picked, `cashier` renders null and the divergence is flagged", () => {
+    const fold = shiftCash();
+    const { emit, envelopes } = branchEmitter("y5c");
+    // Two devices healing after a partition, both claiming S1 under a different PIN. This
+    // disagreement is invisible in the payload — the two payloads are BYTE-IDENTICAL — so a fold
+    // that resolved attribution outside the merge register cannot see it at all and silently
+    // attributes a whole shift's drawer to whichever cashier it happened to fold last.
+    emit(0, shiftOpened("S1"), 0, { actor_user_id: CASHIER_A });
+    emit(2, shiftOpened("S1"), 0, { actor_user_id: CASHIER_B });
+    emit(1, shiftPayment("O1", 40000, { attempt: "sa-c", shift_id: "S1" }), 1000);
+
+    const opens = envelopes.filter((e) => e.type === "shift.opened");
+    expect(new Set(opens.map((e) => canonicalJson(e.payload))).size).toBe(1);
+    expect(opens.map((e) => e.actor_user_id)).toEqual([CASHIER_A, CASHIER_B]);
+
+    const proj = fold.projectAll(envelopes);
+    // 01-F31: a fold never picks a winner. Neither cashier is chosen, both members stay in the
+    // lattice, and the anomaly is what the manager acts on.
+    expect(shiftRow(proj, "S1").cashier).toBeNull();
+    expect(hasCode(shiftRow(proj, "S1"), /diverg/)).toBe(true);
+    // The money is NOT disputed by an attribution disagreement — the settlement carries its own
+    // key and banks normally. A fold that zeroed the drawer here has over-applied 01-F31.
+    expect(expectedOf(shiftRow(proj, "S1")).cash).toBe(40000);
+    // …and the answer depends on neither delivery order nor envelope id (01-F34, 26 §8).
+    const baseline = projectionBytes(proj);
+    expect(projectionBytes(fold.projectAll([...envelopes].reverse()))).toBe(baseline);
+    const relabelled = reversedIds(envelopes);
+    expect(relabelled.reversing).toBe(true);
+    expect(relabelled.bijective).toBe(true);
+    expect(projectionBytes(fold.projectAll(relabelled.envelopes))).toBe(baseline);
   });
 
   it("01-F43/01-F45: `open_at` is the event's branch stamp — the device clock is years away and must not appear", () => {
