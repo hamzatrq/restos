@@ -111,7 +111,9 @@ The **operational** catalog: `order.created`, `order.confirmed`, `order.line_add
   `settlement_attempt_id` (the cap resolves parents by attempt id, never envelope id).
 
 The **audit** family (`audit.login`, `audit.drawer_opened`, `audit.reprint`,
-`audit.threshold_override`, `audit.settings_changed`) is kept deliberately **out** of
+`audit.threshold_override`, `audit.settings_changed`, `audit.print_acknowledged` — the
+sixth added by `01-F5`'s August 2026 amendment for `03-F5`'s print-failure ack) is kept
+deliberately **out** of
 `KnownEventType` because audit events fold to nothing; their only v1 payload contract is
 `prev_audit_hash: string | null`. `isAuditEvent(type)` / `AUDIT_EVENT_TYPES` gate them.
 
