@@ -180,6 +180,16 @@ const MAX_FAILED_ATTEMPTS = 5;
  */
 const kotCapability = () => printerCapability(process.env["RESTOS_KOT_PRINTER"] ?? "TH230");
 
+/**
+ * What this terminal is called (`00 §5.7` — the strip names the device beside the operator).
+ *
+ * A marked DEV SEED like `DEV_IDENTITY` above: admission (`01-F47`) is what will carry a real
+ * terminal name. One constant rather than two literals because `gateway.ts` takes it twice, and
+ * a device that disagreed with itself about its own name is the shape of defect this whole file
+ * is being read for.
+ */
+const DEVICE_LABEL = "Counter 1";
+
 const createWindow = (): BrowserWindow => {
   const window = new BrowserWindow({
     width: 1366,
@@ -376,12 +386,24 @@ app.whenReady().then(async () => {
     catalog: catalogResolver(store),
     menu: sellableMenu(store),
     priceOf: priceResolver(store),
-    actor: "dev",
+    /**
+     * The LOCKED value of `DeviceState.actor`, and nothing else — `gateway.ts` derives the
+     * operator's name from `session` below.
+     *
+     * It read `"dev"` until August 2026, and `StatusStrip` renders that field under `02-F19` as
+     * the person acting. So this device signed Ayesha in, authorized her against the matrix,
+     * stamped `actor_user_id: "user-ayesha"` into every envelope — and told her she was `dev`.
+     * `02-F45`'s two-sources-for-one-fact, on the screen rather than in the payload.
+     *
+     * The device's own label, not a placeholder person: `01-F27` forbids a device identity
+     * standing in for a user identity, and `02-F18` means this string reaches no surface anyway.
+     */
+    actor: DEVICE_LABEL,
     // 02-F41 — read at every append, never captured here. `session` is the function above;
     // closing over its VALUE would freeze attribution at boot, which is the defect this dep
     // replaced.
     session,
-    deviceLabel: "Counter 1",
+    deviceLabel: DEVICE_LABEL,
     // 01-F49 — bound at admission from the branch class, never a UI toggle. Admission has not
     // landed, so this is false and the 27-F67 training inversion is exercised by its story.
     training: false,

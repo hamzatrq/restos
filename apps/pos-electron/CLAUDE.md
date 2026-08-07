@@ -170,13 +170,57 @@ bundle is ESM and `__dirname` does not exist there.
   `PAID_OUT_APPROVAL_THRESHOLD_PAISA` (Rs 2,000, **PINNED not specified**) is refused at the
   counter until that path exists. `02-F20`'s void / comp / price-override rows are mapped ahead
   of their events, which `domain/registry.ts` does not carry yet.
+- **THE STRIP SAID `dev` WHILE THE LEDGER SAID AYESHA — CLOSED AUGUST 2026.** `DeviceState`
+  carries two identity fields. `user` is the `01-F26` session, added by S-0c and stamped into
+  every envelope as `actor_user_id`. `actor` is older — it shipped with the first launch commit,
+  before identity existed — and it is the one `StatusStrip` **renders**, under the caption
+  *"02-F19 — attribution is never anonymous. The name is shown, not just a role."* When identity
+  landed it reached the envelope, the permission matrix and `DeviceState.user`, and **nothing
+  moved the strip over**: `main/index.ts` went on passing the literal `actor: "dev"`. So a till
+  that had signed Ayesha in, refused her the day open on her real role and written
+  `actor_user_id: "user-ayesha"` into every event **told her she was `dev`** — on the one piece
+  of chrome `27-F1` guarantees never leaves the screen. `deviceState()` now derives it from the
+  same `session()` read that stamps the envelope, and `deps.actor` survives as the LOCKED value
+  only (`02-F18` draws no strip there; `01-F27` is why it is the device's own label and not a
+  stand-in person). **The ledger was never wrong** — this was a display defect, and the whole of
+  it lived in one argument at a call site.
+  **Why nothing caught it, which is the part worth keeping:** every gate was green — 330 tests,
+  `pnpm verify` exit 0, `seams:check` clean — and `identity-attribution.test.ts` even carries a
+  test titled *"the identity SHOWN and the identity STAMPED are one fact, not two"*. It compares
+  `deviceState().user` against the envelope, and those two agreed all along. **The guard was
+  built correctly and pointed one field away from the one the product draws.** Reading the diff
+  never finds this; looking at the running app does, in about four seconds.
+- **Mutation matrix — `main/__acceptance__/strip-attribution.test.ts` (control 340/340 green,
+  0 survivors).** Run in-tree with byte-exact backups, full package suite under each mutant.
+  **The column that matters is the last one:** 330 tests existed before this file and *not one of
+  them* can tell any of these mutants from the correct implementation.
+
+  | # | mutant (one branch each) | new tests failed | pre-existing 330 |
+  |---|---|---|---|
+  | M1 | `index.ts` re-introduces `actor: "dev"` — **the defect verbatim** | 2 (§B) | all green |
+  | M2 | **CONTROL** — `gateway.ts` back to `actor: deps.actor` | 4 (§A) | all green |
+  | M3 | `actor: user?.user_id ?? deps.actor` (name → identifier) | 5 (§A) | all green |
+  | M4 | `actor: user?.display_name ?? deps.deviceLabel` (locked value drifts) | 2 (§A) | all green |
+  | M5 | `index.ts` passes `session: () => null` — the **stub-supply** seam | 1 (§B) | all green |
+
+  M2 is the control: it differs from the shipped code in exactly one expression and is the
+  pre-fix tree. M1 and M2 are *different* mutants and neither subsumes the other — M1 is invisible
+  to §A (the gateway still derives correctly) and M2 is invisible to §B (the argument still looks
+  right), which is the AGENTS.md "you need BOTH properties" split showing up on one field. **M5 is
+  the case `seams:check` Rule B cannot see** (`session` is *supplied*, just supplied with a stub);
+  under it the product attributes nothing, shows the placeholder, and 339/340 tests pass.
 - **IT ALSO GUARDS A READ.** `authorizeReads` narrows `cashState` to `reportScope`'s Appendix A
   reach (`02-F23` — "cashiers see only their own shifts"), the permission matrix's last export to
   gain a production caller. It hid nothing for one round: the `shift_cash` fold projected `cashier`
   from a payload field `02-F45` forbids, so every shipped row was `cashier: null` and a
   correctly-built, mutation-proven privacy rule filtered nothing at all. **The fold conformed in
   August 2026** — it reads the envelope's `actor_user_id` now, and the oracle pin recording that
-  source as "undecided" is retired, because `02-F45` had already decided it. A null row is still
+  source as "undecided" is retired, because `02-F45` had already decided it. **It now narrows for
+  real, and that is MEASURED on the shipped app rather than argued:** one store, one
+  `shift.opened` by Hina; signed in as Hina (branch_manager → `own_branch`) the seam serves
+  `[{cashier: "…006"}]`, signed in as Ayesha (cashier → `own_shift`) it serves `[]`. The
+  `actor: "dev"` literal above never reached this — it was never the ledger's attribution, so
+  `02-F23` was filtering against a real per-person value throughout. A null row is still
   SERVED, and now means one of two real things: an event appended before identity reached the
   envelope, or an `01-F31` divergence where two devices claimed one shift under different PINs and
   the fold refused to pick a winner. Hiding the first would blank the Me tab; hiding the second

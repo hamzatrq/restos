@@ -79,6 +79,17 @@ export type GatewayDeps = {
   catalog: CatalogResolver;
   menu: CatalogList;
   priceOf: PriceResolver;
+  /**
+   * What `DeviceState.actor` reads when NOBODY is signed in — not the operator's name.
+   *
+   * `deviceState()` derives the operator's name from `session` below (`02-F19`/`02-F45`), so this
+   * is reached only on a locked device, where `02-F18` draws no strip at all. It exists because
+   * `DeviceStateSchema.actor` is a required non-empty string and the unlock gate parses the whole
+   * object on every read.
+   *
+   * **`01-F27` binds what may go here:** a device identity is never promoted into a user
+   * identity, so it must not be a person's name.
+   */
   actor: string;
   /**
    * `02-F41` — attribution is whoever's PIN is in, and there is no "acting for".
@@ -154,10 +165,33 @@ const checked = <T>(schema: { parse: (v: unknown) => T }, value: unknown, what: 
 export const createGateway = (deps: GatewayDeps): Gateway => ({
   deviceState: () => {
     const b = deps.blockedCursor();
+    // ONE read, used twice below. Two `deps.session()` calls could straddle an `01-F26` auto-lock
+    // and hand the renderer a strip naming Ayesha over a `user` that is already null — the same
+    // disagreement `02-F45` forbids, arrived at through timing rather than through a second field.
+    const user = deps.session();
     return checked(
       DeviceStateSchema,
       {
-        actor: deps.actor,
+        /**
+         * `02-F19` — *"every action is attributed"*, and `StatusStrip` renders THIS as the
+         * operator's name (*"attribution is never anonymous. The name is shown, not just a
+         * role"*). So it is the SESSION's name, derived from the same read that stamps
+         * `actor_user_id` into every envelope below.
+         *
+         * It was `deps.actor` — a construction-time string, and `index.ts` passed the literal
+         * `"dev"`. That is `02-F45`'s two-sources-for-one-fact defect on the screen instead of
+         * in the payload: this field shipped with the first launch commit, the envelope gained
+         * the real identity later with S-0c, and the strip was never moved over — so the ledger
+         * recorded Ayesha while the chrome said `dev`, permanently
+         * (`01-F1`). A value fixed when the gateway is built cannot follow an identity that moves
+         * 20–60× a shift, which is the same argument that made `session` a getter.
+         *
+         * `deps.actor` survives as the LOCKED value only. It is never drawn: `02-F18` gives a
+         * locked device the unlock screen alone, and `App.tsx` reads `user` to decide that. It is
+         * still reached — `deviceState()` is parsed on every locked read — so it cannot be
+         * dropped for a schema that requires a non-empty string.
+         */
+        actor: user?.display_name ?? deps.actor,
         deviceLabel: deps.deviceLabel,
         businessDay: deps.businessDay(),
         training: deps.training,
@@ -168,7 +202,7 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
         // `18 §6` — the lock surface reads the session through THIS seam and no other, and it
         // is the same read the envelope is stamped from below. A strip naming one cashier over
         // a ledger attributing another is `02-F45`'s disagreement with no rule for which wins.
-        user: deps.session(),
+        user,
       },
       "device state",
     );
@@ -265,12 +299,19 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
    * join. `26 §8` puts fold logic in one module, and the shape below is the fold's own four
    * projections under their own names.
    *
-   * **What this does NOT yet do: scope the shifts to the asking cashier.** `02-F23` says
-   * "cashiers see only their own shifts" and `permissions.ts` already resolves it
-   * (`report.sales_view` → `own_shift`, checked against `scope.subject_user_id`) — but
-   * `02-F45` makes the fold's `cashier` column project `null` until an identity reaches the
-   * envelope, so there is no "own" to scope BY. Commandment 8 puts that filter here, on the
-   * trusted side, never in the renderer. Owed, and reported rather than faked.
+   * **It does NOT scope the shifts to the asking cashier, and that is not a gap — it is a
+   * layer.** `02-F23` ("cashiers see only their own shifts") is enforced by `authorizeReads` in
+   * `main/authorize.ts`, which wraps this method and narrows `shifts` to `reportScope`'s reach.
+   * Commandment 8 puts the filter on the trusted side, never in the renderer; putting it in the
+   * WRAPPER rather than here keeps the raw gateway available to the KOT printer, which performs
+   * no person's act.
+   *
+   * **This comment used to say the scoping was owed because the fold's `cashier` column was
+   * always `null`, and that is no longer true (`02-F45` names this file among the stale ones).**
+   * `shift-cash.ts` projects `cashier` from the envelope's `actor_user_id`, and the envelope
+   * gets it from the PIN session — so the narrowing bites. Measured on the shipped app, one
+   * store, one `shift.opened` by Hina: signed in as Hina (branch_manager, `own_branch`) the
+   * seam serves that row; signed in as Ayesha (cashier, `own_shift`) it serves `[]`.
    */
   cashState: () =>
     checked(
