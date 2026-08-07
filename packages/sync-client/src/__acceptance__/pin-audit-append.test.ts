@@ -3,7 +3,7 @@
 // S-0b built the PIN session and left `PinSessionOptions.audit` as a sink the HOST fills in.
 // Every host fills it with `() => {}` today (`apps/pos-electron/src/main/index.ts`), so a PIN
 // unlock, a wrong PIN and a lockout currently leave NO TRAIL AT ALL — `01-F5` names
-// `audit.login` among its five subtypes and nothing produces one. This file owns the seam that
+// `audit.login` among its six subtypes and nothing produces one. This file owns the seam that
 // closes that: the sink that turns a session's `PinAuditRecord` into a ledger append.
 //
 // Sources:
@@ -11,7 +11,7 @@
 //     `01-F1`   append-only — NOTHING written here can ever be redacted. This is why §2 is the
 //               most important section in the file and not hygiene.
 //     `01-F2`   the device persists locally before acknowledging
-//     `01-F5`   the `audit.*` family, its five subtypes, and the STORE-OWNED `prev_audit_hash`
+//     `01-F5`   the `audit.*` family, its six subtypes, and the STORE-OWNED `prev_audit_hash`
 //               ("the device stamps it inside the append transaction; a caller-supplied value
 //               is rejected")
 //     `01-F17`  a sale is never blocked — an audit that cannot be written must not take the

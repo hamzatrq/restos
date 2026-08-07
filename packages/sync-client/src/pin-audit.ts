@@ -5,7 +5,7 @@
  * (the device stamps it inside the append transaction and rejects a caller-supplied value), so
  * the session emits a record and something else appends it. Until now every host filled that
  * `audit` option with `() => {}`, which meant an unlock, a wrong PIN and a lockout left no
- * trail anywhere — `01-F5` names `audit.login` among its five subtypes and nothing produced
+ * trail anywhere — `01-F5` names `audit.login` among its six subtypes and nothing produced
  * one. This is that something else.
  *
  * NO EVENT TYPE IS INVENTED (commandment 2): `audit.login` is already in the `01 §4` catalog
