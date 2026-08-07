@@ -16,7 +16,8 @@
     "drizzle-orm": "0.45.2",
     "fastify": "5.10.0",
     "jose": "6.2.4",
-    "postgres": "3.4.9"
+    "postgres": "3.4.9",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@restos/testing": "workspace:*",

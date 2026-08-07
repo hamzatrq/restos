@@ -64,6 +64,13 @@
       "when": 1785000400000,
       "tag": "0008_catalog_pricing",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785000500000,
+      "tag": "0009_org_events",
+      "breakpoints": true
     }
   ]
 }

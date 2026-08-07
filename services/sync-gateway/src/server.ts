@@ -12,12 +12,20 @@ import { createFrameCodec } from "@restos/sync-protocol";
 import { drizzle } from "drizzle-orm/postgres-js";
 import Fastify, { type FastifyInstance } from "fastify";
 import { createGateway, REVOCATION_SWEEP_INTERVAL_MS } from "./gateway.js";
+import { registerPublishRoutes } from "./publish-http.js";
 
 export const buildServer = (
   databaseUrl: string,
   tokenSecret: string,
   issuer?: string,
   audience?: string,
+  /**
+   * The `/internal` publish credential (`plans/wave-1/catalog-transport.md` §6 Q1 — the API
+   * publishes, the gateway serves). `undefined` means the deployment declared none, and every
+   * `/internal` route then answers 503: fail-closed, so an unconfigured gateway cannot be handed a
+   * menu by anyone who can reach the port. See `registerPublishRoutes`.
+   */
+  publishSecret?: string,
 ): FastifyInstance => {
   const app = Fastify({ logger: true });
   const db = drizzle(databaseUrl);
@@ -49,6 +57,12 @@ export const buildServer = (
     });
   }, REVOCATION_SWEEP_INTERVAL_MS);
   sweep.unref();
+
+  // The back office's publish surface (`01-F52` "edited only via back office"; `01-F62` for the
+  // audit half). It is registered on the SAME Fastify instance as `/sync` on purpose: the founder
+  // ruling is that this service is the one writer of the catalog tables (`18 §4`), and a second
+  // process writing them would be the coupling the ruling exists to prevent, one hop further out.
+  registerPublishRoutes(app, { db, publishSecret });
 
   void app.register(websocket);
   void app.register(async (instance) => {
@@ -123,6 +137,27 @@ export const start = async (): Promise<FastifyInstance> => {
     // what stops a token minted for staging validating against production.
     DEVICE_TOKEN_ISSUER: (raw) => (raw === undefined || raw === "" ? undefined : raw),
     DEVICE_TOKEN_AUDIENCE: (raw) => (raw === undefined || raw === "" ? undefined : raw),
+    /**
+     * The `/internal` publish credential `services/api` presents (founder ruling: the API
+     * publishes, the gateway serves).
+     *
+     * **OPTIONAL, and absent is fail-CLOSED** — every `/internal` route answers 503, so a gateway
+     * that was never told the credential accepts no menu at all rather than accepting one from
+     * anyone. Not required at boot for the same reason `DEVICE_TOKEN_ISSUER` is not: a gateway with
+     * no back office deployed beside it is a legitimate deployment, and crashing it at boot would
+     * take the till's sync down to enforce a back-office concern. The loud failure lands where the
+     * mistake is — `services/api` gets a 503 naming this key.
+     *
+     * The 32-byte floor is `DEVICE_TOKEN_SECRET`'s, for the same reason (`18 §5`): this credential
+     * is the ONLY thing standing between a reachable port and the org's menu.
+     */
+    PUBLISH_TOKEN: (raw) => {
+      if (raw === undefined || raw === "") return undefined;
+      if (Buffer.byteLength(raw, "utf8") < 32) {
+        throw new Error("must be at least 32 bytes (the /internal publish credential, 18 §5)");
+      }
+      return raw;
+    },
     PORT: (raw) => {
       const port = Number(raw ?? "8080");
       if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -136,6 +171,7 @@ export const start = async (): Promise<FastifyInstance> => {
     env.DEVICE_TOKEN_SECRET,
     env.DEVICE_TOKEN_ISSUER,
     env.DEVICE_TOKEN_AUDIENCE,
+    env.PUBLISH_TOKEN,
   );
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
   return app;
