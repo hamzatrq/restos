@@ -330,3 +330,86 @@ describe("C5 — adding a line (01-F60, 01-F53)", () => {
     await waitFor(() => expect(lines).toHaveLength(2));
   });
 });
+
+describe("C11–C14 — settling lives on the Pay surface, and is REACHABLE there", () => {
+  /**
+   * **This is a SEAM guard, and it exists because the counter loop was broken on the screen
+   * while every suite in the repo was green.**
+   *
+   * Measured on the running app (August 2026): the tender panel's own height is **918 px**
+   * against a **568 px** work area on `27 §1a`'s reference counter, and `AppShell` clips rather
+   * than scrolls — deliberately, because `27-F2` bans reaching a primary action by scrolling.
+   * So `TAKE CASH`, the change figure and the correction keys were **below the fold and not
+   * hit-testable**: a cashier could not settle an order at all. Nothing failed, because no test
+   * in this package lays anything out.
+   *
+   * happy-dom cannot measure a pixel, so these do not pretend to. What they pin is the
+   * STRUCTURE the fix rests on — `screen-map §3.1` puts tender on its own surface *"because
+   * `27-F8` puts numeric entry at 126 dp — it cannot share a layout with 76 dp tiles"* — and
+   * the structure is what regresses. **The pixel claim is verified by launching**, and the
+   * evidence for it is screenshots of the real window, not this file.
+   */
+  it("the Pay tab is present, enabled, and one act from the rail", async () => {
+    // MUTATION THIS CATCHES: `unavailable: true` restored on the Pay row — the state it
+    // shipped in, and the state that forced tender onto the Order surface in the first place.
+    // `27-F4` also forbids solving this by adding or reordering a tab.
+    mountWith([openOrder({ order_id: "order-7" })]);
+    render(<Counter />);
+
+    const pay = await screen.findByRole("button", { name: /^Pay$/i });
+    expect((pay as HTMLButtonElement).disabled, "the Pay tab was disabled").toBe(false);
+    expect(pay.textContent, "the Pay tab still says it is unbuilt").not.toMatch(/not built/i);
+  });
+
+  it("the ORDER surface carries the grid and the cart — and NOT the keypad", async () => {
+    // THE ASSERTION THAT OWNS THE DEFECT. A 126 dp pad on this surface is what took 456 px of
+    // width from a grid `27-F11a` sizes at ~88 tiles (it was rendering six) and 918 px of
+    // height from a 568 px box.
+    //
+    // MUTATION THIS CATCHES: rendering `<TenderPanel>` on the Order surface again — whether
+    // instead of, or as well as, the Pay surface.
+    mountWith([openOrder({ order_id: "order-7" })]);
+    render(<Counter />);
+
+    expect(await screen.findByRole("region", { name: /current order/i })).toBeTruthy();
+    expect(
+      screen.queryByRole("region", { name: /take payment/i }),
+      "the tender panel is back on the Order surface, where it does not fit",
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: /TAKE CASH/i })).toBeNull();
+  });
+
+  it("the PAY surface carries the tender panel, with TAKE CASH on arrival", async () => {
+    // `screen-map §4`: "a tab whose contents require another navigation act to reach a primary
+    // action" is depth, and depth is what `27-F1` caps at one. So arriving at Pay must be
+    // enough — no SETTLE press, no mode switch, which `27-F5` bans independently.
+    //
+    // MUTATION THIS CATCHES: putting the panel behind a further control on Pay, and the
+    // simple regression of never wiring the surface to the tab at all.
+    mountWith([openOrder({ order_id: "order-7" })]);
+    render(<Counter />);
+    fireEvent.click(await screen.findByRole("button", { name: /^Pay$/i }));
+
+    expect(await screen.findByRole("region", { name: /take payment/i })).toBeTruthy();
+    const take = await screen.findByRole("button", { name: /TAKE CASH/i });
+    expect((take as HTMLButtonElement).disabled, "TAKE CASH arrived disabled").toBe(false);
+  });
+
+  it("with NO order the tab stays put and the surface says why — never a hidden tab", async () => {
+    // `27-F4` makes the rail positional memory, so a tab that appeared only when there was
+    // something to settle would move every tab beside it, ~150–300 times a shift. `00 §5.7`
+    // then requires the empty surface to report what is true rather than render blank.
+    //
+    // MUTATION THIS CATCHES: conditioning the Pay row on `current !== undefined`, and the
+    // "tidy" variant that renders nothing at all when there is no order.
+    mountWith([]);
+    render(<Counter />);
+    fireEvent.click(await screen.findByRole("button", { name: /^Pay$/i }));
+
+    expect(screen.queryByRole("region", { name: /take payment/i })).toBeNull();
+    expect(
+      await screen.findByText(/no order to settle/i),
+      "the empty Pay surface said nothing at all",
+    ).toBeTruthy();
+  });
+});

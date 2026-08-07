@@ -63,7 +63,9 @@ import { ManagerApproval } from "./ManagerApproval";
 const TABS: readonly Tab[] = [
   { id: "order", label: "Order" },
   { id: "orders", label: "Orders", unavailable: true, unavailableReason: "not built yet" },
-  { id: "pay", label: "Pay", unavailable: true, unavailableReason: "not built yet" },
+  // `C11`–`C14`. This SHIPS now, and `27-F4` means building it changed exactly one thing:
+  // `unavailable` went away. Nothing was added, removed or reordered.
+  { id: "pay", label: "Pay" },
   // `S-3`/`S-4`/`S-5` — these two SHIP. `27-F4` makes the rail positional memory, so building
   // them changes exactly one thing each: `unavailable` goes away. Nothing is added, removed or
   // reordered, which is what that FR calls a breaking change.
@@ -333,6 +335,74 @@ export const Counter = () => {
    * is actually true rather than holding what it assumed — which is the whole of `02-F37`'s
    * "succeed and lie" applied to a day that did not open.
    */
+  /**
+   * `C11`–`C14` — **the Pay surface, and why settling is no longer beside the cart.**
+   *
+   * `screen-map §3.1` gives tender its own tab and states the reason as a measurement:
+   * *"Separate surface because `27-F8` puts numeric entry at 126 dp — it cannot share a layout
+   * with 76 dp tiles."* That was written before either surface existed, and launching the app
+   * proved it exactly right in both directions:
+   *
+   * 1. **The tender panel could not be completed.** Its 918 px against the Order surface's
+   *    568 px left `TAKE CASH`, the change figure and the correction keys below a fold that
+   *    `AppShell` clips and `27-F2` forbids scrolling to — the cashier could not settle at all.
+   * 2. **The grid could not be read.** The pad's 456 px of width came out of the item grid, so
+   *    a surface `27-F11a` sizes at **~88 tiles** was rendering **six**, in a column narrow
+   *    enough to wrap two-word item names onto three lines.
+   *
+   * Moving it fixes the second on its own; the first needed `TenderPanel` to stop stacking
+   * vertically as well, because **the Pay tab's work area is the same 568 px** — see that
+   * component's own note. Both were required, and neither is sufficient.
+   *
+   * **The tab is not conditional** (`27-F4`): it is present, enabled and in the same position
+   * whether or not there is an order, because a rail that grows and shrinks destroys the
+   * positional memory of every operator who learned it. With nothing to settle the surface says
+   * so — `00 §5.7`, the device reports what is true — rather than vanishing or greying the tab.
+   *
+   * **The cart deliberately does NOT move here.** `screen-map §3.1` requires it *"always
+   * visible, never a separate screen, never collapsed"* on the Order surface, and `DUE` already
+   * carries the only number this surface needs (`27-F24` — the system computes, staff read).
+   */
+  const paySurface =
+    current === undefined ? (
+      <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
+        No order to settle — start one on Order.
+      </p>
+    ) : (
+      <TenderPanel
+        dueP={paisa(current.total_paisa)}
+        takenP={paisa(current.paid_paisa)}
+        onTender={({ amountP, method }) => {
+          void window.restos
+            .append({
+              type: "payment.recorded",
+              payload: {
+                order_id: current.order_id,
+                amount_paisa: amountP,
+                method,
+                // 01-F31 — the attempt key is what makes a double-tap idempotent. Minted
+                // per TENDER, not per order: 02-F13's split is several payments against one
+                // order, and sharing a key would collapse them into one.
+                settlement_attempt_id: newId(),
+                // DEC-MONEY-007 — this settles the order. A khata REPAYMENT later carries
+                // `repays_receivable`, and without the discriminator the two double-count
+                // under full observation.
+                purpose: "settles_order",
+                // 26 §7 — the shift this settlement buckets to is CARRIED, never resolved
+                // at fold time from the reading device's state (01-F34). Null because no
+                // shift is open: the POS has no shift concept yet, and `02-F37` makes that
+                // the legal outcome — "settling with no shift open succeeds ... recorded
+                // with a null shift reference ... Never a modal, never a block", because
+                // `01-F17` forbids stopping a sale with a customer standing there.
+                shift_id: null,
+              },
+              refs: [],
+            })
+            .then(reload);
+        }}
+      />
+    );
+
   const cashSurface =
     cash === null ? (
       // `00 §5.7` — the device reports what it knows. An empty reconciliation drawn before the
@@ -401,6 +471,8 @@ export const Counter = () => {
             setApprovalRefusal(null);
           }}
         />
+      ) : activeTab === "pay" ? (
+        paySurface
       ) : activeTab === "cash" || activeTab === "me" ? (
         cashSurface
       ) : (
@@ -535,45 +607,11 @@ export const Counter = () => {
             </div>
           </div>
           {/*
-          02-F12 — settling is on the counter, beside the cart, not behind a mode switch.
-          `27-F1` caps layout depth at ONE and `27-F5` forbids controls that change with
-          context: a payment panel that appeared only after pressing SETTLE would be depth two
-          and a moving target, on the surface where an operator is most interrupted.
+          The cart stays here and only here — `screen-map §3.1` requires it "always visible,
+          never a separate screen, never collapsed", because it is the operator's working
+          memory while she is ringing. Settling moved to the Pay tab; see `paySurface` above
+          for the measurement that forced it.
         */}
-          {current === undefined ? null : (
-            <TenderPanel
-              dueP={paisa(current.total_paisa)}
-              takenP={paisa(current.paid_paisa)}
-              onTender={({ amountP, method }) => {
-                void window.restos
-                  .append({
-                    type: "payment.recorded",
-                    payload: {
-                      order_id: current.order_id,
-                      amount_paisa: amountP,
-                      method,
-                      // 01-F31 — the attempt key is what makes a double-tap idempotent. Minted
-                      // per TENDER, not per order: 02-F13's split is several payments against one
-                      // order, and sharing a key would collapse them into one.
-                      settlement_attempt_id: newId(),
-                      // DEC-MONEY-007 — this settles the order. A khata REPAYMENT later carries
-                      // `repays_receivable`, and without the discriminator the two double-count
-                      // under full observation.
-                      purpose: "settles_order",
-                      // 26 §7 — the shift this settlement buckets to is CARRIED, never resolved
-                      // at fold time from the reading device's state (01-F34). Null because no
-                      // shift is open: the POS has no shift concept yet, and `02-F37` makes that
-                      // the legal outcome — "settling with no shift open succeeds ... recorded
-                      // with a null shift reference ... Never a modal, never a block", because
-                      // `01-F17` forbids stopping a sale with a customer standing there.
-                      shift_id: null,
-                    },
-                    refs: [],
-                  })
-                  .then(reload);
-              }}
-            />
-          )}
           <Cart
             lines={(current?.lines ?? []).map((l) => ({
               id: l.line_id,

@@ -37,7 +37,7 @@
 //     `26 §7`'s carried key) needs the shift surface, which this session does not own.
 // Both are recorded in the session report as owed coverage.
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type AddLineRequest,
@@ -139,8 +139,38 @@ beforeEach(() => {
   vi.stubGlobal("ResizeObserver", StubResizeObserver);
 });
 
-/** Take the whole bill in cash, on the panel `02-F12` puts beside the cart. */
+/**
+ * Reach the tender panel. `screen-map §3.1` gives settling its own **Pay** tab — *"separate
+ * surface because `27-F8` puts numeric entry at 126 dp — it cannot share a layout with 76 dp
+ * tiles"* — so getting there is one lateral act from the rail, which `27-F2a` and
+ * `screen-map §4` both class as depth ZERO rather than navigation.
+ *
+ * **This is a relocation, not a relaxation.** Every assertion below is unchanged and still
+ * bites: the panel is still never behind a mode switch, still never greyed, still never
+ * modal, and `TAKE CASH` still settles on the first tap. What moved is which tab it is on.
+ *
+ * ⚠ **Finding for this file's owning session (`02-F37`).** The header this replaced read
+ * *"the panel `02-F12` puts beside the cart"*, and `02-F12` says no such thing — it is a list
+ * of payment methods and their paisa units, with no placement clause anywhere in it
+ * (`specs/02-pos-app.md:42`). The layout rule it was credited with does not exist, so nothing
+ * in the corpus was contradicted by moving the panel. Recorded rather than quietly corrected,
+ * because an FR cited for a rule it does not contain is the failure commandment 2 names.
+ */
+const goToPay = async () => {
+  fireEvent.click(await screen.findByRole("button", { name: /^Pay$/i }));
+};
+
+/**
+ * Back to the grid and the cart. The rail is `27-F4`'s positional memory, so this is the same
+ * one act in the other direction and costs the cashier nothing.
+ */
+const goToOrder = async () => {
+  fireEvent.click(await screen.findByRole("button", { name: /^Order$/i }));
+};
+
+/** Take the whole bill in cash, on the Pay surface `screen-map §3.1` puts it on. */
 const takeCash = async () => {
+  await goToPay();
   for (const digit of "500") {
     fireEvent.click(await screen.findByRole("button", { name: digit }));
   }
@@ -197,14 +227,16 @@ describe("02-F37 — settling with no shift open SUCCEEDS", () => {
   });
 
   it("never a BLOCK — the tender control is live, not greyed, with no shift open", async () => {
-    // `02-F12` puts settling on the counter beside the cart rather than behind a mode switch,
-    // and `27-F4` disables in place — so the plausible "safe" implementation greys the tender
-    // button and gives its reason. That reads as caution and IS a block: the sale stops.
+    // `27-F5` forbids context-dependent controls and `27-F4` disables in place — so the
+    // plausible "safe" implementation greys the tender button and gives its reason. That reads
+    // as caution and IS a block: the sale stops. Reaching the Pay tab is one lateral act and
+    // is not a mode switch (`27-F2a`); a panel that appeared only after a SETTLE press would be.
     //
     // MUTATION THIS CATCHES: `disabled={!shift}` on the tender control, and any variant that
     // withholds the panel entirely.
     mountWith([openOrder()]);
     render(<Counter />);
+    await goToPay();
 
     const take = await screen.findByRole("button", { name: /TAKE CASH/i });
     expect((take as HTMLButtonElement).disabled, "the tender control was disabled").toBe(false);
@@ -220,6 +252,10 @@ describe("02-F37 — settling with no shift open SUCCEEDS", () => {
     await takeCash();
     await waitFor(() => expect(appended).toHaveLength(1));
 
+    // Back to Order, which is where the next sale is rung — and is itself part of what "the
+    // till keeps working" means: a rail that stopped responding after a settlement would fail
+    // here exactly as a latched error banner would.
+    await goToOrder();
     fireEvent.click(await screen.findByRole("button", { name: /Send to kitchen/i }));
     await waitFor(() => expect(appended).toHaveLength(2));
     expect(appended[1]?.type).toBe("order.confirmed");
@@ -268,7 +304,20 @@ describe("01-F1 — opening a shift later does NOT retro-bind the settlement", (
         ],
       }),
     ]);
-    await screen.findByText("Karahi");
+    // The evidence this waits on is a CART LINE, which lives on the Order surface — so the
+    // wait has to be made from there.
+    //
+    // ⚠ **AND IT IS NOW SCOPED TO THE CART, which STRENGTHENS it.** The stub menu is
+    // `[{ id: "item-karahi", label: "Karahi" }]`, so the item GRID renders a tile reading
+    // "Karahi" too — from mount, before any re-read. An unscoped `findByText("Karahi")` can
+    // therefore be satisfied by a tile that proves nothing, which is precisely the vacuous
+    // shape the note above says this wait was rewritten to escape. It did not fire before only
+    // because the grid had not measured itself; that is an accident of the stub
+    // `ResizeObserver`, not a property anything asserts, and it is exactly the "already true"
+    // trap in its second costume. Scoping to `Cart`'s own region pins the wait to the line the
+    // re-read introduced and to nothing else.
+    await goToOrder();
+    await within(screen.getByRole("region", { name: /current order/i })).findByText("Karahi");
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
