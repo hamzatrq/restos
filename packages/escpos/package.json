@@ -17,6 +17,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@restos/domain": "workspace:*",
     "qrcode": "1.5.4"
   }
 }

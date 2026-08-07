@@ -16,7 +16,12 @@ import {
 } from "./catalog";
 import { createGateway } from "./gateway";
 import { openJobStore } from "./job-store";
-import { createKotPrinter, PUMP_INTERVAL_MS, unattachedPrinter } from "./printing";
+import {
+  createCashPrinter,
+  createKotPrinter,
+  PUMP_INTERVAL_MS,
+  unattachedPrinter,
+} from "./printing";
 import { createUplink } from "./sync";
 
 /**
@@ -482,12 +487,32 @@ app.whenReady().then(async () => {
     },
   });
   /**
+   * S-7 — `02-F23`'s shift-close slip and `02-F24`'s day summary, on the SAME durable spooler.
+   *
+   * Constructed here, once, unconditionally, for the reason the line above it exists at all: a
+   * document type nothing prints is this wave's named defect, and `packages/escpos` has now shed
+   * that once (K-7). It shares `spooler` because `03-F42` makes a DOCUMENT the unit and not the
+   * queue, and it takes `kot.pump` rather than owning a second driver — two pump loops over one
+   * spooler would spend `03-F4`'s three-attempt budget in half the window and turn `03-F5`'s 45 s
+   * bound into ~20 s.
+   *
+   * It takes NO `append`, and that is a stated gap rather than an omission: `01 §4` has no
+   * `slip.printed` and no `slip.print_failed`, so a failed cash slip reaches the counter's band
+   * and nothing in the ledger (`main/printing.ts`'s `CASH_JOB_PREFIX` has the full reasoning).
+   */
+  const cash = createCashPrinter({ spooler, store, capability: kotCapability(), pump: kot.pump });
+  /**
    * `03-F4`'s retry SPACING, which the spooler deliberately does not own ("the BUDGET is
    * enforced here; the SPACING is not enforced anywhere yet" — `RETRY_WINDOW_MS`). Without this
    * interval a queued job sits queued forever: no bytes, no exhaustion, no band — a silent KOT
    * failure produced by an absent timer, which is the shape `03-F5` forbids.
+   *
+   * `cash.reconcile()` runs AFTER the pump and only reads job state — it is how a failed slip
+   * gets its band, and without it S-7's documents would queue, fail and say nothing.
    */
-  const pumping = setInterval(() => void kot.pump(), PUMP_INTERVAL_MS);
+  const pumping = setInterval(() => {
+    void kot.pump().then(() => cash.reconcile());
+  }, PUMP_INTERVAL_MS);
   app.on("will-quit", () => clearInterval(pumping));
 
   // One channel, one gateway method, no dispatcher. A generic handler that switched on a
@@ -512,13 +537,19 @@ app.whenReady().then(async () => {
    * `27-F11g` is why it is here rather than on the pass screen: where paper is the only kitchen
    * channel there is no screen fallback, and the counter is the only human who can react.
    */
-  ipcMain.handle(CHANNELS.alarms, () => kot.alarms());
+  // S-7: BOTH printers' bands, on one channel. `27-F11d` renders the head and counts the tail, so
+  // a second channel would give the counter two bands competing for one region — and a cashier
+  // whose slip did not print needs the same surface as one whose KOT did not.
+  ipcMain.handle(CHANNELS.alarms, () => [...kot.alarms(), ...cash.alarms()]);
   ipcMain.handle(CHANNELS.acknowledgeAlarm, (_event, alarm_id: unknown) => {
     // Type-checked rather than trusted — the renderer is the untrusted end of this bridge
     // (`shared/ipc.ts`), and a non-string here would throw inside the handler on the one surface
     // whose job is to be dismissable.
     if (typeof alarm_id !== "string") return;
     kot.acknowledge(alarm_id);
+    // Ids are namespaced (`cash::`), so exactly one of these two owns any given band; calling
+    // both is how the channel stays one channel without the handler learning the namespace.
+    cash.acknowledge(alarm_id);
     // `03-F5`: the alert repeats until acknowledged, so the screen has to be told it stopped.
     notifyChanged();
   });
@@ -601,6 +632,18 @@ app.whenReady().then(async () => {
     if (confirm.success && confirm.data.type === "order.confirmed") {
       const order_id = confirm.data.payload.order_id;
       if (typeof order_id === "string") kot.confirmed(order_id);
+    }
+    // S-7 — THE SAME HANDOFF FOR THE TWO CASH DOCUMENTS, and it hangs off the same completed
+    // append for the same reason: `02-F23`'s slip carries facts the fold projects off
+    // `shift.closed`, so the event has to be IN before the paper can be assembled, and `01-F17`
+    // says a close is never blocked by a printer. Both calls are synchronous and `void`.
+    if (confirm.success && confirm.data.type === "shift.closed") {
+      const shift_id = confirm.data.payload.shift_id;
+      if (typeof shift_id === "string") cash.shiftClosed(shift_id);
+    }
+    if (confirm.success && confirm.data.type === "day.closed") {
+      const day_id = confirm.data.payload.day_id;
+      if (typeof day_id === "string") cash.dayClosed(day_id);
     }
     // NOTIFY FROM INSIDE THE HANDLER. This was `ipcMain.on(CHANNELS.append, notifyChanged)`,
     // which never fired once: `invoke` dispatches only to the `handle` table, and `.on` is the

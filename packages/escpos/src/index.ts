@@ -18,6 +18,14 @@ export {
   printerCapability,
   UNKNOWN_PRINTER_CAPABILITY,
 } from "./capability.js";
+// S-7 — the two documents that are ENTIRELY money (`02-F23`, `02-F24`). `03-F32`'s ban is a
+// property of the `kot` TYPE, not of this package: see `cash-documents.ts`'s header.
+export type {
+  DaySummaryData,
+  ExpectedByMethod,
+  SalesByChannel,
+  ShiftCloseData,
+} from "./cash-documents.js";
 // `BLOCK_RENDERERS` is deliberately NOT exported: 03-F34 enforces "before bytes reach the
 // spooler", and a caller that could render blocks directly would walk past all four assertions.
 export {

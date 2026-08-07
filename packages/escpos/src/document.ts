@@ -16,6 +16,7 @@
  * simply not in the chit data model".
  */
 
+import { CASH_BLOCK_RENDERERS, CASH_DOCUMENT_SPECS } from "./cash-documents.js";
 import type { EncoderPart } from "./encoder.js";
 import { type DocumentType, MIN_COLUMNS } from "./min-columns.js";
 
@@ -395,11 +396,17 @@ const KOT_SPEC = {
  * `03-F30`: "one spec per document type". Keyed by type, so uniqueness is the map's.
  *
  * `03-F31` names eight types and only the ones whose spec is written appear here — an entry is
- * added when its spec and its data contract are, not before.
+ * added when its spec and its data contract are, not before. Three are written: `kot` (K-5) and
+ * S-7's two cash documents, whose layouts live in `cash-documents.ts` because they are the
+ * INVERSE of this file's `03-F32` invariant and keeping them apart is what makes that legible.
  */
-export const DOCUMENT_SPECS: { readonly kot?: typeof KOT_SPEC } = { kot: KOT_SPEC };
+export const DOCUMENT_SPECS: {
+  readonly kot?: typeof KOT_SPEC;
+  readonly shift_close_slip?: (typeof CASH_DOCUMENT_SPECS)["shift_close_slip"];
+  readonly day_summary?: (typeof CASH_DOCUMENT_SPECS)["day_summary"];
+} = { kot: KOT_SPEC, ...CASH_DOCUMENT_SPECS };
 
 /** The code that renders each shipped spec's blocks, keyed the way the specs are. */
 export const BLOCK_RENDERERS: Readonly<
   Partial<Record<DocumentType, Readonly<Record<string, BlockRenderer>>>>
-> = { kot: KOT_BLOCK_RENDERERS };
+> = { kot: KOT_BLOCK_RENDERERS, ...CASH_BLOCK_RENDERERS };
