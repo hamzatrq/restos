@@ -106,8 +106,8 @@ describe("02-F41 — attribution is whoever's PIN is in", () => {
     h.gateway.append({ type: "order.created", payload: { order_id: "o-1" }, refs: [] });
     h.gateway.addLine({ order_id: "order-1234abcd", item_id: "i-karahi", qty: 1 });
 
-    expect(h.envelope(0)?.["actor_user_id"]).toBe("user-ayesha");
-    expect(h.envelope(1)?.["actor_user_id"]).toBe("user-ayesha");
+    expect(h.envelope(0)?.actor_user_id).toBe("user-ayesha");
+    expect(h.envelope(1)?.actor_user_id).toBe("user-ayesha");
   });
 
   it("FOLLOWS the session — a value fixed when the gateway was built cannot be right", () => {
@@ -120,8 +120,8 @@ describe("02-F41 — attribution is whoever's PIN is in", () => {
     h.setSession(BILAL);
     h.gateway.append({ type: "order.confirmed", payload: { order_id: "o-1" }, refs: [] });
 
-    expect(h.envelope(0)?.["actor_user_id"]).toBe("user-ayesha");
-    expect(h.envelope(1)?.["actor_user_id"]).toBe("user-bilal");
+    expect(h.envelope(0)?.actor_user_id).toBe("user-ayesha");
+    expect(h.envelope(1)?.actor_user_id).toBe("user-bilal");
   });
 
   it("a LOCKED device attributes to NOBODY — never to the last user who was in", () => {
@@ -134,8 +134,8 @@ describe("02-F41 — attribution is whoever's PIN is in", () => {
     h.setSession(null);
     h.gateway.append({ type: "order.confirmed", payload: { order_id: "o-1" }, refs: [] });
 
-    expect(h.envelope(0)?.["actor_user_id"]).toBe("user-ayesha");
-    expect(h.envelope(1)?.["actor_user_id"]).toBeNull();
+    expect(h.envelope(0)?.actor_user_id).toBe("user-ayesha");
+    expect(h.envelope(1)?.actor_user_id).toBeNull();
   });
 
   it("01-F27 — a device identity is NEVER promoted into a user identity", () => {
@@ -147,9 +147,9 @@ describe("02-F41 — attribution is whoever's PIN is in", () => {
     h.gateway.append({ type: "order.created", payload: { order_id: "o-1" }, refs: [] });
 
     const env = h.envelope(0);
-    expect(env?.["device_id"]).toBe(DEVICE_ID);
-    expect(env?.["actor_user_id"]).toBeNull();
-    expect(env?.["actor_user_id"]).not.toBe(DEVICE_ID);
+    expect(env?.device_id).toBe(DEVICE_ID);
+    expect(env?.actor_user_id).toBeNull();
+    expect(env?.actor_user_id).not.toBe(DEVICE_ID);
   });
 });
 
@@ -167,7 +167,7 @@ describe("02-F45 — attribution is read from the ENVELOPE, never from a payload
       refs: [],
     });
 
-    expect(h.envelope(0)?.["actor_user_id"]).toBe("user-ayesha");
+    expect(h.envelope(0)?.actor_user_id).toBe("user-ayesha");
   });
 
   it("and a payload naming a cashier cannot manufacture one on a LOCKED device", () => {
@@ -181,7 +181,7 @@ describe("02-F45 — attribution is read from the ENVELOPE, never from a payload
       refs: [],
     });
 
-    expect(h.envelope(0)?.["actor_user_id"]).toBeNull();
+    expect(h.envelope(0)?.actor_user_id).toBeNull();
   });
 });
 
@@ -208,7 +208,7 @@ describe("18 §6 — the lock surface reads the session through the same seam", 
     const shown = h.gateway.deviceState().user;
     h.gateway.append({ type: "order.created", payload: { order_id: "o-1" }, refs: [] });
 
-    expect(shown?.user_id).toBe(h.envelope(0)?.["actor_user_id"]);
+    expect(shown?.user_id).toBe(h.envelope(0)?.actor_user_id);
     expect(shown?.user_id).toBe("user-bilal");
   });
 });
