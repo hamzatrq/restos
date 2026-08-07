@@ -43,23 +43,44 @@ const MIN_SURFACES = 3;
 /**
  * # THE OWED REGISTER — a FOURTH layout defect, found by this gate on its first run.
  *
- * **`03-F5`'s alarm band pushes the bottom keypad row off the screen.** With the band up, the
- * work area drops from 568 px to 530 px, and on Pay and Cash that puts `C`, `0` and `⌫` at
- * y=673..799 in a 768 px viewport — clipped by `AppShell`, which `27-F2` forbids scrolling to.
- * A cashier cannot type a `0`, cannot clear and cannot backspace, so most tender amounts
- * (Rs 500, Rs 1,000) cannot be entered at all.
+ * **⚠ THIS ENTRY'S FIRST DESCRIPTION WAS WRONG, and the correction is the useful part.** It read
+ * *"a cashier cannot type a `0` … Rs 500 and Rs 1,000 cannot be entered at all"*. That was
+ * inferred from `withinViewport` — a FIT check — and never tested. **Measured (August 2026, real
+ * `sendInputEvent` mouse clicks through Blink's own hit testing, in this window): the band up,
+ * Pay open, pressing `1` `0` `0` `0` takes `REMAINING` from Rs 4,875 to Rs 3,875. Rs 1,000 TYPES
+ * FINE.** The three keys overhang by 31 px of 126, leaving 95 px on screen, and a click at their
+ * centre lands. Nothing on Pay is unreachable in either state; the claim propagated from here
+ * into `CLAUDE.md` and into a task brief before anyone pressed a key. This is the wave's own
+ * "the guard was never pointed at the dangerous case", one level up — the *mechanism* was right
+ * and its *verdict text* was never checked against the case it fires on.
  *
- * **It is reachable in the shipped product on the ordinary path, not a corner case.** This app
- * ships `unattachedPrinter` (no printer exists yet, K-8 owed), so — per this app's CLAUDE.md —
- * *every* confirm raises this band about 20 s later. Ring an order, send it to the kitchen, then
- * try to settle: the band is up and the keypad's bottom row is gone. It is the same failure as
- * the defect this gate was commissioned for, one state along, and `27-F11d` is explicit that it
- * must not happen — *"the work underneath stays visible and usable"*.
+ * **What is measured, and it is still a defect** (768 px viewport, `main` 632 px quiet / 530 px
+ * with the band — the band costs exactly 102 px):
  *
- * **It is REPORTED, not fixed.** The remedy is a layout-budget decision (does the band overlay
- * rather than displace? does the work area absorb it? does the keypad shrink — and `27-F8` puts
- * a 126 dp floor on those keys that may not be negotiated with?), and `24 §3b` makes that the
- * owning session's call, not a drive-by from the session building the rail.
+ * | surface | state | measured |
+ * |---|---|---|
+ * | Pay | band up | `C` `0` `⌫` clipped 126 → **95 px**; all three still clickable; nothing else lost |
+ * | Cash | band up | `C` `0` `⌫` clipped 126 → **112 px**, all clickable; **`Counted Rs 0` ENTIRELY off-screen** |
+ * | Pay, Cash | quiet | nothing clipped, nothing unreachable |
+ *
+ * **Cash is the one that costs something real.** `Counted` is the live echo of what the cashier
+ * has keyed into a drawer count, and `CashSurfaces.tsx` says in its own comment that it is *"the
+ * only feedback that a 126 dp key registered at all"*. Under the band she counts the drawer
+ * blind — `27-F25` (the payload is the largest thing in its region) and `27-F29` (this
+ * population's errors are exactly here) both land on that row.
+ *
+ * **It is on the ordinary path, not a corner case.** This app ships `unattachedPrinter` (K-8
+ * owed), so *every* confirm raises this band about 20 s later.
+ *
+ * **It is REPORTED, not fixed, and the reason is now arithmetic rather than judgement.** The
+ * keypad is 4 × `targetFor("keypad")` + 3 gaps = **528 px**. Under the band `main`'s content box
+ * is **498 px**. *The pad alone does not fit, before any label, any DUE figure, any TAKE CASH
+ * button or any padding* — so no reflow, overlay or reordering of these surfaces can close it.
+ * The only levers are the shell's 238 px of chrome and the 126-dp-as-126-css-px identity, and
+ * `27 §1a`'s own hardware table says a 126 dp keypad key renders at **79–111 px** on this panel,
+ * not 126. That is a spec question (`27-F8` vs `27-F11c` vs `27 §1a`), it needs a physical-panel
+ * input the renderer does not have, and `layout-physical.oracle.test.ts` already carries it as an
+ * open FINDING. Commandment 9: it is not a pixel choice a session may make for itself.
  *
  * **The register cannot rot**, which is the property `seams:check`'s markers already have: a
  * surface listed here that produces NO violation under the band **fails the gate**, so fixing
@@ -121,13 +142,35 @@ const judge = (surface: string, state: State, r: SurfaceReport): void => {
 
   for (const c of r.controls) {
     if (!c.withinViewport) {
+      // **SAY WHAT WAS MEASURED, NOT WHAT FOLLOWS FROM IT.** `withinViewport` is a FIT check —
+      // every edge inside the viewport — and this message used to conclude "cannot be touched"
+      // from it. That does not follow, and it was WRONG on the first case it ever fired on: the
+      // keypad's bottom row on Pay overhangs by 31 px of a 126 px key, leaving 95 px on screen,
+      // and a real `sendInputEvent` click at its centre still lands (`Rs 1,000` types fine). The
+      // false claim then propagated out of this register into `CLAUDE.md` and into a task brief.
+      // A partly-clipped 126 dp target is still a real `27-F8`/`27-F11d` finding and still fails
+      // this gate — but the two outcomes are different sizes of problem and must read differently.
+      const overhang = Math.max(
+        0,
+        c.rect.y + c.rect.h - r.viewport.h,
+        c.rect.x + c.rect.w - r.viewport.w,
+        -c.rect.y,
+        -c.rect.x,
+      );
+      const gone = !c.hitTestable;
       failures.push({
         surface,
         state,
         detail:
-          `UNREACHABLE: ${c.label} at (${c.rect.x},${c.rect.y}) ${c.rect.w}x${c.rect.h} is ` +
-          `outside the ${r.viewport.w}x${r.viewport.h} viewport. 27-F2 bans reaching a primary ` +
-          "action by scrolling and AppShell clips rather than scrolls, so this control cannot be touched.",
+          `${gone ? "UNREACHABLE" : "CLIPPED"}: ${c.label} at (${c.rect.x},${c.rect.y}) ` +
+          `${c.rect.w}x${c.rect.h} overhangs the ${r.viewport.w}x${r.viewport.h} viewport by ` +
+          `${overhang}px. AppShell clips rather than scrolls (27-F2 bans reaching a primary action ` +
+          `by scrolling), so that ${overhang}px is GONE. ` +
+          (gone
+            ? "Its centre does not hit-test: this control cannot be touched at all."
+            : `Its centre still hit-tests, so it can be pressed — but ${overhang}px of a target ` +
+              "27-F8 sizes deliberately has been taken away, which 27-F11d does not permit an " +
+              "alarm to do to the work underneath."),
       });
       continue;
     }
