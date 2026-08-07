@@ -1,3 +1,4 @@
+import { ORDER_CHANNELS } from "@restos/domain";
 import { z } from "zod";
 
 /**
@@ -111,6 +112,38 @@ export const OpenOrderSchema = z.object({
       note: z.string().nullable(),
     }),
   ),
+  /**
+   * `C19`/`C31` — the four projected facts the **Orders** tab reads, and the reason they are
+   * `.optional()` rather than required.
+   *
+   * They come straight off `OpenOrderRow`, which has carried all four since T-01-15; nothing
+   * in the fold changed to expose them. What stops them being REQUIRED is the same constraint
+   * `RestosBridge.cashState` records below: `counter.dom.test.tsx` and
+   * `unbound-settlement.dom.test.tsx` each build fixtures through
+   * `(over: Partial<OpenOrder> = {}): OpenOrder => ({ … })`, so a new required key is a
+   * **compile error in two oracle files this session may not edit** (`24 §3` step 2) — for a
+   * surface neither of them exercises.
+   *
+   * The degrade is honest and is what `01-F54`/`01-F17` ask for: a host that does not supply
+   * these serves an EMPTY cloud inbox rather than a wrong one. `undefined` means "this host
+   * did not say", which is deliberately **not** the same as `confirmed_at: null` ("said, and
+   * it is unconfirmed") — a screen that conflated the two would accept-button an order it
+   * knows nothing about. `orders-tab.dom.test.tsx` §D is what pins that distinction, and the
+   * shipped gateway supplies all four (`main/gateway.ts`), with
+   * `__acceptance__/orders-seam.test.ts` failing if it stops. **Required is where these belong
+   * once those two harnesses catch up.**
+   */
+  channel: z.enum(ORDER_CHANNELS).optional(),
+  /** `02-F1`'s other axis. Still an open string in the registry — the asymmetry `Counter` names. */
+  order_type: z.string().nullable().optional(),
+  /**
+   * `02-F8`/`02-F9` — the confirm anchor as branch-consensus milliseconds (`01-F43`), or `null`
+   * for an order that has not been accepted. This is the field the cloud inbox is keyed on and
+   * the field `03-F46`'s chronological ordering is taken from.
+   */
+  confirmed_at: z.number().int().nullable().optional(),
+  /** `01-F33` — 0/1, matching the fold's column. A settled order is recall-only (`02-F10`). */
+  settled: z.number().int().optional(),
 });
 export type OpenOrder = z.infer<typeof OpenOrderSchema>;
 

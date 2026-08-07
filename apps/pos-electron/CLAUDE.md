@@ -244,6 +244,98 @@ difference is a control an operator cannot reach**, not a cosmetic overflow.
   right), which is the AGENTS.md "you need BOTH properties" split showing up on one field. **M5 is
   the case `seams:check` Rule B cannot see** (`session` is *supplied*, just supplied with a stub);
   under it the product attributes nothing, shows the placeholder, and 339/340 tests pass.
+- **THE ORDERS TAB SHIPS HALF ITS ROW, AND THE OTHER HALF IS BLOCKED IN THE KERNEL.**
+  `screen-map §3.1` gives the **Orders** tab four tasks. **`C19`** (accept a cloud order,
+  `02-F9`) and **`C31`** (find that order again, `02-F10`) are built — `renderer/OrdersSurface.tsx`,
+  on `packages/ui`'s new `OrderList`. **`C20` and `C32` are NOT, and neither is a scoping choice:**
+  - **`C20` (reject) — `order.rejected` has no payload schema.** The `01 §4` catalog absorbed the
+    type in July 2026 (the absorption note names C20 by number), so **`role-task-inventories.md`
+    §10.2 is STALE where it says the reject path "cannot be implemented today"** — that sentence
+    was true when written and the kernel has since moved. What actually blocks it now is one step
+    later: `packages/domain/src/registry.ts` carries **six** `order.*` schemas and this is not one,
+    and `01-F4` makes emitting an unknown type a build-time *and* runtime error. Closing it is a
+    SACRED-path change (`18 §2`) that must also fix the shape of `06-F20`'s reason list. **Owed.**
+  - **`C32` (mark ready) — four independent blockers, any one sufficient.** (1) **Nothing advances
+    a line past `placed`**: no production code in this repo emits `order.line_state_changed` (only
+    test builders do), and `02-F31`'s `kot.printed → in_prep` auto-advance is explicitly
+    *projection-inert* in `sync-client/src/folds/merge.ts`. (2) So the edge `C32` would emit is
+    **illegal** — `LEGAL_NEXT.placed` is `["confirmed","voided","cancelled"]`, and the fold records
+    `illegal_transition` and refuses to apply it. A Ready control would be a control that can never
+    succeed. (3) The seam carries **no per-line state and no head edge ids**, so
+    `line_context.preds` cannot be built; `preds: []` would make the line a contested MVR rather
+    than ready. (4) **`03-F24`'s ready-signal-ownership config does not exist** anywhere in code, so
+    `02-F33`'s gate has no source and inventing one is a commandment-2 violation. **What ships is
+    `02-F33`'s own fallback and it is spec-conformant, not a gap:** *"otherwise the panel is
+    read-only for states."* `orders-tab.dom.test.tsx` §E is an **anti-scope guard** that fails if
+    either control is drawn before its blocker clears.
+  - **The S2 CHIME IS OWED; the count badge ships.** `screen-map §5` rules the arrival signal is
+    *"S2 chime + count badge"* and forbids a popup. The badge is real (`TabRail.badge`, set in
+    `Counter`). **There is no audio anywhere in this app** — `03-F5`'s S1 "repeating distinct
+    sound" is unbuilt too — and `21 §5` requires *"one sound vocabulary platform-wide"*. Shipping
+    an S2 chime alone would make a **new website order audible on a till where a failed kitchen
+    ticket is silent**, inverting the severity ladder that law exists to fix. Named, not dropped.
+  - **`02-F9`'s S1 escalation cannot be computed here.** *"An unaccepted order past half its
+    confirmation window escalates to S1"* needs a placed-at time, and the `open_orders` projection
+    carries **only `confirmed_at`** — an unconfirmed order has no time on this device at all. The
+    inbox therefore keeps the seam's order among its own rows and `03-F46`'s oldest-first applies
+    to the confirmed list. **Owed at the fold, not here.**
+  - **A finding about the CART, left alone deliberately.** `Counter` binds `current = orders[0]`,
+    so an unaccepted cloud order sitting first in the seam's array becomes the Order tab's cart.
+    That predates this tab and is **not changed here**: which order is "the cart" when several are
+    open is `02-F11`'s question and needs an FR, not a patch from the screen that surfaced it.
+- **TWO LAYOUT DEFECTS FOUND BY LAUNCHING, BOTH INVISIBLE TO 367 GREEN TESTS.** happy-dom lays
+  nothing out, so neither could be seen by any renderer suite — this is the package guide's own
+  "⚠ IF YOU CHANGE A COUNTER LAYOUT, LAUNCH IT AND MEASURE IT" earning its place a third time.
+  1. **The Accept tile overflowed its row.** `Tile` sizes from `targetFor("counter")` = **76 CSS
+     px**, while physical capacity math uses `targetMm("counter")` = the same 76 dp expressed as
+     **12.065 mm**, which renders as **45 px**. Rows overlapped and the tiles spilled past their
+     cards. `OrderList` now floors the row at the action's own height *in the same number it
+     renders with*. **The dp-as-CSS-px / dp-as-mm duality is PRE-EXISTING and is not fixed** —
+     `ItemGrid` has it too and the counter papers over it with `tileMm={28}`. Reconciling them is a
+     `packages/ui` tokens change with its own FR. **Owed.**
+  2. **The pager was not subtracted from its own box**, so a two-row page rendered two rows *and* a
+     pager into space for two — and the second inbox row was **clipped in half with no way to reach
+     it**, which on a counter is an order that cannot be accepted. This is exactly the hazard
+     `ItemGrid` documents ("items on the page, invisible, with no pager to reach them"); it only
+     bites here because this surface gives a list a third of the panel instead of nearly all of it.
+     Capacity is now costed twice — full height, then re-costed minus the pager *only if* the list
+     actually overflows. **`ItemGrid` has the same latent bug and it is NOT fixed here** (surgical
+     diffs, `24 §3b`): its box is large enough that it has not bitten yet. **Owed.**
+  Measured after both fixes on the launched app at 1366×768: `main` `scrollHeight` **530** ===
+  `clientHeight` **530** with the `03-F5` band up, rows `[86,86,45,45,45]` — action rows contain
+  their 76 px tile, read-only rows stay at their physical height. **The live `C19` loop was
+  exercised by hand:** badge **3 → 2 → 1**, and each accepted order moved from *New orders* to
+  *Open orders* on the same `order.confirmed` append `sendToKitchen` makes.
+- **Mutation matrix — the Orders tab (control 367/367 green, 0 survivors after two fixes).**
+  In-tree with byte-exact backups and a restore trap, full package suite under each mutant.
+  **344 tests existed before this work and NOT ONE of them can tell any of these mutants from the
+  correct implementation** — which is what makes every kill attributable to the two new files.
+
+  | # | mutant (one branch each) | new tests failed | pre-existing 344 |
+  |---|---|---|---|
+  | M1 | **CONTROL** — Orders tab back to `unavailable: true` (the pre-fix tree) | 17 (§A–§G) | all green |
+  | M2 | `gateway.ts` drops `channel: row.channel` — **the SEAM** | 2 (seam only) | all green |
+  | M3 | `isCloudInbox` uses `!o.confirmed_at` (undefined ≡ null) | 1 (§D) | all green |
+  | M4 | `foodpanda` added to the cloud set (`02-F9` bypasses it) | 1 (§B) | all green |
+  | M5 | badge = `orders.length` | 1 (§B) | all green |
+  | M6 | accept confirms the CART, not the pressed row | 1 (§C) | all green |
+  | M7 | open list rendered as delivered (no chronological sort) | 1 (§G) | all green |
+  | M8 | `OrderList` action fires with the FIRST row's id (`ui`) | 1 of 234 | all green |
+  | M9 | **anti-scope** — a Ready action on the open list | 2 (§E) | all green |
+  | M10 | `gateway.ts` drops `confirmed_at: row.confirmed_at` — **the SEAM** | 2 (seam only) | all green |
+
+  **M3 and M4 SURVIVED THE FIRST RUN — 365/365 green — and that is the finding worth keeping.**
+  Both are the round-3 shape exactly: the mechanism was built and the guard was never pointed at
+  the dangerous case. §D tested a row with **no channel at all**, so `isCloudInbox`'s first clause
+  already refused it and the `confirmed_at` comparison was never reached; and no fixture had an
+  **unconfirmed foodpanda** order, so widening the channel set cost nothing. Two fixtures were
+  added (a cloud channel beside an *absent* confirm state; an unconfirmed aggregator order) and
+  both mutants now die. **Reading the suite would not have found either** — only mutation did.
+  **M2 and M10 are the wave's named defect demonstrated:** each kills the seam file alone and
+  leaves all **19** renderer tests green, so the screen suite by itself blesses a gateway that
+  supplies nothing and an inbox that is empty forever. `main/__acceptance__/orders-seam.test.ts`
+  is the hand-written assertion `seams:check` cannot express (these are fields on a mapping, not
+  an unreached export or an unsupplied optional).
 - **IT ALSO GUARDS A READ.** `authorizeReads` narrows `cashState` to `reportScope`'s Appendix A
   reach (`02-F23` — "cashiers see only their own shifts"), the permission matrix's last export to
   gain a production caller. It hid nothing for one round: the `shift_cash` fold projected `cashier`
