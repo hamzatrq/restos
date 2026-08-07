@@ -13,6 +13,7 @@ import {
   PAID_OUT_APPROVAL_THRESHOLD_PAISA,
 } from "./authorize";
 import {
+  catalogBootSummary,
   catalogResolver,
   priceResolver,
   seedDevMenu,
@@ -395,6 +396,23 @@ app.whenReady().then(async () => {
     // offset is 0 until a hub is contacted, which the strip reports honestly as `down`.
     businessDay: () => businessDate(wallClock.now() + store.branchTimeStatus().offset_ms),
   });
+
+  /**
+   * **Say what the grid will actually show, at boot.** Without this the till renders item names
+   * with `no price set` under every tile and NOTHING anywhere explains why — which is exactly how
+   * a first look at this app ended: six tiles, six refusals, and no way to tell a stale dev store
+   * from a real `01-F60` gap.
+   *
+   * The two states are genuinely different and only one is a bug. A **priced** count of 0 with a
+   * non-zero item count means the catalog was seeded by an older build (or synced without prices
+   * for this branch/channel) — relaunch with `RESTOS_DEV_MENU=1`, which re-applies. A count of 0
+   * items means nothing has ever reached this device, which is `01-F54`'s honest resting state
+   * until the catalog transport delivers.
+   *
+   * `00 §5.7` is the rule this serves: a surface reports what is TRUE. A log line is the cheapest
+   * place to be true about a state the operator cannot otherwise diagnose.
+   */
+  console.log(catalogBootSummary(store, gateway.menu()));
 
   /**
    * **COMMANDMENT 8, and this is the line that makes it true of this product.**

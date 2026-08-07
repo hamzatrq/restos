@@ -197,3 +197,32 @@ export const seedDevMenu = (
   });
   return result.applied;
 };
+
+/**
+ * What the grid will actually show, said once at boot.
+ *
+ * Without it the till renders item names with `no price set` under every tile and NOTHING
+ * explains why — which is exactly how the first look at this app ended: six tiles, six refusals,
+ * and no way to tell a stale dev store from a real `01-F60` gap. The two are different states and
+ * only one is a bug: tiles present but unsellable means the catalog was seeded by an older build
+ * or synced without prices for this branch/channel (relaunch with `RESTOS_DEV_MENU=1`, which
+ * re-applies); no tiles at all is `01-F54`'s honest resting state until the transport delivers.
+ *
+ * It lives HERE and not in `index.ts` because `index.ts` imports `electron` and is therefore
+ * unreachable from every suite in this repo — `catalog-seam.test.ts` fails the build on an inline
+ * `store.catalog` read there, and it caught this function being written in the wrong file.
+ * `00 §5.7`: a surface reports what is true, and a log is the cheapest place to be true about a
+ * state the operator cannot otherwise diagnose.
+ */
+export const catalogBootSummary = (
+  store: DeviceStore,
+  menu: readonly { unavailable?: boolean | undefined; unavailableReason?: string | undefined }[],
+): string => {
+  const blocked = menu.filter((t) => t.unavailable === true);
+  const reasons = [...new Set(blocked.map((t) => t.unavailableReason ?? "unstated"))];
+  return (
+    `@restos/pos catalog v${store.catalog.version()} — ${menu.length} tile(s), ` +
+    `${blocked.length} unsellable` +
+    (reasons.length > 0 ? ` (${reasons.join("; ")})` : "")
+  );
+};
