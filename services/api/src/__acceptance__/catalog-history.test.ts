@@ -282,8 +282,19 @@ describe("14-F3 — the numbers, and what counts as a change", () => {
     ]);
   });
 
-  it("does not confuse two branches whose ids and channels overlap at the separator", () => {
-    // `("a b", "c")` and `("a", "b c")` must never collide, or a moved price reads as unchanged.
+  it("keeps two branches whose ids share a prefix apart", () => {
+    // The diff is keyed by `(branch, channel)`, so `a` and `a b` are different cells and only the
+    // one that moved is reported.
+    //
+    // ⚠ **This does NOT prove the NUL separator.** The obvious claim — "`(\"a b\", \"c\")` and
+    // `(\"a\", \"b c\")` must not collide" — is unfalsifiable here, and measured so: swapping the
+    // NUL join for a space leaves this test GREEN (mutant M11, a survivor by construction).
+    // `channel` is the LAST component and is drawn from `02-F42`'s closed, whitespace-free set, so
+    // no pair of legal cells can collide under a space either. The NUL is kept because it is what
+    // every other `(branch, channel)` map in this codebase uses and because the closed set is a
+    // property of `02-F42` rather than of this function — but the guarantee is `02-F42`'s, and a
+    // comment here claiming this test earns it would be the kind of unearned claim the round-3 law
+    // is about.
     const cell = (branch_id: string, price_paisa: number) => ({
       branch_id,
       channel: "counter" as const,
