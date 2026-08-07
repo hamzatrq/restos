@@ -19,6 +19,10 @@ export {
   type StagedEditStore,
 } from "./catalog.js";
 export { catalogProcedures } from "./catalog-router.js";
+// `18 §5`'s taxonomy slot for an external system that did not answer. Exported beside
+// `AuthzRefusal` for the same reason: a client that must read a refusal's KIND out of its message
+// is a client that breaks when the message improves.
+export { IntegrationError } from "./errors.js";
 // The adapter binding B-4's two ports to `services/sync-gateway` (founder ruling: the API
 // publishes, the gateway serves).
 export {

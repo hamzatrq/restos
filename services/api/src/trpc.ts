@@ -37,6 +37,7 @@ import { type AuthDecision, type AuthSubject, can, type PermissionAction } from 
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { z } from "zod";
+import { IntegrationError } from "./errors.js";
 import type { CatalogRuntime } from "./publish.js";
 import { verifySessionToken } from "./session.js";
 import type { UserStore } from "./users.js";
@@ -92,13 +93,74 @@ const t = initTRPC
      */
     errorFormatter: ({ shape, error }) => {
       const cause = error.cause;
-      if (!(cause instanceof AuthzRefusal)) return shape;
-      return { ...shape, data: { ...shape.data, authz: cause.authz } };
+      if (cause instanceof AuthzRefusal) {
+        return { ...shape, data: { ...shape.data, authz: cause.authz } };
+      }
+      /**
+       * The same lift for `18 §5`'s other typed refusal. A client that has to read `retriable` out
+       * of the MESSAGE is a client that breaks the day the message improves, and "which dependency"
+       * is the question the back office could not answer at all while `"fetch failed"` was the whole
+       * story. Both travel as data; the sentence stays for the human.
+       */
+      if (cause instanceof IntegrationError) {
+        return {
+          ...shape,
+          data: {
+            ...shape.data,
+            integration: { dependency: cause.dependency, retriable: cause.retriable },
+          },
+        };
+      }
+      return shape;
     },
   });
 
 export const router = t.router;
-export const publicProcedure = t.procedure;
+
+/**
+ * **The API boundary, and where a transport failure stops being a 500.**
+ *
+ * `catalog.published` and `catalog.history` proxy to `services/sync-gateway`. With that peer down,
+ * `gateway-client.ts` raises an `IntegrationError`; without this middleware tRPC would normalise it
+ * to `INTERNAL_SERVER_ERROR` and hand the operator its message under a code that says *this service
+ * is broken*. It is not: an unreachable peer is `18 §5`'s `IntegrationError`, and
+ * `SERVICE_UNAVAILABLE` (HTTP 503) is what a caller — human or retry policy — can act on. `00 §5.7`:
+ * report what is TRUE, which includes whose fault it is.
+ *
+ * **The cause is not swallowed** (`24-F15` catch-without-diagnose). Three things survive: the whole
+ * chain goes to the log here, the `IntegrationError` stays as the `TRPCError`'s `cause` so
+ * `errorFormatter` can lift `dependency`/`retriable`, and the sentence reaches the operator intact.
+ *
+ * Attached to `publicProcedure` so it is the OUTERMOST middleware on every procedure in the router,
+ * including the unauthenticated ones — an error taxonomy that only applies to procedures someone
+ * remembered to route through it is the "unsupplied seam" shape (AGENTS.md) wearing a new hat.
+ */
+const integrationBoundary = t.middleware(async ({ next, path, type }) => {
+  /**
+   * ⚠ **`next()` does NOT throw when the resolver does** — it resolves to `{ ok: false, error }`,
+   * with the thrown value already normalised into a `TRPCError` whose `cause` is the original. A
+   * `try/catch` around it therefore never fires, and the first draft of this middleware was exactly
+   * that: it compiled, it read correctly, and it mapped nothing. The suite caught it only because
+   * an assertion checked the resulting HTTP STATUS rather than the message, which arrived looking
+   * perfect either way.
+   */
+  const result = await next();
+  if (result.ok) return result;
+  const integration = result.error.cause;
+  if (!(integration instanceof IntegrationError)) return result;
+
+  // Fastify's own logger is off in this host (`createApiServer`), so this is the log. The whole
+  // error, not the sentence: the sentence omits the stack the operator cannot use and the engineer
+  // on call needs.
+  console.error(`[IntegrationError] ${type} ${path} → ${integration.dependency}`, integration);
+  throw new TRPCError({
+    code: "SERVICE_UNAVAILABLE",
+    message: integration.message,
+    cause: integration,
+  });
+});
+
+export const publicProcedure = t.procedure.use(integrationBoundary);
 
 /** What the session middleware adds: the server's own answer to "who is this". */
 type SubjectContext = ApiContext & { readonly subject: AuthSubject };
