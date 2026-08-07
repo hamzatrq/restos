@@ -14,6 +14,15 @@ import { defineConfig } from "vitest/config";
  * `.dom.test.tsx` opts in. Everything else stays in a node environment, where the gateway and
  * IPC-seam suites already live and where a DOM would be dead weight.
  */
+/**
+ * ⚠ `testTimeout` is set INSIDE each project, never once at the root: a root-level value does
+ * NOT inherit into `projects[]`, which is how `apps/backoffice` ran with 60 s configured and still
+ * failed at 5 s. `01-F61`'s Argon2id floor is deliberately ~0.4 s per verify, and under the full
+ * parallel run a PIN test measured 6.3 s against the 5 s default — passing alone, failing in the
+ * suite, which reads as a flake and is a real timeout. Raised, never weakened.
+ */
+const TIMEOUT_MS = 60_000;
+
 export default defineConfig({
   plugins: [react()],
   test: {
@@ -22,6 +31,7 @@ export default defineConfig({
         plugins: [react()],
         test: {
           name: "node",
+          testTimeout: TIMEOUT_MS,
           include: ["src/**/*.test.ts"],
           environment: "node",
         },
@@ -30,6 +40,7 @@ export default defineConfig({
         plugins: [react()],
         test: {
           name: "dom",
+          testTimeout: TIMEOUT_MS,
           include: ["src/**/*.dom.test.tsx"],
           environment: "happy-dom",
           globals: false,
