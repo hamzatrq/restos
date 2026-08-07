@@ -103,3 +103,50 @@ separates it from the correct build.
 
 The gateway half of the matrix lives beside its own suite: see
 `services/sync-gateway/src/__acceptance__/catalog-publish-http.test.ts`.
+
+## `IntegrationError` — `"fetch failed"` stops reaching an operator (`18 §5`, `00 §5.7`)
+
+`catalog.published`/`catalog.history` proxy to `services/sync-gateway`. With the gateway down,
+`fetch` rejects with Node's undici `TypeError` whose **entire message is `"fetch failed"`**, tRPC
+normalises the unrecognised throw to `INTERNAL_SERVER_ERROR` and carries that message through, and
+the back office rendered exactly those two words — true of nothing an operator can act on.
+
+Three pieces, and `src/errors.ts` says why each exists:
+
+- **`IntegrationError(dependency, message, { retriable, cause })`** — `18 §5`'s taxonomy slot.
+  Raised by `gateway-client.ts`'s `reach()`, which is the ONLY place a rejected `fetch` is caught.
+  The sentence names the dependency, the address, the reason (walked out of the **cause chain** —
+  `"fetch failed"` alone is the top link and the `ECONNREFUSED` is one deeper), and that the state
+  is infrastructural rather than a rejected edit. The cause is carried, never swallowed (`24-F15`).
+- **`integrationBoundary`** in `trpc.ts`, attached to `publicProcedure` so it is the outermost
+  middleware on EVERY procedure. Maps it to `SERVICE_UNAVAILABLE` (HTTP 503) and logs the whole
+  error. ⚠ **`next()` does not THROW when the resolver does** — it resolves to `{ ok: false, error }`
+  with the throw already normalised into a `TRPCError` whose `cause` is the original. A `try/catch`
+  around it never fires; the first draft was exactly that, compiled, read correctly, and mapped
+  nothing. Only an assertion on the resulting HTTP **status** caught it — the message looked perfect
+  either way, because `errorFormatter` was already lifting the data.
+- **`errorFormatter`** lifts `{ dependency, retriable }` into `shape.data.integration`, beside the
+  existing `authz` lift, so no client parses a sentence to learn whether to retry.
+
+**A peer REFUSAL is deliberately untouched.** `refuse()` still carries the gateway's own message —
+`01-F60`'s *"entry 3 (item/biryani) is not sellable — no price for branch b1, channel foodpanda"* is
+the owner's business and wrapping it as an outage would tell them to wait out something that never
+ends. That is the control assertion in `__acceptance__/gateway-unreachable.test.ts`.
+
+### Mutation matrix (round-3 law) — control 10/10 new + 116 pre-existing green, 0 survivors
+
+Every row was run against the FULL suite, so the right-hand column is measured, not reasoned.
+
+| # | mutant (exactly one branch) | new tests failed (of 10) | pre-existing 116 |
+|---|---|---|---|
+| G4 | **the read path back to a raw `fetch`** — the original bug restored | 6 | **all green** |
+| G5 | `integrationBoundary` removed from `publicProcedure` — back to a 500 | 2 | all green |
+| G6 | the message drops the dependency name and the address | 4 | all green |
+| G7 | `IntegrationError` built without `{ cause }` (`24-F15`) | 1 | all green |
+| G8 | `errorFormatter` stops lifting `{ dependency, retriable }` | 1 | all green |
+| G9 | **THE CONTROL: `refuse()` also raises an `IntegrationError`** | exactly 1 | all green |
+
+**G9 is the one to re-run after any change here.** Under it every gate is green — `pnpm verify`
+exit 0, `pnpm seams:check` clean, 125 of 126 tests passing — and an owner with a mispriced menu is
+told to wait for an outage that will never end. Only the assertion that a **400 stays a 400**
+separates it from the correct build.
