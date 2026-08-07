@@ -32,8 +32,13 @@ export const { TRPCProvider, useTRPC } = createTRPCContext<AppRouter>();
 /**
  * Same-origin, because `next.config.ts` rewrites `/api/trpc/*` onto the API. The browser never
  * makes a cross-origin request carrying the bearer.
+ *
+ * **Exported so the rewrite can be asserted against THIS value rather than a copy of it.** The
+ * path is stated in two files that have no other connection, and if they drift the two processes
+ * stop talking with every gate still green — `__acceptance__/api-seam.test.ts` reads it from here
+ * and calls the real `next.config.ts`.
  */
-const TRPC_URL = "/api/trpc";
+export const TRPC_URL = "/api/trpc";
 
 /**
  * `18 §5`'s decision, seen from the client: the token is an identity claim and the server re-reads
