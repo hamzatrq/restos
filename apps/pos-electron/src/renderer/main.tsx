@@ -23,6 +23,24 @@ if (!root) throw new Error("index.html has no #root — the renderer cannot moun
  *
  * Light, per `27-F19`, matching the provider below. `27-F67`'s training inversion happens
  * inside `AppShell`, which paints its own full-height surface over this one.
+ *
+ * ⚠ **WHAT THIS DOES NOT DO: DELIVER THE TYPEFACE. NO WEBFONT IS BUNDLED.** The token's chain
+ * is `'IBM Plex Sans', system-ui, sans-serif`, so this names Plex and then renders whatever the
+ * machine already has — SF Pro on the Mac these screenshots came from, **Segoe UI on the Windows
+ * till this app actually ships to**. The renderer's CSP is `'self'`, so no external font URL can
+ * ever load; delivering it means committing the woff2 files as a local asset.
+ *
+ * **That is a real gap and not a cosmetic one**, which is why it is written here rather than
+ * left to be discovered. `27-F26` did not pick Plex on taste — it picked it on *fail-safe
+ * defaults*, "tabular digits and distinct `I`/`l` with **no feature flags**". Segoe UI gives
+ * neither without opting in: its figures are proportional by default, so a column of money does
+ * not align, on the one surface (`27-F25`) where digits are the operational payload.
+ *
+ * **Not bundled here deliberately, on process rather than preference.** `18 §15` makes adding an
+ * asset a reviewed step — "PR adds it to §14 with one line of justification; **senior
+ * approves**" — and a session fixing a layout blocker cannot approve its own dependency. The
+ * matching call was made in `apps/backoffice` for the same reason, so both planes are honest in
+ * the same direction. **Owed, and named in `apps/pos-electron/CLAUDE.md`.**
  */
 const base = typography["text-body"];
 document.body.style.fontFamily = base.fontFamily;

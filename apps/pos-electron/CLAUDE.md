@@ -56,8 +56,43 @@ Three failures found by launching, each of which builds cleanly and dies at load
 `main/index.ts` uses `import.meta.url`, never `__dirname` — `"type": "module"` means the main
 bundle is ESM and `__dirname` does not exist there.
 
+## The window is 1366x768 of PAGE, and the layout is checked against that
+
+`main/index.ts` passes `useContentSize: true` with `minWidth`/`minHeight` at **1366x768**, which
+is `27 §1a`'s counter panel — the smaller of the two it lists, so a floor rather than a
+preference. Without `useContentSize` those numbers describe the window FRAME and the renderer
+got **736** css px of height; every capacity figure in doc 27, `27-F11a`'s ~88 tiles included, is
+computed against the panel and not against what the title bar leaves over.
+
+The minimums refuse rather than degrade because `AppShell` **clips and does not scroll**
+(`27-F2` bans reaching a primary action by scrolling), so a window dragged smaller does not get
+tighter — it silently hides controls. That is how the defect below shipped.
+
+**⚠ IF YOU CHANGE A COUNTER LAYOUT, LAUNCH IT AND MEASURE IT.** Every suite in this repo was
+green while a cashier could not settle an order. `pnpm -C apps/pos-electron test` renders in
+happy-dom, which lays nothing out and therefore cannot see a control below the fold; the
+structural guards in `counter.dom.test.tsx` §"C11–C14" pin the shape the fix rests on and are
+explicit that the pixel claim is verified by launching. The cheapest way to look:
+
+```
+RESTOS_DEV_MENU=1 RESTOS_DEV_PIN=1234 pnpm start   # add --remote-debugging-port=9222 to drive it
+```
+
+then read `document.querySelector('main').scrollHeight` against its `clientHeight`. **Any
+difference is a control an operator cannot reach**, not a cosmetic overflow.
+
 ## What is deliberately not real yet
 
+- **`27-F26`'S TYPEFACE IS NAMED BUT NOT DELIVERED — no webfont is bundled.** The token chain is
+  `'IBM Plex Sans', system-ui, sans-serif`, so the till renders Plex only if the machine already
+  has it: SF Pro on a Mac, **Segoe UI on the Windows counter this app ships to**. The renderer's
+  CSP is `'self'`, so no external font URL can load and delivering it means committing the woff2
+  files as a local asset. **It is not cosmetic:** `27-F26` chose Plex on *fail-safe defaults* —
+  "tabular digits and distinct `I`/`l` with no feature flags" — and Segoe UI's figures are
+  proportional by default, so money columns do not align on the surface where `27-F25` makes
+  digits the payload. Left unbundled on **process**: `18 §15` requires a §14 entry and a senior
+  approval for a new asset, which a session fixing a layout blocker cannot give itself.
+  `apps/backoffice` made the same call for the same reason. **Owed.**
 - **Device identity is a marked DEV SEED** with stable ids. Admission (`01-F47`) replaces it.
   A device minting a fresh `device_id` per launch would fork its own outbox on every restart.
 - **Reachability reports `down` for all three facts**, because no mesh or cloud session exists.

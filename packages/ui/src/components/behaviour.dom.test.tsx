@@ -170,3 +170,72 @@ describe("27-F23/F24 — money arrives finished", () => {
     expect(text, "a minus sign leaked into a money value").not.toContain("-");
   });
 });
+
+describe("27-F14 — a link that is DOWN is not painted as a FAULT", () => {
+  /**
+   * Found by launching the counter (August 2026): `LAN OFF` and `Hub OFF` rendered as two
+   * permanent red blocks across the top of every screen, because this device reports both as
+   * `down` — no mesh has been elected and none exists yet, which is its honest resting state
+   * (`00 §5.7`). Nothing was wrong, and the loudest signal the system has said otherwise all
+   * shift, which is what teaches an operator to stop reading the strip.
+   *
+   * `27-F14` decides it by ALLOCATION rather than by taste: the red slot's claimants are
+   * "ticket overdue, print failure, cash variance past threshold, void & refund actions,
+   * revoked device", and **no connectivity state is among them**. The only connectivity
+   * claimant in the table is "sync degraded", which sits in amber.
+   */
+  const chip = (label: string): HTMLElement =>
+    screen.getByRole("status", { name: new RegExp(`^${label}:`, "i") });
+  const bgOf = (el: HTMLElement): string => el.style.background || el.style.backgroundColor;
+
+  it("spends NO fault colour on any of the three facts being down", () => {
+    // MUTATION THIS CATCHES: `down: "bgColor-status-fault"` restored in FILL — for LAN, for
+    // Hub, or for Cloud. Asserted against the token VALUE out of `palette`, so renaming the
+    // token cannot make it pass vacuously.
+    render(
+      <ThemeProvider polarity="light">
+        {shell({ lan: "down", hub: "down", cloud: "down" })}
+      </ThemeProvider>,
+    );
+    const fault = palette.light["bgColor-status-fault"];
+    for (const label of ["LAN", "Hub", "Cloud"]) {
+      expect(bgOf(chip(label)), `${label} was painted with the fault colour`).not.toBe(fault);
+    }
+  });
+
+  it("still SAYS the link is down — honesty is not what was withdrawn", () => {
+    // `27-F12`/`27-F18`: colour is the THIRD channel, so withdrawing it must not withdraw the
+    // fact. This is the failure the fix would otherwise trade into, and it is worse than the
+    // one being fixed: a strip that has gone quiet reads as a healthy one.
+    //
+    // MUTATION THIS CATCHES: "fixing" the red block by dropping the chip's word, or by reusing
+    // `ok`'s — i.e. making the strip lie instead of making it proportionate.
+    render(
+      <ThemeProvider polarity="light">
+        {shell({ lan: "down", hub: "down", cloud: "down" })}
+      </ThemeProvider>,
+    );
+    for (const label of ["LAN", "Hub", "Cloud"]) {
+      expect(chip(label).textContent, `${label} stopped reporting that it is down`).toContain(
+        "OFF",
+      );
+    }
+  });
+
+  it("keeps AMBER for degraded — the one connectivity state 27-F14 DOES allocate", () => {
+    // The other half of the allocation, and the reason this is not "never colour a link". A
+    // suite that only banned red would pass against a strip gone entirely achromatic, which
+    // loses the state the FR actually gives a colour to.
+    //
+    // MUTATION THIS CATCHES: flattening `degraded` to the neutral fill alongside `down`.
+    render(
+      <ThemeProvider polarity="light">
+        {shell({ lan: "degraded", hub: "ok", cloud: "down" })}
+      </ThemeProvider>,
+    );
+    expect(bgOf(chip("LAN")), "degraded lost its amber").toBe(
+      palette.light["bgColor-status-abnormal"],
+    );
+    expect(bgOf(chip("LAN"))).not.toBe(bgOf(chip("Cloud")));
+  });
+});
