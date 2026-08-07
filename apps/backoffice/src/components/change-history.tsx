@@ -45,34 +45,23 @@
  * "changed" at a catalog version with no before/after values. The footnote says so.
  */
 
-import { BUSINESS_TIMEZONE, type CatalogPriceChangeT } from "@restos/domain";
+import type { CatalogPriceChangeT } from "@restos/domain";
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { formatPaisa } from "../lib/money";
 import { strings } from "../lib/strings";
 import { useTRPC } from "../lib/trpc";
+import { formatInstant } from "../lib/when";
 import { Note } from "./ui/surface";
 
 /**
  * `14-F3`'s *"2 Jul"*.
  *
- * `en-GB` for the day-before-month order the FR's own example is written in and that this market
- * reads; `27-F22` is satisfied either way, since every `en-*` locale is CLDR `latn` and no Eastern
- * digit can reach the string. The zone is pinned so the rendered date is a property of the record
- * rather than of the reader's machine. The clock is `h23`, stated rather than left to `hour12`,
- * whose h23/h24 mapping has historically differed between engines and would render midnight as
- * "24:05".
+ * The format and every reason for it now live in `lib/when.ts`, because the `14-F28` pending
+ * queue and the save receipt were each rendering a bare `en-US` `toLocaleString` — so one page
+ * showed "Lands 8/8/2026, 05:00:00" above "2 Aug 2026, 05:00". One format, one place.
  */
-const changedAtText = (server_received_at: number): string =>
-  new Date(server_received_at).toLocaleString("en-GB", {
-    timeZone: BUSINESS_TIMEZONE,
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  });
+const changedAtText = formatInstant;
 
 /**
  * One side of `14-F3`'s *"450 → 480"*.
@@ -120,11 +109,22 @@ export const ChangeHistory = ({
 
   return (
     <div className="flex flex-col gap-2">
-      <ol className="flex flex-col gap-1.5">
+      {/*
+        A timeline, not a stack of identical boxes. `14-F3` calls the audit trail *"a first-class
+        UI element, not a hidden log"*, and four equally-weighted rectangles say nothing about
+        order — a reader had to parse four dates to learn which came first. The rule down the
+        left and the tick per entry carry the sequence; entries are newest first.
+
+        ⚠ The text COMPOSITION below is unchanged on purpose. `shell.dom.test.tsx` reads each
+        row's `textContent` and asserts contiguous strings — `"by u-ali · "`, `"2 Jul 2026"`,
+        `"branch-main · counter Rs 450 → Rs 480"` — so the literal spaces inside these template
+        strings are load-bearing, and the spans holding them may be restyled but never re-split.
+      */}
+      <ol className="flex flex-col border-l border-border pl-4">
         {mine.map((record) => (
           <li
             key={`${record.payload.version}-${record.payload.after_ref ?? ""}`}
-            className="flex flex-col gap-1 rounded-md border border-border px-3 py-2 text-sm"
+            className="relative flex flex-col gap-1.5 py-2.5 text-sm before:absolute before:-left-[1.3125rem] before:top-4 before:size-2 before:rounded-full before:bg-border-strong"
           >
             <span>
               <span className="font-medium">
@@ -137,7 +137,9 @@ export const ChangeHistory = ({
                   "appended with no actor" has to be a constructible mistake or no test can prove it
                   does not happen — so it renders as the absence it is, never as an attribution. */}
               <span>{` ${strings.history.by} ${record.actor_user_id ?? strings.history.absent} · `}</span>
-              <span>{changedAtText(record.server_received_at)}</span>
+              <span className="text-muted-foreground">
+                {changedAtText(record.server_received_at)}
+              </span>
               <span className="text-muted-foreground">
                 {` · ${strings.history.version} ${record.payload.version}`}
               </span>
@@ -148,9 +150,16 @@ export const ChangeHistory = ({
                 the `<li>`s of this screen are its history rows, and a reader counting them (a
                 person or a test) must not have price rows folded into that count. */}
             {record.payload.price_changes.map((change) => (
-              <span key={`${change.branch_id} ${change.channel}`} className="text-xs tabular-nums">
-                <span className="text-muted-foreground">{`${change.branch_id} · ${change.channel} `}</span>
-                <span>{changeText(change)}</span>
+              <span
+                key={`${change.branch_id} ${change.channel}`}
+                className="text-xs tabular-nums text-muted-foreground"
+              >
+                <span>{`${change.branch_id} · ${change.channel} `}</span>
+                {/* `27-F25` — these two numbers are the payload of an audit line and were the
+                    DIMMEST thing on it: 12px muted, under a metadata header at full contrast.
+                    Full weight now, cell key muted, which is the correct way round. `27-F16`
+                    keeps them uncoloured: a price rise is not abnormal. */}
+                <span className="font-medium text-foreground">{changeText(change)}</span>
               </span>
             ))}
           </li>

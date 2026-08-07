@@ -65,6 +65,58 @@ pnpm -C apps/backoffice dev         # http://localhost:3000
   no float and therefore no rounding step. Decimals are REFUSED — a pinned interpretation, recorded
   in the file, not a specified rule.
 
+## The visual pass (August 2026) — four things that are now single-source, and stay that way
+
+A design pass ran the two processes in a real browser and fixed what it found. Four of its
+changes are load-bearing rather than cosmetic, and each replaced a duplicate or an absence:
+
+- **`Problem` (`ui/surface.tsx`) is the ONLY way this app renders a failed query.** Before it,
+  `auth-gate.tsx` and `catalog-screen.tsx` each rendered `error.message` inside `<Note
+  tone="fault">` — which in a real run put `Unexpected token 'I', "Internal S"... is not valid
+  JSON` edge-to-edge on an otherwise blank page as the entire application. `Problem` names what
+  is unreachable, says nothing is lost, gives an action, and answers *retriable?* with a **retry
+  control** rather than a sentence. The raw string survives under `detail`, demoted. **Never put
+  a bare `error.message` back on a screen** — and note the surface deliberately does NOT guess a
+  cause, because this client cannot distinguish a dead process from a bad rewrite from a failed
+  API dependency, and a surface that guesses sends an owner to fix the wrong thing.
+- **`lib/when.ts` is the app's one date format.** There were three: `14-F3`'s reasoned `en-GB` +
+  `BUSINESS_TIMEZONE` + `h23`, and two bare `toLocaleString("en-US", { hour12: false })` calls in
+  `pending-edits.tsx` and the save receipt — so one page showed *"Lands 8/8/2026, 05:00:00"*
+  above *"2 Aug 2026, 05:00"*. Month-first is also the wrong reading order for this market. The
+  reasons (including why `businessDate()` is **not** called) live in that file.
+- **`theme-css.ts` now emits `27-F26`'s typeface**, not only the colours. The type half of the
+  tokens export was declared in the manifest, re-derived by `packages/ui`'s `tokens.test.ts` on
+  every commit, and true of no pixel here. No webfont is bundled — the token's own chain falls
+  back to `system-ui`, so on a machine without IBM Plex Sans this renders what it rendered
+  before, now *stated by the token* instead of by omission.
+- **`globals.css` maps `fgColor-status-abnormal` and `outlineColor-status-abnormal`.** Without
+  them the only way to tint a warning glyph was `text-warning`, i.e. `--warning` = a **`bgColor-`**
+  token on a text property, which is the `27-F40` prefix violation `packages/ui`'s own discipline
+  suite fails.
+
+**Two colour assignments were exactly backwards and are now the other way round.** `Archive`
+(`14-F7` — reversible curation, "archive never delete") and `Cancel this edit` (`14-F28` — a
+pending edit no device has heard of) both shipped as `variant="destructive"`, the strongest fill
+in the palette; **apply-now**, the one control here that moves every till in the org mid-order,
+had no colour at all. `27-F16` reserves colour for the abnormal. Both safe controls are now
+`secondary`; apply-now takes the `27-F64` abnormal outline plus a glyph when chosen (`27-F12`:
+never colour alone).
+
+**`01-F60`'s two facts have two appearances now, and the distinction is a WORD.** An unpriced
+cell renders `no price` in the muted foreground; a free one renders `Rs 0`. Seen live before the
+fix: a foodpanda column reading `2173`, `0` and blank, all three drawn identically. Colour is
+spent only once the cell is a real fault. **The `Rs` mark and the `no price` placeholder must
+stay out of the cell's accessible name** — `editor.dom.test.tsx` finds every cell by
+`getByLabelText("<branch> <channel>")`, so the mark is `aria-hidden` and the word is a
+`placeholder` behind an explicit `<label>`.
+
+⚠ **The oracle caught a real a11y regression during this pass, not just a test break.** Wrapping
+an `apply-when` row in a `<label>` to make the whole row clickable folded the consequence
+PARAGRAPH into the radio's accessible name — a screen reader announced *"Apply now Every till in
+the organisation changes as soon as this saves…"* as the option's name. The consequence must be
+**read**; it is not what the control is **called**. The row is a `<div>`; only the option label is
+a `<label>`.
+
 ## Mutation matrix — `api-seam.test.ts` (control 88/88 green, 0 survivors)
 
 The link to `services/api` is `TRPC_URL` (`lib/trpc.tsx`) + the rewrite `source` (`next.config.ts`).
