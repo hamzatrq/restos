@@ -6,6 +6,41 @@ Plan: `plans/wave-1/backoffice-catalog.md`. Stack rules: `18 §7`. Visual langua
 - **IMPLEMENTED: B-5 (shell + tRPC client + auth), B-6 (catalog editor + `14-F29` price grid +
   `03-F50` station), B-7 (`14-F3` change history in place).** `services/api` is the backend and its
   router is the contract — `AppRouter` is imported **type-only** from `@restos/api/src/router.js`.
+## Running it — two commands, two processes
+
+The back office is a **front end with no backend of its own**. Start `services/api` first or every
+query 502s.
+
+```sh
+# 1 — the cloud plane (services/api). Prints `@restos/api listening on http://…` when it is up.
+SESSION_SECRET=<any-dev-secret> \
+BOOTSTRAP_OWNER_EMAIL=owner@example.test \
+BOOTSTRAP_OWNER_PASSWORD_HASH='<a domain hashPin PHC string>' \
+BOOTSTRAP_ORG_ID=org-demo \
+ENABLED_BRANCHES=branch-main ENABLED_CHANNELS=counter,storefront \
+pnpm -C services/api dev            # `start` for no watcher. PORT defaults to 3001.
+
+# 2 — this app.
+RESTOS_API_URL=http://127.0.0.1:3001 \
+NEXT_PUBLIC_ENABLED_BRANCHES=branch-main \
+NEXT_PUBLIC_ENABLED_CHANNELS=counter,storefront \
+pnpm -C apps/backoffice dev         # http://localhost:3000
+```
+
+- **`RESTOS_API_URL` is where the API lives**, read at request time by the Next server and defaulted
+  to `http://127.0.0.1:3001`. The browser never sees it: `next.config.ts` rewrites `/api/trpc/*` onto
+  it, so the client's URL is same-origin and the bearer never crosses an origin. Same
+  environment-configured route as `RESTOS_CLOUD_URL` in `apps/pos-electron`.
+- **`BOOTSTRAP_OWNER_*` seeds exactly one owner, and absent env means NOBODY CAN LOG IN** — the
+  fail-closed direction, and deliberate (`services/api/src/server.ts`). Never replace it with a
+  default credential. Mint the hash with `domain`'s `hashPin`; it is `01-F61` Argon2id, so expect
+  the login round trip to take a beat.
+- **The enabled `(branch, channel)` set is passed to BOTH processes** and they can disagree — see
+  the drift note below. Keep the two pairs identical until `catalog.enabled` exists.
+- `services/api/src/__acceptance__/startable.test.ts` runs step 1 for real — it spawns the declared
+  `start` script on an ephemeral port and drives login → `whoami` → `catalog.published` over a
+  socket. If that suite is red, step 1 above is broken, not your environment.
+
 - **THE TWO-PLANE LAW IS ABSOLUTE HERE (Commandment 5, `18 §6`).** TanStack Query v5 + tRPC only.
   Server state is never copied into a client store; `sync-client` appears nowhere.
   `__acceptance__/two-plane.test.ts` scans every shipped file and **fires each rule at a known
@@ -16,6 +51,9 @@ Plan: `plans/wave-1/backoffice-catalog.md`. Stack rules: `18 §7`. Visual langua
 - **`next build --webpack`, deliberately.** `packages/domain` and `packages/ui` ship TS source whose
   internal specifiers carry `.js`; Turbopack has no `extensionAlias` and cannot follow them.
   `next.config.ts` records the two rejected alternatives.
+- **`agentRules: false` in `next.config.ts` is load-bearing.** Without it `next dev` APPENDS a
+  generic "this is not the Next.js you know" block to this file on every run, so `pnpm dev` dirties
+  a governed doc and `git status` grows noise a session then has to rule out.
 - **No `@/*` path alias.** The repo's `pnpm typecheck` compiles `apps/*/src` with the ROOT tsconfig,
   which has no path mapping — an alias here would pass `next build` and red `pnpm verify`. Relative
   imports only. `src/globals.d.ts` exists for the same reason (`next-env.d.ts` is outside `src/`).
@@ -26,6 +64,25 @@ Plan: `plans/wave-1/backoffice-catalog.md`. Stack rules: `18 §7`. Visual langua
 - **Money is string surgery, never `× 100`** (`lib/money.ts`). Whole rupees in, integer paisa out,
   no float and therefore no rounding step. Decimals are REFUSED — a pinned interpretation, recorded
   in the file, not a specified rule.
+
+## Mutation matrix — `api-seam.test.ts` (control 88/88 green, 0 survivors)
+
+The link to `services/api` is `TRPC_URL` (`lib/trpc.tsx`) + the rewrite `source` (`next.config.ts`).
+The other 83 tests are blind to all five mutants — they drive a real client over a **fake link**,
+which never touches the rewrite.
+
+| # | mutant | new tests failed | other 83 |
+|---|---|---|---|
+| N1 | the client's `TRPC_URL` drifts | 4 | all green |
+| N2 | the rewrite's `source` drifts | 4 | all green |
+| N3 | the destination is hardcoded, not `RESTOS_API_URL` | 2 | all green |
+| N4 | the destination keeps Next's `/api` segment (wrong mount on the API) | 2 | all green |
+| N5 | `TRPC_URL` stops being exported (the vacuity case) | 5, guard first | all green |
+
+⚠ **N5 is not hypothetical — it happened during this matrix's own run.** A `git checkout` revert of
+N1 also dropped the not-yet-committed `export`, and the next mutant's kill was therefore
+unattributable. **Commit the baseline before mutating**, and read the failure MESSAGE, not just the
+count: the tests still went red, but for a reason that had nothing to do with the mutant.
 
 ## Mutation matrix (round-3 law) — control 83/83 green, 19 mutants, **0 survivors**
 
@@ -56,9 +113,13 @@ Re-run it out-of-tree before trusting a change to `lib/` or the editor. Kill cou
   `before_ref`/`after_ref` content hashes and **no timestamp**, so the FR's own example — *"price
   changed by Ali, 2 Jul, 450 → 480"* — has neither its date nor its two numbers. The screen says so
   rather than inventing them.
-- **`services/api` has no `dev`/`start` script and no TS runtime**, so the two processes have never
-  been run against each other. The tRPC path is exercised end to end in `__acceptance__` through a
-  real client over a fake link.
+- ~~`services/api` has no `dev`/`start` script, so the two processes have never been run against
+  each other.~~ **CLOSED** — it has `dev`/`start` on `tsx`, and both processes have been run
+  together: login, `whoami` and `catalog.published` all answer through this app's `/api/trpc`
+  rewrite, including the batched form `httpBatchLink` actually sends. What is STILL only covered by
+  a fake link is the **browser** half — `__acceptance__` drives a real tRPC client over
+  `happy-dom`, and no test loads these screens in a real browser against a live API. The seam that
+  IS asserted is the process one (`startable.test.ts`).
 - The session bearer lives in `sessionStorage`; an httpOnly cookie via a Next route handler is the
   correct shape. Reset, lockout, rate limiting, rotation, revocation and `audit.login` are all owed
   (`backoffice-catalog.md` Q2) and none of them is client work.

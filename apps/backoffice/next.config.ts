@@ -15,6 +15,17 @@ import type { NextConfig } from "next";
  */
 const nextConfig: NextConfig = {
   /**
+   * **`next dev` APPENDS a block to `apps/backoffice/CLAUDE.md` on every run** — a generic "this is
+   * not the Next.js you know" notice, written by `next/dist/server/lib/generate-agent-files.js`.
+   * That file is curated and governed (AGENTS.md routing), and a dev command that dirties a tracked
+   * doc every time it starts turns `git status` into noise for every session that runs the app —
+   * exactly the kind of thing this repo makes a session read a diff to rule out. Next's own opt-out
+   * is this flag. The rejected alternative — committing the generated block, which is what Next
+   * suggests — would put a paragraph nobody here wrote into a doc whose whole value is that
+   * everything in it was.
+   */
+  agentRules: false,
+  /**
    * `packages/domain` and `packages/ui` ship TypeScript SOURCE, and their internal specifiers carry
    * the `.js` extension the emitted JS would have (`export … from "./audit.js"` in an `audit.ts`).
    * Next compiles them from source, so the bundler has to map that specifier back — hence
