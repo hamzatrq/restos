@@ -3,6 +3,21 @@
 **Owning spec: `specs/18-engineering-handbook.md §5 (module routers cite their own specs)` — read it before modifying anything here (AGENTS.md routing).**
 
 - Fastify + tRPC host for all module routers. REST only for third-party webhooks.
+- **IT RUNS: `pnpm -C services/api dev` (watch) or `start` (once), on `tsx` (`18 §14`).** It prints
+  `@restos/api listening on <url>` and nothing else — Fastify's own logger stays off. **That line is
+  load-bearing**: `__acceptance__/startable.test.ts` boots the declared script with `PORT=0` and
+  finds the ephemeral port by reading it. Required env is `SESSION_SECRET`; `PORT` defaults to 3001;
+  `BOOTSTRAP_OWNER_EMAIL`/`_PASSWORD_HASH` + `BOOTSTRAP_ORG_ID` seed the one owner, and **absent env
+  means nobody can log in — fail-closed, never give it a default credential**. `ENABLED_BRANCHES` /
+  `ENABLED_CHANNELS` are `01-F60`'s enabled set; absent means every save is REFUSED, not unchecked.
+  Full two-process startup: `apps/backoffice/CLAUDE.md`.
+- **`__acceptance__/startable.test.ts` is a SEAM test, not a unit test** — this wave's recurring
+  defect (AGENTS.md) landed here as an entire unstartable service, so the seam gets an assertion
+  rather than only a fix. It spawns `scripts.start` **as declared in `package.json`** (delete the
+  script and it fails; hardcoding the command would have let that pass), then drives login →
+  `whoami` → a `can()`-gated `catalog.published` over a real socket. Everything else in this
+  package's suites runs through `server.inject`, which cannot tell a wired process from a compiled
+  module.
 - **IMPLEMENTED: B-2 (host + authz), B-3 (catalog router + staged edits), B-4 (publish path).**
   `plans/wave-1/backoffice-catalog.md`. This is the cloud plane's only caller of `domain`'s
   `can()` — Commandment 8 is enforced here or nowhere on this plane.

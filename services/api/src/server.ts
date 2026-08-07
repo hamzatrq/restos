@@ -149,6 +149,14 @@ const list = (raw: string | undefined): readonly string[] =>
  */
 const DAY_END_SWEEP_MS = 60_000;
 
+/**
+ * The boot line's prefix, exported so the startability test matches THIS string rather than a
+ * hand-copy of it. A copied literal is how an oracle ends up asserting against a symbol nobody
+ * ships (round-3 law, `K-3`): rename the message and a copy keeps passing against a server that
+ * no longer says it.
+ */
+export const LISTENING_PREFIX = "@restos/api listening on ";
+
 const start = async (): Promise<FastifyInstance> => {
   const env = defineEnv({
     PORT: (raw) => (raw === undefined || raw === "" ? 3001 : Number(raw)),
@@ -200,7 +208,16 @@ const start = async (): Promise<FastifyInstance> => {
   }, DAY_END_SWEEP_MS);
   sweep.unref();
 
-  await app.listen({ port: env.PORT, host: "0.0.0.0" });
+  const address = await app.listen({ port: env.PORT, host: "0.0.0.0" });
+  /**
+   * **This line is load-bearing, not decoration.** `PORT=0` binds an ephemeral port, so the port
+   * the process actually got is knowable only from here — and `__acceptance__/startable.test.ts`
+   * spawns the run script with `PORT=0` and reads this line to find where to send its request.
+   * Silence it and the startability test cannot find the server; change its shape and the test
+   * says so. Fastify's `logger` stays `false` (`createApiServer`): one line at boot is the whole
+   * story a `tsx` dev process needs, and request logging is a deployment concern this has none of.
+   */
+  console.log(`${LISTENING_PREFIX}${address}`);
   return app;
 };
 
