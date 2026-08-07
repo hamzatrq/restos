@@ -107,12 +107,58 @@ Re-run it out-of-tree before trusting a change to `lib/` or the editor. Kill cou
 | M13 | an empty enabled set treated as "nothing to check" | 3 |
 | M14 | the timing radio sends `day_end` whatever the owner chose | 1 |
 
+## `14-F3` renders its own example — and the date is a DECISION, not a default
+
+*"Price changed by Ali, 2 Jul, 450 → 480"* renders in full: `LedgerRecord` carries
+`server_received_at` (`01-F62`) and `payload.price_changes` (the `(branch, channel)` cells that
+MOVED). Each cell is named, because `01-F60` prices per pair and a bare "450 → 480" is ambiguous
+across the grid. Rupees come from `lib/money.ts`'s `formatPaisa` — the app's one converter.
+
+**The date is the CALENDAR instant in `BUSINESS_TIMEZONE`, never the `01-F46` business day, and
+`domain`'s `businessDate()` is deliberately not called.** `01-F46`'s 05:00 cutover decides which
+trading day an *operational* figure counts against — a sale, a shift, a cash count. An audit line
+is none of those: it answers "when did Ali change this", and bucketing a 02:00 edit into the
+previous calendar date restates a recorded instant, which is what commandment 1 forbids of a
+history. Mutant **H6** exists so the next session cannot "fix" this into `businessDate()` quietly.
+
+⚠ **This block replaced three copies of a claim that had gone false** — the component header, the
+UI string `strings.history.refsOnly` and a GREEN test — all still saying the date and the two
+numbers were absent, months after `01-F62` supplied them. Same shape as
+`catalog-pricing.test.ts:394` defending the overruled `SELLABLE_KINDS` rule. **A screen claiming a
+gap it no longer has misleads the next reader exactly as badly as one hiding a gap it does have**,
+and a *green* test is the copy that keeps the other two alive.
+
+## Mutation matrix — `14-F3`'s render (round-3 law), control 95/95 green, **0 survivors**
+
+The right-hand column is the attribution: the 87 other tests are blind to five of the eight, and the
+8 new tests are blind to H5 — they only ever supply one entity's records, so the "in place" property
+stays B-6's to defend (M11 below, same 3 kills).
+
+| # | mutant | new 8 failed | other 87 |
+|---|---|---|---|
+| H1 | the date is not rendered | 3 | all green |
+| H2 | `price_changes` ignored — the two numbers are not rendered | 5 | all green |
+| H3 | the paisa→rupee conversion is dropped (off by a factor of 100) | 5 | all green |
+| H4 | a price change with no actor renders as if attributed (`?? "system"`) | 1 | 1 (B-7's own) |
+| H5 | the history is not filtered in place | **0** | 3 (M11, B-6's) |
+| H6 | the `01-F46` BUSINESS day is rendered instead of the calendar instant | 1 | all green |
+| H7 | **the retired apology comes back as the footnote (the vacuity case)** | 1 | all green |
+| H8 | only the FIRST moved cell is rendered | 2 | all green |
+
+**H7 is the one to re-run after any change here**, and it is why one assertion is a *negative* one:
+nothing else in the suite can tell a screen that states its gaps honestly from one that states a gap
+it does not have.
+
 ## Owed, and named as owed
 
-- **`14-F3` is not fully renderable from the contract.** `catalog.history` returns records carrying
-  `before_ref`/`after_ref` content hashes and **no timestamp**, so the FR's own example — *"price
-  changed by Ali, 2 Jul, 450 → 480"* — has neither its date nor its two numbers. The screen says so
-  rather than inventing them.
+- **A non-price field change still has no before/after values.** `price_changes` is a price delta by
+  construction and the refs are one-way `payloadHash` digests indexed by nothing, so a rename or a
+  `03-F50` station move renders as "changed" at a catalog version and no values. The footnote
+  (`strings.history.nonPriceFields`) says exactly that and no more.
+- **`formatPaisa` truncates below a rupee, so a price that is not whole rupees would render its two
+  sides identically.** Unreachable through the shipped writer — this app refuses a decimal at input
+  (`lib/money.ts`) and `isWholeRupees` guards the grid — so no branch was added rather than a second
+  converter written. It becomes real the day anything but this back office writes a catalog price.
 - ~~`services/api` has no `dev`/`start` script, so the two processes have never been run against
   each other.~~ **CLOSED** — it has `dev`/`start` on `tsx`, and both processes have been run
   together: login, `whoami` and `catalog.published` all answer through this app's `/api/trpc`
@@ -123,5 +169,5 @@ Re-run it out-of-tree before trusting a change to `lib/` or the editor. Kill cou
 - The session bearer lives in `sessionStorage`; an httpOnly cookie via a Next route handler is the
   correct shape. Reset, lockout, rate limiting, rotation, revocation and `audit.login` are all owed
   (`backoffice-catalog.md` Q2) and none of them is client work.
-- `SELLABLE_KINDS` is now declared a **third** time (`lib/price-grid.ts`). `18 §2` puts it in
-  `domain` once; that is a protected-path change and outside this task.
+- ~~`SELLABLE_KINDS` is now declared a **third** time (`lib/price-grid.ts`).~~ **CLOSED** —
+  `lib/price-grid.ts` imports it from `@restos/domain`, which is where `18 §2` puts it once.

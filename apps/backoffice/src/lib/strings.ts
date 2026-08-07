@@ -100,14 +100,23 @@ export const strings = {
     by: "by",
     version: "catalog version",
     /**
-     * ⚠ Stated in the UI because it is TRUE of the contract, not because it is desirable.
-     * `catalog.history` returns `catalog.changed` records carrying `before_ref`/`after_ref`
-     * content hashes and no timestamp, so `14-F3`'s literal sentence — "price changed by Ali,
-     * 2 Jul, 450 → 480" — has neither its date nor its two numbers available here.
+     * Not recorded — used for an absent actor and for a price cell that did not exist on one side
+     * of the edit. One mark for both, because both mean the same thing to a reader: the ledger has
+     * no value here. Never `0` and never a blank, which would read as "free" and as "nothing
+     * happened" respectively (`01-F60`'s explicit-zero rule, seen from the display side).
      */
-    refsOnly:
-      "The ledger records who changed what and at which catalog version. The date and the " +
-      "before/after values are not on this record yet (14-F3, owed).",
+    absent: "—",
+    /**
+     * ⚠ Narrowed August 2026, and the narrowing is the point. This string used to say the date and
+     * the before/after values were absent from the record; `01-F62` and `payload.price_changes`
+     * made that false, and a screen claiming a gap it no longer has misleads a reader exactly as
+     * badly as one hiding a gap it does have. What remains true is only the non-price half: the
+     * refs are one-way `payloadHash` digests, so a rename or a station move has a version and no
+     * values.
+     */
+    nonPriceFields:
+      "Price changes are recorded with their before and after values. Other fields — a rename, a " +
+      "kitchen station — are recorded as a catalog version only (14-F3, owed).",
   },
 
   errors: {

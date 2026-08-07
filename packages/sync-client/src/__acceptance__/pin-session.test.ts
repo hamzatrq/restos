@@ -6,7 +6,7 @@
 // Sources, and nothing else:
 //   `specs/01-kernel-sync.md`
 //     `01-F1`   the ledger is append-only — nothing written to it can be redacted later
-//     `01-F5`   `audit.login` is ALREADY one of the five `audit.*` subtypes; the chain link
+//     `01-F5`   `audit.login` is ALREADY one of the six `audit.*` subtypes; the chain link
 //               `prev_audit_hash` is STORE-OWNED ("a caller-supplied value is rejected")
 //     `01-F17`  a sale is never blocked — a shape the device cannot read is a refusal, never
 //               an exception unwinding through whatever was serving the till
