@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@restos/domain": "workspace:*",
+    "@restos/escpos": "workspace:*",
     "@restos/sync-protocol": "workspace:*"
   },
   "devDependencies": {

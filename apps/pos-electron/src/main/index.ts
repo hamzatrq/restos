@@ -19,14 +19,10 @@ import {
   sellableMenu,
   stationResolver,
 } from "./catalog";
+import { printerTransport } from "./file-printer";
 import { createGateway } from "./gateway";
 import { openJobStore } from "./job-store";
-import {
-  createCashPrinter,
-  createKotPrinter,
-  PUMP_INTERVAL_MS,
-  unattachedPrinter,
-} from "./printing";
+import { createCashPrinter, createKotPrinter, PUMP_INTERVAL_MS } from "./printing";
 import { createUplink } from "./sync";
 
 /**
@@ -509,10 +505,17 @@ app.whenReady().then(async () => {
    * startup, unconditionally: a spooler constructed only when some option is set is the same
    * defect wearing the `store.pinAttempts` hat.
    *
-   * `unattachedPrinter` is the transport, and it is the honest one: no USB, Bluetooth or
-   * TCP-9100 transport exists (`18 §10`), so every transmit reports that the printer did not
-   * answer, the retry budget exhausts, and the counter gets `03-F5`'s band naming the printer and
-   * the order. That is exactly true of this device today. K-8 replaces this ONE argument.
+   * `printerTransport` picks the transport, and **with no environment set it picks
+   * `unattachedPrinter`** — the honest one: no USB, Bluetooth or TCP-9100 transport exists
+   * (`18 §10`), so every transmit reports that the printer did not answer, the retry budget
+   * exhausts, and the counter gets `03-F5`'s band naming the printer and the order. That is
+   * exactly true of this device today. K-8 replaces this ONE argument.
+   *
+   * `RESTOS_PRINT_TO_FILE=<directory>` swaps in `filePrinter`, which writes the rendered document
+   * to a PDF so a till with no hardware still produces something a human can look at. It is opt-in
+   * and it **does not close K-8**: it renders what our own encoder thinks the bytes mean, it is not
+   * evidence about a TH230 or about legibility (`27-F35` is owed), and it must never become the
+   * default — the band IS the honest signal that no printer is attached. See `file-printer.ts`.
    *
    * `store` is `03-F4`'s crash clause and it is the OTHER half of the same defect: K-7 wired the
    * spooler and passed no store, so the queue was process-lifetime and a relaunch lost every
@@ -527,7 +530,10 @@ app.whenReady().then(async () => {
     nativeBinding: electronAddonPath(),
   });
   app.on("will-quit", () => jobs.close());
-  const spooler = createSpooler({ transport: unattachedPrinter(kotCapability()), store: jobs });
+  const spooler = createSpooler({
+    transport: printerTransport(kotCapability(), process.env),
+    store: jobs,
+  });
   const kot = createKotPrinter({
     spooler,
     store,

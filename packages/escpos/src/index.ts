@@ -72,6 +72,16 @@ export {
   render,
   validateProfile,
 } from "./render.js";
+// The ONE byte→page interpretation (`18 §10`). Two consumers read it: `@restos/testing`'s virtual
+// printer and `apps/pos-electron`'s file transport. A second walk anywhere is the defect.
+export {
+  encodePagePng,
+  encodePagesPdf,
+  type PageOverflow,
+  type PageWidth,
+  type SimulatedPage,
+  simulate,
+} from "./simulate.js";
 export {
   checkPrinterHealth,
   createSpooler,
