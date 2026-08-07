@@ -1,4 +1,5 @@
 import {
+  type AuthOutcome,
   type AuthScope,
   type AuthSubject,
   can,
@@ -13,6 +14,8 @@ import {
   AppendRequestSchema,
   type AppendResult,
   type CashState,
+  type EscalationOffer,
+  type EscalationResult,
   type Session,
 } from "../shared/ipc";
 import type { Gateway } from "./gateway";
@@ -136,10 +139,11 @@ export const PAID_OUT_APPROVAL_THRESHOLD_PAISA = 200_000;
  * on the POS, a remote approval from the console), and a caller that could not distinguish them
  * would have no way to offer either.
  *
- * **Neither path is built** (`05` is not Wave 1), so today an escalation is refused at this
- * seam like a denial — but it is refused with a DIFFERENT outcome and with the roles that close
- * the gap already named, so the screen that eventually asks for a manager PIN reads them off the
- * matrix instead of hardcoding a role, which is `18 §`'s banned inline check relocated into UI.
+ * **The LOCAL path is built now** (`authorizeEscalation` below); the remote one is doc 05 and is
+ * not Wave 1. So an escalation is still refused HERE — the unescalated write never lands — and
+ * the roles that close the gap travel with the refusal, which is what lets the approval pad name
+ * them off the matrix rather than hardcoding "manager" into a screen (`18 §5`'s banned inline
+ * check, relocated into UI).
  */
 export type WriteRefusal = {
   readonly event_type: string;
@@ -224,78 +228,117 @@ const subjectOf = (deps: SubjectDeps): AuthSubject | null => {
   return { user_id: session.user_id, org_id: deps.store.identity.org_id, assignments };
 };
 
+/**
+ * The sentinel for "the matrix permits this outright". A singleton compared by IDENTITY (`allows`
+ * below), never by field: a refusal that happened to carry the same three values must not read as
+ * a permission, which is the one confusion a three-valued outcome squeezed into a refusal type
+ * could produce.
+ */
+const ALLOWED: WriteRefusal = Object.freeze({
+  event_type: "",
+  outcome: "deny",
+  action: null,
+  satisfied_by: [],
+});
+
+const allows = (verdict: WriteRefusal): boolean => verdict === ALLOWED;
+
+const scopeOf = (store: Pick<DeviceStore, "identity">): AuthScope => ({
+  org_id: store.identity.org_id,
+  branch_id: store.identity.branch_id,
+});
+
+/**
+ * The matrix's verdict on ONE event for ONE subject — the whole of this file's policy reading,
+ * extracted so that two different subjects can be asked the identical question.
+ *
+ * It was inlined in `guard` and had exactly one caller. `02-F20`'s local path needs three
+ * readings of it, not one: what the matrix says about the REQUESTER (which is what makes an act
+ * escalatable at all), and what it says about the APPROVER (which is what `02-F20` means by "the
+ * approver must hold the permission"). A second copy of this reasoning for the approver is how
+ * an escalation quietly widens a cell the guard narrows — so there is one.
+ *
+ * Returns the outcome VERBATIM, including `allow`. Collapsing it to "refused or not" is what
+ * loses `escalate`, and losing `escalate` is what made this feature unable to exist.
+ */
+const verdictFor = (
+  subject: AuthSubject | null,
+  scope: AuthScope,
+  paidOutApprovalThresholdPaisa: number,
+  event_type: string,
+  payload: Record<string, unknown>,
+): WriteRefusal => {
+  const action = WRITE_ACTIONS[event_type] ?? null;
+  const denied = (): WriteRefusal => ({ event_type, outcome: "deny", action, satisfied_by: [] });
+  const from = (decision: {
+    outcome: AuthOutcome;
+    action: PermissionAction;
+    satisfied_by?: readonly Role[];
+  }): WriteRefusal => ({
+    event_type,
+    // `allow` is not a member of `WriteRefusal["outcome"]` and must not become one: the type is
+    // what a REFUSAL carries. The allow case never reaches a `refused(...)` call — see `allows`.
+    outcome: decision.outcome === "escalate" ? "escalate" : "deny",
+    action: decision.action,
+    satisfied_by: decision.satisfied_by ?? [],
+  });
+
+  // `01-F27` — a locked device is a subject with no authority at all, never "the device may".
+  if (subject === null) return denied();
+
+  if (event_type === PAID_OUT) {
+    const amount = payload.amount_paisa;
+    // `02-F44` — the amount is REQUIRED, and here it is the input the verdict turns on. A
+    // paid-out that states none cannot be measured against `05-F19`'s threshold, and the
+    // answer that cannot be right is "under it": that is how a Rs 4,000 paid-out walks past
+    // the approval the FR exists to require. `01-F60`'s precedent, one layer down.
+    if (typeof amount !== "number" || !Number.isInteger(amount) || amount < 0) return denied();
+    const decision = canPayOut(subject, scope, {
+      amount_paisa: amount,
+      threshold_paisa: paidOutApprovalThresholdPaisa,
+    });
+    return decision.outcome === "allow" ? ALLOWED : from(decision);
+  }
+
+  if (action === null) return denied();
+
+  /**
+   * `02-F38` — "a requester never sees an approve control for their own request … *and*
+   * refused server-side by the `domain` permission matrix (a client that renders it anyway
+   * must still fail)". `can` performs the refusal; this supplies the fact it needs.
+   *
+   * A grant that names NO requester is refused, for `canPayOut`'s reason exactly: without the
+   * requester the self-approval rule cannot be evaluated, and the outcome that cannot be right
+   * is the permissive one — an omitted field would re-open the hole by silence.
+   *
+   * **Owed, and named rather than left to look intentional:** `05-F7` puts `requester_id` on
+   * the REQUEST and has the grant reference the request by id, so the trustworthy resolution
+   * is request-id → requester through an approvals projection. That projection is doc-05 work
+   * and does not exist, so this reads the field off the grant.
+   */
+  if (action === "approval.grant") {
+    const requester = payload.requester_id;
+    if (typeof requester !== "string") return denied();
+    const decision = can(subject, action, { ...scope, requested_by_user_id: requester });
+    return decision.outcome === "allow" ? ALLOWED : from(decision);
+  }
+
+  const decision = can(subject, action, scope);
+  return decision.outcome === "allow" ? ALLOWED : from(decision);
+};
+
 export const authorizeWrites = (deps: AuthorizedWritesDeps): AuthorizedWrites => {
   /** Throws a `WriteRefusedError` unless the matrix allows this event outright. */
   const guard = (event_type: string, payload: Record<string, unknown>): void => {
-    const action = WRITE_ACTIONS[event_type] ?? null;
-    const denied = (): WriteRefusedError =>
-      refused({ event_type, outcome: "deny", action, satisfied_by: [] });
-
-    const subject = subjectOf(deps);
-    if (subject === null) throw denied();
-
-    const scope: AuthScope = {
-      org_id: deps.store.identity.org_id,
-      branch_id: deps.store.identity.branch_id,
-    };
-
-    if (event_type === PAID_OUT) {
-      const amount = payload.amount_paisa;
-      // `02-F44` — the amount is REQUIRED, and here it is the input the verdict turns on. A
-      // paid-out that states none cannot be measured against `05-F19`'s threshold, and the
-      // answer that cannot be right is "under it": that is how a Rs 4,000 paid-out walks past
-      // the approval the FR exists to require. `01-F60`'s precedent, one layer down.
-      if (typeof amount !== "number" || !Number.isInteger(amount) || amount < 0) throw denied();
-      const decision = canPayOut(subject, scope, {
-        amount_paisa: amount,
-        threshold_paisa: deps.paidOutApprovalThresholdPaisa,
-      });
-      if (decision.outcome === "allow") return;
-      throw refused({
-        event_type,
-        outcome: decision.outcome,
-        action: decision.action,
-        satisfied_by: decision.satisfied_by ?? [],
-      });
-    }
-
-    if (action === null) throw denied();
-
-    /**
-     * `02-F38` — "a requester never sees an approve control for their own request … *and*
-     * refused server-side by the `domain` permission matrix (a client that renders it anyway
-     * must still fail)". `can` performs the refusal; this supplies the fact it needs.
-     *
-     * A grant that names NO requester is refused, for `canPayOut`'s reason exactly: without the
-     * requester the self-approval rule cannot be evaluated, and the outcome that cannot be right
-     * is the permissive one — an omitted field would re-open the hole by silence.
-     *
-     * **Owed, and named rather than left to look intentional:** `05-F7` puts `requester_id` on
-     * the REQUEST and has the grant reference the request by id, so the trustworthy resolution
-     * is request-id → requester through an approvals projection. That projection is doc-05 work
-     * and does not exist, so this reads the field off the grant.
-     */
-    if (action === "approval.grant") {
-      const requester = payload.requester_id;
-      if (typeof requester !== "string") throw denied();
-      const decision = can(subject, action, { ...scope, requested_by_user_id: requester });
-      if (decision.outcome === "allow") return;
-      throw refused({
-        event_type,
-        outcome: decision.outcome,
-        action,
-        satisfied_by: decision.satisfied_by ?? [],
-      });
-    }
-
-    const decision = can(subject, action, scope);
-    if (decision.outcome === "allow") return;
-    throw refused({
+    const verdict = verdictFor(
+      subjectOf(deps),
+      scopeOf(deps.store),
+      deps.paidOutApprovalThresholdPaisa,
       event_type,
-      outcome: decision.outcome,
-      action,
-      satisfied_by: decision.satisfied_by ?? [],
-    });
+      payload,
+    );
+    if (allows(verdict)) return;
+    throw refused(verdict);
   };
 
   return {
@@ -316,6 +359,185 @@ export const authorizeWrites = (deps: AuthorizedWritesDeps): AuthorizedWrites =>
     addLine: (req: unknown): AppendResult => {
       guard("order.line_added", {});
       return deps.writes.addLine(req);
+    },
+  };
+};
+
+// ── 02-F20's LOCAL manager-PIN path ─────────────────────────────────────────────────────────────
+
+/**
+ * **`02-F20`: *"Two equivalent authorization paths: local manager PIN on the POS; remote approval
+ * via manager console. First response wins; the recorded event carries actor + approver either
+ * way."*** This is the first of the two. The second is doc 05 and is not Wave 1.
+ *
+ * Until this existed, `can()`'s third outcome had no surface anywhere in the product, so an
+ * above-threshold paid-out (`05-F19`) was refused outright — not deferred, not queued, REFUSED —
+ * on a device with no console attached, which is every device this wave ships. `05-F8` had to be
+ * corrected for claiming the local path "remains fully available" when it had never existed.
+ *
+ * ── The four things this refuses, and why each one is a separate refusal ─────────────────────
+ *
+ * 1. **A PIN that does not verify** (`01-F28`). Delegated to `verifyApprover`, which is
+ *    `createPinSession` — the SAME Argon2id verification and the SAME `01-F61` durable
+ *    per-(device, user) counter as the unlock gate. A second comparison here would be a second
+ *    credential surface with its own lockout to forget about.
+ * 2. **A requester approving their own request** (`02-F38`) — "refused server-side by the
+ *    `domain` permission matrix (a client that renders it anyway must still fail)". Refused
+ *    below by asking `can()` for `approval.grant` with the requester named, which is the same
+ *    call the `approval.granted` write path makes. The pad may also hide it; hiding is not this.
+ * 3. **An approver who does not hold the permission.** The credential proves WHO, and nothing
+ *    else. `02-F20` needs a manager, and "a manager PIN was entered" is a claim about a PIN —
+ *    the fact it stands in for is a matrix verdict, and that is re-read here for the approver's
+ *    OWN subject rather than inherited from the requester's escalation.
+ * 4. **A write that was never escalatable.** If the requester's own verdict is `deny`, a manager
+ *    PIN must not launder it into an append: `02-F20` names four escalatable acts and a `deny`
+ *    cell is a different answer from an `escalate` cell (the matrix is explicit — "the cashier
+ *    cell is `deny`, not `escalate`"). If it is `allow`, there is nothing to approve, and
+ *    recording an approver for an unescalated act would put a false approval into a ledger
+ *    `01-F1` forbids correcting in place.
+ *
+ * ── What lands in the ledger ─────────────────────────────────────────────────────────────────
+ *
+ * `02-F20`'s "actor + approver". The ACTOR is the envelope's `actor_user_id`, stamped by
+ * `gateway.append` from the live session (`02-F41`) — the cashier who acted, unchanged, because
+ * verifying the manager's PIN deliberately does not move the session. The APPROVER is a payload
+ * field, because the envelope carries exactly one identity and there is no second slot; that is
+ * not a breach of `02-F45` (which forbids duplicating the ACTOR into the payload) but the only
+ * place a second identity can go.
+ */
+export type AuthorizedEscalation = {
+  /**
+   * `null` when the matrix allows or flatly denies the write, an offer naming the roles that
+   * close the gap when it escalates. A READ — nothing is appended and nothing is authorized.
+   */
+  offer: (req: unknown) => EscalationOffer | null;
+  approve: (req: unknown, approver_user_id: string, pin: string) => Promise<EscalationResult>;
+};
+
+export type AuthorizedEscalationDeps = AuthorizedWritesDeps & {
+  /**
+   * `01-F28`/`01-F61` — verify a PIN for this user WITHOUT moving the session.
+   *
+   * A function seam rather than the session object, and that is the whole safety property: the
+   * host hands in a verifier built from `createPinSession` over the same registry and the same
+   * DURABLE attempt store, and this file cannot reach anything that would sign the manager in.
+   * A manager who authorised a paid-out and thereby took over the till would leave the next
+   * twenty orders attributed to her (`02-F41`), permanently (`01-F1`).
+   */
+  verifyApprover: (user_id: string, pin: string) => Promise<boolean>;
+};
+
+export const authorizeEscalation = (deps: AuthorizedEscalationDeps): AuthorizedEscalation => {
+  const scope = (): AuthScope => scopeOf(deps.store);
+  const threshold = deps.paidOutApprovalThresholdPaisa;
+
+  /** What the matrix says about the SIGNED-IN session for this request. */
+  const requesterVerdict = (type: string, payload: Record<string, unknown>): WriteRefusal =>
+    verdictFor(subjectOf(deps), scope(), threshold, type, payload);
+
+  return {
+    offer: (req: unknown): EscalationOffer | null => {
+      const parsed = AppendRequestSchema.safeParse(req);
+      if (!parsed.success) return null;
+      const verdict = requesterVerdict(parsed.data.type, parsed.data.payload);
+      // `allows` first: `ALLOWED` carries `outcome: "deny"` by construction, and reading its
+      // outcome instead of its identity would report "no escalation" for the right answer by
+      // luck rather than by rule.
+      if (allows(verdict) || verdict.outcome !== "escalate") return null;
+      if (verdict.satisfied_by.length === 0) return null;
+      return { satisfied_by: verdict.satisfied_by };
+    },
+
+    approve: async (
+      req: unknown,
+      approver_user_id: string,
+      pin: string,
+    ): Promise<EscalationResult> => {
+      const no = (refused_as: EscalationResult & { ok: false }): EscalationResult => refused_as;
+      const parsed = AppendRequestSchema.safeParse(req);
+      if (!parsed.success) return no({ ok: false, refused: "not_escalatable" });
+
+      // The REQUESTER is the live session, never a field on the request: `02-F41` makes
+      // attribution whoever's PIN is in, and a renderer that could name its own requester could
+      // name the approver as the requester and defeat `02-F38` by relabelling.
+      const requester = deps.session();
+      if (requester === null) return no({ ok: false, refused: "not_escalatable" });
+
+      // (4) — the act has to BE an escalation before a credential can close it.
+      const verdict = requesterVerdict(parsed.data.type, parsed.data.payload);
+      if (allows(verdict) || verdict.outcome !== "escalate") {
+        return no({ ok: false, refused: "not_escalatable" });
+      }
+
+      // (1) — `01-F28`. Charged to `01-F61`'s durable counter by the session behind this seam,
+      // and charged BEFORE the cheaper checks below on purpose: every PIN submitted at this pad
+      // is an attempt, and a pad that skipped the count for a self-approval would be an
+      // unmetered place to guess a colleague's PIN.
+      if (!(await deps.verifyApprover(approver_user_id, pin))) {
+        return no({ ok: false, refused: "bad_pin" });
+      }
+
+      // The approver's subject, assembled from the SAME registry and the SAME `roleOf` narrowing
+      // the signed-in session goes through (`subjectOf`). A second construction would be a second
+      // reading of `01-F26`'s assignments, and two readings of one fact can disagree.
+      const approver = subjectOf({
+        store: deps.store,
+        session: () => ({ user_id: approver_user_id, display_name: approver_user_id }),
+      });
+      // A verified PIN for an id the registry does not carry cannot happen (`01-F28` verifies
+      // against that registry) — but `01-F42` can revoke a member between the two reads, and the
+      // answer that cannot be right is the permissive one.
+      if (approver === null) return no({ ok: false, refused: "not_permitted" });
+
+      // (2) + (3a) — `02-F38`, and it is `can()` that refuses, not this file. The same call the
+      // `approval.granted` write path makes, with the requester named, so a self-approval is
+      // refused by the matrix on the identical rule whichever route reaches it.
+      const grant = can(approver, "approval.grant", {
+        ...scope(),
+        requested_by_user_id: requester.user_id,
+      });
+      if (grant.outcome !== "allow") {
+        return no({
+          ok: false,
+          refused: approver_user_id === requester.user_id ? "self_approval" : "not_permitted",
+        });
+      }
+
+      /**
+       * (3b) — the approver's OWN verdict on the act itself. `02-F20`'s approver must HOLD the
+       * permission; an approver whose cell is `escalate` cannot close a gap she is standing in,
+       * and one whose cell is `deny` never could.
+       *
+       * **`cash.paid_out` is exempt, and the matrix is what says so.** `canPayOut` derives its
+       * `satisfied_by` from `approval.grant`'s row rather than its own, in terms: *"the credential
+       * that closes the gap is one that may GRANT an approval, not one that may record a
+       * paid-out"*. It could not be otherwise — `cash.paid_out` is `allow` for **every** role, so
+       * above `05-F19`'s threshold every role escalates, the owner included, and a rule demanding
+       * the approver's own verdict be `allow` here would refuse every approval this path exists
+       * to permit. For `02-F20`'s four acts the matrix derives `satisfied_by` from the action's
+       * own row, so there this check IS the rule. One rule, two derivations, both the matrix's.
+       */
+      if (parsed.data.type !== PAID_OUT) {
+        const approverVerdict = verdictFor(
+          approver,
+          scope(),
+          threshold,
+          parsed.data.type,
+          parsed.data.payload,
+        );
+        if (!allows(approverVerdict)) return no({ ok: false, refused: "not_permitted" });
+      }
+
+      // `02-F20` — "the recorded event carries actor + approver either way". The actor is stamped
+      // into the envelope from the session by `gateway.append`; this is the other half.
+      return {
+        ok: true,
+        ...deps.writes.append({
+          type: parsed.data.type,
+          payload: { ...parsed.data.payload, approver_user_id },
+          refs: parsed.data.refs,
+        }),
+      };
     },
   };
 };

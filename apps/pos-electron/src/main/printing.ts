@@ -135,6 +135,46 @@ const CASH_JOB_PREFIX = "cash::";
 const isCashJob = (job_id: string): boolean => job_id.startsWith(CASH_JOB_PREFIX);
 
 /**
+ * **`03-F5`'s third consequence, and until August 2026 it was the one nothing produced.**
+ *
+ * The FR's own words: *"acknowledgment is logged (`audit.*`)"*. `01-F5` gained the subtype for it
+ * — `audit.print_acknowledged`, its sixth — and `packages/domain` carries the schema, and NOTHING
+ * EMITTED IT: the ack was a `raised.delete(id)` and a comment saying so. Dismissing the band left
+ * no record anywhere, which is the wave's named defect (a correct subsystem with no seam) sitting
+ * on top of the exact harm `01-F5` puts this event in the hash-chained family for — *"silently
+ * dismissing the band loses a kitchen ticket with nobody accountable, and the hash chain is what
+ * makes a quiet dismissal detectable"*.
+ *
+ * ── The payload, and what of it the FR actually requires ────────────────────────────────────
+ *
+ * **`03-F5` NAMES NO FIELDS.** `01-F5`'s v1 payload contract for the whole `audit.*` family is
+ * `prev_audit_hash` alone, the schema is a `looseObject` so additive extras are legal, and WHO
+ * comes from the envelope's `actor_user_id` (`02-F41`, stamped at append). So as specified, this
+ * event records *that* a band was dismissed and *by whom*, and is **not linkable to the failed
+ * job at all**.
+ *
+ * The three fields below are therefore an INTERPRETATION and are named as one: making the ack
+ * answer "which ticket" is a `03`/`01-F5` amendment, not something this file may decide. They are
+ * carried because the spooler already holds both nouns across a restart (`03-F4`), so the choice
+ * is between recording them and discarding facts already in hand:
+ *
+ *   * `alarm_id` — the spooler JOB id, which is the finest handle that exists. `03-F2` fans one
+ *     confirm out to N station tickets, so `order_id` alone cannot say which station's chit was
+ *     the one nobody cooked.
+ *   * `order_id` — `03-F5`'s own subject noun, and only on the KOT path. The cash printer omits
+ *     it deliberately: its subject is a shift or a day id, and writing one into a field called
+ *     `order_id` is the same permanent lie `CASH_JOB_PREFIX` refuses to tell with `kot.printed`.
+ *   * `printer_name` — the same field name `kot.print_failed` already carries, so the ack and the
+ *     failure it acknowledges can be joined on it without a second vocabulary.
+ *
+ * **`prev_audit_hash` is absent on purpose** — `01-F5` makes the chain store-owned and a
+ * caller-supplied value a loud refusal with nothing persisted. And nothing here goes near a
+ * credential: `01-F1` has no redaction path, so a PIN that reached a payload would be published
+ * to every device that syncs and never retractable.
+ */
+const PRINT_ACK = "audit.print_acknowledged";
+
+/**
  * `03-F5`'s alert has to name the DOCUMENT as well as the printer and the subject — "KOT #142 did
  * not print" is unactionable if what failed was the shift-close slip a cashier is waiting to sign.
  */
@@ -181,8 +221,15 @@ export const createKotPrinter = ({
     );
   }
   const printer_name = capability.model_id;
-  /** Oldest first: `AlarmBand` renders the head and counts the tail (`27-F11d`). */
-  const raised = new Map<string, Alarm>();
+  /**
+   * Oldest first: `AlarmBand` renders the head and counts the tail (`27-F11d`).
+   *
+   * The value is the band PLUS the subject it is about, rather than the `Alarm` alone. `Alarm` is
+   * the IPC shape and carries `03-F5`'s two nouns inside a SENTENCE ("KOT 5f3a9c21 did not print
+   * — TH230"); the ack needs them as data, and re-parsing an operator-facing string to recover
+   * them is how a wording change silently empties a ledger field.
+   */
+  const raised = new Map<string, { alarm: Alarm; order_id: string }>();
   let pumping = false;
 
   /**
@@ -213,13 +260,16 @@ export const createKotPrinter = ({
   const raise = (id: string, order_ref: string, why: string): boolean => {
     if (raised.has(id)) return false;
     raised.set(id, {
-      // `03-F5`'s own sentence: "KOT #142 did not print — grill printer offline". Both nouns in
-      // the line a cashier reads first, because either one alone is unactionable — the order
-      // without the printer sends her hunting, the printer without the order does not say which
-      // food is not being cooked.
-      message: `${DOCUMENT_NOUNS.kot} ${order_ref.slice(0, 8)} did not print — ${printer_name}`,
-      subject: why,
-      id,
+      alarm: {
+        // `03-F5`'s own sentence: "KOT #142 did not print — grill printer offline". Both nouns in
+        // the line a cashier reads first, because either one alone is unactionable — the order
+        // without the printer sends her hunting, the printer without the order does not say which
+        // food is not being cooked.
+        message: `${DOCUMENT_NOUNS.kot} ${order_ref.slice(0, 8)} did not print — ${printer_name}`,
+        subject: why,
+        id,
+      },
+      order_id: order_ref,
     });
     return true;
   };
@@ -358,13 +408,20 @@ export const createKotPrinter = ({
   return {
     confirmed,
     pump,
-    alarms: () => [...raised.values()],
+    alarms: () => [...raised.values()].map((band) => band.alarm),
     acknowledge: (alarm_id) => {
-      // `03-F5` also says the acknowledgement is logged (`audit.*`) — and `01-F5`'s closed set
-      // has no subtype for it (`login`, `drawer_opened`, `reprint`, `threshold_override`,
-      // `settings_changed`). Inventing one is Commandment 2, so the ack is in-memory only and
-      // that half of the FR is OWED, named here rather than left to look intentional.
+      const band = raised.get(alarm_id);
+      // Acknowledging a band this device does not hold records nothing. The IPC handler calls
+      // BOTH printers' `acknowledge` for one tap (the ids are namespaced, so exactly one owns
+      // any given band), and without this every dismissal would write two acks — one of them
+      // about a band that never existed, permanently (`01-F1`).
+      if (band === undefined) return;
+      // The band goes FIRST and unconditionally. `03-F5`'s alert "repeats until acknowledged",
+      // and `01-F17`'s rule is that a ledger write may not cost the operator the act: an ack that
+      // only cleared the screen if its append succeeded would leave a full-screen repeating
+      // banner on the counter because the ledger was busy. `emit` swallows for the same reason.
       raised.delete(alarm_id);
+      emit(PRINT_ACK, { alarm_id, order_id: band.order_id, printer_name });
     },
   };
 };
@@ -395,6 +452,25 @@ export type CashPrinterDeps = {
    * driver on this device and this is how a queued slip reaches it immediately.
    */
   pump: () => Promise<void>;
+  /**
+   * `03-F5`'s acknowledgement, for the bands THIS printer raises. Same signature as the KOT
+   * printer's `append`, and the same reason: envelope stamping belongs to `gateway.append`.
+   *
+   * **It appends the ack and nothing else** — no `slip.printed`, no `slip.print_failed`, because
+   * `01 §4` carries neither (see `CASH_JOB_PREFIX`). An `audit.*` subtype is a different question
+   * from a print event: it records that a HUMAN dismissed a `03-F5` band, and one tap on one IPC
+   * channel dismisses either printer's band. Recording only the KOT's would make whether the
+   * dismissal is auditable depend on which printer happened to own the alarm — invisible to the
+   * operator and to the Auditor both.
+   *
+   * **OPTIONAL and always supplied**, which is the shape `01-F60` warns about and is taken here
+   * for a stated reason: `__acceptance__/cash-slip-printing.test.ts` predates this dep and is an
+   * oracle this session may not edit (`24 §3` step 2), so a required member reds a suite for a
+   * surface it does not exercise. `pnpm seams:check`'s Rule B is what keeps the omission from
+   * becoming permanent — an optional member no call site passes is a finding — and
+   * `__acceptance__/print-ack-audit.test.ts` §A asserts on the construction in `main/index.ts`.
+   */
+  append?: (type: string, payload: Record<string, unknown>) => void;
 };
 
 export type CashPrinter = {
@@ -424,10 +500,20 @@ export const createCashPrinter = ({
   store,
   capability,
   pump,
+  append,
 }: CashPrinterDeps): CashPrinter => {
   const printer_name = capability.model_id;
   const raised = new Map<string, Alarm>();
   const seen = new Map<string, string>();
+
+  /** `01-F17`, exactly as the KOT printer's: a failed ledger write must not cost the act. */
+  const emit = (type: string, payload: Record<string, unknown>): void => {
+    try {
+      append?.(type, payload);
+    } catch {
+      // No FR names a surface that owns "the ledger record could not be written".
+    }
+  };
 
   /**
    * Render, enqueue and kick — the same three steps `confirmed()` takes, and the same refusal
@@ -605,9 +691,13 @@ export const createCashPrinter = ({
     },
     alarms: () => [...raised.values()],
     acknowledge: (alarm_id) => {
-      // The same owed half as the KOT printer's: `03-F5` says the acknowledgement is logged, and
-      // `01-F5`'s closed `audit.*` set has no subtype for it. Inventing one is Commandment 2.
-      raised.delete(alarm_id);
+      // Only for a band this printer actually holds — the handler calls both, and an ack for a
+      // KOT band written twice would be two permanent records of one tap (`01-F1`).
+      if (!raised.delete(alarm_id)) return;
+      // NO `order_id`. This band's subject is a shift id or a day id (`CASH_JOB_PREFIX`), and
+      // putting one in a field called `order_id` writes a permanent lie into a ledger that has no
+      // edit path. `alarm_id` IS the spool job id, so which document was dismissed is still said.
+      emit(PRINT_ACK, { alarm_id, printer_name });
     },
   };
 };

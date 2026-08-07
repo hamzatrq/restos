@@ -284,6 +284,67 @@ export type AddLineRequest = z.infer<typeof AddLineRequestSchema>;
 export const AppendResultSchema = z.object({ id: z.string() });
 export type AppendResult = z.infer<typeof AppendResultSchema>;
 
+/**
+ * `02-F20`'s LOCAL path, as the two planes see it.
+ *
+ * The FR gives escalation *"two equivalent authorization paths — local manager PIN on the POS;
+ * remote approval via manager console (doc 05)"*. Only the first is Wave 1, and until it existed
+ * `can()`'s third outcome was a flat refusal at the seam: an above-threshold paid-out (`05-F19`)
+ * could not be performed at all, by anyone, on a device with no console attached.
+ *
+ * **What crosses on this schema is an OFFER, never a verdict.** `escalationFor` answers "would a
+ * manager credential close this gap, and whose?" — read off the matrix (`can().satisfied_by`),
+ * never hardcoded in a screen (`18 §5` bans the inline role check, and a screen that listed
+ * "manager" would be that check relocated into UI). It authorizes nothing: the write is still
+ * refused by `main/authorize.ts` and still authorized by `escalate`, so a renderer that lied
+ * about this answer would gain exactly nothing (Commandment 8).
+ */
+export type EscalationOffer = {
+  /**
+   * `02-F20` — the roles whose credential satisfies it, straight off `can().satisfied_by`, which
+   * derives them from the matrix row. Never empty on an offer: a gap no role can close is not an
+   * escalation, and offering a pad for one would be a control that cannot succeed.
+   */
+  readonly satisfied_by: readonly string[];
+};
+
+/**
+ * Why a manager-PIN approval was refused. FOUR causes, kept apart because the operator's next
+ * act differs for each, and a single "no" would send her to re-key a PIN that was already right.
+ *
+ * - `bad_pin` — `01-F28`/`01-F61`: the PIN did not verify, or this (device, user) pair is locked
+ *   out. Collapsed on purpose: the pad must not report which, or it becomes an oracle for how far
+ *   through a lockout an attacker is.
+ * - `self_approval` — `02-F38`: *"a requester never sees an approve control for their own
+ *   request … refused server-side by the `domain` permission matrix"*.
+ * - `not_permitted` — the credential verified and the matrix still says no. `02-F20`'s approver
+ *   must actually HOLD the permission, and "a manager PIN was entered" is not that fact.
+ * - `not_escalatable` — the underlying write was never an `escalate` in the first place. A
+ *   manager PIN does not launder a `deny`, and it does not manufacture an approver for an act
+ *   that needed none.
+ */
+export const ESCALATION_REFUSALS = [
+  "bad_pin",
+  "self_approval",
+  "not_permitted",
+  "not_escalatable",
+] as const;
+export type EscalationRefusal = (typeof ESCALATION_REFUSALS)[number];
+
+/**
+ * A STRUCTURED result rather than a thrown error, and that is the one place this channel differs
+ * from `append`.
+ *
+ * A refusal thrown across `ipcMain.handle` reaches the renderer as a rejected promise carrying a
+ * stringified message and none of its properties, which is why `Counter.tsx`'s `write` can only
+ * swallow and re-read. That is survivable for an unpriced item; it is not survivable here, where
+ * a manager is standing at the till and the operator must be told whether to re-key the PIN or
+ * fetch somebody else.
+ */
+export type EscalationResult =
+  | { readonly ok: true; readonly id: string }
+  | { readonly ok: false; readonly refused: EscalationRefusal };
+
 /** Channel names. Kept in one place so the preload bridge and main cannot drift apart. */
 export const CHANNELS = {
   deviceState: "restos:device-state",
@@ -328,6 +389,29 @@ export const CHANNELS = {
   acknowledgeAlarm: "restos:acknowledge-alarm",
   append: "restos:append",
   addLine: "restos:add-line",
+  /**
+   * `02-F20` — "would a manager credential close this?", asked of the matrix and answered for
+   * display only. A READ: nothing is appended and nothing is authorized on this channel.
+   *
+   * It exists because the refusal itself cannot cross the bridge. `main/authorize.ts` throws a
+   * `WriteRefusedError` carrying `outcome` and `satisfied_by` precisely so *"the screen that
+   * eventually asks for a manager PIN reads them off the matrix instead of hardcoding a role"* —
+   * and `ipcMain.handle` serializes a thrown error to its message, dropping both. So the screen
+   * asks the same guard the same question through the same `decide()`, which is why the offer
+   * cannot drift from the refusal.
+   */
+  escalationFor: "restos:escalation-for",
+  /**
+   * `02-F20`'s local manager-PIN path. The one channel that carries a credential besides
+   * `unlock`, and it takes the SAME one: `01-F28`'s Argon2id verification against the synced
+   * registry, keyed by `01-F61`'s durable per-(device, user) counter. A second PIN comparison
+   * anywhere in this app would be a second credential surface with its own lockout to forget.
+   *
+   * `01-F1` is why nothing about the PIN is appended: what lands in the ledger is the approver's
+   * IDENTITY on the event (`02-F20` — "the recorded event carries actor + approver either way"),
+   * never the digits that proved it.
+   */
+  escalate: "restos:escalate",
   /**
    * `01-F28` — the PIN is verified ON DEVICE, in main, and the renderer is told yes or no.
    *
@@ -396,6 +480,31 @@ export type RestosBridge = {
   append: (req: AppendRequest) => Promise<AppendResult>;
   /** `C5`/`01-F60` — main resolves the price; no money crosses this call. */
   addLine: (req: AddLineRequest) => Promise<AppendResult>;
+  /**
+   * `02-F20`'s local path, and both members are **OPTIONAL for the reason `cashState` and
+   * `alarms` above record**: `unlock-gate.dom.test.tsx` closes its harness with
+   * `satisfies RestosBridge` and `counter.dom.test.tsx` / `unbound-settlement.dom.test.tsx` stub
+   * the bridge as plain objects. All three are oracles this session may not edit (`24 §3` step 2)
+   * and all three predate this channel, so a REQUIRED member reds a typecheck and three suites
+   * for a surface none of them exercises.
+   *
+   * The cost is the same shape and is named rather than accepted quietly: a host that does not
+   * serve these shows no approval pad, so an above-threshold act stays refused — which is
+   * strictly the behaviour that existed before this path, never a silent success. The shipped
+   * preload DOES serve both (`preload/index.ts`), and `__acceptance__/escalation.test.ts` §A
+   * fails if it stops.
+   */
+  escalationFor?: (req: AppendRequest) => Promise<EscalationOffer | null>;
+  /**
+   * `02-F20`/`02-F38`/`01-F28` — the manager identifies herself, types her PIN, and main decides.
+   * Positional and in this order, matching `unlock(user_id, pin)`, because it is the same
+   * credential and the same `01-F61` counter behind it.
+   */
+  escalate?: (
+    req: AppendRequest,
+    approver_user_id: string,
+    pin: string,
+  ) => Promise<EscalationResult>;
   /**
    * `C1`/`01-F28` — hand main **an identity and** the typed digits, and be told whether the
    * device is now unlocked. The boolean is a RESULT, never the lock state: `01-F26`'s idle
