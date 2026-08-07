@@ -107,10 +107,25 @@ it. That is this wave's named defect reproduced inside the fix for it, and only 
 found it; reading the test did not. It now builds a real `buildServer`, listens on a real port, and
 drives a real `createCloudSession` over a real WebSocket, calling nothing on the gateway by hand.
 
-**G3 survives and is recorded rather than papered over.** Announcing a version before it commits is
-wrong, but the device's own `catalog_request` is authoritative about what it then receives, so the
-suite cannot currently distinguish the orders. The ordering in `publish-http.ts` is a reasoned
-choice with no test defending it — do not read it as a defended invariant.
+**G3 survives, and the reason first recorded here was WRONG — corrected by senior review.** The
+original sentence said "the suite cannot currently distinguish the orders", which would send the
+next session off to build a mechanism. It is not true. **G3b** — the same mutant with the window
+widened to 500 ms — is **killed by the existing SEAM test** (1 failed, 280 green). G3 survives only
+because the loopback notice→request round trip beats a sub-millisecond commit; the guard is not
+vacuous, it is simply never handed a realistic window. The cheap fix is a delay injected into the
+fixture, not a new test mechanism, and it is **owed**.
+
+**Severity is LOW, and that is traced rather than assumed.** The device never trusts the notice's
+version number: `reconcileCatalog` (`cloud-session.ts`) calls `requestCatalog(have)` with
+`at_version` **undefined**, and `catalogPage` (`catalog.ts`) clamps `at_version <= current ?
+at_version : current`, so the server can never serve a version it has not committed. A premature
+notice therefore yields an empty delta at the held version and `update: null` — no retry, since
+retry engages only on a refusal. The till gets a **stale** menu, never a wrong one, and self-heals
+on the next `hello_ack` reconnect or the next publish. **There is no window in which a till serves
+wrong prices**: `01-F53` freezes a line's price into the event at line-add, and `01-F56`'s
+`at_version` pin prevents any half-menu or mislabeled commit. Worst case equals the pre-fix
+behaviour — freshness lost, correctness never. The ordering in `publish-http.ts` is a reasoned
+choice; do not read it as a defended invariant until the widened-window fixture lands.
 
 ⚠ **Mint device tokens for a test that uses `buildServer` with `Date.now()`, never `BASE_T`.** Every
 other test in `journey-catalog.test.ts` injects a frozen clock, but `buildServer` is the production
