@@ -226,8 +226,20 @@ over the bridge — either is a spec PR first); and a hardcoded 79 px would be *
 panel `27 §1a` lists**, since 79 px at 1920×1080's 141 PPI is 14.2 mm, *below* the 20 mm floor.
 The alternative ruling — *"the counter ships 1920×1080 only"* — makes 1080 px of panel and fits
 everything, but `27-F11c` says both resolutions are the same physical surface holding the same
-tiles, so "needs more pixels" is the category error that FR exists to name. **Both options are
-founder calls. Until one lands, defects 4 and 5 stay in the register and stay named.**
+tiles, so "needs more pixels" is the category error that FR exists to name.
+
+**RULED (founder, August 2026): option A — `DEC-UI-001`, promoted into `27-F68`.** A dp is
+**1/160 inch of physical size**, rendered through the panel's own density. The density is a
+`00 §7` **layer-3** key, `panel_ppi` — *measured from the display*, configured only to correct a
+panel that reports nothing or reports wrong (**layer 3, not the layer 2 this section guessed**:
+one org runs many different panels, and pinning an org-wide PPI is the same category error one
+level up). *"Ships 1920×1080 only"* is rejected as exactly `27-F11c`'s category error. `27-F68`
+forbids both traps by name: **no pinned 79 px** (it is 14.2 mm on the 141-PPI panel) and **the
+floor stays in millimetres** (`27-F8`'s 20 mm is what it *is*; this changes only how it renders).
+**Defects 4 and 5 stay in the register until the conversion is implemented** — and note the
+ruling closes 4 outright but is **necessary-but-not-sufficient for 5**: at 100.5 PPI it scales
+`ManagerApproval`'s 1162 px to ≈**730 px** against a content box of at most ≈662 px, so that
+surface still needs the `27-F4` positional change named above.
 
 ## What is deliberately not real yet
 
