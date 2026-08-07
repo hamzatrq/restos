@@ -370,13 +370,15 @@ export type AuthorizedReadsDeps = SubjectDeps & {
  * appear. **Reported as an interpretation, not settled:** the narrower reading of "only their
  * own" would hide it, and `can()`'s `own_shift` arm takes that narrower one.
  *
- * It is also the LIVE case and the reason the narrower reading cannot ship today. `shift_cash`
- * reads its `cashier` column from `payload.cashier`, and `02-F45` forbids that field — the
- * shipped counter emits no such payload and `cash-tab.dom.test.tsx` fails the build on one — so
- * EVERY production row projects null. Hiding nulls would blank the Me tab and make "Close my
- * shift" unreachable for every cashier. The owed fix belongs to the fold, not to this seam:
- * `02-F45` already names the envelope's `actor_user_id` as the single source of attribution,
- * and `shift-cash-fold.test.ts`'s PIN #2 records that no FR yet says the fold must read it.
+ * It is also the case that stays live after the fold conformed. `shift_cash` now projects
+ * `cashier` from the envelope's `actor_user_id` (`02-F45`, landed August 2026 — the fold read a
+ * payload field the FR forbids, and the stale pin recording that as "undecided" is retired), so a
+ * row carrying an identity IS narrowed. A null still means one of two real things: an event
+ * appended before identity reached the envelope, or an `01-F31` divergence where two devices
+ * claimed one shift under different PINs and the fold refused to pick a winner. Serving both is
+ * deliberate. Hiding the first would blank the Me tab for pre-identity shifts; hiding the second
+ * would conceal a contested shift from the cashier it accuses, which inverts `02-F23`'s
+ * protection guarantee in the same way the first inversion does.
  */
 const isOwnShift = (cashier: string | null, user_id: string): boolean =>
   cashier === null || cashier === user_id;

@@ -136,15 +136,15 @@ bundle is ESM and `__dirname` does not exist there.
   `PAID_OUT_APPROVAL_THRESHOLD_PAISA` (Rs 2,000, **PINNED not specified**) is refused at the
   counter until that path exists. `02-F20`'s void / comp / price-override rows are mapped ahead
   of their events, which `domain/registry.ts` does not carry yet.
-- **IT ALSO GUARDS A READ, and that guard currently hides nothing.** `authorizeReads` narrows
-  `cashState` to `reportScope`'s Appendix A reach (`02-F23` — "cashiers see only their own
-  shifts"), which is the matrix's last export to gain a production caller. **But every shipped
-  shift row projects `cashier: null`**, so nothing is filtered on a real device yet: the
-  `shift_cash` fold reads its `cashier` column from `payload.cashier`, and `02-F45` forbids that
-  field — `cash-tab.dom.test.tsx` fails the build on a `shift.opened` payload carrying one. The
-  fix is the fold's and it is one line (read the envelope's `actor_user_id`, which `02-F45`
-  already names as the single source of attribution), but it is **PIN #2** in
-  `shift-cash-fold.test.ts` — "no FR says which one the fold reads" — so it is an open question
-  with an oracle of its own, not a drive-by. It is also why an **unattributed** row is served
-  rather than hidden: with every live row null, the narrower reading of "only their own" would
-  blank the Me tab and make "Close my shift" unreachable for every cashier on the device.
+- **IT ALSO GUARDS A READ.** `authorizeReads` narrows `cashState` to `reportScope`'s Appendix A
+  reach (`02-F23` — "cashiers see only their own shifts"), the permission matrix's last export to
+  gain a production caller. It hid nothing for one round: the `shift_cash` fold projected `cashier`
+  from a payload field `02-F45` forbids, so every shipped row was `cashier: null` and a
+  correctly-built, mutation-proven privacy rule filtered nothing at all. **The fold conformed in
+  August 2026** — it reads the envelope's `actor_user_id` now, and the oracle pin recording that
+  source as "undecided" is retired, because `02-F45` had already decided it. A null row is still
+  SERVED, and now means one of two real things: an event appended before identity reached the
+  envelope, or an `01-F31` divergence where two devices claimed one shift under different PINs and
+  the fold refused to pick a winner. Hiding the first would blank the Me tab; hiding the second
+  would conceal a contested shift from the cashier it accuses — both invert `02-F23`'s protection
+  guarantee, which is the half of that FR most easily lost.
