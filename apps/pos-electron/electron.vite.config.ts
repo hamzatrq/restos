@@ -56,7 +56,11 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {
-        input: { index: "src/main/index.ts" },
+        // `layout-gate` is a SECOND main entry, not part of the app: it is the layout rail
+        // (`src/layout-gate/main.ts`), and it is built here so it imports the app's real
+        // `COUNTER_WINDOW_OPTIONS` through TypeScript rather than re-typing the window contract.
+        // A gate measuring its own copy of `1366x768` would prove nothing about the product.
+        input: { index: "src/main/index.ts", "layout-gate": "src/layout-gate/main.ts" },
         external: [...RUNTIME, ...NATIVE],
       },
     },
@@ -65,7 +69,9 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {
-        input: { index: "src/preload/index.ts" },
+        // The gate's stub bridge rides the same CommonJS rule as the real preload below — a
+        // sandboxed preload cannot be an ES module, and the gate's window is sandboxed too.
+        input: { index: "src/preload/index.ts", "layout-gate": "src/layout-gate/preload.ts" },
         external: RUNTIME,
         // `contextIsolation` requires a CommonJS preload; an ESM one fails to load and the
         // renderer comes up with no `window.restos` at all, which looks like a bridge bug.
