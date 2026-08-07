@@ -19,6 +19,13 @@ export {
   type StagedEditStore,
 } from "./catalog.js";
 export { catalogProcedures } from "./catalog-router.js";
+// The adapter binding B-4's two ports to `services/sync-gateway` (founder ruling: the API
+// publishes, the gateway serves).
+export {
+  createGatewayCatalogPublisher,
+  createGatewayLedgerAppender,
+  type GatewayLink,
+} from "./gateway-client.js";
 export {
   type CatalogDeps,
   type CatalogPublisher,

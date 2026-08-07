@@ -103,9 +103,12 @@ two cloud stamps merged back into the envelope only at serve time.
 | `auditor.ts` | `runAuditor` — the five READ-ONLY correctness legs. |
 | `quarantine-query.ts` | `listQuarantine` — a read-only projection for the fleet-health dashboard (doc 15 READ seam only). |
 | `errors.ts` | Typed error taxonomy + the closed `QuarantineReason` union. |
-| `schema.ts` | Drizzle table definitions (the six `kernel` tables). |
+| `catalog.ts` | `publishCatalog` / `catalogPage` / `catalogVersion` — the published catalog artifact (`01-F52`..`01-F56`), and `01-F60`'s completeness check at the writer. |
+| `org-events.ts` | `appendOrgEvent` / `orgEventHistory` — `01-F62`'s ORG-SCOPED store (no branch fields, ordered by `server_received_at`). |
+| `publish-http.ts` | `registerPublishRoutes` — the `/internal` surface `services/api` publishes through (founder ruling: the API publishes, the gateway serves). Credential-gated; fail-CLOSED with none configured. |
+| `schema.ts` | Drizzle table definitions (the six `kernel` tables + `org_events`). |
 | `migrate.ts` | `applyMigrations(databaseUrl)` — runs every `drizzle/` migration. |
-| `server.ts` | `buildServer` / `start` — thin Fastify + `@fastify/websocket` adapter; owns the wire codec. Boot-smoke tested only (`server.test.ts` exists). |
+| `server.ts` | `buildServer` / `start` — thin Fastify + `@fastify/websocket` adapter; owns the wire codec, and mounts `/internal`. Boot-smoke tested only (`server.test.ts` exists); the `/internal` routes have their own acceptance suite. |
 | `index.ts` | Public barrel. |
 
 ### `gateway.ts` — the merge pipeline

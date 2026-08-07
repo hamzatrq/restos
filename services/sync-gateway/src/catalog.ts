@@ -98,12 +98,14 @@ export const catalogVersion = async (db: Db, org_id: string): Promise<number> =>
  * device-side scheduler, a second version axis, a clock read on the application path, and
  * would apply an edit the owner had since cancelled.
  *
- * @unreached-owed THIS IS INSTANCE 6 OF THE WAVE'S NAMED DEFECT, recorded rather than hidden —
- * the catalog transport was built and tested at both ends (`createCatalogFetch` here's
- * counterpart) with zero production callers, which is why `apps/pos-electron`'s CLAUDE.md says
- * "The item grid is empty" and the till cannot sell anything. `plans/wave-1/catalog-transport.md`
- * owes the caller: the back-office write path (`01-F52`) that this function exists to serve.
- * DELETE THIS MARKER when it lands — a marker on something reached fails this check.
+ * **THE CALLER HAS LANDED (August 2026), and this used to carry a debt marker naming instance 6 of
+ * the wave's named defect** — the catalog transport built and tested at both ends with zero
+ * production callers, which is why `apps/pos-electron`'s item grid was empty and the till could
+ * sell nothing. `publish-http.ts` reaches this from `buildServer`, and `services/api`'s
+ * `CatalogPublisher` port reaches THAT over the `/internal` contract — so an owner's menu edit now
+ * travels back office → publish → this writer → `catalogPage` → the till. The marker is deleted
+ * rather than amended: `pnpm seams:check` FAILS on a marker whose subject is reached, which is
+ * what stops the register rotting.
  */
 export const publishCatalog = async (
   db: Db,

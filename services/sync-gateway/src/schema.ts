@@ -13,7 +13,16 @@
 // drizzle-kit at this file to generate `./drizzle/*.sql`; the gateway itself issues raw SQL
 // through `postgres`, so no runtime module imports these table objects. The consumer is real and
 // outside `src/`, which is why this reads as unreached.
-import { bigint, index, jsonb, pgSchema, primaryKey, text, unique } from "drizzle-orm/pg-core";
+import {
+  bigint,
+  bigserial,
+  index,
+  jsonb,
+  pgSchema,
+  primaryKey,
+  text,
+  unique,
+} from "drizzle-orm/pg-core";
 
 export const kernel = pgSchema("kernel");
 
@@ -209,6 +218,44 @@ export const catalogEntries = kernel.table(
     // fold (org, entity, greatest version).
     index("catalog_entries_org_kind_entry_version_idx").on(t.org_id, t.kind, t.entry_id, t.version),
   ],
+);
+
+/**
+ * ORG-SCOPED events (`01-F62`, closing `DEC-SYNC-012`).
+ *
+ * **This is not `kernel.events` with a nullable branch, and the separation is the FR.**
+ * `01-F62` rules shape (c): an org-scoped event "lands in an org-scoped audit store that is not
+ * the branch ledger at all". It "never enters a branch stream and no device folds it", so it has
+ * no `global_seq` (a branch delivery cursor), no `lamport_seq` (a per-device chain), no
+ * `device_id`, and above all **no `branch_id` and no branch stamp** — the alternative the FR
+ * rejected was putting a server value into `branch_created_at`, which would have made a branch
+ * field carry a non-branch value and invited a fold to read it.
+ *
+ * `server_received_at` is the ordering authority (`01-F18`, `01-F62`), and it is trustworthy here
+ * for the reason the FR gives: the cloud plane is the one place a clock is not a threat — the
+ * inverse of the device-clock threat model `01-F43` was written for.
+ *
+ * `seq` is a surrogate arrival order, NOT an ordering authority a reader may interpret. It exists
+ * because `server_received_at` is a millisecond and a bulk edit (`14-F8`) writes five records at
+ * one instant on purpose, so reading them back needs a stable tiebreak. Nothing folds it and no
+ * client is told about it.
+ *
+ * Append-only, like `kernel.events`: no UPDATE and no DELETE of this table exists anywhere in
+ * this package (`01-F1`).
+ */
+export const orgEvents = kernel.table(
+  "org_events",
+  {
+    seq: bigserial("seq", { mode: "number" }).primaryKey(),
+    org_id: text("org_id").notNull(),
+    /** The `01 §4` type. Only `01-F62`'s org-scoped set is accepted — see `appendOrgEvent`. */
+    type: text("type").notNull(),
+    /** `01-F5`/`02-F19` attribution. Nullable because the envelope schema says nullable. */
+    actor_user_id: text("actor_user_id"),
+    server_received_at: bigint("server_received_at", { mode: "number" }).notNull(),
+    payload: jsonb("payload").notNull(),
+  },
+  (t) => [index("org_events_org_received_seq_idx").on(t.org_id, t.server_received_at, t.seq)],
 );
 
 /**

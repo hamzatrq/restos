@@ -13,6 +13,7 @@ import { BUSINESS_DAY_CUTOVER_HOUR_DEFAULT } from "@restos/domain";
 import { type CreateFastifyContextOptions, fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import Fastify, { type FastifyInstance } from "fastify";
 import { createMemoryStagedEditStore } from "./catalog.js";
+import { createGatewayCatalogPublisher, createGatewayLedgerAppender } from "./gateway-client.js";
 import {
   type CatalogDeps,
   createCatalogRuntime,
@@ -175,13 +176,54 @@ const start = async (): Promise<FastifyInstance> => {
      */
     ENABLED_BRANCHES: list,
     ENABLED_CHANNELS: list,
+    /**
+     * **Where a published menu actually goes** (`plans/wave-1/catalog-transport.md` §6 Q1, founder
+     * ruling: the API publishes, the gateway serves).
+     *
+     * **REQUIRED, and the process refuses to boot without it — that refusal IS the fix.** Until
+     * August 2026 this composition root built `createMemoryCatalogPublisher()`, so the back office
+     * published into a `Map` that died with the process: an owner authored a menu, scheduled it,
+     * saw it publish, and no till ever heard. Making these optional would restore exactly that —
+     * the deployment that forgets them looks completely healthy and ships nothing, which is this
+     * wave's named defect (AGENTS.md) and the reason it takes weeks to notice.
+     *
+     * The cost is stated rather than hidden: a back office cannot start without a gateway to
+     * publish to. That is correct. A back office whose only irreversible act is publishing a menu
+     * has nothing to offer an org it cannot publish to, and `SESSION_SECRET` above already sets the
+     * precedent that a missing dependency is a crash and never a degraded mode.
+     */
+    SYNC_GATEWAY_URL: (raw) => {
+      if (raw === undefined || raw === "") {
+        throw new Error(
+          "required (the sync gateway's base URL, e.g. http://sync-gateway:8080). Without it a " +
+            "published menu reaches no device at all — 14-F28 lands into nothing.",
+        );
+      }
+      return raw;
+    },
+    SYNC_GATEWAY_TOKEN: (raw) => {
+      if (raw === undefined || raw === "") {
+        throw new Error(
+          "required (the /internal publish credential; the gateway's PUBLISH_TOKEN). One shared " +
+            "secret — a mismatch is a 401 on every publish and a menu that never ships.",
+        );
+      }
+      return raw;
+    },
   });
 
   const now = (): number => Date.now();
+  const link = { base_url: env.SYNC_GATEWAY_URL, token: env.SYNC_GATEWAY_TOKEN };
   const catalog: CatalogDeps = {
     staged: createMemoryStagedEditStore(),
-    publisher: createMemoryCatalogPublisher(),
-    ledger: createMemoryLedgerAppender(),
+    // **The two ports that were stubs.** Both now reach `services/sync-gateway` over the
+    // `/internal` contract: `publisher` writes the versioned artifact devices fetch (`01-F52`),
+    // `ledger` appends `catalog.changed` to the `01-F62` org-scoped store `14-F3` reads. Swap
+    // either back to its `createMemory*` stub and the process still starts, still serves, still
+    // refuses unauthenticated requests — and no menu ships. That mutant is what
+    // `__acceptance__/catalog-gateway-seam.test.ts` exists to redden.
+    publisher: createGatewayCatalogPublisher(link),
+    ledger: createGatewayLedgerAppender(link),
     enabled: { branches: env.ENABLED_BRANCHES, channels: env.ENABLED_CHANNELS },
     now,
     cutover_hour: BUSINESS_DAY_CUTOVER_HOUR_DEFAULT,

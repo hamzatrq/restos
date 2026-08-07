@@ -33,6 +33,7 @@ import superjson from "superjson";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApiServer, LISTENING_PREFIX } from "../server.js";
 import { createMemoryUserStore } from "../users.js";
+import { type FakeGateway, startFakeGateway } from "./fake-gateway.js";
 
 /**
  * ⚠ **Importing `../server.js` above is itself half of assertion 4, and it is why this comment
@@ -75,7 +76,11 @@ type Running = {
  * `PORT=0` binds an ephemeral port, so the port is knowable ONLY from the boot line — which is
  * what makes that line load-bearing instead of decorative.
  */
-const startDeclaredScript = async (script: string, hash: string): Promise<Running> => {
+const startDeclaredScript = async (
+  script: string,
+  hash: string,
+  gateway: FakeGateway,
+): Promise<Running> => {
   const child = spawn(script, {
     shell: true,
     cwd: PKG_DIR,
@@ -93,6 +98,11 @@ const startDeclaredScript = async (script: string, hash: string): Promise<Runnin
       BOOTSTRAP_ORG_ID: ORG,
       ENABLED_BRANCHES: BRANCH,
       ENABLED_CHANNELS: "counter",
+      // August 2026: `start()` REQUIRES somewhere to publish to, because the alternative it
+      // replaced was publishing into a process-local `Map` (see `server.ts`). Nothing about the
+      // assertions below changed; they simply need the composition root to be satisfiable.
+      SYNC_GATEWAY_URL: gateway.url,
+      SYNC_GATEWAY_TOKEN: gateway.token,
     },
   });
 
@@ -199,17 +209,20 @@ describe("services/api is startable as a process (the seam to the product)", () 
   let running: Running;
   let scripts: Scripts;
   let hash: string;
+  let gateway: FakeGateway;
 
   beforeAll(async () => {
     scripts = await readScripts();
     hash = await hashPin(PASSWORD);
+    gateway = await startFakeGateway();
     const start = scripts.start;
     if (start === undefined) throw new Error("package.json declares no `start` script");
-    running = await startDeclaredScript(start, hash);
+    running = await startDeclaredScript(start, hash, gateway);
   }, 60_000);
 
-  afterAll(() => {
+  afterAll(async () => {
     running?.kill();
+    await gateway?.close();
   });
 
   it("declares run scripts that both point at the composition root", () => {
