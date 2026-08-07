@@ -112,24 +112,70 @@ on the correct tree. **The last column is the point.**
 M4 is what makes the other three mean anything: a real one-branch layout edit does **not** trip
 the gate, so it discriminates rather than reddening at any change.
 
-**⚠ A FOURTH DEFECT, FOUND BY THE GATE ON ITS FIRST RUN — UNRESOLVED, do not treat as fixed.**
-With `03-F5`'s band up the work area drops **568 → 530 px**, and the keypad's bottom row — `C`,
-`0`, `⌫` — lands at y=673..799 in a 768 px viewport on **both Pay and Cash**. A cashier cannot
-type a `0`, so Rs 500 and Rs 1,000 cannot be entered; `C` and backspace go with it. **It is on the
-ordinary path, not a corner case:** this device ships `unattachedPrinter`, so every confirm raises
-that band ~20 s later — ring, send to kitchen, then try to settle. `27-F11d` is explicit that the
-work underneath must stay *"visible and usable"*. The remedy is a layout-budget decision (overlay
-rather than displace? absorb it? shrink keys against `27-F8`'s 126 dp floor, which may not be
-negotiated with?) and belongs to the surface's owner, so it is **reported, not fixed** (`24 §3b`).
+**⚠ A FOURTH DEFECT, FOUND BY THE GATE ON ITS FIRST RUN — UNRESOLVED, do not treat as fixed.
+⚠ AND ITS FIRST DESCRIPTION, INCLUDING THE ONE THAT STOOD HERE, WAS WRONG.** This paragraph used
+to say *"a cashier cannot type a `0`, so Rs 500 and Rs 1,000 cannot be entered"*. **Measured August
+2026 with real `sendInputEvent` mouse clicks through Blink's own hit testing: band up, Pay open,
+press `1` `0` `0` `0` and `REMAINING` goes Rs 4,875 → Rs 3,875. Rs 1,000 TYPES FINE.** The claim
+was inferred from the gate's `withinViewport`, which is a **fit** check ("every edge inside the
+viewport"), whose verdict text then concluded *"cannot be touched"* — which does not follow. It was
+never tested before it propagated from the register into this file and into a task brief. The
+mechanism was right; its **wording** was never pointed at the case it fires on.
+
+**What is actually measured** (768 px viewport; `main` is **632 px** quiet and **530 px** with the
+band, so `03-F5`'s band costs exactly **102 px**; chrome is 51 strip + 85 rail + 102 band + 32
+`main` padding = **270 px**):
+
+| surface | state | measured |
+|---|---|---|
+| Pay | band up | `C` `0` `⌫` clipped 126 → **95 px**, all three still clickable; nothing else lost |
+| Cash | band up | `C` `0` `⌫` clipped 126 → **112 px**, all clickable; **`Counted Rs 0` ENTIRELY off-screen** |
+| Pay, Cash | quiet | nothing clipped, nothing unreachable (Pay has 38 px spare, **Cash has 0**) |
+
+**Cash is the one that costs something.** `Counted` is the live echo of what the cashier has keyed
+into a drawer count, and `CashSurfaces.tsx` already calls it *"the only feedback that a 126 dp key
+registered at all"*. Under the band she counts the drawer blind — `27-F25` and `27-F29` both land
+on that row. Pay's loss is 31 px off three keys that still work.
+
+**It is on the ordinary path, not a corner case:** this device ships `unattachedPrinter`, so every
+confirm raises that band ~20 s later — ring, send to kitchen, then try to settle.
+
+**Why it is REPORTED and not fixed — the reason is arithmetic, not judgement.** The keypad is
+4 × `targetFor("keypad")` + 3 gaps = **528 px**; under the band `main`'s content box is **498 px**.
+*The pad alone does not fit*, before any label, DUE figure, TAKE CASH button or padding — so no
+overlay, reflow or reordering of these surfaces can close it, and every "budget" remedy that looks
+available is arithmetically dead. See **THE BUDGET IS OVER-SUBSCRIBED** below: what is left is a
+spec question, not a pixel choice (commandment 9).
 It is carried in `OWED_UNDER_ALARM` in `src/layout-gate/main.ts`, which **cannot rot**: a listed
 surface that starts laying out cleanly **fails** the gate, forcing the entry out.
+
+**⚠ A FIFTH DEFECT, WORSE THAN THE FOURTH, AND NO GATE CAN SEE IT — `ManagerApproval` DOES NOT
+FIT IN EITHER STATE.** Measured August 2026 in the same real window: with an approver chosen, the
+PIN step lays out **1162 px of content** in a **632 px** box quiet (**530 px** with the band). In
+the **quiet** state `Approve`, `Not them?` and `Cancel` are **entirely below the viewport** — top
+edges at y=852, 1002 and 1152 in a 768 px window — and `0` and `Clear` are two-thirds gone. **A
+manager cannot approve anything, on any device state.** `02-F20`'s local manager-PIN path — the
+only escalation route that exists, since doc 05's remote one is unbuilt — is dead on arrival, and
+`05-F19`'s over-threshold paid-out is the live case that reaches it. The cause is a vertical stack
+of **seven** `posture="keypad"` elements (4 digit rows at a 142 px pitch, then `Approve`, `Not
+them?`, `Cancel` at 150 px each); it is the same 126-dp-as-css-px arithmetic as defect 4 but with
+three extra full-size buttons stacked under the pad, so it overruns by 530 px rather than 64.
+**The layout gate is structurally blind to it**: its fixture returns `escalationFor: () => null`,
+so `ManagerApproval` never renders and the surface is never measured. That is blind spot 2 in the
+list below (*"it only sees the states the fixture produces"*) costing a real, worse defect —
+reproduce it by patching the built gate preload to reject `append` and return an offer.
+**Reported, not fixed:** it needs the same budget ruling, plus a `27-F4` positional change to a
+surface whose three trailing buttons cannot all be keypad-posture in a 768 px panel.
 
 **WHAT THE GATE CANNOT CATCH — do not read a green run as "the screens are right".**
 1. **Main is a stub.** It says nothing about IPC, Zod validation at the plane boundary, or whether
    the shipped preload serves the same channels. `main/__acceptance__/` owns that.
 2. **It only sees the states the fixture produces.** Defect 4 was invisible until the fixture
    served an alarm; a surface state nobody scripted is a surface state nobody measures. The
-   fixture is the gate's real coverage boundary, not the assertions.
+   fixture is the gate's real coverage boundary, not the assertions. **This has now cost a real
+   defect and not just a hypothetical one** — `escalationFor: () => null` means `ManagerApproval`
+   never renders, and defect 5 above (a manager who cannot approve, in *both* states) sat
+   unmeasured behind that one line.
 3. **It does not judge legibility, contrast, typography or target size.** `27-F8`'s 126 dp floor
    and `27-F26`'s missing webfont are untouched — a control can be reachable and still unreadable.
 4. **One panel, one DPI, one platform.** 1366x768 at devicePixelRatio 1 on macOS. `27 §1a`'s
@@ -140,6 +186,48 @@ surface that starts laying out cleanly **fails** the gate, forcing the entry out
 6. **It needs a display.** Electron opens a real (hidden) window; a headless Linux CI needs xvfb.
    Per `T-01-07` that is a LOUD failure, never a skip — an environment prerequisite, not a
    regression.
+
+## THE BUDGET IS OVER-SUBSCRIBED, AND CLOSING IT NEEDS A RULING (defects 4 and 5)
+
+**The one line that settles it: `51 + 85 + 102 + 528 = 766` in a `768` px panel.** Status strip,
+tab rail, `03-F5`'s band and the keypad, with **2 px left** for all padding on every surface. That
+is why defects 4 and 5 have no implementation fix — the pad alone (528 px) is larger than the work
+area under the band (498 px of content box), so overlay, reflow, reordering and "absorb it
+elsewhere" are all arithmetically dead before design taste enters. **Four remedies were checked
+and each is refused by an FR, not by preference:**
+
+- **Overlay instead of displace** — the band would cover the *top* 102 px of the work area, which
+  on Pay is `DUE`, the `02-F12` method row and the top of the pad. You would lose `1` `2` `3` and
+  the method selector instead of the bottom of `C` `0` `⌫`; `27-F11d`'s *"the work underneath
+  stays visible and usable"* is broken either way, and `elementFromPoint` would then report
+  COVERED. It relabels the loss, it does not remove it.
+- **Scroll or page the work area** — `27-F2`, and the keys are not a list.
+- **Hide the pad behind a SETTLE button** — `27-F5`'s ban on context-dependent controls.
+- **Shrink the keys** — `27-F8`'s 20 mm is a measured floor for high-consequence standing entry.
+  Lowering it to fit a layout is the `01-F61` cost-floor move one domain over.
+
+**What is left is one spec question, and it is a real one.** `targetFor("keypad")` returns `126`
+and the product spends it as **126 CSS px**, i.e. dp ≡ css px, which is only true on a 160-PPI
+panel. **`27 §1a`'s own hardware table says otherwise**: the counter POS row is *15.6″, 1366×768
+or 1920×1080, 100–141 PPI, 76 dp tile → **47–67 px**, 126 dp keypad → **79–111 px***. That table
+is exactly the mm conversion (76 dp = 12.06 mm → 47.7 px at this panel's 100.5 PPI; 126 dp =
+20.0 mm → 79.1 px), and `27-F11c` states the rule in words — *"Design in millimetres, render in
+pixels"*. At `27 §1a`'s own 79 px the pad is **340 px** and everything fits with 126 px to spare.
+**Nothing in doc 21 or doc 27 ever says a dp is a CSS px**; `TOKENS.md` already warns that "the
+same dp renders 2.3× larger on a 32″ 69-PPI panel than on a phone", which is this argument at a
+larger ratio. `packages/ui/src/components/layout-physical.oracle.test.ts` carries the unresolved
+half as a written FINDING — *"27-F8's dp and mm columns do not use one conversion … Pick a
+conversion in doc 27 and restate the table from it."*
+
+**It is NOT a session's call to make, for three reasons** (commandment 9, `24 §3b`): it changes
+every touch target in the product in the shrinking direction; it needs a physical-panel input the
+renderer does not have (a layer-2 config key per `00 §7`, or a `screen.getPrimaryDisplay()` fact
+over the bridge — either is a spec PR first); and a hardcoded 79 px would be **wrong on the other
+panel `27 §1a` lists**, since 79 px at 1920×1080's 141 PPI is 14.2 mm, *below* the 20 mm floor.
+The alternative ruling — *"the counter ships 1920×1080 only"* — makes 1080 px of panel and fits
+everything, but `27-F11c` says both resolutions are the same physical surface holding the same
+tiles, so "needs more pixels" is the category error that FR exists to name. **Both options are
+founder calls. Until one lands, defects 4 and 5 stay in the register and stay named.**
 
 ## What is deliberately not real yet
 
