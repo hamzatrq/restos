@@ -65,6 +65,25 @@ pnpm -C apps/backoffice dev         # http://localhost:3000
   no float and therefore no rounding step. Decimals are REFUSED — a pinned interpretation, recorded
   in the file, not a specified rule.
 
+## Mutation matrix — `api-seam.test.ts` (control 88/88 green, 0 survivors)
+
+The link to `services/api` is `TRPC_URL` (`lib/trpc.tsx`) + the rewrite `source` (`next.config.ts`).
+The other 83 tests are blind to all five mutants — they drive a real client over a **fake link**,
+which never touches the rewrite.
+
+| # | mutant | new tests failed | other 83 |
+|---|---|---|---|
+| N1 | the client's `TRPC_URL` drifts | 4 | all green |
+| N2 | the rewrite's `source` drifts | 4 | all green |
+| N3 | the destination is hardcoded, not `RESTOS_API_URL` | 2 | all green |
+| N4 | the destination keeps Next's `/api` segment (wrong mount on the API) | 2 | all green |
+| N5 | `TRPC_URL` stops being exported (the vacuity case) | 5, guard first | all green |
+
+⚠ **N5 is not hypothetical — it happened during this matrix's own run.** A `git checkout` revert of
+N1 also dropped the not-yet-committed `export`, and the next mutant's kill was therefore
+unattributable. **Commit the baseline before mutating**, and read the failure MESSAGE, not just the
+count: the tests still went red, but for a reason that had nothing to do with the mutant.
+
 ## Mutation matrix (round-3 law) — control 83/83 green, 19 mutants, **0 survivors**
 
 Re-run it out-of-tree before trusting a change to `lib/` or the editor. Kill counts, one branch each:

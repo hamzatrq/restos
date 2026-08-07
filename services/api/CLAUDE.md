@@ -34,3 +34,23 @@
   process. The `CatalogPublisher` and `LedgerAppender` ports are shaped to
   `services/sync-gateway`'s `publishCatalog`/`catalogPage` so the owed adapter is a binding, not a
   redesign — see `publish.ts`'s header for what that adapter still owes.
+
+## Mutation matrix for `startable.test.ts` (round-3 law) — control 88/88 green, 0 survivors
+
+Each mutant differs from the control in **exactly one branch**. The right-hand column is the point:
+the 80 pre-existing tests are blind to every one of them, so the kills are attributable to the new
+file rather than to the suite at large.
+
+| # | mutant | new tests failed | pre-existing 80 |
+|---|---|---|---|
+| M1 | `scripts.start` deleted | all 8 (the hook refuses) | **all green** |
+| M2 | `scripts.dev` deleted | 1 (`declares run scripts`) | all green |
+| M3 | the boot line silenced | all 8 (no port to dial) | all green |
+| M4 | an ungated procedure added, so the boot gate refuses | all 8, naming the gate's own error | 41 fail (they build the host too) |
+| M5 | **`bootstrapUsers` returns `[]` — the process starts and wires NOTHING** | exactly 2: the two that claim the composition root did work | all green |
+| M6 | the main-module guard removed | 1 (`imported by another process`) | all green |
+
+**M5 is the one to re-run after any change here.** It is this wave's defect in miniature: the
+service boots, serves, and refuses unauthenticated requests correctly — a seam test that only
+checked "did a process listen" blesses it. The refusal and reachability cases stayed green under
+M5; only the two wiring assertions caught it.
