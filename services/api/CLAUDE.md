@@ -25,6 +25,18 @@
   boot and refuses to start a host carrying an ungated procedure that is on neither
   `PUBLIC_PROCEDURES` nor `SESSION_ONLY_PROCEDURES`. Adding a name to either list is a reviewable
   diff, on purpose.
+- **`14-F3` renders its own example now — "price changed by Ali, 2 Jul, 450 → 480".** A
+  `LedgerRecord` carries `server_received_at` (`01-F62`: `catalog.changed` is **org-scoped** —
+  `org_id`, no `branch_id`, no branch stamp, no fold reads it — so server time is its ordering
+  authority under `01-F18` and is legitimate, the inverse of the `01-F43` device-clock threat) and
+  `payload.price_changes` (the `(branch, channel)` cells that MOVED, `null` on either side for a
+  cell that did not exist or was dropped). **The numbers are carried, not resolved from
+  `before_ref`/`after_ref`** — the refs are one-way `payloadHash` digests indexed by nothing, so
+  "resolve the ref" would mean re-reading the entity at version N-1 out of mutable reference data,
+  which decays under `01-F52` compaction and can be changed after the fact. `01-F52` holds because
+  a price delta is not an entity body; `01-F53` is untouched because a line's price is snapshotted
+  from the CATALOG at line-add. **One `deps.now()` reading per publish**, used for both writes, so
+  a bulk edit's rows cannot disagree about when "the" edit happened.
 - **Two version axes, and conflating them is the defect this module is shaped against.**
   `catalog.pending` is the staged draft (cancellable, no device has heard of it);
   `catalog.published` is the artifact devices fetch (`01-F52`..`01-F56`). Assert timing against
