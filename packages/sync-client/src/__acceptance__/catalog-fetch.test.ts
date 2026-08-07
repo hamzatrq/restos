@@ -323,6 +323,84 @@ describe("T-C4 — applying to the real store (§5.3, §5.5)", () => {
   });
 });
 
+describe("01-F60 / 03-F50 — the price and the station SURVIVE the wire→store reshape", () => {
+  // WHY THIS EXISTS, and why it is written through the STORE rather than against `toEntry`.
+  //
+  // `WireEntry`/`toEntry` carried neither `prices` nor `station`, so a menu published by the back
+  // office arrived at a real till complete in every field a screen renders and empty in the two a
+  // till SELLS from. Measured live, not reasoned: the gateway served `price_paisa: 45000`, and the
+  // device's own `catalog` row was `{"kind":"item","id":…,"name":…,"kitchen_name":…}`. Every tile
+  // read `no price set`.
+  //
+  // Neither existing suite could see it, and that is the point of putting the assertion HERE:
+  // `catalog-pricing.test.ts` proves `priceOf` by calling `store.catalog.apply()` directly, which
+  // never crosses this seam, and this file never mentioned a price. Two correct halves, no join —
+  // AGENTS.md's named defect of the wave. So the assertion deliberately runs the whole hop:
+  // wire frame → `accept()` → `store.catalog.apply()` → `priceOf`/`stationOf`. An assertion on
+  // `update.upserts[0].prices` alone would pass against a store that dropped the column.
+  const freshStore = () => openStore({ path: ":memory:", identity: identity() });
+
+  it("01-F60 — a price on the wire is resolvable by priceOf after the fetch", () => {
+    const store = freshStore();
+    const branch_id = store.identity.branch_id;
+    const fetch = createCatalogFetch(store.catalog.version());
+    const step = fetch.accept(
+      page({
+        version: 1,
+        entries: [
+          entry("I-biryani", "Chicken Biryani", {
+            prices: [
+              { branch_id, channel: "counter", price_paisa: 45_000 },
+              { branch_id, channel: "storefront", price_paisa: 48_000 },
+            ],
+          }),
+        ],
+      }),
+    );
+    const update = must(finished(step), "update");
+    expect(store.catalog.apply(update)).toEqual({ applied: true, version: 1 });
+    // The two together: a single-cell assertion passes against a reshape that keeps only the
+    // first price, which is a real way to get this half-right.
+    expect(store.catalog.priceOf("item", "I-biryani", "counter")).toBe(45_000);
+    expect(store.catalog.priceOf("item", "I-biryani", "storefront")).toBe(48_000);
+    store.close?.();
+  });
+
+  it("03-F50 — a station on the wire is resolvable by stationOf after the fetch", () => {
+    const store = freshStore();
+    const fetch = createCatalogFetch(store.catalog.version());
+    const step = fetch.accept(
+      page({ version: 1, entries: [entry("I-tikka", "Chicken Tikka", { station: "grill" })] }),
+    );
+    const update = must(finished(step), "update");
+    expect(store.catalog.apply(update)).toEqual({ applied: true, version: 1 });
+    expect(store.catalog.stationOf("item", "I-tikka")).toBe("grill");
+    store.close?.();
+  });
+
+  it("03-F50 — a null station still INHERITS, so the null→absent collapse is not a loss", () => {
+    // The control for the mapping choice above. `null` is what the back office sends for a blank
+    // station and it means "inherit", so collapsing it to absent must leave the parent's station
+    // reachable — a mapping that wrote `station: null` through would be indistinguishable here,
+    // which is why the parent carries a station this asserts on.
+    const store = freshStore();
+    const fetch = createCatalogFetch(store.catalog.version());
+    const step = fetch.accept(
+      page({
+        version: 1,
+        entries: [
+          { kind: "category", id: "C-hot", name: "Hot food", station: "grill" },
+          entry("I-boti", "Boti", { parent_id: "C-hot", station: null }),
+        ],
+      }),
+    );
+    const update = must(finished(step), "update");
+    expect(store.catalog.apply(update)).toEqual({ applied: true, version: 1 });
+    expect(store.catalog.stationOf("item", "I-boti")).toBe("grill");
+    store.close?.();
+  });
+});
+
 describe("A16 — a paged DELTA is accumulated exactly like a snapshot", () => {
   // An earlier comment claimed deltas were applied per page. The code never did, and no test
   // distinguished the two forms — every paging test used `form: "snapshot"`, so the comment

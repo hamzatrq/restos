@@ -45,6 +45,18 @@
   back-office concern. **This service still never parses menu structure** — entries pass through to
   `publishCatalog`, which is the only thing that judges them (`01-F60` completeness,
   `CatalogEntryWire`), and nothing in `publish-http.ts` knows what an item is.
+- **`/internal/catalog/publish` NOW SENDS `catalog_notice` — it did not, and that was the whole
+  live-freshness path.** `createGateway` has shipped `notifyCatalogVersion` since T-C3 with **two
+  callers, both tests**; `registerPublishRoutes` was built with `{ db, publishSecret }` and no way
+  to reach it. So from the day `/internal` began accepting menus, a menu published while a till was
+  connected reached that till **only on its next reconnect** — under a back-office screen promising
+  *"every till in the organisation changes as soon as this saves"* (`14-F28` apply-now). Measured
+  live before the fix (`plans/wave-1/running-the-stack.md`): till connected and idle, publish
+  `200`, device `catalog_state` still version 0 / 0 rows until restart. The member is **required**,
+  not optional, precisely so a deployment cannot forget it and still compile — an optional one is
+  Rule B's hole one layer out. Correctness never depended on it and must not: `catalog-transport.md`
+  §3.2 makes version-on-`hello_ack` the correctness mechanism and the notice "only latency", so the
+  call sits **after** the publish commits and cannot fail it.
 - **`kernel.org_events` — `01-F62`'s ORG-SCOPED store (`org-events.ts`), a seventh table.** It is
   deliberately not `kernel.events` with a nullable branch: an org-scoped event carries `org_id` and
   **no `branch_id`, no branch stamp, no `device_id`, no `global_seq`, no `lamport_seq`**, and
@@ -76,6 +88,35 @@ right-hand column is measured rather than reasoned.
 **M1, M3 and M5 are the ones to re-run after any change here** — they are the three the existing
 271 cannot see. M3 in particular: silencing one `console.log` retires the entire startability
 assertion and no other test in this package notices.
+
+## Mutation matrix for the `catalog_notice` publish seam — control 281/281 green
+
+`journey-catalog.test.ts`'s `SEAM —` test. Every row is the FULL package suite.
+
+| # | mutant (exactly one branch) | SEAM test killed | pre-existing 280 |
+|---|---|---|---|
+| G1 | **`server.ts` wires `notifyCatalogVersion: () => {}`** — the shipped behaviour before this change | 1 | **all green** |
+| G2 | `publish-http.ts` never calls the seam it was handed | 1 | **all green** |
+| G3 | the notice fires BEFORE the publish commits (ordering) | **0 — SURVIVES** | all green |
+| G4 | **CONTROL: the notice sends `Number(version)` instead of `version`** | **0** | all green |
+
+**G1 is the one to re-run**, and it has a history worth keeping. The FIRST draft of that test
+mounted `registerPublishRoutes` itself, with its own `notifyCatalogVersion` argument — and **G1
+survived it**, because a test that supplies the wiring cannot observe whether the product supplies
+it. That is this wave's named defect reproduced inside the fix for it, and only the mutation run
+found it; reading the test did not. It now builds a real `buildServer`, listens on a real port, and
+drives a real `createCloudSession` over a real WebSocket, calling nothing on the gateway by hand.
+
+**G3 survives and is recorded rather than papered over.** Announcing a version before it commits is
+wrong, but the device's own `catalog_request` is authoritative about what it then receives, so the
+suite cannot currently distinguish the orders. The ordering in `publish-http.ts` is a reasoned
+choice with no test defending it — do not read it as a defended invariant.
+
+⚠ **Mint device tokens for a test that uses `buildServer` with `Date.now()`, never `BASE_T`.** Every
+other test in `journey-catalog.test.ts` injects a frozen clock, but `buildServer` is the production
+root and builds `createGateway` with the REAL one — a `BASE_T` token is 90 days expired against it
+and the session opens straight into `01-F47` drain mode, where catalog reads are refused. Observed
+exactly that on the first run, and **the assertions still went green off the reconnect**.
 
 ⚠ **This file needs no Postgres; the SUITE still does.** `vitest.config.ts` starts one
 Testcontainers Postgres in `globalSetup` for every file in the package (T-01-07: fail loudly, never
