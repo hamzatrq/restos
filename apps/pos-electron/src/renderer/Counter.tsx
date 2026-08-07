@@ -25,6 +25,7 @@ import type {
 } from "../shared/ipc";
 import { CashSurface, MeSurface } from "./CashSurfaces";
 import { ManagerApproval } from "./ManagerApproval";
+import { isCloudInbox, OrdersSurface } from "./OrdersSurface";
 
 /**
  * The counter screen — the first RestOS surface that renders on a device.
@@ -62,7 +63,11 @@ import { ManagerApproval } from "./ManagerApproval";
  */
 const TABS: readonly Tab[] = [
   { id: "order", label: "Order" },
-  { id: "orders", label: "Orders", unavailable: true, unavailableReason: "not built yet" },
+  // `C19`/`C31`. This SHIPS now, and `27-F4` means building it changed exactly one thing:
+  // `unavailable` went away. Nothing was added, removed or reordered. `C20` (reject) and `C32`
+  // (mark ready) are the two tasks on this row that could NOT be built — both blocked in the
+  // kernel rather than here — and `OrdersSurface`'s header names each blocker by FR.
+  { id: "orders", label: "Orders" },
   // `C11`–`C14`. This SHIPS now, and `27-F4` means building it changed exactly one thing:
   // `unavailable` went away. Nothing was added, removed or reordered.
   { id: "pay", label: "Pay" },
@@ -160,6 +165,14 @@ export const Counter = () => {
    */
   const [roster, setRoster] = useState<readonly Session[]>([]);
   const [page, setPage] = useState(0);
+  /**
+   * `03-F46` — the Orders tab's two lists page independently, and the page numbers live HERE
+   * rather than inside `OrdersSurface` for the reason `page` above does: a component that held
+   * its own page would reset to page 1 on every `changed` push, i.e. every line any terminal
+   * adds, snatching the list out from under a cashier reading page 3.
+   */
+  const [inboxPage, setInboxPage] = useState(0);
+  const [openPage, setOpenPage] = useState(0);
   const [activeTab, setActiveTab] = useState(TABS[0]?.id ?? "order");
   /**
    * Read through the hook, never off the static light record: `27-F67` inverts this surface's
@@ -403,6 +416,44 @@ export const Counter = () => {
       />
     );
 
+  /**
+   * `C19` — accept a cloud order. `02-F9`: **one tap**, `order.confirmed`, and *idempotent*
+   * ("at most one confirm per order id; KOT jobs created exactly once, after confirm, never
+   * before"). The idempotency is the KERNEL's, not this button's: `order.confirmed` folds as a
+   * monotone OR over the confirm set (`sync-client/src/folds/merge.ts`), so a double-tap on a
+   * counter with wet hands converges to one confirm rather than two tickets.
+   *
+   * The same append `sendToKitchen` makes, and deliberately the same one: `screen-map §4` is
+   * explicit that screens do not hand off to each other, they append to one ledger — so
+   * accepting a website order and sending a counter order to the kitchen are the same act
+   * reached from two surfaces, not two mechanisms that must be kept in step.
+   *
+   * `write` (not `escalatableWrite`): `order.confirmed` has no `escalate` cell in the matrix,
+   * and a manager-PIN pad on a control that can never need one is a pad that can never succeed.
+   */
+  const acceptCloudOrder = (order_id: string) => {
+    write(window.restos.append({ type: "order.confirmed", payload: { order_id }, refs: [] }));
+  };
+
+  /**
+   * `screen-map §5` — **"a cloud-order popup" gets no screen at all**: it *"interrupts a cart,
+   * which `27-F11d` forbids"*, and the ruled alternative is *"S2 chime + count badge on the
+   * Orders tab"*. This is the badge half.
+   *
+   * `27-F4` is satisfied by construction: the rail is still the same five tabs in the same
+   * order, and a badge is a COUNT ON an existing tab rather than a sixth surface. `TabRail`
+   * renders it only when non-zero, so a quiet counter carries no decoration.
+   *
+   * **The chime half is NOT built, and is owed rather than quietly dropped.** `21 §5` requires
+   * "one sound vocabulary platform-wide", and this device has no audio at all — `03-F5`'s S1
+   * "repeating distinct sound" is unbuilt too. Shipping an S2 chime alone would make a *new
+   * website order* audible on a till where a *failed kitchen ticket* is silent, inverting the
+   * severity ladder that FR exists to fix. Recorded in `apps/pos-electron/CLAUDE.md`.
+   */
+  const tabs = TABS.map((t) =>
+    t.id === "orders" ? { ...t, badge: orders.filter(isCloudInbox).length } : t,
+  );
+
   const cashSurface =
     cash === null ? (
       // `00 §5.7` — the device reports what it knows. An empty reconciliation drawn before the
@@ -442,7 +493,7 @@ export const Counter = () => {
         // reading this device. `reload` follows so the band goes when main says it went.
         void window.restos.acknowledgeAlarm?.(id).then(reload);
       }}
-      tabs={TABS}
+      tabs={tabs}
       activeTabId={activeTab}
       onSelectTab={setActiveTab}
       training={device.training}
@@ -470,6 +521,21 @@ export const Counter = () => {
             setPending(null);
             setApprovalRefusal(null);
           }}
+        />
+      ) : activeTab === "orders" ? (
+        /*
+          `C19`/`C31`. It takes the whole `orders` read — the same array the Order tab draws
+          `current` from — because `02-F11` makes an order started on one terminal visible on
+          every other, and a second, narrower read for this tab would be a second answer to
+          "what is open" that could disagree with the cart.
+        */
+        <OrdersSurface
+          orders={orders}
+          inboxPage={inboxPage}
+          onInboxPageChange={setInboxPage}
+          openPage={openPage}
+          onOpenPageChange={setOpenPage}
+          onAccept={acceptCloudOrder}
         />
       ) : activeTab === "pay" ? (
         paySurface

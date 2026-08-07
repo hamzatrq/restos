@@ -224,6 +224,22 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
           // billed total directly above, and for the same reason.
           paid_paisa: row.pay_total,
           lines: linesFrom(row.json_lines, deps.catalog),
+          /*
+            `C19`/`C31` — the Orders tab's four facts, passed through from the SAME fold row
+            this function already reads. Nothing is derived, joined or decided here: which
+            channel counts as a "cloud" order is `02-F9`'s policy and lives on the screen that
+            asks the question, because a gateway that pre-classified them would put policy on
+            the wrong side of the seam and hide it from the renderer's own tests.
+
+            `channel` is narrowed by `OpenOrderSchema`'s `z.enum(ORDER_CHANNELS)` on the way
+            out (`02-F42` closed the set), so a row carrying a value outside it fails `checked`
+            loudly here rather than silently mis-sorting an order into or out of the inbox —
+            which, since `01-F60` makes channel a PRICE KEY, is a class of error worth the noise.
+          */
+          channel: row.channel,
+          order_type: row.order_type,
+          confirmed_at: row.confirmed_at,
+          settled: row.settled,
         },
         `open order ${row.order_id}`,
       ),

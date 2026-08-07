@@ -325,6 +325,8 @@ describe("the guard suite actually covers the package", () => {
         "components/MoneyValue.tsx",
         "components/NumericKeypad.stories.tsx",
         "components/NumericKeypad.tsx",
+        "components/OrderList.stories.tsx",
+        "components/OrderList.tsx",
         "components/QuantityItemLine.stories.tsx",
         "components/QuantityItemLine.tsx",
         "components/StatusStrip.stories.tsx",
