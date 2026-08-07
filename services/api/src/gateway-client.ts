@@ -36,6 +36,7 @@
 
 import { z } from "zod";
 import type { CatalogEntry } from "./catalog.js";
+import { IntegrationError } from "./errors.js";
 import type { CatalogPublisher, LedgerAppender, LedgerRecord } from "./publish.js";
 
 /**
@@ -140,17 +141,75 @@ const refuse = async (response: Response, what: string): Promise<never> => {
   throw new Error(`${what}: ${detail}`);
 };
 
+/** How this dependency is named to an operator. One name, so the sentence cannot drift by route. */
+const DEPENDENCY = "sync gateway";
+
+/**
+ * The message and every `cause` beneath it. Node's undici gives `TypeError: fetch failed` and puts
+ * `connect ECONNREFUSED 127.0.0.1:8080` — the only part with any information in it — one `cause`
+ * deeper. Measured, both for a closed port and for an unresolvable host. The depth bound guards
+ * against a cycle, not against length: a real chain here is two links.
+ */
+const causeChain = (error: unknown): string => {
+  const parts: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current !== undefined && current !== null; depth++) {
+    parts.push(current instanceof Error ? current.message : String(current));
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return parts.filter((part) => part !== "").join(" ← ");
+};
+
+/**
+ * **`fetch` itself failing is a different kind of event from the gateway saying no, and this is
+ * where the two stop being the same string.**
+ *
+ * A rejected `fetch` means the peer was never reached: no request was served, nothing changed, and
+ * the caller did nothing wrong. Left alone it reaches the operator as `"fetch failed"` — tRPC
+ * normalises an unrecognised throw to `INTERNAL_SERVER_ERROR` and carries the message through —
+ * which names no dependency, assigns no fault, and suggests no action. `00 §5.7`'s honesty rule is
+ * not satisfied by a true-but-useless string.
+ *
+ * So it becomes an `IntegrationError` (`18 §5`) that says WHICH system, WHERE it was expected, WHY
+ * the attempt failed, and that the state is infrastructural and retriable. **The cause is carried,
+ * never swallowed** (`24-F15`): `trpc.ts` logs the whole chain and the sentence is only what the
+ * human reads.
+ *
+ * Non-2xx responses do NOT come here — `refuse` already carries the gateway's own message, and
+ * `01-F60`'s "entry 3 (item/biryani) is not sellable" is the owner's business, not an outage.
+ */
+const reach = async (
+  link: GatewayLink,
+  url: string | URL,
+  init: RequestInit,
+  what: string,
+): Promise<Response> => {
+  try {
+    return await fetch(url, init);
+  } catch (cause: unknown) {
+    throw new IntegrationError(
+      DEPENDENCY,
+      `${what}: the ${DEPENDENCY} at ${link.base_url} could not be reached ` +
+        `(${causeChain(cause)}). Nothing was changed and nothing was rejected — this is an ` +
+        `infrastructure state, not a problem with the menu or with this request. Check that ` +
+        `services/sync-gateway is running and that SYNC_GATEWAY_URL points at it, then try again.`,
+      { retriable: true, cause },
+    );
+  }
+};
+
 const postJson = async (
   link: GatewayLink,
   path: string,
   body: unknown,
   what: string,
 ): Promise<unknown> => {
-  const response = await fetch(endpoint(link, path), {
-    method: "POST",
-    headers: authHeaders(link),
-    body: JSON.stringify(body),
-  });
+  const response = await reach(
+    link,
+    endpoint(link, path),
+    { method: "POST", headers: authHeaders(link), body: JSON.stringify(body) },
+    what,
+  );
   if (!response.ok) await refuse(response, what);
   return response.json();
 };
@@ -163,7 +222,7 @@ const getJson = async (
 ): Promise<unknown> => {
   const url = new URL(endpoint(link, path));
   url.searchParams.set("org_id", org_id);
-  const response = await fetch(url, { headers: authHeaders(link) });
+  const response = await reach(link, url, { headers: authHeaders(link) }, what);
   if (!response.ok) await refuse(response, what);
   return response.json();
 };

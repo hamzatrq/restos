@@ -146,6 +146,39 @@ const refusalStatus = (error: unknown): number => (error instanceof RangeError ?
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+/**
+ * The two `/internal` READS take one already-parsed query parameter, so anything they throw came
+ * from the DATABASE and never from the caller.
+ *
+ * Left uncaught it becomes Fastify's default 500 body — `{ statusCode, error: "Internal Server
+ * Error", message }` — and `services/api`'s `ErrorBody` schema parses that happily, reading
+ * `error` as the literal string "Internal Server Error" and dropping the `ECONNREFUSED` that names
+ * the actual fault. So the operator three services away is told "Internal Server Error" about a
+ * database nobody started. Naming the dependency here is what keeps that legible (`00 §5.7`).
+ */
+const databaseFailure = (what: string, error: unknown): string =>
+  `${what}: the sync gateway could not read from its database (${causeChain(error)}). This is an ` +
+  `infrastructure state on the gateway, not a rejected request.`;
+
+/**
+ * The message and every `cause` beneath it, outermost first.
+ *
+ * **Measured, not assumed:** `DrizzleQueryError.message` is the SQL that failed, and the
+ * `connect ECONNREFUSED 127.0.0.1:5432` that actually explains it lives one `cause` deeper. Taking
+ * only the top message hands the operator a query they cannot act on and discards the one sentence
+ * that tells them to start Postgres. The depth bound guards against a cycle, not against length —
+ * a real chain here is two links.
+ */
+const causeChain = (error: unknown): string => {
+  const parts: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current !== undefined && current !== null; depth++) {
+    parts.push(messageOf(current));
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return parts.join(" ← ");
+};
+
 export const registerPublishRoutes = (app: FastifyInstance, deps: PublishDeps): void => {
   app.addHook("onRequest", async (request, reply) => {
     if (!request.url.startsWith("/internal/")) return;
@@ -185,7 +218,12 @@ export const registerPublishRoutes = (app: FastifyInstance, deps: PublishDeps): 
     const parsed = OrgQuery.safeParse(request.query);
     if (!parsed.success)
       return reply.code(400).send({ error: "catalog published: org_id required" });
-    return reply.code(200).send(await foldPublished(deps.db, parsed.data.org_id));
+    try {
+      return reply.code(200).send(await foldPublished(deps.db, parsed.data.org_id));
+    } catch (error: unknown) {
+      request.log.error({ err: error }, "catalog published: database read failed");
+      return reply.code(500).send({ error: databaseFailure("catalog published", error) });
+    }
   });
 
   app.post("/internal/org-events", async (request, reply) => {
@@ -204,6 +242,11 @@ export const registerPublishRoutes = (app: FastifyInstance, deps: PublishDeps): 
   app.get("/internal/org-events", async (request, reply) => {
     const parsed = OrgQuery.safeParse(request.query);
     if (!parsed.success) return reply.code(400).send({ error: "org events: org_id required" });
-    return reply.code(200).send({ events: await orgEventHistory(deps.db, parsed.data.org_id) });
+    try {
+      return reply.code(200).send({ events: await orgEventHistory(deps.db, parsed.data.org_id) });
+    } catch (error: unknown) {
+      request.log.error({ err: error }, "org events: database read failed");
+      return reply.code(500).send({ error: databaseFailure("org events", error) });
+    }
   });
 };

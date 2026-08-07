@@ -114,12 +114,57 @@ export const buildServer = (
   return app;
 };
 
+/**
+ * **The boot lines' prefixes, exported so `__acceptance__/startable.test.ts` matches THESE strings
+ * rather than hand-copies of them.** A copied literal is how an oracle ends up asserting against a
+ * symbol nobody ships (round-3 law, `K-3`): rename a message and a copy keeps passing against a
+ * server that no longer says it.
+ *
+ * `LISTENING_PREFIX` is load-bearing and not decoration: the startability test spawns the declared
+ * `start` script with `PORT=0`, so the port the process actually got is knowable ONLY from this
+ * line. Fastify's own pino line says the same thing in JSON; this one is the contract.
+ */
+export const LISTENING_PREFIX = "@restos/sync-gateway listening on ";
+
+/** Which database this process will use — see `DATABASE_URL_DEFAULT` for why it is printed. */
+export const DATABASE_PREFIX = "@restos/sync-gateway database ";
+
+/** Whether `/internal` can accept a menu at all — see `PUBLISH_TOKEN` for why it is printed. */
+export const PUBLISH_PREFIX = "@restos/sync-gateway publish surface ";
+
+/**
+ * The conventional local Postgres.
+ *
+ * **Why a default at all, when `18 §5` crashes at boot on invalid env.** Until August 2026 this
+ * service had no `start` script whatsoever, so nothing had ever run it as a process; when one was
+ * added, a *required* `DATABASE_URL` meant the gateway could not be brought up beside
+ * `services/api` and the back office without first knowing a URL, and the three-process stack is
+ * the thing that was missing. The default is not a fallback that hides: `postgres-js` connects
+ * **lazily**, so a wrong or absent database is never a silent success — it is a loud failure on the
+ * first request that needs one, and the boot line below names the address that will be tried.
+ *
+ * The credentials stay required where a credential is the control: `DEVICE_TOKEN_SECRET` has no
+ * default and `PUBLISH_TOKEN` absent is fail-CLOSED. A default connection string cannot grant
+ * anyone anything; a default secret would.
+ */
+const DATABASE_URL_DEFAULT = "postgres://postgres:postgres@localhost:5432/restos";
+
+/**
+ * The DSN with its password removed, for the boot line. `18 §5` logs are structured JSON that ends
+ * up in a log store; a connection password is the one part of a DSN that must never reach one, and
+ * the host/port/database — the part an operator actually needs to diagnose "why can it not reach
+ * the database" — are the parts kept.
+ */
+const redactedDsn = (raw: string): string => {
+  const url = URL.parse(raw);
+  if (url === null) return "(unparseable DATABASE_URL)";
+  if (url.password !== "") url.password = "*****";
+  return url.toString();
+};
+
 export const start = async (): Promise<FastifyInstance> => {
   const env = defineEnv({
-    DATABASE_URL: (raw) => {
-      if (raw === undefined || raw === "") throw new Error("required (postgres connection URL)");
-      return raw;
-    },
+    DATABASE_URL: (raw) => (raw === undefined || raw === "" ? DATABASE_URL_DEFAULT : raw),
     DEVICE_TOKEN_SECRET: (raw) => {
       // T-01-09: the HS256 device-token verification key (18 §5). Required —
       // the gateway cannot authenticate anyone without it (crash at boot).
@@ -158,9 +203,17 @@ export const start = async (): Promise<FastifyInstance> => {
       }
       return raw;
     },
+    /**
+     * `0` is legal and means "bind an ephemeral port", which is what `startable.test.ts` uses: with
+     * a fixed port the test knows where the server is without reading anything the server said, and
+     * the boot line stops being load-bearing. The alternative it replaced — bind a port, release
+     * it, hand the number to the child — races anything else on the machine in the gap. Everything
+     * outside `0..65535` is still a boot crash (`18 §5`); `services/api`'s `PORT` has always
+     * accepted `0` for the same reason.
+     */
     PORT: (raw) => {
       const port = Number(raw ?? "8080");
-      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      if (!Number.isInteger(port) || port < 0 || port > 65535) {
         throw new Error(`not a valid port: ${String(raw)}`);
       }
       return port;
@@ -173,7 +226,25 @@ export const start = async (): Promise<FastifyInstance> => {
     env.DEVICE_TOKEN_AUDIENCE,
     env.PUBLISH_TOKEN,
   );
-  await app.listen({ port: env.PORT, host: "0.0.0.0" });
+  const address = await app.listen({ port: env.PORT, host: "0.0.0.0" });
+  // Three facts, and each one is a question that cost real time when it had no answer. WHERE it is
+  // listening (with `PORT=0` this is the only place the port exists). WHICH database it will reach
+  // for — lazily, so this line is printed long before anything proves the address is reachable.
+  // And WHETHER `/internal` can accept a menu at all: `PUBLISH_TOKEN` absent is fail-closed, and
+  // without this line that shows up only as a 503 in another service's logs.
+  console.log(`${LISTENING_PREFIX}${address}`);
+  console.log(
+    `${DATABASE_PREFIX}${redactedDsn(env.DATABASE_URL)} (opened lazily — an unreachable database ` +
+      `surfaces on the first request that needs one, never at boot)`,
+  );
+  console.log(
+    `${PUBLISH_PREFIX}${
+      env.PUBLISH_TOKEN === undefined
+        ? "DISABLED — no PUBLISH_TOKEN, so every /internal route answers 503 (fail-closed). " +
+          "services/api cannot publish a menu to this gateway until it is set on both sides."
+        : "enabled (PUBLISH_TOKEN configured)"
+    }`,
+  );
   return app;
 };
 
