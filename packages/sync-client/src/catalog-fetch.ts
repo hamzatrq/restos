@@ -37,6 +37,27 @@ export type WireEntry = {
   parent_id?: string | null | undefined;
   sort?: number | undefined;
   deleted?: boolean | undefined;
+  /**
+   * `01-F60` — the price per `(branch, channel)`, and `03-F50` — the kitchen station.
+   *
+   * **These two were absent from this type and from `toEntry`, and that is the whole reason a
+   * published menu reached a real till unsellable.** Measured end to end (August 2026, live
+   * three-process run): the gateway served
+   * `prices: [{branch_id, channel: "counter", price_paisa: 45000}, …]`, `CatalogEntryWire`
+   * carried them, `catalog.ts`'s `CatalogEntry` declared them and `priceOf`/`stationOf` read
+   * them — and the row that landed in the device's `catalog` table was
+   * `{"kind":"item","id":"chicken-biryani","name":"Chicken Biryani","kitchen_name":"Biryani"}`.
+   * Every tile on the grid rendered `no price set`, and every KOT would have routed to
+   * `DEFAULT_STATION` whatever the owner chose.
+   *
+   * It survived because the two halves are each covered and nothing covered the join:
+   * `__acceptance__/catalog-pricing.test.ts` calls `store.catalog.apply()` DIRECTLY, so it never
+   * crosses this function, and `__acceptance__/catalog-fetch.test.ts` never mentioned a price. See
+   * `WireCatalogResponse` below — its own doc comment already warned that "a reshape is where a
+   * field quietly goes missing", about this reshape.
+   */
+  prices?: readonly { branch_id: string; channel: string; price_paisa: number }[] | undefined;
+  station?: string | null | undefined;
 };
 
 export type WireCatalogResponse = {
@@ -64,6 +85,12 @@ const toEntry = (w: WireEntry): CatalogEntry => ({
     : { kitchen_name: w.kitchen_name }),
   ...(w.parent_id === undefined || w.parent_id === null ? {} : { parent_id: w.parent_id }),
   ...(w.sort === undefined ? {} : { sort: w.sort }),
+  ...(w.prices === undefined ? {} : { prices: w.prices }),
+  // `null` collapses to ABSENT exactly as `kitchen_name` does above, and for `station` that is
+  // behaviour-preserving rather than lossy: `03-F50` makes absence INHERITANCE, and `stationOf`
+  // already treats `null` and `undefined` identically (both fail its `typeof === "string"` test).
+  // The back office sends `null` for a blank station on purpose, meaning "inherit".
+  ...(w.station === undefined || w.station === null ? {} : { station: w.station }),
 });
 
 const toRef = (w: WireEntry): CatalogRef => ({ kind: w.kind as CatalogKind, id: w.id });

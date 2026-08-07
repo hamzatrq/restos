@@ -62,7 +62,17 @@ export const buildServer = (
   // audit half). It is registered on the SAME Fastify instance as `/sync` on purpose: the founder
   // ruling is that this service is the one writer of the catalog tables (`18 §4`), and a second
   // process writing them would be the coupling the ruling exists to prevent, one hop further out.
-  registerPublishRoutes(app, { db, publishSecret });
+  // `notifyCatalogVersion` is THE seam that was missing: the method existed, was tested, and had
+  // no production caller, so a menu published while a till was connected reached it only on the
+  // till's next reconnect (`plans/wave-1/catalog-transport.md` T-C3). Passing the gateway's method
+  // rather than the gateway keeps this module the only thing that knows a gateway exists.
+  registerPublishRoutes(app, {
+    db,
+    publishSecret,
+    notifyCatalogVersion: (org_id, version) => {
+      gateway.notifyCatalogVersion(org_id, version);
+    },
+  });
 
   void app.register(websocket);
   void app.register(async (instance) => {

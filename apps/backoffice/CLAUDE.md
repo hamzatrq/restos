@@ -11,6 +11,15 @@ Plan: `plans/wave-1/backoffice-catalog.md`. Stack rules: `18 §7`. Visual langua
 The back office is a **front end with no backend of its own**. Start `services/api` first or every
 query 502s.
 
+⚠ **THIS IS THE TWO-PROCESS RECIPE. For a menu that actually reaches a till, use
+`plans/wave-1/running-the-stack.md`** — four processes and a Postgres, and it was run end to end in
+August 2026. The values below are fine here because nothing in a two-process run ever reads the org
+id back; **copy them into a four-process run and you get a silent failure.** `BOOTSTRAP_ORG_ID`
+must equal `apps/pos-electron`'s `DEV_IDENTITY.org_id` and `ENABLED_BRANCHES` must contain its
+`branch_id`, or the menu publishes into an org no device fetches — and *nothing reports an error*:
+this screen says "Published version 1", the gateway returns `200`, the row is in Postgres, and the
+till sits at `catalog v0 — 0 tile(s)` for ever.
+
 ```sh
 # 1 — the cloud plane (services/api). Prints `@restos/api listening on http://…` when it is up.
 SESSION_SECRET=<any-dev-secret> \

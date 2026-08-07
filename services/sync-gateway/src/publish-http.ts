@@ -107,6 +107,33 @@ type PublishDeps = {
    * internet.
    */
   readonly publishSecret: string | undefined;
+  /**
+   * Tell every LIVE session in the org that a new catalog version exists
+   * (`plans/wave-1/catalog-transport.md` T-C3 — "the notice broadcast to an org's connected
+   * sessions"; §3.2 — "a `catalog_notice` frame covers the case where the version changes
+   * DURING a live session"). `01-F52`: announcing that a new version exists is the mechanism;
+   * the frame carries no menu.
+   *
+   * **REQUIRED, not optional, and that is the whole point.** `createGateway` has shipped
+   * `notifyCatalogVersion` since T-C3 with **zero production callers** — two acceptance tests and
+   * nothing else — so from the day `/internal` began accepting menus until August 2026 no notice
+   * was ever emitted. Measured live: with a till connected and idle, an owner pressed **Apply
+   * now** in the back office, the publish returned `200`, and the device's `catalog_state` stayed
+   * at version 0 with 0 rows until it was restarted. The screen that promised *"every till in the
+   * organisation changes as soon as this saves"* was telling the owner something the system did
+   * not do (`00 §5` — sync honesty).
+   *
+   * `seams:check` cannot see this class: a key in an object literal is not an export, so Rule A
+   * never looked at it, and there was no options-bag member for Rule B to find unsupplied. An
+   * OPTIONAL member here would have re-created exactly that hole one layer out, which is why this
+   * one is required — a deployment cannot forget it and still compile.
+   *
+   * Correctness does not depend on it and must not: §3.2 makes version-on-`hello_ack` the
+   * correctness mechanism and the notice "only latency", so a dropped notice costs freshness and
+   * never correctness. That is why this is called after the publish has already been committed
+   * and its failure cannot fail the publish.
+   */
+  readonly notifyCatalogVersion: (org_id: string, version: number) => void;
 };
 
 /** Rows per internal page. Matches `CATALOG_PAGE_SIZE`, which is what `catalogPage` serves. */
@@ -208,6 +235,11 @@ export const registerPublishRoutes = (app: FastifyInstance, deps: PublishDeps): 
         now,
         enabled,
       });
+      // AFTER the publish is committed, and never in front of the reply's failure path: the
+      // artifact is what a device fetches, so a notice for a version that did not land would send
+      // every till in the org after a menu that does not exist. Ordered this way the worst case is
+      // a landed version nobody was told about, which `hello_ack` reconciles on the next connect.
+      deps.notifyCatalogVersion(org_id, version);
       return reply.code(200).send({ version });
     } catch (error: unknown) {
       return reply.code(refusalStatus(error)).send({ error: messageOf(error) });

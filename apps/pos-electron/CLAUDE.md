@@ -148,13 +148,28 @@ difference is a control an operator cannot reach**, not a cosmetic overflow.
   is wrong. Nothing in the corpus rules, `simulate()`'s advance was inherited verbatim from K-3's
   virtual printer (so the same overlap has been in every snapshot since), and changing it would change
   an oracle's meaning. **Finding for the K-3/K-5 test owners and for K-8's rig, not a fix.**
+- **THE PUBLISHED MENU NOW REACHES THIS APP, MEASURED — the "nothing publishes one yet" line
+  below is retired.** August 2026: the four-process stack was run end to end and an owner's menu
+  travelled back office → `services/api` → `services/sync-gateway` → this till, which rang it at
+  the price the owner typed (Rs 450 + Rs 320 = Rs 770). Both delivery paths work — a snapshot on
+  `hello_ack` version mismatch, and a **live delta** on `catalog_notice` that moved a connected
+  till from v1 to v2 with no restart. **The runbook is `plans/wave-1/running-the-stack.md`** and it
+  is the only document that takes you from a clean checkout to that state; read §0 first, because
+  `DEV_IDENTITY`'s `org_id` must equal the API's `BOOTSTRAP_ORG_ID` and its `branch_id` must be in
+  `ENABLED_BRANCHES`, and a mismatch fails **silently** in all four processes at once.
+  **Two live defects had to be fixed to get there, and neither was visible to any suite:**
+  `packages/sync-client`'s `catalog-fetch.ts` dropped `prices` and `station` at the wire→store
+  reshape (so every synced tile was `no price set` — it failed 0 of 579 tests), and the gateway's
+  `/internal` publish never called `notifyCatalogVersion` (so apply-now reached nobody live — 0 of
+  280). Both are protected paths and both want senior review.
 - **The item grid needs a source, and there are exactly two.** The catalog *transport* is real
   and wired as of T-C6: `main/sync.ts` builds the cloud session, which requests on `hello_ack`
   version mismatch and on `catalog_notice` and applies into `store.catalog` — so a device with
   `RESTOS_CLOUD_URL`/`RESTOS_DEVICE_TOKEN` pointed at a gateway gets the org's published menu.
-  Nothing *publishes* one yet, because that is the back office
-  (`plans/wave-1/backoffice-catalog.md`). So for a local launch there is a **marked DEV SEED**,
-  off by default like the roster:
+  **Nothing MINTS a device token, though** (`01-F47` admission is unbuilt): the gateway needs both
+  an HS256 token and an unrevoked `kernel.device_registry` row, and both are manual steps in the
+  runbook's §6b. For a local launch with no gateway there is a **marked DEV SEED**, off by default
+  like the roster:
 
   ```
   RESTOS_DEV_MENU=1 RESTOS_DEV_PIN=<digits> pnpm start

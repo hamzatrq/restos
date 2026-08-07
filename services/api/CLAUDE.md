@@ -10,7 +10,17 @@
   `BOOTSTRAP_OWNER_EMAIL`/`_PASSWORD_HASH` + `BOOTSTRAP_ORG_ID` seed the one owner, and **absent env
   means nobody can log in — fail-closed, never give it a default credential**. `ENABLED_BRANCHES` /
   `ENABLED_CHANNELS` are `01-F60`'s enabled set; absent means every save is REFUSED, not unchecked.
-  Full two-process startup: `apps/backoffice/CLAUDE.md`.
+  Full two-process startup: `apps/backoffice/CLAUDE.md`. **Full FOUR-process startup — the one
+  where a published menu reaches a real till — is `plans/wave-1/running-the-stack.md`**, run end to
+  end in August 2026.
+- **⚠ `BOOTSTRAP_ORG_ID` IS A JOIN KEY WITH THREE ENDS AND NO ERROR MESSAGE.** This service
+  publishes under the logged-in owner's org (`ctx.subject.org_id`, i.e. `BOOTSTRAP_ORG_ID`); the
+  gateway stores by that org; a device fetches by the org in its own token and registry row. Set it
+  to anything other than `apps/pos-electron`'s `DEV_IDENTITY.org_id` and every process reports
+  success while no till ever sees a menu. Same for `ENABLED_BRANCHES` versus the device's
+  `branch_id`: the till resolves prices for its OWN branch on `counter`, so an enabled set naming a
+  different branch publishes a menu whose every tile reads `no price set`. Neither has a surface
+  that could notice — there is no `catalog.enabled` procedure and no org-existence check anywhere.
 - **`__acceptance__/startable.test.ts` is a SEAM test, not a unit test** — this wave's recurring
   defect (AGENTS.md) landed here as an entire unstartable service, so the seam gets an assertion
   rather than only a fix. It spawns `scripts.start` **as declared in `package.json`** (delete the
