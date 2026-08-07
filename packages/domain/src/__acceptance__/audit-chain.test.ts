@@ -25,13 +25,33 @@ import {
 
 const T0 = 1752800000000;
 
+// A transcription of `01-F5`'s CLOSED SET, kept independent of the registry on purpose so
+// `AUDIT_EVENT_TYPES` is checked against spec text rather than against itself. `01-F5` was
+// amended (August 2026) from five subtypes to SIX: `audit.print_acknowledged` was added
+// because `03-F5` requires the acknowledgment of an exhausted-retry KOT print alert to be
+// "logged (`audit.*`)" and none of the original five fits. Widening this list is therefore a
+// re-transcription of the amended FR, not a weakening — the assertion below still demands
+// SET EQUALITY, so a registry carrying five, or seven, still reddens.
 const AUDIT_TYPES = [
   "audit.login",
   "audit.drawer_opened",
   "audit.reprint",
   "audit.threshold_override",
   "audit.settings_changed",
+  "audit.print_acknowledged",
 ] as const;
+
+/** Cycle through the subtypes so a fixture chain exercises more than one of them.
+ * `noUncheckedIndexedAccess` widens every numeric index to `T | undefined`, and the `!` that
+ * used to discharge it is banned (`lint/style/noNonNullAssertion`). The totality is real — a
+ * modulo index into a non-empty tuple cannot miss — so it is discharged by an explicit narrow
+ * rather than asserted or cast away: if this list were ever emptied the fixture would fail
+ * loudly here instead of silently building envelopes with an `undefined` type. */
+const cycleAuditType = (i: number): (typeof AUDIT_TYPES)[number] => {
+  const type = AUDIT_TYPES[i % AUDIT_TYPES.length];
+  if (type === undefined) throw new Error("AUDIT_TYPES is empty — 01-F5 names a non-empty set");
+  return type;
+};
 
 /** The store-owned chain field lives in the PAYLOAD (the envelope z.object strips
  * unknown keys — DEC-AUDIT-001 decision 2). Read it back as string | null. */
@@ -94,7 +114,7 @@ const makeChain = (n: number, salt: number): EventEnvelopeT[] => {
       id: `a${salt}-${i}`,
       lamport_seq: i,
       device_created_at: T0 + i * 100,
-      type: AUDIT_TYPES[i % AUDIT_TYPES.length]!,
+      type: cycleAuditType(i),
       payload: { prev_audit_hash: prev, actor: `u${i}` },
     });
     chain.push(env);
@@ -109,7 +129,7 @@ const tamperPrev = (env: EventEnvelopeT, value: string | null): EventEnvelopeT =
 });
 
 describe("audit event catalog (01-F5)", () => {
-  it("01-F5: isAuditEvent recognises exactly the five audit.* subtypes, nothing else", () => {
+  it("01-F5: isAuditEvent recognises exactly the six audit.* subtypes, nothing else", () => {
     for (const type of AUDIT_TYPES) expect(isAuditEvent(type), `${type} is audit`).toBe(true);
     expect([...AUDIT_EVENT_TYPES].sort()).toEqual([...AUDIT_TYPES].sort());
     for (const type of ["order.created", "payment.recorded", "audit", "audit.", "login"]) {

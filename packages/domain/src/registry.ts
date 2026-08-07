@@ -354,7 +354,7 @@ const payloadSchemas = {
 
 export type KnownEventType = keyof typeof payloadSchemas;
 
-// Audit family (01-F5; 01 §4 admin-family `audit.*` wildcard). These five concrete
+// Audit family (01-F5; 01 §4 admin-family `audit.*` wildcard). These six concrete
 // subtypes are ordinary kernel events, hash-chained per device. The chain link lives in
 // the PAYLOAD as `prev_audit_hash: string | null` (store-owned platform law, 01 §7) —
 // NOT the envelope, because `EventEnvelope` is a strict z.object that strips unknown keys
@@ -373,6 +373,14 @@ const auditPayloadSchemas = {
   "audit.reprint": auditPayloadSchema,
   "audit.threshold_override": auditPayloadSchema,
   "audit.settings_changed": auditPayloadSchema,
+  // 01-F5 (amended August 2026): `03-F5` requires that acknowledging an exhausted-retry
+  // KOT print alert is "logged (`audit.*`)", and none of the original five fits. It sits in
+  // THIS family, not beside `kot.*`, for the reason `audit.drawer_opened` does — silently
+  // dismissing the band loses a kitchen ticket with nobody accountable, and the per-device
+  // hash chain is what makes a quiet dismissal detectable. Until it was declared here, the
+  // ack was an `01-F4` UnknownEventTypeError at emit and `03-F5` could not be satisfied at
+  // all (found by K-7, which held the ack in memory rather than mint a subtype).
+  "audit.print_acknowledged": auditPayloadSchema,
 } as const;
 
 /** The closed set of audit.* subtypes (01-F5). Iterable — `[...AUDIT_EVENT_TYPES]`. */
@@ -382,7 +390,7 @@ export type AuditEventType = keyof typeof auditPayloadSchemas;
 
 const AUDIT_TYPE_SET: ReadonlySet<string> = new Set(AUDIT_EVENT_TYPES);
 
-/** True for exactly the five audit.* subtypes — the store stamps the chain for these only. */
+/** True for exactly the six audit.* subtypes (01-F5) — the store stamps the chain for these only. */
 export const isAuditEvent = (type: string): boolean => AUDIT_TYPE_SET.has(type);
 
 // Combined lookup for parse-time payload validation (01-F4) across both families — the
