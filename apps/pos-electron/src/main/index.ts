@@ -6,7 +6,12 @@ import { createSpooler, printerCapability } from "@restos/escpos";
 import { createPinAuditSink, createPinSession, openStore, wallClock } from "@restos/sync-client";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { AppendRequestSchema, CHANNELS, type Session } from "../shared/ipc";
-import { authorizeReads, authorizeWrites, PAID_OUT_APPROVAL_THRESHOLD_PAISA } from "./authorize";
+import {
+  authorizeEscalation,
+  authorizeReads,
+  authorizeWrites,
+  PAID_OUT_APPROVAL_THRESHOLD_PAISA,
+} from "./authorize";
 import {
   catalogResolver,
   priceResolver,
@@ -443,6 +448,59 @@ app.whenReady().then(async () => {
   const reads = authorizeReads({ reads: gateway, store, session });
 
   /**
+   * **`02-F20`'s LOCAL manager-PIN path — the third outcome finally reaching a surface.**
+   *
+   * `can()` returns three values and `escalate` had no path anywhere in the product, so an
+   * above-threshold paid-out (`05-F19`) was refused outright at every till this wave ships.
+   *
+   * ── Why a SECOND `createPinSession` and not the one above ────────────────────────────────
+   *
+   * `unlock()` MOVES the session — `pins.unlock(manager, …)` would sign the manager in and sign
+   * the cashier out, and `02-F41` would then attribute the next twenty orders to whoever
+   * authorised one paid-out, permanently (`01-F1`). `02-F20` wants the opposite: *"the recorded
+   * event carries actor + approver"*, two identities, the actor unchanged.
+   *
+   * It is the same CREDENTIAL SURFACE, not a second one, and that is what matters: the same
+   * `createPinSession` code, the same `store.staff` Argon2id hashes (`01-F28`), the same
+   * `MAX_FAILED_ATTEMPTS`, and — the line that carries `01-F61` — the same **durable
+   * `store.pinAttempts`**, so failures at the approval pad and failures at the unlock gate count
+   * against one per-(device, user) counter and survive a relaunch. A hand-rolled `verifyPin` call
+   * here would be a second credential surface with its own lockout to forget.
+   *
+   * Its own `currentUser()` is never read by anything: `session` above is bound to `pins`, and
+   * `__acceptance__/escalation.test.ts` §E asserts the till still names the cashier after an
+   * approval.
+   *
+   * **`audit: () => {}` is a stated gap, not the instance-4 defect repeating.** `createPinSession`
+   * hardcodes `type: "audit.login"`, and a manager who authorised a paid-out did NOT log in —
+   * writing one would put a session that never existed into a permanent ledger. `01-F5`'s
+   * `audit.threshold_override` is the subtype this act belongs under, but the sink cannot express
+   * it and `sync-client` is a protected path outside this task. What IS recorded: the approver on
+   * the event itself (`02-F20`), and every failed attempt in the durable counter above.
+   */
+  const approvals = createPinSession({
+    registry: store.staff,
+    device: { device_id: DEV_IDENTITY.device_id, registered: true },
+    idle_lock_ms: IDLE_LOCK_MS,
+    max_failed_attempts: MAX_FAILED_ATTEMPTS,
+    now: () => wallClock.now(),
+    audit: () => {},
+    attempts: store.pinAttempts,
+  });
+
+  const escalation = authorizeEscalation({
+    // The RAW gateway: this object performs the authorization itself and appending through
+    // `writes` would re-run the guard that already refused the unescalated write.
+    writes: gateway,
+    store,
+    // The REQUESTER, and it stays the requester: `subjectOf` reads this for `02-F38`'s
+    // self-approval rule and `gateway.append` reads it for `02-F41`'s attribution.
+    session,
+    paidOutApprovalThresholdPaisa: PAID_OUT_APPROVAL_THRESHOLD_PAISA,
+    verifyApprover: async (user_id, pin) => (await approvals.unlock(user_id, pin)).ok,
+  });
+
+  /**
    * `03-F4`/`03-F5` — the durable print spooler and the thing that feeds it.
    *
    * **This is K-7's whole point, and it is four lines.** `packages/escpos` shipped the encoder,
@@ -500,7 +558,21 @@ app.whenReady().then(async () => {
    * `slip.printed` and no `slip.print_failed`, so a failed cash slip reaches the counter's band
    * and nothing in the ledger (`main/printing.ts`'s `CASH_JOB_PREFIX` has the full reasoning).
    */
-  const cash = createCashPrinter({ spooler, store, capability: kotCapability(), pump: kot.pump });
+  const cash = createCashPrinter({
+    spooler,
+    store,
+    capability: kotCapability(),
+    pump: kot.pump,
+    // `03-F5`'s acknowledgement — the ONE ledger fact this printer writes. Not a print event:
+    // `01 §4` still has no `slip.printed`/`slip.print_failed` and none is invented. `01-F5`'s
+    // sixth subtype records that a human dismissed a `03-F5` band, and one tap on
+    // `CHANNELS.acknowledgeAlarm` dismisses either printer's, so both are wired or the record
+    // depends on which printer owned the alarm.
+    append: (type, payload) => {
+      gateway.append({ type, payload, refs: [] });
+      notifyChanged();
+    },
+  });
   /**
    * `03-F4`'s retry SPACING, which the spooler deliberately does not own ("the BUDGET is
    * enforced here; the SPACING is not enforced anywhere yet" — `RETRY_WINDOW_MS`). Without this
@@ -657,6 +729,43 @@ app.whenReady().then(async () => {
     notifyChanged();
     return result;
   });
+
+  /**
+   * `02-F20` — "would a manager credential close this?", answered off the matrix for DISPLAY.
+   *
+   * A read, and it authorizes nothing: the write it describes is still refused by `writes.append`
+   * above, and `escalate` below re-decides everything from scratch. A renderer that ignored this
+   * answer, or forged one, would gain nothing at all — which is the property that lets it exist
+   * without breaking Commandment 8.
+   */
+  ipcMain.handle(CHANNELS.escalationFor, (_event, req: unknown) => escalation.offer(req));
+  /**
+   * `02-F20`'s local path. The SECOND channel that carries a credential, and the last: it takes
+   * `unlock`'s (`user_id`, `pin`) pair in that order because it is the same credential and the
+   * same `01-F61` counter behind it.
+   *
+   * Type-checked rather than trusted, like every other handler here — the renderer is the
+   * untrusted end of this bridge (`shared/ipc.ts`), and a non-string reaching Argon2id is a throw
+   * inside the handler on a surface an operator cannot get out of.
+   *
+   * `touch()` is deliberately NOT called for the approver: `01-F26`'s idle timer belongs to the
+   * signed-in cashier's session, and a manager's PIN is not the cashier working. The append that
+   * follows is hers, so the timer is refreshed on the requester's own act below.
+   */
+  ipcMain.handle(
+    CHANNELS.escalate,
+    async (_event, req: unknown, approver_user_id: unknown, pin: unknown) => {
+      if (typeof approver_user_id !== "string" || typeof pin !== "string") {
+        return { ok: false, refused: "bad_pin" };
+      }
+      const result = await escalation.approve(req, approver_user_id, pin);
+      // The refused case moves nothing, but the screen re-reads either way: a refusal it did not
+      // see would leave the pad over a counter whose folds may have moved underneath it.
+      if (result.ok) touch();
+      notifyChanged();
+      return result;
+    },
+  );
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) load(createWindow());

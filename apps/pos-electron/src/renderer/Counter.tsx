@@ -1,8 +1,19 @@
 import { newId, paisa } from "@restos/domain";
 import { AppShell, Cart, ItemGrid, type Tab, TenderPanel, Tile, usePhysicalSize } from "@restos/ui";
 import { useCallback, useEffect, useState } from "react";
-import type { Alarm, CashState, DeviceState, MenuItem, OpenOrder } from "../shared/ipc";
+import type {
+  Alarm,
+  AppendRequest,
+  CashState,
+  DeviceState,
+  EscalationOffer,
+  EscalationRefusal,
+  MenuItem,
+  OpenOrder,
+  Session,
+} from "../shared/ipc";
 import { CashSurface, MeSurface } from "./CashSurfaces";
+import { ManagerApproval } from "./ManagerApproval";
 
 /**
  * The counter screen — the first RestOS surface that renders on a device.
@@ -98,6 +109,27 @@ export const Counter = () => {
    * does not serve the channel leaves this empty and the counter keeps selling (`01-F17`).
    */
   const [alarms, setAlarms] = useState<readonly Alarm[]>([]);
+  /**
+   * `02-F20`'s local path, mid-flight: the refused request, and the roles main says would close
+   * it. `null` is the ordinary state — a pad is raised only after MAIN has said the matrix
+   * escalates this act, never because a screen guessed that it might.
+   */
+  const [pending, setPending] = useState<{ req: AppendRequest; offer: EscalationOffer } | null>(
+    null,
+  );
+  const [approvalRefusal, setApprovalRefusal] = useState<EscalationRefusal | null>(null);
+  /**
+   * `01-F61` — the roster the approval grid is drawn from, fetched ONLY when an approval is
+   * actually raised, and not on mount.
+   *
+   * Not a performance choice: `cash-tab.dom.test.tsx` and `me-tab.dom.test.tsx` both assert that
+   * those surfaces reach for no bridge member outside their own list, and reading the roster on
+   * mount reddens both — correctly, because the Cash and Me surfaces have no business asking who
+   * could sign in. It is also the honest read for this pad: an approver grid is a per-approval
+   * surface with no positional memory to preserve (`27-F4`), so a list that is a moment old is a
+   * list that is right.
+   */
+  const [roster, setRoster] = useState<readonly Session[]>([]);
   const [page, setPage] = useState(0);
   const [activeTab, setActiveTab] = useState(TABS[0]?.id ?? "order");
   /**
@@ -170,6 +202,64 @@ export const Counter = () => {
   };
 
   /**
+   * `02-F20` — a write that main may refuse with `escalate`, and the local path that follows.
+   *
+   * The refusal itself cannot cross the bridge: `ipcMain.handle` serializes a thrown error to its
+   * message and drops the `refusal` object `main/authorize.ts` attaches. So on a rejection this
+   * asks the SAME guard the same question through `escalationFor`, which returns an offer only
+   * when the matrix says `escalate` — never on a plain `deny`, and never when the write was
+   * allowed. A pad raised on every refusal would offer a manager PIN for an unpriced item.
+   *
+   * Used only where `02-F20`/`05-F19` actually reach: the Cash surface. `startOrder`,
+   * `sendToKitchen` and `addLine` keep the plain `write` above, because `order.create` has no
+   * `escalate` cell and a pad there would be a control that can never succeed.
+   */
+  const escalatableWrite = (req: AppendRequest) => {
+    void window.restos
+      .append(req)
+      .then(() => null)
+      .catch(() => window.restos.escalationFor?.(req)?.catch(() => null) ?? null)
+      .then(async (offer) => {
+        setApprovalRefusal(null);
+        if (!offer) {
+          setPending(null);
+          return;
+        }
+        // `01-F61` — who could approve, read at the moment the pad is raised. Main supplies the
+        // ORDER and it is rendered unsorted (`27-F4`); a renderer-side sort re-ranks the grid
+        // the moment a name is edited.
+        setRoster((await window.restos.staff?.().catch(() => [])) ?? []);
+        setPending({ req, offer });
+      })
+      .then(reload);
+  };
+
+  /**
+   * `02-F20`'s local manager PIN, submitted. Main decides everything — that the act escalates at
+   * all, that the PIN verifies (`01-F28`), that the approver is not the requester (`02-F38`) and
+   * that she holds the permission. This only carries the answer back to the pad.
+   */
+  const approve = (approver_user_id: string, pin: string) => {
+    const req = pending?.req;
+    if (req === undefined) return;
+    const call = window.restos.escalate?.(req, approver_user_id, pin);
+    if (call === undefined) return;
+    void call
+      .then((result) => {
+        if (result.ok) {
+          setPending(null);
+          setApprovalRefusal(null);
+          return;
+        }
+        // The pad STAYS: a manager who mis-keyed re-keys, and one who may not approve is told so
+        // while the cashier still has the request in hand (`01-F17` — nothing is lost either way).
+        setApprovalRefusal(result.refused);
+      })
+      .catch(() => {})
+      .then(reload);
+  };
+
+  /**
    * `C4` — start an order. One append, and every field it carries is a decision made HERE and
    * never inferred later (`02-F1`).
    *
@@ -216,7 +306,10 @@ export const Counter = () => {
       // single most expensive thing to get wrong.
       <p>Reading the day…</p>
     ) : activeTab === "cash" ? (
-      <CashSurface cash={cash} onAppend={(req) => write(window.restos.append(req))} />
+      // `02-F20`/`05-F19` — the surface where the third outcome actually happens: a paid-out
+      // above the org threshold is `escalate`, not `deny`, and this is the write that offers
+      // the local manager-PIN path when main says the matrix escalates it.
+      <CashSurface cash={cash} onAppend={escalatableWrite} />
     ) : (
       <MeSurface cash={cash} />
     );
@@ -251,11 +344,30 @@ export const Counter = () => {
       training={device.training}
     >
       {/*
-        `27-F1` — the tabs are PEER surfaces one act apart, so the work area swaps and the
-        chrome never moves. `Orders` and `Pay` are still unbuilt and are unreachable from the
-        rail, so they cannot be selected here.
+        `02-F20` — the local manager-PIN path, in the WORK AREA and never over the chrome.
+        `27-F11d`'s ruling is that the band and the strip stay put while a work surface changes,
+        and this is a work surface: the cashier is mid-act, an approval is the next step of that
+        act, and `27-F1` caps the depth at the one level this is.
+
+        It is raised only when MAIN said the matrix escalates the refused write (`escalationFor`),
+        so it can never appear over a `deny` — a pad that cannot succeed is worse than a refusal.
       */}
-      {activeTab === "cash" || activeTab === "me" ? (
+      {pending !== null ? (
+        <ManagerApproval
+          satisfiedBy={pending.offer.satisfied_by}
+          roster={roster}
+          // `02-F38` — whose request this is, so her tile is not drawn on the approver grid.
+          // `device.user` is `02-F41`'s attribution read through the same seam main appends
+          // from, never a second copy of the identity (`02-F45`).
+          requesterId={device.user?.user_id ?? ""}
+          refusal={approvalRefusal}
+          onSubmit={approve}
+          onCancel={() => {
+            setPending(null);
+            setApprovalRefusal(null);
+          }}
+        />
+      ) : activeTab === "cash" || activeTab === "me" ? (
         cashSurface
       ) : (
         <div style={{ display: "flex", gap: 16, height: "100%", minHeight: 0 }}>

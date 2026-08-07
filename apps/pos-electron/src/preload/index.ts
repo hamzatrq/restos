@@ -28,6 +28,12 @@ const bridge: RestosBridge = {
   acknowledgeAlarm: (alarm_id) => ipcRenderer.invoke(CHANNELS.acknowledgeAlarm, alarm_id),
   append: (req) => ipcRenderer.invoke(CHANNELS.append, req),
   addLine: (req) => ipcRenderer.invoke(CHANNELS.addLine, req),
+  // `02-F20`'s local manager-PIN path. Optional on the contract, always served here, for the
+  // reason `cashState` and `alarms` record above: this bridge is the one main actually ships.
+  // The offer is display data read off the matrix; the approval is the credential call.
+  escalationFor: (req) => ipcRenderer.invoke(CHANNELS.escalationFor, req),
+  escalate: (req, approver_user_id, pin) =>
+    ipcRenderer.invoke(CHANNELS.escalate, req, approver_user_id, pin),
   // `01-F28` — an identity and the digits go one way and a yes/no comes back. Verification is
   // main's. `01-F61`: the identity is what the failure counter is keyed on, so it travels with
   // the attempt rather than being inferred from the PIN at the far end.
