@@ -82,25 +82,28 @@
 //   shifts[] row (FOLDS.md line 15 gives `shift_id PK, cashier, open_at, expected_json,
 //   closed` VERBATIM; the rest are named additions):
 //     shift_id                 — PK, carried on shift.opened.
-//     cashier                  — carried, NULLABLE. No identity LAYER exists yet (`actor_user_id`
-//                                is nullable and the POS hardcodes it null), so nothing here
-//                                assumes a non-null cashier is REQUIRED — that is S-0b/c's suite.
-//                                It is nonetheless one of the five columns FOLDS.md line 15 gives
-//                                verbatim, so the tests DO carry non-default values and assert
-//                                the column is keyed per shift.
-//                                ⚠ **PIN #2 — THE CASHIER SOURCE. An interpretation, NOT quoted
-//                                FR text.** No FR determines whether the fold reads
-//                                `payload.cashier` or the envelope's `actor_user_id`: 02-F19 says
-//                                "every action is attributed in the event envelope" while
-//                                FOLDS.md line 15 names a `cashier` COLUMN, and the two do not
-//                                jointly decide a source. The pin is therefore SOURCE-AGNOSTIC —
-//                                every fixture puts the SAME value on both surfaces, so the
-//                                assertions pin the CARRY (a cashier keyed per shift) and no
-//                                assertion in this suite can distinguish the two mechanisms.
-//                                An implementer may pick either; that the corpus leaves it open
-//                                is REPORTED AS A FINDING, not settled here.
+//     cashier                  — PROJECTED from the ENVELOPE's `actor_user_id` (`02-F45`), and
+//                                NULLABLE: a locked device attributes to nobody (`01-F27`), so
+//                                nothing here assumes a non-null cashier is REQUIRED. It is one
+//                                of the five columns FOLDS.md line 15 gives verbatim, so the
+//                                tests DO carry non-default values and assert the column is keyed
+//                                per shift.
+//                                ⚠ **PIN #2 (THE CASHIER SOURCE) IS RETIRED — SUPERSEDED BY
+//                                `02-F45` (August 2026).** It recorded that no FR chose between
+//                                `payload.cashier` and the envelope's `actor_user_id`, so every
+//                                fixture set the value on BOTH surfaces and no assertion could
+//                                tell the two mechanisms apart. `02-F45` chose: attribution is
+//                                read from the envelope, NEVER from a payload field, because
+//                                `02-F41` rules attribution is whoever's PIN is in, `01-F27` puts
+//                                that identity in the PIN session, and a duplicate in the payload
+//                                is a SECOND SOURCE for one fact that an append-only ledger has
+//                                no rule for reconciling. Leaving the source-agnostic pin in place
+//                                is the `01-F60` shape that cost this repo three weeks — a green
+//                                test defending a rule that had already been overruled — so the
+//                                fixtures now attribute on the ENVELOPE ONLY, and §8 asserts that
+//                                a payload `cashier` arriving anyway is NOT read.
 //                                Asserted in ./shift-cash-fold.test.ts §8 ("`cashier` is carried
-//                                and keyed PER SHIFT").
+//                                and keyed PER SHIFT" + the two-source and contested-actor cases).
 //     prev_shift_id            — 26 §7's CARRIED CAUSAL LINK, nullable.
 //     open_at                  — 26 §7 "a time source": the event's `branch_created_at`
 //                                (01-F43), NEVER `device_created_at` (01-F45).
@@ -399,18 +402,38 @@ export const requireUnboundDrawer = (store: ShiftCashStore): (() => UnboundDrawe
 // contract-clarification event (reported), not a test defect.
 // ---------------------------------------------------------------------------
 
-export const shiftOpened = (
-  shift_id: string,
-  extra: { cashier?: string | null; prev_shift_id?: string | null } = {},
-) => ({
+/**
+ * `02-F45` — there is NO `cashier` in this payload, and its absence is the point. Attribution
+ * rides the envelope's `actor_user_id` (`shiftEnvelope`'s fourth argument); a payload copy would
+ * be a second source for one fact. `registry.ts`'s `shift.opened` schema declares `shift_id` and
+ * `prev_shift_id` and nothing else, so this builder now emits exactly the declared shape.
+ *
+ * The non-conforming shape — a payload that carries `cashier` anyway — is built explicitly by
+ * `shiftOpenedWithPayloadCashier` below, and only the tests that exist to refuse it use it.
+ */
+export const shiftOpened = (shift_id: string, extra: { prev_shift_id?: string | null } = {}) => ({
   type: "shift.opened",
   payload: {
     shift_id,
-    // NULLABLE by construction — no identity exists yet (brief, S-1/S-2 constraint).
-    cashier: extra.cashier ?? null,
     // 26 §7: the carried causal link that makes a duplicate open detectable.
     prev_shift_id: extra.prev_shift_id ?? null,
   },
+});
+
+/**
+ * `02-F45`'s SECOND SOURCE, built on purpose so a test can prove the fold ignores it.
+ *
+ * `registry.ts` types `shift.opened` as a `z.looseObject`, so an extra key is schema-VALID and a
+ * non-conforming writer can put one on the wire today — which is exactly why "the fold must not
+ * read it" needs a fixture rather than an argument. Used only in ./shift-cash-fold.test.ts §8.
+ */
+export const shiftOpenedWithPayloadCashier = (
+  shift_id: string,
+  cashier: string | null,
+  extra: { prev_shift_id?: string | null } = {},
+) => ({
+  type: "shift.opened",
+  payload: { ...shiftOpened(shift_id, extra).payload, cashier },
 });
 
 /**
@@ -606,8 +629,8 @@ export const shiftEnvelope = (
     branch_at: number;
     id?: string;
     basis?: "branch" | "branch_provisional";
-    /** 02-F19: attribution rides the envelope. Set alongside `payload.cashier` so the
-     * `cashier` column can be asserted without pinning WHICH of the two the fold reads. */
+    /** `02-F19`/`02-F45`: attribution rides the envelope, and after `02-F45` it rides NOTHING
+     * ELSE — this is the only surface any fixture here sets it on. */
     actor_user_id?: string | null;
   },
 ): Record<string, unknown> & { id: string } => {
@@ -824,9 +847,11 @@ export const branchEmitter = (tag: string): BranchEmitter => {
   return { identity, envelopes, emit };
 };
 
-/** Two cashiers on the evening's roster. Non-default on purpose: `cashier` is one of the five
- * columns FOLDS.md line 15 names verbatim, and a fixture that only ever carries `null` cannot
- * tell a fold that CARRIES it from one that hardcodes it. */
+/** Two cashiers on the evening's roster, carried on the ENVELOPE as `02-F45` requires. Two of
+ * them and non-default on purpose: `cashier` is one of the five columns FOLDS.md line 15 names
+ * verbatim, a fixture that only ever carries `null` cannot tell a fold that CARRIES it from one
+ * that hardcodes it, and a fixture carrying ONE cannot tell a per-shift key from a projection
+ * that reuses whichever attribution it saw last. */
 export const CASHIER_A = "u-ayesha";
 export const CASHIER_B = "u-bilal";
 
@@ -861,6 +886,15 @@ export const CASHIER_B = "u-bilal";
  *   * `00 §6` soft refs — drawer and deposit activity for a shift/day whose open never lands.
  * Each is ALSO isolated in its own set below, so a red names the case instead of reporting that
  * a forty-event evening moved.
+ *
+ * ── AUGUST 2026, `02-F45`: TWO MORE ────────────────────────────────────────
+ *   * a shift open whose PAYLOAD carries a `cashier` disagreeing with the envelope's actor —
+ *     the second source the FR refuses;
+ *   * one shift opened twice with byte-identical payloads and DIFFERENT actors — an attribution
+ *     dispute the payload cannot express at all.
+ * Both are asserted present by ./shift-cash-invariance.test.ts §0b, for the same reason the five
+ * above are: reading the fixture answers "is this net coverage?" today and answers it wrongly
+ * the moment someone edits the fixture.
  */
 export const shiftCashScenario = (): ShiftCashSet => {
   const { identity, envelopes, emit } = branchEmitter("sc");
@@ -869,7 +903,7 @@ export const shiftCashScenario = (): ShiftCashSet => {
   // The second head: same day_id, DIFFERENT float. Two devices opened the day across a
   // partition. Not a redelivery — a redelivery carries the identical payload.
   emit(2, dayOpened("D1", { opening_float_paisa: 999999 }), 5);
-  emit(0, shiftOpened("S1", { cashier: CASHIER_A }), 1000, { actor_user_id: CASHIER_A });
+  emit(0, shiftOpened("S1"), 1000, { actor_user_id: CASHIER_A });
   emit(0, shiftPayment("O1", 100000, { attempt: "sa-1", shift_id: "S1" }), 2000);
   emit(1, shiftPayment("O1", 100000, { attempt: "sa-1", shift_id: "S1" }), 2100); // double tap
   emit(0, shiftPayment("O2", 250000, { attempt: "sa-2", shift_id: "S1", method: "card" }), 2200);
@@ -915,7 +949,7 @@ export const shiftCashScenario = (): ShiftCashSet => {
     }),
     3000,
   );
-  emit(1, shiftOpened("S2", { prev_shift_id: "S1", cashier: CASHIER_B }), 3100, {
+  emit(1, shiftOpened("S2", { prev_shift_id: "S1" }), 3100, {
     actor_user_id: CASHIER_B,
   });
   emit(2, shiftPayment("O7", 25000, { attempt: "sa-8", shift_id: "S1" }), 3200); // LATE, keyed to S1
@@ -931,7 +965,7 @@ export const shiftCashScenario = (): ShiftCashSet => {
   // so it is one member and raises no divergence — stamped `branch_provisional` and backdated
   // three days. A plain earliest-wins min over the delivered opens dates S1 to the tablet's raw
   // clock; the branch tier must win despite being later.
-  emit(2, shiftOpened("S1", { cashier: CASHIER_A }), -PROVISIONAL_BACKDATE_MS, {
+  emit(2, shiftOpened("S1"), -PROVISIONAL_BACKDATE_MS, {
     actor_user_id: CASHIER_A,
     basis: "branch_provisional",
   });
@@ -959,6 +993,24 @@ export const shiftCashScenario = (): ShiftCashSet => {
   emit(1, dayOpened("D2a", { opening_float_paisa: 300000, prev_day_id: "D1" }), 4000);
   emit(2, dayOpened("D2b", { opening_float_paisa: 400000, prev_day_id: "D1" }), 4000);
   emit(0, dayOpened("D9", { opening_float_paisa: 100000, prev_day_id: "D2a" }), 4100);
+
+  // 02-F45 — the two attribution shapes, INSIDE the harness. Neither is expressible in the
+  // payload any more (the fixtures carry no `cashier` field), so before August 2026 no set in
+  // this suite could reach either and every net below was a correct net over a safe fixture.
+  //   S-two-source  ONE open whose PAYLOAD carries a `cashier` that DISAGREES with the
+  //                 envelope's actor. `registry.ts` is a `z.looseObject`, so a non-conforming
+  //                 writer can put one on the wire; the fold must read the envelope and ignore
+  //                 the payload copy. Its own shift, because that is the only place a fold
+  //                 reading the wrong source changes anything.
+  //   S-contested   TWO opens of ONE shift, byte-identical payloads, DIFFERENT actors. Two
+  //                 contested heads (`01-F31`): nothing is picked, `cashier` renders null, both
+  //                 are retained, `shift_open_divergence` is raised. `prev_shift_id` is null on
+  //                 both so this is an attribution dispute and not also a fork.
+  emit(0, shiftOpenedWithPayloadCashier("S-two-source", CASHIER_B), 4400, {
+    actor_user_id: CASHIER_A,
+  });
+  emit(0, shiftOpened("S-contested"), 4500, { actor_user_id: CASHIER_A });
+  emit(2, shiftOpened("S-contested"), 4500, { actor_user_id: CASHIER_B });
 
   // 00 §6 soft refs — activity for a shift and a day whose `*.opened` never arrives. Held in
   // the lattice with its money, never projected into a hole, and NOT the same thing as 02-F43's
@@ -992,7 +1044,7 @@ export const divergentDayOpenSet = (): ShiftCashSet => {
   const { identity, envelopes, emit } = branchEmitter("dv");
   emit(0, dayOpened("D1", { opening_float_paisa: DIVERGENT_FLOAT_A }), 0);
   emit(1, dayOpened("D1", { opening_float_paisa: DIVERGENT_FLOAT_B }), 10);
-  emit(2, shiftOpened("S1", { cashier: CASHIER_A }), 100, { actor_user_id: CASHIER_A });
+  emit(2, shiftOpened("S1"), 100, { actor_user_id: CASHIER_A });
   emit(0, shiftPayment("O1", 40000, { attempt: "dv-sa-1", shift_id: "S1" }), 200);
   emit(1, depositRecorded("D1", 200000), 300);
   return { identity, envelopes };
@@ -1025,8 +1077,8 @@ export const divergentDayOpenSet = (): ShiftCashSet => {
  */
 export const basisPrecedenceSet = (): ShiftCashSet => {
   const { identity, envelopes, emit } = branchEmitter("bp");
-  emit(0, shiftOpened("S-mixed", { cashier: CASHIER_A }), 1000, { actor_user_id: CASHIER_A });
-  emit(1, shiftOpened("S-mixed", { cashier: CASHIER_A }), -PROVISIONAL_BACKDATE_MS, {
+  emit(0, shiftOpened("S-mixed"), 1000, { actor_user_id: CASHIER_A });
+  emit(1, shiftOpened("S-mixed"), -PROVISIONAL_BACKDATE_MS, {
     actor_user_id: CASHIER_A,
     basis: "branch_provisional",
   });
@@ -1073,7 +1125,7 @@ export const unboundDrawerSet = (): ShiftCashSet => {
   emit(0, paidOut(null, must(UNBOUND_PAID_OUT[0], "unbound paid-out")), 400);
   emit(2, paidOut(null, must(UNBOUND_PAID_OUT[1], "unbound paid-out")), 500);
   // …and the ordinary bound traffic that must not absorb any of it.
-  emit(0, shiftOpened("S1", { cashier: CASHIER_A }), 1000, { actor_user_id: CASHIER_A });
+  emit(0, shiftOpened("S1"), 1000, { actor_user_id: CASHIER_A });
   emit(0, drawerOpened("S1"), 1100);
   emit(0, paidOut("S1", BOUND_PAID_OUT), 1200);
   emit(1, shiftPayment("O1", 40000, { attempt: "ud-sa-1", shift_id: "S1" }), 1300);
@@ -1095,7 +1147,7 @@ export const unboundDrawerSet = (): ShiftCashSet => {
  */
 export const divergentUnboundSet = (): ShiftCashSet => {
   const { identity, envelopes, emit } = branchEmitter("du");
-  emit(0, shiftOpened("S1", { cashier: CASHIER_A }), 0, { actor_user_id: CASHIER_A });
+  emit(0, shiftOpened("S1"), 0, { actor_user_id: CASHIER_A });
   emit(0, shiftPayment("O1", 75000, { attempt: "du-a", shift_id: null }), 1000);
   emit(1, shiftPayment("O1", 90000, { attempt: "du-a", shift_id: null }), 1010);
   emit(0, shiftPayment("O2", 60000, { attempt: "du-b", shift_id: null }), 1100);
@@ -1148,7 +1200,12 @@ export const generateShiftCashSet = (seed: number): ShiftCashSet => {
   let offset = 0;
   const emit = (
     typed: { type: string; payload: Record<string, unknown> },
-    opts: { basis?: "branch" | "branch_provisional"; backdate_ms?: number } = {},
+    opts: {
+      basis?: "branch" | "branch_provisional";
+      backdate_ms?: number;
+      /** `02-F45` — the generator's only attribution surface, exactly as in production. */
+      actor_user_id?: string | null;
+    } = {},
   ): string => {
     const idx = int(0, peers.length - 1);
     const peer = must(peers[idx], "peer");
@@ -1161,6 +1218,7 @@ export const generateShiftCashSet = (seed: number): ShiftCashSet => {
         branch_at: BRANCH_T0 + offset - (opts.backdate_ms ?? 0),
         id,
         ...(opts.basis === undefined ? {} : { basis: opts.basis }),
+        ...(opts.actor_user_id === undefined ? {} : { actor_user_id: opts.actor_user_id }),
       }),
     );
     return id;
@@ -1177,16 +1235,25 @@ export const generateShiftCashSet = (seed: number): ShiftCashSet => {
   let prevShift: string | null = null;
   for (let s = 0, shifts = int(1, 3); s < shifts; s++) {
     const shiftId = `S${s}`;
+    // 02-F45: the shift's attribution, on the ENVELOPE and nowhere else.
     const cashier = chance(0.5) ? CASHIER_A : CASHIER_B;
-    emit(shiftOpened(shiftId, { prev_shift_id: prevShift, cashier }));
+    emit(shiftOpened(shiftId, { prev_shift_id: prevShift }), { actor_user_id: cashier });
     // 01-F45 basis precedence, under the property: a REDELIVERY of the same open (identical
-    // payload, so one member and no divergence) stamped `branch_provisional` and backdated. The
-    // branch tier must still decide `open_at`, and the tier choice must not depend on which of
-    // the two the delivery happens to hand the fold first.
+    // payload AND identical actor, so one member and no divergence) stamped `branch_provisional`
+    // and backdated. The branch tier must still decide `open_at`, and the tier choice must not
+    // depend on which of the two the delivery happens to hand the fold first.
     if (chance(0.3))
-      emit(shiftOpened(shiftId, { prev_shift_id: prevShift, cashier }), {
+      emit(shiftOpened(shiftId, { prev_shift_id: prevShift }), {
+        actor_user_id: cashier,
         basis: "branch_provisional",
         backdate_ms: PROVISIONAL_BACKDATE_MS,
+      });
+    // 02-F45 under the property: the SAME shift opened by a DIFFERENT cashier is two contested
+    // heads, not a redelivery — an attribution register the payload cannot see at all now that
+    // the payloads of the two are byte-identical. `01-F31`: nothing is picked, both are retained.
+    if (chance(0.2))
+      emit(shiftOpened(shiftId, { prev_shift_id: prevShift }), {
+        actor_user_id: cashier === CASHIER_A ? CASHIER_B : CASHIER_A,
       });
     if (chance(0.25)) emit(shiftOpened(`${shiftId}-fork`, { prev_shift_id: prevShift })); // 26 §7
     prevShift = shiftId;

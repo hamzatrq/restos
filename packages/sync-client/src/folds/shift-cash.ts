@@ -10,8 +10,10 @@
 // Auditor cannot refold is unauditable.
 //
 // ── THE THREE LAWS, AS THEY BITE HERE ───────────────────────────────────────
-// 1. `01-F34` — the fold reads NO ordering metadata. Five envelope fields are read and no
-//    others: `type`, `payload`, `id`, `branch_created_at` and `time_basis`. `id` is used
+// 1. `01-F34` — the fold reads NO ordering metadata. Six envelope fields are read and no
+//    others: `type`, `payload`, `id`, `branch_created_at`, `time_basis` and `actor_user_id`
+//    (`02-F45`, see the merge rules below — a DELIVERED field of the event, stamped once at
+//    the origin's append like `payload` itself, never derived from the reading device). `id` is used
 //    only as a SET KEY (which drawer opens are distinct events), never in a comparison that
 //    reaches a projected value — `26 §8`: `00 §6` pins ids to UUIDv7 whose leading 48 bits
 //    are the minting device's wall clock, so a `min(envelope.id)` tiebreak is min-wall-clock
@@ -32,12 +34,26 @@
 //   open_at, business_date      earliest delivered BRANCH stamp WITHIN THE STRONGEST DELIVERED
 //                               BASIS TIER (`01-F45`) — a min over a partition of the set, so
 //                               it is order-free.
-//   cashier, prev_*_id, float   MVR over the open payloads. Agreed ⇒ carried; DISAGREEING
+//   cashier, prev_*_id, float   MVR over the open members. Agreed ⇒ carried; DISAGREEING
 //                               members mark the key disputed, contribute zero (money → 0,
 //                               a nullable link → null), are all retained and raise a
 //                               `*_divergence` anomaly — `01-F31`, "a fold never picks a
 //                               winner", the clause `01-F58` already applies outside the
 //                               payment domain.
+//                               `02-F45`: a SHIFT open's member is its payload PLUS the
+//                               envelope's `actor_user_id`, and `cashier` is projected from
+//                               that field alone. `02-F41` rules attribution is whoever's PIN
+//                               is in and `01-F27` puts that identity in the PIN session, which
+//                               the envelope carries; a `cashier` duplicated into the payload
+//                               would be a SECOND SOURCE for one fact, and in an append-only
+//                               ledger the two can disagree with no rule for which wins. So the
+//                               payload's own `cashier`, if one somehow arrives, is never read —
+//                               it stays inside the member bytes (any payload difference still
+//                               disputes the open) but it decides nothing.
+//                               A DAY open's member is its payload alone: the day row projects
+//                               no attribution column, and folding the actor in there would zero
+//                               the branch's opening float over a disagreement about which
+//                               manager opened the day — an outcome no FR asks for.
 //   expected_json               grow-only map union over METHODS; each method's value is the
 //                               `01-F31` unique-keyed sum over settlement attempt keys. The
 //                               attempt-key map is ORG-GLOBAL (`01-F31`'s ratified uniqueness
@@ -75,6 +91,7 @@ import { businessDate, canonicalJson } from "@restos/domain";
  * `02-F26` additions the FRs require. */
 export type ShiftRow = {
   shift_id: string;
+  /** `02-F45` — PROJECTED from the envelope's `actor_user_id`, never a payload field. */
   cashier: string | null;
   prev_shift_id: string | null;
   open_at: number;
@@ -148,13 +165,23 @@ type ShiftEvent = {
   payload: Payload;
   branch_created_at: number;
   time_basis: string;
+  /**
+   * `02-F45`'s single source of attribution. A DELIVERED field of the event — stamped once at
+   * the origin's append from the `01-F27` PIN session, exactly as `payload` is — so reading it
+   * is `01-F34`-safe for the same reason reading `payload` is: nothing here comes from the
+   * READING device's state, and two devices holding the same event set project the same answer.
+   */
+  actor_user_id: string | null;
 };
 
 /**
  * Delivered `*.opened` events, keyed by envelope id: identity, never a comparison.
  * `verified` is `01-F44`'s envelope marker reduced to the one bit `01-F45` selects on.
+ * `actor` is `02-F45`'s attribution, taken off the ENVELOPE at fold time so the projection
+ * never has to reach back for it.
  */
-type Opens = Map<string, { stamp: number; verified: boolean; payload: Payload }>;
+type Open = { stamp: number; verified: boolean; payload: Payload; actor: string | null };
+type Opens = Map<string, Open>;
 
 type ShiftAcc = {
   opens: Opens;
@@ -234,6 +261,15 @@ const carriedShift = (payload: Payload): string | null =>
 const isVerified = (event: ShiftEvent): boolean => event.time_basis === "branch";
 
 /**
+ * `02-F45` — attribution off the ENVELOPE, normalised. An envelope with no signed-in subject
+ * carries `null` (`01-F27`: a locked device attributes to nobody), and an envelope minted before
+ * the field existed carries nothing at all; both are the same fact — unattributed — and a fold
+ * that told them apart would make the shape of an old envelope visible in a projected value.
+ */
+const actorOf = (event: ShiftEvent): string | null =>
+  typeof event.actor_user_id === "string" ? event.actor_user_id : null;
+
+/**
  * Fold one envelope. Types outside this fold's vocabulary (`FOLDS.md` line 15) change
  * nothing — an unrelated event is never silently bucketed.
  */
@@ -246,6 +282,10 @@ export const foldShiftCash = (state: ShiftCashState, envelope: unknown): ShiftCa
         stamp: event.branch_created_at,
         verified: isVerified(event),
         payload,
+        // 02-F45 — the one source. The payload is retained whole (it carries `prev_shift_id`
+        // and disputes the open on any difference) but its own `cashier`, if a non-conforming
+        // writer ever emits one, is never read.
+        actor: actorOf(event),
       });
       return state;
     }
@@ -283,6 +323,9 @@ export const foldShiftCash = (state: ShiftCashState, envelope: unknown): ShiftCa
         stamp: event.branch_created_at,
         verified: isVerified(event),
         payload,
+        // Recorded for shape, read by nothing: `dayRowOf` projects no attribution column, so
+        // the day's member rule stays the payload alone (see the merge-rule block above).
+        actor: actorOf(event),
       });
       return state;
     }
@@ -349,6 +392,26 @@ const agreed = (members: Map<string, Payload>, code: string, exceptions: Set<str
 const openMembers = (opens: Opens): Map<string, Payload> => {
   const members = new Map<string, Payload>();
   for (const o of opens.values()) members.set(canonicalJson(o.payload), o.payload);
+  return members;
+};
+
+/**
+ * `02-F45` — a SHIFT open's MVR member: what the event carried, plus who appended it.
+ *
+ * The envelope's `actor_user_id` OVERWRITES any same-named payload key by construction, so the
+ * projected attribution has exactly one source however the payload was written. It is folded
+ * INTO the member rather than resolved beside it because attribution is one of the open's
+ * carried facts: two devices claiming one `shift_id` under two different cashiers are two
+ * contested heads, and `01-F31`'s rule for that is the same rule the rest of this register
+ * already runs — nothing is picked, `cashier` and `prev_shift_id` render null, both members are
+ * retained and `shift_open_divergence` is raised.
+ */
+const attributedOpenMembers = (opens: Opens): Map<string, Payload> => {
+  const members = new Map<string, Payload>();
+  for (const o of opens.values()) {
+    const member: Payload = { ...o.payload, actor_user_id: o.actor };
+    members.set(canonicalJson(member), member);
+  }
   return members;
 };
 
@@ -521,7 +584,7 @@ const shiftRowOf = (
 ): ShiftRow => {
   const exceptions = new Set<string>();
   if (forked) exceptions.add("shift_open_fork");
-  const open = agreed(openMembers(acc.opens), "shift_open_divergence", exceptions);
+  const open = agreed(attributedOpenMembers(acc.opens), "shift_open_divergence", exceptions);
 
   if (tendered?.disputed === true) exceptions.add("attempt_divergence");
   const expectedRendered: Record<string, number> = {};
@@ -554,7 +617,9 @@ const shiftRowOf = (
 
   return {
     shift_id,
-    cashier: (open.cashier as string | null | undefined) ?? null,
+    // 02-F45 — the ENVELOPE's field, off the agreed member. Never `open.cashier`: that is the
+    // second source the FR refuses, and the two can disagree in a ledger 01-F1 forbids correcting.
+    cashier: (open.actor_user_id as string | null | undefined) ?? null,
     prev_shift_id: (open.prev_shift_id as string | null | undefined) ?? null,
     open_at: earliest(acc.opens),
     expected_json: canonicalJson(expectedRendered),

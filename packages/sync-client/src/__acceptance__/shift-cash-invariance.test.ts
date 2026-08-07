@@ -109,6 +109,12 @@ describe("§0 the Proxy poison is a LIVE tripwire, not decoration (26 §8)", () 
 // Five shapes, each of which had NO fixture anywhere in this suite before August 2026 and each
 // of which the fold has a live branch for. A fold could delete any of those branches and pass
 // every net in this file if the set stopped carrying them.
+//
+// **`02-F45` adds two more (August 2026), and they are the same story a second time.** The
+// retired PIN #2 put the cashier on BOTH the payload and the envelope in every fixture, so no
+// set in this suite could distinguish the two sources — a correct net over a safe fixture, for a
+// whole round. The set now carries a payload `cashier` that DISAGREES with the envelope's actor,
+// and one shift opened twice under byte-identical payloads by two different cashiers.
 // ===========================================================================
 
 describe("§0b `shiftCashScenario()` carries every case the nets exist to cover (round-3 law)", () => {
@@ -178,6 +184,38 @@ describe("§0b `shiftCashScenario()` carries every case the nets exist to cover 
     expect([...successors.values()].some((ids) => ids.size > 1)).toBe(true);
     // The negative case has to be in the set too, or "flag every non-null prev_day_id" survives.
     expect([...successors.values()].some((ids) => ids.size === 1)).toBe(true);
+  });
+
+  it("02-F45: the set carries a shift open whose PAYLOAD `cashier` disagrees with the envelope's actor — the second source the FR refuses", () => {
+    const { envelopes } = shiftCashScenario();
+    const twoSource = envelopes.filter(
+      (e) =>
+        e.type === "shift.opened" &&
+        (e.payload as Record<string, unknown>).cashier !== undefined &&
+        (e.payload as Record<string, unknown>).cashier !== e.actor_user_id,
+    );
+    expect(twoSource.length).toBeGreaterThan(0);
+    // …and the envelope really does name somebody, or "read the envelope" and "read nothing"
+    // are indistinguishable on this fixture.
+    expect(twoSource.every((e) => typeof e.actor_user_id === "string")).toBe(true);
+  });
+
+  it("02-F45/01-F31: the set carries ONE shift opened twice with identical payloads and DIFFERENT actors — an attribution dispute the payload cannot express", () => {
+    const { envelopes } = shiftCashScenario();
+    const byShift = new Map<string, { payloads: Set<string>; actors: Set<unknown> }>();
+    for (const e of envelopes.filter((x) => x.type === "shift.opened")) {
+      const id = (e.payload as { shift_id: string }).shift_id;
+      const bucket = byShift.get(id) ?? { payloads: new Set<string>(), actors: new Set() };
+      bucket.payloads.add(JSON.stringify(e.payload));
+      bucket.actors.add(e.actor_user_id ?? null);
+      byShift.set(id, bucket);
+    }
+    // Identical payload bytes, two distinct actors: the register under test is the ENVELOPE's,
+    // and a set in which the payloads also differ would let a payload-only fold pass by accident.
+    expect(
+      [...byShift.values()].some((b) => b.payloads.size === 1 && b.actors.size > 1),
+      "one shift_id, one payload, two actors",
+    ).toBe(true);
   });
 
   it("26 §7 (ruling 3): every `shift.closed` in the set carries a variance the naive recompute CONTRADICTS", () => {
