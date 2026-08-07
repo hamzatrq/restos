@@ -42,7 +42,21 @@ export const Tile = ({
 }: TileProps) => {
   const color = useColor();
   const min = targetFor(posture);
-  const t = typography["text-label"];
+  /**
+   * `27-F25` — "Numbers are the operational payload and the largest element in their region."
+   *
+   * The `keypad` posture IS numeric entry: `27-F8` defines that row as "cash / numeric keypad —
+   * standing, high-consequence entry", and the only things composed from it are the two PIN pads
+   * (`App.tsx`, `ManagerApproval.tsx`). Found by looking, August 2026: those pads rendered their
+   * digits at `text-label` — **14 px inside a 126 dp box** — while `NumericKeypad`, the money pad
+   * two screens away, renders the same digits at `text-numeric-primary`. Two keypads that differ
+   * only in glyph size teach two different habits on one device, and the smaller one was the
+   * credential surface an operator hits 20–60x a shift (`01-F61`).
+   *
+   * Every other posture keeps `text-label`: a menu tile's payload is a NAME, and `27-F16`'s
+   * argument applies to size as well as colour — emphasising the base case emphasises nothing.
+   */
+  const t = typography[posture === "keypad" ? "text-numeric-primary" : "text-label"];
   return (
     <button
       type="button"
@@ -103,7 +117,18 @@ export const Tile = ({
       <span>{label}</span>
       {children}
       {unavailable && unavailableReason ? (
-        <span style={{ color: color["fgColor-disabled"], fontWeight: 600 }}>
+        // The reason is a QUALIFIER on the label, never a competitor to it: pinned to
+        // `text-label` rather than inherited, so it cannot ride the posture's own type step
+        // (27-F25 makes a keypad tile's label numeric-sized, and a 28 px reason under a 28 px
+        // label is two headlines and no hierarchy).
+        <span
+          style={{
+            fontFamily: typography["text-label"].fontFamily,
+            fontSize: typography["text-label"].fontSize,
+            color: color["fgColor-disabled"],
+            fontWeight: 600,
+          }}
+        >
           {unavailableReason}
         </span>
       ) : null}

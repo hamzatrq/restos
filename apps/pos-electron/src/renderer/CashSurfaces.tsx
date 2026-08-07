@@ -234,6 +234,25 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
           compare, which is three literacy-dependent acts at the worst moment.
         */}
         <NumericKeypad value={entry} onChange={setEntry} max={9_999_999} maxDigits={7} />
+        {/*
+          FINDING, deliberately NOT fixed here (August 2026, from looking at the running app).
+
+          `27-F25` wants the LIVE entry to be the largest element in its region, and this is the
+          number a cashier is keying into a drawer count — `27-F29` puts this population's errors
+          exactly here, and this row is the only feedback that a 126 dp key registered at all. It
+          renders at body size, while `TenderPanel` reads its figure back at `hero`: the two
+          numeric-entry surfaces on one device disagree about how loudly they echo.
+
+          Raising it to `hero` was tried and REVERTED, because it does not fit: this column is
+          `NumericKeypad`'s fixed 528 px plus a gap, and at the `27 §1a` reference panel
+          (1366x768, minus a 44 px strip and an 85 px rail) the work area is ~575 px. A hero row
+          pushed the number off the bottom edge under `overflow: hidden` — a clipped total is
+          strictly worse than a small legible one.
+
+          So this is the SAME height-budget problem `TenderPanel` has, and it belongs with that
+          fix rather than with a size prop: a 126 dp keypad plus anything else does not fit a
+          768 px panel once the shell takes its 129 px. Recorded, not patched.
+        */}
         <Row label="Counted" amountPaisa={enteredPaisa} />
       </div>
 
