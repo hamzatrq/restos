@@ -81,6 +81,66 @@ RESTOS_DEV_MENU=1 RESTOS_DEV_PIN=1234 pnpm start   # add --remote-debugging-port
 then read `document.querySelector('main').scrollHeight` against its `clientHeight`. **Any
 difference is a control an operator cannot reach**, not a cosmetic overflow.
 
+## THE LAYOUT GATE — that measurement is now a CI rail (`pnpm layout:check`, inside `verify`)
+
+`seams:check`'s equivalent for layout, and it exists for the same reason: reading a diff never
+finds a control that is off the screen, and neither does any suite here. `pnpm -C apps/pos-electron
+layout:check` (~7 s) builds the real renderer, opens a real `BrowserWindow` from the app's real
+`COUNTER_WINDOW_OPTIONS`, mounts the shipped React app against a scripted bridge
+(`src/layout-gate/`), and measures in **Blink**: every clipping box against the content it holds,
+and every control against the viewport and against `elementFromPoint`. It sweeps the unlock
+surface and every tab in **both** device states — `03-F5`'s band up and acknowledged — with tabs
+read from the DOM so a tab someone adds is measured without touching the gate.
+
+**No dependency was added** (`18 §15` rule 1): `electron` is already a devDependency and ships the
+same Blink the product renders in. `@playwright/test` is on `18 §14`'s allowlist and would still
+have been **wrong** — driving a headless page you *set* the viewport to 1366x768, and the
+`useContentSize` defect is precisely that the app does not get 1366x768. Only the real window sees
+it. Main is deliberately **not** real: it would drag in `better-sqlite3` and make a layout check
+cost a native rebuild.
+
+**Mutation matrix — the three shipped defects, re-introduced one at a time.** Control: gate GREEN
+on the correct tree. **The last column is the point.**
+
+| # | mutant (one branch each) | gate | pre-existing 344 + 216 |
+|---|---|---|---|
+| M1 | `index.html` — `box-sizing` reset removed | **RED**, 7 fatal (`#root` 1392px in 1366px; `I SAW THIS` off-screen) | **all 560 green** |
+| M2 | `TenderPanel` back to one column | **RED**, `main` 960px in 632px, 9 keys unreachable | **all 560 green** |
+| M3 | `useContentSize` off the window | **RED**, renderer got **1366x736** | **all 560 green** |
+| M4 | **NEGATIVE CONTROL** — method column 480→500 px | **GREEN** | all 560 green |
+
+M4 is what makes the other three mean anything: a real one-branch layout edit does **not** trip
+the gate, so it discriminates rather than reddening at any change.
+
+**⚠ A FOURTH DEFECT, FOUND BY THE GATE ON ITS FIRST RUN — UNRESOLVED, do not treat as fixed.**
+With `03-F5`'s band up the work area drops **568 → 530 px**, and the keypad's bottom row — `C`,
+`0`, `⌫` — lands at y=673..799 in a 768 px viewport on **both Pay and Cash**. A cashier cannot
+type a `0`, so Rs 500 and Rs 1,000 cannot be entered; `C` and backspace go with it. **It is on the
+ordinary path, not a corner case:** this device ships `unattachedPrinter`, so every confirm raises
+that band ~20 s later — ring, send to kitchen, then try to settle. `27-F11d` is explicit that the
+work underneath must stay *"visible and usable"*. The remedy is a layout-budget decision (overlay
+rather than displace? absorb it? shrink keys against `27-F8`'s 126 dp floor, which may not be
+negotiated with?) and belongs to the surface's owner, so it is **reported, not fixed** (`24 §3b`).
+It is carried in `OWED_UNDER_ALARM` in `src/layout-gate/main.ts`, which **cannot rot**: a listed
+surface that starts laying out cleanly **fails** the gate, forcing the entry out.
+
+**WHAT THE GATE CANNOT CATCH — do not read a green run as "the screens are right".**
+1. **Main is a stub.** It says nothing about IPC, Zod validation at the plane boundary, or whether
+   the shipped preload serves the same channels. `main/__acceptance__/` owns that.
+2. **It only sees the states the fixture produces.** Defect 4 was invisible until the fixture
+   served an alarm; a surface state nobody scripted is a surface state nobody measures. The
+   fixture is the gate's real coverage boundary, not the assertions.
+3. **It does not judge legibility, contrast, typography or target size.** `27-F8`'s 126 dp floor
+   and `27-F26`'s missing webfont are untouched — a control can be reachable and still unreadable.
+4. **One panel, one DPI, one platform.** 1366x768 at devicePixelRatio 1 on macOS. `27 §1a`'s
+   1920x1080 target and the Windows till this ships to are **not** measured, and font metrics
+   differ there (Segoe UI vs SF Pro), which is exactly the kind of thing that moves a layout.
+5. **`27-F4`'s positional contract is invisible to it.** Controls may be reordered freely and the
+   gate stays green as long as they all fit.
+6. **It needs a display.** Electron opens a real (hidden) window; a headless Linux CI needs xvfb.
+   Per `T-01-07` that is a LOUD failure, never a skip — an environment prerequisite, not a
+   regression.
+
 ## What is deliberately not real yet
 
 - **`27-F26`'S TYPEFACE IS NAMED BUT NOT DELIVERED — no webfont is bundled.** The token chain is

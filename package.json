@@ -14,13 +14,14 @@
     "test": "turbo run test",
     "build": "turbo run build",
     "docs:lint": "node scripts/docs-lint.mjs",
-    "verify": "pnpm docs:lint && pnpm typecheck && pnpm lint && pnpm tokens:check && pnpm seams:check",
+    "verify": "pnpm docs:lint && pnpm typecheck && pnpm lint && pnpm tokens:check && pnpm seams:check && pnpm layout:check",
     "verify:01": "node scripts/verify-module.mjs 01",
     "bench": "node bench/run.mjs",
     "bench:parity": "node bench/run.mjs parity",
     "bench:perf": "node bench/run.mjs bench",
     "tokens:check": "node scripts/check-tokens.mjs",
-    "seams:check": "node scripts/check-seams.mjs"
+    "seams:check": "node scripts/check-seams.mjs",
+    "layout:check": "pnpm -C apps/pos-electron layout:check"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.4",
