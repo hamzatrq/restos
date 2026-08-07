@@ -1,3 +1,4 @@
+import { SELLABLE_KINDS } from "@restos/domain";
 import { CatalogEntryWire } from "@restos/sync-protocol";
 import { sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -36,24 +37,6 @@ export type CatalogEntry = {
   /** `03-F50` — the kitchen station; absent means inherit from the parent. */
   station?: string | null;
 };
-
-/**
- * `01-F60` — the kinds a price is REQUIRED on: `item`, `variant` and **`modifier`**.
- *
- * `modifier` was left off this list while the FR classified it neither way. **The founder ruled
- * it SELLABLE (July 2026)** and the FR now says so outright: "a paid add-on carries the same
- * commission exposure as the dish it sits on, so 'extra raita' is priced per `(branch, channel)`
- * like anything else and falls under the writer's completeness check."
- *
- * The consequence the FR states rather than leaves to be discovered: **a free modifier carries an
- * explicit `0` on every enabled pair.** So the completeness check below must test for the CELL's
- * presence, never for a truthy price — `if (!price)` refuses a legal free add-on, and its mirror
- * gives a paid one away. `01-F53` snapshots either mistake into the ledger permanently.
- *
- * `category` and `modifier_group` remain non-sellable and carry none — one underscore from
- * `modifier`, and on the opposite side of this list.
- */
-const SELLABLE_KINDS: readonly string[] = ["item", "variant", "modifier"];
 
 export type CatalogPage = {
   form: "snapshot" | "delta";

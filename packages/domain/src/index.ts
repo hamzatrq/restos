@@ -10,6 +10,8 @@ export {
   businessDayBounds,
 } from "./business-day.js";
 export { canonicalJson } from "./canonical.js";
+// 01-F60 — the sellable-kind set, declared once here (18 §2) after three copies drifted apart.
+export { SELLABLE_KINDS } from "./catalog.js";
 export { DEVICE_CLASSES, type DeviceClass, HUB_ELIGIBLE_CLASSES } from "./device-classes.js";
 export {
   EventEnvelope,
@@ -74,6 +76,9 @@ export {
 export {
   AUDIT_EVENT_TYPES,
   type AuditEventType,
+  // 14-F3 — one moved price cell on `catalog.changed`, so the history can render "450 → 480".
+  CatalogPriceChange,
+  type CatalogPriceChangeT,
   eventRegistry,
   isAuditEvent,
   type KnownEventType,

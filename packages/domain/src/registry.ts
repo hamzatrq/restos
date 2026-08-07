@@ -69,6 +69,41 @@ const expectedPaisaByMethod = z.strictObject(
   >,
 );
 
+/**
+ * `14-F3` — one price cell that moved, which is the *"450 → 480"* half of the FR's own example
+ * (*"price changed by Ali, 2 Jul, 450 → 480"*). Only cells that actually changed appear, so an
+ * edit that renamed an item carries an empty list rather than its whole grid.
+ *
+ * **This is a DELTA, not an entity body**, and the distinction is what keeps `01-F52` intact. The
+ * hazard `01-F52` names is a ledger event that carries the catalog — from which a reader could
+ * reconstruct a menu and start folding it. A before/after pair for one `(branch, channel)` cell
+ * carries no name, no station, no parent and no grid shape; nothing can rebuild a menu from it.
+ *
+ * **Why the numbers are carried rather than resolved from `before_ref`/`after_ref`.** The refs are
+ * `payloadHash` digests — one-way, and nothing in the corpus indexes by them, so "resolve the ref"
+ * would in fact mean "re-read the entity at version N-1 from the catalog store". That makes the
+ * audit trail a *derived* read of mutable reference data: it decays when `01-F52`'s snapshot+delta
+ * history is compacted (`450 → 480` becomes `— → —`), and it can be changed after the fact by a
+ * later publish or a restore, which is the one thing commandment 1 forbids of a history. The refs
+ * stay, unchanged, as the integrity handles `14 §16` names — the numbers are the record.
+ *
+ * `01-F53` is untouched by this: a line's price is captured into `order.line_added` from the
+ * CATALOG at line-add. This is a display surface and never a price source; nothing resolves a
+ * price by reading history.
+ *
+ * `null` on either side is a real state and both are constructible: `before_paisa === null` is a
+ * cell that did not exist (a new entry, or a newly enabled channel), `after_paisa === null` a cell
+ * the edit dropped. Collapsing either to `0` would print "free" where the truth is "absent" —
+ * exactly the confusion `01-F60`'s explicit-zero rule exists to prevent.
+ */
+export const CatalogPriceChange = z.strictObject({
+  branch_id: z.string().min(1),
+  channel: z.enum(ORDER_CHANNELS),
+  before_paisa: z.union([z.number().int().nonnegative(), z.null()]),
+  after_paisa: z.union([z.number().int().nonnegative(), z.null()]),
+});
+export type CatalogPriceChangeT = z.infer<typeof CatalogPriceChange>;
+
 // Payloads are loose objects: required fields are law; extra fields pass through
 // (additive evolution, 00 §6) and are preserved for consumers.
 const payloadSchemas = {
@@ -112,6 +147,11 @@ const payloadSchemas = {
    * (`14-F6` price history), which is why the payload is actor + before/after REFS rather than
    * entity bodies: a ledger event that carried the menu would make the catalog ledger data,
    * contradicting `01-F52` in the same breath as satisfying it.
+   *
+   * **`01-F62` (August 2026) makes this ORG-SCOPED**: it carries `org_id`, no `branch_id` and no
+   * branch stamp, and its ordering authority is `server_received_at` (`01-F18`). It never enters a
+   * branch stream and no device folds it — which is why a server clock is legitimate here and is
+   * not the `01-F43` device-clock threat wearing a disguise.
    */
   "catalog.changed": z.looseObject({
     /** The catalog entity edited — `item`, `variant`, `category`, `modifier_group`. */
@@ -125,6 +165,21 @@ const payloadSchemas = {
      */
     before_ref: z.union([z.string().min(1), z.null()]),
     after_ref: z.union([z.string().min(1), z.null()]),
+    /**
+     * `14-F3` — the cells that moved, so the history can render *"450 → 480"*. See
+     * `CatalogPriceChange`.
+     *
+     * **Optional HERE and required at the WRITER, and that is not a relaxation** — the same split
+     * `01-F60` already makes for `CatalogEntryWire.prices`. Making it required in this schema
+     * would be a *retroactive* requirement on an **append-only** ledger (commandment 1): every
+     * `catalog.changed` written before August 2026 lacks the field, and `parseEvent` would refuse
+     * to read the history this FR exists to render. Absent therefore means "predates the field",
+     * which is a different fact from `[]` ("this edit moved no price") — and both are different
+     * from a writer that forgot, which is why `services/api`'s `LedgerRecord` types it as
+     * REQUIRED and possibly empty. The distinction the two levels buy is exactly the one
+     * `01-F60`'s explicit zero buys: absence and nothing are not the same answer.
+     */
+    price_changes: z.array(CatalogPriceChange).optional(),
   }),
   "order.table_assigned": z.looseObject({
     order_id: z.string().min(1),

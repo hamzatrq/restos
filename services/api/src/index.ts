@@ -13,7 +13,8 @@ export {
   createMemoryStagedEditStore,
   DEFAULT_APPLY_WHEN,
   type EnabledPairs,
-  SELLABLE_KINDS,
+  // `SELLABLE_KINDS` is deliberately NOT re-exported: `18 §2` gives it one export point,
+  // `@restos/domain`, and a second barrel is how the third copy became easy to write.
   type StagedEdit,
   type StagedEditStore,
 } from "./catalog.js";

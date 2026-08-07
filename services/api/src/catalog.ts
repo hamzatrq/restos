@@ -18,6 +18,7 @@
  * What is NOT here: the publish path (`publish.ts`), the procedures (`catalog-router.ts`).
  */
 
+import { SELLABLE_KINDS } from "@restos/domain";
 import { CatalogEntryWire, type CatalogEntryWireT } from "@restos/sync-protocol";
 
 /**
@@ -43,18 +44,6 @@ export type EnabledPairs = {
   readonly branches: readonly string[];
   readonly channels: readonly string[];
 };
-
-/**
- * `01-F60` — the kinds a price is REQUIRED on, including **`modifier`** (founder ruling July
- * 2026: a paid add-on carries the same commission exposure as the dish it sits on).
- *
- * ⚠ **DECLARED TWICE.** `services/sync-gateway/src/catalog.ts` holds the same list, because that
- * is where `publishCatalog` enforces it and this service may not import the gateway. `18 §2` says
- * a platform classification belongs in `domain` once; this one is not there yet, so the two lists
- * can drift and only a reviewer would notice. Reported as a finding rather than fixed here —
- * `packages/domain` is a protected path and moving it is its own spec-PR-plus-review change.
- */
-export const SELLABLE_KINDS: readonly string[] = ["item", "variant", "modifier"];
 
 /**
  * `14-F28` — when an edit applies. **The default is `day_end` and that is load-bearing**, not a
