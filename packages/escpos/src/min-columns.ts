@@ -54,11 +54,11 @@ export type DocumentType = (typeof DOCUMENT_TYPES)[number];
  * cost and push both floors past a 32-column printer for no FR that asks for it):
  *
  *   * the widest money token is `Rs 99,999,999` = **13 columns** — `27-F23`'s symbol-first `Rs `
- *     (3) plus `MAX_MONEY_DIGITS` (8) under Western 3-digit grouping (2 separators). Eight digits
- *     is a PINNED display bound, not a specified one: no FR bounds a money figure, a large
- *     Pakistani branch's business day is six digits of rupees, and every extra digit costs a
- *     column on a 58 mm-versus-80 mm purchasing decision. Above it a line takes `03-F36`'s last
- *     declared degradation and wraps.
+ *     (3) plus **eight digits** under Western 3-digit grouping (2 separators). Eight is a PINNED
+ *     display bound, not a specified one: no FR bounds a money figure, a large Pakistani branch's
+ *     business day is six digits of rupees, and every extra digit costs a column on a
+ *     58 mm-versus-80 mm purchasing decision. Above it a line takes `03-F36`'s last declared
+ *     degradation and wraps — it is never truncated into a different amount.
  *   * `shift_close_slip` = **35**: its widest label is 21 columns — `Aggregator receivable`, the
  *     longest `PAYMENT_METHODS` member `02-F23` requires "by method", tied by `02-F43`'s
  *     `Unbound no-sale opens` — so 21 + 1 + 13.

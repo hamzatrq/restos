@@ -52,10 +52,19 @@ import { type CashPrinterDeps, createCashPrinter } from "../printing";
 // ── the fixtures ────────────────────────────────────────────────────────────────────────────────
 
 const SHIFT_ID = "shift-7a2b1c9d-0000-4000-8000-000000000001";
-const DAY_ID = "day-2026-08-07";
-const BUSINESS_DATE = "2026-08-07";
-/** 2026-08-07 13:00 Asia/Karachi — inside the business day above, on either side of no cutover. */
-const IN_DAY = Date.UTC(2026, 7, 7, 8, 0, 0);
+const DAY_ID = "day-2026-01-02";
+/**
+ * A business date that is DELIBERATELY NOT TODAY.
+ *
+ * Found by mutation: with the fixture set to the day this suite was written, an
+ * implementation that stamped `new Date()` into the header passed every assertion here —
+ * the round-3 defect exactly (a guard that was never pointed at the dangerous case), and
+ * `03-F30`'s central law is that a document must not depend on the reading device. A fixed
+ * past date is what makes "the date it was HANDED" and "today" distinguishable at all.
+ */
+const BUSINESS_DATE = "2026-01-02";
+/** 2026-01-02 13:00 Asia/Karachi — inside the business day above, clear of the 05:00 cutover. */
+const IN_DAY = Date.UTC(2026, 0, 2, 8, 0, 0);
 
 /**
  * A closed shift whose CARRIED variance CONTRADICTS the naive subtraction, in SIGN.
@@ -315,10 +324,10 @@ describe("26 §7/02-F43 — what the fold carried is what the paper says", () =>
       store: {
         orders: [
           { channel: "counter", pay_total: 120_000, confirmed_at: IN_DAY },
-          // 2026-08-07 21:00 UTC = 2026-08-08 02:00 PKT — still the 7th's business day.
-          { channel: "phone", pay_total: 30_000, confirmed_at: Date.UTC(2026, 7, 7, 21, 0, 0) },
-          // 2026-08-08 01:00 UTC = 2026-08-08 06:00 PKT — past the cutover, a DIFFERENT day.
-          { channel: "counter", pay_total: 999_900, confirmed_at: Date.UTC(2026, 7, 8, 1, 0, 0) },
+          // 2026-01-02 21:00 UTC = 2026-01-03 02:00 PKT — still the 2nd's business day.
+          { channel: "phone", pay_total: 30_000, confirmed_at: Date.UTC(2026, 0, 2, 21, 0, 0) },
+          // 2026-01-03 01:00 UTC = 2026-01-03 06:00 PKT — past the cutover, a DIFFERENT day.
+          { channel: "counter", pay_total: 999_900, confirmed_at: Date.UTC(2026, 0, 3, 1, 0, 0) },
           // Never confirmed: not a sale.
           { channel: "counter", pay_total: 777_700, confirmed_at: null },
         ],
@@ -327,7 +336,11 @@ describe("26 §7/02-F43 — what the fold carried is what the paper says", () =>
     h.printer.dayClosed(DAY_ID);
     await h.spooler.pump();
     const text = textOf(h.sent[0] as Uint8Array);
-    expect(text).toContain("DAY SUMMARY 2026-08-07");
+    // NOT today, deliberately — see `BUSINESS_DATE`.
+    expect(text).toContain("DAY SUMMARY 2026-01-02");
+    expect(text, "the header must not carry the reading device's idea of today").not.toContain(
+      new Date().toISOString().slice(0, 10),
+    );
     expect(text).toContain("Counter Rs 1,200");
     expect(text).toContain("Phone Rs 300");
     expect(text).not.toContain("Rs 9,999");
@@ -340,14 +353,14 @@ describe("26 §7/02-F43 — what the fold carried is what the paper says", () =>
     const elsewhere = {
       ...CLOSED_SHIFT,
       shift_id: "shift-elsewhere",
-      open_at: Date.UTC(2026, 7, 9, 8, 0, 0),
+      open_at: Date.UTC(2026, 0, 4, 8, 0, 0),
       variance_paisa: 500_000,
     };
     const h = recordingHarness({ store: { shifts: [CLOSED_SHIFT, second, elsewhere] } });
     h.printer.dayClosed(DAY_ID);
     await h.spooler.pump();
     const text = textOf(h.sent[0] as Uint8Array);
-    // −5,000 + 8,000 = +3,000 paisa = OVER Rs 30. The Rs 5,000 shift on the 9th is excluded.
+    // −5,000 + 8,000 = +3,000 paisa = OVER Rs 30. The Rs 5,000 shift on the 4th is excluded.
     expect(text).toContain("Over/short OVER Rs 30");
     expect(text).toContain("Shifts closed 2");
   });
