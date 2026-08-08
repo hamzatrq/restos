@@ -208,7 +208,15 @@ describe("an unreachable sync gateway is an IntegrationError, not `fetch failed`
       });
       token = (JSON.parse(login.body) as { result: { data: { json: { token: string } } } }).result
         .data.json.token;
-    }, 30_000);
+      // No per-hook timeout: this inherits `vitest.config.ts`'s 120 s `hookTimeout`, and the 30 s
+      // override that used to sit here is why the package went red in a full `pnpm test --force
+      // --continue` on 2026-08-08 while passing 137/137 alone. This hook pays `01-F61`'s Argon2id
+      // cost TWICE — once hashing the fixture owner, once logging in — and under nine sibling
+      // packages competing for cores that exceeded 30 s. It is the same measured failure the
+      // config header already documents for `startable.test.ts` (62 s against a 60 s budget),
+      // which is why the package budget is 120 s; a local override silently opted back out of it.
+      // Nothing is weakened: no assertion changed, and a hook that genuinely hangs still fails.
+    });
 
     afterAll(async () => {
       await app?.close();

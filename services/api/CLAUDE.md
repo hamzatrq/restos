@@ -90,6 +90,28 @@
   answering; it is unconfigured), and those need different words from an owner. The answer is the
   DEPLOYMENT's set, not a per-org lookup — `00 §7`'s layer-2 config plane still does not exist.
 
+## ⚠ A PER-HOOK TIMEOUT IN THIS DIRECTORY OPTS OUT OF THE PACKAGE BUDGET — and ten still do
+
+`vitest.config.ts` sets `hookTimeout: 120_000` **for a measured reason**: `01-F61`'s Argon2id cost
+floor is deliberately expensive, and under `pnpm test --force --continue` — nine sibling packages
+competing for cores — `startable.test.ts`'s hook once measured 62 s against a 60 s budget. A
+trailing `}, 30_000)` on an individual hook **silently overrides that** back down.
+
+Measured 2026-08-08: `gateway-unreachable.test.ts`'s boundary hook carried `30_000`, paid the
+Argon2id cost **twice** (hashing the fixture owner, then logging in), and failed the whole package
+in a full run — `Tasks: 23 successful, 24 total`, api reading 131 instead of 137 — while passing
+**137/137 when run alone**. That is the documented "a single RED is as untrustworthy as a single
+green" case, and the fix was to delete the override, not to touch an assertion.
+
+**The class is not closed.** Ten further overrides remain in this directory, every one below the
+package budget: `catalog-gateway-seam.test.ts` (25 s, 60 s, 30 s), `catalog-enabled.test.ts`
+(60 s, 20 s, 40 s, 40 s), `catalog.test.ts` (60 s), `startable.test.ts` (25 s, 60 s). They are
+**latent flakes of one shape**, not ten unrelated numbers — AGENTS.md's rule is to search the
+PROPERTY, not the mechanism. They were left in place deliberately: none has been observed failing,
+and rewriting ten oracle timeouts without a failure justifying each is the drive-by `24 §3b`
+forbids. **If any of them reddens a full run and passes alone, delete the override — do not raise
+it, and do not touch the assertion.**
+
 ## Mutation matrix for `catalog-enabled.test.ts` (round-3 law) — control 137/137 green, 0 survivors
 
 The answer is never checked against a literal alone; it is fed back into `catalog.save` in both
