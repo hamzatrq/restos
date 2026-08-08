@@ -401,8 +401,18 @@ in principle**, but see the owed item below — the manifest table itself was no
   digits the payload. Left unbundled on **process**: `18 §15` requires a §14 entry and a senior
   approval for a new asset, which a session fixing a layout blocker cannot give itself.
   `apps/backoffice` made the same call for the same reason. **Owed.**
-- **Device identity is a marked DEV SEED** with stable ids. Admission (`01-F47`) replaces it.
-  A device minting a fresh `device_id` per launch would fork its own outbox on every restart.
+- **Device identity is a marked DEV SEED** with stable ids, and it stays one — a device minting a
+  fresh `device_id` per launch would fork its own outbox on every restart. **What changed in August
+  2026 is the OTHER side:** the gateway can now admit this identity through a declared command
+  (`pnpm -C services/sync-gateway provision-device`, `running-the-stack.md` §6b) instead of a
+  hand-written `INSERT`, so bringing up a second till no longer requires SQL. **Nothing yet gives
+  the device an identity of its own** — `01-F25`'s one-time pairing code is owed, which is why
+  `DEV_IDENTITY`'s three UUIDs are still typed by a human on both sides and why the runbook's §0
+  warning stands unchanged. Also owed here specifically: this app re-reads `RESTOS_DEVICE_TOKEN`
+  from env on **every** launch and persists nothing, so `01-F47`'s silently-renewed credential is
+  dropped on the floor. The FR puts that persistence in `sync-client` rather than the host app, in
+  its own words, because *"any host that forgot to store it would brick its devices at TTL"* — and
+  nothing bites for 90 days after a fresh mint, which is what makes it easy to leave unnoticed.
 - **Reachability reports `down` for all three facts**, because no mesh or cloud session exists.
   `00 §5.7` requires the strip to report what is true; claiming a hub never contacted is the
   exact dishonesty that FR exists to prevent.
