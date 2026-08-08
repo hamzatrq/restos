@@ -56,6 +56,34 @@
   `catalog.pending` is the staged draft (cancellable, no device has heard of it);
   `catalog.published` is the artifact devices fetch (`01-F52`..`01-F56`). Assert timing against
   the second — the staging table cannot tell a landed edit from a cancelled one.
+  - **`catalog.pending` carries the draft's own `name` (August 2026), and the axes stayed apart.**
+    The projection used to emit identity only, so the back office rendered `item / <id>` for a dish
+    an owner knows by name — and the recorded reason ("the staged edit carries no name") was false:
+    `StagedEdit.entry` is a whole `CatalogEntryWire`. The name is read off `edit.entry`, never
+    resolved against `publisher.published()`, because a join shows the OLD name for a rename and
+    nothing at all for an entry never published — and is **invisible on every entry that already
+    exists under the same name**, which is why the tests are built on those two fixtures.
+    **No `?? entity_id` fallback**: `CatalogEntryWire.name` is `z.string().min(1)` and every staged
+    entry is parsed through it, so `01-F54`'s degrade-to-identifier has nothing to degrade — that FR
+    governs a *resolution*, and nothing here resolves.
+
+## Mutation matrix for `catalog-pending-name.test.ts` (round-3 law) — control 142/142 green
+
+| # | mutant (exactly one branch) | new 5 failed | pre-existing 137 |
+|---|---|---|---|
+| P2 | the projection emits `edit.entry.id` as the name | **all 5** | all green |
+| P7 | **the name JOINED to `publisher.published()` inside the procedure** | 4 | **1** — see below |
+
+**P7 is the one to re-run after any change here**, and its right-hand column is a gift from an
+existing test. Joining server-side makes `catalog.pending` reach the gateway, so
+`gateway-unreachable.test.ts`'s *"does not touch a procedure that never leaves the process"* turns
+200 into 503 — the pre-existing suite already forbids this procedure leaving the process, for an
+unrelated reason, and that happens to fence the server-side join. **The CLIENT-side join has no such
+fence**: it failed 0 of `apps/backoffice`'s 110 pre-existing tests (mutant P1 there). Same defect,
+two planes, and only one of them was already guarded.
+
+P7's one survivor is also the thesis restated: the archive test passes under the join, because an
+archived entry is published under the same name and the lookup simply succeeds.
 - **THE ADAPTER HAS LANDED (August 2026) — `gateway-client.ts`, and the composition root wires
   it.** `createGatewayCatalogPublisher` / `createGatewayLedgerAppender` bind B-4's two ports to
   `services/sync-gateway` over its `/internal` surface (founder ruling,
