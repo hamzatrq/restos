@@ -18,7 +18,7 @@
  * What is NOT here: the publish path (`publish.ts`), the procedures (`catalog-router.ts`).
  */
 
-import { SELLABLE_KINDS } from "@restos/domain";
+import { type OrderChannel, SELLABLE_KINDS } from "@restos/domain";
 import { CatalogEntryWire, type CatalogEntryWireT } from "@restos/sync-protocol";
 
 /**
@@ -39,10 +39,18 @@ export type CatalogEntry = CatalogEntryWireT;
  * silently gets no check at all, "which is precisely the omission this FR refuses a fallback in
  * order to prevent". `00 §7`'s config plane does not exist, so the caller states the set
  * explicitly even where that is a constant.
+ *
+ * **`channels` is `02-F42`'s CLOSED set and not a free string** (August 2026), because this type
+ * is now what `catalog.enabled` puts on the wire: `apps/backoffice` draws `14-F29`'s columns from
+ * the server's answer instead of from its own `NEXT_PUBLIC_ENABLED_*` copy, and a column the
+ * editor can draw but no order can ever carry is an item that reads as unpriced on every real
+ * channel. `01-F60` resolves a price by the ORDER's channel, so a `dine_in` column (an order
+ * TYPE, `02-F1`) matches no lookup that will ever happen. `server.ts` enforces the membership at
+ * boot, which is what makes this annotation true rather than decorative.
  */
 export type EnabledPairs = {
   readonly branches: readonly string[];
-  readonly channels: readonly string[];
+  readonly channels: readonly OrderChannel[];
 };
 
 /**

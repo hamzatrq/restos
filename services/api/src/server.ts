@@ -9,7 +9,11 @@
 
 import { pathToFileURL } from "node:url";
 import { defineEnv } from "@restos/config";
-import { BUSINESS_DAY_CUTOVER_HOUR_DEFAULT } from "@restos/domain";
+import {
+  BUSINESS_DAY_CUTOVER_HOUR_DEFAULT,
+  ORDER_CHANNELS,
+  type OrderChannel,
+} from "@restos/domain";
 import { type CreateFastifyContextOptions, fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import Fastify, { type FastifyInstance } from "fastify";
 import { createMemoryStagedEditStore } from "./catalog.js";
@@ -143,6 +147,30 @@ const list = (raw: string | undefined): readonly string[] =>
         .filter((part) => part !== "");
 
 /**
+ * `02-F42`'s CLOSED channel set, enforced at BOOT. An unknown channel crashes the process the way
+ * a missing `SESSION_SECRET` does — loud, never degraded (`18 §5`).
+ *
+ * **This check used to live in `apps/backoffice/src/lib/env.ts` and moved here in August 2026**,
+ * when `catalog.enabled` made this service the authority for `01-F60`'s enabled set. Leaving it
+ * behind would have deleted it: the back office no longer reads a channel list, so the only
+ * remaining refusal would have been `CatalogEntryWire`'s at SAVE — after an owner had already
+ * drawn a `dine_in` column, typed prices into it and pressed save. `01-F60` looks a price up by
+ * the ORDER's channel, so such a column matches no lookup that can ever happen and every item in
+ * it reads as unpriced on every real channel. Boot is the moment the operator can still fix it.
+ */
+const channels = (raw: string | undefined): readonly OrderChannel[] => {
+  const named = list(raw);
+  const unknown = named.filter((name) => !(ORDER_CHANNELS as readonly string[]).includes(name));
+  if (unknown.length > 0) {
+    throw new Error(
+      `not an 02-F42 order channel: ${unknown.join(", ")}. Known: ${ORDER_CHANNELS.join(", ")}. ` +
+        "A channel is a PRICE KEY (01-F60), not an order type (02-F1).",
+    );
+  }
+  return named as readonly OrderChannel[];
+};
+
+/**
  * How often the day-end sweep runs. A minute, because the boundary is a wall-clock instant an
  * edit is compared against rather than a timer it rides: a sweep that is late publishes the same
  * edits, one sweep later. Nothing here schedules AT the boundary, which is what makes a cancel
@@ -173,9 +201,14 @@ const start = async (): Promise<FastifyInstance> => {
      * does not exist, so this is where "the caller states the set, even where that is a constant"
      * actually lands. Absent leaves it empty, and an empty set REFUSES every save (see
      * `unconfiguredCatalog`) rather than checking nothing.
+     *
+     * **This is now the ONLY declaration of the set** (August 2026). `catalog.enabled` serves it
+     * to `apps/backoffice`, which deleted its own `NEXT_PUBLIC_ENABLED_*` copy — the two could
+     * disagree, and a grid drawn on axes the writer does not check publishes a menu whose every
+     * tile reads `no price set` on the till with all four processes reporting success.
      */
     ENABLED_BRANCHES: list,
-    ENABLED_CHANNELS: list,
+    ENABLED_CHANNELS: channels,
     /**
      * **Where a published menu actually goes** (`plans/wave-1/catalog-transport.md` §6 Q1, founder
      * ruling: the API publishes, the gateway serves).

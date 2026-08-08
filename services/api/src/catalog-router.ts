@@ -96,6 +96,37 @@ const cancelInput = z.object({ edit_id: z.string().min(1) });
  */
 export const catalogProcedures = {
   /**
+   * **`01-F60`'s enabled `(branch, channel)` set — the axes `14-F29`'s grid is drawn on.**
+   *
+   * It returns `ctx.catalog.enabled`, which is *the same value* `assertSavable` refuses a save
+   * against. That identity is the whole procedure: until August 2026 the set was declared twice —
+   * `ENABLED_*` here and `NEXT_PUBLIC_ENABLED_*` in `apps/backoffice` — and the two could
+   * disagree with nothing to notice. A grid drawn on axes the writer does not check publishes a
+   * menu whose every tile reads `no price set` on the till while all four processes report
+   * success (`services/api/CLAUDE.md`'s `BOOTSTRAP_ORG_ID` warning is the same class of silent
+   * failure). Two copies cannot drift when there is one copy.
+   *
+   * **An EMPTY set travels as an empty set, and it is not permissive.** `assertSavable` refuses
+   * every save when either axis is empty rather than treating an empty cross product as "nothing
+   * to check" (`unconfiguredCatalog`), and this must carry that meaning to the client rather than
+   * hide it: throwing here would render the back office's *unreachable* surface, which is true of
+   * nothing — the service is answering, it is unconfigured, and those need different words and a
+   * different action from an owner. So the honest empty answer goes on the wire and the editor
+   * refuses to draw a grid on it.
+   *
+   * **Gated on `catalog.edit_menu_prices`, like every read in this bag**, for the reason in this
+   * file's header: Appendix A has no catalog-READ row, inventing one would be inventing policy
+   * (Commandment 2), and `SESSION_ONLY_PROCEDURES` is for procedures reading the CALLER'S OWN
+   * identity — which org config is not. So no name joins either exemption list.
+   *
+   * The answer is the DEPLOYMENT's set rather than a per-org lookup, and that is stated rather
+   * than implied: `00 §7`'s layer-2 config plane does not exist, so one process serves one set —
+   * exactly as `ENABLED_BRANCHES` already did. It is still gated and still org-scoped in effect,
+   * because `authorized(...)` requires a subject before anything is returned.
+   */
+  enabled: authorized("catalog.edit_menu_prices").query(({ ctx }) => ctx.catalog.enabled),
+
+  /**
    * **What DEVICES have** — the published artifact, not the draft. Separate from `pending` on
    * purpose and asserted separately: a screen that merged them would show an owner a menu no till
    * has, and a cancelled edit would keep appearing as though it had shipped.

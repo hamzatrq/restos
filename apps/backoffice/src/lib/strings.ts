@@ -79,9 +79,14 @@ export const strings = {
     freeHelp: "A free item carries an explicit 0 in every cell — an empty cell is not a zero.",
     incomplete: "This item cannot be saved yet:",
     unpriced: "no price",
+    /**
+     * **The empty set is a REFUSAL, not "nothing to check"** (`01-F60`), and the sentence names
+     * where it is configured — which since August 2026 is the RestOS service and not this app.
+     * The back office asks `catalog.enabled` and has no copy of its own to point an owner at.
+     */
     notEnabled:
       "No branches or channels are configured, so no price grid can be drawn and nothing can be " +
-      "saved (01-F60). Set NEXT_PUBLIC_ENABLED_BRANCHES and NEXT_PUBLIC_ENABLED_CHANNELS.",
+      "saved (01-F60). Set ENABLED_BRANCHES and ENABLED_CHANNELS on the RestOS service.",
     openOrdersKeepTheirPrice:
       "Open orders keep the price they were rung at — a line snapshots its price when it is " +
       "added and is never re-derived (01-F18).",

@@ -9,7 +9,9 @@
   finds the ephemeral port by reading it. Required env is `SESSION_SECRET`; `PORT` defaults to 3001;
   `BOOTSTRAP_OWNER_EMAIL`/`_PASSWORD_HASH` + `BOOTSTRAP_ORG_ID` seed the one owner, and **absent env
   means nobody can log in — fail-closed, never give it a default credential**. `ENABLED_BRANCHES` /
-  `ENABLED_CHANNELS` are `01-F60`'s enabled set; absent means every save is REFUSED, not unchecked.
+  `ENABLED_CHANNELS` are `01-F60`'s enabled set — **the ONLY declaration of it anywhere** since
+  `catalog.enabled` landed (August 2026); absent means every save is REFUSED, not unchecked, and a
+  channel outside `02-F42`'s closed set **crashes the boot** rather than reaching a grid.
   Full two-process startup: `apps/backoffice/CLAUDE.md`. **Full FOUR-process startup — the one
   where a published menu reaches a real till — is `plans/wave-1/running-the-stack.md`**, run end to
   end in August 2026.
@@ -19,8 +21,11 @@
   to anything other than `apps/pos-electron`'s `DEV_IDENTITY.org_id` and every process reports
   success while no till ever sees a menu. Same for `ENABLED_BRANCHES` versus the device's
   `branch_id`: the till resolves prices for its OWN branch on `counter`, so an enabled set naming a
-  different branch publishes a menu whose every tile reads `no price set`. Neither has a surface
-  that could notice — there is no `catalog.enabled` procedure and no org-existence check anywhere.
+  different branch publishes a menu whose every tile reads `no price set`. **`BOOTSTRAP_ORG_ID`
+  still has no surface that could notice** — there is no org-existence check anywhere. The
+  `ENABLED_BRANCHES` half is now half-closed: `catalog.enabled` means the back office and this
+  service can no longer disagree about the set (that drift is gone), but agreeing with each other
+  and agreeing with the DEVICE are different claims, and nothing checks the second.
 - **`__acceptance__/startable.test.ts` is a SEAM test, not a unit test** — this wave's recurring
   defect (AGENTS.md) landed here as an entire unstartable service, so the seam gets an assertion
   rather than only a fix. It spawns `scripts.start` **as declared in `package.json`** (delete the
@@ -72,6 +77,41 @@
   `createApiServer` built with no `catalog`) and `__acceptance__/fake-gateway.ts`. Nothing
   `start()` builds is one of them, and putting one back is the mutant `catalog-gateway-seam.test.ts`
   exists to redden.
+
+- **`catalog.enabled` serves `01-F60`'s enabled set (August 2026), and the point is PROVENANCE.**
+  It returns `ctx.catalog.enabled` — *the same value* `assertSavable` refuses a save against — so
+  the axes `14-F29`'s grid is drawn on and the axes the writer checks cannot drift, because there
+  is one copy. `apps/backoffice` deleted its `NEXT_PUBLIC_ENABLED_*` and draws from the answer with
+  **no fallback**. Gated `authorized("catalog.edit_menu_prices")` like every other read in the bag,
+  for the reason in `catalog-router.ts`'s header (Appendix A has no catalog-READ row; inventing one
+  is inventing policy; `SESSION_ONLY_PROCEDURES` is for own-identity reads) — **so neither
+  exemption list changed.** An **empty** set travels as an empty set and does not throw: throwing
+  would render the back office's *unreachable* surface, which is true of nothing (the service is
+  answering; it is unconfigured), and those need different words from an owner. The answer is the
+  DEPLOYMENT's set, not a per-org lookup — `00 §7`'s layer-2 config plane still does not exist.
+
+## Mutation matrix for `catalog-enabled.test.ts` (round-3 law) — control 137/137 green, 0 survivors
+
+The answer is never checked against a literal alone; it is fed back into `catalog.save` in both
+directions, which is what a constant cannot satisfy.
+
+| # | mutant (exactly one branch) | new 11 failed | pre-existing 126 |
+|---|---|---|---|
+| E1 | `catalog.enabled` returns a plausible CONSTANT instead of `ctx.catalog.enabled` | 2 | **all green** |
+| E2 | the procedure built with `sessionProcedure` — ungated, so the boot gate refuses | 10 | 44 fail (they build the host too) |
+| E3 | **the `02-F42` boot check removed** — `ENABLED_CHANNELS` back to a bare `list` | exactly 1 | all green |
+| E4 | `catalog.save` validates against a DIFFERENT set than the one served (the drift, server-side) | 3 | 6 (`catalog.test.ts` owns the save path too) |
+
+**E1 is the one to re-run after any change here**, and its number is the honest one: a constant
+that happens to *match* the default test host survives 9 of 11. The two that kill it are the two
+written for it — a second host with different axes, and the empty-set answer. Without those the
+procedure could be a literal and nothing would know.
+
+**E3 closes the shape AGENTS.md says no reachability walk can see**: a rule that exists so a test
+*could* assert it, and none does. The check moved here from `apps/backoffice/src/lib/env.ts` when
+that file was deleted, so it needed an assertion of its own or the move would have been a silent
+deletion. It is asserted **out of process, through the declared `start` script**, with a CONTROL
+boot proving the channel is why the process died rather than that a process can die.
 
 ## Mutation matrix for `startable.test.ts` (round-3 law) — control 88/88 green, 0 survivors
 

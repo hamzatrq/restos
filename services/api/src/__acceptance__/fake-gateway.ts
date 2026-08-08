@@ -19,6 +19,7 @@
  */
 
 import { createServer, type Server } from "node:http";
+import type { EnabledPairs } from "../catalog.js";
 import {
   createMemoryCatalogPublisher,
   createMemoryLedgerAppender,
@@ -82,7 +83,10 @@ export const startFakeGateway = async (): Promise<FakeGateway> => {
           entries: never[];
           actor_user_id: string | null;
           now: number;
-          enabled: { branches: string[]; channels: string[] };
+          // The port's own type, not a hand-copy of its shape: `channels` became `02-F42`'s
+          // closed set when `catalog.enabled` put `EnabledPairs` on the wire, and a restated
+          // `string[]` here would have gone on compiling against a contract that had moved.
+          enabled: EnabledPairs;
         };
         send(200, {
           version: await publisher.publish(input.org_id, input.entries, {

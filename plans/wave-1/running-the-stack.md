@@ -240,17 +240,19 @@ curl -s -X POST http://127.0.0.1:3001/trpc/auth.login -H 'content-type: applicat
 
 ```sh
 RESTOS_API_URL=http://127.0.0.1:3001 \
-NEXT_PUBLIC_ENABLED_BRANCHES="$BRANCH_ID" \
-NEXT_PUBLIC_ENABLED_CHANNELS=counter,storefront \
 PORT=3000 \
 pnpm -C apps/backoffice dev                  # http://localhost:3000
 ```
 
 **Healthy:** `▲ Next.js 16.3.0 (webpack)` … `✓ Ready in <1s`.
 
-⚠ **The enabled set is declared twice and can drift** (`NEXT_PUBLIC_ENABLED_*` here, `ENABLED_*` on
-the API). There is no `catalog.enabled` procedure, so the editor cannot ask the server what to
-draw; the server's refusal is the backstop. **Keep the two pairs identical.**
+✅ **The enabled set is declared ONCE now** — on the API, at step 5a. `catalog.enabled` (August
+2026) serves it, and the back office draws `14-F29`'s grid from that answer with **no fallback**:
+if the query fails the screen says so and draws no editor rather than guessing. `lib/env.ts` and
+its two `NEXT_PUBLIC_ENABLED_*` variables are deleted, so there is nothing left here to keep in
+step with. **This removes one of this runbook's two silent-failure modes; `BOOTSTRAP_ORG_ID`
+remains** — see §3, and note that the API and the back office agreeing with each other is a
+different claim from either agreeing with the DEVICE's `branch_id`, which nothing checks.
 
 ---
 
@@ -403,7 +405,11 @@ Stated plainly, because a runbook that oversells is worse than none.
 2. **A device-provisioning path.** §6b is two manual steps against a protected service's table.
 3. **`rebuild:native` still clobbers `build/Release/`** (§6a). The documented restore is required
    every time, not "if it ever happens again".
-4. **`catalog.enabled`** — the enabled set is declared twice and can drift (§5c).
+4. ~~**`catalog.enabled`** — the enabled set is declared twice and can drift (§5c).~~ **CLOSED
+   (August 2026.)** The procedure exists, the back office draws its grid from it with no fallback,
+   and `NEXT_PUBLIC_ENABLED_*` is deleted (§5c). **What is NOT closed is the other end:** the set
+   this service and the back office now agree on is still not checked against the DEVICE's
+   `branch_id`, so §3's warning stands unchanged.
 5. **A stuck catalog is invisible to the cashier.** `Uplink.catalogRefusal` carries `01-F56`'s
    refusal out of the cloud session and nothing consumes it, so `DEC-SYNC-011`'s "observable" holds
    at the API and nowhere a human can see it.

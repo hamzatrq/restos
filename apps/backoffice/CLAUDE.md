@@ -29,10 +29,9 @@ BOOTSTRAP_ORG_ID=org-demo \
 ENABLED_BRANCHES=branch-main ENABLED_CHANNELS=counter,storefront \
 pnpm -C services/api dev            # `start` for no watcher. PORT defaults to 3001.
 
-# 2 — this app.
+# 2 — this app. ONE variable, and note what is absent: nothing here states the enabled
+#     (branch, channel) set. It arrives over `catalog.enabled` (August 2026).
 RESTOS_API_URL=http://127.0.0.1:3001 \
-NEXT_PUBLIC_ENABLED_BRANCHES=branch-main \
-NEXT_PUBLIC_ENABLED_CHANNELS=counter,storefront \
 pnpm -C apps/backoffice dev         # http://localhost:3000
 ```
 
@@ -44,8 +43,8 @@ pnpm -C apps/backoffice dev         # http://localhost:3000
   fail-closed direction, and deliberate (`services/api/src/server.ts`). Never replace it with a
   default credential. Mint the hash with `domain`'s `hashPin`; it is `01-F61` Argon2id, so expect
   the login round trip to take a beat.
-- **The enabled `(branch, channel)` set is passed to BOTH processes** and they can disagree — see
-  the drift note below. Keep the two pairs identical until `catalog.enabled` exists.
+- **The enabled `(branch, channel)` set is passed to the API ONLY**, and this app asks for it.
+  It used to be passed to both, where they could disagree; see the closed drift note below.
 - `services/api/src/__acceptance__/startable.test.ts` runs step 1 for real — it spawns the declared
   `start` script on an ephemeral port and drives login → `whoami` → `catalog.published` over a
   socket. If that suite is red, step 1 above is broken, not your environment.
@@ -66,10 +65,23 @@ pnpm -C apps/backoffice dev         # http://localhost:3000
 - **No `@/*` path alias.** The repo's `pnpm typecheck` compiles `apps/*/src` with the ROOT tsconfig,
   which has no path mapping — an alias here would pass `next build` and red `pnpm verify`. Relative
   imports only. `src/globals.d.ts` exists for the same reason (`next-env.d.ts` is outside `src/`).
-- **The enabled `(branch, channel)` set is DECLARED TWICE and can drift** —
-  `NEXT_PUBLIC_ENABLED_BRANCHES`/`NEXT_PUBLIC_ENABLED_CHANNELS` here, `ENABLED_*` in the API. There
-  is no `catalog.enabled` procedure, so the editor cannot ask the server what to draw. The server's
-  refusal is the backstop; the procedure is **owed**. See `lib/env.ts`.
+- ~~**The enabled `(branch, channel)` set is DECLARED TWICE and can drift.**~~ **CLOSED (August
+  2026) — `catalog.enabled` exists and this app has NO second declaration.** `lib/env.ts` is
+  deleted, `NEXT_PUBLIC_ENABLED_BRANCHES`/`NEXT_PUBLIC_ENABLED_CHANNELS` are gone from the run
+  recipe, and `@restos/config` is out of the manifest (this app now reads no `process.env` at all;
+  `RESTOS_API_URL` is read by `next.config.ts`, not by `src/`). `catalog-screen.tsx` runs
+  `catalog.enabled` and hands the answer to `EntryEditor` and to the list heading.
+  - **There is deliberately NO fallback when that query fails** — no constant, no env var, no
+    "sensible default". The screen renders `Problem` and draws no editor. A grid on a guess is how
+    the drift returns, and `01-F60` refuses a fallback price for the same reason. The two guesses
+    that were considered and rejected are recorded in the deleted `lib/env.ts` (git history):
+    deriving branches from published prices invents nothing for a NEW branch, and "all
+    `ORDER_CHANNELS`, one branch" publishes prices for branches that do not exist.
+  - **`02-F42`'s closed-channel check moved with the authority** into `services/api`'s boot env, so
+    an unknown channel crashes the API at boot instead of surviving until a save. Leaving it here
+    would have deleted it, since this app no longer reads a channel list.
+  - The remount key is `selection + axes`: the editor's draft is seeded from `enabled`, so an
+    editor that survived a change of axes would hold cells for a channel no longer enabled.
 - **Money is string surgery, never `× 100`** (`lib/money.ts`). Whole rupees in, integer paisa out,
   no float and therefore no rounding step. Decimals are REFUSED — a pinned interpretation, recorded
   in the file, not a specified rule.
@@ -167,6 +179,39 @@ Re-run it out-of-tree before trusting a change to `lib/` or the editor. Kill cou
 | M12 | `isWholeRupees` unpadded, so a FREE item reads as inexpressible | 4 |
 | M13 | an empty enabled set treated as "nothing to check" | 3 |
 | M14 | the timing radio sends `day_end` whatever the owner chose | 1 |
+
+## Mutation matrix — `enabled-seam.dom.test.tsx` (round-3 law), control 110/110 green, **0 survivors**
+
+`14-F29`'s grid draws on the axes `catalog.enabled` states. **The 95 pre-existing tests are blind
+to every row below**, and that is not incidental: `price-grid.test.ts` and `editor.dom.test.tsx`
+pass `enabled` in as a PROP, so they assert what the grid does with axes it is GIVEN and can say
+nothing about where the shipped screen gets them. Every row is one branch, run against the full
+suite, and the right-hand column is measured.
+
+| # | mutant (exactly one branch) | new 15 failed | pre-existing 95 |
+|---|---|---|---|
+| N1 | **the grid falls back to client env vars when the server answer is unavailable — THE seam mutant** | 4 | **all green** |
+| N2 | the screen never asks; the axes are a module constant | 7 | all green |
+| N3 | an EMPTY answer read as "nothing configured yet, use a default" (M13 over the wire) | 2 | all green |
+| N4 | **THE CONTROL: the list HEADING alone reverts to a local constant; the grid still follows the server** | exactly 1 | all green |
+| N5 | the structural scanner neutered (guard attribution) | exactly 1, the tripwire | all green |
+
+**N1 is the one to re-run after any change here.** It is the drift restored: `lib/env.ts` back,
+`enabled.data ?? enabledPairs`, and the enabled query's own error branch removed. Under it `pnpm
+verify` is exit 0, `pnpm seams:check` is clean, and **95 of 110 tests pass** — the app looks
+entirely healthy and an owner can once again price a menu on axes the writer does not check.
+
+**N4 is why the kill counts mean anything.** The set has two consumers — the grid and the list's
+money-column heading — and N4 changes only the second. Exactly one assertion fires and the grid
+assertions stay green, so the suite is discriminating between them rather than reddening on any
+change at all.
+
+⚠ **N1's first run was UNATTRIBUTABLE and had to be redone — N5's lesson from the `api-seam`
+matrix, reproduced.** The first draft of the mutant imported `@restos/config`, which this commit
+removed from the manifest, so the test FILE failed to load: `Test Files 1 failed` with
+`Tests 95 passed` and zero assertions run. The count went red for a reason that had nothing to do
+with the mutant. **Read the failure message, not the count** — the mutant was rewritten to read
+`process.env` directly (the more plausible regression anyway) before the numbers above were taken.
 
 ## `14-F3` renders its own example — and the date is a DECISION, not a default
 
