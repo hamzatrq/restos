@@ -395,6 +395,47 @@ never used the default, so its exact path is unverified here rather than stated 
 Sign in with any of the three seeded staff — **Ayesha**, **Bilal** (cashiers) or **Hina** (branch
 manager) — with the PIN you passed as `RESTOS_DEV_PIN`. Only Hina can open the day (`02-F22`).
 
+### 6d. Switch a device OFF — the stolen-tablet path (`01-F25`/`01-F48`)
+
+The other half of §6b, and the one you run under pressure. It needs `DATABASE_URL` and **nothing
+else** — no `DEVICE_TOKEN_SECRET`, because revoking mints nothing:
+
+```sh
+DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/restos' \
+pnpm -C services/sync-gateway revoke-device --org "$ORG_ID" --device "$DEVICE_ID"
+```
+
+Everything is on **stdout** here (unlike §6b, where stdout is the credential):
+
+```
+@restos/sync-gateway revoke-device REVOKED …0003 · org …0001 · branch …0002 · class counter_electron · postgres://postgres:*****@127.0.0.1:5432/restos
+@restos/sync-gateway revoke-device revoked_at 2026-08-08T17:15:14.798Z (01-F25/01-F48). This is NOT reversible here and nothing un-revokes: register the replacement under a FRESH device_id (01-N5).
+@restos/sync-gateway revoke-device a RUNNING gateway drops this device's live sessions within 10s (01-F48) and refuses its next hello with a purge_command (01-F42). Where no gateway is running, nothing is evicted until one starts.
+```
+
+**Read the second line before you walk away** — the branch and class are read from the registry, not
+echoed back from your arguments, so they are what catches a typo that happened to land on a real
+device.
+
+| you see | it means |
+|---|---|
+| `is NOT REGISTERED in org … — nothing was revoked` | a typo in `--org` or `--device`. **The device you meant is still live.** This is a refusal on purpose: the underlying `UPDATE … WHERE` matches no rows and reports no error, which is how an operator walks away believing a stolen till is dead |
+| `device was ALREADY revoked … this run changed nothing` | exit **0** — the state you wanted holds, and re-running is safe. The instant printed is the *original* one. If you did not revoke it, somebody else did |
+| `Unknown option '--restore'` | there is no un-revoke, by design and not by omission. The corpus specifies no reinstatement anywhere; `01-N5`'s replacement path is a **fresh `device_id`**, and `provision-device` refuses a revoked row in both its modes |
+
+**What a revoked device experiences, straight from `01-F48`:** eviction *"within 30 s where any path
+(cloud or LAN) reaches it, rather than only at its next voluntary contact"* — the cloud drops **live
+sessions**, not just future ones. Concretely: a running gateway sweeps every
+`REVOCATION_SWEEP_INTERVAL_MS` (10 s) and tears the socket down; any operation on a session not yet
+swept is refused per-operation; the next `hello` is refused and carries `01-F42`'s `purge_command`.
+**With no gateway process running, nothing is evicted until one starts** — the command says so.
+
+**What this does NOT close:** `14-F13`'s back-office flow — the device list with revoked state and
+**actor**, reachable from an owner's phone (`14-N2`). This command emits **no `device.revoked`
+event**, so a revocation leaves no ledger record and no attribution: a shell on the service host has
+no authenticated user, and `packages/domain`'s `PERMISSION_ACTIONS` declares no device action for
+commandment 8 to authorize against. Both are owed together.
+
 ---
 
 ## 7. What is still seeded, faked, or owed
@@ -427,7 +468,7 @@ Stated plainly, because a runbook that oversells is worse than none.
 |---|---|
 | **device identity** | still a marked DEV SEED with fixed UUIDs, and this is the half `provision-device` does **not** close: the command admits an identity you already know, and nothing gives the device one. `01-F25`'s pairing code is what would, and it is owed — which is why §0 still exists |
 | **device token** | **the product mints one now** (§6b) — a declared command on the gateway, not a UI. `01-F25` specifies "a one-time pairing via back office code" and the doc-14/15 pairing UX is owed in full; so is device-side persistence of `01-F47`'s silent renewal, and the host warning below 25% remaining life |
-| **device revocation** | ⚠ **nothing shipped can revoke a device.** `revokeDevice` is written and `01-F48`'s ≤30 s eviction sweep is live in the gateway, but the *act* of setting `revoked_at` has no caller — the register half of the pair now has one and this half does not. So a stolen till can be admitted by a declared command and taken away only with SQL. `provision-device` refuses to re-credential a revoked row precisely so the two halves cannot fight when this lands |
+| **device revocation** | **the product revokes now** (§6d) — `pnpm -C services/sync-gateway revoke-device`, a declared command, not SQL and not a UI. `01-F48`'s ≤30 s eviction sweep was always live; what had no caller was the *act* of setting `revoked_at`. What is still owed is `14-F13`: the back-office device list, and the `device.revoked` **event with an actor** — the command emits none, because a shell on the service host has no authenticated user |
 | **the staff roster** | a DEV SEED behind `RESTOS_DEV_PIN` (three staff sharing one PIN). PIN *verification* is real; nothing populates the registry |
 | **the owner account** | one owner declared in env (`bootstrapUsers`), an in-memory `UserStore` that dies with the process. No user table, no reset, no lockout, no rate limiting, no rotation, no `audit.login` |
 | **staged edits** | `createMemoryStagedEditStore` — a pending day-end edit does **not** survive an API restart |
@@ -458,7 +499,14 @@ Stated plainly, because a runbook that oversells is worse than none.
      host, so an owner still cannot add a till without shell access. It was left undone on a
      commandment-2 ground rather than a scheduling one: the pairing-code *model* — mint, TTL,
      one-time claim, class and branch binding — exists in the corpus only as that one clause.
-   - **revocation has no caller at all** (see the table above). This is now the more dangerous half.
+   - ~~**revocation has no caller at all.**~~ **CLOSED (August 2026)** —
+     `pnpm -C services/sync-gateway revoke-device --org <org_id> --device <device_id>` is declared
+     and seam-tested the same way (`__acceptance__/revocable.test.ts`: the DECLARED script, in a
+     separate process, then a real `createGateway` refusing the device it just admitted). What stays
+     owed is `14-F13`'s **screen and ledger record**: revocation from the back-office device list,
+     emitting `device.revoked` with an **actor**. The command deliberately emits no event — a shell
+     on the service host has no authenticated user, and a `null` actor written permanently into an
+     append-only store is a worse record than none. See §6d.
    - **the device does not persist `01-F47`'s renewal**, and `apps/pos-electron` re-reads
      `RESTOS_DEVICE_TOKEN` from env on every launch. The FR puts persistence in `sync-client` and is
      explicit that a host which forgets to store it bricks its devices at TTL. Nothing bites within

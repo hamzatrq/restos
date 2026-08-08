@@ -94,12 +94,85 @@
   - **stdout is the TOKEN and nothing else; every readable line is on stderr.** The emission of a
     credential is made as narrow as it can be, so `TOKEN=$(…)` captures a credential and not a
     paragraph.
-  - ⚠ **What it does NOT close, and the second is now the dangerous one.** `01-F25`'s pairing code
-    (an owner still needs shell access on the service host); **`revokeDevice` still has no shipping
-    caller at all** — so a stolen till can be *admitted* by a declared command and *revoked* only
-    with SQL; device-side persistence of `01-F47`'s silent renewal (the FR puts it in `sync-client`;
-    `apps/pos-electron` re-reads `RESTOS_DEVICE_TOKEN` from env every launch); the <25%-remaining
-    warning; and `hub_relay`, which this never grants because no mesh session exists to use it.
+  - ⚠ **What it does NOT close.** `01-F25`'s pairing code (an owner still needs shell access on the
+    service host); device-side persistence of `01-F47`'s silent renewal (the FR puts it in
+    `sync-client`; `apps/pos-electron` re-reads `RESTOS_DEVICE_TOKEN` from env every launch); the
+    <25%-remaining warning; and `hub_relay`, which this never grants because no mesh session exists
+    to use it. *(The revocation half — "`revokeDevice` still has no shipping caller at all" — was the
+    dangerous one on this list and is CLOSED by the command below.)*
+- **REVOCATION IS A DECLARED COMMAND — THE KILL SWITCH'S OTHER HALF (August 2026):
+  `pnpm -C services/sync-gateway revoke-device --org <org_id> --device <device_id>`.**
+  `provision-device` landed hours earlier and closed admission *alone*: `revokeDevice` had **zero
+  shipping callers**, so for that window a till could be admitted by a declared command and taken
+  away only by hand-written SQL against this PROTECTED service's table. `01-F48` exists for a stolen
+  or decommissioned device, and 2am against production is the worst moment to improvise an `UPDATE`.
+  - **WHAT THE SPEC SAYS A REVOKED DEVICE EXPERIENCES — quoted, not designed.** `01-F48`: *"Revoking
+    a device evicts it from the mesh **within 30 s** where any path (cloud or LAN) reaches it,
+    **rather than only at its next voluntary contact**: the cloud **drops live sessions** and culls
+    the device from fan-out on the revoking transaction … Revocation blocks **reads as well as
+    writes**: a revoked device receives no further events on any plane."* `01-F25`: *"a revoked
+    device loses cloud+LAN participation on next contact and is flagged branch-wide."* `01-F42`: the
+    device *"receives a local-purge command on next contact"*. So the answer to "does the gateway
+    refuse it at the next hello, mid-session, or only at renewal" is **mid-session**, and all three
+    enforcement points were already shipped — `sweepRevocations` (≤ `REVOCATION_SWEEP_INTERVAL_MS`,
+    10 s, driven by `server.ts`'s `setInterval`), `requireUnrevoked` per operation, and the hello
+    refusal that emits `purge_command`. **Nothing about the policy was invented here; only the act of
+    setting `revoked_at` was missing.**
+  - **The command is in ANOTHER PROCESS from the gateway, and that is the load-bearing claim.**
+    `gateway.ts`'s own comment leaves the drive mechanism to the host ("timer, LISTEN/NOTIFY, or an
+    in-process hook"), and the shipped host chose a timer that re-reads the registry — so a CLI
+    revocation reaches a running gateway's live sessions within one sweep. `revocable.test.ts` §C
+    proves exactly that and it is the half `auth-eviction-latency.test.ts` cannot: that suite calls
+    `revokeDevice` in-process.
+  - **Why a second command and not a `--revoke` flag on `provision-device`** (the SIMPLER option,
+    `24 §3b`). `registry.ts`'s own recorded reason: *"a provisioning command that also revokes is one
+    typo from a stopped branch"*. The two acts have opposite blast radii — a failed provisioning is
+    an inconvenience, an accidental revocation stops a till mid-service — and opposite defaults.
+    Its inputs are strictly **smaller** than provisioning's: `DATABASE_URL` only, no
+    `DEVICE_TOKEN_SECRET`, because revocation mints nothing. Anyone holding that DSN could already
+    run this exact `UPDATE`; it grants nobody anything new.
+  - ⚠ **`14-F13` IS THE SPEC'S REAL ANSWER AND IT IS OWED, not rejected.** *"Revocation is immediate
+    ('stolen tablet' flow): `device.revoked` → cloud token rejected, LAN participation flagged
+    branch-wide on next contact (01-F25); the list shows revoked state and **actor**"*, on `14-F12`'s
+    per-branch device list, reachable from an owner's phone (`14-N2`). Three things stand between
+    here and there, none of them a gateway task: `PERMISSION_ACTIONS` (`packages/domain`, PROTECTED)
+    declares **no device action**, so commandment 8 has nothing to authorize the request against and
+    adding a cell is a spec PR against Appendix A; the screen needs `14-F12`'s device-list read model
+    (class, app version, last-seen, sync lag), none of which this service projects; and the actor —
+    see below.
+  - ⚠ **IT WRITES NO `device.revoked` EVENT, DELIBERATELY.** The type is legal (`01-F62`,
+    `ORG_SCOPED_EVENT_TYPES`) and `appendOrgEvent` is in this service, so emitting one is two lines.
+    Three reasons not to: `registry.ts`'s **ratified T-01-09 ruling** puts `device.registered /
+    revoked` emission on the doc 14/15 emitters, not on this seam; `OrgEvent.actor_user_id` is
+    nullable and `14-F13` requires the **actor**, but a shell on the service host has no
+    authenticated user, so this could only ever write `null` — an unattributed row, permanently, in
+    an append-only store (commandment 1), and "somebody revoked this and we do not know who" is a
+    worse record than none because it looks like one; and `provision-device` emits no
+    `device.registered`, so emitting here would leave a history of revocations with no matching
+    registrations. **So revocation has no ledger record and no actor attribution today** — that is
+    the `14-F13` half, and it is OWED.
+  - **UN-REVOCATION IS NOT OFFERED, AND THE SPEC IS SILENT RATHER THAN PERMISSIVE.** Nothing in the
+    corpus describes reinstating a revoked device — no FR, no `DECISIONS.md` row (`grep -ain
+    "un-revoke\|unrevoke\|reinstate"` over `specs/` returns nothing). What *is* specified is the
+    replacement path: `01-N5` mints a **fresh `device_id`**, and `01-F42` purges the revoked device
+    on next contact, after which there is nothing left to reinstate. Building a restore flag would
+    be inventing security policy (commandment 2) and would reintroduce §6b's
+    `do update set revoked_at = null`. `parseArgs` runs `strict`, so `--restore` / `--unrevoke` /
+    `--reissue` are refused **by name** rather than ignored, and §F pins the round trip an operator
+    would actually try: revoke, then `provision-device` still refuses in both modes.
+  - **It READS THE ROW BEFORE IT WRITES, which is the `00 §5.7` half.** `revokeDevice` is an
+    `UPDATE … WHERE`, so a mistyped `--device` matches zero rows, returns `void`, and a command that
+    trusted it would print success over a till that is still live and still selling. An unregistered
+    device is therefore a **loud** non-zero refusal; the row that is found supplies the **branch and
+    class** printed back, which are the only fields that can catch a typo landing on a real device.
+    Re-revoking says *already*, prints the original instant and stays **exit 0** — the desired state
+    holds, and a kill switch you hesitate to re-run is one you hesitate over; that the instant is
+    unchanged is also a security signal, because if you did not revoke it, somebody did.
+  - **The eviction bound it prints is read from `REVOCATION_SWEEP_INTERVAL_MS`, never written out.**
+    A hand-copied "30 s" keeps saying 30 after someone changes the sweep — `K-3`'s dead-oracle
+    defect in an operator's sentence instead of a test's. Mutant R5 is that row.
+  - Everything goes to **stdout** here, unlike `provision-device`, whose prose is on stderr only
+    because stdout carries a credential. A revocation produces no token, so this follows `migrate.ts`.
 - **It does NOT need Docker to START, only to be TESTED.** `DEVICE_TOKEN_SECRET` is still required
   with its 32-byte floor; `DATABASE_URL` now **defaults** to `postgres://postgres:postgres@localhost:5432/restos`
   and `PORT` to `8080` (`0` is legal and means an ephemeral bind, as `services/api` always allowed).
@@ -250,6 +323,56 @@ describing the fix silently marked all three new exports as debt; and the same l
 and failed as **STALE**. `migrate.ts` already carries this warning for the header form and it was
 read *before* writing and reproduced anyway. **Do not write the token in prose in a production
 module.** Measured: 38 owed exports and a hard failure before, 35 and a clean run after.
+
+## Mutation matrix for `revocable.test.ts` (round-3 law) — control 8/8 new + 296 pre-existing green
+
+Device revocation, `01-F25`/`01-F48`/`01-F42`. Control: **304/304 green** (296 pre-existing + 8 new),
+`REAL_EXIT=0` read from a marker written inside the log, never from a reported status — and confirmed
+on a second full run after every mutant was restored (the tree was diffed byte-exact against its
+backups first). Every row is the FULL package suite, in-tree with byte-exact backups and a restore
+trap, and each mutant differs from the control in **exactly one branch** except R2b, which is labelled.
+
+**In EVERY row the failing test FILE was `revocable.test.ts` alone (`Test Files 1 failed | 47
+passed`), so all 296 pre-existing tests stayed green under every mutant** — including the two that
+reproduce shipped behaviour. Every kill is attributable to the new file.
+
+| # | mutant | new tests failed (of 8) | pre-existing 296 |
+|---|---|---|---|
+| R1 | **`scripts.revoke-device` deleted** | **all 8** | **all green** |
+| R2 | **`revokeDevice` never called** — the command reports on a device it never revoked | **6** | **all green** |
+| R2b | R2 **+ the post-write re-read guard neutered** (two branches — the fully decorative command) | 5 | all green |
+| R3 | **the NOT REGISTERED refusal removed** — a mistyped `--device` silently "succeeds" | **1 (§E)** | **all green** |
+| R4 | the already-revoked branch removed — a re-run claims it did the revoking | 1 (§D) | all green |
+| R5 | the eviction bound hand-copied as `30s` instead of read from `REVOCATION_SWEEP_INTERVAL_MS` | 1 (§C) | all green |
+| R6 | `parseArgs` `strict: false` — flags the command does not implement are silently ignored | 1 (§F) | all green |
+| R7 | the report echoes the ARGUMENTS instead of the registry row — no branch, no class | 1 (§G) | all green |
+| R8 | **CONTROL: same states, same writes, different prose on the narrative lines** | **0** | all green |
+
+**R1, R2 and R3 are the ones to re-run after any change here.** R1 is `startable`'s M1 /
+`migratable`'s N1 / `provisionable`'s P1 for this file — delete the declared script and **every**
+assertion goes red, which is why the test spawns `scripts["revoke-device"]` rather than a hardcoded
+`tsx src/revoke-device.ts`. R2 is the seam row: a command that prints a confident revocation report
+and writes nothing is the exact defect this file exists for, and the six kills are the ones that
+matter (§B admission, §C live eviction, §D, §F, §G, §H). **R3 is the 2am row and it is the one a
+reviewer should look hardest at** — it is not hypothetical, it is what `revokeDevice` alone does:
+an `UPDATE … WHERE` on a device that does not exist matches no rows, returns `void`, and reports
+success over a till that is still selling.
+
+⚠ **R2b is worth keeping for what it did NOT kill.** Neutering the post-write re-read guard *on top*
+of R2 took the kill count **down** from 6 to 5 (§G survives, because the fabricated fallback reads
+the real branch and class off the still-unrevoked row). Two readings, both useful: the guard is not
+what the suite rests on — §B/§C/§D/§F/§H catch a decorative command without it — and R2's sixth kill
+was partly the guard converting a silent lie into a loud failure, which is what it is for. **A
+mutant that changes the count in the unintuitive direction is a result, not noise** (`migratable`'s
+N5 records the same lesson from the other side).
+
+⚠ **§C and §H deliberately overlap `auth-eviction-latency.test.ts`, and the overlap is not the
+point.** That suite already pins that `sweepRevocations` evicts and that a revoked session's
+`catchup_request` is refused — but it calls `revokeDevice` **in-process**. What §C and §H add is that
+the sweep and the per-operation check see a revocation performed by **another process**, which is the
+only way a CLI kill switch can work and is exactly how `server.ts`'s `setInterval` learns of one.
+A mutant inside `sweepRevocations` would kill §C *and* that suite's tests, so its kill would not be
+attributable to this file; no such row is claimed here.
 
 ## Mutation matrix for the `catalog_notice` publish seam — control 282/282 green
 

@@ -96,14 +96,22 @@ export const registerDevice = async (
  * logic, and using Postgres `now()` keeps `Date.now()` out of gateway src
  * (18 §4 spirit). Only the FIRST revocation stamps; a re-revoke is a no-op.
  *
- * @unreached-owed No operator surface sets `revoked_at` — `apps/platform-admin` is a one-file stub
- * and `provision-device` deliberately does not revoke (a provisioning command that also revokes is
- * one typo from a stopped branch). Worth stating plainly, and it is now the LONELY half of this
- * pair: `registerDevice` has a shipping caller and this does not, so **a stolen till can be
- * provisioned by a declared command and cannot be revoked by any shipped path.** The ENFORCEMENT of
- * `revoked_at` is live in the gateway (`01-F48`'s ≤30 s sweep); only the act of setting it has no
- * caller. `provision-device` refuses to re-credential a revoked row precisely so that when this
- * gains a caller, the two halves cannot fight.
+ * **IT HAS A SHIPPING CALLER AS OF AUGUST 2026 — `revoke-device.ts`, the declared
+ * `pnpm -C services/sync-gateway revoke-device` command.** The debt note that stood here said no
+ * operator surface set `revoked_at`, which made this the LONELY half of the pair: `registerDevice`
+ * gained `provision-device.ts` hours earlier and this had nothing, so a stolen till could be
+ * admitted by a declared command and taken away only with hand-written SQL. The note is deleted
+ * because a marker on something reached fails `seams:check` — and, as above, the literal token is
+ * deliberately not written out, since the rail matches it anywhere in this declaration's comment and
+ * would re-declare the very exception this paragraph announces the deletion of.
+ *
+ * What is still owed here is `14-F13` — revocation from the back-office **device list**, emitting
+ * `device.revoked` with an **actor**. The command is an operator command on the service host and has
+ * no authenticated user, so it deliberately writes no event: the T-01-09 ratified ruling above puts
+ * that emission on the doc 14/15 emitters, and a `null` actor in an append-only store is a worse
+ * record than none. The ENFORCEMENT of `revoked_at` was already live (`01-F48`'s ≤30 s sweep); the
+ * act of setting it is what had no caller. `provision-device` refuses to re-credential a revoked
+ * row precisely so the two halves cannot fight, and nothing anywhere un-revokes.
  */
 export const revokeDevice = async (
   db: GatewayDb,
