@@ -11,7 +11,9 @@ import { defineEnv } from "@restos/config";
 import { createFrameCodec } from "@restos/sync-protocol";
 import { drizzle } from "drizzle-orm/postgres-js";
 import Fastify, { type FastifyInstance } from "fastify";
+import { DATABASE_URL_DEFAULT, redactedDsn } from "./database-url.js";
 import { createGateway, REVOCATION_SWEEP_INTERVAL_MS } from "./gateway.js";
+import { pendingMigrations } from "./migrate.js";
 import { registerPublishRoutes } from "./publish-http.js";
 
 export const buildServer = (
@@ -143,34 +145,20 @@ export const DATABASE_PREFIX = "@restos/sync-gateway database ";
 export const PUBLISH_PREFIX = "@restos/sync-gateway publish surface ";
 
 /**
- * The conventional local Postgres.
+ * Whether the database this process will use has had this build's migrations applied.
  *
- * **Why a default at all, when `18 §5` crashes at boot on invalid env.** Until August 2026 this
- * service had no `start` script whatsoever, so nothing had ever run it as a process; when one was
- * added, a *required* `DATABASE_URL` meant the gateway could not be brought up beside
- * `services/api` and the back office without first knowing a URL, and the three-process stack is
- * the thing that was missing. The default is not a fallback that hides: `postgres-js` connects
- * **lazily**, so a wrong or absent database is never a silent success — it is a loud failure on the
- * first request that needs one, and the boot line below names the address that will be tried.
+ * **The fourth question that cost real time when it had no answer, and the one with teeth.**
+ * `applyMigrations` had no runnable caller at all — no migrate script existed anywhere in the repo
+ * — so a gateway pointed at an unmigrated database booted perfectly, printed three healthy lines,
+ * and then answered `500` on the first request that needed a table, in *another service's* logs.
  *
- * The credentials stay required where a credential is the control: `DEVICE_TOKEN_SECRET` has no
- * default and `PUBLISH_TOKEN` absent is fail-CLOSED. A default connection string cannot grant
- * anyone anything; a default secret would.
+ * The state is REPORTED, never acted on. Migration stays a separate deliberate act (`migrate.ts`):
+ * a service that migrates its own database on boot races its own replicas, and this service's own
+ * precedent for a missing dependency is `PUBLISH_TOKEN` — fail-closed, said plainly at boot, and
+ * never a reason to crash the till's sync over a deploy-time concern. `00 §5.7`: the surface
+ * reports what is true rather than presenting a database it cannot serve from as ready.
  */
-const DATABASE_URL_DEFAULT = "postgres://postgres:postgres@localhost:5432/restos";
-
-/**
- * The DSN with its password removed, for the boot line. `18 §5` logs are structured JSON that ends
- * up in a log store; a connection password is the one part of a DSN that must never reach one, and
- * the host/port/database — the part an operator actually needs to diagnose "why can it not reach
- * the database" — are the parts kept.
- */
-const redactedDsn = (raw: string): string => {
-  const url = URL.parse(raw);
-  if (url === null) return "(unparseable DATABASE_URL)";
-  if (url.password !== "") url.password = "*****";
-  return url.toString();
-};
+export const SCHEMA_PREFIX = "@restos/sync-gateway schema ";
 
 export const start = async (): Promise<FastifyInstance> => {
   const env = defineEnv({
@@ -255,6 +243,36 @@ export const start = async (): Promise<FastifyInstance> => {
         : "enabled (PUBLISH_TOKEN configured)"
     }`,
   );
+  // AFTER `listen`, and deliberately not awaited. The other three lines are facts this process
+  // already holds; this one needs a round trip to a database that may not answer, and the whole
+  // point of `DATABASE_URL_DEFAULT` is that an unreachable database is never a boot failure and
+  // never a boot HANG — an unroutable host waits out `postgres-js`'s 30 s connect timeout, so
+  // awaiting this would trade a fast boot for exactly the stall the lazy connection avoids.
+  void pendingMigrations(env.DATABASE_URL)
+    .then(({ pending, total }) => {
+      console.log(
+        `${SCHEMA_PREFIX}${
+          pending === 0
+            ? `up to date — all ${String(total)} migrations applied`
+            : `NOT MIGRATED — ${String(pending)} of ${String(total)} migrations are unapplied. ` +
+              "Run `pnpm -C services/sync-gateway migrate`; until then every request that needs a " +
+              "missing table answers 500."
+        }`,
+      );
+    })
+    .catch((error: unknown) => {
+      // The database could not be read at all — the same fault a request would hit, which names
+      // itself precisely in that 500. Only the top message and its direct cause are printed:
+      // `DrizzleQueryError.message` is the SQL, and the `ECONNREFUSED` that explains it is one
+      // `cause` deeper. Nothing here prints the DSN — `startable.test.ts` asserts the password
+      // never reaches stdout, and that assertion now covers this line too.
+      const top = error instanceof Error ? error.message : String(error);
+      const cause = error instanceof Error && error.cause instanceof Error ? error.cause.message : "";
+      console.log(
+        `${SCHEMA_PREFIX}could not be checked — the database did not answer ` +
+          `(${cause === "" ? top : `${top} ← ${cause}`}). See the database line above.`,
+      );
+    });
   return app;
 };
 
