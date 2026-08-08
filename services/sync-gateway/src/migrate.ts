@@ -5,12 +5,16 @@
 // are exercised on every suite run (T-01-07 testing approach; 18 §4 append-only).
 //
 // **AND IT IS A RUNNABLE COMMAND: `pnpm -C services/sync-gateway migrate`** (August 2026). Until
-// then `applyMigrations` carried `@unreached-by-design` naming its callers as the test harness "and
-// whatever runs the deploy" — and NOTHING RAN THE DEPLOY. There was no migrate script anywhere in
-// the repo, so the only way to migrate was a `tsx -e` one-liner a human copied out of a runbook,
-// and a gateway pointed at an unmigrated database boots perfectly and then 500s on first use
-// (`postgres-js` opens lazily). That is AGENTS.md's recurring defect in its second shape: a correct
-// subsystem whose only caller is a sentence in a comment.
+// then `applyMigrations` carried a by-design unreached marker naming its callers as the test
+// harness "and whatever runs the deploy" — and NOTHING RAN THE DEPLOY. There was no migrate script
+// anywhere in the repo, so the only way to migrate was a `tsx -e` one-liner a human copied out of a
+// runbook, and a gateway pointed at an unmigrated database boots perfectly and then 500s on first
+// use (`postgres-js` opens lazily). That is AGENTS.md's recurring defect in its second shape: a
+// correct subsystem whose only caller is a sentence in a comment.
+//
+// (The marker token itself is deliberately not written out above: `check-seams.mjs` treats a marker
+// in a file header as covering every export in the file, so quoting it here would silently mark
+// this whole module exempt — and then FAIL the rail for a stale exception. Measured, not guessed.)
 //
 // **MIGRATION IS A SEPARATE, DELIBERATE ACT — the server does not migrate itself.** The reasoning
 // was already recorded on this file and is unchanged: a service that migrates its own database on

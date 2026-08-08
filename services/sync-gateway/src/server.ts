@@ -266,8 +266,12 @@ export const start = async (): Promise<FastifyInstance> => {
       // `DrizzleQueryError.message` is the SQL, and the `ECONNREFUSED` that explains it is one
       // `cause` deeper. Nothing here prints the DSN — `startable.test.ts` asserts the password
       // never reaches stdout, and that assertion now covers this line too.
-      const top = error instanceof Error ? error.message : String(error);
-      const cause = error instanceof Error && error.cause instanceof Error ? error.cause.message : "";
+      // One LINE: the failing query is a multi-line template, and a boot line that wraps into
+      // three is one an operator scrolls past.
+      const flat = (text: string): string => text.replace(/\s+/g, " ").trim();
+      const top = flat(error instanceof Error ? error.message : String(error));
+      const cause =
+        error instanceof Error && error.cause instanceof Error ? flat(error.cause.message) : "";
       console.log(
         `${SCHEMA_PREFIX}could not be checked — the database did not answer ` +
           `(${cause === "" ? top : `${top} ← ${cause}`}). See the database line above.`,
