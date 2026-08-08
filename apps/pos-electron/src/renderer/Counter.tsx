@@ -478,6 +478,17 @@ export const Counter = () => {
       hub={device.hub}
       cloud={device.cloud}
       /*
+        `01-F56`/`DEC-SYNC-011` (a) — catalog health, straight through. It rides the same
+        `deviceState()` read as the three reachability facts above and re-arrives on every
+        `changed` push, so a refusal that clears leaves the strip without anything here polling.
+
+        Passed WHOLE rather than destructured into props: the message is main's (it is the
+        operator-facing wording `AlarmSchema` keeps on the trusted side) and the version is the
+        till's, and a renderer that took them apart would be a renderer that could reassemble
+        them differently on the next surface.
+      */
+      catalog={device.catalog}
+      /*
         `03-F5`/`27-F11d` — the print-failure band, and it is REAL now. This was `[]` with a
         recorded reason ("nothing constructs one yet"), which was honest then and would be the
         silent KOT failure the FR forbids now that K-7's spooler does construct them.

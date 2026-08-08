@@ -116,6 +116,22 @@ export type GatewayDeps = {
    * device with no cloud session (LAN-only, DEC-SYNC-009) simply reports null.
    */
   blockedCursor: () => BlockedCursor | null;
+  /**
+   * `01-F56` / `DEC-SYNC-011` — the catalog refusal the cloud session is holding, or `null`.
+   *
+   * **REQUIRED, and the requirement is the point.** `seams:check` Rule B exists because an
+   * *optional* member of an options bag that no call site passes is half this wave's named defect
+   * by count — so this is declared required and a host that forgets it is a typecheck error
+   * rather than a silent no-op. That still leaves the shape the rail *cannot* see (`AGENTS.md`:
+   * "a port supplied with a STUB"): `catalogRefusal: () => null` compiles, satisfies the type,
+   * keeps `seams:check` clean and takes the whole surface off the counter. That case is held by
+   * `__acceptance__/catalog-health-seam.test.ts` and by nothing else.
+   *
+   * A GETTER for the same reason `blockedCursor` is one: the refusal lives on the CLOUD SESSION,
+   * arrives and clears while the process runs, and a device with no cloud session (LAN-only,
+   * `DEC-SYNC-009`) simply reports `null`.
+   */
+  catalogRefusal: () => { reason: string; have_version: number } | null;
   /** 01-F46 — the Asia/Karachi business day with its 05:00 cutover. */
   businessDay: () => string;
   /**
@@ -129,6 +145,61 @@ export type GatewayDeps = {
    */
   panelPpi: () => number;
 };
+
+/**
+ * `01-F56`'s refusal reasons, as the operator hears them.
+ *
+ * **The model is `services/api`'s `IntegrationError`**, and the three questions it names are the
+ * three an operator is actually asking. It says *what* failed (the menu, not the link), *whether
+ * this is the till or the world*, and *what the state is* — because a cashier cannot fix a sync
+ * fault and the only useful act is to hand the till to somebody who can call someone. That
+ * person needs a sentence they can repeat, not a code.
+ *
+ * **The one distinction every sentence has to preserve** is the one the reachability chips beside
+ * it cannot make: *this till reached the cloud and would not take what came back*, as against
+ * *this till has not heard from the cloud*. The second is `Cloud OFF`, one element to the left,
+ * and is not a fault at all (`00 §5.1` — offline is the normal operating state of a Pakistani
+ * restaurant). Every string below therefore says what the TILL or the CLOUD did, never "offline",
+ * "disconnected" or "no connection".
+ *
+ * The reasons are `sync-client`'s own (`catalog.ts`'s `CatalogApplyResult`, plus the session's
+ * `no_progress`). `stale` is deliberately absent: `cloud-session.ts` never records one as a
+ * refusal, because it means a redelivery of something already held — not a fault, and surfacing
+ * it would put an amber chip on a healthy till.
+ */
+const CATALOG_REFUSAL_WORDS: Record<string, string> = {
+  // `01-F56`: "a delta whose base does not match is REFUSED — the device asks for a snapshot
+  // instead". The device is the one refusing, and it is refusing correctly — applying it would
+  // silently diverge this till's menu from every other till's, which is undetectable here and
+  // shows up as a mispriced item days later.
+  needs_snapshot:
+    "this till refused the update it was sent — it needs a full menu, not a change list",
+  // The server stopped paging mid-fetch (`cloud-session.ts` bounds the request loop rather than
+  // asking forever). The cloud answered and then stopped; the link is not the problem.
+  no_progress: "the cloud stopped sending the menu part-way through",
+  // The bytes did not parse. Named as arrival damage rather than as a link failure, because the
+  // link delivered something — it was not what it claimed to be. **The cloud is named
+  // explicitly**: the first draft read "the menu update did not arrive intact", which is the one
+  // sentence of the four that said WHO did nothing at all, and `IntegrationError`'s first
+  // property is *what failed*. "Something went wrong with the menu" sends a manager nowhere.
+  malformed: "the menu the cloud sent did not arrive intact",
+  // `01-F56`'s divergence detection: this device and the sender disagree about what a version
+  // MEANS. The most serious of the four and the one most worth escalating, because it says two
+  // tills in the same restaurant may be selling different menus under one version number.
+  divergent: "this till and the cloud disagree about what this menu version contains",
+};
+
+/**
+ * The operator's sentence for a refusal, and the fallback is deliberately not silence.
+ *
+ * An unrecognised reason still raises the chip and still names the code. `00 §5.7` asks a surface
+ * to report what is TRUE, and "the till is refusing its menu for a reason this build has no words
+ * for" is both true and actionable — where dropping it would hide a stuck catalog behind a
+ * `sync-client` change that added a reason and never told this file. That is exactly the drift
+ * this repo has been bitten by; a `Record` lookup returning `undefined` is a quiet default.
+ */
+const catalogRefusalWords = (reason: string): string =>
+  CATALOG_REFUSAL_WORDS[reason] ?? `this till refused the menu it was sent (${reason})`;
 
 type LineCell = { item_id: string; qty: number; unit_price_paisa: number; states: string[] };
 
@@ -175,6 +246,10 @@ const checked = <T>(schema: { parse: (v: unknown) => T }, value: unknown, what: 
 export const createGateway = (deps: GatewayDeps): Gateway => ({
   deviceState: () => {
     const b = deps.blockedCursor();
+    // `01-F56` / `DEC-SYNC-011` — read on EVERY `deviceState()`, beside the blocked cursor it is
+    // the sibling of. Both are cloud-session facts that arrive and clear under a running process,
+    // so neither may be captured when the gateway is built.
+    const stuck = deps.catalogRefusal();
     // ONE read, used twice below. Two `deps.session()` calls could straddle an `01-F26` auto-lock
     // and hand the renderer a strip naming Ayesha over a `user` that is already null — the same
     // disagreement `02-F45` forbids, arrived at through timing rather than through a second field.
@@ -211,6 +286,21 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
         ...deps.reachability(),
         blocked: b
           ? { global_seq: b.global_seq, event_type: b.event_type, reason: b.reason }
+          : null,
+        /**
+         * `01-F56` / `DEC-SYNC-011` (a) — the honesty UI's half of "a refusal is observable".
+         *
+         * The reason code becomes an operator sentence HERE, on the trusted side, and the version
+         * crosses as a number. `AlarmSchema`'s header states the rule this follows: the
+         * operator-facing wording never gets assembled in the renderer, because that puts it on
+         * the untrusted end of `18 §9`'s bridge with one copy per screen.
+         *
+         * `have_version` is renamed to `version` on the way across on purpose — it is `27-F12`'s
+         * NUMBER for the screen ("the menu this till is actually selling from"), and the wire
+         * name asks a device-internal question the cashier is not being told to answer.
+         */
+        catalog: stuck
+          ? { message: catalogRefusalWords(stuck.reason), version: stuck.have_version }
           : null,
         // `18 §6` — the lock surface reads the session through THIS seam and no other, and it
         // is the same read the envelope is stamped from below. A strip naming one cashier over

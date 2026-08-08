@@ -187,6 +187,11 @@ const gatewayOver = (target: DeviceStore, over: Partial<GatewayDeps> = {}) =>
     training: false,
     reachability: () => ({ lan: "down", hub: "down", cloud: "down" }),
     blockedCursor: () => null,
+    // 01-F56/DEC-SYNC-011 — the catalog refusal, required on GatewayDeps. Healthy here: these
+    // cases are about an APPLIED catalog, and a raised refusal would be scenery in them. The
+    // refused case has its own file (`catalog-health-seam.test.ts`), which is also where the
+    // DEFERRED note at the foot of this one now points.
+    catalogRefusal: () => null,
     businessDay: () => "2026-08-06",
     // 27-F68 — the density of the glass, required on GatewayDeps.
     panelPpi: () => 100.5,
@@ -466,9 +471,14 @@ describe("the wave's recurring defect — the catalog subsystem has a PRODUCTION
 
   it("the uplink's own catalog reads are not silently dropped on the floor", () => {
     // `01-F56`/`DEC-SYNC-011`: the session tracks a catalog refusal so a stuck catalog is
-    // observable. `sync.ts` surfaces it; nothing consumes it yet, which is recorded as a
-    // FINDING in the T-C6 commit rather than asserted as satisfied here — see the DEFERRED
-    // block at the foot of this file.
+    // observable, and `sync.ts` surfaces it.
+    //
+    // **This comment used to end "nothing consumes it yet", and that stopped being true in
+    // August 2026.** `Uplink.catalogRefusal` now has a production consumer — `main/index.ts`
+    // hands it to `createGateway`, `deviceState()` projects it, and `StatusStrip` draws it as
+    // `CatalogHealth`. The assertion below is unchanged and still holds; only the claim about
+    // the state of the tree was stale, which AGENTS.md names as the dangerous kind. The seam
+    // that closed it is asserted in `catalog-health-seam.test.ts`.
     expect(syncSrc).toContain("catalog_refusal");
   });
 });
@@ -530,10 +540,14 @@ describe("01-F52 — the catalog is reference data and never an input to a fold"
 //   exercised by `services/sync-gateway/src/__acceptance__/journey-catalog.test.ts` over a real
 //   `createCloudSession`. What is NOT covered anywhere is `main/sync.ts` itself against a live
 //   gateway — §D asserts its construction, not its behaviour, and that gap is real.
-// * **`catalog_refusal` reaches no human.** `Uplink.catalogRefusal` exists and has no consumer:
-//   `DeviceState` (`shared/ipc.ts`) has a `blocked` cursor field and no catalog-health field, so
-//   `DEC-SYNC-011`'s "observable" holds at the API and nowhere on the counter. Closing it needs a
-//   `DeviceState` field, a renderer surface and an FR that names one — none of which exist. Owed,
-//   and named rather than left to look intentional.
+// * ~~**`catalog_refusal` reaches no human.**~~ **CLOSED, August 2026 —
+//   `catalog-health-seam.test.ts`.** This entry read: *"`Uplink.catalogRefusal` exists and has no
+//   consumer … Closing it needs a `DeviceState` field, a renderer surface and an FR that names
+//   one — none of which exist."* The first two were built. **The third was wrong when written and
+//   the correction is worth keeping**: `01-F56`'s own closing sentence makes a refusal *"observable
+//   in device health (`15`) like any other blocked cursor (`DEC-SYNC-011`)"*, and `DEC-SYNC-011`
+//   (a) names the destinations — *"surfaced to fleet health (doc 15) **and the honesty UI**"*.
+//   `00 §5.7` is the honesty UI's own law. The FR existed; nobody had read past doc 15. An owed
+//   item filed as "no FR exists" is one nobody re-checks, which is how this sat for a wave.
 // * **The seed is not a menu.** `RESTOS_DEV_MENU` exists because the back office does not. Nothing
 //   here is evidence about a published catalog, `14-F28`'s day-end hold, or price history.

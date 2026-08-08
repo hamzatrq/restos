@@ -1,19 +1,29 @@
 import { useColor } from "../theme";
 import { space, typography } from "../tokens/index";
 import { type Alarm, AlarmBand } from "./AlarmBand";
+import { CatalogHealth, type CatalogRefusal } from "./CatalogHealth";
 import { ConnectionFacts, type Fact } from "./ConnectionFacts";
 
 /**
  * The shell's **honesty surface** — the only chrome that changes (screen-map §1.1).
  *
- * It carries four things and nothing else: who is acting, what the device can reach, what
- * business day it is, and the S1 band. Everything else an operator might "want to know"
- * belongs on a work surface or nowhere — a status strip that accumulates content becomes a
- * dashboard, and a dashboard on an operational screen is read by no one.
+ * It carries five things and nothing else: who is acting, what the device can reach, **whether
+ * the menu it is selling from is the current one**, what business day it is, and the S1 band.
+ * Everything else an operator might "want to know" belongs on a work surface or nowhere — a
+ * status strip that accumulates content becomes a dashboard, and a dashboard on an operational
+ * screen is read by no one.
  *
  * The alarm sits INSIDE the strip on purpose (`27-F11d`): it is a band, never the screen,
  * and the work underneath stays visible and usable. A half-built cart is never taken away
  * from a cashier with a customer waiting.
+ *
+ * **Why catalog health earned the fifth slot** (`01-F56`, `DEC-SYNC-011` (a), `00 §5.7`). This
+ * surface is the honesty surface, and it was reporting one kind of truth while a second kind sat
+ * unsaid: the device could be REFUSING the menu it was sent and go on drawing the old grid with
+ * every chip here reading healthy. `CatalogHealth`'s header carries the full argument for why it
+ * is a peer of `ConnectionFacts` rather than a fourth chip inside it — the short version is that
+ * `Cloud OK` **with the menu refused** is a real and common state, and a link chip cannot say it.
+ * It costs nothing when the catalog is healthy: it renders `null` (`27-F16`).
  */
 export type StatusStripProps = {
   /** 02-F19 — attribution is never anonymous. The name is shown, not just a role. */
@@ -26,6 +36,13 @@ export type StatusStripProps = {
    *  the calendar date after midnight, and a cashier closing at 02:00 must not be confused
    *  about which day her drawer belongs to. */
   businessDay: string;
+  /**
+   * `01-F56` / `DEC-SYNC-011` — the catalog this device has refused, or `null` when it is
+   * current. Optional, so a host that has not been taught the fact yet composes unchanged; the
+   * cost of that optionality is that a host which stops supplying it goes quiet, which is why
+   * `apps/pos-electron` holds it with a hand-written seam assertion rather than with the type.
+   */
+  catalog?: CatalogRefusal | null | undefined;
   alarms: readonly Alarm[];
   onAcknowledgeAlarm: (id: string) => void;
 };
@@ -37,6 +54,7 @@ export const StatusStrip = ({
   hub,
   cloud,
   businessDay,
+  catalog = null,
   alarms,
   onAcknowledgeAlarm,
 }: StatusStripProps) => {
@@ -61,7 +79,14 @@ export const StatusStrip = ({
           <strong>{actor}</strong>
           <span style={{ color: color["fgColor-muted"] }}> · {deviceLabel}</span>
         </span>
+        {/*
+          `27-F12`'s POSITION channel: catalog health sits immediately after the three link facts
+          and before the day, always, whether or not it is raised. A fact that moves when it
+          appears is a fact an operator has to hunt for, and `27-F4` makes the arrangement of an
+          operational surface something staff learn rather than read.
+        */}
         <ConnectionFacts lan={lan} hub={hub} cloud={cloud} />
+        <CatalogHealth refusal={catalog} />
         <span style={{ color: color["fgColor-muted"], fontVariantNumeric: "tabular-nums" }}>
           Day {businessDay}
         </span>

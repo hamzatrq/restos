@@ -503,10 +503,135 @@ in principle**, but see the owed item below — the manifest table itself was no
   degrade-to-identifier path is what the launch exercises — the honest state of a device no menu
   has reached (`00 §5.7`). The seam that keeps this wired lives in
   `__acceptance__/catalog-seam.test.ts` §D.
-- **A stuck catalog is not yet visible to the cashier.** `Uplink.catalogRefusal` carries
-  `01-F56`'s refusal out of the cloud session and **nothing consumes it**: `DeviceState` has a
-  `blocked` cursor field and no catalog-health field, so `DEC-SYNC-011`'s "observable" holds at
-  the API and nowhere on the counter. Owed, and named rather than left to look intentional.
+- **✅ A STUCK CATALOG IS NOW VISIBLE TO THE CASHIER (August 2026) — `01-F56` / `DEC-SYNC-011`.**
+  This entry used to read *"`Uplink.catalogRefusal` carries `01-F56`'s refusal out of the cloud
+  session and **nothing consumes it**"*, and it was the twelfth instance of the wave's named
+  defect: producer wired, consumer missing, every gate green. `seams:check` is structurally blind
+  to that direction — it walks for unreached EXPORTS and unsupplied OPTIONALS, and here the
+  export was reached and there was no option to leave unsupplied.
+
+  **The chain now runs end to end:** `cloud-session.ts` → `Uplink.catalogRefusal` →
+  `main/index.ts` (**the seam**) → `GatewayDeps.catalogRefusal` (REQUIRED, so a host that forgets
+  it is a typecheck error) → `deviceState().catalog` → `Counter.tsx` → `AppShell` → `StatusStrip`
+  → `packages/ui`'s new **`CatalogHealth`**.
+
+  **Where it went, and why not the two obvious places.**
+  - **Not `03-F5`'s S1 band.** `AlarmBand` clears on an attributed acknowledgement, which is right
+    for an EVENT that already happened once. A refusal is a **STATE** — true until the catalog
+    un-sticks — so an `I SAW THIS` would take a live condition off the honesty surface, which is
+    what `00 §5.7` exists to forbid. `27-F11d`'s band claimants are `03-F5`'s S1s and this is none
+    of them. `CatalogHealth` therefore ships **no control at all**, and a test pins that.
+  - **Not a fourth `ConnectionFacts` chip.** The state that matters is the one where the two facts
+    DISAGREE — `Cloud OK` with the menu refused — and a link chip reports that as fine. `Fact` is
+    `ok|degraded|down`, which describes a link; a refusal has a reason and a version.
+  - **Amber, not red.** `27-F14`'s allocation is read as the CLOSED table `ConnectionFacts` was
+    corrected to: the only connectivity claimant anywhere in it is *"sync degraded"*, in amber,
+    and red's claimants are enumerated and exclude this. Substantively too — `01-F53` captures the
+    price into the event at line-add, so **a till on a stale catalog still bills correctly**;
+    `01-F54` degrades to the identifier; `01-F17` says the sale is never blocked.
+  - **Nothing at all when healthy** (`27-F16`), because a permanent `Menu OK` chip is the
+    base-case spend that made two red blocks meaningless on this same strip.
+
+  **What the cashier sees, measured on the launched app** (real refusal, not a fixture — see
+  below). Strip, left to right: `Ayesha · Counter 1` · `LAN OFF` `Hub OFF` `Cloud OK` ·
+  **`Menu NOT UPDATING still showing v0 this till refused the update it was sent — it needs a
+  full menu, not a change list`** · `Day 2026-08-08`. The reachability chips and this one are
+  answering different questions and say so: `Cloud OFF` means *this till has not heard from the
+  cloud* (`00 §5.1` — not a fault), and this means *it heard, and would not take what came back*.
+  `main` measured `scrollHeight 958 === clientHeight 958` with the notice up — no vertical cost,
+  because it rides the existing strip row.
+
+  **The words are formatted in MAIN, never in the renderer** (`AlarmSchema`'s precedent, `18 §9`),
+  from `gateway.ts`'s `CATALOG_REFUSAL_WORDS`. Four reasons, four sentences, modelled on
+  `services/api`'s `IntegrationError`: name the dependency, say whether this is the till or the
+  world, keep the diagnosis. **An unrecognised reason still raises the chip and names the code** —
+  `sync-client` is a protected path that can gain a reason without telling this file, and a
+  `Record` lookup returning `undefined` would silently delete the surface on exactly that change.
+
+  **One of the four sentences was wrong and the test caught it, which is worth keeping:**
+  `malformed` first read *"the menu update did not arrive intact"* — the one sentence of four that
+  named neither end. `IntegrationError`'s first property is *what failed*, so it is now *"the menu
+  **the cloud** sent did not arrive intact"*. Found by an assertion, not by reading.
+
+  **A finding about the owed item itself.** `catalog-seam.test.ts`'s DEFERRED block said closing
+  this needed *"a `DeviceState` field, a renderer surface and an FR that names one — none of which
+  exist"*. **The third clause was wrong when written.** `01-F56`'s own closing sentence makes a
+  refusal *"observable in device health (`15`)"*, and `DEC-SYNC-011` (a) names both destinations:
+  *"surfaced to fleet health (doc 15) **and the honesty UI**"*. The FR existed; nobody read past
+  doc 15. **An owed item filed as "no FR exists" is one nobody re-checks** — that is why this sat
+  for a wave, and it is a different failure from the ones this file already records.
+
+- **Mutation matrix — the catalog-health SEAM (control: pos-electron 406/406, ui 247/247).**
+  In-tree, byte-exact backups with a restore trap, **full package suites under every mutant**, so
+  the right-hand column is measured rather than reasoned. 379 pos + 234 ui tests existed before
+  this work.
+
+  | # | mutant (exactly one branch) | new pos (27) | new ui (13) | pre-existing 379 + 234 |
+  |---|---|---|---|---|
+  | M1 | **THE SEAM** — `index.ts` `catalogRefusal: () => null` | **1** | 0 | **all green** |
+  | M2 | `Counter.tsx` `catalog={null}` — the renderer half | 5 | 0 | all green |
+  | M3 | `gateway.ts` projects `catalog: null` — dep read, thrown away | 16 | 0 | all green |
+  | M4 | `version: 0` instead of `have_version` (`27-F12`'s number) | 3 | 0 | all green |
+  | M5 | an unrecognised reason collapses to one generic sentence | 1 | 0 | all green |
+  | M6 | `CatalogHealth` paints the **FAULT** fill (`27-F14`) | 0 | 2 | **1** — `discipline.test.ts` |
+  | M7 | a chip on the HEALTHY case too (`27-F16`) | 2 | 2 | all green |
+  | M8 | `StatusStrip` stops rendering it — the `ui` composition seam | 4 | 4 | all green |
+  | M9 | **NEGATIVE CONTROL** — reword a shipped operator sentence | **0** | **0** | all green |
+
+  **M1 is the one to re-run after any change here, and its number is the whole point: exactly ONE
+  test in this repo separates the shipped wiring from a stub, and all 613 pre-existing tests stay
+  green under it.** `catalogRefusal` is REQUIRED, so `seams:check` Rule B is satisfied by any
+  supply at all and `() => null` is a supply — AGENTS.md's *"a port supplied with a STUB"*, which
+  it measures as invisible to every rail in the repo. The behavioural tests cannot see M1 either,
+  because they inject their own dep; that is the "you need BOTH properties" split landing on one
+  argument.
+
+  **M9 is what makes every other row mean something.** A real one-branch edit to shipped prose
+  reddens nothing, so the suite is holding the PROPERTY (four distinct sentences, no connectivity
+  vocabulary, each names an end) and not pinning strings a future session may improve.
+
+  **M6's third column is a gift from an existing guard.** Painting `bgColor-status-fault` without
+  naming `outlineColor-status-fault` trips `discipline.test.ts`'s `27-F64` rule — a pre-existing
+  test catching a colour-budget violation it was not written for.
+
+- **Mutation matrix — the catalog-health SCREEN (control: gate GREEN, 26 surfaces, 450 controls).**
+  The gate's own coverage boundary is its **fixture**, so `layout-gate/preload.ts` now raises the
+  refusal for the whole sweep and `main.ts` carries a `24-F14` presence check for it.
+
+  | # | mutant (exactly one branch) | gate | pos 406 | ui 247 |
+  |---|---|---|---|---|
+  | L1 | **THE FIXTURE** — `preload.ts` back to `catalog: null` | **RED**, 2 × EMPTY MATCH (one per panel) | 405 (1 seam test) | all green |
+  | M2 | `Counter.tsx` drops the prop | **RED**, 2 × EMPTY MATCH | 401 | all green |
+  | L3 | **A REAL CLIPPING DEFECT** — the notice takes 620 dp of column | **RED**, 57 violations / 12 overflowing boxes | **all 406 green** | **all 247 green** |
+  | L4 | **NEGATIVE CONTROL** — chip gap `space-2` → `space-3` | **GREEN** | all green | all green |
+
+  **L3 is the row that justifies raising the fixture at all**, and its right-hand columns are the
+  gate's thesis restated on new chrome: the notice is made tall enough to eat the vertical budget,
+  and `C` `0` `⌫` go genuinely **UNREACHABLE** on Pay and Cash (`main` holding 593 px in a 400 px
+  box) — the shipped defect-2 shape, verbatim — while **all 653 tests stay green**. Only the gate
+  sees it, and only because the fixture produces the state.
+
+  **L1 is mutation row M8's lesson applied before the defect instead of after it.** `CatalogHealth`
+  renders `null` when healthy and is not a control, so `measureSurface` — which walks clipping
+  boxes and `button`s — would report a perfectly clean strip whether the chip is there or not. One
+  reverted fixture line would have retired the whole surface from the sweep silently, exactly as
+  `escalationFor: () => null` did to `ManagerApproval` for weeks. It is now an EMPTY MATCH on both
+  panels. **M2 reddens the gate too**, and for the right reason: the check asks the DOM, so it
+  fails whether the fixture stopped producing the state or the app stopped drawing it.
+
+- **A REAL REFUSAL WAS DRIVEN, not simulated — and how to do it again.** The refusal above is not
+  a fixture: a ~60-line WebSocket server (scratchpad, not committed) answers `hello` with
+  `hello_ack { catalog_version: 5 }` and answers every `catalog_request` with a **delta whose
+  `base_version` is 3** — a base the device does not hold. Everything downstream is the shipped
+  product: the real `createWsCloudTransport`, the real `createCloudSession`, the real
+  `store.catalog.apply()` returning `needs_snapshot` per `01-F56`, the real bounded retry (4
+  requests, then it stops asking), the real `DeviceState`. Launch with
+  `RESTOS_CLOUD_URL=ws://127.0.0.1:<port> RESTOS_DEVICE_TOKEN=<anything> RESTOS_DEV_MENU=1
+  RESTOS_DEV_PIN=1234`, a private `--user-data-dir` and `--remote-debugging-port`. Serving a valid
+  **snapshot** instead is the control: same healthy link, `catalog: null`, strip quiet, and the
+  synced menu replaces the dev seed. **A fake gateway is not the gateway** — nothing here is
+  evidence about `services/sync-gateway`'s serve path, which is
+  `journey-catalog.test.ts`'s job.
 - **The staff roster is a marked DEV SEED, and it is off by default.** PIN verification itself
   is real — `createPinSession` against Argon2id hashes in `store.staff` (`01-F28`), with
   `01-F61`'s durable per-(device, user) lockout — but nothing *populates* that registry yet, so

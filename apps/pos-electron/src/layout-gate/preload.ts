@@ -28,6 +28,14 @@ import type { Alarm, CashState, MenuItem, OpenOrder, RestosBridge, Session } fro
  * - **`openOrders()` returns a settleable order.** Defect 2 (`TAKE CASH` at y=929) is only
  *   reachable when `TenderPanel` is drawn, and `Counter.tsx`'s Pay surface renders a "no order
  *   to settle" line instead when there is none.
+ * - **`deviceState().catalog` returns a REFUSAL.** `01-F56`'s catalog-health chip renders
+ *   `null` when the menu is current (`27-F16` — colour is spent on the abnormal only), so a
+ *   fixture with a healthy catalog measures a strip that does not contain it. Chrome is the
+ *   scarcest budget on this device — `DEC-UI-001`'s ruling turned on `51 + 85 + 102 + 528 = 766`
+ *   in a 768 px panel — so a strip element that appears only in an abnormal state is exactly the
+ *   kind of thing that fits in every state anyone measured and clips in the one nobody did.
+ *   This is blind spot 2 in `main.ts` ("it only sees the states the fixture produces") being
+ *   paid up front instead of after the defect.
  *
  * Sizes are kept to what `27 §1a` actually specifies rather than inflated: `27-F11a` computes
  * ~88 tiles per page and ~25 items per category tab, so a 24-item menu is the spec's own page
@@ -167,6 +175,25 @@ const bridge: RestosBridge = {
       hub: "down" as const,
       cloud: "down" as const,
       blocked: null,
+      /**
+       * **`01-F56` — a REFUSED catalog, raised for the whole sweep.**
+       *
+       * Raised rather than toggled, because unlike `03-F5`'s band this has no acknowledgement to
+       * drive it with: a catalog refusal is a STATE that clears when the catalog un-sticks, and
+       * `CatalogHealth` deliberately offers no control (see its header). The healthy state is the
+       * strictly SMALLER layout — the chip renders nothing at all — so measuring the raised one
+       * measures the worst case, which is what a fixture is for.
+       *
+       * The message is the real one `main/gateway.ts` formats for `needs_snapshot`, not a short
+       * stand-in: it is the longest of the four and this element sits in a `space-between` row
+       * with the actor, three link chips and the business day. A fixture with `"stuck"` in it
+       * would measure a strip that does not exist on any till.
+       */
+      catalog: {
+        version: 4,
+        message:
+          "this till refused the update it was sent — it needs a full menu, not a change list",
+      },
       user: session,
     }),
   openOrders: () => Promise.resolve([ORDER]),

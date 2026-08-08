@@ -50,6 +50,50 @@ export const DeviceStateSchema = z.object({
     .object({ global_seq: z.number(), event_type: z.string(), reason: z.string() })
     .nullable(),
   /**
+   * `01-F56` / `DEC-SYNC-011` — **a catalog version this device REFUSED.** `null` is healthy.
+   *
+   * The sibling of `blocked` directly above, and it exists for the same reason on the same
+   * authority. `01-F56` makes a refusal *"observable in device health (`15`) like any other
+   * blocked cursor (`DEC-SYNC-011`)"*, and `DEC-SYNC-011` (a) names both destinations for that
+   * observability — *"surfaced to fleet health (doc 15) **and the honesty UI**"*. `blocked`
+   * carried its half from the start; this half stopped at `Uplink.catalogRefusal` with **no
+   * consumer**, so a till could sit refusing every menu update it was sent while the strip showed
+   * nothing and the grid drew a stale catalogue as if it were current — `00 §5.7` (*"stale is
+   * never presented as live"*) inverted on the surface a cashier stands at.
+   *
+   * **This is a SHAPE change in code and not a new state (Commandment 2).** No `01 §4` event type
+   * and no order state is added or touched; the fact already existed on `CloudSessionStatus` and
+   * simply had nowhere to go.
+   *
+   * **The wording is formatted in MAIN**, on `AlarmSchema`'s precedent lower in this file: *"a
+   * band assembled in the renderer from a reason code would put the operator-facing wording on
+   * the untrusted side of `18 §9`'s bridge, one copy per screen."* The sentence has to separate
+   * *"this till refused the menu it was sent"* from *"this till has not heard from the cloud"* —
+   * the second is what the three reachability facts above report — and those are one careless
+   * word apart if each screen writes its own.
+   *
+   * **OPTIONAL, for the reason `panelPpi` below records and with the same stated cost.** Nine
+   * files in this app build a `DeviceState` by hand and a required key is a compile error in
+   * oracle suites this session may not edit (`24 §3` step 2). The price is that an absent value
+   * means "healthy" — which is this wave's recurring defect in miniature, a host that supplies
+   * nothing and green tests — so it is held by a hand-written seam assertion
+   * (`__acceptance__/catalog-health-seam.test.ts`) and by the layout gate's fixture, exactly as
+   * `panelPpi` is. **Required is where it belongs once those harnesses catch up.**
+   */
+  catalog: z
+    .object({
+      /** What is wrong, in the operator's words — never a reason code (`00 §5.7`). */
+      message: z.string().min(1),
+      /**
+       * `01-F56`'s monotonic version, as this device actually holds it. `27-F12` requires a
+       * status to carry a NUMBER as well as a colour, and this is the number that tells whoever
+       * is called whether the till is one menu behind or forty.
+       */
+      version: z.number().int().nonnegative(),
+    })
+    .nullable()
+    .optional(),
+  /**
    * `01-F26` — the PIN session on this device, and **`null` is LOCKED**. Nullable-required
    * rather than optional for the same reason as `blocked` directly above: an absent key would
    * be a third state with no meaning, on the one field that decides whether the counter is

@@ -295,6 +295,27 @@ const run = async (): Promise<number> => {
     );
 
   /**
+   * **`24-F14` — is `01-F56`'s catalog-health chip actually on the strip?**
+   *
+   * `CatalogHealth` renders `null` when the menu is current (`27-F16`), and it is not a control,
+   * so `measureSurface`'s sweep — which walks clipping boxes and `button`s — would report a
+   * perfectly clean strip whether the chip is there or not. That is mutation row M8's lesson
+   * exactly: `escalationFor: () => null` took `ManagerApproval` out of coverage for weeks and the
+   * gate stayed green, and the property that line lacked was **a check that the fixture is still
+   * producing the state**. One reverted line in `preload.ts` would otherwise silently retire this
+   * whole surface from the sweep.
+   *
+   * It asks the DOM rather than the fixture, so it also fails if the chip stops reaching the
+   * strip for any reason at all — `Counter.tsx` dropping the prop, `AppShell` dropping the
+   * pass-through, `StatusStrip` dropping the element.
+   */
+  const catalogChipPresent = (): Promise<boolean> =>
+    window.webContents.executeJavaScript(
+      `[...document.querySelectorAll('[role="status"]')]
+         .some((e) => (e.getAttribute('aria-label') || '').startsWith('Menu: not updating'))`,
+    );
+
+  /**
    * **`27-F68`, measured in millimetres of glass.** Reads a `keypad`-posture control's rendered
    * height out of Blink and converts through the panel the renderer was told it is on — so this
    * is the operator's actual thumb target, not a number the app agrees with itself about.
@@ -393,6 +414,23 @@ const run = async (): Promise<number> => {
     await new Promise((r) => setTimeout(r, 600));
 
     const shell = await measure();
+
+    // `24-F14` — the fixture raises `01-F56`'s refusal for the whole sweep, so the strip below
+    // is measured with the chip up. If it is not there, every `tab:` surface measured on this
+    // panel is measuring a strip the fixture no longer produces, and a green run would mean
+    // nothing about the state this work exists to cover.
+    if (!(await catalogChipPresent())) {
+      failures.push({
+        surface: on("catalog-health"),
+        state: "alarm",
+        detail:
+          "EMPTY MATCH — 01-F56's catalog-health chip is not on the status strip, so every " +
+          "surface below was measured WITHOUT it and this sweep says nothing about the state it " +
+          "was extended to cover. Either preload.ts stopped serving `deviceState().catalog`, or " +
+          "the fact stopped reaching StatusStrip through Counter.tsx / AppShell (24-F14).",
+      });
+    }
+
     if (shell.tabs.length === 0) {
       failures.push({
         surface: on("counter"),
