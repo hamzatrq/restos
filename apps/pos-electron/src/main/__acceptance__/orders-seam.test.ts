@@ -57,6 +57,9 @@ const deps = (rows: unknown[]): GatewayDeps =>
     training: false,
     reachability: () => ({ lan: "ok", hub: "ok", cloud: "down" }),
     blockedCursor: () => null,
+    // 01-F56/DEC-SYNC-011 — the catalog refusal, required on GatewayDeps. Healthy here: this
+    // harness is about another fact, and a raised refusal would be scenery in it.
+    catalogRefusal: () => null,
     businessDay: () => "2026-08-07",
     // 27-F68 — the density of the glass, required on GatewayDeps.
     panelPpi: () => 100.5,

@@ -460,6 +460,23 @@ app.whenReady().then(async () => {
     // nowhere a human could see it.
     reachability: uplink.reachability,
     blockedCursor: uplink.blockedCursor,
+    /**
+     * **`01-F56` / `DEC-SYNC-011` (a) — THE SEAM, and it is the whole of this task.**
+     *
+     * `Uplink.catalogRefusal` was built with T-C6, carried `01-F56`'s refusal correctly out of
+     * the cloud session, and had **no consumer**: `DeviceState` had a `blocked` cursor and no
+     * catalog-health field, so a till could refuse every menu update the cloud sent it — wrong
+     * base version, malformed snapshot, a server that stopped paging — and go on drawing the old
+     * grid with every chip on the strip reading healthy. This one argument is what makes the
+     * observability `DEC-SYNC-011` ratified reach the person standing at the counter.
+     *
+     * **It is the argument, not the subsystem, that this wave keeps losing.** `catalogRefusal:
+     * () => null` compiles, typechecks, keeps `seams:check` clean (the member is *supplied* —
+     * Rule B never asks whether what was supplied is real) and silently deletes the surface.
+     * `__acceptance__/catalog-health-seam.test.ts` is the hand-written assertion that separates
+     * this line from that one, because no rail in this repo can.
+     */
+    catalogRefusal: uplink.catalogRefusal,
     // 01-F46 via `domain`, and computed from BRANCH time (01-F43), not the device clock: a
     // till whose clock is an hour fast must not roll the business day an hour early. The
     // offset is 0 until a hub is contacted, which the strip reports honestly as `down`.

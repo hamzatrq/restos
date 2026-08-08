@@ -316,6 +316,12 @@ describe("the guard suite actually covers the package", () => {
         "components/AppShell.tsx",
         "components/Cart.stories.tsx",
         "components/Cart.tsx",
+        // ADDED with `01-F56`/`DEC-SYNC-011`'s catalog-health surface — a refused menu, said out
+        // loud on the counter's honesty strip. It paints a `27-F14` status fill, so the outline
+        // rule (`27-F64`) and the polarity rule (`27-F67`) both bear on it, which is precisely
+        // the acknowledgement this pin exists to force.
+        "components/CatalogHealth.stories.tsx",
+        "components/CatalogHealth.tsx",
         "components/ConnectionFacts.stories.tsx",
         "components/ConnectionFacts.tsx",
         "components/index.ts",

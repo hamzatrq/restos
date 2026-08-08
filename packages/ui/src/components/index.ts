@@ -2,6 +2,7 @@ export { AgeBadge, ageLevel } from "./AgeBadge";
 export { type Alarm, AlarmBand } from "./AlarmBand";
 export { AppShell } from "./AppShell";
 export { Cart } from "./Cart";
+export { CatalogHealth, type CatalogRefusal } from "./CatalogHealth";
 export { ConnectionFacts, type Fact } from "./ConnectionFacts";
 export { type GridItem, ItemGrid, pageCapacity } from "./ItemGrid";
 export { formatPaisa, MoneyValue } from "./MoneyValue";

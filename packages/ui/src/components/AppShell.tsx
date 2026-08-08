@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { inverse, ThemeProvider, useColor, usePolarity } from "../theme";
 import { space } from "../tokens/index";
 import type { Alarm } from "./AlarmBand";
+import type { CatalogRefusal } from "./CatalogHealth";
 import type { Fact } from "./ConnectionFacts";
 import { StatusStrip } from "./StatusStrip";
 import { type Tab, TabRail } from "./TabRail";
@@ -42,6 +43,13 @@ export type AppShellProps = {
   lan: Fact;
   hub: Fact;
   cloud: Fact;
+  /**
+   * `01-F56` / `DEC-SYNC-011` — a catalog version this device REFUSED, or `null` when the menu
+   * it is selling from is current. Passed straight through to `StatusStrip`, which is where the
+   * honesty surface lives; see `CatalogHealth` for why it is not a fourth `ConnectionFacts` chip
+   * and not an `03-F5` band.
+   */
+  catalog?: CatalogRefusal | null | undefined;
   alarms: readonly Alarm[];
   onAcknowledgeAlarm: (id: string) => void;
   tabs: readonly Tab[];
@@ -60,6 +68,7 @@ export const AppShell = ({
   lan,
   hub,
   cloud,
+  catalog = null,
   alarms,
   onAcknowledgeAlarm,
   tabs,
@@ -85,6 +94,7 @@ export const AppShell = ({
         lan={lan}
         hub={hub}
         cloud={cloud}
+        catalog={catalog}
         alarms={alarms}
         onAcknowledgeAlarm={onAcknowledgeAlarm}
         tabs={tabs}
@@ -108,6 +118,7 @@ const Shell = ({
   lan,
   hub,
   cloud,
+  catalog,
   alarms,
   onAcknowledgeAlarm,
   tabs,
@@ -175,6 +186,7 @@ const Shell = ({
         hub={hub}
         cloud={cloud}
         businessDay={businessDay}
+        catalog={catalog}
         alarms={alarms}
         onAcknowledgeAlarm={onAcknowledgeAlarm}
       />
