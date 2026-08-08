@@ -45,6 +45,9 @@ const deps = (over: Partial<GatewayDeps> = {}): GatewayDeps => ({
   reachability: () => ({ lan: "ok", hub: "ok", cloud: "down" }),
   blockedCursor: () => null,
   businessDay: () => "2026-07-26",
+  // 27-F68 — the density of the glass. Required on GatewayDeps, so no gateway can be
+  // constructed without one; 100.5 is 27 §1a's 1366x768 counter panel.
+  panelPpi: () => 100.5,
   ...over,
 });
 

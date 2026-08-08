@@ -118,6 +118,16 @@ export type GatewayDeps = {
   blockedCursor: () => BlockedCursor | null;
   /** 01-F46 — the Asia/Karachi business day with its 05:00 cutover. */
   businessDay: () => string;
+  /**
+   * `27-F68` / `00 §7` layer 3 — the density of the glass, resolved by `panel-density.ts`.
+   *
+   * A GETTER for the same reason `session` is one: the panel can change under a running process
+   * (a till moved to an external display, a dock), and the whole product's touch-target sizes
+   * are computed from it. Required, not optional — this is the seam the ruling exists to create,
+   * and an optional dep with no supplier is `seams:check` Rule B's own defect (instances 2 and 5
+   * in `AGENTS.md`) reproduced on the one field that decides whether `27-F8` holds.
+   */
+  panelPpi: () => number;
 };
 
 type LineCell = { item_id: string; qty: number; unit_price_paisa: number; states: string[] };
@@ -192,6 +202,9 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
          * dropped for a schema that requires a non-empty string.
          */
         actor: user?.display_name ?? deps.actor,
+        // `27-F68` — read on EVERY `deviceState()`, which is what makes it follow a panel that
+        // changes rather than one that was true when the process booted.
+        panelPpi: deps.panelPpi(),
         deviceLabel: deps.deviceLabel,
         businessDay: deps.businessDay(),
         training: deps.training,

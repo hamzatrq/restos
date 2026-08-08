@@ -64,6 +64,23 @@ export const DeviceStateSchema = z.object({
    * separate from `deviceLabel` and stays null on an unattended till.
    */
   user: z.object({ user_id: z.string().min(1), display_name: z.string().min(1) }).nullable(),
+  /**
+   * `27-F68` / `00 §7` layer 3 — the density of the glass, in device pixels per physical inch.
+   * A dp is 1/160 inch of PHYSICAL size, so this is what turns `27-F8`'s 126 dp keypad into the
+   * 79 px it is on `27 §1a`'s 1366×768 counter and the 111 px it is on its 1920×1080 one.
+   * `main/panel-density.ts` resolves it — measured from the display, `panel_ppi` only to correct
+   * a panel that reports nothing or reports wrong.
+   *
+   * **Optional, and the optionality is a real cost that is bounded rather than denied.** Every
+   * fixture in this app's renderer suites builds a `DeviceState` by hand, and a required field
+   * would rewrite eight acceptance files this change has no business touching. The price is that
+   * an absent value has to mean something, and what it means is `App.tsx`'s stated fallback to
+   * `27 §1a`'s reference counter panel — which is *the* shape of this wave's recurring defect (a
+   * host that supplies nothing, and green tests). So it is held by a hand-written seam assertion
+   * (`__acceptance__/panel-density.test.ts` §B) and by the layout gate, which measures the pixel
+   * sizes that only appear if a real density arrived.
+   */
+  panelPpi: z.number().positive().optional(),
 });
 export type DeviceState = z.infer<typeof DeviceStateSchema>;
 

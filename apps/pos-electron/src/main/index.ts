@@ -1,10 +1,11 @@
+import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { businessDate, hashPin } from "@restos/domain";
 import { createSpooler, printerCapability } from "@restos/escpos";
 import { createPinAuditSink, createPinSession, openStore, wallClock } from "@restos/sync-client";
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, screen } from "electron";
 import { AppendRequestSchema, CHANNELS, type Session } from "../shared/ipc";
 import {
   authorizeEscalation,
@@ -23,6 +24,12 @@ import {
 import { printerTransport } from "./file-printer";
 import { createGateway } from "./gateway";
 import { openJobStore } from "./job-store";
+import {
+  describePanelDensity,
+  measurePhysicalWidthMm,
+  type PanelDensity,
+  resolvePanelDensity,
+} from "./panel-density";
 import { createCashPrinter, createKotPrinter, PUMP_INTERVAL_MS } from "./printing";
 import { createUplink } from "./sync";
 import { COUNTER_WINDOW_OPTIONS } from "./window-options";
@@ -190,6 +197,42 @@ const kotCapability = () => printerCapability(process.env["RESTOS_KOT_PRINTER"] 
  * is being read for.
  */
 const DEVICE_LABEL = "Counter 1";
+
+/**
+ * `27-F68` / `00 §7` layer 3 — the density of the glass, resolved once per read and cached for
+ * the process.
+ *
+ * **Lazy, because `screen` throws before `app.whenReady()`** and this module is imported at
+ * load. **Cached, because it shells out** on Windows and Linux and `deviceState()` is the
+ * hottest read on the device — a PowerShell spawn per poll would be absurd. The cache is the
+ * honest trade: a panel swapped mid-session keeps the density it booted with until the app is
+ * restarted, which is the same staleness `DEVICE_LABEL` and `training` already carry and is
+ * bounded by a relaunch rather than by a reinstall.
+ */
+let panelDensityCache: PanelDensity | null = null;
+const panelDensity = (): PanelDensity => {
+  if (panelDensityCache !== null) return panelDensityCache;
+  const display = screen.getPrimaryDisplay();
+  panelDensityCache = resolvePanelDensity({
+    // `display.size` is in DIP; the panel's own pixels are that times its scale factor. This is
+    // the "resolution" half of `00 §7`'s "resolution and physical size".
+    display: {
+      widthPx: display.size.width * display.scaleFactor,
+      heightPx: display.size.height * display.scaleFactor,
+    },
+    configured: process.env["RESTOS_PANEL_PPI"],
+    physicalWidthMm: measurePhysicalWidthMm(process.platform, (command, args) => {
+      try {
+        return execFileSync(command, [...args], { encoding: "utf8", timeout: 4_000 });
+      } catch {
+        // A platform probe that is absent or refuses is a panel that "reports nothing"
+        // (`00 §7`), which is a resolved state and never a reason to stop the till (`01-F17`).
+        return null;
+      }
+    }),
+  });
+  return panelDensityCache;
+};
 
 const createWindow = (): BrowserWindow => {
   const window = new BrowserWindow({
@@ -421,7 +464,24 @@ app.whenReady().then(async () => {
     // till whose clock is an hour fast must not roll the business day an hour early. The
     // offset is 0 until a hub is contacted, which the strip reports honestly as `down`.
     businessDay: () => businessDate(wallClock.now() + store.branchTimeStatus().offset_ms),
+    /**
+     * `27-F68` / `00 §7` layer 3 — the density of the glass, and the input that makes a dp a
+     * physical size instead of a CSS pixel. A GETTER, so a till moved to another display resizes
+     * its own touch targets rather than keeping the panel it booted on.
+     *
+     * `screen` is required lazily: it is a main-process module that throws if it is touched
+     * before `app.whenReady()`, and this function outlives the call that builds the gateway.
+     */
+    panelPpi: () => panelDensity().ppi,
   });
+
+  /**
+   * `00 §5.7` — the device reports what is TRUE, and on this field being wrong looks exactly
+   * like being right: every `27-F8` target renders at the wrong physical size and nothing on
+   * screen is visibly broken. So the source is printed, and the `assumed` case says so at
+   * length. This is the same argument as `catalogBootSummary` directly above.
+   */
+  console.log(describePanelDensity(panelDensity()));
 
   /**
    * **Say what the grid will actually show, at boot.** Without this the till renders item names

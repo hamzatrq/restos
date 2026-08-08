@@ -37,8 +37,50 @@ import { measureSurface, type SurfaceReport } from "./probe";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-/** `24-F14` empty-match protection: a gate that measured nothing must FAIL, never pass. */
-const MIN_SURFACES = 3;
+/**
+ * `24-F14` empty-match protection: a gate that measured nothing must FAIL, never pass.
+ *
+ * Raised from 3 to 16 when the panel loop landed: two panels × (one lock surface + five tabs in
+ * two states + two escalation steps) is 26 today, and a floor of 3 would have been satisfied by
+ * a run that lost an entire panel. A floor that only catches total collapse is not a floor.
+ */
+const MIN_SURFACES = 16;
+
+/**
+ * `27 §1a` lists TWO counter panels — 15.6″ at 1366×768 **or** 1920×1080 — and `DEC-UI-001` (e)
+ * requires both be measured: *"the layout gate measures one panel at devicePixelRatio 1;
+ * `27 §1a`'s second counter panel must enter its fixture with this work, or the ruling ships
+ * untested on precisely the case that produced"* the pinned-79-px trap.
+ *
+ * They are the same 13.6 × 7.6 inches of glass, so under `27-F68` they must hold the **same**
+ * layout at different pixel counts — that is `27-F11c` stated as a test rather than as prose,
+ * and it is the assertion a pinned pixel constant cannot pass: 79 px is 20 mm on the first and
+ * 14.2 mm on the second.
+ */
+const PANELS = [
+  { label: "1366x768", width: COUNTER_WINDOW_OPTIONS.width, height: COUNTER_WINDOW_OPTIONS.height },
+  { label: "1920x1080", width: 1920, height: 1080 },
+] as const;
+
+/**
+ * `27-F8`'s keypad target, and what it must MEASURE as on each panel — `27 §1a`'s own published
+ * figures for its own hardware table (*"126 dp keypad → 79–111 px"*).
+ *
+ * **This is the assertion that makes the conversion visible to the gate**, and without it the
+ * rail would pass on a product that had silently gone back to spending dp as CSS pixels: every
+ * other check here asks whether things FIT, and 126 css px fits a 1920×1080 panel perfectly
+ * while being 22.7 mm of glass instead of 20. Expressed as millimetres against `27-F8`'s floor
+ * rather than as a pixel count, because `27-F68` (b) is explicit that the minimum IS the
+ * millimetre and a pixel figure is one panel's answer.
+ */
+const KEYPAD_MM = 20.0;
+/**
+ * ±0.6 mm — 3% of the target. Wide enough for the sub-pixel rounding a fractional zoom produces
+ * on a 126 dp box (measured: 79 px where 79.1 is exact), narrow enough that the 6.4 mm error a
+ * pinned 79 px makes on the second panel is nowhere near it. A guard with generous slack is not
+ * a guard.
+ */
+const KEYPAD_MM_TOLERANCE = 0.6;
 
 /**
  * # THE OWED REGISTER — a FOURTH layout defect, found by this gate on its first run.
@@ -89,8 +131,29 @@ const MIN_SURFACES = 3;
  * **What it costs while it stands, stated plainly:** a genuinely NEW violation on Pay or Cash
  * *in the alarm state only* would be masked by this entry. Both surfaces are still judged
  * strictly in the quiet state, and every other surface is judged strictly in both.
+ *
+ * ## ⚠ THE REGISTER IS EMPTY — DEFECT 4 IS CLOSED (August 2026, `DEC-UI-001` / `27-F68`)
+ *
+ * `tab:Pay` and `tab:Cash` came out because **the gate refused to let them stay**: the anti-rot
+ * rule above fired with *"STALE REGISTER … it now lays out cleanly"* the first time the founder
+ * ruling's conversion ran, which is the property this list was built to have. Nothing here was
+ * relaxed to achieve that — the same measurement, the same tolerance, the same two states.
+ *
+ * What changed is arithmetic. `27-F68` makes a dp 1/160 inch of PHYSICAL size, so on this panel
+ * a 126 dp keypad key renders at **79 px** and not 126, the pad is **340 px** and not 528, and
+ * the work area under `03-F5`'s band holds it with room. Measured before and after, same window,
+ * same fixture:
+ *
+ * | surface, band up | before | after |
+ * |---|---|---|
+ * | Pay `main` | 594 px of content in a 530 px box | fits |
+ * | Cash `main` | 584 px in 530 — **`Counted Rs 0` entirely off-screen** | fits, `Counted` on screen |
+ * | `C` `0` `⌫` | clipped 126 → 95 px (Pay), 112 px (Cash) | not clipped on either |
+ *
+ * **The list stays**, and stays exercised: `MIN_SURFACES` and the empty-match guards keep the
+ * rail honest, and the next surface that earns an entry gets the same anti-rot treatment.
  */
-const OWED_UNDER_ALARM: readonly string[] = ["tab:Pay", "tab:Cash"];
+const OWED_UNDER_ALARM: readonly string[] = [];
 
 type Failure = { readonly surface: string; readonly state: State; readonly detail: string };
 
@@ -219,6 +282,45 @@ const run = async (): Promise<number> => {
         if (b) b.click(); })()`,
     );
 
+  /**
+   * Press a control by its accessible name, and REPORT whether it was there. The gate drives the
+   * escalation path through the same three taps a cashier makes, and a tap that silently missed
+   * would leave `ManagerApproval` unrendered and the sweep vacuously green — `24-F14` again.
+   */
+  const press = (label: string): Promise<boolean> =>
+    window.webContents.executeJavaScript(
+      `(() => { const b = [...document.querySelectorAll('button')]
+          .find((e) => (e.getAttribute('aria-label') || e.textContent || '').trim().startsWith(${JSON.stringify(label)}));
+        if (b) { b.click(); return true; } return false; })()`,
+    );
+
+  /**
+   * **`27-F68`, measured in millimetres of glass.** Reads a `keypad`-posture control's rendered
+   * height out of Blink and converts through the panel the renderer was told it is on — so this
+   * is the operator's actual thumb target, not a number the app agrees with itself about.
+   *
+   * The pad's digits are the only `keypad` posture on the device, so `aria-label="1"` finds one
+   * on every surface that has one. Returns `null` where no pad is drawn, which the caller treats
+   * as "nothing to judge" rather than as a pass.
+   */
+  const keypadMm = (): Promise<{ mm: number; px: number; ppi: number } | null> =>
+    window.webContents.executeJavaScript(
+      `(async () => {
+        const b = [...document.querySelectorAll('button')]
+          .find((e) => (e.getAttribute('aria-label') || '').trim() === '1');
+        if (!b) return null;
+        const px = b.getBoundingClientRect().height;
+        // The density is read back OUT OF THE SEAM the renderer was handed it through, never
+        // recomputed here: a gate that derived its own PPI would be measuring its own arithmetic
+        // against itself, which is the "gate measuring its own copy of 1366x768" mistake one
+        // field along.
+        const ppi = (await window.restos.deviceState()).panelPpi;
+        if (!ppi) return null;
+        // css px -> device px -> inches of glass -> mm.
+        return { mm: (px * window.devicePixelRatio / ppi) * 25.4, px, ppi };
+      })()`,
+    );
+
   // ---------------------------------------------------------------------------------------
   // 1. THE WINDOW ITSELF (defect 3). `27 §1a` promises the counter a 1366x768 PANEL.
   // ---------------------------------------------------------------------------------------
@@ -266,53 +368,150 @@ const run = async (): Promise<number> => {
   await new Promise((r) => setTimeout(r, 200));
 
   // ---------------------------------------------------------------------------------------
-  // 2. THE LOCK SURFACE (`02-F18` — a locked device shows only the unlock screen).
+  // 2. EVERY SURFACE, IN BOTH DEVICE STATES, ON BOTH OF `27 §1a`'s COUNTER PANELS.
+  //
+  // The panel loop is `DEC-UI-001` (e). It reloads rather than merely resizing, because the
+  // fixture's alarm is module state in the preload: a reload re-runs it, so the second panel
+  // gets `03-F5`'s band up exactly like the first instead of inheriting an acknowledged one.
   // ---------------------------------------------------------------------------------------
-  judge("unlock", "alarm", await measure());
+  for (const panel of PANELS) {
+    window.setContentSize(panel.width, panel.height);
+    await new Promise((r) => setTimeout(r, 200));
+    await window.loadFile(join(HERE, "../renderer/index.html"));
+    await new Promise((r) => setTimeout(r, 600));
 
-  // ---------------------------------------------------------------------------------------
-  // 3. EVERY TAB, enumerated from the DOM so a tab another session adds is measured too.
-  // ---------------------------------------------------------------------------------------
-  await window.webContents.executeJavaScript(
-    "window.restos.unlock('user-hina', '1234')",
-    // `01-F26`'s session, taken the way the operator takes it. Hina is the branch manager in the
-    // dev roster, so role-gated surfaces render rather than refusing.
-  );
-  await new Promise((r) => setTimeout(r, 600));
+    const on = (surface: string): string => `${panel.label} ${surface}`;
 
-  const shell = await measure();
-  if (shell.tabs.length === 0) {
-    failures.push({
-      surface: "counter",
-      state: "alarm",
-      detail:
-        "EMPTY MATCH — the tab rail rendered no tabs, so no operational surface was measured. " +
-        "Either the unlock did not take or AppShell's rail markup moved; either way this rail " +
-        "proves nothing (24-F14).",
-    });
-  }
+    // `02-F18` — a locked device shows only the unlock screen.
+    judge(on("unlock"), "alarm", await measure());
 
-  /**
-   * BOTH STATES, every tab. The band is up first because that is the state a cashier is in
-   * after any confirm on this device (no printer is attached — see `preload.ts`), and it is the
-   * tighter of the two vertical budgets. Tabs come from the DOM, so a tab another session adds
-   * is measured without touching this file.
-   */
-  const sweep = async (state: State): Promise<void> => {
-    for (const [i, tab] of shell.tabs.entries()) {
-      await click(i);
-      await new Promise((r) => setTimeout(r, 350));
-      judge(`tab:${tab.label || i}`, state, await measure());
+    await window.webContents.executeJavaScript(
+      "window.restos.unlock('user-hina', '1234')",
+      // `01-F26`'s session, taken the way the operator takes it. Hina is the branch manager in
+      // the dev roster, so role-gated surfaces render rather than refusing.
+    );
+    await new Promise((r) => setTimeout(r, 600));
+
+    const shell = await measure();
+    if (shell.tabs.length === 0) {
+      failures.push({
+        surface: on("counter"),
+        state: "alarm",
+        detail:
+          "EMPTY MATCH — the tab rail rendered no tabs, so no operational surface was measured. " +
+          "Either the unlock did not take or AppShell's rail markup moved; either way this rail " +
+          "proves nothing (24-F14).",
+      });
     }
-  };
 
-  await sweep("alarm");
+    /**
+     * BOTH STATES, every tab. The band is up first because that is the state a cashier is in
+     * after any confirm on this device (no printer is attached — see `preload.ts`), and it is
+     * the tighter of the two vertical budgets. Tabs come from the DOM, so a tab another session
+     * adds is measured without touching this file.
+     */
+    const sweep = async (state: State): Promise<void> => {
+      for (const [i, tab] of shell.tabs.entries()) {
+        await click(i);
+        await new Promise((r) => setTimeout(r, 350));
+        judge(on(`tab:${tab.label || i}`), state, await measure());
+      }
+    };
 
-  // `03-F5` — acknowledging clears it, which is how the gate reaches the quiet state through the
-  // real contract rather than a second fixture.
-  await window.webContents.executeJavaScript("window.restos.acknowledgeAlarm('alarm-1')");
-  await new Promise((r) => setTimeout(r, 500));
-  await sweep("quiet");
+    await sweep("alarm");
+
+    // -------------------------------------------------------------------------------------
+    // `02-F20` — THE ESCALATION PAD, reached the way a cashier reaches it.
+    //
+    // This is the fixture line that used to read `escalationFor: () => null`, and behind it sat
+    // a surface laying out 1162 px in a 632 px box in BOTH states — `Approve`, `Not them?` and
+    // `Cancel` entirely below the viewport, so `02-F20`'s only built escalation route had never
+    // been usable by anyone and every gate was green. Driven through the real controls rather
+    // than by poking state: `05-F19`'s over-threshold paid-out needs a reason and a receipt
+    // photo before the write, and it is the write's refusal that raises the pad.
+    // -------------------------------------------------------------------------------------
+    const cashTab = shell.tabs.findIndex((t) => t.label.startsWith("Cash"));
+    if (cashTab === -1) {
+      failures.push({
+        surface: on("escalation"),
+        state: "alarm",
+        detail:
+          "EMPTY MATCH — no Cash tab in the rail, so 02-F20's escalation pad was never reached " +
+          "and ManagerApproval went unmeasured on this panel (24-F14).",
+      });
+    } else {
+      await click(cashTab);
+      await new Promise((r) => setTimeout(r, 350));
+      const taps = [await press("Supplier"), await press("Receipt photo"), await press("Paid out")];
+      await new Promise((r) => setTimeout(r, 500));
+      if (taps.some((t) => !t)) {
+        failures.push({
+          surface: on("escalation"),
+          state: "alarm",
+          detail:
+            `EMPTY MATCH — the paid-out sequence did not find its controls (${taps.join(",")}), ` +
+            "so ManagerApproval never rendered and this sweep proves nothing (24-F14).",
+        });
+      } else {
+        // Step one: `02-F38`'s approver grid, the requester absent.
+        judge(on("escalation:approvers"), "alarm", await measure());
+        // Step two: the PIN pad. `01-F61` identify-then-PIN, and the step that did not fit.
+        const chose = await press("Ayesha");
+        await new Promise((r) => setTimeout(r, 400));
+        if (!chose) {
+          failures.push({
+            surface: on("escalation:pin"),
+            state: "alarm",
+            detail:
+              "EMPTY MATCH — no approver tile to choose, so the PIN step never rendered (24-F14).",
+          });
+        } else {
+          judge(on("escalation:pin"), "alarm", await measure());
+          await press("Cancel");
+          await new Promise((r) => setTimeout(r, 300));
+        }
+      }
+    }
+
+    // `03-F5` — acknowledging clears it, which is how the gate reaches the quiet state through
+    // the real contract rather than a second fixture.
+    await window.webContents.executeJavaScript("window.restos.acknowledgeAlarm('alarm-1')");
+    await new Promise((r) => setTimeout(r, 500));
+    await sweep("quiet");
+
+    // -------------------------------------------------------------------------------------
+    // `27-F68` — THE TARGET'S PHYSICAL SIZE. The one check here that is not about fitting.
+    // -------------------------------------------------------------------------------------
+    await click(cashTab === -1 ? 0 : cashTab);
+    await new Promise((r) => setTimeout(r, 350));
+    const key = await keypadMm();
+    if (key === null) {
+      failures.push({
+        surface: on("keypad"),
+        state: "quiet",
+        detail:
+          "EMPTY MATCH — no keypad-posture control was found and no density came back through " +
+          "the seam, so 27-F68's conversion went unmeasured on this panel (24-F14).",
+      });
+    } else {
+      note(
+        `  [${panel.label}] 27-F8 keypad target: ${key.px.toFixed(1)} css px at ${key.ppi.toFixed(1)} PPI = ${key.mm.toFixed(2)} mm`,
+      );
+      if (Math.abs(key.mm - KEYPAD_MM) > KEYPAD_MM_TOLERANCE) {
+        failures.push({
+          surface: on("keypad"),
+          state: "quiet",
+          detail:
+            `27-F8 IS BROKEN ON THE GLASS: the 126 dp keypad target renders ${key.mm.toFixed(2)} mm, ` +
+            `not ${KEYPAD_MM} mm (measured ${key.px.toFixed(1)} css px on a ${key.ppi.toFixed(1)} PPI panel). ` +
+            "27-F68 makes a dp 1/160 inch of PHYSICAL size and 27-F8's minimum IS the millimetre — " +
+            "so this is the ergonomic floor failing, on the highest-consequence entry surface in " +
+            "the product, and it fits its box perfectly while doing so. Spending a dp as a CSS " +
+            "pixel, or pinning one panel's pixel answer, both land exactly here.",
+        });
+      }
+    }
+  }
 
   // ---------------------------------------------------------------------------------------
   // 4. `24-F14` — the rail must have looked at something, or it fails rather than passing.

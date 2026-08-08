@@ -99,21 +99,87 @@ have been **wrong** — driving a headless page you *set* the viewport to 1366x7
 it. Main is deliberately **not** real: it would drag in `better-sqlite3` and make a layout check
 cost a native rebuild.
 
-**Mutation matrix — the three shipped defects, re-introduced one at a time.** Control: gate GREEN
-on the correct tree. **The last column is the point.**
+**It sweeps BOTH of `27 §1a`'s counter panels** (`DEC-UI-001` (e), August 2026) — 1366x768 and
+1920x1080, reloading between so the second gets `03-F5`'s band rather than inheriting an
+acknowledged one. They are the same 13.6 x 7.6 inches of glass, so under `27-F68` they must hold
+the SAME layout at different pixel counts; that is `27-F11c` stated as a test rather than as
+prose, and it is the assertion a pinned pixel constant cannot pass.
 
-| # | mutant (one branch each) | gate | pre-existing 344 + 216 |
-|---|---|---|---|
-| M1 | `index.html` — `box-sizing` reset removed | **RED**, 7 fatal (`#root` 1392px in 1366px; `I SAW THIS` off-screen) | **all 560 green** |
-| M2 | `TenderPanel` back to one column | **RED**, `main` 960px in 632px, 9 keys unreachable | **all 560 green** |
-| M3 | `useContentSize` off the window | **RED**, renderer got **1366x736** | **all 560 green** |
-| M4 | **NEGATIVE CONTROL** — method column 480→500 px | **GREEN** | all 560 green |
+**And it has ONE check that is not about fitting:** `27-F8`'s keypad target measured in
+**millimetres of glass**, with the density read back out of the same seam the renderer was handed
+it on. Every other check asks whether a thing FITS, and 126 CSS px fits a 1920x1080 panel
+perfectly while being 22.7 mm instead of 20. Current run — 26 surfaces, 450 controls:
 
-M4 is what makes the other three mean anything: a real one-branch layout edit does **not** trip
-the gate, so it discriminates rather than reddening at any change.
+```
+  [1366x768]  126 dp keypad =  79.1 css px at 200.9 PPI = 20.00 mm
+  [1920x1080] 126 dp keypad = 111.2 css px at 282.4 PPI = 20.00 mm
+```
 
-**⚠ A FOURTH DEFECT, FOUND BY THE GATE ON ITS FIRST RUN — UNRESOLVED, do not treat as fixed.
-⚠ AND ITS FIRST DESCRIPTION, INCLUDING THE ONE THAT STOOD HERE, WAS WRONG.** This paragraph used
+(The PPI figures are high because the gate SIMULATES those panels on a Retina host: it derives
+the density from the window it actually has — `css px x devicePixelRatio / 15.6"` — rather than
+typing one in, so 200.9/2 = 100.5 and 282.4/2 = 141.2, which are `27 §1a`'s own numbers. A gate
+that typed `100.5` on a dpr-2 machine would render every target at half size and pass.)
+
+**Mutation matrix — the shipped defects, re-introduced one at a time.** Control: gate GREEN on
+the correct tree (**pos-electron 379/379, ui 234/234**). **The last column is the point.**
+
+| # | mutant (one branch each) | gate | pos-electron 379 | ui 234 |
+|---|---|---|---|---|
+| — | `index.html` `box-sizing`; `TenderPanel` one column; `useContentSize` off | **RED** (the 2026-07 round; 7 / 9 / 1 violations) | all green | all green |
+| M1 | **CONTROL** — `PanelRoot` applies no `zoom`: the pre-ruling tree, dp ≡ css px | **RED**, 12 | 378 (§B only) | all green |
+| M2 | **THE SEAM** — `App` stops wrapping its tree; `PanelRoot` correct and unreached | **RED**, 12 | 378 (§B only) | all green |
+| M3 | **PINNED 79 px** (`27-F68` (a)) — `cssPxPerDp` returns `0.628` on every panel | **RED**, 1 — *1920x1080 only* | **all 379 green** | all green |
+| M4 | **THE PLANE** — `gateway.ts` drops `panelPpi` from `DeviceState` | **GREEN** | 378 (§B only) | all green |
+| M5 | **THE MM FLOOR** (`27-F68` (b)) — `touch-keypad` trimmed 126 → 100 dp | **RED**, 2 | 378 | 231 |
+| M6 | **DEFECT 5 VERBATIM** — `ManagerApproval` restored to its pre-fix file | **RED**, 6 | **all 379 green** | all green |
+| M8 | **THE FIXTURE** — `escalationFor` back to `() => null` | **RED**, 2 (`24-F14` EMPTY MATCH) | all green | all green |
+| M7 | **NEGATIVE CONTROL** — identity column 320 → 400 dp, a real layout edit | **GREEN** | all green | all green |
+
+**M7 is what makes every red row mean anything**: a real one-branch layout edit does not trip the
+gate, so it discriminates rather than reddening at any change.
+
+**M3 is the row that justifies the second panel, and nothing else catches it.** The pinned
+constant is right on 1366x768 and renders `27-F8`'s 20 mm target at **14.23 mm** on the 1920x1080
+panel `27 §1a` also lists — 29% under the ergonomic floor, on the highest-consequence entry
+surface in the product — and **all 613 tests stay green**. Without `DEC-UI-001` (e)'s second
+panel the trap that FR forbids by name would have shipped through a green rail.
+
+**M4 is `seams:check` Rule B's blind spot on a new field.** Main is a stub in the gate, so the
+plane boundary going silent is invisible to it — only the hand-written
+`__acceptance__/panel-density.test.ts` §B sees it. M1/M2/M4 are three different failures of one
+seam and none subsumes the others.
+
+**M6 is defect 5, and the pre-existing suites are the finding.** Restoring the pre-fix file gives
+`1162px of content in a 987px box` and `Cancel` genuinely **UNREACHABLE** (overhanging by 97 px,
+centre off-screen) — and **not one of the 379 + 234 tests can tell it from the correct
+implementation**, including the 12 this work added. Only the gate sees it, and only because the
+fixture reaches it: M8 shows that reverting one fixture line takes the whole surface back out of
+coverage — caught as an `24-F14` EMPTY MATCH rather than as a silent pass, which is the property
+that line lacked the first time.
+
+**⚠ M6's FIRST DRAFT SURVIVED, and that is worth more than the row it replaced.** The first M6
+stacked the *fixed* composition vertically (`flexDirection: "column"`) instead of restoring the
+*pre-fix file*, and the gate stayed GREEN — because the fixed composition has two `counter` tiles
+where the original had three `keypad` ones, so it fits either way round. A mutant that does not
+reproduce the defect proves nothing about the guard, and reading it would not have told you: only
+running it did. Whole-file restore from git is what made the row real.
+
+**✅ THE FOURTH DEFECT IS CLOSED (August 2026, `DEC-UI-001` / `27-F68`), and the register is
+EMPTY.** `tab:Pay` and `tab:Cash` came out of `OWED_UNDER_ALARM` because **the gate refused to let
+them stay**: its anti-rot rule fired with *"STALE REGISTER … it now lays out cleanly"* the first
+time the founder ruling's conversion ran. Nothing was relaxed — same measurement, same tolerance,
+same two states. What changed is arithmetic: a 126 dp key is **79 px** on this panel, the pad is
+**340 px** and not 528, and the work area under `03-F5`'s band holds it with room.
+
+| surface, band up | before | after |
+|---|---|---|
+| Pay `main` | 594 px of content in a 530 px box | fits |
+| Cash `main` | 584 px in 530 — **`Counted Rs 0` entirely off-screen** | fits, `Counted` on screen |
+| `C` `0` `⌫` | clipped 126 → 95 px (Pay), 112 px (Cash) | not clipped on either |
+
+**The history below is kept as a worked example and no longer describes the tree.**
+
+**⚠ ITS FIRST DESCRIPTION, INCLUDING THE ONE THAT STOOD HERE, WAS WRONG.** This paragraph used
 to say *"a cashier cannot type a `0`, so Rs 500 and Rs 1,000 cannot be entered"*. **Measured August
 2026 with real `sendInputEvent` mouse clicks through Blink's own hit testing: band up, Pay open,
 press `1` `0` `0` `0` and `REMAINING` goes Rs 4,875 → Rs 3,875. Rs 1,000 TYPES FINE.** The claim
@@ -140,56 +206,87 @@ on that row. Pay's loss is 31 px off three keys that still work.
 **It is on the ordinary path, not a corner case:** this device ships `unattachedPrinter`, so every
 confirm raises that band ~20 s later — ring, send to kitchen, then try to settle.
 
-**Why it is REPORTED and not fixed — the reason is arithmetic, not judgement.** The keypad is
+**Why it stood REPORTED for a round — the reason was arithmetic, not judgement.** The keypad was
 4 × `targetFor("keypad")` + 3 gaps = **528 px**; under the band `main`'s content box is **498 px**.
-*The pad alone does not fit*, before any label, DUE figure, TAKE CASH button or padding — so no
-overlay, reflow or reordering of these surfaces can close it, and every "budget" remedy that looks
-available is arithmetically dead. See **THE BUDGET IS OVER-SUBSCRIBED** below: what is left is a
-spec question, not a pixel choice (commandment 9).
-It is carried in `OWED_UNDER_ALARM` in `src/layout-gate/main.ts`, which **cannot rot**: a listed
-surface that starts laying out cleanly **fails** the gate, forcing the entry out.
+*The pad alone did not fit*, before any label, DUE figure, TAKE CASH button or padding — so no
+overlay, reflow or reordering of these surfaces could close it, and every "budget" remedy that
+looked available was arithmetically dead. That made it a spec question rather than a pixel choice
+(commandment 9), and the founder ruled it: **`DEC-UI-001`**.
 
-**⚠ A FIFTH DEFECT, WORSE THAN THE FOURTH, AND NO GATE CAN SEE IT — `ManagerApproval` DOES NOT
-FIT IN EITHER STATE.** Measured August 2026 in the same real window: with an approver chosen, the
-PIN step lays out **1162 px of content** in a **632 px** box quiet (**530 px** with the band). In
-the **quiet** state `Approve`, `Not them?` and `Cancel` are **entirely below the viewport** — top
-edges at y=852, 1002 and 1152 in a 768 px window — and `0` and `Clear` are two-thirds gone. **A
-manager cannot approve anything, on any device state.** `02-F20`'s local manager-PIN path — the
-only escalation route that exists, since doc 05's remote one is unbuilt — is dead on arrival, and
-`05-F19`'s over-threshold paid-out is the live case that reaches it. The cause is a vertical stack
-of **seven** `posture="keypad"` elements (4 digit rows at a 142 px pitch, then `Approve`, `Not
-them?`, `Cancel` at 150 px each); it is the same 126-dp-as-css-px arithmetic as defect 4 but with
-three extra full-size buttons stacked under the pad, so it overruns by 530 px rather than 64.
-**The layout gate is structurally blind to it**: its fixture returns `escalationFor: () => null`,
-so `ManagerApproval` never renders and the surface is never measured. That is blind spot 2 in the
-list below (*"it only sees the states the fixture produces"*) costing a real, worse defect —
-reproduce it by patching the built gate preload to reject `append` and return an offer.
-**Reported, not fixed:** it needs the same budget ruling, plus a `27-F4` positional change to a
-surface whose three trailing buttons cannot all be keypad-posture in a 768 px panel.
+**✅ THE FIFTH DEFECT IS ALSO CLOSED — but NOT by the conversion alone, and the difference is the
+lesson.** `ManagerApproval`'s PIN step laid out **1162 px in a 632 px box quiet** (530 with the
+band), so `Approve`, `Not them?` and `Cancel` sat entirely below the viewport in **both** device
+states — `02-F20`'s local manager-PIN path, the only escalation route that exists since doc 05's
+remote one is unbuilt, was dead on arrival at every till, with `05-F19`'s over-threshold paid-out
+as the live case reaching it.
+
+`27-F68` turns the work area from 530 px into **987 dp** and the stack is still **1162 dp**, so it
+overran even after the ruling — measured, not predicted (mutation row M6 above). It needed the
+`27-F4` positional change `DEC-UI-001` named: *"three trailing full-size buttons cannot all be
+keypad-posture under a keypad in a 768 px panel."*
+
+**`27-F4` is a breaking change and it requires PR justification. Here it is, and a reviewer should
+accept or reject it explicitly.**
+
+1. **There is no positional memory to break.** That FR protects an operator who learned a layout;
+   `Approve` has never been on screen for anyone to learn, in either state, since the surface
+   shipped. The acclimation window it asks for costs nothing because no arrangement is in service.
+2. **The change moves TOWARD `27-F4`, not away from it.** The file claimed to be *"`App.tsx`'s
+   composition, deliberately identical"* and was not: the unlock pad is `1-9, Clear, 0, Unlock`
+   — `Clear` bottom-left, the confirming act bottom-right, where `NumericKeypad` also puts its
+   twelfth key — while this pad was `1-9, 0, Clear` in a wrapping row, putting `0` where the other
+   pad puts `Clear`. `App.tsx` names that exact hazard: *"two pads on one device that disagree
+   about which cell closes an entry is the muscle-memory break `27-F4` exists to prevent."*
+
+The shape is `App.tsx`'s two-column composition, for the reason `App.tsx` gives: the pad's own
+height is the tallest fixed thing on the surface, so everything else sits BESIDE it. `Not them?`
+and `Cancel` move to `counter` posture on the identity side — `27-F9`, a column away from `Clear`,
+which is where `App.tsx` already puts `Not you?`.
+
+**The gate can see this surface now**, because the fixture reaches it: `escalationFor: () => null`
+is gone and the gate drives `05-F19`'s paid-out through its real three taps (reason → receipt
+photo → Paid out), measuring both escalation steps on both panels.
 
 **WHAT THE GATE CANNOT CATCH — do not read a green run as "the screens are right".**
 1. **Main is a stub.** It says nothing about IPC, Zod validation at the plane boundary, or whether
    the shipped preload serves the same channels. `main/__acceptance__/` owns that.
 2. **It only sees the states the fixture produces.** Defect 4 was invisible until the fixture
    served an alarm; a surface state nobody scripted is a surface state nobody measures. The
-   fixture is the gate's real coverage boundary, not the assertions. **This has now cost a real
-   defect and not just a hypothetical one** — `escalationFor: () => null` means `ManagerApproval`
-   never renders, and defect 5 above (a manager who cannot approve, in *both* states) sat
-   unmeasured behind that one line.
-3. **It does not judge legibility, contrast, typography or target size.** `27-F8`'s 126 dp floor
-   and `27-F26`'s missing webfont are untouched — a control can be reachable and still unreadable.
-4. **One panel, one DPI, one platform.** 1366x768 at devicePixelRatio 1 on macOS. `27 §1a`'s
-   1920x1080 target and the Windows till this ships to are **not** measured, and font metrics
+   fixture is the gate's real coverage boundary, not the assertions. **This has cost a real
+   defect and not just a hypothetical one** — `escalationFor: () => null` meant `ManagerApproval`
+   never rendered, and defect 5 (a manager who cannot approve, in *both* states) sat unmeasured
+   behind that one line. Both are fixed and the boundary has not moved: **mutation row M8 shows
+   that putting that single line back takes the whole surface out of coverage again**, now caught
+   as a `24-F14` EMPTY MATCH rather than as a silent pass. The states still NOT scripted are the
+   ones to worry about — an open shift with a counted drawer, a 300-item catalogue, a refused
+   escalation showing `REFUSAL_WORDS`, training mode's `27-F67` inversion.
+3. **It does not judge legibility, contrast, typography or target size.** `27-F26`'s missing
+   webfont is untouched — a control can be reachable and still unreadable. **`27-F8`'s target
+   size is now the ONE exception**: since `27-F68` the gate measures a keypad target in
+   millimetres of glass on both panels and fails below 20 mm ± 0.6. It judges that number and
+   nothing else about type.
+4. **Two panels, one DPI, one platform.** `27 §1a`'s 1366x768 **and** 1920x1080 are both swept
+   (`DEC-UI-001` (e)) — but both are SIMULATED on a macOS host at devicePixelRatio 2 with a
+   derived density. The **Windows till this ships to is still not measured**, and font metrics
    differ there (Segoe UI vs SF Pro), which is exactly the kind of thing that moves a layout.
+   Nor is any non-counter surface: `27 §1a`'s ~224-PPI tablet and ~405-PPI phone rows are where
+   `27-F68` makes targets *grow* by 1.4x and 2.5x, and no rail looks at either.
 5. **`27-F4`'s positional contract is invisible to it.** Controls may be reordered freely and the
    gate stays green as long as they all fit.
 6. **It needs a display.** Electron opens a real (hidden) window; a headless Linux CI needs xvfb.
    Per `T-01-07` that is a LOUD failure, never a skip — an environment prerequisite, not a
    regression.
 
-## THE BUDGET IS OVER-SUBSCRIBED, AND CLOSING IT NEEDS A RULING (defects 4 and 5)
+## ✅ THE BUDGET WAS OVER-SUBSCRIBED; THE RULING LANDED AND IS IMPLEMENTED (defects 4 and 5)
 
-**The one line that settles it: `51 + 85 + 102 + 528 = 766` in a `768` px panel.** Status strip,
+**Read this section for the reasoning, not for the state of the tree.** `DEC-UI-001` is ratified,
+`27-F68` is written, and the conversion ships: `packages/ui`'s `PanelRoot` is the one element in
+the product where a dp becomes a pixel, `main/panel-density.ts` resolves the density it needs, and
+both defects below are closed. **What to take from it:** the arithmetic that made four plausible
+remedies dead, and the shape of the mistake — a spec that said *"design in millimetres, render in
+pixels"* for three drafts while the code spent a dp as a CSS pixel and every gate stayed green.
+
+**The one line that settled it: `51 + 85 + 102 + 528 = 766` in a `768` px panel.** Status strip,
 tab rail, `03-F5`'s band and the keypad, with **2 px left** for all padding on every surface. That
 is why defects 4 and 5 have no implementation fix — the pad alone (528 px) is larger than the work
 area under the band (498 px of content box), so overlay, reflow, reordering and "absorb it
@@ -236,10 +333,61 @@ one org runs many different panels, and pinning an org-wide PPI is the same cate
 level up). *"Ships 1920×1080 only"* is rejected as exactly `27-F11c`'s category error. `27-F68`
 forbids both traps by name: **no pinned 79 px** (it is 14.2 mm on the 141-PPI panel) and **the
 floor stays in millimetres** (`27-F8`'s 20 mm is what it *is*; this changes only how it renders).
-**Defects 4 and 5 stay in the register until the conversion is implemented** — and note the
-ruling closes 4 outright but is **necessary-but-not-sufficient for 5**: at 100.5 PPI it scales
-`ManagerApproval`'s 1162 px to ≈**730 px** against a content box of at most ≈662 px, so that
-surface still needs the `27-F4` positional change named above.
+
+### ✅ IMPLEMENTED (August 2026) — where the conversion lives and what it cost
+
+**One boundary: `packages/ui`'s `PanelRoot`,** applied at the app root in `App.tsx` so it wraps
+the unlock gate, the counter shell, the strip, the rail, `03-F5`'s band and `ManagerApproval`.
+Not inside `AppShell`, because `02-F18`'s lock surface sits OVER the shell and would otherwise be
+the one screen still drawn at the wrong physical size, 20–60x a shift.
+
+**The mechanism is CSS `zoom`, and the trade-off was measured rather than argued.** Blink resolves
+every length in the subtree against it, so tokens, component internals, host numbers and chrome
+convert together and **there is no call site for a session to forget** — which is `DEC-UI-001`
+(b)'s named next error. The alternatives were rejected on correctness: a root `font-size` + `rem`
+boundary and a computed token layer both convert only what a call site remembers (~200 numeric
+style values in `packages/ui`, and a missed one renders silently unscaled), and `transform:
+scale()` does not move a layout box at all — the keypad would still be 528 px inside a 498 px
+area, hiding the defect behind a visual while `elementFromPoint` disagreed with the paint.
+
+**What `zoom` does to measurement, because the gate depends on it** (measured in Blink at
+`zoom: 0.628` in a 1366x768 window): `getBoundingClientRect` and `elementFromPoint` report
+**post-zoom viewport pixels**, so the gate keeps measuring real pixels at real positions — that
+property is what decided the choice, since a conversion the gate could not see would be a green
+gate over a wrong screen. But `clientWidth` / `scrollHeight` / `getComputedStyle().width` report
+the element's **own units, i.e. dp**. Both sides of an overflow comparison are in that same unit
+so the verdict is unaffected, **but the numbers the gate prints are dp** — read
+`OVERFLOW y: … 1162px of content in a 987px box` as dp, not CSS pixels.
+
+**The density input** is `00 §7` layer 3, resolved in `main/panel-density.ts` in that FR's own
+order — **measurement, then correction, then an admission**. Electron gives resolution
+(`display.size × scaleFactor`) and **no physical size**, so the inches come from the platform:
+`WmiMonitorBasicDisplayParams` on Windows (the ship target), `xrandr` on Linux, and **nothing on
+macOS** — checked, `system_profiler SPDisplaysDataType -json` reports pixels and a product id and
+no millimetres. So on a dev Mac the panel genuinely "reports nothing" and `RESTOS_PANEL_PPI` is
+the answer; without it the boot line says `assumed` at length, because being wrong here looks
+exactly like being right.
+
+**Two things the conversion closed for free.** `usePhysicalSize` measured through the CSS
+reference 96 PPI, so the same 15.6" panel reported **361 mm at 1366x768 and 508 mm at 1920x1080**
+— the reading `27-F11c` exists to forbid; it reports 345 mm on both now. And `OrderList`'s
+recorded dp-as-px / dp-as-mm duality (76 dp = 76 px while the same posture's 12 mm = 45 px) is
+gone: there is one conversion. **That closed `layout-physical.oracle.test.ts`'s written FINDING
+in principle**, but see the owed item below — the manifest table itself was not restated.
+
+**Owed, and named rather than left to look intentional:**
+- **`tokens.json`'s `mm` column is not yet restated from `27-F68`.** The FR gives 76 dp = **12.1**
+  mm and 96 dp = **15.2** mm; the manifest still says 12 and 15. Nothing depends on the
+  difference today (`layout-physical.oracle.test.ts` compares at 0 decimals and passes either
+  way), and correcting it is a tokens change with `tokens.test.ts`'s posture-table derivation in
+  its blast radius — a separate, surgical piece of work.
+- **`OrderList`'s `actionFloorMm` is now effectively dead.** `orderPageRows` throws below
+  `targetMm("counter")` = 12 mm and the floor is 12.065 mm, so it can only change an outcome
+  inside a 0.065 mm window. It is kept (it still expresses "a row contains its action") and the
+  assertion that used to separate it was rewritten — see the note in `order-list.dom.test.tsx`.
+- **The handhelds are unmeasured.** `27-F68` makes targets *grow* on anything above 160 PPI:
+  `27 §1a`'s ~224-PPI tablet and ~405-PPI phone are 1.4x and 2.5x their old rendered size. No
+  rail looks at either, and `apps/waiter` / `apps/rider` are stubs.
 
 ## What is deliberately not real yet
 
@@ -465,9 +613,11 @@ surface still needs the `27-F4` positional change named above.
      px**, while physical capacity math uses `targetMm("counter")` = the same 76 dp expressed as
      **12.065 mm**, which renders as **45 px**. Rows overlapped and the tiles spilled past their
      cards. `OrderList` now floors the row at the action's own height *in the same number it
-     renders with*. **The dp-as-CSS-px / dp-as-mm duality is PRE-EXISTING and is not fixed** —
-     `ItemGrid` has it too and the counter papers over it with `tileMm={28}`. Reconciling them is a
-     `packages/ui` tokens change with its own FR. **Owed.**
+     renders with*. **The dp-as-CSS-px / dp-as-mm duality that caused it is CLOSED (August 2026,
+     `DEC-UI-001` / `27-F68`)** — it was the same posture measuring two different sizes depending
+     on which of the package's two conversions you asked, and there is one conversion now. Both
+     `OrderList` and `ItemGrid` default `ppi` to `DP_PER_INCH`, so a measured millimetre and a
+     rendered dp are the same physical thing. The FR that was owed here is `27-F68`.
   2. **The pager was not subtracted from its own box**, so a two-row page rendered two rows *and* a
      pager into space for two — and the second inbox row was **clipped in half with no way to reach
      it**, which on a counter is an order that cannot be accepted. This is exactly the hazard

@@ -131,10 +131,34 @@ const CASH_STATE: CashState = {
 let session: Session | null = null;
 const listeners = new Set<() => void>();
 
+/**
+ * `27 §1a`'s two counter panels, and `DEC-UI-001` (e) requires BOTH be measured: *"the layout
+ * gate measures one panel at devicePixelRatio 1; `27 §1a`'s second counter panel must enter its
+ * fixture with this work, or the ruling ships untested on precisely the case that produced"* the
+ * no-pinned-79-px trap.
+ *
+ * The gate simulates a panel it is not running on, so the density is DERIVED from the window it
+ * actually has rather than typed in: the window is `n` CSS pixels across at this host's own
+ * `devicePixelRatio`, and if that were a 15.6″ panel it would be
+ * `n × devicePixelRatio / widthInches` PPI. That keeps `27-F68`'s arithmetic honest on a Retina
+ * Mac — where the same simulation typed as a flat `100.5` would render every target at half its
+ * physical size — and it makes the two panels differ in exactly the thing `27-F11c` says must
+ * not matter: pixels across the same 15.6 inches.
+ */
+const COUNTER_DIAGONAL_IN = 15.6;
+const simulatedPanelPpi = (): number => {
+  const inches = { w: window.innerWidth, h: window.innerHeight };
+  const diagonalPx = Math.hypot(inches.w, inches.h) * window.devicePixelRatio;
+  return diagonalPx / COUNTER_DIAGONAL_IN;
+};
+
 const bridge: RestosBridge = {
   deviceState: () =>
     Promise.resolve({
       actor: session?.display_name ?? "Counter 1",
+      // `27-F68` — read fresh on every call, so the gate's resize to the second panel is
+      // followed by the renderer without a reload.
+      panelPpi: simulatedPanelPpi(),
       deviceLabel: "Counter 1",
       businessDay: "2026-08-07",
       training: false,
@@ -163,9 +187,40 @@ const bridge: RestosBridge = {
     for (const fn of listeners) fn();
     return Promise.resolve();
   },
-  append: () => Promise.resolve({ id: "evt-gate" }),
+  /**
+   * **`05-F19` — AN OVER-THRESHOLD PAID-OUT IS REFUSED, AND THAT IS WHAT RAISES THE PAD.**
+   *
+   * `escalationFor: () => null` used to sit here and it cost a real, worse defect than any this
+   * gate has caught: `ManagerApproval` never rendered, so a surface that laid out **1162 px in a
+   * 632 px box in BOTH device states** — `Approve`, `Not them?` and `Cancel` entirely below the
+   * viewport — was measured by nothing. That is blind spot 2 in `main.ts` ("it only sees the
+   * states the fixture produces") in its most expensive form: `02-F20`'s local manager PIN is the
+   * only escalation route that exists, so the one built path out of an `escalate` verdict was
+   * dead on arrival at every till and every gate was green.
+   *
+   * The shape is faithful rather than convenient. `main/authorize.ts` refuses a `cash.paid_out`
+   * above `PAID_OUT_APPROVAL_THRESHOLD_PAISA` with `outcome: "escalate"` and the roles that would
+   * satisfy it, and `Counter.tsx`'s `escalatableWrite` re-asks the same guard through
+   * `escalationFor` on the rejection — so a rejecting `append` plus an offer is exactly the
+   * sequence a real till performs. Every other append still succeeds, because a fixture that
+   * refused everything would measure a counter nobody can use.
+   */
+  append: (req) =>
+    (req as { type?: string }).type === "cash.paid_out"
+      ? Promise.reject(new Error("cash.paid_out above the org threshold (05-F19)"))
+      : Promise.resolve({ id: "evt-gate" }),
   addLine: () => Promise.resolve({ id: "evt-gate" }),
-  escalationFor: () => Promise.resolve(null),
+  escalationFor: (req) =>
+    Promise.resolve(
+      (req as { type?: string }).type === "cash.paid_out"
+        ? {
+            // Read off the matrix by main in the shipped path (`can().satisfied_by`); the two
+            // roles `domain` actually returns for this cell, so the prompt line is the real
+            // length rather than a short stand-in.
+            satisfied_by: ["branch_manager", "owner"],
+          }
+        : null,
+    ),
   escalate: () => Promise.resolve({ ok: true as const, id: "evt-gate" }),
   unlock: (user_id: string) => {
     session = STAFF.find((s) => s.user_id === user_id) ?? null;

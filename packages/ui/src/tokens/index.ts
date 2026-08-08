@@ -117,10 +117,24 @@ export const targetMm = (p: Posture | TouchFloor): number => {
 };
 
 /**
+ * `27-F68` — **a dp is 1/160 inch of PHYSICAL size.** This is the whole of the definition, and
+ * it lives here because it is a TOKEN-layer fact: it is the density that generates both columns
+ * of `27-F8`'s posture table and every cell of `27 §1a`'s hardware table.
+ *
+ * It is deliberately not `96`. `dp ≡ CSS px` holds only on a 160-PPI panel, is stated nowhere in
+ * doc 21 or doc 27, and does not fit `27 §1a`'s own hardware: the counter runs at 100–141 PPI,
+ * where this package's 126 dp keypad key is **79–111 px** and not 126. Spending a dp as a CSS
+ * pixel drew every touch target in the product at the wrong physical size — measured at 1366×768
+ * (100.5 PPI) as a 528 px keypad in a 498 px work area. `physical.tsx` is where this constant is
+ * turned into pixels, and `PanelRoot` is the ONE place that turn happens.
+ */
+export const DP_PER_INCH = 160;
+
+/**
  * dp → mm at the 160-dpi density that DEFINES a dp. The one conversion the package uses, so a
  * spacing token can be spent on a physical layout without a second arithmetic appearing.
  */
-export const mmFromDp = (dp: number): number => (dp / 160) * 25.4;
+export const mmFromDp = (dp: number): number => (dp / DP_PER_INCH) * 25.4;
 
 /**
  * 27-F27 — KDS type is specified in cap-millimetres at a stated viewing distance, never in

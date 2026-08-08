@@ -1,5 +1,5 @@
-import { space, Tile, typography, useColor } from "@restos/ui";
-import { useCallback, useEffect, useState } from "react";
+import { PanelRoot, space, Tile, typography, useColor } from "@restos/ui";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import type { DeviceState, Session } from "../shared/ipc";
 import { Counter } from "./Counter";
 
@@ -141,6 +141,20 @@ const ROW: React.CSSProperties = {
  * commandment 6 is satisfied by the vocabulary, not by the money component.
  */
 
+/**
+ * `27 §1a`'s counter panel, used ONLY when the seam supplied no density.
+ *
+ * `00 §7` makes `panel_ppi` a measurement with a config correction, and main resolves it — so
+ * reaching this line means the shipped preload stopped supplying it, which is exactly this
+ * wave's recurring defect (a correct conversion with no seam to the product). It is a stated
+ * fallback rather than a silent one for that reason: it is the panel the counter ships on, it
+ * is named here, and `main/__acceptance__/panel-density.test.ts` §B is the hand-written
+ * assertion that the product does not actually take this path. It is deliberately **not**
+ * `dp ≡ CSS px`: falling back to the identity `27-F68` overturned would restore the defect
+ * under a different name.
+ */
+const REFERENCE_COUNTER_PPI = Math.hypot(1366, 768) / 15.6;
+
 export const App = () => {
   /**
    * `undefined` = the seam has not answered yet, and it is a THIRD state on purpose: painting
@@ -148,6 +162,13 @@ export const App = () => {
    * (a renderer reload, a crash restart) — a flash of the lock screen on every launch.
    */
   const [user, setUser] = useState<DeviceState["user"] | undefined>(undefined);
+  /**
+   * `27-F68` — the density of the glass, read through the same seam as every other device fact.
+   * It rides `deviceState()` rather than a channel of its own so it arrives on the read the
+   * surface already waits for: there is no frame in which real content is painted at the wrong
+   * physical size, because nothing but `Starting…` renders before the first answer.
+   */
+  const [panelPpi, setPanelPpi] = useState<number | undefined>(undefined);
   /**
    * `01-F61`'s roster, read from the seam and rendered **unsorted**. A renderer-side sort
    * cannot be stable: it re-ranks the grid the moment a name is added or edited, which `27-F4`
@@ -166,8 +187,12 @@ export const App = () => {
   const color = useColor();
 
   const reload = useCallback(async () => {
-    const next = (await window.restos.deviceState()).user;
+    const state = await window.restos.deviceState();
+    const next = state.user;
     setUser(next);
+    // `27-F68` — re-read on every device-state read, so a panel that changes under a running
+    // till resizes its own touch targets rather than keeping the one it booted on.
+    setPanelPpi(state.panelPpi);
     // A session that is IN clears step one, so a lock decided later — idle auto-lock, shift
     // end, a manual lock — returns the device to identification rather than to a pad still
     // holding the last cashier's name. `01-F61` fixes the order of the two steps for every
@@ -196,9 +221,24 @@ export const App = () => {
     void window.restos.staff().then(setRoster);
   }, []);
 
+  /**
+   * **`27-F68` / `DEC-UI-001` (b) — the conversion is applied ONCE, HERE, and it wraps
+   * everything.**
+   *
+   * Every surface this app draws is inside it: the unlock gate, the counter shell, the status
+   * strip, the tab rail, `03-F5`'s band and `ManagerApproval`. That is the ruling's own
+   * requirement — *"applied once at the token boundary and to every dp in the layout, chrome
+   * included"* — and the reason it is at the app root rather than inside `AppShell` is that
+   * `02-F18`'s lock surface sits OVER the shell and would otherwise be the one screen still
+   * drawn at the wrong physical size, 20–60× a shift.
+   */
+  const panel = (children: ReactNode) => (
+    <PanelRoot panelPpi={panelPpi ?? REFERENCE_COUNTER_PPI}>{children}</PanelRoot>
+  );
+
   // `01-F17` — nothing is blocked here, there is simply nothing yet known to draw.
   if (user === undefined) return <p>Starting…</p>;
-  if (user !== null) return <Counter />;
+  if (user !== null) return panel(<Counter />);
 
   /**
    * `01-F28` — the identity and the digits go to main and a yes/no comes back. The answer is
@@ -233,7 +273,7 @@ export const App = () => {
    * is the tighter one the digits are designed to.
    */
   if (chosen === null) {
-    return (
+    return panel(
       <div style={GATE}>
         <div style={STEP}>
           {/*
@@ -254,11 +294,11 @@ export const App = () => {
             ))}
           </div>
         </div>
-      </div>
+      </div>,
     );
   }
 
-  return (
+  return panel(
     <div style={GATE}>
       <div style={IDENTITY}>
         {/*
@@ -343,6 +383,6 @@ export const App = () => {
         */}
         <Tile posture="keypad" label="Unlock" onPress={() => submit(chosen)} />
       </div>
-    </div>
+    </div>,
   );
 };

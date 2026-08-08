@@ -1,6 +1,13 @@
-import { CSS_PX_PER_INCH } from "../physical";
 import { useColor } from "../theme";
-import { mmFromDp, type Posture, space, targetFor, targetMm, typography } from "../tokens/index";
+import {
+  DP_PER_INCH,
+  mmFromDp,
+  type Posture,
+  space,
+  targetFor,
+  targetMm,
+  typography,
+} from "../tokens/index";
 import { Tile } from "./Tile";
 
 /**
@@ -113,9 +120,11 @@ export type ItemGridProps = {
   widthMm: number;
   heightMm: number;
   /**
-   * Pixels per inch of the surface. Defaults to the CSS reference density, which is what
-   * `usePhysicalSize` measures in — so a caller that measures and a caller that names a panel
-   * cannot silently disagree about what a millimetre is.
+   * Pixels per inch of the surface. Defaults to `DP_PER_INCH` — inside `PanelRoot` (`27-F68`)
+   * the pixel Blink lays out in **is** the dp, which is what `usePhysicalSize` measures in, so
+   * a caller that measures and a caller that names a panel cannot silently disagree about what
+   * a millimetre is. It was the CSS reference 96 until `DEC-UI-001`, which made this grid's
+   * millimetres true only on a 96-PPI panel.
    */
   ppi?: number | undefined;
   /** Rendered tile edge in mm; must be ≥ the posture minimum. Defaults to that minimum. */
@@ -130,7 +139,7 @@ export const ItemGrid = ({
   posture,
   widthMm,
   heightMm,
-  ppi = CSS_PX_PER_INCH,
+  ppi = DP_PER_INCH,
   tileMm,
   page,
   onPageChange,

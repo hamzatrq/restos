@@ -2,10 +2,15 @@
 // A CLOSED vocabulary (Commandment 6): app code composes these, never raw primitives.
 export * from "./components/index";
 // 27-F11c — capacity is a PHYSICAL question, so a surface is measured rather than assumed.
+// 27-F68 — and a dp is a PHYSICAL size, so `PanelRoot` is the one place it becomes a pixel.
+// `mmFromCssPx`/`cssPxFromMm` are gone with that ruling: they converted at the CSS reference
+// 96 PPI, which inside `PanelRoot` is simply the wrong density, and a second conversion living
+// beside the right one is how a layout comes out right in one place and wrong in another.
 export {
   CSS_PX_PER_INCH,
-  cssPxFromMm,
-  mmFromCssPx,
+  cssPxPerDp,
+  PanelRoot,
+  type PanelRootProps,
   type PhysicalSize,
   usePhysicalSize,
 } from "./physical";

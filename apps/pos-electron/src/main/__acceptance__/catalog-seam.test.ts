@@ -188,6 +188,8 @@ const gatewayOver = (target: DeviceStore, over: Partial<GatewayDeps> = {}) =>
     reachability: () => ({ lan: "down", hub: "down", cloud: "down" }),
     blockedCursor: () => null,
     businessDay: () => "2026-08-06",
+    // 27-F68 — the density of the glass, required on GatewayDeps.
+    panelPpi: () => 100.5,
     ...over,
   });
 
