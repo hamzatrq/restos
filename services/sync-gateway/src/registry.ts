@@ -45,9 +45,19 @@ const isDeviceClass = (value: string): value is DeviceClass =>
 /**
  * Layer-1 provisioning seam (01 §7). Unknown class throws, nothing written (01-F39).
  *
- * @unreached-owed `01-F47` device admission has no operator surface — `apps/platform-admin` is a
- * one-file stub — so a device is provisioned only by a test or by hand-written SQL. This is why
- * `apps/pos-electron` ships a "marked DEV SEED" identity: nothing can register it for real.
+ * **IT HAS A SHIPPING CALLER AS OF AUGUST 2026 — `provision-device.ts`, the declared
+ * `pnpm -C services/sync-gateway provision-device` command.** The debt marker that stood here said
+ * "a device is provisioned only by a test or by hand-written SQL", and that was exactly true:
+ * `plans/wave-1/running-the-stack.md` §6b was a `tsx -e` one-liner plus a psql `INSERT` into this
+ * table. It is deleted now, because a marker on something reached fails `seams:check`. What is
+ * still owed is the `01-F25` *pairing code* — registration is specified as "a one-time pairing via
+ * back office code", and this is an operator command on the service host, which is a smaller thing
+ * that happens to remove the SQL.
+ *
+ * (The marker token is deliberately not spelled out above. `check-seams.mjs` matches the literal
+ * anywhere in the declaration's comment, so quoting it here re-declares the exception it describes
+ * and fails the rail as STALE — measured on this change, and `migrate.ts` records the file-header
+ * form of the same trap.)
  */
 export const registerDevice = async (
   db: GatewayDb,
@@ -86,9 +96,14 @@ export const registerDevice = async (
  * logic, and using Postgres `now()` keeps `Date.now()` out of gateway src
  * (18 §4 spirit). Only the FIRST revocation stamps; a re-revoke is a no-op.
  *
- * @unreached-owed With `registerDevice` — no platform-admin surface exists. Worth stating plainly:
- * a stolen till cannot be revoked by any shipped path today. The ENFORCEMENT of `revoked_at` is
- * live in the gateway; only the act of setting it has no caller.
+ * @unreached-owed No operator surface sets `revoked_at` — `apps/platform-admin` is a one-file stub
+ * and `provision-device` deliberately does not revoke (a provisioning command that also revokes is
+ * one typo from a stopped branch). Worth stating plainly, and it is now the LONELY half of this
+ * pair: `registerDevice` has a shipping caller and this does not, so **a stolen till can be
+ * provisioned by a declared command and cannot be revoked by any shipped path.** The ENFORCEMENT of
+ * `revoked_at` is live in the gateway (`01-F48`'s ≤30 s sweep); only the act of setting it has no
+ * caller. `provision-device` refuses to re-credential a revoked row precisely so that when this
+ * gains a caller, the two halves cannot fight.
  */
 export const revokeDevice = async (
   db: GatewayDb,

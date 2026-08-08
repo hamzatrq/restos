@@ -7,6 +7,7 @@
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "migrate": "tsx src/migrate.ts",
+    "provision-device": "tsx src/provision-device.ts",
     "test": "vitest run",
     "build": "echo 'no build yet — scaffold stub'"
   },

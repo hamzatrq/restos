@@ -19,7 +19,9 @@ that stop the chain, three of which no suite could see; they are recorded in
 ## 0. The one thing that breaks every attempt: THREE IDS MUST MATCH
 
 Before any command: `apps/pos-electron` ships a **dev-seed device identity** with fixed UUIDs
-(`main/index.ts`, `DEV_IDENTITY` — `01-F47` admission has not landed, so nothing mints these):
+(`main/index.ts`, `DEV_IDENTITY`). Since August 2026 the gateway **can** admit a device
+(§6b, `provision-device`) — but nothing yet *hands the device its own identity*, so these three
+UUIDs are still typed by a human on both sides and must agree:
 
 | | value |
 |---|---|
@@ -279,29 +281,49 @@ cd node_modules/.pnpm/better-sqlite3@*/node_modules/better-sqlite3 && npm run bu
 Do this **before** any `pnpm test`, and verify with `pnpm test --force` (a cached turbo run reports
 green off results computed before the rebuild).
 
-### 6b. Mint a device token and register the device — nothing in the product does this
+### 6b. Provision the device — ONE DECLARED COMMAND (August 2026)
 
-`01-F47` admission is not built. The gateway needs **both**: an HS256 token signed with
-`DEVICE_TOKEN_SECRET`, **and** an unrevoked, branch-matching row in `kernel.device_registry`. The
-registry has the veto, so a valid token alone opens nothing.
+The gateway needs **both** halves of admission: an HS256 token signed with `DEVICE_TOKEN_SECRET`,
+**and** an unrevoked, branch-matching row in `kernel.device_registry`. The registry has the veto, so
+a valid token alone opens nothing. One command now does both:
 
 ```sh
-cd services/sync-gateway
-export RESTOS_DEVICE_TOKEN=$(ORG=$ORG_ID BRANCH=$BRANCH_ID DEVICE=$DEVICE_ID pnpm exec tsx -e \
-  "import('./src/auth.ts').then(m => m.issueDeviceToken({org_id: process.env.ORG, branch_id: process.env.BRANCH, device_id: process.env.DEVICE}, process.env.DEVICE_TOKEN_SECRET, {now: Date.now()})).then(t => console.log(t))" | tail -1)
-cd -
-
-docker exec restos-pg psql -U postgres -d restos -v ON_ERROR_STOP=1 -c \
-  "insert into kernel.device_registry (org_id, branch_id, device_id, device_class)
-   values ('$ORG_ID','$BRANCH_ID','$DEVICE_ID','counter_electron')
-   on conflict (org_id, device_id) do update set revoked_at = null;"
+export RESTOS_DEVICE_TOKEN=$(
+  DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/restos' \
+  DEVICE_TOKEN_SECRET="$DEVICE_TOKEN_SECRET" \
+  pnpm -C services/sync-gateway provision-device \
+    --org "$ORG_ID" --branch "$BRANCH_ID" --device "$DEVICE_ID" --class counter_electron \
+  | tail -1)
 ```
 
-`device_class` must be one of `01-F39`'s hub-eligible classes (`counter_electron`, `counter_rn`,
-`kitchen`) for a counter terminal. **Mint with `Date.now()`**, not a fixture instant: the token's
-90-day expiry is checked against the gateway's real clock, and an expired one opens the session
-straight into `01-F47` drain mode where *reads are refused* — which reads as "the catalog never
-arrived" rather than as an auth problem.
+**The token is the only thing on stdout; every readable line goes to stderr**, so `$( … )` captures
+a credential and not a paragraph. (`| tail -1` is still needed because the package manager prints
+its own banner ahead of the script.) You will see, on stderr:
+
+```
+@restos/sync-gateway provision-device registered …0003 · org …0001 · branch …0002 · class counter_electron · postgres://postgres:*****@127.0.0.1:5432/restos
+@restos/sync-gateway provision-device token expires 2026-11-06T15:41:55.015Z (01-F47, 90 days). Binding: iss=(unbound) aud=(unbound) — these must match the gateway that will verify it.
+@restos/sync-gateway provision-device the next line on STDOUT is the device token. It is a credential: do not log it.
+```
+
+| you see | it means |
+|---|---|
+| `is already registered … pass --reissue` | you ran it twice. Registering a device twice is a provisioning error — re-registration mints a FRESH `device_id` (`01-N5`). To hand the *same* registered device a new credential (you lost the token, the shell died), add `--reissue` |
+| `is REVOKED … Provisioning never un-revokes` | working as designed, in **both** modes. This step used to be an `INSERT … on conflict do update set revoked_at = null`, which resurrected a revoked till; `01-F25`/`01-F48` make revocation the operative kill switch |
+| `"espresso_machine" is not a DEVICE_CLASSES member (01-F39)` | `device_class` must be a `01-F39` identifier, and for a counter terminal one of the hub-eligible three: `counter_electron`, `counter_rn`, `kitchen` |
+| `must be at least 32 bytes` | `DEVICE_TOKEN_SECRET` floor (`18 §5`) — the command mints with the same key the server verifies with, so the floor is enforced on both sides |
+
+⚠ **If the gateway is started with `DEVICE_TOKEN_ISSUER` / `DEVICE_TOKEN_AUDIENCE` set, export the
+same two here.** `01-F47` binds a token to its deployment and `verifyDeviceToken` enforces each only
+where configured, so a token minted unbound against a bound gateway is a perfectly-signed credential
+that opens nothing. The command reads both env keys for exactly this reason, and prints what it
+used on the second line. §4 above leaves them unset, so `(unbound)` is correct for this run.
+
+**What this does NOT close, and it is why §0 still exists:** it admits a device whose identity you
+already know. `01-F25`'s one-time **pairing code from the back office** — the thing that would let
+an owner add a till without touching the service host — is owed, as is device-side persistence of
+`01-F47`'s silent renewal (the FR puts that in `sync-client`; this app re-reads
+`RESTOS_DEVICE_TOKEN` on every launch) and the host-app warning below 25% remaining life.
 
 ### 6c. Run the till
 
@@ -329,11 +351,26 @@ cd -
 **No `RESTOS_DEV_MENU`.** That flag seeds a local dev menu and is precisely what the published one
 replaces; leaving it off is how you find out whether the transport works.
 
-**Healthy — one line, and it is the measurement:**
+**Healthy — two lines, and both are measurements:**
 
 ```
+panel: 224.8 PPI (assumed) — the OS reported no physical size and 00 §7's panel_ppi is unset, so
+27 §1a's 15.6" counter panel is ASSUMED. Every 27-F8 target on this device is sized from that
+guess; set RESTOS_PANEL_PPI to correct it.
 @restos/pos catalog v1 — 1 tile(s), 0 unsellable
 ```
+
+**The panel line is new (`DEC-UI-001` / `27-F68`, August 2026) and on a Mac it will always say
+`(assumed)`.** A dp is 1/160 inch of *physical* size now, converted through the panel's own
+density, and `main/panel-density.ts` resolves that in `00 §7`'s order — **measurement, then
+correction, then an honest admission**. Electron gives resolution and no physical size, so the
+inches come from the platform: WMI on Windows (the ship target), `xrandr` on Linux, and **nothing
+on macOS**. So a dev Mac genuinely is a panel that "reports nothing", and `(assumed)` is the truth
+rather than a warning to silence. It is worth reading because being wrong here **looks exactly like
+being right**: every touch target renders at the wrong physical size and nothing on screen looks
+broken. `RESTOS_PANEL_PPI=<number>` is the correction (`00 §7` layer 3 — per device, because one
+org runs many different panels); a value outside a wide sanity band is refused and falls back to
+the measurement rather than stopping the till (`01-F17`).
 
 | the line says | it means |
 |---|---|
@@ -376,13 +413,21 @@ Stated plainly, because a runbook that oversells is worse than none.
   v1 to v2 with no restart.
 - `03-F50`'s `station` travels with the entry (`"station":"grill"` observed in the device store).
 - The till's PIN unlock, order loop and totals are real.
+- **Re-measured on a second, independent run (August 2026), with the device admitted by §6b's new
+  `provision-device` command rather than by hand-written SQL.** A 20-entry Pakistani menu (5
+  categories, 15 priced items) was authored one entry at a time in a real browser; the till was
+  **connected and idle throughout** and rode the notice path from **v0 to v20 with no restart**
+  (`select version from catalog_state` = 20, 20 catalog rows, `station` and both channel prices
+  present on every item). Signed in as Hina, four tiles rang **Rs 450 + Rs 320 + Rs 60 + Rs 180 =
+  Rs 1,010** — the prices typed in the back office, to the paisa.
 
 **SEEDED OR FAKED, and each is why:**
 
 | thing | state |
 |---|---|
-| **device identity** | a marked DEV SEED with fixed UUIDs. `01-F47` admission/pairing is not built, which is why §0 exists and why §6b is a manual SQL insert |
-| **device token** | nothing in the product mints one. `issueDeviceToken` is a Wave-0 seam; the pairing-code UX is doc 14/15 |
+| **device identity** | still a marked DEV SEED with fixed UUIDs, and this is the half `provision-device` does **not** close: the command admits an identity you already know, and nothing gives the device one. `01-F25`'s pairing code is what would, and it is owed — which is why §0 still exists |
+| **device token** | **the product mints one now** (§6b) — a declared command on the gateway, not a UI. `01-F25` specifies "a one-time pairing via back office code" and the doc-14/15 pairing UX is owed in full; so is device-side persistence of `01-F47`'s silent renewal, and the host warning below 25% remaining life |
+| **device revocation** | ⚠ **nothing shipped can revoke a device.** `revokeDevice` is written and `01-F48`'s ≤30 s eviction sweep is live in the gateway, but the *act* of setting `revoked_at` has no caller — the register half of the pair now has one and this half does not. So a stolen till can be admitted by a declared command and taken away only with SQL. `provision-device` refuses to re-credential a revoked row precisely so the two halves cannot fight when this lands |
 | **the staff roster** | a DEV SEED behind `RESTOS_DEV_PIN` (three staff sharing one PIN). PIN *verification* is real; nothing populates the registry |
 | **the owner account** | one owner declared in env (`bootstrapUsers`), an in-memory `UserStore` that dies with the process. No user table, no reset, no lockout, no rate limiting, no rotation, no `audit.login` |
 | **staged edits** | `createMemoryStagedEditStore` — a pending day-end edit does **not** survive an API restart |
@@ -402,7 +447,22 @@ Stated plainly, because a runbook that oversells is worse than none.
    date`, because drizzle keeps one `created_at` watermark and never re-checks the objects.
    Measured, not assumed; re-running `migrate` against that database also reports success and
    repairs nothing.
-2. **A device-provisioning path.** §6b is two manual steps against a protected service's table.
+2. ~~**A device-provisioning path.** §6b is two manual steps against a protected service's table.~~
+   **PARTLY CLOSED (August 2026)** — and the residue is named rather than rounded up.
+   `pnpm -C services/sync-gateway provision-device` is declared, seam-tested against a real Postgres
+   (`__acceptance__/provisionable.test.ts` spawns the DECLARED script and then makes a real
+   `createGateway` judge the token it printed), and §6b is that command now. **It removed the SQL;
+   it did not build `01-F25`.** Three things stay owed, in the order they bite:
+   - **the pairing code.** `01-F25` says registration is "a one-time pairing via back office code"
+     and `14-F26` puts it in the onboarding wizard. This is an operator command on the service
+     host, so an owner still cannot add a till without shell access. It was left undone on a
+     commandment-2 ground rather than a scheduling one: the pairing-code *model* — mint, TTL,
+     one-time claim, class and branch binding — exists in the corpus only as that one clause.
+   - **revocation has no caller at all** (see the table above). This is now the more dangerous half.
+   - **the device does not persist `01-F47`'s renewal**, and `apps/pos-electron` re-reads
+     `RESTOS_DEVICE_TOKEN` from env on every launch. The FR puts persistence in `sync-client` and is
+     explicit that a host which forgets to store it bricks its devices at TTL. Nothing bites within
+     90 days of a fresh mint, which is exactly why it is easy to leave unnoticed.
 3. **`rebuild:native` still clobbers `build/Release/`** (§6a). The documented restore is required
    every time, not "if it ever happens again".
 4. ~~**`catalog.enabled`** — the enabled set is declared twice and can drift (§5c).~~ **CLOSED

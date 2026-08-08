@@ -61,6 +61,45 @@
     `postgres-js` as objects with a `code` field. They are evidence of idempotency. The runbook
     previously called them "Postgres error objects", which is what they look like and not what they
     are.
+- **DEVICE PROVISIONING IS A DECLARED COMMAND (August 2026):
+  `pnpm -C services/sync-gateway provision-device --org <id> --branch <id> --device <id> --class <device_class> [--reissue]`.**
+  Until then **nothing in this product minted a device credential.** Both halves of admission were
+  correct, tested and unreachable: `registerDevice` carried a debt marker reading *"a device is
+  provisioned only by a test or by hand-written SQL"*, and `issueDeviceToken`'s only production
+  caller was the RENEWAL path — which by definition needs a device that is already admitted. So the
+  service could renew a credential it had no way to issue, and `running-the-stack.md` §6b told an
+  operator to run a `tsx -e` one-liner and then `INSERT` into this service's own table with psql.
+  **You could not add a second till without writing SQL.** Eleventh instance of the wave's named
+  defect, in the shape the rail cannot see: the exports are not dead, there is no way to invoke them.
+  - **Why a COMMAND and not a route or a screen** (`24 §3b` — the rejected alternatives are in
+    `provision-device.ts`'s header, in full). The decisive property is that **it grants no authority
+    its inputs did not already carry**: it needs `DEVICE_TOKEN_SECRET` *and* `DATABASE_URL`, and
+    anyone holding both could already mint a token and already write the row. An `/internal` route
+    behind `PUBLISH_TOKEN` was rejected because that is the *menu* credential held by
+    `services/api` — publishing a menu and admitting a device to the ledger should not sit behind
+    one secret. A back-office pairing code is the **correct end state** (`01-F25`, `14-F26`) and is
+    OWED: the pairing-code model exists in the corpus as one clause, so building it now would be
+    inventing policy (commandment 2).
+  - **It never un-revokes, in either mode, and that is a defect it REMOVED.** §6b's SQL ended
+    `on conflict (org_id, device_id) do update set revoked_at = null`, so re-running the documented
+    provisioning step **resurrected a revoked till** — against `01-F25`/`01-F48`, and against
+    `01-F47`'s own sentence that revocation "remains the operative kill switch".
+  - **ONE expiry instant, written twice.** `expires_at` is computed once and passed to both
+    `issueDeviceToken` and `registerDevice`, closing the drift `registry.ts` names in its own doc
+    comment (seeded from the DATABASE clock, judged against the gateway's INJECTED clock — a
+    freshly-provisioned device then reads as permanently not-due and never renews).
+  - **It reads `DEVICE_TOKEN_ISSUER`/`DEVICE_TOKEN_AUDIENCE` because `server.ts` does.** A token
+    minted unbound against a bound gateway is a perfectly-signed credential that opens nothing —
+    adversarial-review B3's defect one process over.
+  - **stdout is the TOKEN and nothing else; every readable line is on stderr.** The emission of a
+    credential is made as narrow as it can be, so `TOKEN=$(…)` captures a credential and not a
+    paragraph.
+  - ⚠ **What it does NOT close, and the second is now the dangerous one.** `01-F25`'s pairing code
+    (an owner still needs shell access on the service host); **`revokeDevice` still has no shipping
+    caller at all** — so a stolen till can be *admitted* by a declared command and *revoked* only
+    with SQL; device-side persistence of `01-F47`'s silent renewal (the FR puts it in `sync-client`;
+    `apps/pos-electron` re-reads `RESTOS_DEVICE_TOKEN` from env every launch); the <25%-remaining
+    warning; and `hub_relay`, which this never grants because no mesh session exists to use it.
 - **It does NOT need Docker to START, only to be TESTED.** `DEVICE_TOKEN_SECRET` is still required
   with its 32-byte floor; `DATABASE_URL` now **defaults** to `postgres://postgres:postgres@localhost:5432/restos`
   and `PORT` to `8080` (`0` is legal and means an ephemeral bind, as `services/api` always allowed).
@@ -164,6 +203,53 @@ place**, which is semantically near-equivalent because the probe already sits *a
 — it **survived**, correctly, and the real hazard (moving it *before* `listen`) had to be built
 deliberately. A mutant that survives because it does not actually change behaviour proves nothing
 about the test; check what the mutant does before recording what it means.
+
+## Mutation matrix for `provisionable.test.ts` (round-3 law) — control 8/8 new + 288 pre-existing green
+
+Device provisioning, `01-F25`/`01-F47`. Control: **296/296 green** (288 pre-existing + 8 new),
+`REAL_EXIT=0` read from a marker written inside the log, never from a reported status. Every row is
+the FULL package suite, in-tree with byte-exact backups and a restore trap, and each mutant differs
+from the control in **exactly one branch**.
+
+**The right-hand column is the whole point, and it is unusually clean here: in EVERY row the failing
+test FILE was `provisionable.test.ts` alone (`Test Files 1 failed | 46 passed`), so all 288
+pre-existing tests stayed green under every mutant** — including the two that reproduce shipped
+behaviour. Every kill is therefore attributable to the new file rather than to the suite at large.
+
+| # | mutant (exactly one branch) | new tests failed (of 8) | pre-existing 288 |
+|---|---|---|---|
+| P1 | **`scripts.provision-device` deleted** | **all 8** | **all green** |
+| P2 | **`registerDevice` never called** — a decorative command that mints a token and admits nobody | **5** | **all green** |
+| P3 | `token_expires_at` not passed — the registry seeds from the DATABASE clock instead | 1 (§B2) | all green |
+| P4 | **the revocation refusal removed** — §6b's `do update set revoked_at = null` semantics restored | **1 (§D)** | **all green** |
+| P5 | `DEVICE_TOKEN_ISSUER`/`AUDIENCE` not read — the token carries no deployment binding | 1 (§B3) | all green |
+| P6 | the already-registered refusal removed — a second run silently re-registers | 1 (§C) | all green |
+| P7 | the 32-byte `DEVICE_TOKEN_SECRET` floor dropped from the command (the VALUE is untouched) | 1 (§F) | all green |
+| P8 | **CONTROL: same states, same writes, different prose on the narrative lines** | **0** | all green |
+
+**P1, P2 and P4 are the ones to re-run after any change here.** P1 is `startable.test.ts`'s M1 and
+`migratable.test.ts`'s N1 for this file — delete the declared script and **every** assertion goes
+red, which is the whole reason the test spawns `scripts["provision-device"]` rather than a hardcoded
+`tsx src/provision-device.ts`. P2 is the seam row and the one that matters most: a command that
+mints a valid, verifiable, correctly-bound token and writes **no registry row** is a command that
+looks like it worked and admits nobody — `18 §5`'s "the registry, never the token, decides" stated
+as a mutant. P4 is the security row, and it is not hypothetical: it restores exactly what the
+runbook instructed for months.
+
+⚠ **P7 is a validation BRANCH, not a security constant.** AGENTS.md requires mutation of a security
+*parameter* to happen out-of-tree, because an agent killed between "weaken" and "revert" strands
+live weakened crypto. Nothing here weakens `DEVICE_TOKEN_SECRET`, `PIN_ARGON2ID_PARAMS` or any
+cost floor — the mutant deletes the command's *check* that the operator supplied ≥32 bytes, and a
+stranded copy reds a test rather than downgrading a credential.
+
+⚠ **THE FIRST RUN OF `seams:check` ON THIS WORK FAILED, AND THE REASON IS WORTH KEEPING.** The new
+file's header explained the debt marker it was deleting — and *quoted the marker token*. The rail
+treats a marker in a file header as covering **every export in the module**, so the paragraph
+describing the fix silently marked all three new exports as debt; and the same literal, quoted in
+`registry.ts`'s rewritten doc comment, re-declared the exception it was announcing the deletion of
+and failed as **STALE**. `migrate.ts` already carries this warning for the header form and it was
+read *before* writing and reproduced anyway. **Do not write the token in prose in a production
+module.** Measured: 38 owed exports and a hard failure before, 35 and a clean run after.
 
 ## Mutation matrix for the `catalog_notice` publish seam — control 282/282 green
 
