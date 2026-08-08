@@ -135,12 +135,39 @@ export const catalogProcedures = {
     ctx.catalog.publisher.published(ctx.subject.org_id),
   ),
 
-  /** `14-F28` — pending day-end edits are visible until they land. The OTHER axis. */
+  /**
+   * `14-F28` — pending day-end edits are visible until they land. The OTHER axis.
+   *
+   * **`name` is the DRAFT'S OWN, read off `edit.entry`, and never resolved from
+   * `catalog.published`.** The row used to project identity alone, so an owner reviewing what lands
+   * at 05:00 read `item / item-chicken-karahi` — a kind and a raw id — for a dish she knows by
+   * name. The name was never missing: `StagedEdit.entry` is a whole `CatalogEntryWire` and carries
+   * the name the owner just typed. Only this projection dropped it.
+   *
+   * **Resolving it from the published artifact instead is the defect this module is shaped
+   * against** (see `catalog.ts`'s header: two version axes, conflating them is silent). It fails in
+   * both directions and neither is visible on an item that happens to already exist:
+   *
+   *   - a **rename** would render the OLD name, describing the menu as it is rather than as this
+   *     edit will leave it — and this list exists to answer "what lands at 05:00";
+   *   - an entry **not yet published at all** has nothing to resolve against, so a brand-new item
+   *     would fall back to its identifier for ever, which is the case a join cannot serve.
+   *
+   * **No fallback, because there is no absent case.** `CatalogEntryWire.name` is
+   * `z.string().min(1)` and every staged entry is parsed through it — `save` validates its input
+   * against `CatalogEntryWire` and `assertSavable` returns `safeParse`'s output, and `archive`
+   * stages an already-published entry. `01-F54`'s degrade-to-identifier precedent governs a
+   * *resolution* — a device holding an id whose catalog has not synced — and there is no resolution
+   * here: the name arrives in the same record as the id, so no state exists where one is present
+   * and the other is not. A `?? entity_id` here would be an unreachable branch dressed as a
+   * safeguard, and `24 §3b` refuses error handling for implausible cases.
+   */
   pending: authorized("catalog.edit_menu_prices").query(async ({ ctx }) =>
     (await ctx.catalog.staged.pending(ctx.subject.org_id)).map((edit) => ({
       edit_id: edit.edit_id,
       entity: edit.entry.kind,
       entity_id: edit.entry.id,
+      name: edit.entry.name,
       actor_user_id: edit.actor_user_id,
       staged_at: edit.staged_at,
       apply_when: edit.apply_when,

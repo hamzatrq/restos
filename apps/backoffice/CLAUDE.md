@@ -20,6 +20,13 @@ must equal `apps/pos-electron`'s `DEV_IDENTITY.org_id` and `ENABLED_BRANCHES` mu
 this screen says "Published version 1", the gateway returns `200`, the row is in Postgres, and the
 till sits at `catalog v0 — 0 tile(s)` for ever.
 
+⚠ **`SYNC_GATEWAY_URL`/`_TOKEN` ARE REQUIRED AND THIS BLOCK USED TO OMIT THEM** (corrected August
+2026, when a session followed it verbatim and the API died at boot). `services/api`'s `start()`
+crashes without them **on purpose** — an optional adapter falling back to the stub is a deployment
+that boots, serves, logs in and ships no menu (`services/api/CLAUDE.md`, mutant G1). So a
+two-process run still needs a gateway to point at, and the honest options are the four-process
+runbook or a peer you supply; there is no "back office only" mode and the crash is the feature.
+
 ```sh
 # 1 — the cloud plane (services/api). Prints `@restos/api listening on http://…` when it is up.
 SESSION_SECRET=<any-dev-secret> \
@@ -27,6 +34,7 @@ BOOTSTRAP_OWNER_EMAIL=owner@example.test \
 BOOTSTRAP_OWNER_PASSWORD_HASH='<a domain hashPin PHC string>' \
 BOOTSTRAP_ORG_ID=org-demo \
 ENABLED_BRANCHES=branch-main ENABLED_CHANNELS=counter,storefront \
+SYNC_GATEWAY_URL=http://127.0.0.1:8080 SYNC_GATEWAY_TOKEN=<the gateway's PUBLISH_TOKEN> \
 pnpm -C services/api dev            # `start` for no watcher. PORT defaults to 3001.
 
 # 2 — this app. ONE variable, and note what is absent: nothing here states the enabled
@@ -213,6 +221,80 @@ removed from the manifest, so the test FILE failed to load: `Test Files 1 failed
 with the mutant. **Read the failure message, not the count** — the mutant was rewritten to read
 `process.env` directly (the more plausible regression anyway) before the numbers above were taken.
 
+## The pending row names the dish — and the reason it took a whole extra pass is worth keeping
+
+`14-F28`'s row rendered **`item / item-chicken-karahi`**: a kind and a raw identifier, in the one
+list whose job is to let an owner recognise what lands at 05:00 and cancel it. The earlier visual
+pass found it, declined to paper over it, and gave a reason that was **half right and half wrong** —
+and the wrong half is the instructive one:
+
+> *"`catalog.pending` carries no name, and joining it to `catalog.published` would merge the two
+> version axes this screen exists to keep apart."*
+
+The second clause is correct and still binds. The first was **false about its own data**:
+`StagedEdit.entry` is a whole `CatalogEntryWire`, so the name the owner typed was already in the
+staged record — only `catalog-router.ts`'s projection dropped it. A true constraint (do not join)
+had been carried into a false premise (there is nothing to render), and the false premise is what
+made the defect look unfixable. **When a gap is recorded as owed, record the SHAPE that was
+checked** — "the projection omits it" and "the record lacks it" are one word apart and a wave apart.
+
+The decisions, since `24 §3b` wants the rejected alternatives named:
+
+- **A rename shows the NEW name.** This list answers *"what lands at 05:00"*; the old name is what a
+  till has **today**, which is the other axis. Showing the old one — or both — requires reading
+  `catalog.published`, so those alternatives are **structurally unavailable**, not merely rejected.
+  The cost is stated: this row cannot say what the dish used to be called, and `14-F3`'s history has
+  no row until the edit lands. Verified in a browser: the Menu card read `Chicken Karahi` while the
+  pending row read `Chicken Karahi (Half Plate)`, and both were right.
+- **An item that has never been published works**, and it is the case a join cannot serve at all.
+- **There is NO fallback to the identifier**, and that is the `01-F54` question answered rather than
+  dodged. `01-F54` degrades a **resolution** — a device holding an id whose catalog has not synced —
+  and nothing is resolved here: the name arrives in the same record as the id, and
+  `CatalogEntryWire.name` is `z.string().min(1)`, so no state exists where one is present and the
+  other is not. A `?? entity_id` would be an unreachable branch wearing a safeguard's clothes.
+- **The identity is DEMOTED, not deleted** — two entries can share a display name, and this row's
+  control cancels one of them. Same move as `Problem`'s `detail`: lead with the meaning, keep the
+  raw string.
+
+## Mutation matrix — the pending row's name (round-3 law), control backoffice 116/116 green
+
+Every row is one branch, run against the FULL suite; the right-hand column is measured. **The
+fixture is the whole matrix**: on an item that already exists under the same name a join and the
+correct implementation are indistinguishable, so the rename and the never-published fixtures are
+not extra coverage, they are the only coverage that discriminates.
+
+| # | mutant (exactly one branch) | new 6 failed | pre-existing 110 |
+|---|---|---|---|
+| P1 | **the row resolves its name from `catalog.published` — THE seam mutant** | 4 | **all green** |
+| P3 | the row's headline reverts to `${entity} / ${entity_id}` (the shipped defect, restored) | 6 | **all green** |
+| P4 | **THE CONTROL: name and identity SWAPPED — right name, wrong place** | exactly 2 | all green |
+| P5 | the component fetches `catalog.published` and ignores it (name still correct) | exactly 1, the tripwire | all green |
+| P6 | `edit.name \|\| identity` — an unreachable fallback | **0 (survivor)** | 3, and see below |
+
+**P1 is the one to re-run after any change here.** Its two survivors are the point: the tests that
+stayed green under it are exactly the ones whose fixture is an item already published under the same
+name. A suite built only on that fixture would have blessed the re-conflated axes completely —
+AGENTS.md's *"guard that was never pointed at the dangerous case"*, measured rather than argued.
+
+**P3 is the number that indicts the old suite.** The code that shipped, and that a human found by
+looking at a screen, failed **0 of 110** pre-existing tests. This is the second recurring defect
+(*"a correct component that is not on the screen"*) in its content form — `pnpm layout:check` cannot
+see it either, because the row **fits its box perfectly** while saying the wrong thing.
+
+**P4 proves the kill counts mean something.** It changes only where the name sits; exactly the two
+hierarchy assertions fire and all four naming assertions — rename, never-published, tripwire,
+multi-row — stay green. The suite discriminates rather than reddening on any change.
+
+**P6 is a declared SURVIVOR, and the honest reading matters.** Its 3 kills are all in
+`shell.dom.test.tsx`, whose `catalog.pending` fixtures predate the `name` field: the fallback fires
+only because those fixtures omit it, which is an artifact of a stale fixture and not evidence about
+the shipped path. So **this suite cannot distinguish "no fallback" from "an unreachable fallback"** —
+that property is held by `CatalogEntryWire.name`'s `min(1)` in `sync-protocol` (a protected path with
+golden fixtures), not by anything here. It is AGENTS.md's uncatchable shape (i), named rather than
+hidden.
+
+The server half's matrix lives beside its own suite: see `services/api/CLAUDE.md`.
+
 ## `14-F3` renders its own example — and the date is a DECISION, not a default
 
 *"Price changed by Ali, 2 Jul, 450 → 480"* renders in full: `LedgerRecord` carries
@@ -257,6 +339,18 @@ it does not have.
 
 ## Owed, and named as owed
 
+- ~~The `14-F28` pending row shows `item / <id>` because `catalog.pending` carries no name.~~
+  **CLOSED (August 2026)** — the staged edit always carried it; the projection did not. See the
+  section above, and note the premise, not the constraint, was what had gone wrong.
+- **A pending row cannot say what a renamed item used to be called.** It shows the draft's name,
+  which is correct for *"what lands at 05:00"*, and the before-name lives only on the published axis
+  this screen may not join. `14-F3`'s history would answer it — but a day-end edit has no
+  `catalog.changed` row until it lands, so between staging and 05:00 the old name is on screen
+  nowhere. Closing it means the STAGED record carrying a before-name of its own, which is a payload
+  change and therefore a spec question (`01 §4` / `14-F28`), not a client fix.
+- **`Staged by bootstrap-owner:org-demo`** — the row renders a raw `user_id` where `14-F3`'s example
+  says *"by Ali"*. Same gap as the history line's actor; it wants the staff registry
+  (`01-F26`/`F27`) that the back office does not yet read, and is not this row's to invent.
 - **A non-price field change still has no before/after values.** `price_changes` is a price delta by
   construction and the refs are one-way `payloadHash` digests indexed by nothing, so a rename or a
   `03-F50` station move renders as "changed" at a catalog version and no values. The footnote

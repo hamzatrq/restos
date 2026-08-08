@@ -64,15 +64,33 @@ export const PendingEdits = (): ReactNode => {
           <div className="flex min-w-0 items-start gap-3">
             <Clock aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
             <div className="flex min-w-0 flex-col gap-0.5 text-sm">
-              {/* `${entity} / ${entity_id}` is the identity `shell.dom.test.tsx` reads as one text
-                  node (`getByText("item / tikka")`), so it stays exactly one node and exactly
-                  that string. The `catalog.pending` row carries no NAME — the staged draft is
-                  keyed by identity and the published artifact is a different axis this component
-                  deliberately never joins (see the header above) — so a friendlier label here
-                  would mean either merging the two axes or inventing a name. Neither is on. */}
-              <span className="truncate font-medium">{`${edit.entity} / ${edit.entity_id}`}</span>
-              <span className="text-xs text-muted-foreground">
-                {`${strings.timing.landsAt} ${landsAtText(edit.lands_at)} · ${strings.timing.stagedBy} ${edit.actor_user_id}`}
+              {/* **The DRAFT'S OWN name** — `catalog.pending` carries it, and this component
+                  resolves nothing. This row read `item / item-chicken-karahi` until August 2026,
+                  which is a kind and a raw id in front of an owner deciding whether to cancel a
+                  dish she knows as "Chicken Karahi".
+
+                  The name was never absent from the staged edit: `StagedEdit.entry` is a whole
+                  `CatalogEntryWire`. Only the router's projection dropped it, and the earlier note
+                  here ("the staged draft is keyed by identity") was wrong about its own data — the
+                  half that was right is that the two axes must not be joined, and they still are
+                  not. Resolving this name out of `catalog.published` would show the OLD name for a
+                  rename and nothing at all for an item that has never been published, both
+                  silently; `pending-name.dom.test.tsx` asserts this component never even asks for
+                  the published artifact, which is what makes the separation structural rather
+                  than a comment. */}
+              <span className="truncate font-medium">{edit.name}</span>
+              <span className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
+                {/* The identity, DEMOTED — not deleted. Two entries may share a display name (an
+                    `item` "Coke" and a `modifier` "Coke"), and this row's control cancels one of
+                    them: `shell.dom.test.tsx` names cancelling the wrong edit as the same failure
+                    as a cancelled edit publishing anyway. It stays exactly one text node reading
+                    `${entity} / ${entity_id}`, which that suite reads with
+                    `getByText("item / tikka")`. Same demotion as `Problem`'s `detail`: lead with
+                    the meaning, keep the raw string available. */}
+                <span className="truncate">{`${edit.entity} / ${edit.entity_id}`}</span>
+                <span>
+                  {`${strings.timing.landsAt} ${landsAtText(edit.lands_at)} · ${strings.timing.stagedBy} ${edit.actor_user_id}`}
+                </span>
               </span>
             </div>
           </div>
