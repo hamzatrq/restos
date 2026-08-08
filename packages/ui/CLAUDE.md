@@ -6,6 +6,33 @@ language) — read both before modifying anything here (AGENTS.md routing).**
 **Before writing a component or picking a value, read `TOKENS.md` in this package.** It is
 the 27-F44 hallucination guard and it is short on purpose.
 
+## A dp is a PHYSICAL size, and `PanelRoot` is where it becomes a pixel (27-F68)
+
+**`targetFor("keypad")` returns `126` and that is 20 MILLIMETRES, not 126 CSS pixels.** The
+identity `dp ≡ css px` holds only at 160 PPI, is stated nowhere in doc 21 or doc 27, and
+does not fit `27 §1a`'s hardware: on the counter's two panels that key is **79 px and 111
+px**. Spending it as a CSS pixel drew every touch target in the product at the wrong
+physical size, and it took `DEC-UI-001` — a founder ruling — to settle it.
+
+**You never do the conversion.** A host wraps its tree in `<PanelRoot panelPpi>` once, and
+everything inside is laid out in dp: tokens, component internals, the host's own numbers
+and the chrome, all together. That is deliberate and it is the whole design — `DEC-UI-001`
+(b) names "converted `targetFor()` and left the chrome in raw CSS px" as the next error, and
+there is no call site here to get that wrong. `physical.tsx` carries the arithmetic, the
+component, and the measured reasons the alternatives (`rem`, a computed token layer,
+`transform: scale()`) were rejected.
+
+Two rules the FR forbids breaking, both easy to break by accident:
+- **Never pin a pixel value.** 79 px is 20 mm at 100 PPI and **14.2 mm at 141 PPI**, below
+  `27-F8`'s floor on the highest-consequence entry surface in the product.
+- **Never trim the millimetres to make a layout fit.** `27-F8`'s numbers are a measured
+  ergonomic minimum; the ruling changed how they *render*, never what they *are*.
+
+Inside `PanelRoot` the CSS pixel Blink lays out in **is** the dp, which is why
+`usePhysicalSize` converts through `mmFromDp` and why `ItemGrid`/`OrderList` default `ppi`
+to `DP_PER_INCH`. A component reaching for `CSS_PX_PER_INCH` to size something is almost
+certainly making the mistake `27-F68` exists to name.
+
 ## The rule this package exists to hold
 
 **A component that can be configured into violating a law is not a closed vocabulary.**
