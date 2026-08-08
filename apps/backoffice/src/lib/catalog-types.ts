@@ -13,6 +13,18 @@ import type { inferRouterOutputs } from "@trpc/server";
 
 type Outputs = inferRouterOutputs<AppRouter>;
 
+/**
+ * `01-F60`'s enabled `(branch, channel)` set — **the server's answer, and this app has no other.**
+ *
+ * It was `NEXT_PUBLIC_ENABLED_BRANCHES`/`NEXT_PUBLIC_ENABLED_CHANNELS` here until August 2026, so
+ * the axes the grid drew and the axes the writer checked were two declarations that could
+ * disagree — and a disagreement publishes a menu whose every tile reads `no price set` on the
+ * till with every process reporting success. Inferring the type keeps the second half of that
+ * honest: if `catalog.enabled` changes shape, this app fails to compile rather than drawing a
+ * grid on something the server never said.
+ */
+export type EnabledSet = Outputs["catalog"]["enabled"];
+
 /** `01-F52` reference data as devices fetch it — the published artifact, never the staged draft. */
 export type PublishedCatalog = Outputs["catalog"]["published"];
 export type CatalogEntry = PublishedCatalog["entries"][number];

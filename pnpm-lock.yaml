@@ -29,9 +29,6 @@ importers:
       '@radix-ui/react-slot':
         specifier: 1.3.3
         version: 1.3.3(@types/react@19.2.17)(react@19.2.8)
-      '@restos/config':
-        specifier: workspace:*
-        version: link:../../packages/config
       '@restos/domain':
         specifier: workspace:*
         version: link:../../packages/domain

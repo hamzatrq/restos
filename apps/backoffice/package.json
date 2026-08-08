@@ -13,7 +13,6 @@
   "dependencies": {
     "@radix-ui/react-radio-group": "1.4.7",
     "@radix-ui/react-slot": "1.3.3",
-    "@restos/config": "workspace:*",
     "@restos/domain": "workspace:*",
     "@restos/ui": "workspace:*",
     "@tanstack/react-query": "5.101.4",
