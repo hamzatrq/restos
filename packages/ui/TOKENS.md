@@ -74,8 +74,20 @@ decision; the number is an implementation detail that may change when the eviden
 - `handheld` 64 dp — one-handed thumb
 - `floor` 48 dp — absolute minimum, anything
 
-**KDS type is never dp.** Use `capHeightMm(arcmin, distanceMm)` — the same dp renders 2.3×
-larger on a 32″ 69-PPI panel than on a phone, so a dp value on a KDS is meaningless.
+**A dp is 1/160 inch of PHYSICAL size, never a CSS pixel** (27-F68). `targetFor("keypad")`
+returns `126` and that is **20 mm**, which renders as 79 px on 27 §1a's 1366×768 counter and
+111 px on its 1920×1080 one. You never do that conversion: `PanelRoot` applies it once, to
+the whole tree, chrome included, and everything inside it is laid out in dp. Do not pin a
+pixel value — 79 px is 20 mm at 100 PPI and 14.2 mm at 141 PPI, below 27-F8's floor. And do
+not trim the millimetres to make a layout fit; 27-F8's numbers are a measured ergonomic
+minimum and the ruling changed how they are *rendered*, never what they *are*.
+
+**KDS type is never dp.** Use `capHeightMm(arcmin, distanceMm)`. *(Premise corrected August
+2026, the same correction 27-F27 took. This rule used to argue that "the same dp renders 2.3×
+larger on a 32″ 69-PPI panel than on a phone", which 27-F68 makes **false** — a dp is a
+physical size and renders alike everywhere. The rule stands on stronger ground: legibility is
+ANGULAR, so cap-height must scale with viewing DISTANCE, and no fixed physical size does that.
+A 22″ pass screen read at 1.5 m and a phone read at 0.35 m need different millimetres.)*
 
 ## Space and type
 

@@ -1,7 +1,6 @@
 import type { Paisa } from "@restos/domain";
-import { CSS_PX_PER_INCH } from "../physical";
 import { useColor } from "../theme";
-import { mmFromDp, space, targetFor, targetMm, typography } from "../tokens/index";
+import { DP_PER_INCH, mmFromDp, space, targetFor, targetMm, typography } from "../tokens/index";
 import { MoneyValue } from "./MoneyValue";
 import { Tile } from "./Tile";
 
@@ -65,7 +64,12 @@ export type OrderListProps = {
   orders: readonly OrderRow[];
   /** Usable height in **millimetres**, measured by the caller (`27-F11c`). */
   heightMm: number;
-  /** Surface density. Defaults to the CSS reference, which is what `usePhysicalSize` measures in. */
+  /**
+   * Pixels per inch of the surface. Defaults to `DP_PER_INCH` — inside `PanelRoot` (`27-F68`)
+   * the pixel Blink lays out in **is** the dp, which is also the unit `usePhysicalSize`
+   * measures in, so a caller that measures and a caller that names a panel cannot disagree
+   * about what a millimetre is.
+   */
   ppi?: number | undefined;
   /** Rendered row height in mm; must be >= the counter posture minimum. Defaults to it. */
   rowMm?: number | undefined;
@@ -101,7 +105,7 @@ export const orderPageRows = (opts: {
 export const OrderList = ({
   orders,
   heightMm,
-  ppi = CSS_PX_PER_INCH,
+  ppi = DP_PER_INCH,
   rowMm,
   page,
   onPageChange,
@@ -113,18 +117,19 @@ export const OrderList = ({
   /**
    * **A row must be able to CONTAIN its action, and this floor was found by launching.**
    *
-   * `Tile` sizes itself from `targetFor(posture)` — 76, in CSS pixels — while this component's
-   * capacity math is physical (`27-F11c`), and `targetMm("counter")` is the same 76 dp expressed
-   * as **12.065 mm**, which at the CSS reference density renders as **45 px**. So the default
-   * row was 31 px shorter than the control it holds: on the launched counter the Accept tiles
+   * `Tile` sizes itself from `targetFor(posture)` — 76 — while this component's capacity math is
+   * physical (`27-F11c`), and `targetMm("counter")` is the same 76 dp expressed as **12.065
+   * mm**. Under the old CSS-reference density those were 76 px and 45 px: the default row was
+   * 31 px shorter than the control it holds, so on the launched counter the Accept tiles
    * overflowed their cards and consecutive rows overlapped. Nothing in happy-dom could see it —
    * it lays nothing out — which is why this was found by looking and not by the suite.
    *
-   * The dp-as-CSS-px / dp-as-millimetre duality is a **pre-existing property of the package**,
-   * not something this component introduced: `ItemGrid` has the same gap and the counter papers
-   * over it by passing `tileMm={28}` explicitly. Reconciling the two is a `tokens` change with
-   * its own FR, so it is **named as a finding** in `apps/pos-electron/CLAUDE.md` rather than
-   * fixed from here (`24 §3b`, surgical diffs).
+   * **The duality that caused it is CLOSED by `27-F68`** (`DEC-UI-001`, August 2026), and this
+   * comment is kept as the worked example. The finding it recorded was that "76 dp" meant two
+   * different physical sizes depending on which of this package's two conversions you asked;
+   * with `ppi` defaulting to `DP_PER_INCH` they are one conversion and `actionFloorMm` now
+   * evaluates to `targetMm("counter")` itself. The floor stays, because a caller may still pass
+   * an explicit `rowMm` below the control it has to contain.
    *
    * The floor is applied to the SAME `row` used for both capacity and render, which is
    * `ItemGrid`'s own ruling: a number that is computed and a number that is drawn must be one
