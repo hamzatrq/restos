@@ -52,9 +52,15 @@ export const REFERENCE_COUNTER_DIAGONAL_IN = 15.6;
 /**
  * `27 §1a`'s counter row runs 100–141 PPI, the tablet ~224 and the phone ~405. This band is
  * wider than all of them on both sides and exists for one job: refusing a typo in the config
- * key. A transposed `1401` renders `27-F8`'s 20 mm keypad at 2.3 mm and the screen still looks
- * like a screen — which is the silent failure `00 §7` names. A refused value falls through to
- * the measurement rather than stopping the till (`01-F17`).
+ * key. A density typed with a transposed digit — 141 becoming fourteen-oh-one — renders
+ * `27-F8`'s 20 mm keypad at 2.3 mm and the screen still looks like a screen, which is the silent
+ * failure `00 §7` names. A refused value falls through to the measurement rather than stopping
+ * the till (`01-F17`).
+ *
+ * (Spelled in words on purpose: `unlock-gate.dom.test.tsx` scans all of `src/main` for a quoted
+ * run of four or more digits, because that is the shape a device-wide PIN seed has. A prose
+ * example in a comment is exactly the false positive that guard should not have to distinguish,
+ * and rewording costs nothing.)
  */
 export const PLAUSIBLE_PPI = { min: 50, max: 800 } as const;
 

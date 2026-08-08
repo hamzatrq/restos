@@ -362,7 +362,13 @@ describe("the guard suite actually covers the package", () => {
         // numeric constants outside `tokens.json` (96 CSS px per inch, 25.4 mm per inch), and
         // both are DEFINITIONS rather than design values, which is exactly the distinction
         // this pin exists to make someone state out loud.
-        "physical.ts",
+        //
+        // RENAMED to `.tsx` August 2026, and the acknowledgement this pin forces is that the
+        // file now RENDERS: `27-F68` / `DEC-UI-001` put `PanelRoot` here, the one element in
+        // the product where a dp becomes a pixel. The conversion and the component that applies
+        // it live in one module deliberately — two of either is two answers to "how big is a
+        // dp", which is the defect the ruling exists to close.
+        "physical.tsx",
       ].sort(),
     );
   });

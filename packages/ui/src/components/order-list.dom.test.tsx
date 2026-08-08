@@ -158,12 +158,35 @@ describe("02-F9 — the inbox action is ONE TAP, and it acts on ITS OWN row", ()
   });
 
   it("leaves a read-only row at its own height — the floor is the ACTION's, not decoration", () => {
-    // The control: with no action there is no 76 px tile to contain, so the row stays at the
-    // physical height the caller asked for. A floor applied unconditionally would silently
-    // change every read-only list's capacity, which is the mutant this separates.
-    list();
+    // The control: with no action there is no tile to contain, so the row stays at the physical
+    // height the caller asked for. A floor applied unconditionally would silently change every
+    // read-only list's capacity, which is the mutant this separates.
+    //
+    // ⚠ REWRITTEN August 2026, and the reason is a RATIFIED FOUNDER RULING rather than a
+    // convenience — `DEC-UI-001` / `27-F68`, carried back into the suite the day it landed
+    // (`AGENTS.md`: "when a ruling lands, grep the suites that encode the old rule").
+    //
+    // This read `minHeight < targetFor("counter")` and it passed for one reason only: the
+    // package had TWO conversions for one posture. `targetFor("counter")` was spent as 76 CSS px
+    // while `targetMm("counter")`'s 12 mm rendered as 45 px at the CSS reference density — the
+    // dp-as-px / dp-as-mm duality `OrderList` itself carried as a written finding. `27-F68` makes
+    // a dp 1/160 inch of PHYSICAL size, so 76 dp and 12 mm are now ONE size (12.065 vs 12.0 mm,
+    // 76 px against 75.6 px rounded) and the old assertion is unsatisfiable by any correct
+    // implementation. Measured: both rows render at 76.
+    //
+    // So the mutant the original comment names — an unconditionally applied floor — is now
+    // genuinely UNOBSERVABLE: `orderPageRows` throws below `targetMm("counter")` = 12 mm and the
+    // floor IS 12.065 mm, so it can only change an outcome inside a 0.065 mm window. That is
+    // reported rather than papered over. What is asserted instead still bites, on the property
+    // the title always claimed: the row is the height the CALLER asked for. An implementation
+    // that ignored `rowMm`, or raised a read-only row to anything else, dies here.
+    list({ rowMm: 20 });
     const article = document.querySelector("article") as HTMLElement;
-    expect(Number.parseInt(article.style.minHeight, 10)).toBeLessThan(targetFor("counter"));
+    // 20 mm at 160 dp/inch (27-F68's density) = 126 dp, and 126 is `27-F8`'s keypad target
+    // precisely because 20 mm is what that posture measures — the same arithmetic, checked from
+    // the other end.
+    expect(Number.parseInt(article.style.minHeight, 10)).toBe(targetFor("keypad"));
+    expect(Number.parseInt(article.style.minHeight, 10)).toBeGreaterThan(targetFor("counter"));
   });
 
   it("renders the caller's label, so a screen can say what the tap DOES", () => {
