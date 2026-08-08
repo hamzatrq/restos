@@ -107,7 +107,7 @@ two cloud stamps merged back into the envelope only at serve time.
 | `org-events.ts` | `appendOrgEvent` / `orgEventHistory` — `01-F62`'s ORG-SCOPED store (no branch fields, ordered by `server_received_at`). |
 | `publish-http.ts` | `registerPublishRoutes` — the `/internal` surface `services/api` publishes through (founder ruling: the API publishes, the gateway serves). Credential-gated; fail-CLOSED with none configured. |
 | `schema.ts` | Drizzle table definitions (the six `kernel` tables + `org_events`). |
-| `migrate.ts` | `applyMigrations(databaseUrl)` — runs every `drizzle/` migration. |
+| `migrate.ts` | `applyMigrations(databaseUrl)` — runs every `drizzle/` migration. Also the deploy step itself: `pnpm -C services/sync-gateway migrate`. |
 | `server.ts` | `buildServer` / `start` — thin Fastify + `@fastify/websocket` adapter; owns the wire codec, and mounts `/internal`. Boot-smoke tested only (`server.test.ts` exists); the `/internal` routes have their own acceptance suite. |
 | `index.ts` | Public barrel. |
 
@@ -261,7 +261,12 @@ crash. Five legs:
   `storage_reject`, `invariant_violation`, `origin_unregistered`,
   `origin_revoked`.
 - **`migrate.ts`** — `applyMigrations(databaseUrl)` runs every `drizzle/`
-  migration programmatically (exercised on every suite run).
+  migration programmatically (exercised on every suite run). It is also the
+  **declared deploy step**: `pnpm -C services/sync-gateway migrate`, idempotent,
+  with `pendingMigrations` answering the schema-state question the server's
+  fourth boot line reports. Migration is deliberate and never automatic — see
+  `CLAUDE.md` for why the server does not migrate itself, and for what the boot
+  check does and does not prove.
 - **`server.ts`** — `buildServer` / `start`: Fastify + `@fastify/websocket`,
   env via `@restos/config` `defineEnv` (crash at boot on invalid env). Requires
   `DATABASE_URL` and `DEVICE_TOKEN_SECRET` (≥ 32 bytes). The **real clock is

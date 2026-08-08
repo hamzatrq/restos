@@ -76,20 +76,20 @@ If `5432` is taken (a local Postgres, or another agent's container) map `-p 5433
 already in use"*; note that `lsof -iTCP:5432` can come back **empty** under a sandboxed shell even
 when the port is genuinely held, so trust the bind error over the probe.
 
-### Migrations — there is no migrate script, and nothing runs them for you
-
-`services/sync-gateway/src/migrate.ts` carries `@unreached-by-design`, naming its callers as the
-test harness "and whatever runs the deploy". **Nothing runs the deploy.** A gateway started against
-an unmigrated database boots perfectly and answers `500` on the first request that needs a table.
+### Migrations — one declared command
 
 ```sh
-cd services/sync-gateway
 DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/restos' \
-  pnpm exec tsx -e "import('./src/migrate.ts').then(m => m.applyMigrations(process.env.DATABASE_URL)).then(() => console.log('migrations applied'))"
-cd -
+  pnpm -C services/sync-gateway migrate
 ```
 
-Healthy: `migrations applied`, and nine tables in `kernel`:
+Healthy — one line, and the DSN is password-redacted (`18 §5`):
+
+```
+@restos/sync-gateway migrate applied 10 of 10 migrations · postgres://postgres:*****@127.0.0.1:5432/restos
+```
+
+and nine tables in `kernel`:
 
 ```sh
 docker exec restos-pg psql -U postgres -d restos -c '\dt kernel.*'
@@ -97,8 +97,28 @@ docker exec restos-pg psql -U postgres -d restos -c '\dt kernel.*'
 # events · org_events · org_sequences · quarantine · quarantine_notices
 ```
 
-Re-running against an already-migrated database prints Postgres error objects and still ends
-`migrations applied` — noisy, not a failure.
+**It is idempotent.** A second run says so and changes nothing:
+
+```
+@restos/sync-gateway migrate nothing to apply — all 10 migrations were already present · postgres://…
+```
+
+⚠ **Postgres `NOTICE` objects on the second run are not errors.** `42P06 schema "drizzle" already
+exists, skipping` and `42P07 relation "__drizzle_migrations" already exists, skipping` come from the
+migrator's own `CREATE … IF NOT EXISTS` preamble and are dumped by `postgres-js` as objects with a
+`code` field, which read like faults. They are evidence of idempotency. **Trust the last line and
+the exit code** — an earlier version of this section called them "Postgres error objects", which is
+what they look like and not what they are.
+
+**Migration is a separate, deliberate act — the gateway does NOT migrate itself at boot** (a service
+that migrates its own database on boot races its own replicas). What it does instead is *tell you*:
+a fourth boot line reports the schema state, so forgetting this step is a sentence you read while
+bringing the stack up rather than a `500` somewhere else later.
+
+```
+@restos/sync-gateway schema up to date — all 10 migrations applied
+@restos/sync-gateway schema NOT MIGRATED — 10 of 10 migrations are unapplied. Run `pnpm -C services/sync-gateway migrate`; …
+```
 
 ---
 
@@ -127,13 +147,20 @@ PORT=8080 \
 pnpm -C services/sync-gateway start          # `dev` to watch
 ```
 
-**Healthy** — three lines, plus Fastify's own pino JSON beside them:
+**Healthy** — four lines, plus Fastify's own pino JSON beside them:
 
 ```
 @restos/sync-gateway listening on http://0.0.0.0:8080
 @restos/sync-gateway database postgres://postgres:*****@127.0.0.1:5432/restos (opened lazily …)
 @restos/sync-gateway publish surface enabled (PUBLISH_TOKEN configured)
+@restos/sync-gateway schema up to date — all 10 migrations applied
 ```
+
+**Read the fourth line too.** `schema NOT MIGRATED — …` means you skipped §2; the gateway is up and
+every request that needs a table will answer `500`. It arrives a moment after the other three
+(it is a database round trip, deliberately not awaited, so an unreachable database can never delay
+or block the boot) and reads `schema could not be checked — the database did not answer (…)` when
+Postgres is not running at all.
 
 **Read the third line.** `publish surface DISABLED — no PUBLISH_TOKEN …` means every `/internal`
 route answers `503` (fail-closed, deliberate) and the API will fail to publish with a message about
@@ -360,12 +387,19 @@ Stated plainly, because a runbook that oversells is worse than none.
 | **the session bearer** | `sessionStorage` in the browser; an httpOnly cookie is the correct shape and is owed |
 | **LAN / hub** | reported `OFF` and that is honest — no mesh session exists yet |
 | **printing** | no printer. Every confirm raises `03-F5`'s band ~20 s later. `RESTOS_PRINT_TO_FILE=<dir>` renders documents to PDF and **does not** close K-8 |
-| **migrations** | run by hand (§2). No deploy step exists |
+| **migrations** | run by ONE declared command (§2), by hand. That command is now the deploy step — but nothing *automated* calls it yet, because no deploy pipeline exists to call it |
 
 **OWED, found by this run:**
 
-1. **A migrate entry point.** `applyMigrations` has no CLI and no deploy caller; §2 is a `tsx -e`
-   because there is nothing better to point at.
+1. ~~**A migrate entry point.**~~ **CLOSED (August 2026).** `pnpm -C services/sync-gateway migrate`
+   is declared, idempotent, and verified against a real Postgres; boot reports the schema state
+   rather than failing later and elsewhere. §2 is that command now, not a `tsx -e`. Two things are
+   still owed underneath it: **no deploy pipeline calls it** (it is a command a human runs), and
+   the boot check answers *"has this build's journal been applied"* — **not** *"is the schema
+   intact"*. Drop a table by hand and leave the journal alone and the check still says `up to
+   date`, because drizzle keeps one `created_at` watermark and never re-checks the objects.
+   Measured, not assumed; re-running `migrate` against that database also reports success and
+   repairs nothing.
 2. **A device-provisioning path.** §6b is two manual steps against a protected service's table.
 3. **`rebuild:native` still clobbers `build/Release/`** (§6a). The documented restore is required
    every time, not "if it ever happens again".

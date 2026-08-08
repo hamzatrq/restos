@@ -8,17 +8,59 @@
   **no `dev`, no `start`** — so 271 tests, the whole cloud sync end, the `/internal` surface and the
   device WebSocket had **never run as a process**, and the three-process stack (gateway → api →
   back office) could not be brought up at all. That is AGENTS.md's recurring defect, tenth instance.
-  It prints three lines and Fastify's own pino beside them:
+  It prints four lines and Fastify's own pino beside them:
 
       @restos/sync-gateway listening on http://0.0.0.0:8080
       @restos/sync-gateway database postgres://gateway:*****@127.0.0.1:5432/restos (opened lazily …)
       @restos/sync-gateway publish surface enabled (PUBLISH_TOKEN configured)
+      @restos/sync-gateway schema up to date — all 10 migrations applied
 
   **The first line is load-bearing** — `__acceptance__/startable.test.ts` spawns the declared script
-  with `PORT=0` and finds the ephemeral port by reading it. The second and third exist because both
-  questions cost real time when they had no answer: which database, and whether `/internal` can
-  accept a menu at all (`PUBLISH_TOKEN` absent is fail-closed and otherwise shows up only as a 503
-  in *another service's* logs). The DSN is printed **password-redacted** (`18 §5`).
+  with `PORT=0` and finds the ephemeral port by reading it. The other three exist because each
+  question cost real time when it had no answer: which database, whether `/internal` can accept a
+  menu at all (`PUBLISH_TOKEN` absent is fail-closed and otherwise shows up only as a 503 in
+  *another service's* logs), and whether the schema is even there. The DSN is printed
+  **password-redacted** (`18 §5`).
+- **MIGRATION IS A DECLARED COMMAND, AND A SEPARATE DELIBERATE ACT (August 2026):
+  `pnpm -C services/sync-gateway migrate`.** Until then `applyMigrations` was marked unreached by
+  design, naming its callers as the test harness "and whatever runs the deploy" — and **nothing ran
+  the deploy**: there was no migrate script anywhere in this repo, so the only route was a `tsx -e`
+  one-liner copied out of a runbook. `migrate.ts` now has a `main()` and an entry guard in the same
+  shape as `server.ts`, and the by-design marker is **gone** — it is reached now, and a marker on
+  something reached fails `seams:check`.
+  - **The server does NOT migrate itself**, and that is the design question rather than an
+    oversight. A service that migrates its own database on boot races its own replicas, and every
+    process start becomes a schema change. It also matches this service's own precedent for a
+    missing dependency: `PUBLISH_TOKEN` absent is fail-closed, said plainly at boot, and never a
+    reason to crash the till's sync over a deploy-time concern.
+  - **So boot REPORTS instead** (`00 §5.7` — the same FR `publish-http.ts` cites for naming a
+    dependency). `pendingMigrations` runs **after `listen` and is not awaited**: an unroutable host
+    waits out `postgres-js`'s 30 s connect timeout, so awaiting it would trade a fast boot for
+    exactly the stall the lazy connection exists to avoid. Unmigrated reads `schema NOT MIGRATED —
+    10 of 10 migrations are unapplied. Run ...`; an unreachable database reads `schema could not be
+    checked — the database did not answer (… ← connect ECONNREFUSED …)`, on ONE line and with no
+    DSN in it.
+  - **Idempotency and partial application, MEASURED against a real Postgres.** drizzle 0.45.2 runs
+    every PENDING migration inside **ONE transaction** (`pg-core/dialect.ts`) and Postgres DDL is
+    transactional, so a failed run is all-or-nothing: verified by planting a colliding
+    `kernel.events` before migrating — the run failed on `CREATE SCHEMA "kernel"` and left **zero**
+    journal rows and no new tables. A second run on a migrated database applies nothing (journal
+    row count unchanged at 10) and says `nothing to apply`.
+  - ⚠ **What the boot check does NOT prove — the honest boundary.** It answers *"has this build's
+    journal been applied"*, **not** *"is the schema intact"*. drizzle keeps ONE `created_at`
+    watermark and never re-checks the objects, so dropping `kernel.org_events` by hand while
+    leaving the journal alone yields `pending: 0` for a database that 500s — and re-running
+    `migrate` against it also reports success and **repairs nothing** (measured). Removing the
+    journal's last row *and* its table does self-heal: the watermark drops and `0009` re-applies.
+    Deriving the answer from a table list would catch the torn case and would be a **second
+    interpretation of the schema** — the defect `03-F40`'s two sensor bit layouts already cost this
+    corpus — so the deploy question is answered honestly rather than overselling a schema audit
+    that is not performed.
+  - ⚠ **Postgres `NOTICE` objects on a re-run are not errors.** `42P06`/`42P07` "already exists,
+    skipping" come from the migrator's own `CREATE … IF NOT EXISTS` preamble and are dumped by
+    `postgres-js` as objects with a `code` field. They are evidence of idempotency. The runbook
+    previously called them "Postgres error objects", which is what they look like and not what they
+    are.
 - **It does NOT need Docker to START, only to be TESTED.** `DEVICE_TOKEN_SECRET` is still required
   with its 32-byte floor; `DATABASE_URL` now **defaults** to `postgres://postgres:postgres@localhost:5432/restos`
   and `PORT` to `8080` (`0` is legal and means an ephemeral bind, as `services/api` always allowed).
@@ -88,6 +130,40 @@ right-hand column is measured rather than reasoned.
 **M1, M3 and M5 are the ones to re-run after any change here** — they are the three the existing
 271 cannot see. M3 in particular: silencing one `console.log` retires the entire startability
 assertion and no other test in this package notices.
+
+## Mutation matrix for `migratable.test.ts` (round-3 law) — control 6/6 new + 282 pre-existing green
+
+The migrate entry point and its boot report. Control: **288/288 green** (282 pre-existing + 6 new),
+`REAL_EXIT=0` read from a marker written inside the log, never from a reported status. Every row is
+the FULL package suite, and each mutant differs from the control in **exactly one branch**. The
+right-hand column is the point: the 282 pre-existing tests are blind to **every** row, so all the
+kills are attributable to the new file rather than to the suite at large.
+
+| # | mutant (exactly one branch) | new tests failed (of 6) | pre-existing 282 |
+|---|---|---|---|
+| N1 | **`scripts.migrate` deleted** | **5** | **all green** |
+| N2 | `main()` never calls `applyMigrations` — a decorative command | 4 | **all green** |
+| N3 | **`server.ts` never calls `pendingMigrations`** — the shipped behaviour before this change | **2** | **all green** |
+| N4 | **the schema line always says "up to date"** — a one-sided guard | **1** | **all green** |
+| N5 | the report moved BEFORE `listen`, and awaited | 1 | **all green** |
+| N6 | the migrate line prints the RAW DSN (password leak) | 1 | **all green** |
+| N7 | **CONTROL: same states reported, different prose** | **0** | all green |
+
+**N1, N3 and N4 are the ones to re-run after any change here.** N1 is `startable.test.ts`'s M1 for
+this file — delete the declared script and five of six assertions go red, which is the whole reason
+the test spawns `scripts.migrate` instead of a hardcoded `tsx src/migrate.ts`. N3 is the seam row:
+it reproduces exactly what shipped before this change, and **not one of the 282 pre-existing tests
+notices** — the same shape as the `notifyCatalogVersion` gap above. N4 is the round-3 row: a guard
+that always cries "NOT MIGRATED" closes the gap as badly as one that never does, so the assertion
+is two-sided and only the empty-database half dies here.
+
+⚠ **Two mutants in this round were mis-designed, and both are worth keeping.** The first N3 draft
+did not compile (7 files failed to load, 243 tests ran) — a broken mutant is not a result, and a
+"kill" read off that run would have been noise. The first N5 replaced `void` with `await` **in
+place**, which is semantically near-equivalent because the probe already sits *after* `app.listen`
+— it **survived**, correctly, and the real hazard (moving it *before* `listen`) had to be built
+deliberately. A mutant that survives because it does not actually change behaviour proves nothing
+about the test; check what the mutant does before recording what it means.
 
 ## Mutation matrix for the `catalog_notice` publish seam — control 282/282 green
 
