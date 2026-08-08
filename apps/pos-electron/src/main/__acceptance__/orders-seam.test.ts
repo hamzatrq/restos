@@ -58,6 +58,8 @@ const deps = (rows: unknown[]): GatewayDeps =>
     reachability: () => ({ lan: "ok", hub: "ok", cloud: "down" }),
     blockedCursor: () => null,
     businessDay: () => "2026-08-07",
+    // 27-F68 — the density of the glass, required on GatewayDeps.
+    panelPpi: () => 100.5,
   }) as GatewayDeps;
 
 describe("C19/C31 — the gateway carries the fold's order facts to the Orders tab", () => {

@@ -399,6 +399,8 @@ describe("§K the guard over the real gateway — a refusal never reaches the le
       reachability: () => ({ lan: "down", hub: "down", cloud: "down" }),
       blockedCursor: () => null,
       businessDay: () => "2026-08-07",
+      // 27-F68 — the density of the glass, required on GatewayDeps.
+      panelPpi: () => 100.5,
     });
     return {
       appended,

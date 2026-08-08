@@ -131,10 +131,34 @@ const CASH_STATE: CashState = {
 let session: Session | null = null;
 const listeners = new Set<() => void>();
 
+/**
+ * `27 §1a`'s two counter panels, and `DEC-UI-001` (e) requires BOTH be measured: *"the layout
+ * gate measures one panel at devicePixelRatio 1; `27 §1a`'s second counter panel must enter its
+ * fixture with this work, or the ruling ships untested on precisely the case that produced"* the
+ * no-pinned-79-px trap.
+ *
+ * The gate simulates a panel it is not running on, so the density is DERIVED from the window it
+ * actually has rather than typed in: the window is `n` CSS pixels across at this host's own
+ * `devicePixelRatio`, and if that were a 15.6″ panel it would be
+ * `n × devicePixelRatio / widthInches` PPI. That keeps `27-F68`'s arithmetic honest on a Retina
+ * Mac — where the same simulation typed as a flat `100.5` would render every target at half its
+ * physical size — and it makes the two panels differ in exactly the thing `27-F11c` says must
+ * not matter: pixels across the same 15.6 inches.
+ */
+const COUNTER_DIAGONAL_IN = 15.6;
+const simulatedPanelPpi = (): number => {
+  const inches = { w: window.innerWidth, h: window.innerHeight };
+  const diagonalPx = Math.hypot(inches.w, inches.h) * window.devicePixelRatio;
+  return diagonalPx / COUNTER_DIAGONAL_IN;
+};
+
 const bridge: RestosBridge = {
   deviceState: () =>
     Promise.resolve({
       actor: session?.display_name ?? "Counter 1",
+      // `27-F68` — read fresh on every call, so the gate's resize to the second panel is
+      // followed by the renderer without a reload.
+      panelPpi: simulatedPanelPpi(),
       deviceLabel: "Counter 1",
       businessDay: "2026-08-07",
       training: false,

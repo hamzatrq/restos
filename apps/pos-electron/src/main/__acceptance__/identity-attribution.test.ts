@@ -83,6 +83,8 @@ const harness = (start: { user_id: string; display_name: string } | null = null)
     reachability: () => ({ lan: "ok", hub: "ok", cloud: "down" }),
     blockedCursor: () => null,
     businessDay: () => "2026-08-04",
+    // 27-F68 — the density of the glass, required on GatewayDeps.
+    panelPpi: () => 100.5,
   };
   return {
     gateway: createGateway(deps),
