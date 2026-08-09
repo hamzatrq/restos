@@ -49,6 +49,39 @@
   --font-sans: var(--rx-fontFamily-default);
 }
 
+/*
+ * `27-F42` — COMPOSITE typography, bound to Tailwind's font-size namespace so one utility carries
+ * all four parts. `text-numeric-primary` sets size AND line-height AND weight AND tracking; there
+ * is no way to spend the size without the pairing, which is the whole of the rule.
+ *
+ * Tailwind v4's `--text-<name>--line-height` / `--font-weight` / `--letter-spacing` modifiers are
+ * what make that possible; without them this would have had to be four utilities per style and
+ * the composite would be a naming convention rather than a constraint.
+ *
+ * The values are `theme-css.ts`'s, which are the manifest's. Nothing here is a number.
+ */
+@theme inline {
+  --text-numeric-hero: var(--rx-text-numeric-hero-size);
+  --text-numeric-hero--line-height: var(--rx-text-numeric-hero-line);
+  --text-numeric-hero--font-weight: var(--rx-text-numeric-hero-weight);
+  --text-numeric-hero--letter-spacing: var(--rx-text-numeric-hero-tracking);
+
+  --text-numeric-primary: var(--rx-text-numeric-primary-size);
+  --text-numeric-primary--line-height: var(--rx-text-numeric-primary-line);
+  --text-numeric-primary--font-weight: var(--rx-text-numeric-primary-weight);
+  --text-numeric-primary--letter-spacing: var(--rx-text-numeric-primary-tracking);
+
+  --text-body: var(--rx-text-body-size);
+  --text-body--line-height: var(--rx-text-body-line);
+  --text-body--font-weight: var(--rx-text-body-weight);
+  --text-body--letter-spacing: var(--rx-text-body-tracking);
+
+  --text-label: var(--rx-text-label-size);
+  --text-label--line-height: var(--rx-text-label-line);
+  --text-label--font-weight: var(--rx-text-label-weight);
+  --text-label--letter-spacing: var(--rx-text-label-tracking);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

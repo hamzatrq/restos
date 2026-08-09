@@ -13,7 +13,7 @@
  * light-by-default law is about the COUNTER; this is not one.
  */
 
-import { colorDark, color as colorLight, tokens } from "@restos/ui/tokens";
+import { colorDark, color as colorLight, tokens, typography } from "@restos/ui/tokens";
 
 const block = (palette: Record<string, string>): string =>
   Object.entries(palette)
@@ -42,10 +42,44 @@ const block = (palette: Record<string, string>): string =>
 const family = tokens.typography.$family;
 
 /**
+ * `27-F42` — **the type SCALE, and it is the half of the manifest this app was still not
+ * rendering.**
+ *
+ * The colour half arrived first and `$family` second; the four composite styles stayed a JSON
+ * file. So every size on these screens came from Tailwind's own scale — `text-sm`, `text-xs`,
+ * `text-base` — which is a *different* system's decomposed primitives, i.e. exactly the
+ * "consumers assemble pairings the system never designed" that `27-F42` names. The screens then
+ * used roughly one of them, which is what `plans/wave-1/design-direction.md` calls the biggest
+ * unused lever.
+ *
+ * Each style is emitted as its four parts under one name so `globals.css` can bind them to a
+ * single Tailwind font-size utility. **The four are never spendable apart** — there is no
+ * `--rx-text-*-size` consumer anywhere that does not also take the other three, which is what
+ * keeps this a composite token rather than four primitives with a shared prefix.
+ *
+ * ⚠ **The set is FOUR and a dense back office needs six.** There is no display style for a
+ * wordmark and no caption style below `text-label`'s 14 px, so the sign-in headline and every
+ * metadata line here still come from Tailwind's scale. That is a `packages/ui` gap, recorded in
+ * `apps/backoffice/CLAUDE.md`, not something to paper over with a fifth local size.
+ */
+const typeBlock = (): string =>
+  Object.entries(typography)
+    .map(
+      ([name, style]) =>
+        `--rx-${name}-size:${style.fontSize}px;` +
+        `--rx-${name}-line:${style.lineHeight}px;` +
+        `--rx-${name}-weight:${style.fontWeight};` +
+        `--rx-${name}-tracking:${style.letterSpacing};`,
+    )
+    .join("");
+
+/**
  * `:root` carries the light palette; the dark one is applied under the viewer's OS preference and
  * under an explicit `.dark` class, so a future in-app toggle needs no change here.
+ *
+ * The type scale is polarity-independent and is emitted once.
  */
 export const themeCss = (): string =>
-  `:root{${block(colorLight)}--rx-fontFamily-default:${family};}` +
+  `:root{${block(colorLight)}--rx-fontFamily-default:${family};${typeBlock()}}` +
   `@media (prefers-color-scheme: dark){:root:not(.light){${block(colorDark)}}}` +
   `.dark{${block(colorDark)}}`;

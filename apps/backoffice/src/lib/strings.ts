@@ -31,6 +31,14 @@ export const strings = {
   session: {
     signOut: "Sign out",
     org: "Organisation",
+    /**
+     * The signed-in user, LABELLED. The header ran the org id and the user id together behind one
+     * word, so `org-zaiqa · bootstrap-owner:org-zaiqa` read as one fact with a stray separator.
+     * Both are raw ids because they are the only names the server has — `01-F47` covers devices,
+     * not people, and there is no user profile in the corpus to read a display name from — so the
+     * least this can do is say which id is which.
+     */
+    user: "Signed in as",
   },
 
   catalog: {
