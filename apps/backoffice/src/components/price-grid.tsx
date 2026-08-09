@@ -174,7 +174,18 @@ export const PriceGrid = ({
                     const empty = value === "";
                     const id = `price-${branch_id}-${channel}`;
                     return (
-                      <td key={channel} className="border-l border-border p-1.5">
+                      <td
+                        key={channel}
+                        /*
+                          **A money column may never squeeze its own number.** Found by looking at
+                          390 px (`14-N2`'s phone): `Mutton Karahi`'s `3200` rendered as `32` —
+                          the cell had shrunk under the 28 px numerals and clipped the value
+                          inside the input, on the one surface in the product where a mistyped
+                          figure reaches every till. A `min-w` makes the TABLE overflow and scroll
+                          instead, which is visible and recoverable; a clipped price is neither.
+                        */
+                        className="min-w-36 border-l border-border p-2"
+                      >
                         <Label htmlFor={id} className="sr-only">
                           {`${branch_id} ${channel}`}
                         </Label>

@@ -195,9 +195,14 @@ export const AuthGate = ({ children }: { children: ReactNode }): ReactNode => {
     */
     <div className="flex min-h-svh flex-col bg-background">
       <header className="sticky top-0 z-10 border-b border-border bg-card">
-        <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-5 py-3 sm:px-8">
-          <span className="text-base font-semibold tracking-tight">{strings.appName}</span>
-          <div className="flex items-center gap-5 sm:gap-8">
+        <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:gap-4 sm:px-8">
+          {/* `truncate` and `whitespace-nowrap` below are not decoration: at 390 px (`14-N2`'s
+              phone) the brand wrapped to two lines and `Sign out` wrapped under its own glyph,
+              which doubled the chrome's height on the surface with the least of it to spare. */}
+          <span className="truncate text-base font-semibold tracking-tight">
+            {strings.appName}
+          </span>
+          <div className="flex shrink-0 items-center gap-4 sm:gap-8">
             {/*
               The org and the user, LABELLED AND STACKED. These are raw ids because they are the
               only names the server has — `01-F47` covers devices, not people, and there is no user
@@ -209,11 +214,11 @@ export const AuthGate = ({ children }: { children: ReactNode }): ReactNode => {
               a phone with a publish button, and which organisation she is about to publish to is
               consequential in a way her own user id is not.
             */}
-            <span className="flex flex-col leading-tight">
+            <span className="flex min-w-0 flex-col leading-tight">
               <span className="text-xs uppercase tracking-wider text-muted-foreground">
                 {strings.session.org}
               </span>
-              <span className="text-label text-foreground">{whoami.data.org_id}</span>
+              <span className="truncate text-label text-foreground">{whoami.data.org_id}</span>
             </span>
             <span className="hidden flex-col leading-tight md:flex">
               <span className="text-xs uppercase tracking-wider text-muted-foreground">
@@ -234,7 +239,7 @@ export const AuthGate = ({ children }: { children: ReactNode }): ReactNode => {
               }}
             >
               <LogOut aria-hidden="true" className="size-4" />
-              {strings.session.signOut}
+              <span className="whitespace-nowrap">{strings.session.signOut}</span>
             </Button>
           </div>
         </div>
