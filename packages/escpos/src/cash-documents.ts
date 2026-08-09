@@ -34,65 +34,22 @@
  */
 
 import type { OrderChannel, PaymentMethod } from "@restos/domain";
-import { directedPaisa, ORDER_CHANNELS, PAYMENT_METHODS, rupeesFromPaisa } from "@restos/domain";
+import { ORDER_CHANNELS, PAYMENT_METHODS } from "@restos/domain";
 import type { BlockRenderer, DocumentSpec } from "./document.js";
-import type { EncoderPart } from "./encoder.js";
+import {
+  amountToken,
+  CHANNEL_LABELS,
+  GROUP_BREAK,
+  METHOD_LABELS,
+  NOT_RECORDED,
+  ownerNote,
+  reprintBand,
+  row,
+  TAIL,
+  UNATTRIBUTED,
+  varianceToken,
+} from "./document-parts.js";
 import { MIN_COLUMNS } from "./min-columns.js";
-
-// ── the money token (27-F22, 27-F23) ─────────────────────────────────────────────────────────────
-
-/**
- * `27-F23`: "`Rs`, symbol-first … **Not `₨`, not `PKR` in staff UI**." One space after it, so a
- * six-digit figure and a two-digit figure begin at the same offset from their label.
- */
-const MONEY_SYMBOL = "Rs";
-
-/**
- * Western 3-digit grouping, hand-rolled for `03-F30`'s reason (see the file header).
- *
- * `27-F23`: "CLDR gives `ur`/`en-PK` the `#,##0.###` pattern — Pakistan does **not** inherit lakh
- * grouping." `27-F22`: Western digits, which is what `String(n)` produces and what no locale can
- * be asked to change here.
- */
-const grouped = (whole: number): string => {
-  const digits = String(whole);
-  let out = "";
-  for (let i = 0; i < digits.length; i += 1) {
-    if (i > 0 && (digits.length - i) % 3 === 0) out += ",";
-    out += digits[i];
-  }
-  return out;
-};
-
-/**
- * A NON-NEGATIVE money magnitude, as `27-F23` renders it.
- *
- * Routed through `directedPaisa` rather than `rupeesFromPaisa` directly because that is the one
- * call that hands back a BRANDED magnitude (`DEC-MONEY-005`: the paisa→rupee divide is `domain`'s,
- * never a formatter's), and because it refuses a non-integer at the boundary instead of printing
- * a fraction of a rupee onto a document a cashier signs.
- */
-const amountToken = (magnitude_paisa: number): string => {
-  const { magnitudePaisa } = directedPaisa(magnitude_paisa);
-  return `${MONEY_SYMBOL} ${grouped(rupeesOf(magnitudePaisa))}`;
-};
-
-/**
- * `27-F12` — direction is a WORD, never a minus sign and never a colour alone: "a lone `-` is one
- * glyph wide, is the first thing lost at 1–2 m or on a scratched panel, and means nothing to a
- * non-reader". The vocabulary is `MoneyValue`'s, so the counter and the paper say the same word
- * about the same fact; `domain` deliberately owns only the arithmetic sign.
- *
- * A variance of exactly zero carries no word — "OVER Rs 0" is not a thing anyone says, and a
- * clean drawer is the ordinary case this document exists to certify.
- */
-const varianceToken = (signed_paisa: number): string => {
-  const { magnitudePaisa, sign } = directedPaisa(signed_paisa);
-  const amount = `${MONEY_SYMBOL} ${grouped(rupeesOf(magnitudePaisa))}`;
-  if (sign === 1) return `OVER ${amount}`;
-  if (sign === -1) return `SHORT ${amount}`;
-  return amount;
-};
 
 // ── the data contracts (03-F31: "each declares its own data contract") ───────────────────────────
 
@@ -214,101 +171,12 @@ export type DaySummaryData = {
   readonly reprint: boolean;
 };
 
-// ── labels: English words for kernel identifiers (00 §5.6) ───────────────────────────────────────
-
 /**
- * `00 §5.6` — the interface language is English. `khata_credit` is an identifier, not a word, and
- * `01-F54`'s degrade-to-identifier path is for a MISSING label, never the ordinary one.
- *
- * Derived from `PAYMENT_METHODS`' own order (`27-F4`: an order a reader learns is an order that
- * stays), and exhaustive by the `Record` type — a sixth tender fails to compile here rather than
- * printing a slip that silently omits a bucket.
+ * `02-F24`'s third group, named as a gap (`00 §5.7`) — see `DaySummaryData`. The WORD is shared
+ * (`document-parts.ts`) because more than one document has a fact it does not hold; the LABEL is
+ * this document's own.
  */
-const METHOD_LABELS: Readonly<Record<PaymentMethod, string>> = {
-  cash: "Cash",
-  card: "Card",
-  raast: "Raast",
-  khata_credit: "Khata credit",
-  aggregator_receivable: "Aggregator receivable",
-};
-
-/**
- * `02-F42`'s closed channel set as English words.
- *
- * `whatsapp` is labelled **WhatsApp**, which is where AGENTS.md's open question (`02-F1` writes
- * "WhatsApp", `02-F42` writes `whatsapp`) actually resolves: the KEY is the kernel enum and the
- * LABEL is the product's name, and neither has to move for both to be right.
- */
-const CHANNEL_LABELS: Readonly<Record<OrderChannel, string>> = {
-  counter: "Counter",
-  phone: "Phone",
-  storefront: "Storefront",
-  whatsapp: "WhatsApp",
-  foodpanda: "Foodpanda",
-};
-
-/** `02-F45`'s null attribution, said out loud rather than left as a blank. */
-const UNATTRIBUTED = "NOT ATTRIBUTED";
-
-/** `02-F24`'s third group, named as a gap (`00 §5.7`) — see `DaySummaryData`. */
 const ADJUSTMENTS_LABEL = "Voids/comps/discounts";
-const NOT_RECORDED = "NOT RECORDED";
-
-// ── line construction ────────────────────────────────────────────────────────────────────────────
-
-/**
- * One `label value` row, and `03-F36` is why there is exactly ONE space between them.
- *
- * The FR bans "space-as-layout (it makes a document permanently unreflowable)" alongside absolute
- * dot positioning, and a right-aligned money column is that ban's central case: the padding is
- * computed from a width the block renderer is not given (`BlockRenderer` takes data and slots, not
- * columns — deliberately, since `03-F30` makes the render pure over `(spec, profile, data, caps)`
- * and a block that reflowed itself would be a fourth input).
- *
- * `27-F57` supplies the comprehension half of the same answer for the same readers: a value read
- * in a distant column is the mapping step where comprehension collapses (decode ~71%, execute
- * ~35%). So the value sits immediately right of its label, exactly as the KOT's quantity sits
- * immediately left of its item.
- */
-const row = (label: string, value: string): readonly EncoderPart[] => [
-  { kind: "text", value: `${label} ${value}`, ink: "normal" },
-  { kind: "feed", lines: 1 },
-];
-
-/** `27-F58`'s group separator: "Groups are separated by **blank lines, not rules**." */
-const GROUP_BREAK: EncoderPart = { kind: "feed", lines: 2 };
-
-/**
- * `03-F37`'s mandatory reprint marker, in a locked region and declaring no slot — so it is
- * unsuppressible rather than merely unsuppressed (`03-F33` puts owner content only outside a
- * locked block and `03-F34` refuses any document that breaks that). `27-F56` gives it the
- * document's ONE inverted banner; a shift slip has no second use for the rung.
- *
- * "Reprints are already a named fraud vector — the paper must say so", and that is sharper on a
- * cash document than on a chit: a second copy of a close slip is a second signature surface.
- */
-const reprintBand = (reprint: boolean): readonly EncoderPart[] =>
-  reprint
-    ? [
-        { kind: "text", value: "REPRINT", ink: "inverted", scope: "banner" },
-        { kind: "feed", lines: 1 },
-      ]
-    : [];
-
-/**
- * An owner note. `user_text`, not `text`, on `document.ts`'s stated precedent: a note typed into
- * doc 14's editor is DATA, not one of `00 §5.6`'s English interface strings, so an Urdu footer
- * refuses `raster_font_unavailable` (`03-F8`'s July 2026 ruling — the raster text path is unwalked
- * until a font and a shaping engine are chosen) rather than `non_ascii_system_text`, which would
- * claim the platform's own English is broken and is permanent.
- */
-const ownerNote = (value: string): readonly EncoderPart[] => [
-  { kind: "user_text", value },
-  { kind: "feed", lines: 1 },
-];
-
-/** `27-F55`'s channel 3, and `03 §7`'s `has_cutter` handled inside the encoder. */
-const TAIL: readonly EncoderPart[] = [{ kind: "feed", lines: 2 }, { kind: "cut" }];
 
 const shiftOf = (data: unknown): ShiftCloseData => data as ShiftCloseData;
 const dayOf = (data: unknown): DaySummaryData => data as DaySummaryData;
@@ -555,13 +423,3 @@ export const CASH_BLOCK_RENDERERS = {
   shift_close_slip: SHIFT_BLOCK_RENDERERS,
   day_summary: DAY_BLOCK_RENDERERS,
 } as const;
-
-/**
- * Kept last because it is the one line that reads oddly out of context: `rupeesFromPaisa` returns
- * `{ rupees }` and the `DEC-MONEY-005` GritQL ban covers `rupee`-named member expressions, so the
- * value is unwrapped ONCE here, passed as a function argument (which the rule leaves legal, by
- * design) and never used in an arithmetic position anywhere above.
- */
-function rupeesOf(magnitude: Parameters<typeof rupeesFromPaisa>[0]): number {
-  return rupeesFromPaisa(magnitude).rupees;
-}

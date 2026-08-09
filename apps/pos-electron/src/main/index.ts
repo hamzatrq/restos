@@ -30,7 +30,12 @@ import {
   type PanelDensity,
   resolvePanelDensity,
 } from "./panel-density";
-import { createCashPrinter, createKotPrinter, PUMP_INTERVAL_MS } from "./printing";
+import {
+  createCashPrinter,
+  createKotPrinter,
+  createReceiptPrinter,
+  PUMP_INTERVAL_MS,
+} from "./printing";
 import { createUplink } from "./sync";
 import { COUNTER_WINDOW_OPTIONS } from "./window-options";
 
@@ -701,16 +706,46 @@ app.whenReady().then(async () => {
     },
   });
   /**
+   * `C16` — `02-F15`'s receipt, on the SAME durable spooler and the SAME pump, for the reasons the
+   * cash printer above is: `03-F42` makes a DOCUMENT the unit and not the queue, and a second pump
+   * loop would spend `03-F4`'s three-attempt budget in half the window.
+   *
+   * Constructed here, once, unconditionally — the line above it exists for exactly this reason. A
+   * `DocumentSpec` nothing prints is this wave's named defect, and `packages/escpos` has shed it
+   * once already (K-7): before this call the `receipt` spec would have been a correct subsystem
+   * with no seam to the product, which is the thirteenth instance waiting to be written up.
+   *
+   * `cashier` is `02-F15`'s own field and it is READ AT PRINT TIME through the same `session()`
+   * the envelope's `actor_user_id` is stamped from — `02-F41`, attribution is whoever's PIN is in.
+   * A captured value would name whoever unlocked the till first for the rest of the day.
+   *
+   * It takes NO `append`, and that is a stated gap: `02-F16`'s `receipt.printed` is in the
+   * `01 §4` catalog and has no payload schema in `packages/domain`, so `01-F4` makes emitting it a
+   * runtime error. See `main/printing.ts`'s `RECEIPT_JOB_PREFIX`.
+   */
+  const receipts = createReceiptPrinter({
+    spooler,
+    store,
+    catalog: catalogResolver(store),
+    capability: kotCapability(),
+    pump: kot.pump,
+    cashier: () => session()?.display_name ?? null,
+  });
+  /**
    * `03-F4`'s retry SPACING, which the spooler deliberately does not own ("the BUDGET is
    * enforced here; the SPACING is not enforced anywhere yet" — `RETRY_WINDOW_MS`). Without this
    * interval a queued job sits queued forever: no bytes, no exhaustion, no band — a silent KOT
    * failure produced by an absent timer, which is the shape `03-F5` forbids.
    *
-   * `cash.reconcile()` runs AFTER the pump and only reads job state — it is how a failed slip
-   * gets its band, and without it S-7's documents would queue, fail and say nothing.
+   * `cash.reconcile()` and `receipts.reconcile()` run AFTER the pump and only read job state — it
+   * is how a failed slip or a failed receipt gets its band, and without them those documents would
+   * queue, fail and say nothing.
    */
   const pumping = setInterval(() => {
-    void kot.pump().then(() => cash.reconcile());
+    void kot.pump().then(() => {
+      cash.reconcile();
+      receipts.reconcile();
+    });
   }, PUMP_INTERVAL_MS);
   app.on("will-quit", () => clearInterval(pumping));
 
@@ -736,19 +771,21 @@ app.whenReady().then(async () => {
    * `27-F11g` is why it is here rather than on the pass screen: where paper is the only kitchen
    * channel there is no screen fallback, and the counter is the only human who can react.
    */
-  // S-7: BOTH printers' bands, on one channel. `27-F11d` renders the head and counts the tail, so
-  // a second channel would give the counter two bands competing for one region — and a cashier
-  // whose slip did not print needs the same surface as one whose KOT did not.
-  ipcMain.handle(CHANNELS.alarms, () => [...kot.alarms(), ...cash.alarms()]);
+  // S-7 + C16: ALL THREE printers' bands, on one channel. `27-F11d` renders the head and counts
+  // the tail, so a second channel would give the counter two bands competing for one region — and
+  // a cashier whose receipt did not print needs the same surface as one whose KOT did not.
+  ipcMain.handle(CHANNELS.alarms, () => [...kot.alarms(), ...cash.alarms(), ...receipts.alarms()]);
   ipcMain.handle(CHANNELS.acknowledgeAlarm, (_event, alarm_id: unknown) => {
     // Type-checked rather than trusted — the renderer is the untrusted end of this bridge
     // (`shared/ipc.ts`), and a non-string here would throw inside the handler on the one surface
     // whose job is to be dismissable.
     if (typeof alarm_id !== "string") return;
     kot.acknowledge(alarm_id);
-    // Ids are namespaced (`cash::`), so exactly one of these two owns any given band; calling
-    // both is how the channel stays one channel without the handler learning the namespace.
+    // Ids are namespaced (`cash::`, `receipt::`), so exactly one of these three owns any given
+    // band; calling all three is how the channel stays one channel without the handler learning
+    // the namespace.
     cash.acknowledge(alarm_id);
+    receipts.acknowledge(alarm_id);
     // `03-F5`: the alert repeats until acknowledged, so the screen has to be told it stopped.
     notifyChanged();
   });
@@ -843,6 +880,16 @@ app.whenReady().then(async () => {
     if (confirm.success && confirm.data.type === "day.closed") {
       const day_id = confirm.data.payload.day_id;
       if (typeof day_id === "string") cash.dayClosed(day_id);
+    }
+    // `C16` — THE CUSTOMER'S COPY, and it hangs off the same completed append for the same reason
+    // as the three above: `02-F15`'s receipt carries `01-F30`'s billed total and `01-F31`'s keyed
+    // tender sums, both projected from THIS event, so the payment has to be IN before the paper
+    // can be assembled — and `01-F17` says a sale is never blocked by a printer. `settled()` reads
+    // the fold and returns without printing unless the order is now tendered for in full, which is
+    // what makes a `02-F13` split print one receipt rather than one per tender.
+    if (confirm.success && confirm.data.type === "payment.recorded") {
+      const order_id = confirm.data.payload.order_id;
+      if (typeof order_id === "string") receipts.settled(order_id);
     }
     // NOTIFY FROM INSIDE THE HANDLER. This was `ipcMain.on(CHANNELS.append, notifyChanged)`,
     // which never fired once: `invoke` dispatches only to the `handle` table, and `.on` is the

@@ -62,6 +62,9 @@ export {
   type DocumentType,
   MIN_COLUMNS,
 } from "./min-columns.js";
+// `02-F15`/`02-F16` — the customer's copy. Its layout lives in `receipt-document.ts` beside the
+// two cash documents for the same reason: it carries money, which the `kot` TYPE may not.
+export type { ReceiptData, ReceiptLine, ReceiptTender } from "./receipt-document.js";
 export {
   type ProfileFinding,
   type ProfileValidation,

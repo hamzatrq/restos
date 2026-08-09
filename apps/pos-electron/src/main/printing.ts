@@ -14,12 +14,14 @@ import {
   MAX_TRANSMIT_ATTEMPTS,
   type PrinterCapability,
   RETRY_WINDOW_MS,
+  type ReceiptData,
   render,
   type ShiftCloseData,
   type Spooler,
   type SpoolerTransport,
 } from "@restos/escpos";
 import type { DeviceStore } from "@restos/sync-client";
+import { billedEffectiveFromJsonLines } from "@restos/sync-client";
 import type { Alarm } from "../shared/ipc";
 import type { CatalogResolver } from "./gateway";
 
@@ -109,6 +111,12 @@ export const PUMP_INTERVAL_MS = RETRY_WINDOW_MS / MAX_TRANSMIT_ATTEMPTS;
 /** One cell of the order projection's `json_lines`, as `gateway.ts` reads it too. */
 type LineCell = { item_id: string; qty: number };
 
+/**
+ * The same cell with `01-F53`'s captured price, which the KOT deliberately never reads (`03-F32`:
+ * "prices are simply not in the chit data model") and the receipt must.
+ */
+type BilledCell = LineCell & { unit_price_paisa: number };
+
 /** `03-F3`: "order number + table/channel in large type" — ONE field, filled in that order. */
 const tableOf = (table_ids_json: string, channel: string): string => {
   const ids = JSON.parse(table_ids_json) as string[];
@@ -116,23 +124,33 @@ const tableOf = (table_ids_json: string, channel: string): string => {
 };
 
 /**
- * S-7 — the namespace that tells a CASH job from a KOT job, and it is load-bearing rather than
- * tidy.
+ * S-7 — the namespace that tells a CASH job, and now a RECEIPT job, from a KOT job. It is
+ * load-bearing rather than tidy.
  *
- * The three document types share this device's ONE spooler (`03-F42` makes a document the unit,
- * not the queue), so `reconcile` sees all three states — and `01 §4` has **no print event for a
- * cash document**. There is no `slip.printed` and no `slip.print_failed`; emitting `kot.printed`
- * for a shift-close slip would write a KOT fact about an order id that is a shift id, permanently,
- * into a ledger `01-F1` forbids correcting in place. Commandment 2 forbids inventing the event, so
- * a cash job's outcome reaches the COUNTER (`03-F5`'s band) and nothing else — an owed gap, named
- * here rather than papered over with a plausible event type.
+ * All four document types share this device's ONE spooler (`03-F42` makes a document the unit, not
+ * the queue), so `reconcile` sees every state — and `01 §4` has **no emittable print event for any
+ * of them but the KOT**. There is no `slip.printed`; `receipt.printed` is in the catalog but
+ * carries no payload schema in `packages/domain`, so `01-F4` makes emitting it a runtime error.
+ * Emitting `kot.printed` for one of them would write a KOT fact about an id that is a shift id, a
+ * day id or a settled order's receipt, permanently, into a ledger `01-F1` forbids correcting in
+ * place. Commandment 2 forbids inventing the event, so those jobs' outcomes reach the COUNTER
+ * (`03-F5`'s band) and nothing else — an owed gap, named here rather than papered over.
+ *
+ * **The pair below is a DENY-LIST and every new document type must extend it.** A KOT job id is
+ * `<order_id>::<station>` and carries no marker of its own, so "is this a KOT" can only be asked
+ * as "is it none of the others" — which means a namespaced document added without touching the
+ * KOT's `reconcile` is misread as a KOT and appends `kot.printed` about a document that is not
+ * one. `C16` is the first time that trap was live: with only `isCashJob` in place, every printed
+ * receipt would have written a `kot.printed` for its order.
  *
  * A PREFIX rather than an in-memory set, because the spool is durable (`03-F4`): a relaunch
  * re-reads jobs it did not enqueue, and a set built at construction would classify every surviving
- * cash job as a KOT.
+ * job as a KOT.
  */
 const CASH_JOB_PREFIX = "cash::";
+const RECEIPT_JOB_PREFIX = "receipt::";
 const isCashJob = (job_id: string): boolean => job_id.startsWith(CASH_JOB_PREFIX);
+const isReceiptJob = (job_id: string): boolean => job_id.startsWith(RECEIPT_JOB_PREFIX);
 
 /**
  * **`03-F5`'s third consequence, and until August 2026 it was the one nothing produced.**
@@ -180,6 +198,7 @@ const PRINT_ACK = "audit.print_acknowledged";
  */
 const DOCUMENT_NOUNS = {
   kot: "KOT",
+  receipt: "Receipt",
   shift_close_slip: "Shift slip",
   day_summary: "Day summary",
 } as const;
@@ -363,15 +382,18 @@ export const createKotPrinter = ({
   const reconcile = (before: ReadonlyMap<string, string>): void => {
     for (const job of spooler.jobs()) {
       if (before.get(job.job_id) === job.state) continue;
-      // S-7 — THE ONE LINE THAT KEEPS THIS FILE'S TWO PRINTERS APART, and it is not tidiness.
+      // S-7 — THE ONE LINE THAT KEEPS THIS FILE'S PRINTERS APART, and it is not tidiness.
       //
-      // `03-F42` makes a DOCUMENT the unit, not the queue, so all three types share this device's
-      // one durable spooler and this loop sees all three. But `01 §4` has **no print event for a
-      // cash document** — no `slip.printed`, no `slip.print_failed` — and emitting `kot.printed`
-      // here would append a KOT fact whose `order_id` is a shift id, permanently, into a ledger
-      // `01-F1` forbids correcting in place. Commandment 2 forbids inventing the event. So the
-      // cash printer below owns its own reconciliation and its own band; this one owns the KOT's.
+      // `03-F42` makes a DOCUMENT the unit, not the queue, so all four types share this device's
+      // one durable spooler and this loop sees all four. But `01 §4` has **no emittable print
+      // event for any of them but the KOT**, and emitting `kot.printed` here would append a KOT
+      // fact whose `order_id` is a shift id or a receipt's, permanently, into a ledger `01-F1`
+      // forbids correcting in place. Commandment 2 forbids inventing the event. So the cash and
+      // receipt printers below own their own reconciliation and their own band; this one owns the
+      // KOT's. See `CASH_JOB_PREFIX` for why these two lines are a DENY-LIST that every new
+      // document type must extend — `C16` is the first time that trap was live.
       if (isCashJob(job.job_id)) continue;
+      if (isReceiptJob(job.job_id)) continue;
       if (job.state === "printed") {
         // `02-F31`'s precondition — T1 advances lines to `in_prep` off this event. The advance
         // itself needs a branch device registry that does not exist; this is the fact it needs.
@@ -698,6 +720,229 @@ export const createCashPrinter = ({
       // putting one in a field called `order_id` writes a permanent lie into a ledger that has no
       // edit path. `alarm_id` IS the spool job id, so which document was dismissed is still said.
       emit(PRINT_ACK, { alarm_id, printer_name });
+    },
+  };
+};
+
+// ── C16 — 02-F15's receipt, printed when the settlement completes ───────────────────────────────
+
+export type ReceiptPrinterDeps = {
+  /** The SAME durable spooler — `03-F42` makes a document the unit, not the queue. */
+  spooler: Spooler;
+  /** `01-F30`'s billed lines and `01-F31`'s keyed tender sums, both off the order projection. */
+  store: Pick<DeviceStore, "openOrders">;
+  /** `01-F54` — an unknown item degrades to its identifier rather than vanishing off the bill. */
+  catalog: CatalogResolver;
+  /** `03 §7` layer 3. `03-F49`'s floor for `receipt` is 32 and is checked inside `render()`. */
+  capability: PrinterCapability;
+  /** The KOT printer's `pump`, injected for `CashPrinterDeps.pump`'s reason: ONE driver, one budget. */
+  pump: () => Promise<void>;
+  /**
+   * `02-F15`'s "cashier", as a display name.
+   *
+   * A FUNCTION and not a value, because `01-F26`'s session moves: a till hands over mid-shift and
+   * a name captured at construction would attribute every receipt for the rest of the day to
+   * whoever unlocked it first. `02-F41` rules that attribution is whoever's PIN is in, and the
+   * settle this fires on is the act that read it.
+   *
+   * **DECLARED INTERPRETATION (`24 §3b`).** The named alternative is the envelope's
+   * `actor_user_id` on the `payment.recorded` that triggered the print, which is the ledger's own
+   * answer and is strictly better. It is not taken because the order projection carries no
+   * attribution — `OpenOrderRow` has fifteen keys and none of them is an actor — so reading it
+   * would need a fold change in a protected package. The two answers coincide for every print this
+   * seam can make: the session that authorised the append is the session this reads, one
+   * synchronous call later.
+   */
+  cashier: () => string | null;
+};
+
+export type ReceiptPrinter = {
+  /**
+   * A `payment.recorded` has landed. If the order is now settled, the customer's copy is queued.
+   *
+   * Synchronous and `void` for `01-F17`'s reason, exactly as `confirmed` and `shiftClosed` are:
+   * the settlement is already in the ledger when this runs, and a customer may not be held at the
+   * counter by a socket timeout. A device with no printer still takes money.
+   */
+  settled: (order_id: string) => void;
+  /** Raise `03-F5`'s band for any receipt job that has reached `failed` since the last look. */
+  reconcile: () => void;
+  alarms: () => readonly Alarm[];
+  acknowledge: (alarm_id: string) => void;
+};
+
+/** One tender member as the fold renders it into `pay_attempts_json` (payload minus its key). */
+type PayMember = { amount_paisa: number; method: string; purpose: string };
+
+/**
+ * `C16` — "**Print the receipt** · Settlement completes · **0 taps — automatic on settle**"
+ * (`plans/wave-1/role-task-inventories.md`), which is why this file gains a printer and the
+ * counter gains no control. `27-F4` makes the chrome immutable and a receipt nobody has to ask for
+ * is the only design that costs a cashier nothing at the moment she is handing over change.
+ *
+ * **What "settlement completes" MEANS here, stated because `01-F33` does not settle it for us.**
+ * `order.settlement_closed` is the cashier-emitted closing act and **nothing in this product emits
+ * it** — measured: the type has a schema in `packages/domain`, a fold arm in `merge.ts`, and zero
+ * production emitters, so `OpenOrderRow.settled` is `0` for every order this device has ever held.
+ * Waiting for it would mean no receipt ever prints. So the trigger is the observable fact `02-F15`
+ * describes: the order has been TENDERED FOR IN FULL — `pay_total >= billed_effective`, both off
+ * the fold's own keyed sums, with at least one agreed tender. When `01-F33`'s act gains an emitter
+ * this should move to it, and that is a better trigger rather than a different one.
+ */
+export const createReceiptPrinter = ({
+  spooler,
+  store,
+  catalog,
+  capability,
+  pump,
+  cashier,
+}: ReceiptPrinterDeps): ReceiptPrinter => {
+  const printer_name = capability.model_id;
+  const raised = new Map<string, Alarm>();
+  const seen = new Map<string, string>();
+
+  const raise = (id: string, ref: string, why: string): void => {
+    if (raised.has(id)) return;
+    raised.set(id, {
+      // `03-F5`'s sentence shape, with the DOCUMENT named: "Receipt 5f3a9c21 did not print — TH230"
+      // sends a cashier to the right piece of paper, where "KOT … did not print" would send her to
+      // the kitchen for a document the kitchen never sees.
+      message: `${DOCUMENT_NOUNS.receipt} ${ref.slice(0, 8)} did not print — ${printer_name}`,
+      subject: why,
+      id,
+    });
+  };
+
+  const settled = (order_id: string): void => {
+    const spec = DOCUMENT_SPECS.receipt;
+    // `03-F30` ships the specs as code, so this cannot fire. A quiet return rather than the KOT's
+    // construction-time throw, for `createCashPrinter`'s reason: a missing document spec must not
+    // stop the app from starting, and a sale completes in the ledger with or without paper.
+    if (spec === undefined) return;
+    const order = store.openOrders().find((row) => row.order_id === order_id);
+    if (order === undefined) return;
+
+    const total_paisa = billedEffectiveFromJsonLines(order.json_lines);
+    // `01-F31`'s keyed sum, computed by the fold: a disputed attempt contributes ZERO to it and is
+    // rendered, never picked. The receipt must agree with that or it would claim money the ledger
+    // does not count. `pay_total` also excludes `repays_receivable` (`DEC-MONEY-007`), so a khata
+    // tab repaid later can never read as settling the original order twice.
+    if (order.pay_total < total_paisa) return;
+
+    // `02-F15`'s "payment method(s)", aggregated over `PAYMENT_METHODS`' DECLARED order (`27-F4`).
+    // Never over the attempt-id key order: `pay_attempts_json` is keyed by `settlement_attempt_id`
+    // and iterating it would let an id sort decide what a customer reads, which is the shape of
+    // the `01-F34` break law 1 exists to prevent even where the values themselves are unchanged.
+    const byMethod = new Map<PaymentMethod, number[]>();
+    const attempts = JSON.parse(order.pay_attempts_json) as Record<string, PayMember[]>;
+    for (const members of Object.values(attempts)) {
+      // A DIVERGENT attempt (two devices, one key, different payloads) is `01-F31`'s contested
+      // head: it contributes zero to `pay_total`, so printing one of its members would put a
+      // figure on the customer's copy that the order's own total does not contain.
+      if (members.length !== 1) continue;
+      const member = members[0] as PayMember;
+      if (member.purpose !== "settles_order") continue;
+      const method = member.method as PaymentMethod;
+      if (!PAYMENT_METHODS.includes(method)) continue;
+      const amounts = byMethod.get(method) ?? [];
+      amounts.push(member.amount_paisa);
+      byMethod.set(method, amounts);
+    }
+    const tenders = PAYMENT_METHODS.filter((method) => byMethod.has(method)).map((method) => ({
+      method,
+      // BigInt-exact (`DEC-MONEY-005`, standing law 3): a running double `+` is non-associative
+      // near 2^53, so a plain accumulator would let delivery order decide a printed money figure.
+      amount_paisa: totalOf(byMethod.get(method) ?? []),
+    }));
+    // A settled order always has one. Guarding rather than asserting keeps `01-F17` intact: a
+    // projection this device cannot read must not stop the next sale.
+    if (tenders.length === 0) return;
+
+    // ONE receipt per order, for ever — the id is deterministic and the spool is durable
+    // (`03-F4`), so a relaunch, a second `payment.recorded` on a split settlement, or a
+    // double-tapped TAKE CASH all resolve to the same job. `02-F16` makes a second copy a named
+    // fraud vector, which is why the only way to a second one is `03-F37`'s banded reprint act.
+    const job_id = `${RECEIPT_JOB_PREFIX}${order_id}`;
+    if (spooler.job(job_id) !== undefined) return;
+
+    const lines = Object.values(JSON.parse(order.json_lines) as Record<string, BilledCell>).map(
+      (cell) => ({
+        quantity: cell.qty,
+        // `01-F54` — an unsynced or renamed item degrades to its identifier. The money came from the
+        // EVENT (`01-F53`), so a stale catalog costs a word on the paper and never a rupee.
+        name: catalog(cell.item_id)?.name ?? cell.item_id,
+        unit_price_paisa: cell.unit_price_paisa,
+      }),
+    );
+
+    const result = render(
+      spec,
+      // No owner profile: `02-F15`'s configurable header/footer is doc 14's editing surface and
+      // does not exist yet, so every declared slot takes its shipped default (an empty note).
+      {},
+      {
+        receipt_no: order_id.slice(0, 8),
+        channel: order.channel as ReceiptData["channel"],
+        // `27-F62` — the DELIVERED branch stamp (`01-F43`), never this device's clock. The confirm
+        // anchor is the only one an order carries here; an order settled without ever being sent
+        // to the kitchen has none, and the document says so rather than inventing one.
+        branch_created_at: order.confirmed_at,
+        cashier: cashier(),
+        lines,
+        total_paisa,
+        tenders,
+        // `03-F7`/`03-F37`: a reprint is a deliberate, logged act and a settlement is not one.
+        // `C17` is owed with the surface that offers it.
+        reprint: false,
+      } satisfies ReceiptData,
+      capability,
+    );
+    if (!result.ok) {
+      const measured =
+        result.required_columns === undefined || result.available_columns === undefined
+          ? ""
+          : ` — needs ${result.required_columns} columns, this printer has ${result.available_columns}`;
+      // `03-F34`: NOTHING is enqueued, and no ledger record either — `01 §4` carries no
+      // `receipt.print_failed` (see `RECEIPT_JOB_PREFIX`).
+      raise(job_id, order_id, `refused: ${result.reason}${measured}`);
+      return;
+    }
+    spooler.enqueue({ job_id, document: result.bytes, printer_name, order_ref: order_id });
+    // `queueMicrotask` for `01-F17`'s reason, not style: `await transport.send(...)` invokes `send`
+    // synchronously before it suspends, so a direct call would reach the socket on the stack of the
+    // IPC handler that has not yet answered the cashier's settlement.
+    queueMicrotask(() => void pump());
+  };
+
+  return {
+    settled,
+    reconcile: () => {
+      for (const job of spooler.jobs()) {
+        if (!isReceiptJob(job.job_id)) continue;
+        if (seen.get(job.job_id) === job.state) continue;
+        seen.set(job.job_id, job.state);
+        // `03-F41`: `stalled` is deliberately absent. The printer TOOK the bytes and is holding
+        // them until the roll is replaced; a band here sends a cashier to reprint a document that
+        // is about to appear, and on a receipt that is `02-F16`'s fraud vector by accident.
+        if (job.state !== "failed") continue;
+        // `03-F12` puts receipts under "the same spooler and durability rules" as the KOT, and
+        // `03-F5`'s argument — a silent failure is forbidden — is what the band delivers. Reading
+        // `03-F5` as KOT-only would leave a cashier believing a customer has a receipt they do not
+        // have, which is the same harm one document over. Same declared reading as S-7's slips.
+        raise(job.job_id, job.order_ref, `printing failed after ${job.attempts} attempts`);
+      }
+    },
+    alarms: () => [...raised.values()],
+    acknowledge: (alarm_id) => {
+      // Only for a band this printer holds — the IPC handler calls every printer's `acknowledge`
+      // for one tap, and an ack written twice would be two permanent records of one act (`01-F1`).
+      //
+      // It appends NOTHING. `audit.print_acknowledged` is the KOT's and the cash printer's because
+      // each was handed an `append`; this printer is deliberately handed none, since the only
+      // ledger fact it could write about a receipt is `02-F16`'s `receipt.printed` and that has no
+      // payload schema. The ack for a receipt band is therefore UNRECORDED — a named gap with the
+      // same owner as the event itself, not an omission.
+      raised.delete(alarm_id);
     },
   };
 };

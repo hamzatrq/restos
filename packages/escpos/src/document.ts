@@ -17,8 +17,10 @@
  */
 
 import { CASH_BLOCK_RENDERERS, CASH_DOCUMENT_SPECS } from "./cash-documents.js";
+import { clockOf } from "./document-parts.js";
 import type { EncoderPart } from "./encoder.js";
 import { type DocumentType, MIN_COLUMNS } from "./min-columns.js";
+import { RECEIPT_BLOCK_RENDERER_TABLE, RECEIPT_DOCUMENT_SPECS } from "./receipt-document.js";
 
 /**
  * `03-F33`, verbatim and in the FR's own order. The order is data: "owner content is legal only
@@ -186,27 +188,11 @@ export type KotData = {
 /** `03-F31`: the document type IS the data contract, so the cast is at the type's own boundary. */
 const kotOf = (data: unknown): KotData => data as KotData;
 
-/**
- * `27-F62`'s stamp as a wall clock, and the reason it is integer arithmetic rather than `Date`.
- *
- * `01-F46` anchors the business to Asia/Karachi ("the timezone anchor is not configurable"), which
- * has been a fixed UTC+5 with no daylight saving since 2009 — so the offset is a constant and not a
- * zone lookup. `Date`, `Intl` and `toLocale*` all read the HOST's zone and locale, and `03-F30`
- * makes byte-identity across an Electron POS and an RN handheld a law: a chit formatted through the
- * reading device's zone is two different tickets for one order.
- *
- * `03-F3` asks for a "timestamp" and states no format; `27-F55` says the chit must carry LESS, so
- * this is the hour and minute the line was appended and no date. DECLARED INTERPRETATION (`24 §3b`)
- * — the named alternative is a date-and-time stamp, rejected because a KOT is read minutes after it
- * is cut and the date costs a channel-3 group for a fact nobody on the line uses.
- */
-const KARACHI_UTC_OFFSET_MS = 5 * 60 * 60 * 1000;
-
-const clockOf = (branch_created_at: number): string => {
-  const minute_of_day = Math.floor((branch_created_at + KARACHI_UTC_OFFSET_MS) / 60_000) % 1440;
-  const hours = Math.floor(minute_of_day / 60);
-  return `${String(hours).padStart(2, "0")}:${String(minute_of_day % 60).padStart(2, "0")}`;
-};
+// `27-F62`'s stamp as a wall clock (`clockOf`) moved to `document-parts.ts` when the receipt became
+// its second consumer — ONE Karachi conversion, for the reason `simulate.ts` states about the
+// byte→page walk: two of them diverge, and then a chit and a receipt for one order disagree about
+// what time it was. The KOT's own reading of it — hour and minute, no date, `27-F55` — is recorded
+// there beside the receipt's opposite reading of `02-F15`.
 
 /**
  * `27-F59`: "Modifiers are indented under their item". With `03-F36` banning absolute dot
@@ -396,17 +382,24 @@ const KOT_SPEC = {
  * `03-F30`: "one spec per document type". Keyed by type, so uniqueness is the map's.
  *
  * `03-F31` names eight types and only the ones whose spec is written appear here — an entry is
- * added when its spec and its data contract are, not before. Three are written: `kot` (K-5) and
- * S-7's two cash documents, whose layouts live in `cash-documents.ts` because they are the
- * INVERSE of this file's `03-F32` invariant and keeping them apart is what makes that legible.
+ * added when its spec and its data contract are, not before. FOUR are written: `kot` (K-5), S-7's
+ * two cash documents, and `receipt` (`02-F15`/`02-F16`) — the last three live in their own files
+ * because they carry money, which is the INVERSE of this file's `03-F32` invariant, and keeping
+ * them apart is what makes that legible.
+ *
+ * **Four of the eight are still unwritten and that is a scope statement, not an oversight:**
+ * `bill` (a PRE-payment request — `03-F31` names the type and no FR in doc 02 or doc 03 states
+ * what it carries, so writing one would be inventing content), `refund_slip` (`02-F36`, owed with
+ * the refund flow), `rider_settlement_slip` (`09-F19`, Wave 2) and `test_page` (`03-F10`).
  */
 export const DOCUMENT_SPECS: {
   readonly kot?: typeof KOT_SPEC;
+  readonly receipt?: (typeof RECEIPT_DOCUMENT_SPECS)["receipt"];
   readonly shift_close_slip?: (typeof CASH_DOCUMENT_SPECS)["shift_close_slip"];
   readonly day_summary?: (typeof CASH_DOCUMENT_SPECS)["day_summary"];
-} = { kot: KOT_SPEC, ...CASH_DOCUMENT_SPECS };
+} = { kot: KOT_SPEC, ...RECEIPT_DOCUMENT_SPECS, ...CASH_DOCUMENT_SPECS };
 
 /** The code that renders each shipped spec's blocks, keyed the way the specs are. */
 export const BLOCK_RENDERERS: Readonly<
   Partial<Record<DocumentType, Readonly<Record<string, BlockRenderer>>>>
-> = { kot: KOT_BLOCK_RENDERERS, ...CASH_BLOCK_RENDERERS };
+> = { kot: KOT_BLOCK_RENDERERS, ...RECEIPT_BLOCK_RENDERER_TABLE, ...CASH_BLOCK_RENDERERS };
