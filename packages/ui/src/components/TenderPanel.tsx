@@ -1,9 +1,11 @@
 import { PAYMENT_METHODS, type Paisa, type PaymentMethod, paisa, subPaisa } from "@restos/domain";
 import { useState } from "react";
+import { type SurfaceMode, useSurfaceMode } from "../surface-mode";
 import { useColor } from "../theme";
 import { space, targetFor, typography } from "../tokens/index";
 import { MoneyValue } from "./MoneyValue";
 import { acceptKeystroke, NumericKeypad } from "./NumericKeypad";
+import { Readout } from "./Readout";
 
 /**
  * Settling an order (`02-F12`, `02-F13`).
@@ -45,11 +47,59 @@ export type TenderPanelProps = {
   onTender: (tender: { amountP: Paisa; method: PaymentMethod }) => void;
 };
 
+/**
+ * **The money column's width, per `SurfaceMode` — the only thing that reflows here.**
+ *
+ * The keypad does NOT reflow and must not: `27-F8`'s 126 dp is a measured ergonomic floor, and
+ * `27-F68` (b) forbids trimming the millimetres to make a layout fit. It is also pointless in
+ * the other direction — `27-F8` records that *"there is no significant accuracy gain above"*
+ * 9.6 mm, so a bigger key on a bigger panel buys nothing an operator can feel. The pad is the
+ * fixed thing; the reading column is what has an opinion about room.
+ *
+ * `compact`'s **480** is not a design choice, it is a MEASUREMENT and it is a floor: the five
+ * `02-F12` methods at their `27-F8` counter targets come to `76+76+76+76+120 + 4 gaps = 456`
+ * natural, and at exactly 456 the row still wrapped on sub-pixel border rounding. A wrapped
+ * method row re-ranks the highest-consequence entry on the counter, which `27-F4` forbids in as
+ * many words. Every mode is at or above it, so the row can never wrap in any of them.
+ */
+const MONEY_COLUMN_DP: Record<SurfaceMode, number> = {
+  compact: 480,
+  counter: 560,
+  wide: 760,
+};
+
+/**
+ * **The signature element, and the one place this surface spends the top of the type ladder.**
+ *
+ * `27-F25` makes the payload *"the largest element in their region"*, and `27-F11c` makes a
+ * physically larger panel a larger region — so holding one size across every panel means the
+ * figure stops being the largest thing in its region exactly when there is most room for it to
+ * be. On `wide` the change figure takes `text-numeric-display`.
+ *
+ * `DUE` deliberately does not step with it. Two figures at the same size is two headlines and no
+ * hierarchy, and of the pair it is CHANGE the cashier reads aloud to a customer while counting
+ * notes into their hand (`27-F24` — she is never asked to derive it).
+ *
+ * **`counter` takes `display` too, and the reason is a RANKING measured off a screenshot rather
+ * than a size preference.** With the change figure at `hero` (48 dp) the loudest thing on the Pay
+ * surface after `03-F5`'s red band was the blue `TAKE CASH` fill — ~510 × 126 dp of saturated
+ * `bgColor-interactive` against a 48 dp black numeral. `plans/wave-1/design-direction.md`'s thesis
+ * is that **the money is the loudest thing on the screen**, and it was third. The fix is to raise
+ * the payload, not to strip an accent `27-F14` allocates by name; see the note on the button.
+ * `compact` keeps `hero` because 64 dp does not fit a 223 mm tablet's column beside the pad.
+ */
+const CHANGE_SIZE: Record<SurfaceMode, "display" | "hero"> = {
+  compact: "hero",
+  counter: "display",
+  wide: "display",
+};
+
 export const TenderPanel = ({ dueP, takenP = paisa(0), onTender }: TenderPanelProps) => {
   const color = useColor();
   const label = typography["text-label"];
   const [entry, setEntry] = useState("");
   const [method, setMethod] = useState<PaymentMethod>("cash");
+  const mode = useSurfaceMode();
 
   // `01-F17` — the entry is RUPEES because that is what a cashier types (`27-F23`: no decimals
   // on operational screens, and no sub-rupee unit circulates in Pakistan). The paisa conversion
@@ -95,7 +145,7 @@ export const TenderPanel = ({ dueP, takenP = paisa(0), onTender }: TenderPanelPr
       style={{
         display: "flex",
         gap: space["space-5"],
-        padding: space["space-4"],
+        padding: space["space-5"],
         background: color["bgColor-surface-raised"],
         border: `1px solid ${color["borderColor-default"]}`,
         borderRadius: space["space-2"],
@@ -103,6 +153,12 @@ export const TenderPanel = ({ dueP, takenP = paisa(0), onTender }: TenderPanelPr
         // The panel is as wide as the two columns need and no wider. Left to fill the work
         // area it stretched `TAKE CASH` to ~850 px and threw the `DUE` figure to the far side
         // of its own label — `27-F25` wants the number big, not distant from what it names.
+        //
+        // **The room left over is the HOST's to place, and it does place it** (`Counter.tsx`
+        // centres this on both axes). A panel that anchors itself is how the founder's screen
+        // came to sit in the top-left of a large window with the bottom third empty; a panel
+        // that stretches to fill is how `TAKE CASH` became 850 px wide. Neither is the answer —
+        // the panel is capped and the surface centres it.
         width: "fit-content",
       }}
     >
@@ -116,32 +172,26 @@ export const TenderPanel = ({ dueP, takenP = paisa(0), onTender }: TenderPanelPr
         style={{
           display: "flex",
           flexDirection: "column",
-          gap: space["space-4"],
+          gap: space["space-5"],
           /**
-           * **456 px is the MEASURED natural width of the method row, and that is why it is
-           * this number.** The five `02-F12` methods at their `27-F8` counter targets come to
-           * `76+76+76+76+120 + 4 gaps` — `AGGREGATOR` is wider than a bare target because its
-           * label is. At 420 the row wrapped `AGGREGATOR` onto a second line, which `27-F4`
-           * forbids in as many words for exactly this control: *"a fixed row of methods, every
-           * one always present and in the same place"*. A row that re-wraps on a different
-           * panel re-ranks the highest-consequence entry on the counter.
-           *
-           * Fixed rather than fluid for the same reason: the pad must not move between orders.
-           *
-           * **480 and not 456**, which is the measured total: at exactly the natural width the
-           * row still wrapped, because sub-pixel rounding on the five borders is enough to
-           * exceed it. A wrap guard with no slack is not a guard. `PAYMENT_METHODS` is a closed
-           * set (`02-F12`), so these labels cannot grow without a spec change reaching here.
+           * Fixed per mode, never fluid: the pad must not move between orders, and a column
+           * that tracked the surface continuously would put the method row and `TAKE CASH` in a
+           * slightly different place on every panel. `MONEY_COLUMN_DP` carries the derivation
+           * and the 480 dp floor that stops the `02-F12` method row wrapping (`27-F4`).
            */
-          width: 480,
+          width: MONEY_COLUMN_DP[mode],
         }}
       >
-        <header
-          style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}
-        >
-          <span style={{ fontFamily: label.fontFamily, fontSize: label.fontSize }}>DUE</span>
+        {/*
+          `27-F25`/`27-F57` — the caption sits directly ABOVE its own figure, not at the far end
+          of a `space-between` row. This was a row, and on the reference panel it put the word
+          `DUE` **70 mm** from the number it names; `27-F57` measures that pairing step as where
+          comprehension collapses (decode ~71%, execute ~35%). `Readout` is the fix and it is the
+          same shape on every surface in this product.
+        */}
+        <Readout caption="DUE">
           <MoneyValue paisa={remainingP} size="primary" />
-        </header>
+        </Readout>
 
         {/*
         27-F4 — a fixed row of methods, every one always present and in the same place. A method
@@ -189,17 +239,26 @@ export const TenderPanel = ({ dueP, takenP = paisa(0), onTender }: TenderPanelPr
         It stays with the money and the act rather than under the pad: this is the number the
         cashier says out loud to the customer, and `27-F24` exists because 9.5% of the operator
         population can do the arithmetic that would otherwise be needed to check it.
+
+        **⚠ THE WORD WAS PRINTED TWICE AND A FOUNDER READ IT OFF THE GLASS: `CHANGE` /
+        `CHANGE Rs 0`, overlapping, in a `space-between` row.** This label said `CHANGE` and the
+        call below ALSO passed `direction: "change"`, which `MoneyValue` renders as a prefix —
+        two mechanisms discharging one `27-F12` obligation, each correct alone. It had been
+        filed once as "cosmetic, pre-existing" and it is neither: two words for one fact is the
+        `02-F45` shape ("a second source for one fact"), and duplicated text is what a
+        plausibly-non-reading operator has the least ability to parse past (`21 §5`).
+
+        **The CAPTION owns the word here, and that is forced rather than chosen.** `REMAINING` is
+        not a member of `MoneyValue`'s `direction` union (`refund | short | over | change`), so
+        the other resolution would leave one arm of one control taking its word from the prefix
+        and the other from a label — the asymmetry that produced the duplication in the first
+        place. `MoneyValue.direction` keeps its job everywhere it is the ONLY word:
+        `CashSurfaces.tsx`'s `Variance` renders `OVER`/`SHORT` with no caption at all, and
+        `me-tab.dom.test.tsx` asserts it.
       */}
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-          <span style={{ fontFamily: label.fontFamily, fontSize: label.fontSize }}>
-            {coversBill ? "CHANGE" : "REMAINING"}
-          </span>
-          <MoneyValue
-            paisa={coversBill ? changeP : shortP}
-            size="hero"
-            {...(coversBill ? { direction: "change" as const } : {})}
-          />
-        </div>
+        <Readout caption={coversBill ? "CHANGE" : "REMAINING"}>
+          <MoneyValue paisa={coversBill ? changeP : shortP} size={CHANGE_SIZE[mode]} />
+        </Readout>
 
         <button
           type="button"
@@ -210,6 +269,34 @@ export const TenderPanel = ({ dueP, takenP = paisa(0), onTender }: TenderPanelPr
             onTender({ amountP: coversBill ? remainingP : enteredP, method });
             setEntry("");
           }}
+          /**
+           * **THE BLUE STAYS, and this is the deliberate decision the design direction asked for
+           * rather than an oversight.**
+           *
+           * `plans/wave-1/design-direction.md` raises it as an open question: *"the primary action
+           * currently ships as a large saturated blue fill. `27-F16` reserves colour for the
+           * abnormal, and a permanent blue on the resting happy path may already violate it."*
+           *
+           * **Read against the FRs, the premise does not hold.** `27-F16` is a rule about MONEY —
+           * *"money is never coloured by default … colouring the commonest number on screen spends
+           * the whole preattentive channel on the base case"* — and this is a control, not a
+           * number. What governs a control is `27-F14`, whose table has four slots and allocates
+           * the fourth **by name**: *"blue accent — interactive / mandatory action — any control
+           * the operator may press."* It is the one slot in the budget that is not a status,
+           * created precisely so pressability can be marked without blunting amber or red.
+           *
+           * The product already spends it far more narrowly than that allocation permits: the
+           * keypad's twelve keys, the five method buttons and every `Tile` on the counter are all
+           * controls the operator may press and none of them is blue. Exactly one control per
+           * surface carries it, which is what makes `27-F5`'s *"persistent, visible, labelled
+           * target"* legible at a glance on a screen where a keypad key is already large.
+           *
+           * **The real observation behind the question was right, and it is fixed elsewhere.** The
+           * blue did out-rank the money. `27-F18` puts colour THIRD, after position and number, so
+           * the answer is to raise the payload — `CHANGE_SIZE` now takes `text-numeric-display` on
+           * the counter as well as on `wide` — rather than to withdraw an allocated accent and
+           * leave the primary act marked by size alone.
+           */
           style={{
             minHeight: targetFor("keypad"),
             fontFamily: label.fontFamily,

@@ -333,8 +333,27 @@ describe("the guard suite actually covers the package", () => {
         "components/NumericKeypad.tsx",
         "components/OrderList.stories.tsx",
         "components/OrderList.tsx",
+        /**
+         * ADDED with the responsive round (August 2026), and the acknowledgement this pin exists
+         * to force is worth writing down because **the guards caught this component twice on its
+         * first run**:
+         *
+         * - `touchCheck` flagged `height: 140/160/180` — a literal in the 40–200 band on a
+         *   pressable element. It was right, and the fix was better than the code it replaced:
+         *   the card is content-sized now with `targetFor("counter")` as its floor.
+         * - `useValidAriaRole` (Biome, not this file) flagged a prop originally named `role`,
+         *   which shadows the ARIA attribute at every literal call site.
+         *
+         * `PersonTile` is `01-F61`'s identification target and `Readout` is the caption-over-
+         * payload idiom every money surface now uses, so both are squarely inside `27-F8`'s
+         * posture rules and `27-F25`'s ladder.
+         */
+        "components/PersonTile.stories.tsx",
+        "components/PersonTile.tsx",
         "components/QuantityItemLine.stories.tsx",
         "components/QuantityItemLine.tsx",
+        "components/Readout.stories.tsx",
+        "components/Readout.tsx",
         "components/StatusStrip.stories.tsx",
         "components/StatusStrip.tsx",
         // ADDED with the payment surface (02-F12/F13). It is the highest-consequence entry
@@ -350,6 +369,16 @@ describe("the guard suite actually covers the package", () => {
         "components/Tile.stories.tsx",
         "components/Tile.tsx",
         "index.ts",
+        /**
+         * ADDED with the responsive round. Not a component either, and scanned for the same
+         * reason `color-science.ts` is: it is source in `packages/ui/src`. It is also the file
+         * that decides which layout mode every surface in the product is in (`27-F11c`), so the
+         * "never a raw value" rule bearing on it is not academic — the two millimetre boundaries
+         * it declares are the closest thing this package has to a magic number, and they are
+         * named, derived from `27 §1a`'s hardware table, and asserted in
+         * `responsive.dom.test.tsx`.
+         */
+        "surface-mode.tsx",
         // NOT a component, and scanned on purpose: `color-science.ts` is source in
         // `packages/ui/src` like any other, so TOKENS.md's "never a raw value" rule applies to
         // it too. It was missing from the first draft of this list — a hand-typed inventory,

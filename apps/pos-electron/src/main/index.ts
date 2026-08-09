@@ -798,9 +798,25 @@ app.whenReady().then(async () => {
    * The registry's order is passed through untouched (`27-F4`).
    */
   ipcMain.handle(CHANNELS.staff, () =>
-    store.staff
-      .list()
-      .map((m) => ({ user_id: m.user_id, display_name: m.display_name ?? m.user_id })),
+    store.staff.list().map((m) => ({
+      user_id: m.user_id,
+      display_name: m.display_name ?? m.user_id,
+      /**
+       * `01-F26`'s per-(user, location) assignment, projected for the identification grid.
+       *
+       * **This branch's assignment, not the first one in the list.** A user may hold different
+       * roles at different branches and this till is one branch (`DEV_IDENTITY.branch_id`, and
+       * the gateway's own device identity in a real deployment), so taking `[0]` would show a
+       * cashier here the manager role she holds somewhere else. `main/authorize.ts` already
+       * matches on `branch_id` for exactly this reason when it answers Commandment 8; this is the
+       * same match, and the two must not diverge.
+       *
+       * `null` where she has no assignment at THIS branch — `01-F54` degrades to what is known
+       * rather than guessing, and a guessed role is a false claim about a person's authority.
+       * It authorizes nothing either way: see `RosterMember`.
+       */
+      role: m.assignments.find((a) => a.branch_id === DEV_IDENTITY.branch_id)?.role ?? null,
+    })),
   );
   /**
    * `C1`/`01-F28` — the one channel that is not a gateway method, because it does not touch the

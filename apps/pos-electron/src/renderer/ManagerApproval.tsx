@@ -1,6 +1,6 @@
-import { space, Tile, typography, useColor } from "@restos/ui";
+import { PersonTile, space, Tile, typography, useColor } from "@restos/ui";
 import { useState } from "react";
-import type { EscalationRefusal, Session } from "../shared/ipc";
+import type { EscalationRefusal, RosterMember, Session } from "../shared/ipc";
 
 /**
  * `02-F20`'s **local manager PIN on the POS** — the surface that outcome never had.
@@ -130,19 +130,42 @@ const MARKS: React.CSSProperties = {
   margin: 0,
 };
 
-/** Step one, and it is a column so the roster and its way out share one vertical rhythm. */
+/**
+ * Step one, and it is a column so the roster and its way out share one vertical rhythm.
+ *
+ * **Centred on both axes, like step two and like the unlock door.** It was top-left anchored and
+ * the layout gate's composition check found it on all five panels — 138 dp of content in a 619 dp
+ * work area with **471 dp of slack below it**, and 809 dp on the 24″ panel. Every other check
+ * passed it, which is the whole reason that check exists: an approval pad in the top-left corner
+ * of an empty surface fits perfectly.
+ *
+ * It matters more here than on a quiet tab. This surface appears **over a cashier's work**, once,
+ * with a manager standing at the till and a customer waiting (`05-F19`'s over-threshold paid-out
+ * is the live case). A centred pad is the one arrangement where the thing that just interrupted
+ * you is where your eye already is.
+ */
 const STEP: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: space["space-4"],
+  alignItems: "center",
+  justifyContent: "center",
+  gap: space["space-6"],
+  height: "100%",
+  minHeight: 0,
 };
 
-/** A wrapping row of approver tiles, bounded so a large roster pages down rather than sideways. */
+/**
+ * A wrapping row of approver cards.
+ *
+ * The 720 dp cap is gone for the reason `App.tsx`'s roster row records: it was chosen for 76 dp
+ * tiles and would now force a `PersonTile` row to wrap at three cards on a panel with room for
+ * four — the responsive defect this round exists to remove, surviving in a constant.
+ */
 const ROW: React.CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
-  gap: space["space-2"],
-  maxWidth: 720,
+  justifyContent: "center",
+  gap: space["space-5"],
 };
 
 /**
@@ -169,7 +192,7 @@ export type ManagerApprovalProps = {
    */
   satisfiedBy: readonly string[];
   /** `01-F61`'s roster — the same list the unlock grid is drawn from, in main's order (`27-F4`). */
-  roster: readonly Session[];
+  roster: readonly RosterMember[];
   /** `02-F38` — whose request this is. Their tile is not drawn. */
   requesterId: string;
   /** The last server answer, or `null` before one. */
@@ -206,12 +229,23 @@ export const ManagerApproval = ({
           says who can approve, and doc 05 will add the other route without changing the line.
         */}
         <p style={PROMPT}>Manager approval needed — {satisfiedBy.join(" or ")}</p>
+        {/*
+          `PersonTile`, the SAME component the unlock door draws its roster with, and that is a
+          `27-F4` argument rather than a tidiness one: this is `01-F61`'s identification step
+          performed a second time — identify, then PIN — and two surfaces on one device that draw
+          the same act at two different sizes teach two different habits. It also carries the
+          `01-F26` role, which matters more here than at the door: `02-F20` asks for a credential
+          that HOLDS the permission, so "which of these people is a manager" is the question the
+          operator is actually answering.
+        */}
         <div style={ROW}>
           {approvers.map((member) => (
-            <Tile
+            <PersonTile
               key={member.user_id}
-              posture="counter"
-              label={member.display_name}
+              name={member.display_name}
+              {...(member.role === null || member.role === undefined
+                ? {}
+                : { staffRole: member.role })}
               onPress={() => setChosen(member)}
             />
           ))}

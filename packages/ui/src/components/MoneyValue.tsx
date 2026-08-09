@@ -35,7 +35,15 @@ export type MoneyValueProps = {
    * nothing to a non-reader. The word is also what a cashier repeats back to a customer.
    */
   direction?: "refund" | "short" | "over" | "change";
-  size?: "hero" | "primary" | "body";
+  /**
+   * `display` is one step above `hero` and is spent on ROOM, never on distance: `27-F25` makes
+   * the payload *"the largest element in their region"*, and `27-F11c` makes a physically wider
+   * panel a larger region — so a figure pinned at one size stops being the largest thing in it
+   * the moment the surface grows. `useSurfaceMode`'s `wide` is the only caller, and 48 dp
+   * already clears `27-F27`'s 20–22 arcmin at arm's length, so this buys hierarchy and not
+   * legibility. Said plainly because the two are easy to conflate and only one is measured.
+   */
+  size?: "display" | "hero" | "primary" | "body";
   /**
    * 27-F16 — money is NEVER coloured by default. Colour on a number means *this number is
    * abnormal*, and colouring the commonest number on screen spends the whole preattentive
@@ -44,7 +52,8 @@ export type MoneyValueProps = {
   abnormal?: boolean;
 };
 
-const SIZES: Record<"hero" | "primary" | "body", TypeName> = {
+const SIZES: Record<"display" | "hero" | "primary" | "body", TypeName> = {
+  display: "text-numeric-display",
   hero: "text-numeric-hero",
   primary: "text-numeric-primary",
   body: "text-body",

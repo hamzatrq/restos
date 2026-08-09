@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { WorkSurface } from "../surface-mode";
 import { inverse, ThemeProvider, useColor, usePolarity } from "../theme";
 import { space } from "../tokens/index";
 import type { Alarm } from "./AlarmBand";
@@ -193,8 +194,16 @@ const Shell = ({
       <TabRail tabs={tabs} activeId={activeTabId} onSelect={onSelectTab} />
 
       {/* The work surface. The shell never scrolls it — 27-F2 pages instead — so a child that
-        overflows is a layout bug to see, not to hide behind a scrollbar. */}
-      <main style={{ flex: 1, padding: space["space-4"], overflow: "hidden" }}>{children}</main>
+        overflows is a layout bug to see, not to hide behind a scrollbar.
+
+        `WorkSurface` measures it ONCE and tells every surface inside what size of glass it is
+        on (`27-F11c`). It goes here rather than in each tab for the reason `PanelRoot` is at
+        the app root: two surfaces that measure separately can disagree about the panel they are
+        on, invisibly. It measures the box AFTER the strip, the rail and `03-F5`'s band have
+        taken their share, which is the surface a layout actually has. */}
+      <main style={{ flex: 1, minHeight: 0, padding: space["space-4"], overflow: "hidden" }}>
+        <WorkSurface>{children}</WorkSurface>
+      </main>
     </div>
   );
 };

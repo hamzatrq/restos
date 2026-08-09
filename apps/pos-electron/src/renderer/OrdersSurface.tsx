@@ -88,12 +88,53 @@ const toRow = (o: OpenOrder): OrderRow => ({
 const byOldestConfirmFirst = (a: OpenOrder, b: OpenOrder): number =>
   (a.confirmed_at ?? Number.POSITIVE_INFINITY) - (b.confirmed_at ?? Number.POSITIVE_INFINITY);
 
+/**
+ * A section name. `27-F25` puts the payload at the top of the ladder and a section name is
+ * scaffolding — this was `fgColor-default` at the same weight as the order references beneath it,
+ * which is two headlines and no hierarchy. It is muted at the call site now.
+ */
 const HEADING: React.CSSProperties = {
   fontFamily: typography["text-label"].fontFamily,
   fontSize: typography["text-label"].fontSize,
   fontWeight: 600,
   letterSpacing: typography["text-label"].letterSpacing,
   margin: 0,
+};
+
+/**
+ * **A TRAY — a bounded, sunken region each list lives in, and it is the answer to a real defect
+ * rather than decoration.**
+ *
+ * Measured by the layout gate's composition check on all five panels: this surface reserved a
+ * third of its height for the inbox and, with nothing in the inbox, drew **one line of text and
+ * then ~480 dp of pure white** before the next heading. Two bare headings floating over a page
+ * with one card between them. It FITS and every control is reachable, which is why nothing had
+ * ever reported it.
+ *
+ * The reservation itself is correct and stays: a fixed 1 : 2 split keeps `OPEN ORDERS` at the
+ * same y whether the inbox holds nothing or six arrivals, which is `27-F4` positional memory on a
+ * surface whose row COUNT changes all day. What was wrong is that an empty allocation was
+ * indistinguishable from an empty screen.
+ *
+ * A bounded sunken region fixes both at once — it is `27-F66`'s idiom (a boundary carries the
+ * region, the ~1.1:1 fill step is a legitimate depth cue that is not load-bearing) and it spends
+ * **no `27-F14` colour at all**. An empty tray reads as *an empty tray*; a blank rectangle reads
+ * as a broken app, and `00 §5.7` cares about the difference.
+ *
+ * The headings drop to `fgColor-muted`: a section name is scaffolding and the payload is the
+ * orders (`27-F25`). They stay **sentence case**, which is a deliberate stop short of `Readout`'s
+ * upper-case caption treatment — `orders-tab.dom.test.tsx` is an acceptance oracle that finds both
+ * lists by their heading text, and the hierarchy inversion this round is after comes from the
+ * MUTED colour and the small size, not from the capitals. Changing five oracle assertions to buy
+ * a typographic flourish is not a trade an implementer gets to make (`24 §3` step 2).
+ */
+const TRAY: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: space["space-2"],
+  minHeight: 0,
+  padding: space["space-3"],
+  borderRadius: space["space-2"],
 };
 
 export type OrdersSurfaceProps = {
@@ -145,39 +186,43 @@ export const OrdersSurface = ({
             primary action, and `02-F9`'s accept is this surface's primary action — so it is
             above the fold on arrival, with no filter to change and no segment to select.
           */}
-          <h2 style={{ ...HEADING, color: color["fgColor-default"] }}>New orders</h2>
-          <OrderList
-            orders={inbox.map(toRow)}
-            // The inbox gets a third of the surface and the open list the rest: `02-F9` puts
-            // this at 10–20 arrivals a shift against `02-F10`'s continuous recall, and
-            // `27-F2` forbids reaching either by scrolling — so both are paged inside their
-            // own measured box rather than sharing one that overflows.
-            heightMm={sizeMm.heightMm / 3}
-            page={inboxPage}
-            onPageChange={onInboxPageChange}
-            action={{ label: "Accept", onAct: onAccept }}
-            /*
-              `00 §5.7` — the honest resting state, and it says WHY it is empty rather than
-              just that it is. Nothing publishes cloud orders yet (docs 06/07 are unbuilt), so
-              on a launched device this is what the surface always says, and it should read as
-              "none have arrived" and never as "this screen is broken".
-            */
-            empty="No new orders from the website or WhatsApp."
-          />
-          <h2 style={{ ...HEADING, color: color["fgColor-default"] }}>Open orders</h2>
-          {/*
-            `02-F10` recall, and `02-F33`'s read-only posture: NO `action` is passed. That is
-            the whole of the ready-marking decision expressed in one absent prop — see this
-            file's header for why `C32` cannot be drawn, and note that a greyed Ready control
-            would still be claiming the act exists, which is the opposite of read-only.
-          */}
-          <OrderList
-            orders={open.map(toRow)}
-            heightMm={(sizeMm.heightMm * 2) / 3}
-            page={openPage}
-            onPageChange={onOpenPageChange}
-            empty="No open orders. Start one on the Order tab."
-          />
+          <div style={{ ...TRAY, flex: 1, background: color["bgColor-surface-sunken"] }}>
+            <h2 style={{ ...HEADING, color: color["fgColor-muted"] }}>New orders</h2>
+            <OrderList
+              orders={inbox.map(toRow)}
+              // The inbox gets a third of the surface and the open list the rest: `02-F9` puts
+              // this at 10–20 arrivals a shift against `02-F10`'s continuous recall, and
+              // `27-F2` forbids reaching either by scrolling — so both are paged inside their
+              // own measured box rather than sharing one that overflows.
+              heightMm={sizeMm.heightMm / 3}
+              page={inboxPage}
+              onPageChange={onInboxPageChange}
+              action={{ label: "Accept", onAct: onAccept }}
+              /*
+                `00 §5.7` — the honest resting state, and it says WHY it is empty rather than
+                just that it is. Nothing publishes cloud orders yet (docs 06/07 are unbuilt), so
+                on a launched device this is what the surface always says, and it should read as
+                "none have arrived" and never as "this screen is broken".
+              */
+              empty="No new orders from the website or WhatsApp."
+            />
+          </div>
+          <div style={{ ...TRAY, flex: 2, background: color["bgColor-surface-sunken"] }}>
+            <h2 style={{ ...HEADING, color: color["fgColor-muted"] }}>Open orders</h2>
+            {/*
+              `02-F10` recall, and `02-F33`'s read-only posture: NO `action` is passed. That is
+              the whole of the ready-marking decision expressed in one absent prop — see this
+              file's header for why `C32` cannot be drawn, and note that a greyed Ready control
+              would still be claiming the act exists, which is the opposite of read-only.
+            */}
+            <OrderList
+              orders={open.map(toRow)}
+              heightMm={(sizeMm.heightMm * 2) / 3}
+              page={openPage}
+              onPageChange={onOpenPageChange}
+              empty="No open orders. Start one on the Order tab."
+            />
+          </div>
         </>
       )}
     </div>
