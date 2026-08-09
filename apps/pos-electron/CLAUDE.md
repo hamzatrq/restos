@@ -690,6 +690,25 @@ in principle**, but see the owed item below — the manifest table itself was no
   PIN. **Genuinely owed:** `02-F20`'s REMOTE path (approval via doc 05), and its void / comp /
   price-override rows, which are mapped ahead of their events — `domain/registry.ts` does not carry
   those yet.
+- **⚠ `TAKE CASH` ON AN EMPTY ENTRY RECORDS A Rs 0 SETTLEMENT — OPEN, found 2026-08-09 while
+  measuring the `shift_id` fix.** `TenderPanel.tsx` computes `enteredP = (Number(entry) || 0) * 100`,
+  so an empty pad is `0`; `coversBill = enteredP >= remainingP` is then false against a positive
+  bill, and the handler fires `onTender({ amountP: enteredP })` — a **permanent** `payment.recorded`
+  worth nothing, on an append-only ledger where `01-F1` forbids removing it. One accidental tap per
+  shift is one phantom settlement in `02-F23`'s reconciliation for ever. (When the bill is already
+  covered, `0 >= 0` makes `coversBill` true and it tenders `remainingP`, also `0` — same outcome by
+  the other branch.)
+  **The arithmetic is unharmed** — zero adds nothing to the `shift_cash` expected map — so this is
+  ledger hygiene and cashier trust, not a money error. **It is recorded rather than fixed because
+  the fix is a judgement call the code's own comment pre-empts:** that handler says *"`01-F17` — a
+  sale is never blocked … the one thing this button never does is refuse."* `01-F17` forbids
+  blocking a **sale**; a tender of nothing is not a sale, so refusing an empty entry is very likely
+  outside what that FR protects — but the distinction is not written anywhere, and `02-F13`'s split
+  path deliberately records partial tenders as themselves, which is the same shape one step along.
+  **Do not "fix" this by disabling the button** without settling it: an inert primary control is
+  `27-F5`'s own failure mode, and the `M4` row of the `shift_id` matrix measured that the plausible
+  safe repair — gating settlement on a precondition — kills six existing `02-F37` tests that exist
+  precisely to stop an `01-F17` violation. A finding for the `02-F13`/`02-F37` owner.
 - **THE STRIP SAID `dev` WHILE THE LEDGER SAID AYESHA — CLOSED AUGUST 2026.** `DeviceState`
   carries two identity fields. `user` is the `01-F26` session, added by S-0c and stamped into
   every envelope as `actor_user_id`. `actor` is older — it shipped with the first launch commit,
