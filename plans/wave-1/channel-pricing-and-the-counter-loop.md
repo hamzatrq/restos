@@ -1,5 +1,12 @@
 # Channel pricing and the counter loop — plan
 
+> **⚠ This plan is not the wave's scope.** `plans/wave-1/` covers six areas; `restaurant-os.md`
+> §8 names more than six things in Wave 1, and four Wave-1 modules have no plan at all. This
+> plan is accurate about what it covers and does not claim to cover the wave — see
+> `wave-1-scope-reconciliation.md`. **Two items inside this plan's own module are in no plan:**
+> `02-F28`/`02-F30` quick-entry (phone + foodpanda, which §8 names explicitly) and `02-F7`'s
+> availability toggle.
+
 **Planning artefact, July 2026.** Owning specs: `specs/01-kernel-sync.md` (`01-F18`, `01-F21`,
 `01-F52`..`01-F56`, `01-F17`), `specs/02-pos-app.md` (`02-F1`..`02-F3`), `specs/14-backoffice.md`
 (`14-F5`, `14-F6`). Also binding: `00 §6` (money contract), `00 §7` (config layers),

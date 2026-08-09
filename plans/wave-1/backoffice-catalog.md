@@ -1,5 +1,8 @@
 # Back office — the catalog editor and the publish path
 
+> **⚠ This plan is not the wave's scope** — it is doc 14's catalog slice. `plans/wave-1/` covers
+> six areas and four Wave-1 modules have no plan at all. See `wave-1-scope-reconciliation.md`.
+
 **Planning artefact, July 2026.** Owning spec: `specs/14-backoffice.md` (`14-F1`..`14-F8`,
 `14-F28`, **`14-F29`**). Also binding: `18 §5` (server-side authz), `18 §6` (the two-plane law),
 `18 §7` (web UI rules), `01-F52`..`01-F56` + **`01-F60`** (the catalog and its prices),

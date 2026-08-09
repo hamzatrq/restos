@@ -1,5 +1,8 @@
 # Palette repaint — the measurement, and what it forces
 
+> **⚠ This is doc 27's slice, not the wave's scope.** `plans/wave-1/` covers six areas and four
+> Wave-1 modules have no plan at all. See `wave-1-scope-reconciliation.md`.
+
 **July 2026.** Founder ruling: repaint to a dark ISA-101 base (`27 §3`) rather than patch the
 light theme. This file records the derivation so the numbers are auditable and the spec
 amendment can be written against measurements rather than taste.

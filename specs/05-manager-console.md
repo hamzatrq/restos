@@ -11,6 +11,8 @@ The manager's operational surface, running on the **manager's own phone** (React
 
 Works in-branch over LAN and remotely over cloud; remote views always carry sync-honesty labels (00 §5.7). All tiers and profiles get the console; floor state requires T3 tables (doc 04). This is the *operational* manager surface — the owner's analytical surface is doc 12; back-office configuration is doc 14.
 
+**⚠ Build status, August 2026 — this module's Wave 1 core is UNBUILT and nothing in `plans/` schedules it.** `apps/manager` is a two-line scaffold stub, so 05-F1..05-F4 (alarms) and the remote half of 05-F5..05-F7/05-F9 (approvals) have no surface at all; 02-F20's *local* PIN path did ship on the counter (see 05-F8). Recorded here because it is a **scope** fact a reader of §3 cannot otherwise see: `restaurant-os.md` §8 names "manager alarms+approvals" in Wave 1 and `00 §1` rows this module **1 core / 4 full**, while `plans/wave-1/` covers six areas and none is doc 05. **Not a licence to build it** — sequence is a founder call, and this note cannot distinguish deliberate deferral from oversight. Reconciliation, with the same delta for docs 08/12/13: `plans/wave-1/wave-1-scope-reconciliation.md`.
+
 ## 2. Position in platform
 
 - **Depends on:** kernel (doc 01) — full branch slice on the manager device, PIN auth, fast-path LAN; aging thresholds and print-failure events (doc 03).

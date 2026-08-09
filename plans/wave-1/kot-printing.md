@@ -1,5 +1,12 @@
 # KOT printing — plan
 
+> **⚠ This plan covers HALF of doc 03's Wave 1 slice.** `specs/03:3` scopes that slice as
+> "printing **+ pass screen**"; this plan is printing. The pass screen (T2) is unplanned and
+> `apps/pass-kds` is a scaffold stub, which is also what blocks `03-F47`'s aging timers — a
+> Wave-1 item named in `restaurant-os.md` §8, whose components are written and carry
+> `@unreached-owed` markers. Nothing here is wrong; it simply is not the whole module. See
+> `wave-1-scope-reconciliation.md`.
+
 **Planning artefact, July 2026.** Owning spec: `specs/03-kitchen-fulfillment.md`
 (`03-F1`..`03-F10`, `03-F30`..`03-F45`, `03-F48`). Also binding: `specs/27-design-language.md
 §2b` (`27-F55`..`27-F59`), `18 §10` (the printing stack), `00 §5.6` (English-only UI, Unicode

@@ -1,5 +1,9 @@
 # Wave 1 — the service surface: shifts, cash, day open/close
 
+> **⚠ The title says "Wave 1" and this plan is one area of it.** `restaurant-os.md` §8 names
+> seven things in Wave 1; this plan is "payments/shifts". Four Wave-1 modules (05, 08, 12, 13)
+> have no plan at all. See `wave-1-scope-reconciliation.md` before reading this as the wave.
+
 **Status:** APPROVED. Chosen as the next build by the founder in `dac8747`, scoped there as
 *"unprotected `pos-electron` work"* — a scoping this plan corrects on three counts (§2). The
 identity blocker §2 raised is **RULED (founder, July 2026): A-narrow — PIN session plus a minimal

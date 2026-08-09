@@ -1,5 +1,10 @@
 # S-0 — identity and authorization (`domain`, `sync-client`, `pos-electron`)
 
+> **⚠ This plan is not the wave's scope.** It unblocks `02-F20`'s approval family; the LOCAL
+> half of that family has since shipped and the REMOTE half (doc 05) is unplanned — `apps/manager`
+> is a scaffold stub. Four Wave-1 modules have no plan at all. See
+> `wave-1-scope-reconciliation.md`.
+
 **Status:** APPROVED by the orchestrator (lead call, August 2026). The founder ruled the *shape*
 — **A-narrow: PIN session plus a minimal staff registry, nothing else from doc 11**
 (`service-surface.md §2.3`). This plan settles the design questions that ruling leaves, none of
