@@ -131,9 +131,13 @@ in a full run — `Tasks: 23 successful, 24 total`, api reading 131 instead of 1
 **137/137 when run alone**. That is the documented "a single RED is as untrustworthy as a single
 green" case, and the fix was to delete the override, not to touch an assertion.
 
-**The class is not closed.** Ten further overrides remain in this directory, every one below the
-package budget: `catalog-gateway-seam.test.ts` (25 s, 60 s, 30 s), `catalog-enabled.test.ts`
-(60 s, 20 s, 40 s, 40 s), `catalog.test.ts` (60 s), `startable.test.ts` (25 s, 60 s). They are
+**The class is not closed.** **Eleven** further overrides remain in this directory, every one below
+the package budget: `catalog-gateway-seam.test.ts` (25 s, 60 s, 30 s), `catalog-enabled.test.ts`
+(60 s, 20 s, 40 s, 40 s), `catalog.test.ts` (60 s), `startable.test.ts` (25 s, **60 s, 60 s**).
+*(This block said "Ten" and gave `startable.test.ts` two; it carries three — re-counted 2026-08-09
+by grepping `}, <n>)` across the directory. A hand-counted census of a latent-flake class is the
+one number you should never carry forward, because the eleventh is the one nobody re-checks.)*
+They are
 **latent flakes of one shape**, not ten unrelated numbers — AGENTS.md's rule is to search the
 PROPERTY, not the mechanism. They were left in place deliberately: none has been observed failing,
 and rewriting ten oracle timeouts without a failure justifying each is the drive-by `24 §3b`

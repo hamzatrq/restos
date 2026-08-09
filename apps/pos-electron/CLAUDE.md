@@ -484,10 +484,20 @@ in principle**, but see the owed item below — the manifest table itself was no
   and wired as of T-C6: `main/sync.ts` builds the cloud session, which requests on `hello_ack`
   version mismatch and on `catalog_notice` and applies into `store.catalog` — so a device with
   `RESTOS_CLOUD_URL`/`RESTOS_DEVICE_TOKEN` pointed at a gateway gets the org's published menu.
-  **Nothing MINTS a device token, though** (`01-F47` admission is unbuilt): the gateway needs both
-  an HS256 token and an unrevoked `kernel.device_registry` row, and both are manual steps in the
-  runbook's §6b. For a local launch with no gateway there is a **marked DEV SEED**, off by default
-  like the roster:
+  ⚠ **THIS BULLET READ "Nothing MINTS a device token, though (`01-F47` admission is unbuilt) …
+  both are manual steps in the runbook's §6b" AFTER PROVISIONING SHIPPED — and the bullet forty
+  lines above it, in this same file, already said the opposite.** The product mints one:
+  `pnpm -C services/sync-gateway provision-device --org … --branch … --device … --class …` is a
+  declared command that issues the HS256 token **and** writes the unrevoked
+  `kernel.device_registry` row in one act, seam-tested against a real Postgres
+  (`provisionable.test.ts`), and `revoke-device` is its other half. §6b is that command now, not
+  a `tsx -e` one-liner and an `INSERT`. **The shape is the one this file keeps recording:** the
+  stale sentence is not merely out of date, it is a claim that an ADMISSION path is absent, which
+  is the direction that invites a session to invent a second one or to route around the check it
+  believes is missing. What is genuinely owed is narrower and is named in the DEV SEED bullet
+  above: `01-F25`'s back-office pairing code (an owner still needs shell access on the service
+  host), and device-side persistence of `01-F47`'s silent renewal. For a local launch with no
+  gateway there is a **marked DEV SEED**, off by default like the roster:
 
   ```
   RESTOS_DEV_MENU=1 RESTOS_DEV_PIN=<digits> pnpm start
@@ -651,7 +661,13 @@ in principle**, but see the owed item below — the manifest table itself was no
   cashier unable to open the day, so a roster of three cashiers would leave `pnpm start` with a
   day that can never be opened. Sign in as Ayesha and "Open the day" is refused in main; sign in
   as Hina and it lands.
-- **COMMANDMENT 8 IS ENFORCED HERE, AND ITS ESCALATION PATH IS NOT BUILT.** `main/authorize.ts`
+- **COMMANDMENT 8 IS ENFORCED HERE, AND ITS ESCALATION PATH IS HALF BUILT — LOCAL YES, REMOTE
+  NO.** ⚠ *This heading read "AND ITS ESCALATION PATH IS NOT BUILT" for a round after the local
+  path shipped, sitting directly on top of a body that says the opposite in bold.* The body was
+  corrected and the heading was not, which is the worst place to leave one: a heading is what a
+  skimmer reads and what the next session quotes upward — and quoting this one upward is exactly
+  how `AGENTS.md` came to say `escalate` had no UI. **When you correct a claim, correct its
+  headline in the same edit.** `main/authorize.ts`
   wraps the gateway's two write methods and runs every renderer-originated append through
   `domain`'s `can` / `canPayOut` before the ledger is touched — that file is the matrix's first
   production caller in the whole product. What is owed and is named rather than left to look
