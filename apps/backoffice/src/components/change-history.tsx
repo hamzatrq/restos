@@ -92,7 +92,7 @@ export const ChangeHistory = ({
   const history = useQuery(trpc.catalog.history.queryOptions());
 
   if (history.isPending) {
-    return <p className="text-sm text-muted-foreground">{strings.errors.loading}</p>;
+    return <p className="text-body text-muted-foreground">{strings.errors.loading}</p>;
   }
   if (history.error !== null) return <Note tone="fault">{history.error.message}</Note>;
 
@@ -104,7 +104,7 @@ export const ChangeHistory = ({
     .reverse();
 
   if (mine.length === 0) {
-    return <p className="text-sm text-muted-foreground">{strings.history.empty}</p>;
+    return <p className="text-body text-muted-foreground">{strings.history.empty}</p>;
   }
 
   return (
@@ -120,14 +120,26 @@ export const ChangeHistory = ({
         `"branch-main · counter Rs 450 → Rs 480"` — so the literal spaces inside these template
         strings are load-bearing, and the spans holding them may be restyled but never re-split.
       */}
+      {/*
+        **The cell rows are a TABLE now, not nine sentences.** `01-F60` prices per (branch,
+        channel), so a fully-priced 3x3 org logs nine movements per edit — and they rendered as
+        nine ragged lines of `<branch> · <channel> — → Rs 1,850`, where the key, the arrow and the
+        two numbers all started at a different x on every line. Nothing in that block could be
+        compared down a column, which is the only thing a reader wants from it.
+
+        A two-column grid fixes the comparison without touching the text COMPOSITION, which is
+        load-bearing: `shell.dom.test.tsx` reads each row's `textContent` and asserts contiguous
+        strings including the literal spaces inside these template strings, so the spans may be
+        restyled and re-laid-out but never re-split.
+      */}
       <ol className="flex flex-col border-l border-border pl-4">
         {mine.map((record) => (
           <li
             key={`${record.payload.version}-${record.payload.after_ref ?? ""}`}
-            className="relative flex flex-col gap-1.5 py-2.5 text-sm before:absolute before:-left-[1.3125rem] before:top-4 before:size-2 before:rounded-full before:bg-border-strong"
+            className="relative flex flex-col gap-2 py-3 text-label before:absolute before:-left-[1.3125rem] before:top-4 before:size-2 before:rounded-full before:bg-border-strong"
           >
             <span>
-              <span className="font-medium">
+              <span className="text-foreground">
                 {/* `before_ref === null` means the entry is NEW — there was nothing to change from. */}
                 {record.payload.before_ref === null
                   ? strings.history.created
@@ -149,19 +161,36 @@ export const ChangeHistory = ({
                 no key is ambiguous across every cell in the grid. Deliberately NOT a nested list —
                 the `<li>`s of this screen are its history rows, and a reader counting them (a
                 person or a test) must not have price rows folded into that count. */}
-            {record.payload.price_changes.map((change) => (
-              <span
-                key={`${change.branch_id} ${change.channel}`}
-                className="text-xs tabular-nums text-muted-foreground"
-              >
-                <span>{`${change.branch_id} · ${change.channel} `}</span>
-                {/* `27-F25` — these two numbers are the payload of an audit line and were the
-                    DIMMEST thing on it: 12px muted, under a metadata header at full contrast.
-                    Full weight now, cell key muted, which is the correct way round. `27-F16`
-                    keeps them uncoloured: a price rise is not abnormal. */}
-                <span className="font-medium text-foreground">{changeText(change)}</span>
+            {record.payload.price_changes.length === 0 ? null : (
+              /*
+                **The moved cells are a TABLE now, not a stack of sentences.** A fully-priced
+                3x3 org logs NINE movements per edit, and they rendered as nine ragged lines
+                where the key, the arrow and both numbers started at a different x on every one
+                — so nothing in the block could be compared down a column, which is the only
+                thing a reader wants from it. A two-column subgrid puts every key left and every
+                movement right, on their own sunken ground so the block reads as one artifact
+                belonging to the line above it.
+
+                ⚠ The text COMPOSITION is untouched. `shell.dom.test.tsx` asserts contiguous
+                strings, so the literal spaces in these template strings are load-bearing: these
+                spans may be restyled and re-laid-out, never re-split.
+              */
+              <span className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-6 gap-y-1 rounded-md bg-muted px-3 py-2">
+                {record.payload.price_changes.map((change) => (
+                  <span
+                    key={`${change.branch_id} ${change.channel}`}
+                    className="col-span-2 grid grid-cols-subgrid text-xs tabular-nums text-muted-foreground"
+                  >
+                    <span className="truncate">{`${change.branch_id} · ${change.channel} `}</span>
+                    {/* `27-F25` — these two numbers are the payload of an audit line and were
+                        the DIMMEST thing on it: 12px muted, under a metadata header at full
+                        contrast. Full contrast now, cell key muted, which is the correct way
+                        round. `27-F16` keeps them uncoloured: a price rise is not abnormal. */}
+                    <span className="text-right text-foreground">{changeText(change)}</span>
+                  </span>
+                ))}
               </span>
-            ))}
+            )}
           </li>
         ))}
       </ol>

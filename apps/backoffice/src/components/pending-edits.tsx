@@ -46,24 +46,31 @@ export const PendingEdits = (): ReactNode => {
   );
 
   if (pending.isPending)
-    return <p className="text-sm text-muted-foreground">{strings.errors.loading}</p>;
+    return <p className="text-body text-muted-foreground">{strings.errors.loading}</p>;
   if (pending.error !== null) return <Note tone="fault">{pending.error.message}</Note>;
 
   const edits = pending.data;
   if (edits.length === 0) {
-    return <p className="text-sm text-muted-foreground">{strings.timing.pendingEmpty}</p>;
+    return <p className="text-body text-muted-foreground">{strings.timing.pendingEmpty}</p>;
   }
 
+  /*
+    A queue, not a stack of separate cards. Each row was its own bordered box on a sunken fill
+    with 8 px between them — five objects where the truth is one list with five entries, and
+    `27-F66`'s 3.41:1 boundary spent five times over inside a card that already has one. The rows
+    now share one bounded well and are separated by a single rule each, which is what makes them
+    read as *a queue with an order* rather than as unrelated notices.
+  */
   return (
-    <ul className="flex flex-col gap-2">
+    <ul className="flex flex-col overflow-hidden rounded-md border border-border-strong bg-muted">
       {edits.map((edit) => (
         <li
           key={edit.edit_id}
-          className="flex flex-wrap items-center justify-between gap-4 rounded-md border border-border-strong bg-muted p-3"
+          className="flex flex-wrap items-center justify-between gap-4 border-b border-border p-4 last:border-b-0"
         >
           <div className="flex min-w-0 items-start gap-3">
             <Clock aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-            <div className="flex min-w-0 flex-col gap-0.5 text-sm">
+            <div className="flex min-w-0 flex-col gap-1">
               {/* **The DRAFT'S OWN name** — `catalog.pending` carries it, and this component
                   resolves nothing. This row read `item / item-chicken-karahi` until August 2026,
                   which is a kind and a raw id in front of an owner deciding whether to cancel a
@@ -78,8 +85,10 @@ export const PendingEdits = (): ReactNode => {
                   silently; `pending-name.dom.test.tsx` asserts this component never even asks for
                   the published artifact, which is what makes the separation structural rather
                   than a comment. */}
-              <span className="truncate font-medium">{edit.name}</span>
-              <span className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
+              {/* The dish the owner recognises, at content scale — this row exists so she can
+                  decide whether to cancel it, and the identity below is the tie-breaker. */}
+              <span className="truncate text-body text-foreground">{edit.name}</span>
+              <span className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">
                 {/* The identity, DEMOTED — not deleted. Two entries may share a display name (an
                     `item` "Coke" and a `modifier` "Coke"), and this row's control cancels one of
                     them: `shell.dom.test.tsx` names cancelling the wrong edit as the same failure
