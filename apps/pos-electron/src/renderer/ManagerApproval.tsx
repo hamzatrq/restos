@@ -243,7 +243,9 @@ export const ManagerApproval = ({
             <PersonTile
               key={member.user_id}
               name={member.display_name}
-              {...(member.role === null || member.role === undefined ? {} : { role: member.role })}
+              {...(member.role === null || member.role === undefined
+                ? {}
+                : { staffRole: member.role })}
               onPress={() => setChosen(member)}
             />
           ))}

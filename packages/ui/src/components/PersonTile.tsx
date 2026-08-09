@@ -33,7 +33,7 @@ import { space, targetFor, typography } from "../tokens/index";
  *   `02-F22` means a cashier cannot open the day. **It authorizes nothing here** (`18 §5`): every
  *   write is gated in main against the registry, never against anything a renderer holds.
  *
- * `role` is optional and renders nothing when absent, rather than guessing. `01-F54` degrades to
+ * `staffRole` is optional and renders nothing when absent, rather than guessing. `01-F54` degrades to
  * what is known, and a guessed role is a false claim about a person's authority.
  *
  * ## What it deliberately cannot do
@@ -59,8 +59,15 @@ export type PersonTileProps = {
    *
    * Absent renders nothing at all — never a guess, never an em-dash placeholder. `01-F54`
    * degrades to what is known, and a guessed role is a false claim about a person's authority.
+   *
+   * **Named `staffRole` and NOT `role`, which is not fussiness.** `role` is the single most
+   * load-bearing attribute name in HTML, and a `packages/ui` prop that shadows it is a component
+   * configured to collide: Biome's `useValidAriaRole` reads `<PersonTile role="cashier">` as an
+   * invalid ARIA role and fails the build at every literal call site, and any future
+   * implementation that spread its props onto the element would put `role="cashier"` on a real
+   * button and destroy its accessible role for good. Caught by the linter on the first call site.
    */
-  role?: string | undefined;
+  staffRole?: string | undefined;
   onPress: () => void;
 };
 
@@ -96,30 +103,53 @@ const roleLabel = (role: string): string => {
  *
  * It grows with the surface for the reason `MONEY_COLUMN_DP` does: `27-F25`'s "largest element in
  * their region" is relative, and `27-F11c` makes a physically wider panel a larger region.
+ *
+ * **There is NO height here, and its absence is the design rather than an omission.** Two things
+ * removed it, arriving from opposite directions on the same afternoon:
+ *
+ * 1. **A screenshot.** The first draft pinned the wrapped-name height (250 dp on `wide`) and a
+ *    row of cards each carried a third of itself empty below the name.
+ * 2. **`discipline-ast.oracle.test.ts`**, which bans a 40–200 literal on a size property in this
+ *    package outright — *"a control takes `targetFor(posture)`; anything else takes a token,
+ *    never a literal"*. It caught `height: 140/160/180` the first time the suite ran, and it was
+ *    right: a hand-typed number on a pressable element is how a destructive control once shipped
+ *    at 44 px under `27-F8`'s floor.
+ *
+ * The card is therefore sized by its CONTENT — padding, the role line, the name — with
+ * `targetFor("counter")` as the ergonomic floor beneath it, and the row's own `stretch`
+ * equalising siblings. Three one-line names give three identical short cards; one wrapped name
+ * lifts all three together. That is the alignment `27-F4` wants, obtained from the layout instead
+ * of from a constant sized for a case that is usually not happening.
+ *
+ * The WIDTH stays explicit and stays here, because it is the one dimension content cannot decide:
+ * a card that shrink-wrapped its name would make `Ayesha Khan` and `Hina Raza` different widths,
+ * and a row of unequal cards is the ragged rank this component exists to avoid.
  */
-const CARD_DP: Record<SurfaceMode, { width: number; height: number }> = {
-  compact: { width: 280, height: 190 },
-  counter: { width: 360, height: 210 },
-  wide: { width: 440, height: 250 },
+const CARD_WIDTH_DP: Record<SurfaceMode, number> = {
+  compact: 280,
+  counter: 360,
+  wide: 440,
 };
 
-export const PersonTile = ({ name, role, onPress }: PersonTileProps) => {
+export const PersonTile = ({ name, staffRole, onPress }: PersonTileProps) => {
   const color = useColor();
   const mode = useSurfaceMode();
-  const card = CARD_DP[mode];
+  const width = CARD_WIDTH_DP[mode];
   const heading = typography["text-numeric-hero"];
   const label = typography["text-label"];
   return (
     <button
       type="button"
       onClick={onPress}
-      aria-label={role === undefined ? name : `${name} — ${roleLabel(role)}`}
+      aria-label={staffRole === undefined ? name : `${name} — ${roleLabel(staffRole)}`}
       style={{
-        width: card.width,
-        minHeight: card.height,
-        // 27-F8's counter target as a hard floor under the layout numbers above, so a future
-        // edit to CARD_DP cannot quietly take this below the ergonomic minimum.
+        width,
+        // 27-F8's counter target as a hard floor on BOTH axes. The card is content-sized, so
+        // this is what guarantees it can never come out below the ergonomic minimum however
+        // short a name is — and it is a token call rather than a number, which is the rule
+        // `discipline-ast.oracle.test.ts` enforces and the reason the height literal is gone.
         minWidth: targetFor("counter"),
+        minHeight: targetFor("counter"),
         display: "flex",
         flexDirection: "column",
         /**
@@ -152,7 +182,7 @@ export const PersonTile = ({ name, role, onPress }: PersonTileProps) => {
         cursor: "pointer",
       }}
     >
-      {role === undefined ? null : (
+      {staffRole === undefined ? null : (
         <span
           style={{
             fontFamily: label.fontFamily,
@@ -162,7 +192,7 @@ export const PersonTile = ({ name, role, onPress }: PersonTileProps) => {
             color: color["fgColor-muted"],
           }}
         >
-          {roleLabel(role)}
+          {roleLabel(staffRole)}
         </span>
       )}
       <span

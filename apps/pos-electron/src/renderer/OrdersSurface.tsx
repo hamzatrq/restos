@@ -89,16 +89,15 @@ const byOldestConfirmFirst = (a: OpenOrder, b: OpenOrder): number =>
   (a.confirmed_at ?? Number.POSITIVE_INFINITY) - (b.confirmed_at ?? Number.POSITIVE_INFINITY);
 
 /**
- * A section caption, in the treatment `Readout` gives every caption in this product: small,
- * upper-case at the call site, wide-tracked, muted. `27-F25` puts the payload at the top of the
- * ladder and a section name is scaffolding — it was `fgColor-default` at the same weight as the
- * order references beneath it, which is two headlines and no hierarchy.
+ * A section name. `27-F25` puts the payload at the top of the ladder and a section name is
+ * scaffolding — this was `fgColor-default` at the same weight as the order references beneath it,
+ * which is two headlines and no hierarchy. It is muted at the call site now.
  */
 const HEADING: React.CSSProperties = {
   fontFamily: typography["text-label"].fontFamily,
   fontSize: typography["text-label"].fontSize,
   fontWeight: 600,
-  letterSpacing: "0.12em",
+  letterSpacing: typography["text-label"].letterSpacing,
   margin: 0,
 };
 
@@ -122,8 +121,12 @@ const HEADING: React.CSSProperties = {
  * **no `27-F14` colour at all**. An empty tray reads as *an empty tray*; a blank rectangle reads
  * as a broken app, and `00 §5.7` cares about the difference.
  *
- * The headings drop to `fgColor-muted` and take the caption treatment the rest of this product
- * uses (`Readout`): a section name is scaffolding, and the payload is the orders.
+ * The headings drop to `fgColor-muted`: a section name is scaffolding and the payload is the
+ * orders (`27-F25`). They stay **sentence case**, which is a deliberate stop short of `Readout`'s
+ * upper-case caption treatment — `orders-tab.dom.test.tsx` is an acceptance oracle that finds both
+ * lists by their heading text, and the hierarchy inversion this round is after comes from the
+ * MUTED colour and the small size, not from the capitals. Changing five oracle assertions to buy
+ * a typographic flourish is not a trade an implementer gets to make (`24 §3` step 2).
  */
 const TRAY: React.CSSProperties = {
   display: "flex",
@@ -184,7 +187,7 @@ export const OrdersSurface = ({
             above the fold on arrival, with no filter to change and no segment to select.
           */}
           <div style={{ ...TRAY, flex: 1, background: color["bgColor-surface-sunken"] }}>
-            <h2 style={{ ...HEADING, color: color["fgColor-muted"] }}>NEW ORDERS</h2>
+            <h2 style={{ ...HEADING, color: color["fgColor-muted"] }}>New orders</h2>
             <OrderList
               orders={inbox.map(toRow)}
               // The inbox gets a third of the surface and the open list the rest: `02-F9` puts
@@ -205,7 +208,7 @@ export const OrdersSurface = ({
             />
           </div>
           <div style={{ ...TRAY, flex: 2, background: color["bgColor-surface-sunken"] }}>
-            <h2 style={{ ...HEADING, color: color["fgColor-muted"] }}>OPEN ORDERS</h2>
+            <h2 style={{ ...HEADING, color: color["fgColor-muted"] }}>Open orders</h2>
             {/*
               `02-F10` recall, and `02-F33`'s read-only posture: NO `action` is passed. That is
               the whole of the ready-marking decision expressed in one absent prop — see this

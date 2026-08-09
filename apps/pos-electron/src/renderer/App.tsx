@@ -404,13 +404,20 @@ export const App = () => {
   /**
    * The door, as one composition, so both `01-F61` steps get the same masthead and the same room.
    *
+   * **It does NOT apply `PanelRoot` itself, and the separation is deliberate.** `27-F68`'s
+   * conversion is one concern (how big is a dp on this glass) and the door's composition is
+   * another (masthead, room, the step inside it); folding the first into the second would leave one
+   * `panel(` call site in this file where `main/__acceptance__/panel-density.test.ts` §B counts on
+   * seeing the conversion applied at every return — and that assertion is the hand-written seam
+   * check for the wave's recurring defect, which is not a thing to make harder to see.
+   *
    * `WorkSurface` is here for the reason `AppShell` has one: this surface has layout opinions
    * that depend on how much glass there is (`PersonTile`'s card size), and a mode measured
    * separately per component is a mode two components can disagree about. `02-F18`'s lock screen
    * has no `AppShell`, so it takes its own.
    */
-  const door = (children: ReactNode) =>
-    panel(
+  const door = (children: ReactNode) => (
+    <>
       <WorkSurface>
         <div style={GATE}>
           <div style={{ ...MASTHEAD, borderBottom: `1px solid ${color["borderColor-default"]}` }}>
@@ -434,8 +441,9 @@ export const App = () => {
           </div>
           <div style={ROOM}>{children}</div>
         </div>
-      </WorkSurface>,
-    );
+      </WorkSurface>
+    </>
+  );
 
   // `01-F17` — nothing is blocked here, there is simply nothing yet known to draw.
   if (user === undefined) return <p>Starting…</p>;
@@ -481,35 +489,40 @@ export const App = () => {
    * size an operator can hit without looking.
    */
   if (chosen === null) {
-    return door(
-      <div style={STEP}>
-        {/*
+    return panel(
+      door(
+        <div style={STEP}>
+          {/*
           The surface names its own act. `27-F1` gives the operator nowhere to be lost and no
           back affordance, so the one line of chrome a lock screen gets has to say what this
           step IS — and `01-F61` makes it a step, not the whole thing: identify, THEN the PIN.
           Three unlabelled boxes in the corner of a blank page said neither.
         */}
-        <p style={{ ...PROMPT, color: color["fgColor-muted"], letterSpacing: "0.12em" }}>
-          WHO ARE YOU?
-        </p>
-        <div style={ROW}>
-          {roster.map((member) => (
-            <PersonTile
-              key={member.user_id}
-              name={member.display_name}
-              {...(member.role === null || member.role === undefined ? {} : { role: member.role })}
-              onPress={() => setChosen(member)}
-            />
-          ))}
-        </div>
-      </div>,
+          <p style={{ ...PROMPT, color: color["fgColor-muted"], letterSpacing: "0.12em" }}>
+            WHO ARE YOU?
+          </p>
+          <div style={ROW}>
+            {roster.map((member) => (
+              <PersonTile
+                key={member.user_id}
+                name={member.display_name}
+                {...(member.role === null || member.role === undefined
+                  ? {}
+                  : { staffRole: member.role })}
+                onPress={() => setChosen(member)}
+              />
+            ))}
+          </div>
+        </div>,
+      ),
     );
   }
 
-  return door(
-    <div style={STEP_TWO}>
-      <div style={IDENTITY}>
-        {/*
+  return panel(
+    door(
+      <div style={STEP_TWO}>
+        <div style={IDENTITY}>
+          {/*
           Who the PIN is about to be charged against. `02-F41` makes this the cashier the ledger
           will name, so an operator who mis-tapped has to be able to see it before submitting —
           which is why it is the largest word on the surface and no longer a 16 px serif line.
@@ -518,10 +531,10 @@ export const App = () => {
           pairing the money surfaces use, so the product has ONE way of saying "here is a fact and
           here is what it is called" and this screen is not a second dialect of it.
         */}
-        <Readout caption="SIGNING IN AS">
-          <p style={NAME}>{chosen.display_name}</p>
-        </Readout>
-        {/*
+          <Readout caption="SIGNING IN AS">
+            <p style={NAME}>{chosen.display_name}</p>
+          </Readout>
+          {/*
           One mark per digit, and the digits themselves are never shown: `01-F61` records that
           shoulder-surfing is the norm on a shared counter. It is feedback, not a readout — an
           operator has to be able to see that a key registered.
@@ -530,18 +543,18 @@ export const App = () => {
           once entry starts moves everything under it on the first keystroke, and `27-F4` is
           about exactly that — the surface must not rearrange under a hand already moving.
         */}
-        <Readout caption="PIN">
-          <p
-            style={{
-              ...MARKS,
-              background: color["bgColor-surface-sunken"],
-              border: `1px solid ${color["borderColor-default"]}`,
-            }}
-          >
-            {"•".repeat(pin.length)}
-          </p>
-        </Readout>
-        {/*
+          <Readout caption="PIN">
+            <p
+              style={{
+                ...MARKS,
+                background: color["bgColor-surface-sunken"],
+                border: `1px solid ${color["borderColor-default"]}`,
+              }}
+            >
+              {"•".repeat(pin.length)}
+            </p>
+          </Readout>
+          {/*
           Back to step one, and `01-F61` requires that this cost NOTHING: "a mis-tap on a grid
           charges a failed attempt to someone who is not in the building" is the failure it
           exists to prevent, so re-choosing sends nothing to main and clears the entry rather
@@ -551,16 +564,16 @@ export const App = () => {
           control here whose mis-tap costs the operator her entry, and a wet hand reaching for
           `Clear` must not find it.
         */}
-        <Tile
-          posture="counter"
-          label="Not you?"
-          onPress={() => {
-            setChosen(null);
-            setPin("");
-            setRefused(false);
-          }}
-        />
-        {/*
+          <Tile
+            posture="counter"
+            label="Not you?"
+            onPress={() => {
+              setChosen(null);
+              setPin("");
+              setRefused(false);
+            }}
+          />
+          {/*
           Also invented, and for a reason worth stating: a refusal with no feedback is
           indistinguishable from a stuck app, so the operator re-enters blindly and walks into
           `01-F61`'s lockout without ever being told why. `00 §5.7` — the device reports what is
@@ -569,25 +582,25 @@ export const App = () => {
           `27-F14` — red is the fault slot, and a refused credential is a fault. It is the only
           colour this surface spends.
         */}
-        {refused ? (
-          <p style={{ ...PROMPT, color: color["fgColor-status-fault"] }}>
-            That PIN was not accepted.
-          </p>
-        ) : null}
-      </div>
+          {refused ? (
+            <p style={{ ...PROMPT, color: color["fgColor-status-fault"] }}>
+              That PIN was not accepted.
+            </p>
+          ) : null}
+        </div>
 
-      <div style={PAD}>
-        {DIGITS.slice(0, 9).map((d) => (
-          <Tile key={d} posture="keypad" label={d} onPress={() => press(d)} />
-        ))}
-        {/*
+        <div style={PAD}>
+          {DIGITS.slice(0, 9).map((d) => (
+            <Tile key={d} posture="keypad" label={d} onPress={() => press(d)} />
+          ))}
+          {/*
           A correction key, and it is not a convenience: without it a mistyped digit forces a
           failed attempt, and `01-F61` counts failed attempts toward a lockout that would then
           stop the till on a fat finger.
         */}
-        <Tile posture="keypad" label="Clear" onPress={() => setPin("")} />
-        <Tile posture="keypad" label="0" onPress={() => press("0")} />
-        {/*
+          <Tile posture="keypad" label="Clear" onPress={() => setPin("")} />
+          <Tile posture="keypad" label="0" onPress={() => press("0")} />
+          {/*
           `01-F26` fixes no PIN length, so entry cannot know when it is done and a confirming act
           has to exist. "Unlock" is an invented string — no FR names one — and is `00 §5.6`
           English.
@@ -596,8 +609,9 @@ export const App = () => {
           pads on one device that disagree about which cell closes an entry is the muscle-memory
           break `27-F4` exists to prevent.
         */}
-        <Tile posture="keypad" label="Unlock" onPress={() => submit(chosen)} />
-      </div>
-    </div>,
+          <Tile posture="keypad" label="Unlock" onPress={() => submit(chosen)} />
+        </div>
+      </div>,
+    ),
   );
 };

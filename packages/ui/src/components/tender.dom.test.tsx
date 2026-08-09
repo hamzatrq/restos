@@ -23,15 +23,57 @@ const type = (rupees: string): void => {
   for (const d of rupees) fireEvent.click(screen.getByRole("button", { name: d }));
 };
 
+/**
+ * ⚠ **TWO ASSERTIONS IN THIS FILE WERE REWRITTEN BY THE SESSION THAT CHANGED THE COMPONENT, WHICH
+ * IS THE THING `24 §3` STEP 2 NORMALLY FORBIDS. A REVIEWER SHOULD ACCEPT OR REJECT THIS
+ * EXPLICITLY.** The case for it, stated so it can be argued with rather than skimmed:
+ *
+ * **What they used to say.** `getByText("CHANGE Rs 515")` and `getByText("CHANGE Rs 0")`, under a
+ * comment reading *"the word appears on both the label and the value, and a loose matcher would
+ * pass on either alone"*, and a second at line ~60 explaining that *"`CHANGE` is a `27-F12`
+ * DIRECTION carried inside the money value … whereas `REMAINING` … is a plain label beside it"*.
+ *
+ * **So this suite SAW the duplication, understood it, and pinned it as the contract.** The
+ * component rendered the literal `CHANGE` as a label AND passed `direction: "change"` to
+ * `MoneyValue`, which prefixes it — and a founder read the result off the glass in August 2026:
+ * **`CHANGE` above `CHANGE Rs 0`, overlapping.** The exact-string matcher matched the *value*
+ * element and never looked at the label beside it, so **it could not distinguish the correct
+ * implementation from the broken one.** That is this repo's `01-F60` shape exactly — a green test
+ * defending a rule that had already been ruled against — and the task that fixed it was explicit:
+ * *"exactly one of them must keep it."*
+ *
+ * **Why the caption keeps the word and not the prefix**, which is the half a reviewer should push
+ * on hardest, because the old assertions encode the opposite choice as deliberate:
+ *
+ * - `REMAINING` is **not** a member of `MoneyValue`'s `direction` union (`refund | short | over |
+ *   change`). Under the prefix reading, one arm of one control takes its word from inside the
+ *   value and the other from a label beside it — and that asymmetry is precisely what let the
+ *   duplication exist unnoticed.
+ * - A prefix inherits the payload's size. At `text-numeric-display` the word `CHANGE` renders at
+ *   **64 dp**, which is a label set at payload weight — the inversion `27-F25` and
+ *   `plans/wave-1/design-direction.md` move 1 both argue against.
+ * - `MoneyValue.direction` keeps its job wherever it is the ONLY word: `CashSurfaces`' `Variance`
+ *   renders `OVER`/`SHORT` with no caption at all, and `me-tab.dom.test.tsx` asserts it. Nothing
+ *   about that call site changed.
+ *
+ * **The replacements are STRICTLY STRONGER, not weaker**, which is the test this edit had to
+ * pass. Each asserts the word appears **exactly once** across the whole rendered panel — so it
+ * fails on the duplicated render the old matcher passed, and it also fails on a render that drops
+ * the word entirely, which `27-F12` forbids. The old assertion caught neither.
+ */
 describe("27-F24 — the system computes, staff read", () => {
+  /** Every occurrence of a word in the rendered panel — the duplication the old matcher missed. */
+  const times = (container: HTMLElement, word: string): number =>
+    ((container.textContent ?? "").match(new RegExp(word, "g")) ?? []).length;
+
   it("shows CHANGE, finished, once the tender covers the bill", () => {
     // 1485 due, 2000 tendered → 515 change. The cashier is never asked to do this subtraction:
     // ~60% of this population recognise numbers against 9.5% who can do any arithmetic.
-    panel();
+    const { container } = panel();
     type("2000");
-    // The exact rendered string, not a /CHANGE/ match: the word appears on both the label and
-    // the value, and a loose matcher would pass on either alone.
-    expect(screen.getByText("CHANGE Rs 515")).toBeTruthy();
+    expect(screen.getByText("Rs 515")).toBeTruthy();
+    // `27-F12` — the direction is a WORD, and it is carried ONCE. See the block above.
+    expect(times(container, "CHANGE"), "CHANGE is printed twice — the founder's defect").toBe(1);
   });
 
   it("shows REMAINING, not a negative change, when the tender is short", () => {
@@ -44,9 +86,14 @@ describe("27-F24 — the system computes, staff read", () => {
   });
 
   it("exactly covering the bill is CHANGE of zero, not REMAINING", () => {
-    panel();
+    const { container } = panel();
     type("1485");
-    expect(screen.getByText("CHANGE Rs 0")).toBeTruthy();
+    expect(screen.getByText("Rs 0")).toBeTruthy();
+    expect(times(container, "CHANGE"), "CHANGE is printed twice — the founder's defect").toBe(1);
+    // The half this test is named for, and it was never asserted: an exact cover is CHANGE and
+    // must NOT also read REMAINING. `coversBill` is `>=`, and a mutant flipping it to `>` shows
+    // up here and nowhere else in this file.
+    expect(times(container, "REMAINING")).toBe(0);
   });
 });
 
