@@ -1,6 +1,17 @@
-import { PanelRoot, space, Tile, typography, useColor } from "@restos/ui";
+import {
+  CatalogHealth,
+  ConnectionFacts,
+  PanelRoot,
+  PersonTile,
+  Readout,
+  space,
+  Tile,
+  typography,
+  useColor,
+  WorkSurface,
+} from "@restos/ui";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
-import type { DeviceState, Session } from "../shared/ipc";
+import type { DeviceState, RosterMember, Session } from "../shared/ipc";
 import { Counter } from "./Counter";
 
 /**
@@ -36,26 +47,78 @@ import { Counter } from "./Counter";
 const DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"] as const;
 
 /**
- * The lock surface's layout, found by looking (August 2026).
+ * The lock surface's layout, found by looking (August 2026) and then looked at again.
  *
- * What was here: the roster as three 76 dp tiles wrapped into the TOP-LEFT CORNER of an
- * otherwise blank white page, and the pad as one centred column of `Tile`s with a `maxWidth`
- * that produced three columns by accident of wrapping. On the `27 §1a` reference counter
- * (1366x768) that column ran **780 px** before "Unlock" — so the confirming act of the one
- * surface that gates every other sat below the fold, on a body with `overflow: hidden`, where
- * `27-F2` says no primary action may be. It was not reachable by scrolling either.
+ * **Round one — the geometry.** What was here: the roster as three 76 dp tiles wrapped into the
+ * TOP-LEFT CORNER of an otherwise blank white page, and the pad as one centred column of `Tile`s
+ * with a `maxWidth` that produced three columns by accident of wrapping. On the `27 §1a`
+ * reference counter (1366x768) that column ran **780 px** before "Unlock" — so the confirming act
+ * of the one surface that gates every other sat below the fold, on a body with
+ * `overflow: hidden`, where `27-F2` says no primary action may be. The fix was a two-column
+ * composition — identity left, pad right — because the pad's own height is the tallest fixed
+ * thing on the surface and everything else fits BESIDE it instead of under it.
  *
- * The fix is a two-column composition — identity on the left, pad on the right — because the
- * pad's own height (4 rows x 126 dp = 536 px) is the tallest fixed thing on the surface and
- * everything else fits BESIDE it instead of under it. Nothing is below the fold at 768.
+ * **Round two — and the founder was right about this one too.** With the geometry fixed the
+ * screen was still *"a colour-less screen with just 3 names"*. Two separate things were wrong and
+ * only one of them is visual:
+ *
+ * 1. **A touch FLOOR was being spent as a design.** Three `posture="counter"` tiles is three
+ *    **12 mm** boxes, which is `27-F8`'s menu-grid minimum, on the one surface an operator meets
+ *    20–60× a shift before anything else. `PersonTile` is the vocabulary item that was missing.
+ * 2. **The door was withholding facts the device already had.** `deviceState()` has carried
+ *    `deviceLabel`, `businessDay` and the three `00 §5.7` reachability facts throughout, and the
+ *    lock screen — the one screen with no `AppShell`, so no `StatusStrip` — showed none of them.
+ *    A cashier arriving for a shift could not tell which till she was at or whether it could
+ *    reach anything. That is not decoration: `00 §5.7` makes reporting what is true a platform
+ *    law, and this surface was the single exception to it.
+ *
+ * **`27-F16` is not a licence to leave a screen undesigned**, and conflating the two is what
+ * produced this. That FR reserves *signal* colour for the abnormal, and it is obeyed here
+ * absolutely — the door spends **zero** of `27-F14`'s allocation on its resting state. What it
+ * spends instead is what a monochrome instrument has always spent: the three neutral surfaces
+ * (`-sunken` field, `-raised` cards), the boundary `27-F66` already requires at 3:1, and the type
+ * ladder, which this product had built four steps of and was using two.
  */
 const GATE: React.CSSProperties = {
   height: "100%",
+  minHeight: 0,
+  display: "flex",
+  flexDirection: "column",
+  gap: space["space-6"],
+  padding: space["space-6"],
+};
+
+/**
+ * The room the door opens into: everything below the masthead, centred on BOTH axes.
+ *
+ * Centring is the whole answer to *"an enormous dead area"*. The content here has a natural size
+ * — three cards, or a name and a pad — and a 24″ desktop is larger than it; stretching a PIN pad
+ * across 531 mm of glass would be worse than the emptiness. So the room is given back as
+ * symmetric field, which reads as composed, where the same room anchored top-left reads as
+ * abandoned. `27-F4` is unaffected: a till lives on one panel, so nothing ever moves under an
+ * operator's hand.
+ */
+const ROOM: React.CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: space["space-6"],
+};
+
+/**
+ * The two-column composition of step two, unchanged in shape and now inside `ROOM`.
+ * `27-F4`: the pad's twelfth cell is still `Unlock`, bottom-right, where `NumericKeypad` puts
+ * its own — two pads on one device that disagree about which cell closes an entry is the
+ * muscle-memory break that FR exists to prevent.
+ */
+const STEP_TWO: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
   gap: space["space-8"],
-  padding: space["space-5"],
 };
 
 /** The identity half: who this is about, and what has been keyed so far. */
@@ -82,7 +145,91 @@ const STEP: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
   alignItems: "center",
+  gap: space["space-6"],
+};
+
+/**
+ * **The masthead — `00 §5.7` reaching the one surface it never reached.**
+ *
+ * Every operational screen carries `StatusStrip`; the lock surface sits OVER the shell (`02-F18`
+ * — a locked device shows only the unlock screen, and `App.tsx`'s header records why the gate is
+ * here and not inside `Counter`), so it has no strip and had no honesty row at all. A cashier
+ * arriving for a shift could not read which till she was standing at, what business day it
+ * thought it was, or whether it could reach the LAN, the hub or the cloud.
+ *
+ * **Every fact here is one `deviceState()` already served while locked** — `App.tsx` calls it on
+ * mount precisely to decide lock state — so this costs no new channel, no new schema field and
+ * no read a locked device was not already making. It is composition, not capability.
+ *
+ * `ConnectionFacts` and `CatalogHealth` are reused rather than restated, which is `21-F1`'s point
+ * and also the safer half: `ConnectionFacts` carries the correction that `down` is NOT the fault
+ * colour (`27-F14` allocates red to acted-on events and lists no connectivity claimant), and a
+ * hand-rolled row of dots on this screen would have re-introduced the two permanent red blocks
+ * that correction removed. `CatalogHealth` renders `null` when the menu is current (`27-F16`), so
+ * a healthy till carries no decoration here at all.
+ *
+ * **What is NOT here, named rather than left looking intentional: whether the DAY is open and
+ * whose shift is running.** It is the single most useful thing this screen could say to an
+ * arriving cashier and it is deliberately absent, because it is not a fact a locked device may
+ * serve. `main/authorize.ts`'s `authorizeReads` narrows `cashState` through `domain`'s
+ * `reportScope` against the asking SUBJECT, and a locked device has no subject — so putting the
+ * shift on the door means either widening an authorization boundary or routing around it, and
+ * Commandment 8 makes that a spec question and not a session's call. **Owed**, and it wants an
+ * FR: `02-F23` scopes the reconciliation to a person, and "what an unauthenticated operator at
+ * the glass may see about the day" is a question no FR in doc 02 currently answers.
+ */
+const MASTHEAD: React.CSSProperties = {
+  display: "flex",
+  alignItems: "flex-end",
+  justifyContent: "space-between",
   gap: space["space-5"],
+  paddingBottom: space["space-4"],
+};
+
+/**
+ * `01-F46`'s Asia/Karachi business date, read as a person reads a date.
+ *
+ * The strip renders the raw `YYYY-MM-DD` beside the word "Day", which is right for a dense chrome
+ * row an operator glances at mid-service. This is the door, it is read once at the start of a
+ * shift, and `21 §5` puts the reader at plausibly non-reading — a written month is the one form
+ * of a date that cannot be misread as day-first or month-first. English per `00 §5.6`.
+ *
+ * `Intl` with an EXPLICIT `en-GB` and an explicit UTC time zone, never the host's locale or the
+ * host's clock: the value is already `01-F46`'s branch business day, and re-interpreting it
+ * through a machine's own zone is how a date shifts by one at 05:00 Karachi. It degrades to the
+ * raw string rather than throwing — `01-F54`, and a blank date on a locked till reads as broken.
+ */
+/**
+ * `01-F26`'s registry role string, as a person reads it. `owner`, `branch_manager`, `cashier`,
+ * `kitchen`, `waiter`, `rider` arrive as identifiers over the sync chain (`01-F21` reference
+ * data), and `branch_manager` is not a word.
+ *
+ * A TRANSFORM and never a lookup table, deliberately. A `Record<Role, string>` here would be
+ * `domain`'s `ROLES` restated in a renderer — a second declaration of a closed set that can
+ * silently fall out of step, which is the shape `catalog.enabled` was closed for — and it would
+ * render nothing at all for a role this table had not heard of, on data that explicitly may name
+ * anything. Underscores to spaces and one leading capital is right for every current member and
+ * degrades honestly for any future one (`01-F54`).
+ *
+ * English per `00 §5.6`. `en-US` explicitly, not the host locale: `toLocaleUpperCase` under a
+ * Turkish locale turns `i` into `İ`, which is the classic way a machine's own locale reaches a
+ * string it has no business touching.
+ */
+const roleLabel = (role: string): string => {
+  const words = role.replace(/_/g, " ");
+  return words.charAt(0).toLocaleUpperCase("en-US") + words.slice(1);
+};
+
+const readableDay = (businessDay: string): string => {
+  const parsed = new Date(`${businessDay}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return businessDay;
+  return new Intl.DateTimeFormat("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(parsed);
 };
 
 /** `27-F42` — composite type tokens, taken whole. Never an assembled size/line-height pairing. */
@@ -98,10 +245,29 @@ const PROMPT: React.CSSProperties = {
  * The identified cashier. `27-F25` puts the operational payload at the top of the size ladder,
  * and on this surface the payload is WHO the ledger is about to name (`02-F41`) — the one fact
  * a mis-tap makes wrong and the one an operator must catch before submitting.
+ *
+ * **Raised from `text-numeric-primary` to `-hero`**, which is the same step `PersonTile` takes
+ * one screen earlier and for the same reason: the two surfaces are the two halves of `01-F61`'s
+ * one act, and a name that shrinks between choosing it and confirming it tells the operator the
+ * fact got less important exactly as it became irreversible.
  */
 const NAME: React.CSSProperties = {
+  fontFamily: typography["text-numeric-hero"].fontFamily,
+  fontSize: typography["text-numeric-hero"].fontSize,
+  lineHeight: `${typography["text-numeric-hero"].lineHeight}px`,
+  fontWeight: typography["text-numeric-hero"].fontWeight,
+  letterSpacing: typography["text-numeric-hero"].letterSpacing,
+  margin: 0,
+};
+
+/**
+ * The till's own name, in the masthead. `01-F27` — this is the DEVICE identity and it is
+ * deliberately not a person: a till says what it is before anyone has said who they are.
+ */
+const TILL: React.CSSProperties = {
   fontFamily: typography["text-numeric-primary"].fontFamily,
   fontSize: typography["text-numeric-primary"].fontSize,
+  lineHeight: `${typography["text-numeric-primary"].lineHeight}px`,
   fontWeight: typography["text-numeric-primary"].fontWeight,
   margin: 0,
 };
@@ -122,13 +288,25 @@ const MARKS: React.CSSProperties = {
   margin: 0,
 };
 
-/** A wrapping row of roster tiles, bounded so a large roster pages down rather than sideways. */
+/**
+ * A wrapping row of roster cards.
+ *
+ * **No `maxWidth`.** It carried 720 dp, which was a cap chosen for 76 dp tiles and is now the
+ * thing that would force a `PersonTile` row to wrap at three cards on a panel with room for four
+ * — the responsive defect this work exists to remove, one constant along. The row is centred by
+ * `ROOM` and bounded by the surface itself, so a large roster wraps to a second line when the
+ * glass genuinely runs out and not before.
+ *
+ * `27-F2` is satisfied without paging: this is a roster, not a catalogue, and `01-F61`'s
+ * identification grid is one branch's staff. If a roster ever outgrows two lines of cards that is
+ * a paged surface and a different design — named here so the next reader knows it was considered
+ * rather than missed.
+ */
 const ROW: React.CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
   justifyContent: "center",
-  gap: space["space-2"],
-  maxWidth: 720,
+  gap: space["space-5"],
 };
 
 /**
@@ -163,6 +341,13 @@ export const App = () => {
    */
   const [user, setUser] = useState<DeviceState["user"] | undefined>(undefined);
   /**
+   * The whole device state, kept so the masthead can render `00 §5.7`'s facts on the one surface
+   * that never had them. Same read, same push, no new channel — `user` above stays a separate
+   * piece of state because lock state has exactly ONE source and folding it into an object would
+   * make "is this device locked" a property lookup on a possibly-stale record.
+   */
+  const [device, setDevice] = useState<DeviceState | null>(null);
+  /**
    * `27-F68` — the density of the glass, read through the same seam as every other device fact.
    * It rides `deviceState()` rather than a channel of its own so it arrives on the read the
    * surface already waits for: there is no frame in which real content is painted at the wrong
@@ -174,7 +359,7 @@ export const App = () => {
    * cannot be stable: it re-ranks the grid the moment a name is added or edited, which `27-F4`
    * makes a breaking change for every operator who learned a tile by position.
    */
-  const [roster, setRoster] = useState<Session[]>([]);
+  const [roster, setRoster] = useState<RosterMember[]>([]);
   /**
    * Who the operator has identified as — and `01-F61` is explicit that this is **not** an
    * attempt: *"Identification is revocable until the PIN is submitted: tapping a different tile
@@ -190,6 +375,7 @@ export const App = () => {
     const state = await window.restos.deviceState();
     const next = state.user;
     setUser(next);
+    setDevice(state);
     // `27-F68` — re-read on every device-state read, so a panel that changes under a running
     // till resizes its own touch targets rather than keeping the one it booted on.
     setPanelPpi(state.panelPpi);
@@ -236,6 +422,42 @@ export const App = () => {
     <PanelRoot panelPpi={panelPpi ?? REFERENCE_COUNTER_PPI}>{children}</PanelRoot>
   );
 
+  /**
+   * The door, as one composition, so both `01-F61` steps get the same masthead and the same room.
+   *
+   * `WorkSurface` is here for the reason `AppShell` has one: this surface has layout opinions
+   * that depend on how much glass there is (`PersonTile`'s card size), and a mode measured
+   * separately per component is a mode two components can disagree about. `02-F18`'s lock screen
+   * has no `AppShell`, so it takes its own.
+   */
+  const door = (children: ReactNode) =>
+    panel(
+      <WorkSurface>
+        <div style={GATE}>
+          <div style={{ ...MASTHEAD, borderBottom: `1px solid ${color["borderColor-default"]}` }}>
+            <div>
+              {/* `01-F27` — the DEVICE's identity. A till says what it is before anyone has
+                  said who they are, and this screen never said it at all. */}
+              <p style={TILL}>{device?.deviceLabel ?? ""}</p>
+              <p style={{ ...PROMPT, color: color["fgColor-muted"] }}>
+                {device === null ? "" : readableDay(device.businessDay)}
+              </p>
+            </div>
+            {/* `00 §5.7` — the three facts, and `01-F56`'s catalog health, reused from the
+                vocabulary rather than restated. `CatalogHealth` draws nothing when the menu is
+                current (`27-F16`), so a healthy till carries no decoration here. */}
+            <div style={{ display: "flex", alignItems: "center", gap: space["space-3"] }}>
+              {device === null ? null : (
+                <ConnectionFacts lan={device.lan} hub={device.hub} cloud={device.cloud} />
+              )}
+              <CatalogHealth refusal={device?.catalog ?? null} />
+            </div>
+          </div>
+          <div style={ROOM}>{children}</div>
+        </div>
+      </WorkSurface>,
+    );
+
   // `01-F17` — nothing is blocked here, there is simply nothing yet known to draw.
   if (user === undefined) return <p>Starting…</p>;
   if (user !== null) return panel(<Counter />);
@@ -267,47 +489,61 @@ export const App = () => {
   /**
    * Step one: the fixed grid. **Never a text list** — `27-F6` forbids requiring typing on a
    * critical path and `21 §5` puts the cashier at plausibly non-reading, so each member is a
-   * `Tile`, which carries `27-F8`'s measured touch target. A row of names carries neither.
+   * pressable card and never a row of names.
    *
-   * `posture="counter"` is the standing-counter target this surface is used at; `keypad` below
-   * is the tighter one the digits are designed to.
+   * **`Tile posture="counter"` is gone from this surface and `PersonTile` replaces it**, which is
+   * the single change the founder's *"just 3 names"* actually asks for. A counter posture is
+   * `27-F8`'s **12 mm** menu-grid minimum — a floor, being spent as the design for the one screen
+   * that gates every other. `PersonTile` carries the name at the top of the type ladder and
+   * `01-F26`'s role beneath it, and it is the same component the approver grid will want.
+   *
+   * `27-F4` is not engaged: nothing is added, removed or reordered — main supplies the roster
+   * order and it is still rendered untouched. The card is the same target in the same place, at a
+   * size an operator can hit without looking.
    */
   if (chosen === null) {
-    return panel(
-      <div style={GATE}>
-        <div style={STEP}>
-          {/*
-            The surface names its own act. `27-F1` gives the operator nowhere to be lost and no
-            back affordance, so the one line of chrome a lock screen gets has to say what this
-            step IS — and `01-F61` makes it a step, not the whole thing: identify, THEN the PIN.
-            Three unlabelled boxes in the corner of a blank page said neither.
-          */}
-          <p style={PROMPT}>Who are you?</p>
-          <div style={ROW}>
-            {roster.map((member) => (
-              <Tile
-                key={member.user_id}
-                posture="counter"
-                label={member.display_name}
-                onPress={() => setChosen(member)}
-              />
-            ))}
-          </div>
+    return door(
+      <div style={STEP}>
+        {/*
+          The surface names its own act. `27-F1` gives the operator nowhere to be lost and no
+          back affordance, so the one line of chrome a lock screen gets has to say what this
+          step IS — and `01-F61` makes it a step, not the whole thing: identify, THEN the PIN.
+          Three unlabelled boxes in the corner of a blank page said neither.
+        */}
+        <p style={{ ...PROMPT, color: color["fgColor-muted"], letterSpacing: "0.12em" }}>
+          WHO ARE YOU?
+        </p>
+        <div style={ROW}>
+          {roster.map((member) => (
+            <PersonTile
+              key={member.user_id}
+              name={member.display_name}
+              {...(member.role === null || member.role === undefined
+                ? {}
+                : { role: roleLabel(member.role) })}
+              onPress={() => setChosen(member)}
+            />
+          ))}
         </div>
       </div>,
     );
   }
 
-  return panel(
-    <div style={GATE}>
+  return door(
+    <div style={STEP_TWO}>
       <div style={IDENTITY}>
         {/*
           Who the PIN is about to be charged against. `02-F41` makes this the cashier the ledger
           will name, so an operator who mis-tapped has to be able to see it before submitting —
           which is why it is the largest word on the surface and no longer a 16 px serif line.
+
+          `Readout` rather than a loose label and a loose name: it is the same caption-above-fact
+          pairing the money surfaces use, so the product has ONE way of saying "here is a fact and
+          here is what it is called" and this screen is not a second dialect of it.
         */}
-        <p style={{ ...PROMPT, color: color["fgColor-muted"] }}>Signing in as</p>
-        <p style={NAME}>{chosen.display_name}</p>
+        <Readout caption="SIGNING IN AS">
+          <p style={NAME}>{chosen.display_name}</p>
+        </Readout>
         {/*
           One mark per digit, and the digits themselves are never shown: `01-F61` records that
           shoulder-surfing is the norm on a shared counter. It is feedback, not a readout — an
@@ -317,15 +553,17 @@ export const App = () => {
           once entry starts moves everything under it on the first keystroke, and `27-F4` is
           about exactly that — the surface must not rearrange under a hand already moving.
         */}
-        <p
-          style={{
-            ...MARKS,
-            background: color["bgColor-surface-sunken"],
-            border: `1px solid ${color["borderColor-default"]}`,
-          }}
-        >
-          {"•".repeat(pin.length)}
-        </p>
+        <Readout caption="PIN">
+          <p
+            style={{
+              ...MARKS,
+              background: color["bgColor-surface-sunken"],
+              border: `1px solid ${color["borderColor-default"]}`,
+            }}
+          >
+            {"•".repeat(pin.length)}
+          </p>
+        </Readout>
         {/*
           Back to step one, and `01-F61` requires that this cost NOTHING: "a mis-tap on a grid
           charges a failed attempt to someone who is not in the building" is the failure it

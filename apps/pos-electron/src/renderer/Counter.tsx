@@ -386,8 +386,53 @@ export const Counter = () => {
    * visible, never a separate screen, never collapsed"* on the Order surface, and `DUE` already
    * carries the only number this surface needs (`27-F24` — the system computes, staff read).
    */
+  /**
+   * **THE ROOM AROUND THE PANEL, and it is the half a founder saw before he saw anything else.**
+   *
+   * Opened on a window much wider than `27 §1a`'s panel, this surface put the tender panel in the
+   * **top-left** at its `fit-content` size: keypad stranded up and right, `TAKE CASH` mid-left,
+   * roughly the bottom third of the window empty. His verdict was *"this user interface is
+   * unusable for a human"*, and every gate was green — `layout:check` asks whether a thing FITS
+   * and a thing anchored in a corner of an ocean fits perfectly.
+   *
+   * **Centring is the fix, and it is a decision about the leftover room rather than an absence of
+   * one.** The content here has a natural maximum: the pad is fixed at `27-F8`'s 20 mm keys (a
+   * floor, and `27-F8` also records no accuracy gain above ~10 mm, so a bigger key buys nothing),
+   * the method row is a closed set of five (`02-F12`), and the two figures already sit at the top
+   * of the type ladder. There is nothing on this surface that a 24″ desktop's extra 190 mm should
+   * be spent on, and stretching `TAKE CASH` across it — which is what filling the width does, and
+   * what this panel used to do before `width: fit-content` — is worse than the emptiness.
+   *
+   * So the room is given back as **symmetric field**. That is not a euphemism: asymmetric dead
+   * space on two sides reads as a layout that failed, and the same quantity of space distributed
+   * evenly around a composed panel reads as deliberate. What the wide surface DOES earn is the
+   * money figure — `TenderPanel` steps `CHANGE` to `text-numeric-display` on `wide`, because
+   * `27-F25`'s "largest element in their region" is relative and `27-F11c` makes a larger panel a
+   * larger region.
+   *
+   * `27-F4` is untouched: a till lives on one panel for its service life, so no operator ever
+   * watches this reflow. And under `03-F5`'s band a centred panel moves by HALF the band's height
+   * where a top-anchored one moved by all of it.
+   */
+  const centred = (children: React.ReactNode) => (
+    <div
+      style={{
+        flex: 1,
+        minHeight: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      {children}
+    </div>
+  );
+
   const paySurface =
     current === undefined ? (
+      // The empty state is centred too. A single muted sentence in the top-left corner of a
+      // 531 mm panel is the same defect at a smaller scale, and `00 §5.7` makes this line the
+      // device honestly reporting that there is nothing to settle — a fact worth composing.
       <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
         No order to settle — start one on Order.
       </p>

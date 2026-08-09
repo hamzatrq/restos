@@ -135,6 +135,56 @@ export type DeviceState = z.infer<typeof DeviceStateSchema>;
  */
 export type Session = NonNullable<DeviceState["user"]>;
 
+/**
+ * One row of `01-F61`'s identification roster: a `Session` plus **the role that user holds at
+ * this branch**.
+ *
+ * `01-F26` makes a role a per-(user, location) assignment and it is already in `store.staff`,
+ * already read by `main/authorize.ts` to answer Commandment 8 — it was simply never projected to
+ * the one screen where the operator could use it. What that cost is small and real: `02-F22`'s
+ * role guard means **a cashier cannot open the day**, so on a dev till Ayesha's day-open is
+ * refused in main and the only place she learns why is the refusal. The door now says it before
+ * she taps.
+ *
+ * **It authorizes NOTHING, and it must not be read as though it does** (Commandment 8, `18 §5`).
+ * This is the same posture as `EscalationOffer.satisfied_by` above: a display fact, projected by
+ * main, that a renderer forging would gain exactly nothing by — every write is still gated by
+ * `main/authorize.ts` against the registry, never against anything that crossed this bridge.
+ *
+ * **`null` is a real and expected value, not a defect.** `main/authorize.ts`'s `roleOf` narrows a
+ * registry string to a matrix column and returns nothing for a row naming a role `domain` does
+ * not carry — reference data arrives over the sync chain and can name anything. A tile for such a
+ * user still renders, with no role line: `01-F54`'s degrade-to-what-you-know, and the alternative
+ * (guessing "cashier") would put a false claim about a person's authority on the glass.
+ *
+ * A separate type from `Session` on purpose. `Session` is `DeviceState["user"]` — who is signed
+ * IN — and `01-F27` exists because that axis and "who COULD sign in" get conflated the moment
+ * they share a shape.
+ *
+ * ## Why `role` is OPTIONAL and not required, and what that costs
+ *
+ * Required is where a field like this belongs — a host that forgot it would be a typecheck error
+ * rather than a silent absence, which is the whole posture this wave's recurring defect argues
+ * for. It is optional for one reason: **`unlock-gate.dom.test.tsx` is an S-0c acceptance oracle,
+ * authored from spec text by a session that saw no implementation, and its declared contract is
+ * `staff() => Promise<Session[]>`.** Widening the return type to a required field turns that
+ * harness red, and an implementer editing the oracle that governs the surface he is implementing
+ * is exactly what `24 §3` step 2 forbids — so the contract bends and the test does not.
+ *
+ * This is the same trade `panelPpi` above records, made for the same reason and with the same
+ * remedy: the price of an optional field is that **absent has to mean something**, and what it
+ * means here is a card with no role line — indistinguishable from a user with no assignment at
+ * this branch. So it is held by a hand-written seam assertion,
+ * `main/__acceptance__/roster-role.test.ts`, which is what `seams:check` structurally cannot
+ * express (a field on a mapping is neither an unreached export nor an unsupplied optional).
+ */
+export const RosterMemberSchema = z.object({
+  user_id: z.string().min(1),
+  display_name: z.string().min(1),
+  role: z.string().min(1).nullable().optional(),
+});
+export type RosterMember = z.infer<typeof RosterMemberSchema>;
+
 /** One open order, as the fold projects it. The renderer never assembles this itself. */
 export const OpenOrderSchema = z.object({
   order_id: z.string(),
@@ -531,11 +581,15 @@ export type RestosBridge = {
    * sort cannot be stable — it re-ranks the grid the moment a name changes, and a tile learned
    * by position is what makes this surface usable to a non-reader (`21 §5`).
    *
-   * Carries `Session`, so **no `pin_hash` crosses this bridge**. The renderer never verifies
+   * Carries `RosterMember`, so **no `pin_hash` crosses this bridge**. The renderer never verifies
    * anything (`01-F28` puts that in main), so a credential hash on this side would be a
    * secret shipped to the untrusted end of the seam for no purpose at all.
+   *
+   * It carries the `01-F26` ROLE, which `RosterMember` explains: a display fact that authorizes
+   * nothing, projected because the one screen that could use it was the one screen without it.
+   * A `RosterMember` is a `Session` plus that field, so every existing consumer still typechecks.
    */
-  staff: () => Promise<Session[]>;
+  staff: () => Promise<RosterMember[]>;
   /**
    * `02-F23`/`02-F37`/`02-F43` — the `shift_cash` projection behind the Cash and Me surfaces.
    *
