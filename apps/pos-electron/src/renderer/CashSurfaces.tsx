@@ -157,7 +157,22 @@ const ByMethod = ({ expected }: { expected: Record<PaymentMethod, number> }) => 
 const latest = <T,>(rows: readonly T[], key: (row: T) => number | string): T | null =>
   rows.reduce<T | null>((best, row) => (best === null || key(row) >= key(best) ? row : best), null);
 
-const openShiftOf = (cash: CashState): CashShift | null =>
+/**
+ * The one open shift, and **the ONE definition of it in this app** — exported for that reason
+ * rather than for reuse.
+ *
+ * `02-F22` binds "subsequent cash settlements **and** drawer events" to a shift, so the money
+ * path (`payment.recorded`, in `Counter.tsx`) and the drawer path (`cash.drawer_opened` /
+ * `cash.paid_out`, below) must answer *"which shift is open?"* identically. Two answers is not
+ * a duplication smell, it is a live money defect: `Counter.tsx` shipped a literal `null` here
+ * while these three call sites resolved correctly, so every settlement bypassed `02-F23`'s
+ * expected-cash map and raised `02-F37`'s `unbound_settlement` on 100% of sales — an anomaly
+ * built for the exceptional case, firing always, which makes it noise instead of signal.
+ *
+ * This is `catalog.enabled`'s lesson one package over: the fix for two declarations of one fact
+ * is ONE declaration, not two that agree today.
+ */
+export const openShiftOf = (cash: CashState): CashShift | null =>
   latest(
     cash.shifts.filter((s) => s.closed === 0),
     (s) => s.open_at,
