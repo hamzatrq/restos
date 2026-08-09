@@ -67,7 +67,12 @@ export type TypeStyle = {
   fontWeight: number;
   letterSpacing: string;
 };
-export type TypeName = "text-numeric-hero" | "text-numeric-primary" | "text-body" | "text-label";
+export type TypeName =
+  | "text-numeric-display"
+  | "text-numeric-hero"
+  | "text-numeric-primary"
+  | "text-body"
+  | "text-label";
 
 export const typography = Object.fromEntries(
   Object.entries(manifest.typography).filter(([k]) => !k.startsWith("$")),

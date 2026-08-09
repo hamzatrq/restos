@@ -14,6 +14,17 @@ export {
   type PhysicalSize,
   usePhysicalSize,
 } from "./physical";
+// 27-F11c — a layout mode is a PHYSICAL question too: `27 §1a` lists four deployment surfaces
+// and the product had no responsive construct of any kind. The mode is derived from measured
+// millimetres, so the two counter panels are the same mode and a 24" desktop is not.
+export {
+  SURFACE_MODE_MIN_MM,
+  type SurfaceMode,
+  surfaceModeFor,
+  useSurfaceMode,
+  WorkSurface,
+  type WorkSurfaceProps,
+} from "./surface-mode";
 // 27-F19's KDS opt-in and 27-F67's training inversion are the same mechanism, so it ships
 // as one: a host app wraps its tree in <ThemeProvider polarity> and every component follows.
 export { inverse, ThemeProvider, type ThemeProviderProps, useColor, usePolarity } from "./theme";
