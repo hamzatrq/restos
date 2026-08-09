@@ -840,3 +840,94 @@ in principle**, but see the owed item below — the manifest table itself was no
   the fold refused to pick a winner. Hiding the first would blank the Me tab; hiding the second
   would conceal a contested shift from the cashier it accuses — both invert `02-F23`'s protection
   guarantee, which is the half of that FR most easily lost.
+## ✅ EVERY SETTLEMENT WAS UNBOUND — the money path read a literal `null` (August 2026)
+
+`Counter.tsx` wrote **`shift_id: null`** into every `payment.recorded`, under a comment saying
+*"the POS has no shift concept yet"*. It had one, and **that same component read it** —
+`window.restos.cashState?.()`, twenty lines above the defect — while the three sibling call sites
+in `CashSurfaces.tsx` (`shift.closed`, `cash.drawer_opened`, `cash.paid_out`) all resolved it
+correctly with `openShift?.shift_id ?? null`. Only the money path did not.
+
+**The cost was total, not partial.** `sync-client/src/folds/shift-cash.ts` buckets by
+`payload.shift_id` into `expected_json`, which *is* `02-F23`'s "system-expected cash (by method)".
+With a constant null **no sale ever reached a shift's expected map**: a cashier closed her shift
+and read Rs 0 expected from sales while every real settlement sat in the unbound bucket raising
+`unbound_settlement`. `02-F22` ("a shift binds subsequent cash settlements … to that cashier") was
+violated on **100% of settlements**, and `02-F37`'s anomaly — written for the exceptional case —
+fired always, which is noise rather than signal, and it was hiding the defect it was reporting.
+
+**The fix is one expression**, `shift_id: openShift?.shift_id ?? null`, resolved through
+`CashSurfaces.tsx`'s now-**exported** `openShiftOf` so there is ONE definition of "which shift is
+open" for both the money path and the drawer path. `?? null` is not a fallback to tidy away — it
+IS `02-F37`, and it is why the resolution can never gate the append. **`packages/sync-client` was
+not touched and needed no change**: the fold was correct throughout, so this wants no
+protected-path review on that account.
+
+**Measured on the running app, `RESTOS_DEV_MENU=1` + `RESTOS_DEV_PIN`, signed in as Hina
+(branch_manager — `02-F22`'s role guard means a cashier cannot open the day), same flow both
+times: open day Rs 5,000 float → open shift → five taps of Chicken Karahi (Rs 7,250) → TAKE CASH →
+close the shift counting Rs 12,250.** Read out of `device.db`, not off the screen:
+
+| | `payment.recorded.shift_id` | `shift.closed.expected…{cash}` | `variance_paisa` |
+|---|---|---|---|
+| **before** | **`null`** | **0** | 1225000 — **the entire drawer reads OVER** |
+| **after** | `019fe771-3a96-…` = the open shift | **725000** (Rs 7,250) | 500000 — exactly the opening float |
+
+The variance line is the user-visible bug: before, a cashier who counted her drawer *correctly*
+was Rs 12,250 **over** with nothing to point at; after, the residue is the Rs 5,000 float, which is
+right because `02-F23`'s snapshot is the tender by method **UNADJUSTED** (`CashSurfaces.tsx` says
+so, and netting the float in would make `01-F30` unresolvable).
+
+**Mutation matrix — control: 411/411 green (406 pre-existing + 5 new).** In-tree, byte-exact
+backups with a restore trap, full package suite under every mutant.
+**The right-hand column is the finding.**
+
+| # | mutant (exactly one branch) | new (5) | pre-existing 406 |
+|---|---|---|---|
+| M1 | **THE DEFECT VERBATIM** — `shift_id: null` restored | 3 | **all 406 green** |
+| M2 | **CONTROL** — `openShiftOf` drops its `closed === 0` filter | 2 | 405 (`cash-tab`'s `shift.opened`) |
+| M3 | `?? null` dropped, so the key goes `undefined` | 1 | 405 (the null-reference test) |
+| M4 | **THE PLAUSIBLE WRONG FIX** — `if (openShift === null) return;` | 1 | **400** (6 × `02-F37`) |
+| M5 | `02-F45` break — the shift's `cashier` copied into the payload | 1 | 405 (the identity sweep) |
+| M6 | **NEGATIVE CONTROL** — `cash === null ? … :` → `cash ? … :` | **0** | **all green** |
+
+**M1 is the number to remember: the defect that mis-bucketed every rupee in the product leaves
+all 406 pre-existing tests green.** `unbound-settlement.dom.test.tsx` asserts `shift_id` **is
+null** — correctly, under a fixture that never opens a shift — so a hardcoded null satisfies it.
+The suite had exactly one fixture, and it was the one the hardcode passes. **This is the round-3
+law's shape on a money field: the guard was built correctly and never pointed at the dangerous
+case.** The fix is a second fixture (the file's last describe block), *not* a change to any
+existing assertion.
+
+**M4 is why none of those assertions may be weakened, and it is the strongest row here.** The
+"safe" repair — refuse to settle until a shift is open — kills **six** pre-existing tests. Those
+tests are not obstacles to the fix; they are the guard against the fix overshooting into an
+`01-F17` violation, and they bite hard. Keep both fixtures: the product must bind when there IS a
+shift and record the truth when there is not, and one fixture can only ever prove one of those.
+
+**M2 and M1 are different failures of one fact and neither subsumes the other** — M2 (the shared
+helper) is partly visible to the drawer's own suite, M1 (the money call site) is invisible to
+everything. That is AGENTS.md's "you need BOTH properties" split landing on one expression.
+**M6 is what makes the red rows mean anything:** a real one-branch edit reddens nothing.
+
+**⚠ TWO ENVIRONMENT TRAPS COST MOST OF THIS SESSION'S CLOCK, AND NEITHER IS A PRODUCT DEFECT.**
+1. **A backgrounded Electron window is OCCLUDED, and then the item grid is EMPTY with nothing
+   saying why.** `document.visibilityState` is `hidden`, Chromium stops delivering
+   ResizeObserver callbacks, `usePhysicalSize` never measures, `ItemGrid` computes zero capacity
+   and renders **no tiles** — so no line can be added, the bill is Rs 0, and every money figure
+   downstream is a false zero that looks exactly like the defect under test. `menu()` returns all
+   8 items the whole time, which is what makes it so misleading. `Page.bringToFront` is **not**
+   enough. Launch with `--disable-backgrounding-occluded-windows --disable-renderer-backgrounding
+   --disable-features=CalculateNativeWinOcclusion` and `visibilityState` goes `visible`. (The
+   layout gate is immune: it drives `webContents.executeJavaScript` on a `show: false` window it
+   owns, so nothing about it warns you.)
+2. **`TenderPanel`'s keypad enters RUPEES and an EMPTY entry tenders ZERO** —
+   `enteredP = entry * 100`, and `onTender` passes `coversBill ? remainingP : enteredP`. Pressing
+   `TAKE CASH` without keying records `amount_paisa: 0`, a *successful* settlement worth nothing.
+   The shift then binds correctly and still shows Rs 0 expected, which reads as the money bug
+   surviving its own fix. Key the due first.
+
+**And the harness trap fired live, exactly as AGENTS.md describes it.** A backgrounded launch was
+reported by the notification as **"completed (exit code 0)"** while the `REAL_EXIT=$?` marker
+written inside the log said **127** — the electron binary was not on the path the command used.
+A reported exit code is not evidence; the marker inside the log is.

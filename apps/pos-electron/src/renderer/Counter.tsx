@@ -23,7 +23,7 @@ import type {
   OpenOrder,
   Session,
 } from "../shared/ipc";
-import { CashSurface, MeSurface } from "./CashSurfaces";
+import { CashSurface, MeSurface, openShiftOf } from "./CashSurfaces";
 import { ManagerApproval } from "./ManagerApproval";
 import { isCloudInbox, OrdersSurface } from "./OrdersSurface";
 
@@ -229,6 +229,16 @@ export const Counter = () => {
   const current = orders[0];
 
   /**
+   * `02-F22` — the shift a settlement binds to, read from the SAME projection and through the
+   * SAME helper the drawer writes in `CashSurfaces.tsx` use. One definition, so the money path
+   * and the drawer path cannot drift apart; see `openShiftOf` for what it cost when they had.
+   *
+   * `null` here is a fact about the branch, never a gate: `02-F37` and `01-F17` make settling
+   * with no shift open succeed. The tender handler below records the null and does not refuse.
+   */
+  const openShift = cash === null ? null : openShiftOf(cash);
+
+  /**
    * Every write goes through here, and the `catch` is the point.
    *
    * `void promise.then(reload)` leaves a REJECTION UNHANDLED, which in a renderer is not a tidy
@@ -402,12 +412,32 @@ export const Counter = () => {
                 // under full observation.
                 purpose: "settles_order",
                 // 26 §7 — the shift this settlement buckets to is CARRIED, never resolved
-                // at fold time from the reading device's state (01-F34). Null because no
-                // shift is open: the POS has no shift concept yet, and `02-F37` makes that
-                // the legal outcome — "settling with no shift open succeeds ... recorded
-                // with a null shift reference ... Never a modal, never a block", because
-                // `01-F17` forbids stopping a sale with a customer standing there.
-                shift_id: null,
+                // at fold time from the reading device's state (01-F34). That is why the
+                // renderer reads it HERE, at append time, and writes the answer down.
+                //
+                // ⚠ This was a literal `null`, under a comment claiming "the POS has no shift
+                // concept yet". It had one — this component reads `cashState()` — and the
+                // three sibling call sites in `CashSurfaces.tsx` resolved it correctly while
+                // the money path did not. The cost was total, not partial: `02-F22` binds
+                // settlements to a shift, `shift-cash.ts` buckets by this key into `02-F23`'s
+                // "system-expected cash (by method)", and a constant null meant NO sale ever
+                // reached a shift's expected map — a cashier closed her shift and read Rs 0
+                // expected from sales, with every settlement in the unbound bucket raising
+                // `unbound_settlement`. `02-F37`'s anomaly is for the exceptional case; firing
+                // on 100% of settlements it is noise, and it hid the defect it was reporting.
+                //
+                // `?? null` is NOT a fallback to tidy away — it is `02-F37` itself, and the
+                // reason this resolution can never gate the append: settling with no shift
+                // open SUCCEEDS, records the null reference, and is "never a modal, never a
+                // block" because `01-F17` forbids stopping a sale with a customer standing
+                // there. Bind when there is a shift; record the truth when there is not.
+                //
+                // `02-F45` governs the OTHER identity on this event and is deliberately not
+                // touched: attribution rides the envelope's `actor_user_id`, stamped in main
+                // from the PIN session. The shift is a payload key (a bucket, carried under
+                // `26 §7`); the cashier is not (a second source for one fact). Adding a
+                // `cashier` here would be the duplication that FR forbids by name.
+                shift_id: openShift?.shift_id ?? null,
               },
               refs: [],
             })
