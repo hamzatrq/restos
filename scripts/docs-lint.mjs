@@ -150,6 +150,23 @@ if (agents.split("\n").length > 120)
       // in one of these families is still caught.
       "device.manage",
       "catalog.edit_menu_prices",
+      // The seven actions 14-F30 names to COUNT the precedent it follows (7 of 22 have no
+      // Appendix A row). Every one is the infinitive of an act; every event in the same family is
+      // 00 §6's `noun.verb_past` — `shift.open_close` the action versus `shift.opened` /
+      // `shift.closed` the events, `refund.issue` versus `refund.issued`. So none of these can
+      // ever become an event and listing them costs the rule nothing.
+      //
+      // ⚠ The two vocabularies collide on exactly one name and it is worth knowing: `cash.paid_out`
+      // is BOTH a permission action and a real event type, so it is absent here — it passes as a
+      // known event. A future action that happens to be spelled like a past-tense event will
+      // likewise pass silently; the rule cannot tell them apart, and only the count above would.
+      "order.price_override",
+      "approval.grant",
+      "shift.open_close",
+      "cash.count",
+      "cash.drawer_no_sale",
+      "refund.issue",
+      "day.open_close",
       // The naming-convention placeholder itself (00 §6).
       "noun.verb_past",
     ]);

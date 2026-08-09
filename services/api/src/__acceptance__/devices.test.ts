@@ -37,6 +37,20 @@ const PASSWORD = "a-bootstrap-owner-password";
 
 const OWNER_ID = "user-owner";
 const MANAGER_ID = "user-manager";
+/**
+ * A branch manager assigned **org-wide** (`branch_id: null`), and the reason this file has two
+ * managers rather than one.
+ *
+ * Neither device procedure states a `branch_id` (`devices.ts` — the branch is learned by reading
+ * the registry, which happens *inside* the revocation, so a caller-stated branch would be checked
+ * after the destructive act). `branchOf` therefore resolves the scope to `null`, and `rolesAt`
+ * matches only org-wide assignments against a `null` branch — so `MANAGER_ID` above is refused by
+ * **scope resolution before the matrix cell is ever read**. That refusal is real and worth keeping,
+ * but it is not `14-F30`'s cell: a senior review measured that the branch-scoped test passes
+ * unchanged under `device.manage` widened to `branch_manager: "allow"`, leaving this service with
+ * **no coverage of the cell for any non-owner role**. This subject reaches the matrix.
+ */
+const MANAGER_ORG_ID = "user-manager-org";
 const CASHIER_ID = "user-cashier";
 
 /** Server time is injected (`18 §4`) and MOVES, so `server_received_at` can be asserted exactly. */
@@ -63,6 +77,13 @@ const users = async (): Promise<UserRecord[]> => {
       email: "manager@devices.test",
       password_hash,
       assignments: [{ role: "branch_manager", branch_id: BRANCH }],
+    },
+    {
+      user_id: MANAGER_ORG_ID,
+      org_id: ORG,
+      email: "manager-org@devices.test",
+      password_hash,
+      assignments: [{ role: "branch_manager", branch_id: null }],
     },
     {
       user_id: CASHIER_ID,
@@ -112,7 +133,46 @@ beforeAll(async () => {
   });
   await login("owner@devices.test", OWNER_ID);
   await login("manager@devices.test", MANAGER_ID);
+  await login("manager-org@devices.test", MANAGER_ORG_ID);
   await login("cashier@devices.test", CASHIER_ID);
+
+  /**
+   * ⚠ **THE STORE THIS ORG'S EVENTS SHARE — seeded so every read below runs the production shape.**
+   *
+   * `01-F62`'s org store is ONE endpoint holding the whole org-scoped set, and `services/api` itself
+   * writes `catalog.changed` into it for this same org on every publish
+   * (`createGatewayLedgerAppender.append`). So the moment an org has ever published a menu, its
+   * `/internal/org-events` read carries rows `DeviceRevokedPayload` cannot parse — which is exactly
+   * why `createGatewayDeviceDirectory.revocations` filters to `device.revoked` before parsing, the
+   * mirror of the filter `createGatewayLedgerAppender.history` applies in the other direction.
+   *
+   * Until this seed, **no fixture in this file put a non-`device.revoked` row in the store**, so
+   * deleting that filter failed 0 of 167 tests while `devices.list` would 500 in production for any
+   * org with a menu — the screen an owner opens to kill a stolen tablet. `fake-gateway.ts` preserves
+   * `type` as sent *specifically* so an adapter reading it back unfiltered would be caught, and the
+   * capability was never pointed at the case: AGENTS.md's round-3 defect, and the reason this is a
+   * fixture rather than only an assertion — the whole file now runs against a mixed store.
+   * `catalog-adapter.test.ts`'s *"keeps 01-F62's other org-scoped types out of 14-F3's price
+   * history"* is the same fixture one adapter over, and it already existed.
+   */
+  await fetch(`${gateway.url}/internal/org-events`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${gateway.token}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      org_id: ORG,
+      type: "catalog.changed",
+      actor_user_id: OWNER_ID,
+      server_received_at: 1_700_000_000_001,
+      payload: {
+        entity: "item",
+        entity_id: "item-biryani",
+        version: 1,
+        before_ref: null,
+        after_ref: "sha-after",
+        price_changes: [],
+      },
+    }),
+  });
 
   gateway.registerDevice(ORG, {
     device_id: "device-counter-1",
@@ -151,16 +211,37 @@ describe("§A — device.manage gates both procedures (14-F30, Commandment 8)", 
     expect((await call("devices.revoke", null, { device_id: "device-kds-1" })).status).toBe(401);
   });
 
-  it("a branch manager is REFUSED both — the cell is deny, not optional (14-F30)", async () => {
-    // The mutant this exists for is `device.manage` widened to `branch_manager: "allow"`, which is
-    // the plausible-looking wrong reading of "Used by owners, permitted managers" (doc 14 §1). Doc
-    // 14 §9 q1 says a manager's back-office reach is an OPEN QUESTION, so the matrix may not
-    // answer it here.
+  it("a BRANCH-SCOPED manager is refused both — by scope resolution, before the cell (14-F30)", async () => {
+    // ⚠ **THIS TEST DOES NOT OWN THE MATRIX CELL, AND ITS COMMENT ONCE CLAIMED IT DID.** It said
+    // "the mutant this exists for is `device.manage` widened to `branch_manager: allow`" — and a
+    // senior review measured that it PASSES under exactly that mutant. Neither procedure states a
+    // `branch_id`, so `branchOf` resolves the scope to `null` and `rolesAt` drops this subject's
+    // branch assignment before `can()` reads any cell: the 403 here is scope, not policy. That is a
+    // real property and worth pinning — a branch-scoped subject must not reach an org-wide act — so
+    // the test stays with its title corrected. The cell itself is owned by the test below, which
+    // uses an ORG-WIDE manager and is the one that dies under D1.
     const list = await call("devices.list", MANAGER_ID);
     expect(list.status).toBe(403);
     const revoke = await call("devices.revoke", MANAGER_ID, { device_id: "device-kds-1" });
     expect(revoke.status).toBe(403);
     // …and the refusal names the action, so the client is not guessing which check failed.
+    expect(JSON.stringify(revoke.body)).toContain("device.manage");
+  });
+
+  it("an ORG-WIDE manager is REFUSED both — the CELL is deny, not optional (14-F30)", async () => {
+    // The mutant this exists for is `device.manage` widened to `branch_manager: "allow"` — the
+    // plausible-looking wrong reading of doc 14 §1's "Used by owners, permitted managers". Doc 14
+    // §9 q1 says a manager's back-office reach is an OPEN QUESTION, so the matrix may not answer it
+    // here, and `packages/domain`'s own D1 mutant row is this cell.
+    //
+    // This subject's assignment is org-wide, so it survives `rolesAt` against the `null` scope both
+    // procedures resolve to and the refusal can only come from the matrix. Without it, `14-F30`'s
+    // cell has NO coverage on this plane for any non-owner role: every other refusal in this file
+    // is scope resolution wearing a 403.
+    const list = await call("devices.list", MANAGER_ORG_ID);
+    expect(list.status).toBe(403);
+    const revoke = await call("devices.revoke", MANAGER_ORG_ID, { device_id: "device-kds-1" });
+    expect(revoke.status).toBe(403);
     expect(JSON.stringify(revoke.body)).toContain("device.manage");
   });
 
@@ -315,6 +396,22 @@ describe("§C — the list joins registry state to ledger attribution (14-F12, 1
     // …and `14-F12`'s one column this table can honestly answer.
     expect(live?.device_class).toBe("kds");
     expect(live?.branch_id).toBe(BRANCH);
+  });
+
+  it("survives 01-F62's OTHER org-scoped types in the same store (14-F12)", async () => {
+    // The production failure this owns, stated as its own assertion rather than left implicit in
+    // the fixture: `01-F62`'s store is SHARED, and this service writes `catalog.changed` into it
+    // for this same org on every publish. An adapter that parsed every row as a revocation would
+    // throw on the first one, so `devices.list` would 500 for any org that has ever published a
+    // menu — and it is the screen an owner opens to kill a stolen tablet. The `beforeAll` seed is
+    // what makes this reachable; the assertion is what names it.
+    const reply = await call("devices.list", OWNER_ID);
+    expect(reply.status).toBe(200);
+    const rows = reply.body as readonly { device_id: string; revoked_by: string | null }[];
+    // …and the foreign row is IGNORED, not merely survived: it contributes no phantom device and
+    // attributes nobody. A filter that dropped `device.revoked` instead would also answer 200.
+    expect(rows).toHaveLength(3);
+    expect(rows.find((row) => row.device_id === "device-counter-1")?.revoked_by).toBe(OWNER_ID);
   });
 });
 
