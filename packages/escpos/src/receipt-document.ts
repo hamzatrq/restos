@@ -224,8 +224,8 @@ const RECEIPT_BLOCK_RENDERERS: Readonly<Record<string, BlockRenderer>> = {
    * the platform's own English is broken and is permanent. Byte output for a Latin name is
    * identical either way; only the S1 band's sentence differs.
    */
-  RECEIPT_ITEMS: (data) =>
-    receiptOf(data).lines.flatMap((line): readonly EncoderPart[] => [
+  RECEIPT_ITEMS: (data) => [
+    ...receiptOf(data).lines.flatMap((line): readonly EncoderPart[] => [
       { kind: "text", value: `${line.quantity} `, ink: "normal" },
       { kind: "user_text", value: line.name },
       // `each` is an English word (`00 §5.6`) and it is load-bearing: without it the figure reads
@@ -235,6 +235,17 @@ const RECEIPT_BLOCK_RENDERERS: Readonly<Record<string, BlockRenderer>> = {
       { kind: "text", value: ` ${amountToken(line.unit_price_paisa)} each`, ink: "normal" },
       { kind: "feed", lines: 1 },
     ]),
+    // `27-F58`: "Groups are separated by **blank lines, not rules**."
+    //
+    // ⚠ THIS WAS MISSING AND ONLY LOOKING AT THE PAPER FOUND IT. The first receipt rendered
+    // through `RESTOS_PRINT_TO_FILE` ran `Total Rs 930` straight on from the last item line with
+    // no gap, so the body and the totals read as one block — while every other transition on the
+    // document had its break. The suite did not see it because §I asserted only that SOME blank
+    // line exists, which the head and totals breaks already satisfied: the round-3 shape exactly,
+    // a mechanism that was right and a guard that was never pointed at the transition that lacked
+    // it. §I now asserts a blank line at EVERY region change, and this is the part that fixes it.
+    GROUP_BREAK,
+  ],
   /** `03-F33`'s `TOTALS` region and `02-F15`'s "totals" — the fold's own figure, never a sum here. */
   RECEIPT_TOTALS: (data) => [
     ...row("Total", amountToken(receiptOf(data).total_paisa)),

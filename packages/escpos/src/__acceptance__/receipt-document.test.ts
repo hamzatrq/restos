@@ -683,6 +683,33 @@ describe("§I 27-F56/27-F58 — the ink ladder and the whitespace", () => {
     }
   });
 
+  it("27-F58: EVERY region change carries a blank line — not merely some of them", () => {
+    // ⚠ THE ASSERTION ABOVE PASSED WHILE THE DOCUMENT WAS WRONG, and only looking at the printed
+    // page found it: `Total Rs 930` ran straight on from the last item line with no gap, because
+    // `RECEIPT_ITEMS` ended in a plain feed while the head and totals blocks ended in a
+    // `GROUP_BREAK`. "Some blank line exists" was satisfied by the transitions that were already
+    // right. That is the round-3 law's own shape — the guard was built and never pointed at the
+    // dangerous case — so this one walks the region boundaries and asks at each.
+    const blocks = draw(SALE).blocks;
+    const offenders: string[] = [];
+    for (let i = 1; i < blocks.length; i += 1) {
+      const prev = blocks[i - 1] as (typeof blocks)[number];
+      const here = blocks[i] as (typeof blocks)[number];
+      if (prev.region === here.region) continue;
+      // The tail is a cut, not a group: `27-F58` separates groups of CONTENT.
+      if (here.region === "TAIL_LOCKED") continue;
+      const upToHere = linesOf(blocks.slice(0, i));
+      const last = upToHere[upToHere.length - 1];
+      if (last === undefined || !last.blank) {
+        offenders.push(`${prev.region} → ${here.region} (before ${here.block_id})`);
+      }
+    }
+    expect(
+      offenders,
+      "these region changes run straight on with no blank line, so two groups read as one",
+    ).toEqual([]);
+  });
+
   it("03-F36: a label and its value are separated by exactly one space", () => {
     for (const line of linesOf(draw(SALE).blocks).filter((l) => !l.blank)) {
       expect(line.text, `space-as-layout in ${JSON.stringify(line.text)}`).not.toMatch(/ {2,}/);
