@@ -884,35 +884,6 @@ const run = async (): Promise<number> => {
   }
 
   // ---------------------------------------------------------------------------------------
-  // 5. THE OWED REGISTER — exempt the known fourth defect, and FAIL if it has been fixed.
-  // ---------------------------------------------------------------------------------------
-  const owed = failures.filter((f) => f.state === "alarm" && OWED_UNDER_ALARM.includes(f.surface));
-  /**
-   * A FIT verdict on a panel the counter does not ship to is **reported, never fatal** — see the
-   * `ships: false` note on `tablet-10.1`. Composition verdicts bind on every panel, and every
-   * verdict of every kind binds on every shipping one.
-   */
-  const offPanel = PANELS.filter((p) => !p.ships).map((p) => p.label);
-  const probe = failures.filter(
-    (f) => f.fit === true && offPanel.some((label) => f.surface.startsWith(label)),
-  );
-  const fatal = failures.filter((f) => !owed.includes(f) && !probe.includes(f));
-
-  for (const surface of OWED_UNDER_ALARM) {
-    if (!owed.some((f) => f.surface === surface)) {
-      fatal.push({
-        surface,
-        state: "alarm",
-        detail:
-          `STALE REGISTER — '${surface}' is listed in OWED_UNDER_ALARM as a known-broken surface ` +
-          "under 03-F5's band, and it now lays out cleanly. The fourth defect appears to be FIXED: " +
-          "delete this entry from the register so the surface is judged strictly again. A register " +
-          "that outlives its defect is how an exemption becomes permanent (24-F14).",
-      });
-    }
-  }
-
-  // ---------------------------------------------------------------------------------------
   // `27-F11c` — THE TWIN CHECK. Same glass, different pixels, and the layout must not know.
   // ---------------------------------------------------------------------------------------
   const twins = PANELS.filter((p) => p.diagonalIn === 15.6).map((p) => p.label);
@@ -974,6 +945,43 @@ const run = async (): Promise<number> => {
         `${surfacesMeasured} surfaces. Every surface inside AppShell has a <main>; if they have ` +
         "stopped being found, the one check here that is not about fitting is inert (24-F14).",
     });
+  }
+
+  // ---------------------------------------------------------------------------------------
+  // 5. THE OWED REGISTER — exempt the known fourth defect, and FAIL if it has been fixed.
+  //
+  // ⚠ **EVERY CHECK THAT PUSHES A FAILURE MUST RUN ABOVE THIS LINE.** `fatal` is computed here,
+  // once, from whatever `failures` holds at this moment — so a check placed after it pushes into
+  // an array nobody reads again and is **completely inert while looking completely present**.
+  // The twin check above shipped below this line for one round and was exactly that: it computed
+  // the right ratios (0.472 vs 0.564 under the mutant it was built for), pushed the right
+  // failure, printed `12 twin pairs` in the summary, and the gate said PASSED. Reading it would
+  // not have found that — the diff of two gate logs being ZERO LINES is what did.
+  // ---------------------------------------------------------------------------------------
+  const owed = failures.filter((f) => f.state === "alarm" && OWED_UNDER_ALARM.includes(f.surface));
+  /**
+   * A FIT verdict on a panel the counter does not ship to is **reported, never fatal** — see the
+   * `ships: false` note on `tablet-10.1`. Composition verdicts bind on every panel, and every
+   * verdict of every kind binds on every shipping one.
+   */
+  const offPanel = PANELS.filter((p) => !p.ships).map((p) => p.label);
+  const probe = failures.filter(
+    (f) => f.fit === true && offPanel.some((label) => f.surface.startsWith(label)),
+  );
+  const fatal = failures.filter((f) => !owed.includes(f) && !probe.includes(f));
+
+  for (const surface of OWED_UNDER_ALARM) {
+    if (!owed.some((f) => f.surface === surface)) {
+      fatal.push({
+        surface,
+        state: "alarm",
+        detail:
+          `STALE REGISTER — '${surface}' is listed in OWED_UNDER_ALARM as a known-broken surface ` +
+          "under 03-F5's band, and it now lays out cleanly. The fourth defect appears to be FIXED: " +
+          "delete this entry from the register so the surface is judged strictly again. A register " +
+          "that outlives its defect is how an exemption becomes permanent (24-F14).",
+      });
+    }
   }
 
   note("");
