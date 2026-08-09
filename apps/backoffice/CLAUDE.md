@@ -94,6 +94,69 @@ pnpm -C apps/backoffice dev         # http://localhost:3000
   no float and therefore no rounding step. Decimals are REFUSED — a pinned interpretation, recorded
   in the file, not a specified rule.
 
+## The DESIGN pass (August 2026) — `plans/wave-1/design-direction.md` applied to this app
+
+The pass below fixed real defects and this one is the level above it: hierarchy, scale, density
+and presence. It ran the two processes in a real browser at **1440 and 390 px**, in both
+polarities. Nothing under it is superseded — the `Problem` surface, `lib/when.ts`, the `27-F26`
+typeface and the two reversed colour assignments all stand.
+
+- **`27-F42`'s type scale was declared and rendered nowhere.** `theme-css.ts` emitted the colours
+  and `$family` and skipped the four COMPOSITE styles, so every size came from Tailwind's own
+  scale — a different system's decomposed primitives, which is the thing that FR exists to stop.
+  All four are emitted now and `globals.css` binds each to ONE font-size utility, so `text-label`
+  carries size + line-height + weight + tracking and cannot be spent apart.
+  - ⚠ **The manifest has FOUR composites and this app needs SIX.** No display style for a wordmark
+    and no caption below `text-label`'s 14 px. Those two still come from Tailwind's scale,
+    centralised in `Caption` (`ui/surface.tsx`). **A `packages/ui` finding, not a local fifth size.**
+- **The `27-F14` blue means *pressable*, not *important*** — read deliberately, because the
+  direction doc leaves it open. `27-F16` is about MONEY; `27-F14` allocates the fourth slot to
+  "any control the operator may press". Spending the saturated fill on everything said nothing and
+  put a full-width blue `New item` bar above the menu while `Save` sat below the fold in the same
+  colour. **The fill is now the ONE committing action per screen**; everything else pressable is
+  `secondary`.
+- **The price grid is this app's signature element.** `text-numeric-primary` (the manifest's
+  28/36/600 tabular composite) on every cell — `27-F25`'s own law line assigns it to exactly this.
+  An UNPRICED cell deliberately does NOT take that scale: `01-F60`'s placeholder is a word, and an
+  absence must not shout louder than a price.
+- **Borders are a budget.** `27-F66` makes `borderColor-default` a *control* boundary at 3.41:1 —
+  a strong rule, not a hairline — and the screens spent five nested levels of it inside one
+  editor. A card gets its boundary and its header rule; everything inside is separated by ground
+  and space.
+- **`CardTitle` is a panel label and uppercases through CSS.** Right for *Menu*, wrong for
+  *Chicken Karahi (Full)* — it rendered CHICKEN KARAHI (FULL) in the browser, commandment 7 broken
+  by a stylesheet. **Never pass user content to it.** `entry-editor.tsx` deliberately does not
+  import it and says so.
+
+### Three defects found by LOOKING, none of them visible to any rail here
+
+`layout:check` imports `apps/pos-electron`'s `COUNTER_WINDOW_OPTIONS` and measures the till, so
+**no gate in this repo looks at these screens at any width**, and happy-dom performs no layout —
+`getBoundingClientRect` is zeroes, so a clipped value and a rendered one are the same DOM.
+
+1. **`Mutton Karahi`'s `3200` rendered as `32`** at 390 px — the cell shrank under the 28 px
+   numerals and clipped the value inside its own input, on the one surface where a mistyped figure
+   reaches every till. Fixed with a `min-w` on the cell so the TABLE overflows and scrolls instead.
+2. **The header wrapped twice at 390 px** — brand to two lines, `Sign out` under its own glyph.
+3. **`max-w-[100rem]` was an arbitrary value** (`21-F3`) that I introduced and no gate catches —
+   the arbitrary-value grep doc 21 describes is not wired for this app. It also caused a layout
+   defect: at 1600 px a device row put its identity at x=107 and its own `Active` at x=1468.
+
+### What is still weak here, stated rather than hidden
+
+- **The editor's seven identity fields still sit above the grid.** Three columns instead of two
+  bought a row, but an owner who came to change a price still passes `ID`, `Belongs to` and
+  `Order` first. The obvious fix — collapse them behind a disclosure — is a **trap**: happy-dom
+  finds elements inside a closed `<details>` and `fireEvent.change` works on them, so
+  `editor.dom.test.tsx` would stay green while a real owner could not type an ID.
+- **The 3x3 grid scrolls horizontally on a phone** and that does not go away at any type size
+  (three channel columns exceed 350 px even at 16 px). `14-N2` targets full editors at
+  tablet/desktop, so this is a known cost, not a solved problem.
+- **`14-F3`'s history renders nine rows for a creation**, all reading `— → Rs 1,850`. They are a
+  subgrid now so they align, but nine lines to say "created at one price" is still the wrong
+  shape; collapsing them needs a rule about when cells are equal, which is a judgement this pass
+  did not have a spec for.
+
 ## The visual pass (August 2026) — four things that are now single-source, and stay that way
 
 A design pass ran the two processes in a real browser and fixed what it found. Four of its
