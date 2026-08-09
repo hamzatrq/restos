@@ -42,7 +42,9 @@ import { ChangeHistory } from "./change-history";
 import { PriceGrid } from "./price-grid";
 import { Button } from "./ui/button";
 import { Field, Input } from "./ui/field";
-import { Card, CardBody, CardHeader, CardTitle, Note } from "./ui/surface";
+// `CardTitle` is deliberately NOT imported: it uppercases, and this card's subject is a dish name.
+// See the `CardHeader` below.
+import { Card, CardBody, CardHeader, Note } from "./ui/surface";
 
 /** The text fields, as typed. Nothing here is a number until save — see `lib/money.ts`. */
 type Form = {

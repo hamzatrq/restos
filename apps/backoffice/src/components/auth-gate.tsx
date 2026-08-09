@@ -199,9 +199,7 @@ export const AuthGate = ({ children }: { children: ReactNode }): ReactNode => {
           {/* `truncate` and `whitespace-nowrap` below are not decoration: at 390 px (`14-N2`'s
               phone) the brand wrapped to two lines and `Sign out` wrapped under its own glyph,
               which doubled the chrome's height on the surface with the least of it to spare. */}
-          <span className="truncate text-base font-semibold tracking-tight">
-            {strings.appName}
-          </span>
+          <span className="truncate text-base font-semibold tracking-tight">{strings.appName}</span>
           <div className="flex shrink-0 items-center gap-4 sm:gap-8">
             {/*
               The org and the user, LABELLED AND STACKED. These are raw ids because they are the
