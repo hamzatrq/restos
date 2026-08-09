@@ -371,3 +371,45 @@ it does not have.
   (`backoffice-catalog.md` Q2) and none of them is client work.
 - ~~`SELLABLE_KINDS` is now declared a **third** time (`lib/price-grid.ts`).~~ **CLOSED** —
   `lib/price-grid.ts` imports it from `@restos/domain`, which is where `18 §2` puts it once.
+
+## `14-F12`/`14-F13` — the Devices section, and why the ACTOR column is the whole point
+
+`components/device-list.tsx`, reached from `components/workspace.tsx`'s two-tab shell (this app had
+one section until now; why a tab and not a second route is recorded in that file).
+
+Two things this screen says that a screen usually would not, and both are `00 §5.7`:
+
+- **`14-F12` asks for app version, last-seen and sync lag. Nothing in this product stores any of
+  them** — no heartbeat table, doc 15's device pipeline unbuilt — so the card says which columns are
+  missing rather than showing a plausible number. A fabricated "last seen 2 minutes ago" is
+  indistinguishable from a real one on a demo and wrong every day after.
+- **A device revoked from the service host has revoked state and NO actor**, because
+  `pnpm -C services/sync-gateway revoke-device` runs where there is no signed-in user. That renders
+  as *"actor not recorded"*, never as an empty cell — a blank reads as "nobody", which is a claim.
+
+`14-F13` is irreversible, so revoking is **two acts**: the consequence ("stops working within 30
+seconds and cannot be brought back") is READ before the second, never folded into the control's
+accessible name — the a11y regression this file records from the apply-when row, avoided by
+construction. A revoked row offers **no control at all**; a disabled button would imply an un-revoke
+exists behind a condition, and none exists anywhere in the product (`14-F30`, `01-N5`).
+
+### Mutation matrix — `device-list.dom.test.tsx` (round-3 law), control **129/129** green, 0 survivors
+
+In-tree with a byte-exact backup and a restore trap. Every row is the FULL suite, and **in every row
+the failing FILE was `device-list.dom.test.tsx` alone — all 116 pre-existing tests stayed green**.
+
+| # | mutant (exactly one branch) | new 13 failed | pre-existing 116 |
+|---|---|---|---|
+| B1 | **an unattributed revocation renders as a BLANK instead of "actor not recorded"** | **2** | **all green** |
+| B1b | **its mirror: the current user's id rendered for every revoked row** | **2** | **all green** |
+| B2 | one-tap revoke — the confirmation and its consequence skipped | 5 | all green |
+| B3 | the list is not re-read after a revocation | 1 | all green |
+| B4 | a revoke control on an already-revoked device (an un-revoke by implication) | 1 | all green |
+| B5 | the already-revoked notice dropped — the screen claims credit it did not earn | 1 | all green |
+| B6 | **CONTROL: the row's two metadata facts swap order** | **0** | all green |
+
+**B1b is the one to re-run after any change here, and the FIXTURE is what kills it.** A suite built
+only on devices revoked through this screen cannot tell a correct implementation from one that
+stamps the signed-in owner on every revoked row — so the CLI-revoked fixture is not extra coverage,
+it is the only row that discriminates. AGENTS.md's "guard that was never pointed at the dangerous
+case", answered by choosing the fixture rather than by adding assertions.

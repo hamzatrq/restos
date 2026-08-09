@@ -17,7 +17,12 @@ import {
 import { type CreateFastifyContextOptions, fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import Fastify, { type FastifyInstance } from "fastify";
 import { createMemoryStagedEditStore } from "./catalog.js";
-import { createGatewayCatalogPublisher, createGatewayLedgerAppender } from "./gateway-client.js";
+import { type DeviceDirectory, unconfiguredDeviceDirectory } from "./devices.js";
+import {
+  createGatewayCatalogPublisher,
+  createGatewayDeviceDirectory,
+  createGatewayLedgerAppender,
+} from "./gateway-client.js";
 import {
   type CatalogDeps,
   createCatalogRuntime,
@@ -44,6 +49,17 @@ export type ApiServerOptions = {
    * `unconfiguredCatalog`.
    */
   readonly catalog?: CatalogDeps;
+  /**
+   * `14-F12`/`14-F13`'s device surface. Optional here for `catalog`'s reason — the B-2 suite
+   * predates it and still has to boot — and REQUIRED once resolved.
+   *
+   * **The fallback is `unconfiguredDeviceDirectory`, which refuses every call**, not a memory stub.
+   * AGENTS.md measured the stub shape as invisible to every rail we have ("Rule B asks whether an
+   * optional member is *supplied*, never whether what was supplied is *real*"), and on this surface
+   * a stub means a revoke button that reports success and stops nothing — on the one screen whose
+   * entire subject is a stolen tablet.
+   */
+  readonly devices?: DeviceDirectory;
 };
 
 /**
@@ -86,6 +102,7 @@ export const createApiServer = async (options: ApiServerOptions): Promise<Fastif
   // store have to be the same objects across every request, or a cancel would reach a different
   // pending set than the sweep reads (`14-F28`).
   const catalog = createCatalogRuntime(options.catalog ?? unconfiguredCatalog(options.now));
+  const devices = options.devices ?? unconfiguredDeviceDirectory();
 
   await app.register(fastifyTRPCPlugin, {
     prefix: "/trpc",
@@ -97,6 +114,7 @@ export const createApiServer = async (options: ApiServerOptions): Promise<Fastif
         now: options.now,
         bearer: bearerOf(req.headers.authorization),
         catalog,
+        devices,
       }),
     },
   });
@@ -262,12 +280,19 @@ const start = async (): Promise<FastifyInstance> => {
     cutover_hour: BUSINESS_DAY_CUTOVER_HOUR_DEFAULT,
   };
 
+  // `14-F12`/`14-F13`, over the SAME `/internal` link the catalog uses. Swap it for
+  // `unconfiguredDeviceDirectory()` and the process still starts, still serves, still gates — and
+  // every device request refuses loudly rather than lying, which is the mutant
+  // `__acceptance__/device-seam.test.ts` exists to redden.
+  const devices: DeviceDirectory = createGatewayDeviceDirectory(link);
+
   const app = await createApiServer({
     store: createMemoryUserStore(bootstrapUsers(env)),
     sessionSecret: env.SESSION_SECRET,
     // The real clock, injected here and nowhere else (`18 §4`).
     now,
     catalog,
+    devices,
   });
 
   // `14-F28`'s day-end landing, in production. `unref` so the sweep never holds the process open.

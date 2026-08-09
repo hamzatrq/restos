@@ -140,6 +140,62 @@ export const strings = {
       "kitchen station — are recorded as a catalog version only (14-F3, owed).",
   },
 
+  /** The two sections this app has. `14-F12`/`14-F13` gave it a second one. */
+  nav: {
+    menu: "Menu",
+    devices: "Devices",
+  },
+
+  /**
+   * `14-F12` (the device list) and `14-F13` (revocation, "immediate — the stolen tablet flow").
+   *
+   * **Two of these sentences exist because the honest answer is "we do not know", and saying so is
+   * the requirement rather than a shortfall.** `14-F12` asks for app version, last-seen and sync
+   * lag; none is stored anywhere in this product, and a screen that showed a plausible number for
+   * a fact it does not have is the `00 §5.7` failure the whole corpus is written against. Same for
+   * an actor the ledger never recorded: `notRecorded` is a statement, and a blank cell would be a
+   * different, false one ("nobody").
+   */
+  devices: {
+    heading: "Devices",
+    empty: "No devices are registered in this organisation yet.",
+    /**
+     * Named as owed, on the screen, because an owner reading this list will otherwise assume the
+     * columns she asked for are simply not applicable to her tills.
+     */
+    columnsOwed:
+      "App version, last seen and sync lag are not recorded yet, so they are not shown (14-F12). " +
+      "What is here is what the device registry actually holds.",
+    branch: "Branch",
+    deviceClass: "Type",
+    active: "Active",
+    revoked: "Revoked",
+    revokedAt: "Revoked",
+    revokedBy: "by",
+    /** An actor the ledger has no record of — see this block's header. */
+    notRecorded: "actor not recorded",
+    notRecordedHelp:
+      "This device was revoked outside the back office — from the service host, where there is no " +
+      "signed-in user to record. Revocations made here are attributed.",
+    tokenExpires: "Credential expires",
+    revoke: "Revoke",
+    revoking: "Revoking…",
+    /**
+     * `14-F13` + `01-F48` + `01-N5`. The consequence is stated ON the control, `14-F28`'s rule
+     * applied to the one act on these screens that is genuinely irreversible — apply-now moves a
+     * menu, this stops a till, and nothing anywhere brings it back.
+     */
+    revokeConsequence:
+      "This device stops working within 30 seconds and cannot be brought back. Its replacement " +
+      "must be registered as a new device (01-F48, 01-N5).",
+    confirm: "Revoke this device?",
+    confirmYes: "Yes, revoke it",
+    confirmNo: "Keep it",
+    /** The already-revoked answer, which claims no credit — see `device-router.ts`. */
+    alreadyRevoked: "This device was already revoked; nothing changed and no actor was recorded.",
+    refused: "The server refused this revocation:",
+  },
+
   errors: {
     loading: "Loading…",
     /** A refusal from the server is the owner's mistake and names the cell — never "save failed". */

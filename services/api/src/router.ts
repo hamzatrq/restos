@@ -14,6 +14,7 @@ import { verifyPin } from "@restos/domain";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { catalogProcedures } from "./catalog-router.js";
+import { deviceProcedures } from "./device-router.js";
 import { issueSessionToken } from "./session.js";
 import {
   type ApiMeta,
@@ -104,10 +105,17 @@ const opsRouter = router({
     .mutation(({ ctx, input }) => ({ ...input, org_id: ctx.subject.org_id })),
 });
 
+/**
+ * `14-F12` + `14-F13`, gated on `14-F30`'s `device.manage`. Both procedures are built with
+ * `authorized(...)`, so `assertEveryProcedureIsGated` sees them and neither exemption list changed.
+ */
+const deviceRouter = router(deviceProcedures);
+
 export const appRouter = router({
   auth: authRouter,
   session: sessionRouter,
   catalog: catalogRouter,
+  devices: deviceRouter,
   ops: opsRouter,
 });
 

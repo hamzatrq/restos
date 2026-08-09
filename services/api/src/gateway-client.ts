@@ -36,6 +36,12 @@
 
 import { z } from "zod";
 import type { CatalogEntry } from "./catalog.js";
+import {
+  type DeviceDirectory,
+  type DeviceRecord,
+  type DeviceRevocationRecord,
+  DeviceRevokedPayload,
+} from "./devices.js";
 import { IntegrationError } from "./errors.js";
 import type { CatalogPublisher, LedgerAppender, LedgerRecord } from "./publish.js";
 
@@ -105,6 +111,33 @@ const CatalogChangedPayload = z.object({
 });
 
 const ErrorBody = z.object({ error: z.string() });
+
+/** `14-F12`'s list as the gateway's registry answers it. Parsed, for `OrgEventResponse`'s reason. */
+const DeviceListResponse = z.object({
+  devices: z.array(
+    z.object({
+      device_id: z.string(),
+      branch_id: z.string(),
+      device_class: z.string(),
+      revoked_at: z.union([z.number().int(), z.null()]),
+      token_expires_at: z.union([z.number().int(), z.null()]),
+    }),
+  ),
+});
+
+/**
+ * `revokeRegisteredDevice`'s outcome, verbatim.
+ *
+ * `already` is parsed rather than defaulted, and the difference is the whole point: a client that
+ * treated a missing `already` as `false` would tell an owner she had just revoked a device somebody
+ * else killed last Tuesday — and would then append a `device.revoked` naming her for it.
+ */
+const DeviceRevokeResponse = z.object({
+  branch_id: z.string(),
+  device_class: z.string(),
+  revoked_at: z.number().int(),
+  already: z.boolean(),
+});
 
 const endpoint = (link: GatewayLink, path: string): string =>
   `${link.base_url.replace(/\/+$/, "")}${path}`;
@@ -263,6 +296,68 @@ export const createGatewayCatalogPublisher = (link: GatewayLink): CatalogPublish
     // re-typed, not re-validated: `CatalogEntryWire` already refused anything else at the writer,
     // and a second copy of that schema here is the third-copy problem `18 §2` names.
     return { version: parsed.version, entries: parsed.entries as readonly CatalogEntry[] };
+  },
+});
+
+/**
+ * `DeviceDirectory`, bound to the gateway — `14-F12`'s list and `14-F13`'s kill switch.
+ *
+ * **Two endpoints on two tables, deliberately, and the split is `01-F62`'s.** `list`/`revoke` reach
+ * `/internal/devices*`, which is the device registry: `revoked_at` is what `01-F48`'s ≤30 s sweep
+ * reads, so that write — and only that write — is what actually stops a till. `recordRevocation`/
+ * `revocations` reach `/internal/org-events`, the org-scoped store, because T-01-09 puts
+ * `device.registered / revoked` **emission** on this doc-14 emitter rather than on the kernel's
+ * registry seam, and `14-F13`'s actor has nowhere else to live.
+ *
+ * `history` on `LedgerAppender` filters that same endpoint to `catalog.changed`; this filters it to
+ * `device.revoked`. Same reason the filter is here and not a query parameter — a filter the caller
+ * states is a filter the caller can forget, and this store holds `01-F62`'s whole set.
+ */
+export const createGatewayDeviceDirectory = (link: GatewayLink): DeviceDirectory => ({
+  list: async (org_id) => {
+    const body = await getJson(link, "/internal/devices", org_id, "device list");
+    return DeviceListResponse.parse(body).devices as readonly DeviceRecord[];
+  },
+  revoke: async (org_id, device_id) => {
+    const body = await postJson(
+      link,
+      "/internal/devices/revoke",
+      { org_id, device_id },
+      "device revoke",
+    );
+    return DeviceRevokeResponse.parse(body);
+  },
+  recordRevocation: async (record) => {
+    await postJson(
+      link,
+      "/internal/org-events",
+      {
+        org_id: record.org_id,
+        // Sent rather than assumed, so the gateway's `01-F62` scope check is the one that decides
+        // and not this client's confidence — the same rule `createGatewayLedgerAppender` follows.
+        type: "device.revoked",
+        actor_user_id: record.actor_user_id,
+        server_received_at: record.server_received_at,
+        payload: {
+          device_id: record.device_id,
+          branch_id: record.branch_id,
+          device_class: record.device_class,
+        },
+      },
+      "device revocation record",
+    );
+  },
+  revocations: async (org_id) => {
+    const body = await getJson(link, "/internal/org-events", org_id, "device revocations");
+    return OrgEventResponse.parse(body)
+      .events.filter((event) => event.type === "device.revoked")
+      .map(
+        (event): DeviceRevocationRecord => ({
+          device_id: DeviceRevokedPayload.parse(event.payload).device_id,
+          actor_user_id: event.actor_user_id,
+          server_received_at: event.server_received_at,
+        }),
+      );
   },
 });
 

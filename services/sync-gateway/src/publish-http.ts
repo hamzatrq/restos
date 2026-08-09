@@ -4,6 +4,10 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { type CatalogEntry, catalogPage, publishCatalog } from "./catalog.js";
 import { appendOrgEvent, orgEventHistory } from "./org-events.js";
+import { listDevices } from "./registry.js";
+// `revoke-device.ts` carries a main-module entry guard, so importing it runs nothing. Reaching for
+// the CLI's own function is the point — see the route below.
+import { revokeRegisteredDevice } from "./revoke-device.js";
 
 /**
  * **THE SEAM THE FOUNDER RULED INTO EXISTENCE: the API publishes, the gateway serves**
@@ -75,6 +79,20 @@ const OrgEventRequest = z.strictObject({
 });
 
 const OrgQuery = z.object({ org_id: z.string().min(1) });
+
+/**
+ * `14-F13`'s revocation, arriving from `services/api` on behalf of an AUTHENTICATED owner.
+ *
+ * **No actor field, deliberately.** The registry stores provisioning bookkeeping and not event
+ * history (T-01-09), so attribution does not belong in this write — it belongs on the
+ * `device.revoked` org-scoped event, which `services/api` appends through `/internal/org-events`
+ * because `01-F62` puts that emission on the doc 14 emitter. Accepting an actor here would create a
+ * second place attribution could be recorded and a first place it could be recorded *only*.
+ */
+const DeviceRevokeRequest = z.strictObject({
+  org_id: z.string().min(1),
+  device_id: z.string().min(1),
+});
 
 /**
  * Constant-time bearer comparison. `timingSafeEqual` throws on a length mismatch, so the lengths
@@ -279,6 +297,49 @@ export const registerPublishRoutes = (app: FastifyInstance, deps: PublishDeps): 
     } catch (error: unknown) {
       request.log.error({ err: error }, "org events: database read failed");
       return reply.code(500).send({ error: databaseFailure("org events", error) });
+    }
+  });
+
+  /** `14-F12`'s per-branch device list, as far as this table can honestly answer it. */
+  app.get("/internal/devices", async (request, reply) => {
+    const parsed = OrgQuery.safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ error: "devices: org_id required" });
+    try {
+      return reply.code(200).send({ devices: await listDevices(deps.db, parsed.data.org_id) });
+    } catch (error: unknown) {
+      request.log.error({ err: error }, "devices: database read failed");
+      return reply.code(500).send({ error: databaseFailure("devices", error) });
+    }
+  });
+
+  /**
+   * `14-F13` — the kill switch, reachable from an authenticated back-office screen at last.
+   *
+   * **It calls `revokeRegisteredDevice`, the SAME function `pnpm … revoke-device` calls**, and that
+   * is the load-bearing part rather than convenience. Two paths to one act means two readings of
+   * "revoked": the read-before-write that refuses an unknown `device_id` (a mistyped id matches no
+   * rows, returns `void` and reports success over a till that is still selling), the already-revoked
+   * branch that refuses to move the original instant, and the post-write re-read. A second
+   * implementation here would drift from all three, and `03-F40`'s two sensor bit layouts is this
+   * corpus's own record of what that costs.
+   *
+   * `01-F48`'s enforcement is untouched and is not re-stated: the running gateway's
+   * `sweepRevocations` re-reads the registry, so a revocation written *here* evicts a live session
+   * within the same bound a CLI one does. This route sets `revoked_at`; nothing else changes.
+   */
+  app.post("/internal/devices/revoke", async (request, reply) => {
+    const parsed = DeviceRevokeRequest.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: `device revoke: ${z.prettifyError(parsed.error)}` });
+    }
+    try {
+      const outcome = await revokeRegisteredDevice(deps.db, {
+        org: parsed.data.org_id,
+        device: parsed.data.device_id,
+      });
+      return reply.code(200).send(outcome);
+    } catch (error: unknown) {
+      return reply.code(refusalStatus(error)).send({ error: messageOf(error) });
     }
   });
 };

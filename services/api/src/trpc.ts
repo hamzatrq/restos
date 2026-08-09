@@ -37,6 +37,7 @@ import { type AuthDecision, type AuthSubject, can, type PermissionAction } from 
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { z } from "zod";
+import type { DeviceDirectory } from "./devices.js";
 import { IntegrationError } from "./errors.js";
 import type { CatalogRuntime } from "./publish.js";
 import { verifySessionToken } from "./session.js";
@@ -58,6 +59,13 @@ export type ApiContext = {
    * is exactly an optional dependency that every call site forgets.
    */
   readonly catalog: CatalogRuntime;
+  /**
+   * `14-F12`/`14-F13`. Required for `catalog`'s reason, and one sharper: the fallback
+   * `createApiServer` resolves when a host declares none REFUSES every call rather than answering
+   * emptily, so an unconfigured host cannot render a device list that says "no devices" or a revoke
+   * that reports success. See `unconfiguredDeviceDirectory`.
+   */
+  readonly devices: DeviceDirectory;
 };
 
 /**

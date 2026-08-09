@@ -141,6 +141,15 @@ if (agents.split("\n").length > 120)
       "z.object",
       // Database objects (kernel schema), not events.
       "kernel.quarantine_notices",
+      // `domain` PERMISSION ACTIONS (`restaurant-os.md` Appendix A via 01-F26, `permissions.ts`).
+      // They share `noun.verb` with the event catalog and are a different vocabulary entirely —
+      // an action is something a ROLE may do, an event is something that HAPPENED. A spec that
+      // names the action gating a screen (14-F30) is not declaring an emission, and the two
+      // vocabularies genuinely overlap in shape: `device.revoked` IS an event, `device.manage` is
+      // not and never will be. Listed by name rather than wildcarded, so a real event that lands
+      // in one of these families is still caught.
+      "device.manage",
+      "catalog.edit_menu_prices",
       // The naming-convention placeholder itself (00 §6).
       "noun.verb_past",
     ]);
