@@ -199,27 +199,6 @@ const MASTHEAD: React.CSSProperties = {
  * through a machine's own zone is how a date shifts by one at 05:00 Karachi. It degrades to the
  * raw string rather than throwing — `01-F54`, and a blank date on a locked till reads as broken.
  */
-/**
- * `01-F26`'s registry role string, as a person reads it. `owner`, `branch_manager`, `cashier`,
- * `kitchen`, `waiter`, `rider` arrive as identifiers over the sync chain (`01-F21` reference
- * data), and `branch_manager` is not a word.
- *
- * A TRANSFORM and never a lookup table, deliberately. A `Record<Role, string>` here would be
- * `domain`'s `ROLES` restated in a renderer — a second declaration of a closed set that can
- * silently fall out of step, which is the shape `catalog.enabled` was closed for — and it would
- * render nothing at all for a role this table had not heard of, on data that explicitly may name
- * anything. Underscores to spaces and one leading capital is right for every current member and
- * degrades honestly for any future one (`01-F54`).
- *
- * English per `00 §5.6`. `en-US` explicitly, not the host locale: `toLocaleUpperCase` under a
- * Turkish locale turns `i` into `İ`, which is the classic way a machine's own locale reaches a
- * string it has no business touching.
- */
-const roleLabel = (role: string): string => {
-  const words = role.replace(/_/g, " ");
-  return words.charAt(0).toLocaleUpperCase("en-US") + words.slice(1);
-};
-
 const readableDay = (businessDay: string): string => {
   const parsed = new Date(`${businessDay}T00:00:00Z`);
   if (Number.isNaN(parsed.getTime())) return businessDay;
@@ -518,9 +497,7 @@ export const App = () => {
             <PersonTile
               key={member.user_id}
               name={member.display_name}
-              {...(member.role === null || member.role === undefined
-                ? {}
-                : { role: roleLabel(member.role) })}
+              {...(member.role === null || member.role === undefined ? {} : { role: member.role })}
               onPress={() => setChosen(member)}
             />
           ))}

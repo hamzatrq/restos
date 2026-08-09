@@ -1,5 +1,13 @@
 import { contextBridge } from "electron";
-import type { Alarm, CashState, MenuItem, OpenOrder, RestosBridge, Session } from "../shared/ipc";
+import type {
+  Alarm,
+  CashState,
+  MenuItem,
+  OpenOrder,
+  RestosBridge,
+  RosterMember,
+  Session,
+} from "../shared/ipc";
 
 /**
  * **The layout gate's bridge — a scripted `window.restos`, so the REAL renderer mounts with no
@@ -43,10 +51,20 @@ import type { Alarm, CashState, MenuItem, OpenOrder, RestosBridge, Session } fro
  * inventing a requirement doc 27 does not make.
  */
 
-const STAFF: Session[] = [
-  { user_id: "user-ayesha", display_name: "Ayesha Khan" },
-  { user_id: "user-bilal", display_name: "Bilal Ahmed" },
-  { user_id: "user-hina", display_name: "Hina Raza" },
+/**
+ * `01-F26`'s roles are on the roster, and the mix is the shipped dev seed's: two cashiers and one
+ * branch manager. Not decoration — `PersonTile` renders the role beneath the name, so a fixture
+ * without one measures a card that is a line shorter than the one every real till draws, and the
+ * lock surface's vertical budget is measured against the card.
+ *
+ * `branch_manager` is deliberately the longest role string this product has (`domain`'s `ROLES`),
+ * for the same reason the menu below carries `Chicken Karahi (Half)`: a fixture of short values
+ * measures a layout nobody has.
+ */
+const STAFF: RosterMember[] = [
+  { user_id: "user-ayesha", display_name: "Ayesha Khan", role: "cashier" },
+  { user_id: "user-bilal", display_name: "Bilal Ahmed", role: "cashier" },
+  { user_id: "user-hina", display_name: "Hina Raza", role: "branch_manager" },
 ];
 
 /**
@@ -154,10 +172,33 @@ const listeners = new Set<() => void>();
  * not matter: pixels across the same 15.6 inches.
  */
 const COUNTER_DIAGONAL_IN = 15.6;
+
+/**
+ * **The panel's diagonal, in inches, from the URL the gate loaded this page with.**
+ *
+ * It has to arrive before the page runs. `App.tsx` reads `deviceState()` on mount, so a density
+ * injected after `loadFile` resolves is a frame late and the surface paints once at the previous
+ * panel's physical size — which on a sweep that reloads per panel is a screenshot of the wrong
+ * layout. `location.search` is the only channel that exists that early.
+ *
+ * **The diagonal is the whole input** and the pixel count is not: under `27-F68` a surface's
+ * physical size is `diagonalIn × (px / hypot) × 25.4` mm, in which the resolution cancels. That
+ * is why the sweep can hold `1920×1080` fixed and still measure a 15.6″ counter and a 24″ desktop
+ * as genuinely different surfaces — and why a gate keyed on pixels is blind to the founder's
+ * defect by construction.
+ *
+ * Defaults to `27 §1a`'s counter when absent, so a page opened without the parameter is the panel
+ * this app ships on rather than a guess.
+ */
+const panelDiagonalIn = (): number => {
+  const declared = Number(new URLSearchParams(window.location.search).get("diagonalIn"));
+  return Number.isFinite(declared) && declared > 0 ? declared : COUNTER_DIAGONAL_IN;
+};
+
 const simulatedPanelPpi = (): number => {
   const inches = { w: window.innerWidth, h: window.innerHeight };
   const diagonalPx = Math.hypot(inches.w, inches.h) * window.devicePixelRatio;
-  return diagonalPx / COUNTER_DIAGONAL_IN;
+  return diagonalPx / panelDiagonalIn();
 };
 
 const bridge: RestosBridge = {

@@ -8,7 +8,7 @@ import {
   paisa,
   subPaisa,
 } from "@restos/domain";
-import { MoneyValue, NumericKeypad, Tile } from "@restos/ui";
+import { MoneyValue, NumericKeypad, Readout, Tile } from "@restos/ui";
 import { useState } from "react";
 import type { AppendRequest, CashShift, CashState } from "../shared/ipc";
 
@@ -241,7 +241,15 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
       : reconcile(expected.cash, openShift.paid_out_paisa, enteredPaisa);
 
   return (
-    <div style={{ display: "flex", gap: 24, height: "100%", minHeight: 0 }}>
+    /*
+      **No `height: "100%"`, and its removal is the fix rather than a tidy-up.** `Counter.tsx`
+      now centres this surface in the work area, and a child that claims the full height
+      stretches to fill the centring box — so the box centres a full-height element and the ink
+      inside it stays pinned to the top. The layout gate measured exactly that: 394 dp of content
+      in a 619 dp box with **279 dp of slack below it** on every panel, while every fit check
+      passed. Sizing to the content is what lets the surface be placed.
+    */
+    <div style={{ display: "flex", gap: 24, minHeight: 0 }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {/*
           27-F8 — 126 dp, the kiosk condition. 27-F29 blocks the impossible keystroke at entry
@@ -250,25 +258,29 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
         */}
         <NumericKeypad value={entry} onChange={setEntry} max={9_999_999} maxDigits={7} />
         {/*
-          FINDING, deliberately NOT fixed here (August 2026, from looking at the running app).
+          ✅ **THE FINDING RECORDED HERE IS CLOSED, AND ITS ARITHMETIC EXPIRED BEFORE ITS TEXT.**
 
-          `27-F25` wants the LIVE entry to be the largest element in its region, and this is the
-          number a cashier is keying into a drawer count — `27-F29` puts this population's errors
-          exactly here, and this row is the only feedback that a 126 dp key registered at all. It
-          renders at body size, while `TenderPanel` reads its figure back at `hero`: the two
-          numeric-entry surfaces on one device disagree about how loudly they echo.
+          What stood here said `27-F25` wants this live entry to be the largest element in its
+          region — it is the number a cashier keys into a drawer count, `27-F29` puts this
+          population's errors exactly here, and this row is *"the only feedback that a 126 dp key
+          registered at all"* — and then recorded that raising it *"was tried and REVERTED,
+          because it does not fit"*, citing a 528 px pad against a ~575 px work area.
 
-          Raising it to `hero` was tried and REVERTED, because it does not fit: this column is
-          `NumericKeypad`'s fixed 528 px plus a gap, and at the `27 §1a` reference panel
-          (1366x768, minus a 44 px strip and an 85 px rail) the work area is ~575 px. A hero row
-          pushed the number off the bottom edge under `overflow: hidden` — a clipped total is
-          strictly worse than a small legible one.
+          **Both numbers are pre-`27-F68`.** `DEC-UI-001` made a dp a physical size, so on the
+          reference panel the pad is **340 px** and not 528, and the work area holds it with room
+          — measured at 568 dp of content in a 1037 dp box on this very surface. The budget that
+          justified the small figure stopped existing when the founder ruling landed, and the
+          comment outlived it. This is the shape AGENTS.md keeps recording: *"when a ruling lands,
+          grep the suites that encode the old rule the same day"*, and a doc comment is one.
 
-          So this is the SAME height-budget problem `TenderPanel` has, and it belongs with that
-          fix rather than with a size prop: a 126 dp keypad plus anything else does not fit a
-          768 px panel once the shell takes its 129 px. Recorded, not patched.
+          So it is a `Readout` at `hero`, which also closes the second half of the same finding —
+          the two numeric-entry surfaces on this device now echo their figure the same way, with
+          the caption directly above the number rather than a `space-between` row holding the word
+          `Counted` **340 dp** away from the value it names (`27-F57`).
         */}
-        <Row label="Counted" amountPaisa={enteredPaisa} />
+        <Readout caption="COUNTED">
+          <MoneyValue paisa={paisa(enteredPaisa)} size="hero" />
+        </Readout>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
@@ -499,6 +511,31 @@ export const MeSurface = ({ cash }: { cash: CashState }) => {
     cash.unbound.length > 0 || drawer.no_sale_count > 0 || drawer.paid_out_paisa > 0;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24, minHeight: 0 }}>
+      {/*
+        ⚠ **THIS SURFACE RENDERED LITERALLY NOTHING WITH NO SHIFTS — an empty `<div>`, no words,
+        found August 2026 by the layout gate's composition check reporting an EMPTY MATCH on every
+        one of five panels.**
+
+        Not a cosmetic gap. `02-F23` makes this the cashier's own protection surface — *"I'm
+        clean"* — and `00 §5.7` requires a device to report what is true; a blank region on a
+        counter screen is indistinguishable from a hung app, which this repo has already written
+        down twice (`MoneyValue`'s throw, `Counter.tsx`'s `Starting…`). A cashier who taps `Me`
+        before her first shift of the day got a white rectangle and no way to tell whether the
+        till was broken or she was clean.
+
+        The sibling surface got this right and this one did not: `Counter.tsx` renders
+        *"Reading the day…"* for a `cashState` that has not answered, and the distinction it draws
+        is exactly the one missing here — **an unread reconciliation and an empty one are different
+        facts and a blank surface says neither.**
+
+        It states its own condition rather than a generic emptiness, because `02-F22` binds
+        settlements to a shift and "no shift has been opened" is the actionable half.
+      */}
+      {cash.shifts.length === 0 && !anomalous ? (
+        <Readout caption="MY SHIFTS TODAY">
+          <span>Nothing yet — no shift has been opened on this till today.</span>
+        </Readout>
+      ) : null}
       {cash.shifts.map((shift) => {
         // A CLOSED shift shows the expectation AS AT CLOSE; an open one shows what has been
         // tendered so far. The two numbers are one fact: a variance is meaningless without the

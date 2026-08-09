@@ -52,11 +52,36 @@ export type PersonTileProps = {
   /** `02-F41` — the name the ledger will carry. Unicode user content (`00 §5.6`). */
   name: string;
   /**
-   * `01-F26`'s branch assignment, already narrowed and formatted by the host. Absent renders
-   * nothing at all — never a guess, never an em-dash placeholder.
+   * `01-F26`'s branch assignment, as the **registry string** — `cashier`, `branch_manager`. The
+   * component formats it; the host does not, because two hosts formatting it is two hosts that
+   * can format it differently, and this product draws the same roster on the unlock door and on
+   * `02-F20`'s approver grid.
+   *
+   * Absent renders nothing at all — never a guess, never an em-dash placeholder. `01-F54`
+   * degrades to what is known, and a guessed role is a false claim about a person's authority.
    */
   role?: string | undefined;
   onPress: () => void;
+};
+
+/**
+ * A registry role string, as a person reads it. `branch_manager` is not a word.
+ *
+ * A TRANSFORM and never a lookup table, deliberately. A `Record<Role, string>` here would be
+ * `domain`'s `ROLES` restated in the UI layer — a second declaration of a closed set that can
+ * fall silently out of step, which is the shape `catalog.enabled` was closed for — and it would
+ * render nothing at all for a role it had not heard of, on reference data (`01-F21`) that may
+ * legitimately name anything. Underscores to spaces and one leading capital is right for every
+ * current member of `ROLES` and degrades honestly for any future one.
+ *
+ * `en-US` explicitly, never the host locale: `toLocaleUpperCase` under a Turkish locale turns `i`
+ * into `İ`, which is the classic way a machine's own locale reaches a string it has no business
+ * touching. `00 §5.6` — the UI is English; the NAME beside it is Unicode user content and is
+ * never transformed at all.
+ */
+const roleLabel = (role: string): string => {
+  const words = role.replace(/_/g, " ");
+  return words.charAt(0).toLocaleUpperCase("en-US") + words.slice(1);
 };
 
 /**
@@ -73,9 +98,9 @@ export type PersonTileProps = {
  * their region" is relative, and `27-F11c` makes a physically wider panel a larger region.
  */
 const CARD_DP: Record<SurfaceMode, { width: number; height: number }> = {
-  compact: { width: 260, height: 160 },
-  counter: { width: 300, height: 180 },
-  wide: { width: 380, height: 220 },
+  compact: { width: 280, height: 190 },
+  counter: { width: 360, height: 210 },
+  wide: { width: 440, height: 250 },
 };
 
 export const PersonTile = ({ name, role, onPress }: PersonTileProps) => {
@@ -88,7 +113,7 @@ export const PersonTile = ({ name, role, onPress }: PersonTileProps) => {
     <button
       type="button"
       onClick={onPress}
-      aria-label={role === undefined ? name : `${name} — ${role}`}
+      aria-label={role === undefined ? name : `${name} — ${roleLabel(role)}`}
       style={{
         width: card.width,
         minHeight: card.height,
@@ -97,10 +122,22 @@ export const PersonTile = ({ name, role, onPress }: PersonTileProps) => {
         minWidth: targetFor("counter"),
         display: "flex",
         flexDirection: "column",
-        // Bottom-aligned: the name sits on a common baseline across a row of tiles whatever the
-        // role lines do, which is what makes three cards read as one rank rather than three
-        // boxes. 27-F4 — a row that re-aligns when one member's role changes has moved.
-        justifyContent: "flex-end",
+        /**
+         * **TOP-aligned, and the first draft was bottom-aligned — found by looking at the
+         * screenshot, which is the only instrument that could have.**
+         *
+         * Bottom-alignment was chosen to put the names on a common baseline. It does the
+         * opposite as soon as a name wraps: `Ayesha Khan` and `Bilal Ahmed` take two lines at
+         * `text-numeric-hero` where `Hina Raza` takes one, so growing upward from a shared
+         * bottom edge pushed their role captions **51 dp higher** than hers and the row read as
+         * three unrelated boxes.
+         *
+         * Top-alignment pins the captions to one line across the row and lets the names hang
+         * from a common top edge instead. A name is user content of unbounded length
+         * (`00 §5.6`), so a layout that only aligns while nothing wraps is a layout that aligns
+         * by luck — `27-F4`'s positional contract wants the opposite.
+         */
+        justifyContent: "flex-start",
         alignItems: "flex-start",
         gap: space["space-1"],
         padding: space["space-5"],
@@ -125,7 +162,7 @@ export const PersonTile = ({ name, role, onPress }: PersonTileProps) => {
             color: color["fgColor-muted"],
           }}
         >
-          {role}
+          {roleLabel(role)}
         </span>
       )}
       <span

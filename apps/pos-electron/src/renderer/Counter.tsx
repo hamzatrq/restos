@@ -21,7 +21,7 @@ import type {
   EscalationRefusal,
   MenuItem,
   OpenOrder,
-  Session,
+  RosterMember,
 } from "../shared/ipc";
 import { CashSurface, MeSurface, openShiftOf } from "./CashSurfaces";
 import { ManagerApproval } from "./ManagerApproval";
@@ -163,7 +163,7 @@ export const Counter = () => {
    * surface with no positional memory to preserve (`27-F4`), so a list that is a moment old is a
    * list that is right.
    */
-  const [roster, setRoster] = useState<readonly Session[]>([]);
+  const [roster, setRoster] = useState<readonly RosterMember[]>([]);
   const [page, setPage] = useState(0);
   /**
    * `03-F46` — the Orders tab's two lists page independently, and the page numbers live HERE
@@ -624,9 +624,9 @@ export const Counter = () => {
           onAccept={acceptCloudOrder}
         />
       ) : activeTab === "pay" ? (
-        paySurface
+        centred(paySurface)
       ) : activeTab === "cash" || activeTab === "me" ? (
-        cashSurface
+        centred(cashSurface)
       ) : (
         <div style={{ display: "flex", gap: 16, height: "100%", minHeight: 0 }}>
           {/*

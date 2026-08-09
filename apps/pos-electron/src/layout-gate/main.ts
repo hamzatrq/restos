@@ -1,3 +1,4 @@
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow } from "electron";
@@ -38,29 +39,100 @@ import { measureSurface, type SurfaceReport } from "./probe";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 /**
- * `24-F14` empty-match protection: a gate that measured nothing must FAIL, never pass.
+ * # THE PANEL SWEEP — a RANGE of physical surfaces, not one panel and its twin
  *
- * Raised from 3 to 16 when the panel loop landed: two panels × (one lock surface + five tabs in
- * two states + two escalation steps) is 26 today, and a floor of 3 would have been satisfied by
- * a run that lost an entire panel. A floor that only catches total collapse is not a floor.
- */
-const MIN_SURFACES = 16;
-
-/**
- * `27 §1a` lists TWO counter panels — 15.6″ at 1366×768 **or** 1920×1080 — and `DEC-UI-001` (e)
- * requires both be measured: *"the layout gate measures one panel at devicePixelRatio 1;
- * `27 §1a`'s second counter panel must enter its fixture with this work, or the ruling ships
- * untested on precisely the case that produced"* the pinned-79-px trap.
+ * `27 §1a` lists four deployment surfaces and `27-F11f` a fifth, and this rail measured one of
+ * them plus its higher-resolution twin. A founder then opened the app on a large window and got a
+ * screen he called *"unusable for a human"* — **and the gate was green**, because both of its
+ * questions (does a box overflow, is a control reachable) are satisfied perfectly by content
+ * anchored in the corner of an ocean.
  *
- * They are the same 13.6 × 7.6 inches of glass, so under `27-F68` they must hold the **same**
- * layout at different pixel counts — that is `27-F11c` stated as a test rather than as prose,
- * and it is the assertion a pinned pixel constant cannot pass: 79 px is 20 mm on the first and
- * 14.2 mm on the second.
+ * ## What a panel IS here, and why the diagonal is the input
+ *
+ * Under `27-F68` a dp is 1/160 inch of glass and `PanelRoot` converts once, so the layout's own
+ * coordinate system is **physical**. A surface's size in that system is therefore
+ * `diagonalInches × (pixelWidth / hypot) × 25.4` mm — **the pixel count cancels out entirely**.
+ * That is `27-F11c` (*"extra pixels buy sharpness; only inches buy room"*) falling out of the
+ * arithmetic rather than being asserted, and it is why the two counter rows below differ in
+ * resolution and must produce the SAME layout, while the tablet row shares a resolution with one
+ * of them and must not.
+ *
+ * ## The five, each earning its row
+ *
+ * | row | window px | diagonal | glass | why it is here |
+ * |---|---|---|---|---|
+ * | `counter-1366` | 1366×768 | 15.6″ | 345 × 194 mm | `27 §1a` counter, and `COUNTER_WINDOW_OPTIONS`' own floor |
+ * | `counter-1920` | 1920×1080 | 15.6″ | 345 × 194 mm | `27 §1a` counter — `DEC-UI-001` (e); same glass, different pixels |
+ * | `tablet-10.1` | 1366×768 | 10.1″ | 223 × 126 mm | `27 §1a` waiter tablet — the NARROW and SHORT case |
+ * | `desktop-24` | 1920×1080 | 24″ | 531 × 299 mm | **the founder's window.** Same pixels as row 2, 1.5× the glass |
+ * | `ultrawide-32` | 3840×1080 | 32″ | 783 × 220 mm | the deliberately awkward one: 3.56:1, very wide and short |
+ *
+ * Rows 2 and 4 are the pair that matters most and they are why this cannot be a pixel sweep:
+ * **identical `1920×1080`, and the layout must differ**, because one is a 15.6″ counter and the
+ * other is a 24″ desktop. A gate keyed on pixels is blind to the entire defect by construction.
+ *
+ * `ultrawide-32` is a real product (32:9 at 32″) rather than an invented viewport, and it is the
+ * stress row: 783 mm of width against 220 mm of height, where the vertical budget is tightest and
+ * the horizontal one is absurd. It is included on the brief's own instruction to sweep *"a
+ * deliberately awkward one (very wide-short, and narrow) to catch what the founder hit."*
+ *
+ * **The window's declared floor still binds** (`COUNTER_WINDOW_OPTIONS.minWidth/minHeight`), so
+ * every row is at or above 1366×768 in PIXELS while spanning 223→783 mm of GLASS. Nothing here
+ * probes below a size the shipped app refuses to be, which would measure a state no operator can
+ * reach.
  */
 const PANELS = [
-  { label: "1366x768", width: COUNTER_WINDOW_OPTIONS.width, height: COUNTER_WINDOW_OPTIONS.height },
-  { label: "1920x1080", width: 1920, height: 1080 },
+  {
+    label: "counter-1366",
+    width: COUNTER_WINDOW_OPTIONS.width,
+    height: COUNTER_WINDOW_OPTIONS.height,
+    diagonalIn: 15.6,
+    ships: true,
+  },
+  { label: "counter-1920", width: 1920, height: 1080, diagonalIn: 15.6, ships: true },
+  /**
+   * **`ships: false` — this glass is `27 §1a`'s WAITER row, not the counter's, and the
+   * distinction is what stops this panel demanding a forbidden fix.**
+   *
+   * `27 §1a` puts the counter POS at **15.6″** and the 10.1″ Android in the *waiter tablet* row,
+   * whose posture is `handheld` (64 dp) rather than `keypad` (126 dp). The counter renderer on it
+   * is not a shipping configuration — `apps/waiter` is a stub — so measuring it here is a stress
+   * probe, not a product claim.
+   *
+   * It matters that it cannot GATE, because the only way to make the counter fit 126 mm of glass
+   * height is to shrink `27-F8`'s 20 mm keys, which `27-F68` (b) and `DEC-UI-001` forbid by name:
+   * *"reducing the millimetres to make a layout fit is forbidden."* A gate whose only available
+   * remedy is a spec violation is a gate that gets suppressed. So its FIT violations are reported
+   * and its **composition** violations still bind — asymmetry is a layout decision at any size,
+   * and it is the half this panel genuinely tests.
+   *
+   * What it buys, and it is worth the row: it is the only panel here that can red on a layout
+   * that stops working when the glass gets SMALL, and the report tells a reader the true and
+   * useful thing — how much counter this hardware cannot hold.
+   */
+  { label: "tablet-10.1", width: 1366, height: 768, diagonalIn: 10.1, ships: false },
+  { label: "desktop-24", width: 1920, height: 1080, diagonalIn: 24, ships: true },
+  { label: "ultrawide-32", width: 3840, height: 1080, diagonalIn: 32, ships: true },
 ] as const;
+
+/**
+ * The number of surfaces one panel contributes: one lock surface, five tabs in two device states,
+ * and two escalation steps.
+ *
+ * Derived rather than typed so `MIN_SURFACES` below cannot rot when a tab is added — the tab list
+ * is read from the DOM precisely so another session's tab is measured without touching this file,
+ * and a hand-typed floor would then be the one thing that did need touching.
+ */
+const SURFACES_PER_PANEL = 1 + 5 * 2 + 2;
+
+/**
+ * `24-F14` empty-match protection: a gate that measured nothing must FAIL, never pass.
+ *
+ * Set one whole panel below the expected total, so **losing any single panel reds the gate**. A
+ * floor that only catches total collapse is not a floor, and with five panels the failure mode
+ * this guards is no longer "nothing ran" but "one row silently stopped loading".
+ */
+const MIN_SURFACES = (PANELS.length - 1) * SURFACES_PER_PANEL;
 
 /**
  * `27-F8`'s keypad target, and what it must MEASURE as on each panel — `27 §1a`'s own published
@@ -155,7 +227,110 @@ const KEYPAD_MM_TOLERANCE = 0.6;
  */
 const OWED_UNDER_ALARM: readonly string[] = [];
 
-type Failure = { readonly surface: string; readonly state: State; readonly detail: string };
+/**
+ * # THE COMPOSITION CHECK — the one question here that is not "does it fit"
+ *
+ * **This rail's blind spot, stated by the founder rather than by a test.** Every other check
+ * above asks whether a thing fits or can be touched, and a tender panel anchored in the top-left
+ * of a 24″ window with the bottom third empty answers *yes* to both. He answered *"this user
+ * interface is unusable for a human"*, and he was reading the same screen.
+ *
+ * ## What is measured, and why it is SYMMETRY rather than density
+ *
+ * The obvious check is a density floor — flag a surface whose content covers less than some
+ * fraction of its viewport — and **it cannot be made honest.** It fires on every legitimately
+ * sparse surface this product has: `02-F18`'s empty-state line ("No order to settle"), a
+ * reconciliation with one closed shift, a roster of three, the Orders inbox on a quiet Tuesday.
+ * Every one of those is *correct* at low density, and there is no threshold that separates them
+ * from the defect — the founder's Pay screen covered roughly the same fraction of its surface as
+ * a legitimately quiet Me tab. A rule that cannot distinguish its target from its control is a
+ * rule that gets suppressed, and this repo already knows what a permanently-suppressed signal
+ * does to the ones beside it (`27-F16`, and the two red chips that meant nothing).
+ *
+ * **Asymmetry can be made honest, because it measures a DECISION and not an amount.** Content
+ * with a natural maximum size, centred in a surface larger than it, has equal margins — that is a
+ * layout that considered the leftover room and gave it back deliberately. The identical content
+ * pinned to a corner has all of the slack on two sides. Same coverage, same fit, opposite
+ * intents, and the difference is arithmetic rather than taste. It is also scale-free: it says
+ * nothing about how much room a surface should use, which is exactly the judgement a gate has no
+ * business making.
+ *
+ * ## The threshold, and why it is loose
+ *
+ * A surface fails when the slack on one side exceeds the slack on the other by more than
+ * **{@link COMPOSITION_TOLERANCE} of the work area** on either axis. At 0.25 that is a quarter of
+ * the surface of pure asymmetry before anything is said — deliberately far above anything a
+ * `space-between` header, a bottom-aligned pager or an odd-pixel centring can produce, and far
+ * below the founder's case, which ran **57% horizontally and 39% vertically** on the panel he
+ * opened. Measured on the shipped tree, not chosen: see the report at the bottom of this file for
+ * what every surface reads, including the ones that pass with room to spare.
+ *
+ * **What it deliberately does NOT catch, so a green run is not over-read:** a surface that is
+ * symmetric and ugly, a surface whose content is centred but far too small for the room, and any
+ * question of typography, hierarchy or colour. It separates *composed* from *abandoned*. It has
+ * no opinion whatsoever about whether the composition is any good, and the only thing that does
+ * is looking at the screenshots this gate now writes.
+ */
+const COMPOSITION_TOLERANCE = 0.25;
+
+/**
+ * Surfaces whose asymmetry is a fact about the CONTENT rather than a layout that gave up, keyed
+ * by the tab label so the entry survives a panel being added.
+ *
+ * `Order` is the shape this exemption exists for and the only member: `27-F2`/`27-F11a` make the
+ * item grid a **paged** surface that fills its box top-left and pages laterally, with the last
+ * page legitimately part-full — `ItemGrid` pins its rows to `alignContent: "start"` for `27-F4`
+ * (*"a page with four items must put them where a page with forty puts its first four"*), which
+ * is bottom slack by construction and is the correct behaviour. Centring that page would move
+ * every tile the moment the menu changed size, which is the breaking change `27-F4` names.
+ *
+ * It is exempt on the VERTICAL axis only. Horizontal asymmetry on Order would mean the grid or
+ * the cart had stopped filling the width, which is defect 2's own shape and must still red.
+ */
+const COMPOSITION_EXEMPT_Y: readonly string[] = ["Order"];
+
+/**
+ * # `RESTOS_LAYOUT_SHOTS=<dir>` — the gate writes a PNG of every surface it measures
+ *
+ * **Because measuring is not looking, and this repo has the receipts.** Seven layout defects were
+ * found by launching the app and looking; zero by the suites. Two more were found by a founder
+ * looking at screens that had passed every check in this file. The rail's own blind-spot list
+ * says it *"judges nothing about legibility, contrast or typography"* and that
+ * *"`27-F4`'s positional contract is invisible to it"* — and there is exactly one instrument for
+ * all of that, which is a person's eye on a picture.
+ *
+ * So the gate hands you the pictures. Same window, same fixture, same five panels, same two
+ * device states — 65 surfaces — captured at the moment each one is judged, which is the property
+ * a screenshot taken by hand afterwards does not have (a hand-driven session cannot reliably
+ * reproduce the escalation pad on the third panel with the band up).
+ *
+ * **Off by default and it must stay off**, for the reason `T-01-07` gives everywhere else here: a
+ * rail that writes 65 PNGs on every `pnpm verify` is a rail people turn off. Unset, this is one
+ * branch that does nothing.
+ *
+ * It is **not evidence of correctness** — nothing about a PNG asserts anything, and a green gate
+ * beside an ugly screenshot is exactly the state this whole exercise started from. It is evidence
+ * for a *human*, which is the only reader that can answer the question the founder is asking.
+ */
+const SHOT_DIR = process.env["RESTOS_LAYOUT_SHOTS"];
+
+const shoot = async (window: BrowserWindow, name: string): Promise<void> => {
+  if (SHOT_DIR === undefined || SHOT_DIR === "") return;
+  const image = await window.webContents.capturePage();
+  writeFileSync(join(SHOT_DIR, `${name}.png`), image.toPNG());
+};
+
+type Failure = {
+  readonly surface: string;
+  readonly state: State;
+  readonly detail: string;
+  /**
+   * A FIT verdict (overflow, clipping, reachability) as opposed to a COMPOSITION one. Only fit
+   * verdicts are downgraded to a report on a `ships: false` panel; asymmetry is a layout decision
+   * on any glass and binds everywhere.
+   */
+  readonly fit?: boolean;
+};
 
 /** The two states this device really has: `03-F5`'s band up, and acknowledged. */
 type State = "alarm" | "quiet";
@@ -193,6 +368,7 @@ const judge = (surface: string, state: State, r: SurfaceReport): void => {
     failures.push({
       surface,
       state,
+      fit: true,
       detail:
         `OVERFLOW ${o.axis}: ${o.label} holds ${o.content}px of content in a ${o.box}px box ` +
         `(overflow: ${o.overflow}) — ${o.content - o.box}px is ${
@@ -224,6 +400,7 @@ const judge = (surface: string, state: State, r: SurfaceReport): void => {
       failures.push({
         surface,
         state,
+        fit: true,
         detail:
           `${gone ? "UNREACHABLE" : "CLIPPED"}: ${c.label} at (${c.rect.x},${c.rect.y}) ` +
           `${c.rect.w}x${c.rect.h} overhangs the ${r.viewport.w}x${r.viewport.h} viewport by ` +
@@ -243,6 +420,7 @@ const judge = (surface: string, state: State, r: SurfaceReport): void => {
       failures.push({
         surface,
         state,
+        fit: true,
         detail:
           `COVERED: ${c.label} at (${c.rect.x},${c.rect.y}) is inside the viewport but ` +
           "elementFromPoint at its centre lands on something else — another element is painted over it.",
@@ -250,12 +428,75 @@ const judge = (surface: string, state: State, r: SurfaceReport): void => {
     }
   }
 
+  judgeComposition(surface, state, r);
+
   note(
     `  [${state}] ${surface}: ${r.controls.length} controls, ${r.overflows.length} overflow(s), viewport ${r.viewport.w}x${r.viewport.h}`,
   );
 };
 
+/** Totals for the composition check, so it too can prove it looked at something (`24-F14`). */
+let extentsMeasured = 0;
+
+const judgeComposition = (surface: string, state: State, r: SurfaceReport): void => {
+  const e = r.extent;
+  // The unlock surface has no `AppShell` and therefore no `<main>` (`02-F18` — the lock sits OVER
+  // the shell). Nothing to judge, and saying so beats inventing a work area for it.
+  if (e === null) return;
+  extentsMeasured += 1;
+  if (e.content === null) {
+    failures.push({
+      surface,
+      state,
+      detail:
+        "EMPTY MATCH — the work area contains no INKED element at all: no control, no fill, no " +
+        "boundary, no text. Either the surface did not render or `measureSurface`'s ink test has " +
+        "stopped recognising what this product draws, and either way the composition check below " +
+        "proves nothing about it (24-F14).",
+    });
+    return;
+  }
+  const slack = {
+    left: e.content.x - e.box.x,
+    right: e.box.x + e.box.w - (e.content.x + e.content.w),
+    top: e.content.y - e.box.y,
+    bottom: e.box.y + e.box.h - (e.content.y + e.content.h),
+  };
+  const tab = surface.slice(surface.indexOf("tab:") + 4);
+  const axes = [
+    { axis: "x" as const, a: slack.left, b: slack.right, span: e.box.w, ends: "left/right" },
+    {
+      axis: "y" as const,
+      a: slack.top,
+      b: slack.bottom,
+      span: e.box.h,
+      ends: "top/bottom",
+      exempt: surface.includes("tab:") && COMPOSITION_EXEMPT_Y.includes(tab),
+    },
+  ];
+  for (const { axis, a, b, span, ends, exempt } of axes) {
+    if (exempt === true || span <= 0) continue;
+    const asymmetry = Math.abs(a - b);
+    if (asymmetry <= span * COMPOSITION_TOLERANCE) continue;
+    failures.push({
+      surface,
+      state,
+      detail:
+        `ANCHORED ${axis}: the content occupies ${e.content.w}x${e.content.h} of a ${e.box.w}x${e.box.h} ` +
+        `work area with ${Math.round(a)}dp and ${Math.round(b)}dp of slack on its ${ends} — an ` +
+        `asymmetry of ${Math.round(asymmetry)}dp, ${Math.round((asymmetry / span) * 100)}% of the axis, ` +
+        `over the ${Math.round(COMPOSITION_TOLERANCE * 100)}% this gate allows. It FITS and every ` +
+        "control is reachable; that is the point. Content pinned against one edge with all the " +
+        "leftover room on the other is a layout that ran out of opinions, and it is what a founder " +
+        'called "unusable for a human" on a screen every other check here passed. Either the ' +
+        "composition should fill the room, or it has a natural maximum and the surface should " +
+        "CENTRE it — both are decisions; this is neither.",
+    });
+  }
+};
+
 const run = async (): Promise<number> => {
+  if (SHOT_DIR !== undefined && SHOT_DIR !== "") mkdirSync(SHOT_DIR, { recursive: true });
   const window = new BrowserWindow({
     // THE SHIPPED OPTIONS, imported — not a copy. This is the whole of defect 3's coverage.
     ...COUNTER_WINDOW_OPTIONS,
@@ -396,15 +637,51 @@ const run = async (): Promise<number> => {
   // gets `03-F5`'s band up exactly like the first instead of inheriting an acknowledged one.
   // ---------------------------------------------------------------------------------------
   for (const panel of PANELS) {
+    // The window's declared floor is 1366x768 of CONTENT, so a panel is never requested below it
+    // and Electron never clamps one. Asserted rather than assumed: a clamped panel would be
+    // measured under the wrong label, which is worse than not measuring it.
     window.setContentSize(panel.width, panel.height);
-    await new Promise((r) => setTimeout(r, 200));
-    await window.loadFile(join(HERE, "../renderer/index.html"));
+    await new Promise((r) => setTimeout(r, 250));
+    /**
+     * **The diagonal travels to the fixture as a query parameter**, because the density is the
+     * whole input and the preload has to have it before React's first read.
+     *
+     * `deviceState()` is called on mount, so anything injected after `loadFile` resolves arrives
+     * a frame too late and the surface paints once at the previous panel's physical size. A query
+     * parameter is on the URL the preload's own `location` already carries, which is the only
+     * channel that exists before the page runs.
+     */
+    await window.loadFile(join(HERE, "../renderer/index.html"), {
+      query: { diagonalIn: String(panel.diagonalIn) },
+    });
     await new Promise((r) => setTimeout(r, 600));
+
+    const [pw, ph] = JSON.parse(
+      (await window.webContents.executeJavaScript(
+        "JSON.stringify([window.innerWidth, window.innerHeight])",
+      )) as string,
+    ) as [number, number];
+    if (pw !== panel.width || ph !== panel.height) {
+      failures.push({
+        surface: `${panel.label} panel`,
+        state: "alarm",
+        detail:
+          `THE PANEL WAS NOT THE PANEL: asked for ${panel.width}x${panel.height} and the renderer ` +
+          `got ${pw}x${ph}. Every surface below would be measured under a label that does not ` +
+          "describe it, which is worse than not measuring it at all (24-F14).",
+      });
+    }
+    note(
+      `panel ${panel.label}: ${pw}x${ph} css px at ${panel.diagonalIn}″ = ` +
+        `${((panel.diagonalIn * panel.width) / Math.hypot(panel.width, panel.height)) * 25.4} x ` +
+        `${((panel.diagonalIn * panel.height) / Math.hypot(panel.width, panel.height)) * 25.4} mm of glass`,
+    );
 
     const on = (surface: string): string => `${panel.label} ${surface}`;
 
     // `02-F18` — a locked device shows only the unlock screen.
     judge(on("unlock"), "alarm", await measure());
+    await shoot(window, `${panel.label}--unlock`);
 
     await window.webContents.executeJavaScript(
       "window.restos.unlock('user-hina', '1234')",
@@ -453,6 +730,7 @@ const run = async (): Promise<number> => {
         await click(i);
         await new Promise((r) => setTimeout(r, 350));
         judge(on(`tab:${tab.label || i}`), state, await measure());
+        await shoot(window, `${panel.label}--${state}--${tab.label || i}`);
       }
     };
 
@@ -493,6 +771,7 @@ const run = async (): Promise<number> => {
       } else {
         // Step one: `02-F38`'s approver grid, the requester absent.
         judge(on("escalation:approvers"), "alarm", await measure());
+        await shoot(window, `${panel.label}--alarm--escalation-approvers`);
         // Step two: the PIN pad. `01-F61` identify-then-PIN, and the step that did not fit.
         const chose = await press("Ayesha");
         await new Promise((r) => setTimeout(r, 400));
@@ -505,6 +784,7 @@ const run = async (): Promise<number> => {
           });
         } else {
           judge(on("escalation:pin"), "alarm", await measure());
+          await shoot(window, `${panel.label}--alarm--escalation-pin`);
           await press("Cancel");
           await new Promise((r) => setTimeout(r, 300));
         }
@@ -575,7 +855,16 @@ const run = async (): Promise<number> => {
   // 5. THE OWED REGISTER — exempt the known fourth defect, and FAIL if it has been fixed.
   // ---------------------------------------------------------------------------------------
   const owed = failures.filter((f) => f.state === "alarm" && OWED_UNDER_ALARM.includes(f.surface));
-  const fatal = failures.filter((f) => !owed.includes(f));
+  /**
+   * A FIT verdict on a panel the counter does not ship to is **reported, never fatal** — see the
+   * `ships: false` note on `tablet-10.1`. Composition verdicts bind on every panel, and every
+   * verdict of every kind binds on every shipping one.
+   */
+  const offPanel = PANELS.filter((p) => !p.ships).map((p) => p.label);
+  const probe = failures.filter(
+    (f) => f.fit === true && offPanel.some((label) => f.surface.startsWith(label)),
+  );
+  const fatal = failures.filter((f) => !owed.includes(f) && !probe.includes(f));
 
   for (const surface of OWED_UNDER_ALARM) {
     if (!owed.some((f) => f.surface === surface)) {
@@ -591,10 +880,36 @@ const run = async (): Promise<number> => {
     }
   }
 
+  // `24-F14` — the composition check must have looked at something too. Without this a change
+  // that stopped `<main>` being found would silently retire the whole check while every other
+  // number in the summary stayed healthy, which is precisely how row M8's fixture defect worked.
+  if (extentsMeasured < MIN_SURFACES - PANELS.length) {
+    failures.push({
+      surface: "gate",
+      state: "quiet",
+      detail:
+        `EMPTY MATCH — the composition check measured only ${extentsMeasured} work areas across ` +
+        `${surfacesMeasured} surfaces. Every surface inside AppShell has a <main>; if they have ` +
+        "stopped being found, the one check here that is not about fitting is inert (24-F14).",
+    });
+  }
+
   note("");
   note(
-    `measured ${surfacesMeasured} surfaces, ${controlsMeasured} controls, ${clippingBoxesSeen} overflowing boxes`,
+    `measured ${surfacesMeasured} surfaces, ${controlsMeasured} controls, ` +
+      `${extentsMeasured} compositions, ${clippingBoxesSeen} overflowing boxes`,
   );
+
+  if (probe.length > 0) {
+    note("");
+    note(
+      `OFF-PANEL PROBE — ${probe.length} FIT violation(s) on glass the counter does not ship to ` +
+        `(${offPanel.join(", ")}). Reported, not failing: 27 §1a puts the counter at 15.6″, and ` +
+        "the only remedy for these would be shrinking 27-F8's 20 mm target, which 27-F68 (b) " +
+        "forbids by name. Composition verdicts on the same panel DO fail.",
+    );
+    for (const f of probe) note(`  [${f.state}] [${f.surface}] ${f.detail}`);
+  }
 
   if (owed.length > 0) {
     note("");
