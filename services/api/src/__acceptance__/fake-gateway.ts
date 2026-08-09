@@ -28,6 +28,27 @@ import {
 
 export type Recorded = { readonly path: string; readonly body: unknown };
 
+/**
+ * One `kernel.device_registry` row as this fake holds it (`14-F12`).
+ *
+ * **The revocation SEMANTICS below are the real gateway's, restated once and no further.** Only the
+ * first revocation stamps (`revokeDevice`'s `and revoked_at is null`) and an unregistered device is
+ * a loud refusal (`revokeRegisteredDevice`'s read-before-write, which exists because an
+ * `UPDATE … WHERE` matching zero rows reports success over a till that is still selling). Those two
+ * are restated because the ADAPTER's behaviour depends on them — `already` decides whether
+ * `device.revoked` is appended at all — and a fake that silently re-stamped would let this suite
+ * bless an adapter that attributes last Tuesday's revocation to today's owner. Everything else is
+ * the real writer's and is asserted against real Postgres in
+ * `services/sync-gateway/src/__acceptance__/device-http.test.ts`.
+ */
+export type FakeDeviceRow = {
+  readonly device_id: string;
+  readonly branch_id: string;
+  readonly device_class: string;
+  revoked_at: number | null;
+  readonly token_expires_at: number | null;
+};
+
 export type FakeGateway = {
   readonly url: string;
   readonly token: string;
@@ -39,6 +60,10 @@ export type FakeGateway = {
   orgEvents(): readonly { org_id: string; type: string; payload: unknown }[];
   /** Make the next N responses on `path` a refusal, to drive the adapter's error path. */
   refuseWith(path: string, status: number, message: string): void;
+  /** `14-F12` — seed a registry row. `revoked_at` seeds an already-revoked device. */
+  registerDevice(org_id: string, row: FakeDeviceRow): void;
+  /** The registry as it stands now, so a test can assert `revoked_at` actually MOVED. */
+  devices(org_id: string): readonly FakeDeviceRow[];
   close(): Promise<void>;
 };
 
@@ -49,6 +74,15 @@ export const startFakeGateway = async (): Promise<FakeGateway> => {
   const ledger = createMemoryLedgerAppender();
   const received: Recorded[] = [];
   const refusals = new Map<string, { status: number; message: string }>();
+  const registry = new Map<string, FakeDeviceRow[]>();
+  /**
+   * The real gateway stamps `revoked_at` from the DATABASE clock. A monotonic counter here keeps
+   * two revocations in one millisecond distinguishable, which `Date.now()` does not — and the
+   * `withActors` join picks the EARLIEST event, so a fixture whose two instants collide could not
+   * tell a correct join from a wrong one.
+   */
+  let tick = 1_700_000_000_000;
+  const revocationClock = (): number => ++tick;
 
   const server: Server = createServer((req, res) => {
     void (async () => {
@@ -117,6 +151,33 @@ export const startFakeGateway = async (): Promise<FakeGateway> => {
         send(200, { events: await ledger.history(org_id) });
         return;
       }
+      if (req.method === "GET" && url.pathname === "/internal/devices") {
+        send(200, { devices: [...(registry.get(org_id) ?? [])] });
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/internal/devices/revoke") {
+        const input = body as { org_id: string; device_id: string };
+        const row = (registry.get(input.org_id) ?? []).find(
+          (candidate) => candidate.device_id === input.device_id,
+        );
+        if (row === undefined) {
+          // `RangeError` → 400 in the real service (`refusalStatus`). The status is what the
+          // adapter sees, so the status is what this reproduces.
+          send(400, {
+            error: `device ${input.device_id} is NOT REGISTERED in org ${input.org_id} — nothing was revoked.`,
+          });
+          return;
+        }
+        const already = row.revoked_at !== null;
+        if (!already) row.revoked_at = revocationClock();
+        send(200, {
+          branch_id: row.branch_id,
+          device_class: row.device_class,
+          revoked_at: row.revoked_at as number,
+          already,
+        });
+        return;
+      }
       send(404, { error: `no route ${req.method ?? "?"} ${url.pathname}` });
     })().catch((error: unknown) => {
       res.writeHead(500, { "content-type": "application/json" });
@@ -143,6 +204,10 @@ export const startFakeGateway = async (): Promise<FakeGateway> => {
     refuseWith: (path, status, message) => {
       refusals.set(path, { status, message });
     },
+    registerDevice: (org_id, row) => {
+      registry.set(org_id, [...(registry.get(org_id) ?? []), { ...row }]);
+    },
+    devices: (org_id) => [...(registry.get(org_id) ?? [])],
     close: () =>
       new Promise<void>((done, fail) => {
         server.close((error) => (error === undefined ? done() : fail(error)));

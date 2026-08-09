@@ -125,6 +125,45 @@ export const revokeDevice = async (
   );
 };
 
+/**
+ * `14-F12`'s **device list**, one org at a time — the read the back office's device screen is.
+ *
+ * ⚠ **IT PROJECTS WHAT THIS TABLE HAS AND NOT WHAT `14-F12` ASKS FOR, and the gap is named rather
+ * than filled.** The FR wants "class, app version, last-seen, sync lag"; `kernel.device_registry`
+ * holds class and nothing else on that list. **App version and last-seen are not stored anywhere in
+ * this service** — no heartbeat table exists, doc 15's device pipeline is unbuilt — and sync lag is
+ * derived from a cursor this row does not carry. Inventing a plausible value (a `last_seen` stamped
+ * at hello, say) would be a second interpretation of a fact the corpus assigns to another module,
+ * and `00 §5.7` forbids a screen showing an aged number as a fresh one. So the three absent columns
+ * are absent here, the screen says so, and closing them is doc 15's pipeline landing — not a column
+ * added on a guess.
+ *
+ * `token_expires_at` IS carried, because it is real and it is the one liveness fact this table
+ * honestly has (`01-F47`).
+ *
+ * Ordered by `(branch_id, device_id)` so the list is stable between visits: without it the planner
+ * decides the order and a `14-F12` list re-shuffles under an owner between two reads of the same
+ * unchanged fleet.
+ */
+export const listDevices = async (
+  executor: SqlExecutor,
+  orgId: string,
+): Promise<readonly (DeviceRegistryRow & { device_id: string })[]> => {
+  const rows = await executor.execute(
+    sql`select device_id, branch_id, device_class, revoked_at, token_expires_at
+        from kernel.device_registry
+        where org_id = ${orgId}
+        order by branch_id asc, device_id asc`,
+  );
+  return [...rows].map((row) => ({
+    device_id: String(row.device_id),
+    branch_id: String(row.branch_id),
+    device_class: String(row.device_class),
+    revoked_at: row.revoked_at === null ? null : Number(row.revoked_at),
+    token_expires_at: row.token_expires_at === null ? null : Number(row.token_expires_at),
+  }));
+};
+
 /** The auth-check read: one (org, device) row, or undefined when never registered. */
 export const readRegistryRow = async (
   executor: SqlExecutor,

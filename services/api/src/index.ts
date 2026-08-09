@@ -19,6 +19,18 @@ export {
   type StagedEditStore,
 } from "./catalog.js";
 export { catalogProcedures } from "./catalog-router.js";
+export { deviceProcedures } from "./device-router.js";
+// `14-F12`/`14-F13`'s port and its two honest absences (see `devices.ts`).
+export {
+  type DeviceDirectory,
+  type DeviceListing,
+  type DeviceRecord,
+  type DeviceRevocationRecord,
+  DeviceRevokedPayload,
+  type DeviceRevokeOutcome,
+  unconfiguredDeviceDirectory,
+  withActors,
+} from "./devices.js";
 // `18 §5`'s taxonomy slot for an external system that did not answer. Exported beside
 // `AuthzRefusal` for the same reason: a client that must read a refusal's KIND out of its message
 // is a client that breaks when the message improves.
@@ -27,6 +39,7 @@ export { IntegrationError } from "./errors.js";
 // publishes, the gateway serves).
 export {
   createGatewayCatalogPublisher,
+  createGatewayDeviceDirectory,
   createGatewayLedgerAppender,
   type GatewayLink,
 } from "./gateway-client.js";

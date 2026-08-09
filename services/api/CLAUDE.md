@@ -250,3 +250,74 @@ Every row was run against the FULL suite, so the right-hand column is measured, 
 exit 0, `pnpm seams:check` clean, 125 of 126 tests passing — and an owner with a mispriced menu is
 told to wait for an outage that will never end. Only the assertion that a **400 stays a 400**
 separates it from the correct build.
+
+## `14-F12`/`14-F13` — the device surface, and the ACTOR a shell command could not record
+
+`devices.list` and `devices.revoke`, both built with `authorized("device.manage")` (`14-F30`).
+**Neither exemption list changed and neither may**: `PUBLIC_PROCEDURES` would put a kill switch on
+the open internet, and `SESSION_ONLY_PROCEDURES` is for procedures reading the CALLER'S OWN
+identity, which an org's device fleet is not.
+
+- **The port is `DeviceDirectory` (`devices.ts`), ONE bag with four required members** — two reach
+  the gateway's device registry, two reach `01-F62`'s org-scoped event store. Splitting them into
+  two ports was the obvious shape and is rejected: `14-F13` says *"the list shows revoked state **and
+  actor**"*, so a deployment that wired the registry half and forgot the ledger half would revoke
+  correctly, evict the till, and attribute nothing — Rule B's hole with two ports instead of one
+  optional member.
+- **The fallback REFUSES; it is not a memory stub.** `unconfiguredDeviceDirectory` throws on every
+  method. AGENTS.md measured the stub shape as invisible to every rail we have ("Rule B asks whether
+  an optional member is *supplied*, never whether what was supplied is *real*"), and here a stub
+  means a revoke button that reports success and stops nothing.
+- **NEITHER PROCEDURE TAKES A `branch_id`, and the first draft did.** `trpc.ts` scopes `can()` from
+  the raw input, so sending the device's branch looks like `01-F26` done properly — and is wrong:
+  this service learns a device's branch only by reading the registry, and that read happens *inside*
+  the revocation, so the check lands AFTER the destructive act and a caller naming a branch they
+  hold could revoke a device at a branch they do not. Stating no branch resolves the scope to `null`,
+  which matches org-wide assignments only. Widening it needs a `find(org_id, device_id)` on the port,
+  and is additive when a role that needs it exists.
+- **Registry write FIRST, attribution second.** A failure between them leaves a dead till with an
+  unattributed revocation — `01-F48` evicts on `revoked_at` and never reads the ledger. The reverse
+  leaves a live till with a history row saying it was switched off, which `01-F1` forbids deleting.
+- **An ALREADY-revoked device appends nothing.** The instant did not move, so writing
+  `device.revoked` with today's actor would attribute last Tuesday's act to whoever pressed the
+  button today. Cost stated: a device revoked by `pnpm -C services/sync-gateway revoke-device` keeps
+  `revoked_by: null` for ever and pressing revoke again does not adopt it.
+- ⚠ **`device.registered` is still unemitted and this did NOT close it.** Registration is an
+  operator command with no signed-in user, so the only actor it could write is `null`. The org-scoped
+  history therefore holds revocations with no matching registrations — **it is not a device history
+  and no surface may render it as one.** `01-F25`'s pairing code unblocks it.
+
+### Mutation matrix (round-3 law) — control **167/167** green, 0 survivors
+
+In-tree with byte-exact backups and a restore trap; the tree was diffed byte-exact after every run.
+Nothing here weakens a security CONSTANT (the permission cells were mutated out-of-tree, see
+`packages/domain/CLAUDE.md`) — each mutant below reds a test rather than downgrading a credential.
+Every row is the FULL package suite.
+
+| # | mutant (exactly one branch) | tests failed | notes |
+|---|---|---|---|
+| A1 | **`devices.revoke` built with `sessionProcedure` — the kill switch UNGATED** | **56** | `assertEveryProcedureIsGated` refuses to BOOT; 9 of 11 files fail because they build the host |
+| A1b | the same for `devices.list` — the fleet legible to any session | 56 | as A1 |
+| A2 | **`recordRevocation` never called — the registry write lands, the ACTOR never does** | **8** | only the two device files; **154 pre-existing green** |
+| A3 | `actor_user_id: null` — exactly what a shell command could write | 4 | only the two device files |
+| A4 | the ledger append moved BEFORE the registry write | 1 | the ordering assertion, alone |
+| A5 | `already` ignored — a second press attributes the first revocation to today's owner | 2 | |
+| A6 | **`withActors` takes the LATEST event instead of the earliest** | **2** | **survived 0/162 before §D was written — see below** |
+| A7 | **an ACTIVE device is given an actor** | **1** | **also survived before §D** |
+| A8 | **`server.ts` supplies `unconfiguredDeviceDirectory()` — THE seam mutant** | **4** | boots, gates, serves the catalog; the fleet is unreachable |
+| A8b | the seam mutant's quieter twin: a stub answering `[]` and reporting success | 4 | the shape `seams:check` cannot see — the port IS supplied, with a lie |
+| A9 | **CONTROL: same states, same writes, different prose** | **0** | |
+
+**A2 and A8 are the two to re-run after any change here.** A2 is `14-F13` itself: the till stops,
+the screen says so, and nobody is named — which is the state the shell command was already in, so a
+suite that missed it would have blessed a screen that added nothing.
+
+⚠ **A6 and A7 SURVIVED THE FIRST RUN — 0 of 162 — and that is the finding worth keeping.** Both are
+branches of `withActors`, and every fixture in `devices.test.ts` had exactly one event per device and
+no event on a live one, so neither branch was ever exercised. This is AGENTS.md's round-3 defect
+reproduced *inside the work that cites it*: the mechanism was built correctly and never aimed at the
+case it exists for. §D now drives `withActors` directly and both die. **A doc comment was wrong in
+the same place** — it claimed two events for one device were producible today by revoking through
+the CLI and then the screen, which is false (the CLI writes no event, and `already` suppresses the
+second). The branch is kept because `15 §2` emits `device.revoked` (support-initiated) into this
+same store, so the collision is real the day doc 15 lands.

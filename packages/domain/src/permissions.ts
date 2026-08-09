@@ -129,6 +129,11 @@ export const PERMISSION_ACTIONS = [
   "stock.wastage_record",
   "catalog.edit_menu_prices",
   "catalog.edit_recipes",
+  // ── Device management (`14-F30`, which decides it alone). ───────────────────────────────
+  // Appendix A has no device row, so before `14-F30` this matrix could not answer a device
+  // request at all — and `14-F13` puts an immediate, irreversible kill switch on an
+  // authenticated back-office screen. Commandment 8 has to have something to refuse against.
+  "device.manage",
   "history.edit_delete",
   "approval.grant",
   "report.sales_view",
@@ -319,6 +324,33 @@ const VERDICTS: Readonly<Record<VerdictAction, Readonly<Record<Role, AuthOutcome
   // `Edit recipes` — — · — · — · ✔ (or vendor onboarding team). The parenthesis is not a
   // column in the matrix, so it decides nothing here.
   "catalog.edit_recipes": {
+    cashier: "deny",
+    branch_manager: "deny",
+    storekeeper: "deny",
+    owner: "allow",
+  },
+  // No Appendix A row — `14-F30` decides it, and records itself as a PINNED INTERPRETATION
+  // rather than a transcription, because the appendix carries no device row to transcribe.
+  //
+  // The corpus names exactly ONE role for this act and names it twice: `14-N2` — "an owner can
+  // change a price **or revoke a device** from their phone" — and doc 14 §4's *Device revocation*
+  // flow, "**Owner** marks a tablet stolen". No FR puts a manager, a cashier or a storekeeper on
+  // it, and doc 14 §9's first open question ("whether managers get a scoped back-office slice on
+  // phones … or stay manager-console-only until pilots demand it") is the corpus saying a
+  // manager's back-office reach is UNDECIDED — so a `branch_manager: allow` here would answer an
+  // open question by accident. The row therefore reads like `catalog.edit_menu_prices` above,
+  // which is the other half of `14-N2`'s own sentence and resolves the same way for the same
+  // reason: no FR states the widening, and the widening edit is additive.
+  //
+  // **`deny`, not `escalate`.** `02-F20` enumerates the escalating actions and this is not among
+  // them; there is no manager-PIN path to a back-office screen, and `services/api` refuses
+  // `escalate` anyway because the cloud plane cannot collect a second credential.
+  //
+  // **ONE action covering `14-F12`'s list AND `14-F13`'s revocation** (`14-F30`). Splitting the
+  // read from the destructive act is the tempting shape and it is speculative while every cell
+  // is identical — two actions differing in no cell differ in nothing an implementation can
+  // observe. It becomes a real question the day a role is widened into the list.
+  "device.manage": {
     cashier: "deny",
     branch_manager: "deny",
     storekeeper: "deny",

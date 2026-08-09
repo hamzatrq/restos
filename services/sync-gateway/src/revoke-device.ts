@@ -151,7 +151,11 @@ export type RevokeOutcome = {
 export const revokeRegisteredDevice = async (db: GatewayDb, args: Args): Promise<RevokeOutcome> => {
   const existing = await readRegistryRow(db, args.org, args.device);
   if (existing === undefined) {
-    throw new Error(
+    // A `RangeError` because this is the CALLER's mistake and `publish-http.ts`'s `refusalStatus`
+    // is the module that has to tell the two apart: an unknown device is a 400, a failed write is
+    // a 500. The CLI reads `error.message` and exits 1 either way, so the class is invisible there
+    // — which is exactly why it can be stated for the route without moving the command.
+    throw new RangeError(
       `device ${args.device} is NOT REGISTERED in org ${args.org} — nothing was revoked. ` +
         "Check both ids: an UPDATE against a device that does not exist matches no rows and " +
         "reports no error, which is how an operator walks away believing a live till is dead.",

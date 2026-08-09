@@ -458,3 +458,52 @@ exactly that on the first run, and **the assertions still went green off the rec
 Testcontainers Postgres in `globalSetup` for every file in the package (T-01-07: fail loudly, never
 skip). Both processes `startable.test.ts` spawns are pointed at a deliberately CLOSED port instead,
 so what they prove is independent of that container — which is exactly the claim being made.
+
+## `/internal/devices` — `14-F12`'s list and `14-F13`'s revocation, over the service credential
+
+Two routes beside the four publish ones, behind the same `PUBLISH_TOKEN` and the same fail-closed
+503. They exist so `services/api` can serve an AUTHENTICATED device screen: the CLI kill switch
+above stays, and `14-F13`'s half — a revocation with an **actor** — is now reachable.
+
+- `GET /internal/devices?org_id=` → `listDevices` (`registry.ts`). ⚠ **It projects what this table
+  HAS, not what `14-F12` asks for.** The FR wants "class, app version, last-seen, sync lag"; the
+  registry holds the class. App version and last-seen are stored **nowhere in this service** and sync
+  lag comes off a cursor this row does not carry, so the three are ABSENT rather than invented —
+  doc 15's device pipeline is what closes them.
+- `POST /internal/devices/revoke` → **`revokeRegisteredDevice`, the SAME function the CLI calls.**
+  That reuse is load-bearing, not convenience: two paths to one act means two readings of the
+  read-before-write (a mistyped id matches no rows and reports success over a live till), of the
+  already-revoked branch, and of the post-write re-read. `03-F40`'s two sensor bit layouts is this
+  corpus's own record of what a second interpretation costs.
+- `revokeRegisteredDevice`'s NOT-REGISTERED throw became a **`RangeError`** so `refusalStatus` maps
+  it to 400 rather than 500. The CLI reads `error.message` and exits 1 either way, so the class is
+  invisible there — which is exactly why it could be stated for the route without moving the command.
+- **No actor field on the request, deliberately.** Registry rows are provisioning bookkeeping, not
+  event history (T-01-09), so attribution goes on the `device.revoked` org-scoped event that
+  `services/api` appends. `strictObject` refuses an `actor_user_id` **by name**, so a caller cannot
+  believe it attributed a revocation it did not.
+
+### Mutation matrix — `device-http.test.ts` (round-3 law), control **317/317** green, 0 survivors
+
+In-tree with byte-exact backups and a restore trap, against real Postgres. **In every row the failing
+FILE was `device-http.test.ts` alone — all 304 pre-existing gateway tests stayed green.**
+
+| # | mutant (exactly one branch) | new 13 failed | pre-existing 304 |
+|---|---|---|---|
+| G1 | **the revoke route never registered — the back office's kill switch 404s** | **8** | **all green** |
+| G2 | **the route calls `revokeDevice` directly instead of the shared `revokeRegisteredDevice`** | **3** | **all green** |
+| G3 | `listDevices` loses its `where org_id` — one org sees another's fleet | 4 | all green |
+| G4 | a fabricated `last_seen` added to the row (`00 §5.7`) | 1 | all green |
+| G5 | the NOT-REGISTERED refusal loses its `RangeError` — a caller mistake becomes a 500 | 1 | all green |
+| G6 | **CONTROL: the list's ORDER BY loses its branch tiebreak; same rows, same values** | **0** | all green |
+
+**G1 and G2 are the two to re-run after any change here.** G2 is the 2am row: it is what the route
+would do if someone "simplified" it to the one-line UPDATE, and it answers **200 with a fabricated
+outcome over a device that does not exist** — the same defect `revoke-device.ts` was built to
+prevent, reintroduced one layer out.
+
+⚠ **§C is the assertion a column check cannot make, and it needed the RIGHT CLOCK.** The first draft
+built its gateway with `Date.now()`; `helpers.ts` mints session tokens against `BASE_T`, so every
+token read as 90 days expired and the session opened straight into `01-F47` drain mode — where reads
+are refused **for the wrong reason**, and §C's read assertion would have passed against an unrevoked
+device. `journey-catalog.test.ts` records the same trap from the other side. Fixed to `makeClock()`.
