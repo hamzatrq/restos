@@ -34,8 +34,8 @@ import { Note } from "./ui/surface";
  * `aria-hidden`, deliberately: the cell's accessible name is its `(branch, channel)` pair and
  * nothing else, so a screen reader hears "gulberg counter" rather than "Rs gulberg counter".
  */
-const RupeeMark = (): React.ReactNode => (
-  <span aria-hidden="true" className="shrink-0 text-xs font-medium text-muted-foreground">
+const RupeeMark = ({ className }: { className?: string }): React.ReactNode => (
+  <span aria-hidden="true" className={cn("shrink-0 text-xs text-muted-foreground", className)}>
     Rs
   </span>
 );
@@ -71,9 +71,30 @@ export const PriceGrid = ({
   );
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-1">
-        <h3 className="text-sm font-semibold tracking-tight">{strings.grid.heading}</h3>
+    /*
+      **THE SIGNATURE ELEMENT OF THIS APP.**
+
+      `plans/wave-1/design-direction.md` gives the till one: the money figure at display scale,
+      because "the figure is the product". The back office is a different room with a different
+      product — an owner does not read a total here, she SETS one, and this grid is the only place
+      in RestOS where a number she types reaches every device in the organisation. So the boldness
+      budget is spent here, on the same axis: `27-F25`'s "numbers are the operational payload and
+      the largest element in their region", taken literally.
+
+      The cells were 16 px inside 36 px boxes — the same size as the field labels above them, one
+      step below the entry name, and indistinguishable from the `Order` and `Kitchen station`
+      inputs an owner touches once a year. They are now `text-numeric-primary`, the manifest's own
+      28 px/600 tabular composite, which is the second-largest style `packages/ui` defines.
+
+      Everything around them got quieter to pay for it: the two help sentences are captions, the
+      column and row headers are the label register, and the grid is one ruled object on a sunken
+      ground instead of a heading, a bar, a table and three loose paragraphs.
+    */
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1.5">
+        <h3 className="text-label uppercase tracking-wider text-foreground">
+          {strings.grid.heading}
+        </h3>
         <p className="max-w-3xl text-xs leading-relaxed text-muted-foreground">
           {strings.grid.help}
         </p>
@@ -87,16 +108,16 @@ export const PriceGrid = ({
         has to notice. Before this it was a 12rem input with a two-line caption that pushed the
         button off the shared baseline, and it read as less important than the 25 cells it sets.
       */}
-      <div className="overflow-hidden rounded-md border border-border-strong">
-        <div className="flex flex-wrap items-end gap-x-4 gap-y-2 border-b border-border-strong bg-muted p-3">
-          <div className="w-40">
+      <div className="overflow-hidden rounded-md border border-border-strong bg-card">
+        <div className="flex flex-wrap items-end gap-x-5 gap-y-3 border-b border-border-strong bg-muted px-4 py-3.5">
+          <div className="w-36">
             <Field label={strings.grid.fillValue} htmlFor="fill">
               <div className="flex items-center gap-2">
                 <RupeeMark />
                 <Input
                   id="fill"
                   inputMode="numeric"
-                  className="text-right font-medium"
+                  className="text-right"
                   value={fillValue}
                   onChange={(event) => setFillValue(event.target.value)}
                 />
@@ -113,16 +134,22 @@ export const PriceGrid = ({
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-sm">
+          <table className="w-full border-collapse">
             <thead>
-              <tr className="border-b border-border">
-                <th className="w-48 px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {/*
+                The channel axis, in the caption register on its own sunken band. `01-F60` prices
+                per (branch, channel), so these two headers are the KEY to every number below —
+                scaffolding by definition, and they were competing with the cells at the same
+                12-14 px the values used.
+              */}
+              <tr className="border-b border-border bg-muted/60">
+                <th className="w-40 px-4 py-2.5 text-left text-xs uppercase tracking-wider text-muted-foreground">
                   {strings.grid.branch}
                 </th>
                 {enabled.channels.map((channel) => (
                   <th
                     key={channel}
-                    className="border-l border-border px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                    className="border-l border-border px-4 py-2.5 text-left text-xs uppercase tracking-wider text-muted-foreground"
                   >
                     {channel}
                   </th>
@@ -134,7 +161,7 @@ export const PriceGrid = ({
                 <tr key={branch_id} className="border-b border-border last:border-b-0">
                   <th
                     scope="row"
-                    className="px-3 py-1.5 text-left align-middle text-sm font-medium"
+                    className="w-40 px-4 py-2 text-left align-middle text-label text-muted-foreground"
                   >
                     {branch_id}
                   </th>
@@ -168,20 +195,36 @@ export const PriceGrid = ({
                           is an actual fault, which is `27-F16`'s rule exactly: colour on a number
                           means *this number is abnormal*.
                         */}
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-baseline gap-2">
                           {/* The mark means something only beside a number. On an unpriced cell
                               it would read "Rs no price", which is neither. */}
-                          {empty ? <span className="w-4 shrink-0" /> : <RupeeMark />}
+                          {empty ? (
+                            <span className="w-5 shrink-0" />
+                          ) : (
+                            <RupeeMark className="w-5" />
+                          )}
                           <Input
                             id={id}
                             inputMode="numeric"
                             aria-invalid={reason !== undefined}
                             placeholder={strings.grid.unpriced}
                             className={cn(
-                              // `27-F25` — the number is the payload of this region, so it is the
-                              // largest thing in the cell rather than 14px inside a 36px box.
-                              "text-right text-base font-medium tabular-nums",
-                              empty && "border-dashed placeholder:text-muted-foreground",
+                              /*
+                                `27-F25` — the number is the operational payload of this region and
+                                THE LARGEST ELEMENT IN IT. `text-numeric-primary` is the manifest's
+                                own 28 px / 36 / 600 / tabular composite (`27-F42`, taken whole),
+                                the second-largest style `packages/ui` defines and the one its law
+                                line assigns to exactly this job.
+
+                                It was `text-base font-medium` — 16/500, an assembled pairing, and
+                                the same size as the `Order` field an owner touches once a year.
+                              */
+                              "h-14 text-right text-numeric-primary",
+                              // An unpriced cell is not a number, so it does not get the number's
+                              // scale: the placeholder is a WORD (`01-F60`, `27-F12`) and setting
+                              // it at 28 px would make an absence shout louder than a price.
+                              empty &&
+                                "border-dashed text-body placeholder:text-body placeholder:text-muted-foreground",
                             )}
                             value={value}
                             onChange={(event) =>
@@ -199,10 +242,6 @@ export const PriceGrid = ({
         </div>
       </div>
 
-      {/* `01-F60`'s explicit zero, stated beside the grid it governs rather than three lines
-          above it in a block of prose an owner has already scrolled past. */}
-      <p className="text-xs leading-relaxed text-muted-foreground">{strings.grid.freeHelp}</p>
-
       {faults.length === 0 ? null : (
         <Note tone="fault">
           {`${strings.grid.incomplete} ${faults
@@ -211,9 +250,21 @@ export const PriceGrid = ({
         </Note>
       )}
 
-      <p className="text-xs leading-relaxed text-muted-foreground">
-        {strings.grid.openOrdersKeepTheirPrice}
-      </p>
+      {/*
+        The grid's two standing footnotes, together and demoted.
+
+        `01-F60`'s explicit zero and `01-F18`'s price snapshot were two separate paragraphs at the
+        same weight as each other and as the fault note between them, so the block under the grid
+        read as three equal claims of which one was sometimes a refusal. Grouped, captioned and
+        set below the fault, the refusal is the only thing that changes and is therefore the only
+        thing that draws the eye — `27-F16`'s principle applied to text weight rather than hue.
+      */}
+      <div className="flex flex-col gap-1.5">
+        <p className="text-xs leading-relaxed text-muted-foreground">{strings.grid.freeHelp}</p>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          {strings.grid.openOrdersKeepTheirPrice}
+        </p>
+      </div>
     </div>
   );
 };

@@ -171,18 +171,37 @@ export const EntryEditor = ({
 
   return (
     <Card>
+      {/*
+        **The entry's NAME is user content and is never case-transformed** (commandment 7 —
+        "user content is Unicode and renders faithfully"). `CardTitle` is a panel label and
+        uppercases through CSS, which is right for the word *Menu* and wrong for *Chicken Karahi
+        (Full)*: it rendered as CHICKEN KARAHI (FULL) the first time this header went through it.
+        So the panel label here is the KIND — vendor vocabulary, safe to shout — and the name sits
+        under it at content scale, which is also the correct label-above-value order.
+      */}
       <CardHeader>
-        <CardTitle>{initial === null ? strings.catalog.newEntry : initial.name}</CardTitle>
+        <span className="text-label uppercase tracking-wider text-muted-foreground">
+          {initial === null ? strings.catalog.newEntry : initial.kind}
+        </span>
+        {initial === null ? null : (
+          <h2 className="text-xl font-semibold leading-tight tracking-tight">{initial.name}</h2>
+        )}
         {archived ? (
           <p className="text-xs text-muted-foreground">{strings.catalog.archived}</p>
         ) : null}
       </CardHeader>
       <CardBody>
-        <div className="grid gap-4 sm:grid-cols-2">
+        {/*
+          Three columns, not two. Seven identity fields at 450 px each filled the whole first
+          screen of the editor and pushed `14-F29`'s grid — the reason an owner opened this — below
+          the fold. None of them needs 450 px: the longest value on the screen is `chicken-karahi`.
+          Same fields, same order, one row shorter, and the money starts higher.
+        */}
+        <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
           <Field label={strings.catalog.kind} htmlFor="kind">
             <select
               id="kind"
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+              className="h-10 rounded-md border border-input bg-background px-3 text-body"
               value={form.kind}
               onChange={(event) => set("kind", event.target.value)}
             >
@@ -253,40 +272,63 @@ export const EntryEditor = ({
           />
         ) : null}
 
-        <ApplyWhenControl value={applyWhen} onChange={setApplyWhen} />
-
-        {refusal === null ? null : (
-          <Note tone="fault">{`${strings.errors.saveRefused} ${refusal}`}</Note>
-        )}
-        {receipt === null ? null : (
-          <Note tone="neutral">
-            {receipt.apply_when === "now"
-              ? `${strings.timing.now} · ${strings.history.version} ${receipt.version ?? "—"}`
-              : `${strings.timing.landsAt} ${formatInstant(receipt.lands_at)}`}
-          </Note>
-        )}
-
         {/*
-          **`14-F7` is "archive, never delete" — so archive must not be painted as a deletion.**
+          **THE COMMIT REGION — one bounded object carrying the timing choice and the act.**
 
-          Archive shipped as `variant="destructive"`: the fault fill, the strongest colour in the
-          palette, sitting immediately beside Save at the same size. Two things wrong with that.
-          It misstates the act — `14-F7` archiving *hides an item from menus and POS grids and
-          keeps it resolvable*, which is reversible curation, not destruction. And it spends the
-          `27-F16` alarm channel on the base case, on the same screen where apply-now (an edit
-          that moves every till mid-order) had no colour at all. The two were exactly backwards.
+          `plans/wave-1/design-direction.md`: *"apply-now is the most consequential control in the
+          product — it moves every till mid-service. Make sure the weight of the control matches
+          the weight of the act, without spending colour that `27-F16` reserves."*
 
-          Archive is now a secondary control, separated from the primary by the layout rather
-          than by hue, with its `14-F7` consequence attached to IT — the help text used to sit
-          under both buttons, so it read as a footnote on Save as well.
+          The weight is STRUCTURAL, which is the one channel that costs no hue. Before this, the
+          timing radios were an ordinary fieldset in the flow of the form, then a refusal note,
+          then a receipt note, then a `border-t` and a 36 px `Save` — so an owner could reach the
+          button with the timing choice three blocks and a scroll behind her. They are now one
+          sunken, bounded panel at the foot of the editor: the choice and the act cannot be in
+          different glances, which is what `14-F28` means by *"a deliberate act with the
+          consequence stated on the control, not a hidden default"*.
+
+          `Save` takes the `lg` size and the one `27-F14` blue on this screen. Nothing here is
+          coloured by state — the amber belongs to the chosen apply-now row inside
+          `ApplyWhenControl`, where `27-F64`'s outline and the glyph carry it.
         */}
-        <div className="flex flex-col gap-4 border-t border-border pt-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <Button type="button" onClick={onSubmit} disabled={save.isPending}>
+        <div className="flex flex-col gap-5 rounded-lg border border-border-strong bg-muted p-5">
+          <ApplyWhenControl value={applyWhen} onChange={setApplyWhen} />
+
+          {refusal === null ? null : (
+            <Note tone="fault" className="bg-destructive">
+              {`${strings.errors.saveRefused} ${refusal}`}
+            </Note>
+          )}
+          {receipt === null ? null : (
+            <Note tone="neutral" className="bg-card">
+              {receipt.apply_when === "now"
+                ? `${strings.timing.now} · ${strings.history.version} ${receipt.version ?? "—"}`
+                : `${strings.timing.landsAt} ${formatInstant(receipt.lands_at)}`}
+            </Note>
+          )}
+
+          {/*
+            **`14-F7` is "archive, never delete" — so archive must not be painted as a deletion.**
+
+            Archive shipped as `variant="destructive"`: the fault fill, the strongest colour in the
+            palette, sitting immediately beside Save at the same size. Two things wrong with that.
+            It misstates the act — `14-F7` archiving *hides an item from menus and POS grids and
+            keeps it resolvable*, which is reversible curation, not destruction. And it spends the
+            `27-F16` alarm channel on the base case, on the same screen where apply-now (an edit
+            that moves every till mid-order) had no colour at all. The two were exactly backwards.
+
+            Archive is a secondary control, separated from the primary by the layout rather than by
+            hue, with its `14-F7` consequence attached to IT — the help text used to sit under both
+            buttons, so it read as a footnote on Save as well. The size gap is now explicit: `lg`
+            against `sm`, which is the difference between publishing a price to every till and
+            hiding one dish.
+          */}
+          <div className="flex flex-wrap items-center gap-4 border-t border-border pt-5">
+            <Button type="button" size="lg" onClick={onSubmit} disabled={save.isPending}>
               {save.isPending ? strings.catalog.saving : strings.catalog.save}
             </Button>
             {initial === null || archived ? null : (
-              <div className="ml-auto flex flex-col items-end gap-1">
+              <div className="ml-auto flex max-w-md flex-col items-end gap-2">
                 <Button
                   type="button"
                   variant="secondary"
@@ -299,19 +341,19 @@ export const EntryEditor = ({
                   <Archive aria-hidden="true" className="size-4" />
                   {strings.catalog.archive}
                 </Button>
+                <p className="text-right text-xs leading-relaxed text-muted-foreground">
+                  {strings.catalog.archiveHelp}
+                </p>
               </div>
             )}
           </div>
-          {initial === null || archived ? null : (
-            <p className="max-w-2xl text-xs leading-relaxed text-muted-foreground">
-              {strings.catalog.archiveHelp}
-            </p>
-          )}
         </div>
 
         {initial === null ? null : (
-          <section className="flex flex-col gap-2 border-t border-border pt-4">
-            <h3 className="text-sm font-semibold">{strings.history.heading}</h3>
+          <section className="flex flex-col gap-3">
+            <h3 className="text-label uppercase tracking-wider text-foreground">
+              {strings.history.heading}
+            </h3>
             <ChangeHistory entity={initial.kind} entity_id={initial.id} />
           </section>
         )}

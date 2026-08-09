@@ -74,12 +74,14 @@ export const ApplyWhenControl = ({
   value: ApplyWhen;
   onChange: (next: ApplyWhen) => void;
 }): ReactNode => (
-  <fieldset className="flex flex-col gap-2">
-    <legend className="pb-2 text-sm font-semibold tracking-tight">{strings.timing.heading}</legend>
+  <fieldset className="flex flex-col gap-3">
+    <legend className="pb-3 text-label uppercase tracking-wider text-foreground">
+      {strings.timing.heading}
+    </legend>
     <RadioGroup.Root
       value={value}
       onValueChange={(next) => onChange(next as ApplyWhen)}
-      className="flex flex-col gap-2"
+      className="flex flex-col gap-2.5"
     >
       {OPTIONS.map((option) => {
         const chosen = value === option.value;
@@ -93,15 +95,35 @@ export const ApplyWhenControl = ({
           <div
             key={option.value}
             className={cn(
-              // `27-F15` — state is a FILL, never an opacity wash, so the chosen row takes the
-              // same `muted` surface in both cases and the DISTINCTION is carried by the
-              // `27-F64` outline plus the glyph. A tinted-transparency background would put
-              // this row's text on an unpredictable contrast, which is the failure `27-F21`
-              // gates every pairing against.
-              "flex cursor-pointer items-start gap-3 rounded-md border p-3",
-              chosen && option.disruptive && "border-warning-outline bg-muted",
-              chosen && !option.disruptive && "border-border-strong bg-muted",
-              !chosen && "border-border hover:bg-muted",
+              /*
+                `27-F15` — state is a FILL, never an opacity wash, so the chosen row takes the
+                same raised surface in both cases and the DISTINCTION is carried by the `27-F64`
+                outline plus the glyph. A tinted-transparency background would put this row's text
+                on an unpredictable contrast, which is the failure `27-F21` gates every pairing
+                against.
+
+                **The polarity is inverted from what shipped, and that is the fix.** The panel
+                behind this control is now sunken, so an unchosen row is a hole in it and the
+                CHOSEN row lifts to the raised fill — the selected option is the object standing
+                proud of the panel. Before, both rows sat on the card and the chosen one went
+                *darker*, which made the safe 05:00 default the visually heavy row and left
+                apply-now — the one act that reaches a cashier mid-order — as the lighter, emptier
+                box of the two. Weight now follows consequence.
+
+                The chosen apply-now row also takes a real 2 px OUTLINE on top of its border —
+                `27-F64`'s own instrument, and the FR explicitly frees it for this: the outline
+                bounds the state and never encodes meaning of its own. It is thickness, not hue,
+                so it costs nothing from the `27-F14` budget; and because an outline is drawn
+                outside the box it adds no layout shift, which a `border-2` would (and which is
+                what `21-F3` would have made me pay for with an arbitrary padding value).
+                The signal is still the word, the glyph and the sentence.
+              */
+              "flex cursor-pointer items-start gap-3 rounded-md border bg-card p-3.5",
+              chosen &&
+                option.disruptive &&
+                "border-warning-outline outline-2 outline-warning-outline",
+              chosen && !option.disruptive && "border-border-strong",
+              !chosen && "border-border bg-transparent hover:bg-card",
             )}
           >
             <RadioGroup.Item
@@ -116,10 +138,15 @@ export const ApplyWhenControl = ({
             >
               <RadioGroup.Indicator className="block size-full rounded-full" />
             </RadioGroup.Item>
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-1.5">
               <label
                 htmlFor={`apply-${option.value}`}
-                className="flex cursor-pointer items-center gap-1.5 text-sm font-medium"
+                className={cn(
+                  "flex cursor-pointer items-center gap-2 text-body",
+                  // The chosen option's own name at content weight, so which one is armed is
+                  // legible from the label and not only from the dot beside it.
+                  chosen ? "text-foreground" : "text-muted-foreground",
+                )}
               >
                 <Icon
                   aria-hidden="true"

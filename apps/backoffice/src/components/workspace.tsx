@@ -34,7 +34,25 @@ export const Workspace = (): ReactNode => {
 
   return (
     <div className="flex flex-col gap-6">
-      <nav aria-label={strings.appName} className="flex gap-1 border-b border-border">
+      {/*
+        **A segmented control on the page's ground, not a third full-width rule.**
+
+        The rail was a `border-b` spanning the whole viewport, sitting 24 px under the header's
+        `border-b` and 24 px above the first card's border — three parallel 3.41:1 lines across the
+        top of every screen, which is most of what made the app read as a wireframe. It is now a
+        bounded object sized to its own two tabs: it takes the raised fill inside `27-F66`'s
+        boundary and the page ground shows around it, so the chrome and the work are two planes
+        rather than one ruled sheet.
+
+        `27-F66` still carries the state — an independent MARK meeting 3:1 (here the selected tab's
+        own boundary and fill against a sunken track), never a fill step alone, so the selection
+        survives a monochrome screenshot. `27-F4`'s positional contract is untouched: same tabs,
+        same order.
+      */}
+      <nav
+        aria-label={strings.appName}
+        className="flex w-fit gap-1 rounded-lg border border-border bg-muted p-1"
+      >
         {TABS.map((tab) => {
           const current = tab.id === section;
           return (
@@ -43,16 +61,11 @@ export const Workspace = (): ReactNode => {
               type="button"
               aria-current={current ? "page" : undefined}
               onClick={() => setSection(tab.id)}
-              /*
-                `27-F66` — the state difference is carried by an independent MARK (the underline)
-                meeting 3:1, never by a fill step alone, so the selected tab survives a monochrome
-                screenshot and a low-contrast panel. Same treatment as the catalog list's rows.
-              */
               className={cn(
-                "-mb-px border-b-2 px-3 py-2 text-sm",
+                "rounded-md px-4 py-1.5 text-label",
                 current
-                  ? "border-b-primary font-medium text-foreground"
-                  : "border-b-transparent text-muted-foreground hover:border-b-border-strong hover:text-foreground",
+                  ? "border border-border-strong bg-card text-foreground"
+                  : "border border-transparent text-muted-foreground hover:text-foreground",
               )}
             >
               {tab.label}
