@@ -79,10 +79,18 @@ const MONEY_COLUMN_DP: Record<SurfaceMode, number> = {
  * `DUE` deliberately does not step with it. Two figures at the same size is two headlines and no
  * hierarchy, and of the pair it is CHANGE the cashier reads aloud to a customer while counting
  * notes into their hand (`27-F24` — she is never asked to derive it).
+ *
+ * **`counter` takes `display` too, and the reason is a RANKING measured off a screenshot rather
+ * than a size preference.** With the change figure at `hero` (48 dp) the loudest thing on the Pay
+ * surface after `03-F5`'s red band was the blue `TAKE CASH` fill — ~510 × 126 dp of saturated
+ * `bgColor-interactive` against a 48 dp black numeral. `plans/wave-1/design-direction.md`'s thesis
+ * is that **the money is the loudest thing on the screen**, and it was third. The fix is to raise
+ * the payload, not to strip an accent `27-F14` allocates by name; see the note on the button.
+ * `compact` keeps `hero` because 64 dp does not fit a 223 mm tablet's column beside the pad.
  */
 const CHANGE_SIZE: Record<SurfaceMode, "display" | "hero"> = {
   compact: "hero",
-  counter: "hero",
+  counter: "display",
   wide: "display",
 };
 
@@ -261,6 +269,34 @@ export const TenderPanel = ({ dueP, takenP = paisa(0), onTender }: TenderPanelPr
             onTender({ amountP: coversBill ? remainingP : enteredP, method });
             setEntry("");
           }}
+          /**
+           * **THE BLUE STAYS, and this is the deliberate decision the design direction asked for
+           * rather than an oversight.**
+           *
+           * `plans/wave-1/design-direction.md` raises it as an open question: *"the primary action
+           * currently ships as a large saturated blue fill. `27-F16` reserves colour for the
+           * abnormal, and a permanent blue on the resting happy path may already violate it."*
+           *
+           * **Read against the FRs, the premise does not hold.** `27-F16` is a rule about MONEY —
+           * *"money is never coloured by default … colouring the commonest number on screen spends
+           * the whole preattentive channel on the base case"* — and this is a control, not a
+           * number. What governs a control is `27-F14`, whose table has four slots and allocates
+           * the fourth **by name**: *"blue accent — interactive / mandatory action — any control
+           * the operator may press."* It is the one slot in the budget that is not a status,
+           * created precisely so pressability can be marked without blunting amber or red.
+           *
+           * The product already spends it far more narrowly than that allocation permits: the
+           * keypad's twelve keys, the five method buttons and every `Tile` on the counter are all
+           * controls the operator may press and none of them is blue. Exactly one control per
+           * surface carries it, which is what makes `27-F5`'s *"persistent, visible, labelled
+           * target"* legible at a glance on a screen where a keypad key is already large.
+           *
+           * **The real observation behind the question was right, and it is fixed elsewhere.** The
+           * blue did out-rank the money. `27-F18` puts colour THIRD, after position and number, so
+           * the answer is to raise the payload — `CHANGE_SIZE` now takes `text-numeric-display` on
+           * the counter as well as on `wide` — rather than to withdraw an allocated accent and
+           * leave the primary act marked by size alone.
+           */
           style={{
             minHeight: targetFor("keypad"),
             fontFamily: label.fontFamily,
