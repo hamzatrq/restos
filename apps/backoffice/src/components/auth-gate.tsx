@@ -195,7 +195,7 @@ export const AuthGate = ({ children }: { children: ReactNode }): ReactNode => {
     */
     <div className="flex min-h-svh flex-col bg-background">
       <header className="sticky top-0 z-10 border-b border-border bg-card">
-        <div className="mx-auto flex w-full max-w-[100rem] items-center justify-between gap-4 px-5 py-3 sm:px-8">
+        <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-5 py-3 sm:px-8">
           <span className="text-base font-semibold tracking-tight">{strings.appName}</span>
           <div className="flex items-center gap-5 sm:gap-8">
             {/*
@@ -239,7 +239,7 @@ export const AuthGate = ({ children }: { children: ReactNode }): ReactNode => {
           </div>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-[100rem] flex-1 px-5 py-6 sm:px-8">{children}</main>
+      <main className="mx-auto w-full max-w-7xl flex-1 px-5 py-6 sm:px-8">{children}</main>
     </div>
   );
 };
