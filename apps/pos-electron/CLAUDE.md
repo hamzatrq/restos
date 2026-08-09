@@ -655,14 +655,25 @@ in principle**, but see the owed item below — the manifest table itself was no
   wraps the gateway's two write methods and runs every renderer-originated append through
   `domain`'s `can` / `canPayOut` before the ledger is touched — that file is the matrix's first
   production caller in the whole product. What is owed and is named rather than left to look
-  intentional: `can()` returns three outcomes and the third, `escalate`, has **no UI**. `02-F20`
-  gives it two equivalent paths (a local manager PIN on the POS, a remote approval via doc 05)
-  and neither is Wave-1 work, so today an escalation is *refused* at the seam — carrying the
-  outcome and the roles that would satisfy it, so the screen that eventually asks for a manager
-  PIN reads them off the matrix. The live case is `05-F19`: a paid-out above
-  `PAID_OUT_APPROVAL_THRESHOLD_PAISA` (Rs 2,000, **PINNED not specified**) is refused at the
-  counter until that path exists. `02-F20`'s void / comp / price-override rows are mapped ahead
-  of their events, which `domain/registry.ts` does not carry yet.
+  intentional: `can()` returns three outcomes, and the third one now has **half** its paths.
+  **⚠ THIS ENTRY READ "`escalate` HAS NO UI" AFTER THE LOCAL PATH SHIPPED, and it was copied from
+  here into `AGENTS.md` by a session that was in the middle of fixing a *different* stale claim
+  two sentences away.** That is the propagation route worth remembering: a stale line in a package
+  guide is not a local problem, because the next reader quotes it upward with the authority of the
+  file it lands in. **`02-F20`'s LOCAL manager-PIN path is BUILT** — `main/index.ts` wires
+  `CHANNELS.escalationFor` (display-only; it authorizes nothing, so a renderer that forged the
+  answer gains nothing and Commandment 8 holds) and `CHANNELS.escalate` (the approval itself,
+  behind `01-F61` Argon2id), `Counter.tsx` renders `ManagerApproval`, and
+  `__acceptance__/escalation.test.ts` plus `manager-approval.dom.test.tsx` cover it. **It builds a
+  SECOND `createPinSession` deliberately**: `unlock()` MOVES the session, so approving through the
+  cashier's own would sign her out and `02-F41` would attribute her next twenty orders to whoever
+  authorised one paid-out — permanently, because `01-F1` forbids unwinding it. `02-F20` asks for
+  the opposite, *"the recorded event carries actor + approver"*: two identities, the actor
+  unchanged. So `05-F19`'s live case works — a paid-out above `PAID_OUT_APPROVAL_THRESHOLD_PAISA`
+  (Rs 2,000, **PINNED not specified**) is refused from the cashier alone and lands with a manager's
+  PIN. **Genuinely owed:** `02-F20`'s REMOTE path (approval via doc 05), and its void / comp /
+  price-override rows, which are mapped ahead of their events — `domain/registry.ts` does not carry
+  those yet.
 - **THE STRIP SAID `dev` WHILE THE LEDGER SAID AYESHA — CLOSED AUGUST 2026.** `DeviceState`
   carries two identity fields. `user` is the `01-F26` session, added by S-0c and stamped into
   every envelope as `actor_user_id`. `actor` is older — it shipped with the first launch commit,
