@@ -110,7 +110,11 @@ export const PriceGrid = ({
       */}
       <div className="overflow-hidden rounded-md border border-border-strong bg-card">
         <div className="flex flex-wrap items-end gap-x-5 gap-y-3 border-b border-border-strong bg-muted px-4 py-3.5">
-          <div className="w-36">
+          {/* Wide enough for its own label on one line. `PRICE FOR EVERY CELL` is 20 uppercase,
+              wide-tracked characters and it wrapped to three lines inside `w-36`, which pushed the
+              `Fill across` button off the bar's baseline. The STRING cannot shrink — two suites
+              find this control by `getByLabelText("Price for every cell")` — so the column does. */}
+          <div className="w-full sm:w-56">
             <Field label={strings.grid.fillValue} htmlFor="fill">
               <div className="flex items-center gap-2">
                 <RupeeMark />
