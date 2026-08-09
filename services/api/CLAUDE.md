@@ -291,7 +291,7 @@ identity, which an org's device fleet is not.
   history therefore holds revocations with no matching registrations — **it is not a device history
   and no surface may render it as one.** `01-F25`'s pairing code unblocks it.
 
-### Mutation matrix (round-3 law) — control **167/167** green, 0 survivors
+### Mutation matrix (round-3 law) — control **169/169** green, 0 survivors
 
 In-tree with byte-exact backups and a restore trap; the tree was diffed byte-exact after every run.
 Nothing here weakens a security CONSTANT (the permission cells were mutated out-of-tree, see
@@ -311,6 +311,8 @@ Every row is the FULL package suite.
 | A8 | **`server.ts` supplies `unconfiguredDeviceDirectory()` — THE seam mutant** | **4** | boots, gates, serves the catalog; the fleet is unreachable |
 | A8b | the seam mutant's quieter twin: a stub answering `[]` and reporting success | 4 | the shape `seams:check` cannot see — the port IS supplied, with a lie |
 | A9 | **CONTROL: same states, same writes, different prose** | **0** | |
+| A10 | **`revocations` stops filtering to `device.revoked`** — every org-scoped row parsed as one | **5** | all green |
+| A11 | **`device.manage` widened to `branch_manager: "allow"`** (`packages/domain`'s D1, out-of-tree) | **1** | all green |
 
 **A2 and A8 are the two to re-run after any change here.** A2 is `14-F13` itself: the till stops,
 the screen says so, and nobody is named — which is the state the shell command was already in, so a
@@ -325,3 +327,42 @@ the same place** — it claimed two events for one device were producible today 
 the CLI and then the screen, which is false (the CLI writes no event, and `already` suppresses the
 second). The branch is kept because `15 §2` emits `device.revoked` (support-initiated) into this
 same store, so the collision is real the day doc 15 lands.
+
+⚠ **A10 AND A11 ARE A SENIOR REVIEW'S FINDINGS, AND BOTH ARE THE SAME DEFECT AS A6/A7 — a third and
+fourth instance inside the work that already records two.** Neither is a code defect: `revocations`
+filters correctly and the `device.manage` cell is correct. Both were **assertions that did not
+exist**, and both were invisible because the fixture never produced the case.
+
+- **A10 guards a live production failure.** `01-F62`'s store is SHARED — `createGatewayLedgerAppender.append`
+  writes `catalog.changed` to the same endpoint for the same org — so without the filter
+  `DeviceRevokedPayload.parse` throws on the first menu ever published and **`devices.list` 500s for
+  any org that has one**, which is the screen an owner opens to kill a stolen tablet. `fake-gateway.ts`
+  preserves `type` as sent *specifically* so this would be caught, and the assertion was never
+  written: **no fixture in `devices.test.ts` put a non-`device.revoked` row in the store**, so the
+  mutant failed **0 of 167**. The `beforeAll` now seeds one and the mutant fails 5.
+  `catalog-adapter.test.ts` had the mirror assertion for `LedgerAppender.history` all along — the
+  two adapters filter in opposite directions and only one was pointed at its case.
+- **A11 is a test that SURVIVED THE MUTANT ITS OWN COMMENT NAMED.** §A's *"a branch manager is
+  REFUSED both"* carried a comment reading "the mutant this exists for is `device.manage` widened to
+  `branch_manager: allow`" — and it passes under exactly that mutant, because every non-owner
+  subject in the file was branch-scoped and neither procedure states a `branch_id`, so `branchOf`
+  resolves `null`, `rolesAt` drops the branch assignment, and **the 403 comes from scope resolution
+  before any cell is read**. This service therefore had **no coverage of the `device.manage` cell for
+  any non-owner role**. The fix ADDS an org-wide branch manager rather than re-scoping the existing
+  one — the branch-scoping refusal is a real property worth keeping — and the old test's title and
+  comment now say what it actually proves.
+
+**Both 2×2s were measured, not reasoned** (the correct implementation is the other row, so a kill
+count alone would not separate "the assertion bites" from "the suite is brittle"):
+
+| | fixture as it was | fixture as it is now |
+|---|---|---|
+| correct implementation | 167 green | **169 green** |
+| A10 (filter deleted) | **167 green — 0 killed** | **5 killed**, `devices.test.ts` alone |
+| A11 (D1 cell widened) | **167 green — 0 killed** | **1 killed** — the new test, alone |
+
+⚠ **A11's mutant was run OUT-OF-TREE and `packages/domain/src/permissions.ts` was never edited**
+(AGENTS.md: an agent killed between "weaken" and "revert" strands a widened credential with every
+test green). The package was copied to a scratchpad, mutated there, and only
+`services/api/node_modules/@restos/domain` — a gitignored symlink, not source — was repointed at the
+copy for the two runs. `permissions.ts` was verified byte-identical by checksum before and after.

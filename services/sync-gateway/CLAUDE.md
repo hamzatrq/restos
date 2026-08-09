@@ -482,6 +482,37 @@ above stays, and `14-F13`'s half — a revocation with an **actor** — is now r
   event history (T-01-09), so attribution goes on the `device.revoked` org-scoped event that
   `services/api` appends. `strictObject` refuses an `actor_user_id` **by name**, so a caller cannot
   believe it attributed a revocation it did not.
+- ⚠ **REVOCATION SITS BEHIND `PUBLISH_TOKEN` — THE MENU CREDENTIAL — AND THAT IS THE ARGUMENT
+  `provision-device` USED TO REJECT EXACTLY THIS SHAPE.** The `onRequest` hook above guards every
+  `/internal/` path with one bearer, so the kill switch and the menu share a secret. Admission was
+  refused that arrangement in this file on the stated ground that *"publishing a menu and admitting
+  a device to the org's ledger should not sit behind one secret"*. A senior review flagged the
+  contradiction as **unargued anywhere** — the fact was recorded, the reasoning was not — so here it
+  is. **Revocation is defensible behind this credential; it is not the same act as admission**, for
+  three reasons in descending strength:
+  - **It is not the only check, and admission's would have been.** `14-F30` gates the human at
+    `services/api` (`can("device.manage")`, owner-only), so `PUBLISH_TOKEN` is the second layer
+    under a person-level refusal. An `/internal/provision` route would have had **no** person-level
+    check above it — no signed-in user exists at provisioning time, which is the whole reason
+    `01-F25`'s pairing code is owed — so there the credential would have been the entire security
+    story. ⚠ **Stated honestly: that layering protects callers who come through `services/api` and
+    nobody else.** A holder of `PUBLISH_TOKEN` can POST this route directly and bypass the matrix
+    entirely. This service authorizes **services, never people** — the same boundary `01-F47` draws
+    for devices — and nothing here changes that.
+  - **It grants no authority.** Admission MINTS a credential that opens a session and writes the
+    org's ledger; revocation only takes one away. The failure directions are not comparable:
+    admission's is escalation, revocation's is denial of service.
+  - **The blast radius is already reachable with this credential.** A holder can publish an
+    arbitrary menu to every till in the org — an empty one stops all of them selling. So revocation
+    widens the specific act, not the CLASS of harm, and its damage is loud, attributable at the
+    registry, and recoverable by `01-N5`'s replacement path (a fresh `device_id`). It never yields a
+    read or a write.
+
+  **This is a recorded justification, not a ruling, and splitting the credential is not refused —
+  it is unscoped.** A second secret for the device routes is a larger change (deployment, the
+  runbook, `services/api`'s env contract) and wants its own decision. **Two things would reopen it:**
+  a role other than owner widened into `device.manage`, which weakens the first reason; or a second
+  service issued `PUBLISH_TOKEN`, which weakens the third.
 
 ### Mutation matrix — `device-http.test.ts` (round-3 law), control **317/317** green, 0 survivors
 
