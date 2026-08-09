@@ -438,6 +438,31 @@ const judge = (surface: string, state: State, r: SurfaceReport): void => {
 /** Totals for the composition check, so it too can prove it looked at something (`24-F14`). */
 let extentsMeasured = 0;
 
+/**
+ * # `27-F11c` AS A TEST — the two counter panels must lay out IDENTICALLY
+ *
+ * *"A 1366×768 and a 1920×1080 15.6″ panel hold the SAME number of 12 mm tiles. Extra pixels buy
+ * sharpness; only inches buy room."* Both are `27 §1a`'s counter, both are 345 × 194 mm of glass,
+ * so under `27-F68` every surface must come out the same size **as a proportion of its work
+ * area** on both. Only the pixel count differs, and `27-F11c` says the pixel count buys nothing.
+ *
+ * **⚠ THIS EXISTS BECAUSE A MUTANT CAUGHT ITS ABSENCE, AND THE ABSENCE HAD A DOC COMMENT CLAIMING
+ * OTHERWISE.** `PANELS` above says in as many words that the two counter rows *"must produce the
+ * SAME layout"*, and **nothing compared them.** Mutant M5 — the context keyed on CSS pixels
+ * instead of millimetres, which is the exact category error `27-F11c` exists to name — put the two
+ * twins in different modes and left this gate **GREEN**, because a differently-sized composition
+ * that is still centred still composes fine. The rail measured composition and was blind to
+ * adaptation.
+ *
+ * A RATIO and not a pixel count, because the two panels differ in pixels by construction and
+ * requiring them to agree in pixels is precisely the wrong test. Tolerance is 3% of the axis: wide
+ * enough for the sub-pixel rounding two different fractional `zoom` factors produce, far below the
+ * ~9% a single mode change moves the tender panel by.
+ */
+const PANEL_TWIN_TOLERANCE = 0.03;
+/** `state + surface -> panel -> [content/box width, content/box height]`, filled as the sweep runs. */
+const shape = new Map<string, Map<string, readonly [number, number]>>();
+
 const judgeComposition = (surface: string, state: State, r: SurfaceReport): void => {
   const e = r.extent;
   // The unlock surface has no `AppShell` and therefore no `<main>` (`02-F18` — the lock sits OVER
@@ -456,6 +481,13 @@ const judgeComposition = (surface: string, state: State, r: SurfaceReport): void
     });
     return;
   }
+  // Record the shape as a PROPORTION of the work area, for the `27-F11c` twin check below. The
+  // surface key strips the panel label, which is what lets two panels' rows meet.
+  const at = surface.indexOf(" ");
+  const key = `${state} ${surface.slice(at + 1)}`;
+  if (!shape.has(key)) shape.set(key, new Map());
+  shape.get(key)?.set(surface.slice(0, at), [e.content.w / e.box.w, e.content.h / e.box.h]);
+
   const slack = {
     left: e.content.x - e.box.x,
     right: e.box.x + e.box.w - (e.content.x + e.content.w),
@@ -880,6 +912,56 @@ const run = async (): Promise<number> => {
     }
   }
 
+  // ---------------------------------------------------------------------------------------
+  // `27-F11c` — THE TWIN CHECK. Same glass, different pixels, and the layout must not know.
+  // ---------------------------------------------------------------------------------------
+  const twins = PANELS.filter((p) => p.diagonalIn === 15.6).map((p) => p.label);
+  let twinsCompared = 0;
+  if (twins.length !== 2) {
+    failures.push({
+      surface: "gate",
+      state: "quiet",
+      detail:
+        `EMPTY MATCH — 27-F11c's twin check needs exactly two panels of one diagonal and found ` +
+        `${twins.length}. 27 §1a lists the counter at 15.6″ in two resolutions and this is the ` +
+        "only check asserting they lay out alike (24-F14).",
+    });
+  } else {
+    const [a, b] = twins as [string, string];
+    for (const [key, byPanel] of shape) {
+      const one = byPanel.get(a);
+      const two = byPanel.get(b);
+      if (one === undefined || two === undefined) continue;
+      twinsCompared += 1;
+      for (const [i, axis] of (["width", "height"] as const).entries()) {
+        const l = one[i] ?? 0;
+        const r = two[i] ?? 0;
+        if (Math.abs(l - r) <= PANEL_TWIN_TOLERANCE) continue;
+        failures.push({
+          surface: `${a}~${b} ${key}`,
+          state: "quiet",
+          detail:
+            `27-F11c BROKEN: '${key}' fills ${Math.round(l * 100)}% of its work area's ${axis} on ` +
+            `${a} and ${Math.round(r * 100)}% on ${b}. Those are the SAME 345 x 194 mm of glass at ` +
+            "two resolutions, and 27-F11c is explicit that extra pixels buy sharpness while only " +
+            "inches buy room — so a layout that differs between them is keyed on the PIXEL COUNT. " +
+            "That is the category error the FR exists to name, and the usual cause is a " +
+            "breakpoint, a container query or a media query measuring CSS px where it should be " +
+            "measuring millimetres.",
+        });
+      }
+    }
+    if (twinsCompared < SURFACES_PER_PANEL - 1) {
+      failures.push({
+        surface: "gate",
+        state: "quiet",
+        detail:
+          `EMPTY MATCH — only ${twinsCompared} surface(s) were comparable across ${a} and ${b}, ` +
+          `expected about ${SURFACES_PER_PANEL - 1}. 27-F11c's twin check is inert (24-F14).`,
+      });
+    }
+  }
+
   // `24-F14` — the composition check must have looked at something too. Without this a change
   // that stopped `<main>` being found would silently retire the whole check while every other
   // number in the summary stayed healthy, which is precisely how row M8's fixture defect worked.
@@ -897,7 +979,8 @@ const run = async (): Promise<number> => {
   note("");
   note(
     `measured ${surfacesMeasured} surfaces, ${controlsMeasured} controls, ` +
-      `${extentsMeasured} compositions, ${clippingBoxesSeen} overflowing boxes`,
+      `${extentsMeasured} compositions, ${twinsCompared} 27-F11c twin pairs, ` +
+      `${clippingBoxesSeen} overflowing boxes`,
   );
 
   if (probe.length > 0) {
