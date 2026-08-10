@@ -23,11 +23,13 @@
 // kernel forbids, and `02-F31`'s oversell path — which exists precisely to absorb this — would
 // have had nothing to absorb.
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PERMISSION_ACTIONS } from "@restos/domain";
 import { type DeviceStore, openStore } from "@restos/sync-client";
 import { afterEach, describe, expect, it } from "vitest";
+import { authorizeWrites, WRITE_ACTIONS } from "../authorize";
 import { createGateway, type Gateway, type GatewayDeps } from "../gateway";
 
 const IDENTITY = { org_id: "org-1", branch_id: "br-1", device_id: "dev-1" } as const;
@@ -312,5 +314,144 @@ describe("§F an 86'd item and an unpriced one are DIFFERENT states", () => {
     expect(unpriced?.unavailable).toBe(true);
     expect(soldOut?.sold_out).toBe(true);
     expect(unpriced?.sold_out).toBeUndefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// §G / §H — **BOTH SECTIONS EXIST BECAUSE MUTANTS SURVIVED §A–§F.** Full pos-electron suite
+// under each mutant, control 586:
+//
+//   M1  `index.ts` never wires `CHANNELS.toggleAvailability`   SURVIVED — 586/586 green
+//   M7  `authorize.ts` drops the guard on the toggle           SURVIVED — 586/586 green
+//
+// M1 is **the wave's named defect reproduced inside the fix for it**: a correct, fold-verified,
+// mutation-proven toggle that the shipped application never calls, every gate green.
+// `seams:check` cannot see it either — `toggleAvailability` IS a reached export (the authorize
+// wrapper reaches it), so Rule A is satisfied and Rule B has no optional member to look at.
+//
+// M7 is worse in kind: a renderer-originated append reaching an append-only ledger with no
+// matrix verdict, on a brand-new write channel. `02-F46` exists precisely so Commandment 8 has
+// something to refuse against, and nothing was checking that the refusal is actually wired.
+//
+// ── THE MATRIX AFTER THESE SECTIONS LANDED ──────────────────────────────────────────────────
+//
+// Control 606/606. Full pos-electron suite under every mutant; the right-hand column is the
+// finding — **no pre-existing test can see ANY of these**, so every kill is attributable here.
+//
+//   #     mutant (exactly one branch)                                    new   pre-existing 574
+//   M1    `index.ts` never wires the toggle channel                       2         all green
+//   M1b   wired, but to the RAW gateway — commandment 8 routed around     1         all green
+//   M1c   wired and guarded, but no `notifyChanged()`                     1         all green
+//   M7    `authorize.ts` drops the guard                                  2         all green
+//   M7b   guarded AFTER the append — `01-F1` makes it permanent           2         all green
+//   M7c   mapped to `order.create` instead of `02-F46`'s own action       1         all green
+//   M8    the no-default channel ruling undone (`?? "counter"`)           2         all green
+//   M8b   the channel STICKS across orders (no reset)                     1         all green
+//   M8c   `storefront` + `whatsapp` offered — the narrowing widened       1         all green
+//   M10   the Sold-out grid reads the TILE, not the FOLD                  1         all green
+//   M9    NEGATIVE CONTROL — a real refactor of the supersedes read       0         all green
+//
+// M9 is what makes every other row mean something: a genuine one-branch edit reddens nothing.
+//
+// ⚠ **A MEASUREMENT NOTE, because the first count of this table was WRONG.** The harness
+// counted lines matching `FAIL` and reported four pre-existing failures under M1 — they were
+// source-context lines containing `MAX_FAILED_ATTEMPTS`. Anchoring on `^ FAIL ` gives zero.
+// A proxy for the evidence accepted as the evidence, which is the mistake `AGENTS.md` records
+// against a comment-blind grep, reappearing one tool over inside the work that cites it.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+describe("§G the SHIPPED host reaches the toggle (the M1 survivor)", () => {
+  // A SOURCE READ, and say so plainly: `main/index.ts` builds an Electron app at module scope
+  // and no suite in this package can import it. Same instrument and same justification as
+  // `line-advance-seam.test.ts` §A and `print-ack-audit.test.ts` §A. It is weak — it cannot tell
+  // a wired handler from a commented-out one — which is why §H below is behavioural.
+  const indexSrc = readFileSync(new URL("../index.ts", import.meta.url).pathname, "utf8");
+  const handlerBody = (): string => {
+    const at = indexSrc.indexOf("CHANNELS.toggleAvailability");
+    expect(at, "no toggle channel is wired in index.ts at all").toBeGreaterThan(-1);
+    return indexSrc.slice(at, at + 400);
+  };
+
+  it("binds the toggle channel to the AUTHORIZED writes, not to the raw gateway", () => {
+    expect(indexSrc).toMatch(/ipcMain\.handle\(\s*CHANNELS\.toggleAvailability/);
+    // `writes.`, never `gateway.` — a handler wired straight to the gateway would append with no
+    // matrix verdict, and §H would still pass because §H tests the wrapper, not the wiring.
+    expect(handlerBody()).toMatch(/writes\.toggleAvailability\(req\)/);
+    expect(handlerBody()).not.toMatch(/gateway\.toggleAvailability/);
+  });
+
+  it("notifies the renderer, so 01-F15's fast path is visible on this device", () => {
+    // Without this the grid greys only at the next poll, while `02-F7` promises the tile greys
+    // "within the LAN budget". The same omission is what left `notifyCatalogVersion` unwired.
+    expect(handlerBody()).toMatch(/notifyChanged\(\)/);
+  });
+
+  it("the preload bridge serves the channel", () => {
+    // The other half of one seam: main can wire it and the renderer still never reach it.
+    const preload = readFileSync(
+      new URL("../../preload/index.ts", import.meta.url).pathname,
+      "utf8",
+    );
+    expect(preload).toMatch(/toggleAvailability:\s*\(req\)\s*=>\s*ipcRenderer\.invoke/);
+  });
+});
+
+describe("§H commandment 8 — the toggle is GATED (the M7 survivor)", () => {
+  const storeFor = (role: string) =>
+    ({
+      identity: IDENTITY,
+      staff: { lookup: () => ({ user_id: "u-x", assignments: [{ role, branch_id: "br-1" }] }) },
+    }) as unknown as Parameters<typeof authorizeWrites>[0]["store"];
+
+  const wrap = (role: string, session: () => { user_id: string; display_name: string } | null) => {
+    const calls: unknown[] = [];
+    const writes = authorizeWrites({
+      writes: {
+        append: () => ({ id: "a" }),
+        addLine: () => ({ id: "b" }),
+        toggleAvailability: (req: unknown) => {
+          calls.push(req);
+          return { id: "c" };
+        },
+      },
+      store: storeFor(role),
+      session,
+      paidOutApprovalThresholdPaisa: 200_000,
+    });
+    return { writes, calls };
+  };
+
+  const signedIn = () => ({ user_id: "u-x", display_name: "X" });
+
+  it("`02-F46` — a CASHIER may 86, which is the cell that makes the feature exist at all", () => {
+    // `02-F40` makes 86-ing a counter action in a printer-only kitchen and `27-F11e` makes that
+    // most deployments, so a denied cashier means a T1 branch whose manager went home cannot 86.
+    const { writes, calls } = wrap("cashier", signedIn);
+    expect(() => writes.toggleAvailability({ item_id: KARAHI, available: false })).not.toThrow();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("refuses a STOREKEEPER, and refuses BEFORE the ledger is touched", () => {
+    const { writes, calls } = wrap("storekeeper", signedIn);
+    expect(() => writes.toggleAvailability({ item_id: KARAHI, available: false })).toThrow(
+      /permission matrix/,
+    );
+    // The load-bearing half: a guard that threw AFTER delegating would already have appended,
+    // and `01-F1` makes that permanent.
+    expect(calls).toEqual([]);
+  });
+
+  it("refuses a LOCKED device — `01-F27` never promotes a device identity into a user", () => {
+    const { writes, calls } = wrap("cashier", () => null);
+    expect(() => writes.toggleAvailability({ item_id: KARAHI, available: false })).toThrow();
+    expect(calls).toEqual([]);
+  });
+
+  it("refuses against `02-F46`'s OWN action, never a borrowed one", () => {
+    // Mapped to `order.create` the two would move together for ever — a later narrowing of one
+    // silently narrowing the other. `02-F46` says in terms that they are different acts with
+    // different blast radii.
+    expect(WRITE_ACTIONS["availability.changed"]).toBe("availability.toggle");
+    expect(PERMISSION_ACTIONS).toContain("availability.toggle");
   });
 });
