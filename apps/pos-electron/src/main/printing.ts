@@ -92,20 +92,18 @@ export type KotPrinterDeps = {
    * The default is `() => true`, which is the behaviour of every branch before `03-F51` existed —
    * so an omission cannot change what any existing caller does.
    *
-   * That makes it exactly the shape AGENTS.md warns about (an optional seam nobody supplies), and
-   * **`pnpm seams:check` DOES NOT HOLD IT — measured, not assumed.** Rule B's loop opens with
-   * `if (groupOf(mod.file) !== "packages") continue;` (`scripts/check-seams.mjs`), so it only ever
-   * examines factories declared under `packages/`. Every factory in this file is in an APP, so
-   * none of their optional members is a Rule-B candidate at all. Both mutants were run: deleting
-   * the supply in `main/index.ts` outright, and replacing it with `() => true`. `pnpm seams:check`
-   * is **exit 0 and CLEAN under both**, and its own summary line reports the same `5 optional
-   * seams` either way — this member was never counted.
+   * That makes it exactly the shape AGENTS.md warns about (an optional seam nobody supplies).
+   * **`pnpm seams:check` NOW HOLDS IT — since 2026-08-10, and it did not before.** Rule B's loop
+   * opened `if (groupOf(mod.file) !== "packages") continue;`, so a factory declared in an APP was
+   * never a candidate: both mutants (deleting the supply in `main/index.ts`, and stubbing it
+   * `() => true`) left the rail **exit 0 and CLEAN**, reporting the same `5 optional seams` either
+   * way. Rule B now walks `apps/` and `services/` too, and deleting the supply reddens it by name.
    *
-   * So the ONLY thing standing between this seam and the wave's named defect is the hand-written
-   * `__acceptance__/station-routing-seam.test.ts` §E, which drives the host's own construction.
-   * (⚠ `CashPrinterDeps.append` below carries the opposite claim about Rule B, written before this
-   * was measured. It is wrong for the same reason and is a finding for that dep's owner, not a
-   * drive-by edit here.)
+   * Two things that fix does NOT buy, both still load-bearing here:
+   *   · The STUB case. `routesToPaper: () => true` is a *supply*, so Rule B is satisfied while the
+   *     product has no `03-F51` in it at all. That is the rail's own documented blind spot.
+   *   · Therefore `__acceptance__/station-routing-seam.test.ts` §E, which drives the host's real
+   *     construction, is still the only guard on the difference between the resolver and a literal.
    */
   routesToPaper?: PaperRouteResolver;
   /** `03 §7` layer 3. `03-F49`'s column floor is checked against this, inside `render()`. */
@@ -547,9 +545,18 @@ export type CashPrinterDeps = {
    * **OPTIONAL and always supplied**, which is the shape `01-F60` warns about and is taken here
    * for a stated reason: `__acceptance__/cash-slip-printing.test.ts` predates this dep and is an
    * oracle this session may not edit (`24 §3` step 2), so a required member reds a suite for a
-   * surface it does not exercise. `pnpm seams:check`'s Rule B is what keeps the omission from
-   * becoming permanent — an optional member no call site passes is a finding — and
-   * `__acceptance__/print-ack-audit.test.ts` §A asserts on the construction in `main/index.ts`.
+   * surface it does not exercise.
+   *
+   * ⚠ **This comment claimed `pnpm seams:check`'s Rule B kept that omission from becoming
+   * permanent, and the claim was FALSE for as long as it stood.** Rule B only examined factories
+   * declared under `packages/`; `createCashPrinter` is declared in an app, so this member was
+   * never a candidate and deleting the supply left the rail exit 0 and clean. The claim is TRUE as
+   * of 2026-08-10, when Rule B was widened to `apps/` and `services/` — kept in this form rather
+   * than quietly corrected, because a shipped comment asserting a protection that does not exist
+   * is worse than no comment: it retires the hand-written assertion someone would otherwise write.
+   * `__acceptance__/print-ack-audit.test.ts` §A asserts on the construction in `main/index.ts`,
+   * and that remains the guard against a supplied-but-inert `append` (Rule B checks that a member
+   * is supplied, never that what was supplied is real).
    */
   append?: (type: string, payload: Record<string, unknown>) => void;
 };

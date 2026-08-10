@@ -837,11 +837,12 @@ app.whenReady().then(async () => {
     // `03-F22`/`03-F51` — **THE SEAM.** A station configured screen-only enqueues no job, so a
     // printerless kitchen produces no failed transmit, no exhausted budget, no permanent
     // `kot.print_failed` (`01-F1`) and no vendor page (`15-F14`). Passing the REAL resolution and
-    // not a literal is the point: `() => true` here is a product with no `03-F51` in it at all,
-    // and **no rail in this repo can see the difference** — `seams:check` Rule B only walks
-    // factories declared under `packages/`, so `createKotPrinter`'s optional members are not
-    // candidates and the check is exit-0 CLEAN with this argument deleted (measured). The only
-    // guard is `__acceptance__/station-routing-seam.test.ts` §E, which reads this construction.
+    // not a literal is the point: `() => true` here is a product with no `03-F51` in it at all.
+    // DELETING this argument is now caught — `seams:check` Rule B walks `apps/` as of 2026-08-10,
+    // and it did not before (the check was exit-0 clean with the argument gone, measured). But
+    // **no rail can see the difference between this resolver and `() => true`**, because a stub is
+    // a supply; `__acceptance__/station-routing-seam.test.ts` §E, which reads this construction,
+    // is still the only guard on that.
     routesToPaper: (at) => stationRouting().routesToPaper(at),
     capability: kotCapability(),
     // 03-F5's `kot.print_failed` and 02-F31's `kot.printed`, through the gateway so the envelope

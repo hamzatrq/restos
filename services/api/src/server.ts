@@ -41,9 +41,17 @@ export type ApiServerOptions = {
   readonly now: () => number;
   /**
    * B-3/B-4's dependencies. Optional here and REQUIRED once resolved, which is the narrow shape
-   * this needs to be: `start()` always passes one built from env, so the "unsupplied optional
-   * seam" the CI rail catches cannot form — and a host that omits it (the B-2 suite, which
-   * predates the catalog and exercises only authorization) still boots.
+   * this needs to be: `start()` always passes one built from env — and a host that omits it (the
+   * B-2 suite, which predates the catalog and exercises only authorization) still boots.
+   *
+   * ⚠ **This said the "unsupplied optional seam" the CI rail catches "cannot form", and that was
+   * FALSE when written.** Rule B examined only factories declared under `packages/`, and it
+   * additionally required a call site to IMPORT the factory — `createApiServer` fails both tests,
+   * being declared in `services/` and constructed 195 lines below in this same file's `start()`.
+   * The seam was invisible twice over. Both holes were closed on 2026-08-10 and the claim is true
+   * now: delete `catalog` from the `createApiServer({ … })` call and `pnpm seams:check` reddens by
+   * name (measured). Recorded rather than silently corrected — a comment promising a protection
+   * that does not exist is what stops someone writing the assertion by hand.
    *
    * The fallback is deliberately UNUSABLE for saving rather than convenient. See
    * `unconfiguredCatalog`.
