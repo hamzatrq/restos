@@ -27,19 +27,48 @@ export type TicketCardProps = {
   minutes: number;
   amberAt: number;
   redAt: number;
+  /**
+   * `03-F13`'s **channel badge** — *"all channels, channel-tagged"*.
+   *
+   * It is on the card because a kitchen works a dine-in ticket and a foodpanda ticket
+   * differently, and because the aging thresholds behind `amberAt`/`redAt` are per order type
+   * (`03-F14`): a cook who cannot see the channel cannot tell why one ticket goes amber sooner.
+   * A WORD and not a colour — `27-F14`'s budget has three status slots and none of them is a
+   * channel, and `27-F12` is why a word beats a hue at 1–2 m anyway.
+   */
+  channel?: string | undefined;
+  /** `03-F13`'s table. Absent for every channel that has none; never invented (`00 §5.7`). */
+  tables?: readonly string[] | undefined;
+  /**
+   * `03-F15` — *"2 of 3 items ready, waiting on naan"*, as the two numbers that sentence needs.
+   *
+   * Counted by the caller from the same projection the lines come from, so the roll-up and the
+   * rows can never disagree.
+   */
+  assembly?: { done: number; total: number } | undefined;
   lines: readonly (QuantityItemLineProps & { id: string })[];
   /** 03-F3 — a reprint is marked on the paper AND here; it is a named fraud vector. */
   reprint?: boolean | undefined;
-  onBump: () => void;
+  /**
+   * `03-F16`/`03-F24` — the bump, or `null` where this surface does not own the ready signal.
+   *
+   * `null` renders **no control at all** rather than a disabled one, and that is `27-F5`: an
+   * inert primary target is a context-dependent control wearing a different name, and a cook who
+   * presses a grey DONE twice and gets nothing learns to distrust the screen. `03-F24`'s own
+   * words are that a surface without the assignment *"renders read-only"* — read-only is the
+   * absence of the control, not a greyed copy of it.
+   */
+  onBump: (() => void) | null;
 };
 
-// @unreached-owed The KDS ticket, waiting on the same screen as `AgeBadge` — `apps/pass-kds` is a
-// one-file stub. `03-F3`'s reprint marking is built and has nowhere to be seen.
 export const TicketCard = ({
   reference,
   minutes,
   amberAt,
   redAt,
+  channel,
+  tables = [],
+  assembly,
   lines,
   reprint = false,
   onBump,
@@ -75,6 +104,41 @@ export const TicketCard = ({
         <AgeBadge minutes={minutes} amberAt={amberAt} redAt={redAt} />
       </header>
 
+      {/*
+        `03-F13`'s remaining card contents — channel, table, assembly count — on one row under the
+        identifier, because `27-F58` fixes the reading order as **identifier → timing → items** and
+        these are none of those three. They are context for the ticket rather than the work in it,
+        so they sit between the header and the items and take one line of the budget `27-F28`
+        costs a ticket at.
+
+        Rendered only when there is something to say (`27-F16`'s argument one domain over): a
+        permanent empty `Table —` chip on every takeaway ticket spends a line of a panel whose
+        whole capacity is measured in lines.
+      */}
+      {channel !== undefined || tables.length > 0 || assembly !== undefined ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: space["space-3"],
+            fontFamily: label.fontFamily,
+            fontSize: label.fontSize,
+            color: color["fgColor-muted"],
+            letterSpacing: "0.06em",
+          }}
+        >
+          {channel === undefined ? null : <span>{channel.toUpperCase()}</span>}
+          {tables.length === 0 ? null : <span>TABLE {tables.join(" + ")}</span>}
+          {assembly === undefined ? null : (
+            // `27-F24` — the system computes and staff read. "2 of 3" is a finished sentence; a
+            // cook is never asked to count the ready rows themselves.
+            <span>
+              {assembly.done} OF {assembly.total} READY
+            </span>
+          )}
+        </div>
+      ) : null}
+
       {reprint ? (
         <span
           style={{
@@ -98,30 +162,32 @@ export const TicketCard = ({
         ))}
       </div>
 
-      <button
-        type="button"
-        onClick={onBump}
-        style={{
-          // 27-F8 kitchen row: 96 dp, above the standing-counter minimum, because this is the
-          // surface where the 21.34% wet-hand error was measured and it is read at 1–2 m.
-          minHeight: targetFor("kitchen"),
-          fontFamily: label.fontFamily,
-          fontSize: label.fontSize,
-          fontWeight: 700,
-          background: color["bgColor-interactive"],
-          color: color["fgColor-on-interactive"],
-          // 27-F64 — the OUTLINE carries SC 1.4.11. This was `border: "none"` while the fill had
-          // been relieved of the 3:1 requirement on the outline's account, which measured
-          // 2.35:1 against the card ON DARK — and dark is the KDS polarity (27-F19), so the
-          // primary control of the kitchen screen had no perceivable boundary on the surface it
-          // actually ships to.
-          border: `1px solid ${color["outlineColor-interactive"]}`,
-          borderRadius: space["space-2"],
-          cursor: "pointer",
-        }}
-      >
-        DONE
-      </button>
+      {onBump === null ? null : (
+        <button
+          type="button"
+          onClick={onBump}
+          style={{
+            // 27-F8 kitchen row: 96 dp, above the standing-counter minimum, because this is the
+            // surface where the 21.34% wet-hand error was measured and it is read at 1–2 m.
+            minHeight: targetFor("kitchen"),
+            fontFamily: label.fontFamily,
+            fontSize: label.fontSize,
+            fontWeight: 700,
+            background: color["bgColor-interactive"],
+            color: color["fgColor-on-interactive"],
+            // 27-F64 — the OUTLINE carries SC 1.4.11. This was `border: "none"` while the fill
+            // had been relieved of the 3:1 requirement on the outline's account, which measured
+            // 2.35:1 against the card ON DARK — and dark is the KDS polarity (27-F19), so the
+            // primary control of the kitchen screen had no perceivable boundary on the surface it
+            // actually ships to.
+            border: `1px solid ${color["outlineColor-interactive"]}`,
+            borderRadius: space["space-2"],
+            cursor: "pointer",
+          }}
+        >
+          DONE
+        </button>
+      )}
     </article>
   );
 };

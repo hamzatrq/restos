@@ -23,8 +23,15 @@ export type AgeBadgeProps = {
 
 type Level = "normal" | "abnormal" | "fault";
 
-// @unreached-owed With `AgeBadge` below — `apps/pass-kds` is a one-file stub, so `03-F47`'s aging
-// badge has no screen to appear on. Both exports land together when the pass screen does.
+/**
+ * ⚠ **THIS AND `AgeBadge` CARRIED `@unreached-owed` MARKERS UNTIL 2026-08-10, AND THE RAIL IS
+ * WHY THEY ARE GONE.** `apps/pass-kds` was a one-file stub, so `03-F47`'s aging badge had no
+ * screen to appear on and both exports were marked as owed debt. The pass screen landed;
+ * `PassSurface.tsx` renders `TicketCard`, which renders this. `pnpm seams:check` **fails on a
+ * marker for something now reached**, by design — *"so the register cannot rot"* — which means
+ * deleting these two comments was a required part of building the screen and not a tidy-up. A
+ * green-to-red the rail causes on purpose.
+ */
 export const ageLevel = (minutes: number, amberAt: number, redAt: number): Level =>
   minutes >= redAt ? "fault" : minutes >= amberAt ? "abnormal" : "normal";
 
@@ -51,8 +58,6 @@ const ON: Record<Level, ColorName> = {
   fault: "fgColor-on-status-fault",
 };
 
-// @unreached-owed `03-F47`'s aging badge, waiting on the pass/KDS screen (`apps/pass-kds` is a
-// one-file stub; `plans/wave-1/screen-map.md`). Stories and the happy-dom suite exercise it.
 export const AgeBadge = ({ minutes, amberAt, redAt }: AgeBadgeProps) => {
   const color = useColor();
   const level = ageLevel(minutes, amberAt, redAt);
