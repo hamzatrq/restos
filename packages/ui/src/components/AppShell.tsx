@@ -207,11 +207,13 @@ const Shell = ({
       {/* The work surface. The shell never scrolls it — 27-F2 pages instead — so a child that
         overflows is a layout bug to see, not to hide behind a scrollbar.
 
-        `WorkSurface` measures it ONCE and tells every surface inside what size of glass it is
-        on (`27-F11c`). It goes here rather than in each tab for the reason `PanelRoot` is at
-        the app root: two surfaces that measure separately can disagree about the panel they are
-        on, invisibly. It measures the box AFTER the strip, the rail and `03-F5`'s band have
-        taken their share, which is the surface a layout actually has. */}
+        ⚠ This comment used to say `WorkSurface` "measures it ONCE and tells every surface inside
+        what size of glass it is on". It does not any more, and the distinction is the point: the
+        box below is the WORK AREA, which `03-F5`'s band shortens by 102 dp and a vertical tab
+        rail narrows — so a MODE read from it would change under a cashier the moment a printer
+        stopped answering. The mode comes from `PanelRoot`'s measurement of the GLASS now
+        (`usePanelSize`), which is the thing that does not move. `WorkSurface` is the box; the
+        panel is the mode. Capacity still measures the box, in `ItemGrid` and `OrderList`. */}
       <main style={{ flex: 1, minHeight: 0, padding: space["space-4"], overflow: "hidden" }}>
         <WorkSurface>{children}</WorkSurface>
       </main>
