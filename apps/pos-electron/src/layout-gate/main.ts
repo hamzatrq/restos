@@ -254,14 +254,27 @@ const PANELS = [
 ] as const;
 
 /**
- * The number of surfaces one panel contributes: one lock surface, five tabs in two device states,
+ * The number of surfaces one panel contributes: one lock surface, SIX tabs in two device states,
  * and two escalation steps.
  *
- * Derived rather than typed so `MIN_SURFACES` below cannot rot when a tab is added — the tab list
- * is read from the DOM precisely so another session's tab is measured without touching this file,
- * and a hand-typed floor would then be the one thing that did need touching.
+ * ⚠ **THIS SAID FIVE, AND ITS OWN COMMENT CLAIMED IT COULD NOT ROT WHEN A TAB WAS ADDED.** The
+ * claim was *"derived rather than typed so `MIN_SURFACES` below cannot rot when a tab is added —
+ * the tab list is read from the DOM precisely so another session's tab is measured without
+ * touching this file"*. Both halves are true of the SWEEP and neither is true of this line: the
+ * `5` is a literal, and `02-F7`'s Sold-out tab (August 2026) is the first tab added since it was
+ * written. Nothing failed — `MIN_SURFACES` is a FLOOR — which is precisely the problem: the gate
+ * measured 165 surfaces against a floor of 130, so the comment two blocks down promising that
+ * *"losing any single panel reds the gate"* had quietly become false, and a whole panel could
+ * have stopped loading in silence.
+ *
+ * **So it is hand-typed, and this comment says so.** Update it when a tab lands. A genuinely
+ * derived floor would have to run the sweep first, which is the thing the floor exists to check.
+ *
+ * ⚠ **MERGE NOTE for the pass-screen branch:** that branch changes the leading `1` to `2` (both
+ * of `01-F61`'s lock steps). The merged value is `2 + 6 * 2 + 2`, not either side alone — a
+ * textual merge of these two edits will take one number and drop the other.
  */
-const SURFACES_PER_PANEL = 1 + 5 * 2 + 2;
+const SURFACES_PER_PANEL = 1 + 6 * 2 + 2;
 
 /**
  * `24-F14` empty-match protection: a gate that measured nothing must FAIL, never pass.
