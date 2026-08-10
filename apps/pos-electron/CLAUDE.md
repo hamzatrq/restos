@@ -624,13 +624,17 @@ validator — and an `assumed` tier is passed as **`null`**, never as T1, becaus
 a registry. Every shipped device is `assumed` today, so the check reports `unverified` and never
 refuses. `03-F51`: *an unknown is not a blessing.*
 
-**⚠ `seams:check` CANNOT SEE THIS SEAM, and that was measured, not assumed.** Rule B opens with
-`if (groupOf(mod.file) !== "packages") continue;`, so a factory declared in an APP has no Rule-B
-candidates. The rail is **exit 0 and CLEAN** with the `routesToPaper` argument deleted from
-`main/index.ts` *and* with it stubbed to `() => true`, reporting the same `5 optional seams` both
-times. `__acceptance__/station-routing-seam.test.ts` §E is the only guard. **`CashPrinterDeps.append`
-carries the opposite claim about Rule B and it is wrong for the same reason — a finding for that
-dep's owner, not fixed here.**
+**⚠ `seams:check` COULD NOT SEE THIS SEAM UNTIL 2026-08-10 — HALF CLOSED, and the surviving half
+is the one that matters here.** Rule B opened with `if (groupOf(mod.file) !== "packages") continue;`,
+so a factory declared in an APP had no Rule-B candidates: the rail was **exit 0 and CLEAN** with the
+`routesToPaper` argument deleted from `main/index.ts` *and* with it stubbed to `() => true`,
+reporting the same `5 optional seams` both times. Rule B walks `apps/` and `services/` now, so
+**deleting the argument reddens the rail by name**. **Stubbing it to `() => true` still does not** —
+Rule B asks whether a member was *supplied*, never whether what was supplied is real, and that blind
+spot is untouched. So `__acceptance__/station-routing-seam.test.ts` §E is still the only thing
+separating the real resolution from a literal, which is the case `03-F51` actually turns on.
+(`CashPrinterDeps.append` carried the opposite claim about Rule B; it was false when written and is
+true now, and `printing.ts` records both facts at the declaration.)
 
 **`03-F9`'s CASH DRAWER IS NOT A FAULT, checked rather than assumed.** `cash.drawer_opened` is
 emitted, authorized and folded, and **nothing executes a kick**: `packages/escpos` ships no

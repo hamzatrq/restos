@@ -219,11 +219,15 @@ describe("E. main/index.ts supplies the route, and supplies the real one", () =>
   const main = SRC("index.ts");
 
   it("the KOT printer is constructed with routesToPaper", () => {
-    // **This assertion is the ONLY guard on this seam, and that was measured rather than assumed.**
-    // `seams:check` Rule B opens with `if (groupOf(mod.file) !== "packages") continue;`, so a
-    // factory declared in an APP has no Rule-B candidates at all: the rail is exit-0 CLEAN both
-    // with this argument deleted and with it replaced by `() => true`, and reports the same
-    // "5 optional seams" in each case. Delete this test and the seam has nothing holding it.
+    // **Measured rather than assumed, and re-measured 2026-08-10 when the rail changed under it.**
+    // `seams:check` Rule B opened with `if (groupOf(mod.file) !== "packages") continue;`, so a
+    // factory declared in an APP had no Rule-B candidates at all: the rail was exit-0 CLEAN both
+    // with this argument deleted and with it replaced by `() => true`, reporting the same
+    // "5 optional seams" in each case. Rule B walks `apps/` now, so DELETING the argument is
+    // caught by the rail as well as here. **Replacing it with `() => true` is still caught by
+    // NOTHING but the `stationRouting()` assertion below** — a stub is a supply as far as Rule B
+    // is concerned — and that literal is the case `03-F51` turns on, so this test still carries
+    // the seam even though it is no longer the only thing that would notice a deletion.
     const call = main.slice(main.indexOf("createKotPrinter({"));
     expect(call.indexOf("createKotPrinter({")).toBe(0); // 24-F14
     const body = call.slice(0, call.indexOf("\n  });"));
