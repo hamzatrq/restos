@@ -82,6 +82,8 @@ const rig = (opts: {
           lines.push(req);
           return { id: "evt-2" };
         }),
+        // `02-F7`/`02-F46` — the third guarded write channel (August 2026).
+        setAvailability: vi.fn(() => ({ id: "evt-3" })),
       },
       store,
       session: () => (assignments === null ? null : { user_id, display_name: "Stub" }),
@@ -635,7 +637,11 @@ describe("§J 05-F19 — the threshold cannot be omitted", () => {
     } as unknown as Pick<DeviceStore, "identity" | "staff">;
     // @ts-expect-error — `paidOutApprovalThresholdPaisa` is required (01-F60's precedent).
     const writes = authorizeWrites({
-      writes: { append: () => ({ id: "x" }), addLine: () => ({ id: "y" }) },
+      writes: {
+        append: () => ({ id: "x" }),
+        addLine: () => ({ id: "y" }),
+        setAvailability: () => ({ id: "z" }),
+      },
       store,
       session: () => null,
     });

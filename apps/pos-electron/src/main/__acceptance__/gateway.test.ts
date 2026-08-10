@@ -114,7 +114,7 @@ describe("18 §6 / 18 §9 — the renderer's whole surface", () => {
     //
     // No price: 01-F53 snapshots unit_price_paisa into the event at line-add, so a price on a
     // grid tile would be a second source of truth for money, and the wrong one.
-    const grid = createGateway(deps()).menu();
+    const grid = createGateway(deps()).menu("counter");
     expect(grid).toEqual([{ id: "i-karahi", label: "Chicken Karahi" }]);
     expect(grid[0]).not.toHaveProperty("price");
     expect(grid[0]).not.toHaveProperty("unit_price_paisa");
@@ -149,9 +149,26 @@ describe("18 §6 / 18 §9 — the renderer's whole surface", () => {
         { id: "i-roti", name: "Roti" },
       ],
     });
-    expect(createGateway(withToggles).menu()).toEqual([
-      { id: "i-karahi", label: "Chicken Karahi", unavailable: true, unavailableReason: "86" },
-      { id: "i-daal", label: "Daal", unavailable: true, unavailableReason: "86 — disputed" },
+    expect(createGateway(withToggles).menu("counter")).toEqual([
+      // `sold_out` / `contested` are the availability fold's own two facts, added August 2026
+      // for `02-F7`'s toggle surface: `unavailable` is a DISPLAY verdict that also covers the
+      // unpriced case, and `01-F60` calls those two dispositions opposites. The greying
+      // assertions either side of them are unchanged.
+      {
+        id: "i-karahi",
+        label: "Chicken Karahi",
+        unavailable: true,
+        unavailableReason: "86",
+        sold_out: true,
+      },
+      {
+        id: "i-daal",
+        label: "Daal",
+        unavailable: true,
+        unavailableReason: "86 — disputed",
+        sold_out: true,
+        contested: true,
+      },
       // Never toggled, so sellable. Defaulting the other way would empty the grid on day one.
       { id: "i-roti", label: "Roti" },
     ]);

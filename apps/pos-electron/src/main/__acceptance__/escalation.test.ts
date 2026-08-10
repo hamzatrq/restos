@@ -113,6 +113,7 @@ const rig = (opts: { signedInAs?: string | null; pinOk?: boolean } = {}): Rig =>
           return { id: "evt-1" };
         },
         addLine: () => ({ id: "evt-2" }),
+        setAvailability: () => ({ id: "evt-3" }),
       },
       store,
       session: () =>
@@ -373,6 +374,7 @@ describe("§E 18 §5 — the ordinary write path is unchanged", () => {
             return { id: "evt-1" };
           },
           addLine: () => ({ id: "evt-2" }),
+          setAvailability: () => ({ id: "evt-3" }),
         },
         store,
         session: () => ({ user_id, display_name: user_id }),

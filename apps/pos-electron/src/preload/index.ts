@@ -14,7 +14,9 @@ const bridge: RestosBridge = {
   deviceState: () => ipcRenderer.invoke(CHANNELS.deviceState),
   openOrders: () => ipcRenderer.invoke(CHANNELS.openOrders),
   kitchenQueue: () => ipcRenderer.invoke(CHANNELS.kitchenQueue),
-  menu: () => ipcRenderer.invoke(CHANNELS.menu),
+  // The `channel` decides GREYING only (`01-F60`'s unpriced disposition); the price a line
+  // snapshots is resolved in main from the ORDER's own channel and never from this argument.
+  menu: (channel) => ipcRenderer.invoke(CHANNELS.menu, channel),
   // `01-F61` — the identification grid's roster, in the order main supplies it (`27-F4`).
   staff: () => ipcRenderer.invoke(CHANNELS.staff),
   // `02-F23`/`02-F37`/`02-F43` — the `shift_cash` projection behind Cash and Me. Optional on
@@ -28,6 +30,10 @@ const bridge: RestosBridge = {
   acknowledgeAlarm: (alarm_id) => ipcRenderer.invoke(CHANNELS.acknowledgeAlarm, alarm_id),
   append: (req) => ipcRenderer.invoke(CHANNELS.append, req),
   addLine: (req) => ipcRenderer.invoke(CHANNELS.addLine, req),
+  // `02-F7` — the 86. Optional on the contract, always served here, for the reason `cashState`
+  // and `alarms` record above: this bridge is the one main actually ships. It carries no
+  // `supersedes` link; main reads `01-F57`'s heads off the fold at append time.
+  setAvailability: (req) => ipcRenderer.invoke(CHANNELS.setAvailability, req),
   // `02-F20`'s local manager-PIN path. Optional on the contract, always served here, for the
   // reason `cashState` and `alarms` record above: this bridge is the one main actually ships.
   // The offer is display data read off the matrix; the approval is the credential call.
