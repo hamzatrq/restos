@@ -202,6 +202,31 @@ own preload fixture, so a main-process seam going to a stub is structurally invi
 `seams:check` Rule B is satisfied by any supply and `() => null` is a supply. Exactly **one test
 in this repo** separates each from the shipped wiring, and it is `panel-fit-seam.test.ts`.
 
+**Mutation matrix — the composition check's FIT precondition.** Control: gate GREEN, 91 surfaces,
+**145 axes judged, 9 not judged** (all nine on the two below-floor panels, all nine already
+carrying fit verdicts, so the pairing guard stayed silent). Two of the nine read `-21dp / -21dp`
+— **symmetric overflows that the OLD check passed at asymmetry 0**, which is the closed form
+confirmed in the live tree rather than on paper.
+
+| # | mutant | gate | ANCHORED, by panel |
+|---|---|---|---|
+| N0 | **DIAGNOSTIC** — `safe center` → `center`, gate untouched | **GREEN** | none — the *worse* layout passes |
+| N1/N2 | `<main>` dumps 240 dp of slack at the bottom — a real composition defect | **RED, 13**, exit 1 | **`laptop-1280` 6** (ABOVE the floor) · **`netbook-1024` 4 + `tablet-10.1` 3** (BELOW it) |
+| N3 | the precondition retires every axis — the back door | **RED, 141** EMPTY MATCH, `0 axes judged` | — |
+
+**N1/N2's second half is the load-bearing one.** A composition defect above the floor is still
+fatal; a composition defect BELOW the floor on content that **fits** is *also* still fatal — which
+is what separates "the check has a precondition" from "small panels are exempt". A floor-based
+exemption would have silenced those seven. Under that mutant **zero axes were skipped on any
+shipping panel**, so the precondition removed nothing from its detection: the counter panels
+simply passed, because 240 dp of dead space is under 25% of their taller box.
+
+**N0 is the diagnostic that made the case, and it is the reason this is a soundness fix and not a
+suppression.** Reverting one keyword produces a strictly *more* damaged surface by the gate's own
+reckoning — three controls unreachable become zero, but 46 dp is still lost and six controls are
+still clipped — and the composition check goes quiet. A verdict that flips on where an overflow
+was cut is measuring the cut, not the composition.
+
 **It sweeps SEVEN panels** (`DEC-UI-001` (e), extended August 2026), reloading between each so
 every one gets `03-F5`'s band rather than inheriting an acknowledged one:
 
@@ -544,6 +569,30 @@ though content is being lost."* ⚠ **It also means the gate's composition check
 too-tall surface as ANCHORED, where a centred overflow used to read as symmetric slack and pass.**
 That is a property of the gate worth knowing: **`center` hides an overflow from the composition
 check; `safe center` shows it.**
+
+**⚠ THAT OBSERVATION WAS RIGHT, AND IT WAS A GATE DEFECT RATHER THAN A PROPERTY — CLOSED (August
+2026).** This branch was green on the 65-surface rail and the seven-panel rail was green on its
+own; **together they were RED**, on one verdict: `tablet-10.1 tab:Pay` ANCHORED y, with **−105 dp**
+of slack on the bottom. Negative slack is not leftover room, and every sentence of the composition
+check's own design note presupposes there is some (*"centred in a surface LARGER THAN IT"*).
+
+The closed form: with overflow `D > 0`, `top + bottom = −D` always, so asymmetry is `|2·top + D|`
+— **0 for a centred overflow of ANY magnitude**, and `2·padding + D` for an edge-anchored one. On
+overflowing content the check was **a function of the alignment mode and not of the loss**, so it
+**passed the arrangement that hides its loss above the viewport and failed the one that puts it at
+the bottom edge**. Measured by reverting this one keyword on the shipped tree: `center` → 46 dp
+lost, 6 controls clipped, **0 unreachable**, gate **PASSED**; `safe center` → 108 dp lost, **3
+controls UNREACHABLE**, gate **FAILED**. Its verdict text also asserted *"It FITS and every
+control is reachable"* on a surface holding 593 px in a 485 px box.
+
+`judgeComposition` now requires the content to fit, **per axis** — stated as the measurement's own
+precondition, naming no panel, no `ships` flag and no size floor, so `counter-1366` and
+`tablet-10.1` are treated identically. **Nothing is silenced**: the fit checks already own an
+overflowing surface and name the controls, and an `OVERFLOW` is FATAL on a shipping panel. The
+`24-F14` guard asserts that pairing rather than assuming it (a skipped axis with no fit verdict is
+an EMPTY MATCH — `scrollHeight` cannot see an upward-only overflow), plus a floor on judged axes.
+**So the sentence above is now true of the FIT checks, which is where it belonged: `safe center`
+shows an overflow to the gate. It is the ANCHORED verdict that must not be the one showing it.**
 
 **3. THE FIXTURE WAS `{ shifts: [], days: [] }` AND ONE ORDER, so four states had never been laid
 out by anything but happy-dom.** `main.ts`'s own blind-spot list names *"an open shift with a
