@@ -960,6 +960,8 @@ const ruleBExamines = (mod) => RULE_B_GROUPS.includes(groupOf(mod.file));
 
 const ruleBFindings = [];
 let ruleBCandidates = 0;
+/** Candidates per workspace group, so each half of the scope can be asserted on its own. */
+const ruleBByGroup = new Map();
 
 /**
  * Rule B's per-export scan: every optional member of `name`'s options bag that no shipping call
@@ -986,6 +988,8 @@ const scanSeams = (mod, name, decl) => {
   const whole = fileMarker(mod);
   for (const member of optional) {
     ruleBCandidates++;
+    const group = groupOf(mod.file);
+    ruleBByGroup.set(group, (ruleBByGroup.get(group) ?? 0) + 1);
     const label = `${name}({ ${member.name} })`;
     const line = lineOf(mod.raw, member.offset);
     const where = `${relative(ROOT, mod.file)}:${line}`;
@@ -1020,9 +1024,27 @@ for (const mod of modules.values()) {
   for (const [name, decl] of mod.declared) scanSeams(mod, name, decl);
 }
 
-if (ruleBCandidates === 0)
+/**
+ * `24-F14`, ASSERTED PER SCOPE HALF — and the reason is a tripwire this very change broke.
+ *
+ * One global `ruleBCandidates === 0` was sufficient while Rule B walked a single group. Widening
+ * it to three made the global count a place for a dead half to hide: measured 2026-08-10,
+ * renaming `packages/` HARD-FAILED the old rail on exactly this assert and left the widened one
+ * **clean at exit 0**, because the five app/service seams kept the total non-zero. Widening a
+ * rail's scope had silently removed one of its own tripwires, which is this file's named defect
+ * committed by the file itself.
+ *
+ * So each half is asserted separately and neither can go inert behind the other.
+ */
+const ruleBSeen = (groups) => groups.reduce((n, g) => n + (ruleBByGroup.get(g) ?? 0), 0);
+
+if (ruleBSeen(["packages"]) === 0)
   fail(
-    "EMPTY MATCH — Rule B found zero optional seams on any factory that shipping code calls. Either the options-type parser stopped matching or the app stopped constructing subsystems; both make this rail inert (24-F14).",
+    "EMPTY MATCH — Rule B found zero optional seams on any PACKAGE factory that shipping code calls. Either the options-type parser stopped matching or the apps stopped constructing kernel subsystems; both make this rail inert (24-F14).",
+  );
+if (ruleBSeen(SHIPPING_GROUPS) === 0)
+  fail(
+    `EMPTY MATCH — Rule B found zero optional seams on any factory declared under ${SHIPPING_GROUPS.join("/, ")}/. Rule B walked packages/ ONLY until 2026-08-10, and this assert is what stops it regressing to that silently — the failure it would hide is an app-declared subsystem switched off in the product. If every app-declared factory has genuinely made its dependencies required, that is a real and good change: relax this assert deliberately and say so here (24-F14).`,
   );
 
 // ---------------------------------------------------------------------------------------------
