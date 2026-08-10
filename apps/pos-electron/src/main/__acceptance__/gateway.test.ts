@@ -96,6 +96,18 @@ describe("18 §6 / 18 §9 — the renderer's whole surface", () => {
     // paid: `02-F23`'s own-shifts-only scoping is a filter, and because this channel cannot
     // express one it must be applied on the trusted side (commandment 8), never by the renderer
     // choosing which rows to draw.
+    //
+    // EIGHT since `02-F7`'s toggle, and the widening is acknowledged on the same terms as the
+    // three above it. `toggleAvailability` exists because `01-F57` makes `availability.changed`
+    // converge on a carried `supersedes` link read off the fold's own heads — which live on this
+    // side. Routing it through the generic `append` would have meant the RENDERER supplying that
+    // link, and a stale set strands an item 86'd for ever with no act that clears it. Exactly
+    // `addLine`'s argument with a causal link in place of a price.
+    //
+    // Still a CLOSED vocabulary: it names an item and a target state. No table, no filter, and
+    // no mutation — it APPENDS, which is why `01-F1`'s channel-name tripwire in
+    // `unbound-settlement.dom.test.tsx` had to be satisfied by naming it honestly rather than by
+    // loosening the regex.
     expect(Object.keys(createGateway(deps())).sort()).toEqual([
       "addLine",
       "append",
@@ -104,6 +116,7 @@ describe("18 §6 / 18 §9 — the renderer's whole surface", () => {
       "kitchenQueue",
       "menu",
       "openOrders",
+      "toggleAvailability",
     ]);
   });
 

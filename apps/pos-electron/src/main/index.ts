@@ -1064,9 +1064,9 @@ app.whenReady().then(async () => {
    * Propagation to OTHER devices is the sync layer's and needs nothing here: the append is an
    * ordinary ledger event and rides the same outbox as every other.
    */
-  ipcMain.handle(CHANNELS.setAvailability, (_event, req: unknown) => {
+  ipcMain.handle(CHANNELS.toggleAvailability, (_event, req: unknown) => {
     touch();
-    const result = writes.setAvailability(req);
+    const result = writes.toggleAvailability(req);
     notifyChanged();
     return result;
   });

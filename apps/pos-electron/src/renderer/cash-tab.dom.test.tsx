@@ -348,7 +348,9 @@ describe("27-F4 — the Cash tab stops being 'not built yet' without moving anyt
     const labels = [...(rail as Element).querySelectorAll("button")].map((b) =>
       (b.querySelector("span")?.textContent ?? "").trim(),
     );
-    expect(labels).toEqual(["Order", "Orders", "Pay", "Cash", "Me"]);
+    // SIX since `02-F7`'s Sold-out tab (August 2026), APPENDED so nothing here moved: the five
+    // labels this test was written for are still in their original order and positions.
+    expect(labels).toEqual(["Order", "Orders", "Pay", "Cash", "Me", "Sold out"]);
 
     await goToTab("Cash");
     expect(unexpectedBridgeCalls, "the Cash surface reached for an unknown bridge member").toEqual(

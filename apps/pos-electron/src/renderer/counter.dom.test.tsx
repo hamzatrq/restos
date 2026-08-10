@@ -209,6 +209,15 @@ describe("C4 — starting an order (02-F1, founder ruling: no default type)", ()
   it("appends order.created carrying the chosen type AND the counter channel", async () => {
     mountWith([]);
     render(<Counter />);
+    // ⚠ THE CHANNEL TAP IS NEW (August 2026) AND IT IS NOT A CONVENIENCE STEP. `02-F1` requires
+    // BOTH axes at creation; until `restaurant-os.md` §8's phone/foodpanda quick entry landed,
+    // `Counter.tsx` pinned `channel: "counter"` and the type tap alone could carry it. It now
+    // carries neither by default, extending `C4`'s founder ruling to the axis that is MONEY:
+    // a pre-selected chip *"would save one tap … and would silently corrupt the axis"*, and here
+    // the corruption is a phone order billed at counter prices, frozen by `01-F53`.
+    // The assertion below is UNCHANGED — this test still proves the chosen type and the channel
+    // both reach the event.
+    fireEvent.click(await screen.findByRole("button", { name: /^Counter$/i }));
     fireEvent.click(await screen.findByRole("button", { name: /Takeaway/i }));
 
     await waitFor(() => expect(appended).toHaveLength(1));

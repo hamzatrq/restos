@@ -83,7 +83,7 @@ const rig = (opts: {
           return { id: "evt-2" };
         }),
         // `02-F7`/`02-F46` — the third guarded write channel (August 2026).
-        setAvailability: vi.fn(() => ({ id: "evt-3" })),
+        toggleAvailability: vi.fn(() => ({ id: "evt-3" })),
       },
       store,
       session: () => (assignments === null ? null : { user_id, display_name: "Stub" }),
@@ -335,7 +335,13 @@ describe("§E 01-F26 — an assignment is per (org, location)", () => {
 
 describe("§F fail-closed — an unmapped event type is refused, not passed through", () => {
   it("refuses a type with no matrix action, even for an owner", () => {
-    for (const type of ["staff.clocked_in", "availability.changed", "catalog.changed"]) {
+    // ⚠ `availability.changed` WAS the middle entry and is no longer unmapped: `02-F46` gave it
+    // `availability.toggle` in August 2026 so `02-F7`'s counter toggle could exist at all. Left
+    // in place it would be a green test defending a rule the FR overruled — the exact failure
+    // `AGENTS.md` records for `catalog-pricing.test.ts:394`, which is why the suites encoding the
+    // old rule were grepped the same day. `receipt.printed` replaces it: still unmapped, still an
+    // `01 §4` catalogued type, so the arity and the property are unchanged.
+    for (const type of ["staff.clocked_in", "receipt.printed", "catalog.changed"]) {
       const r = asOwner();
       const refusal = refusalOf(() => r.writes.append(event(type, {})));
       expect(refusal.outcome).toBe("deny");
@@ -640,7 +646,7 @@ describe("§J 05-F19 — the threshold cannot be omitted", () => {
       writes: {
         append: () => ({ id: "x" }),
         addLine: () => ({ id: "y" }),
-        setAvailability: () => ({ id: "z" }),
+        toggleAvailability: () => ({ id: "z" }),
       },
       store,
       session: () => null,

@@ -18,8 +18,8 @@ import {
   type OpenOrder,
   OpenOrderSchema,
   type Session,
-  type SetAvailabilityRequest,
-  SetAvailabilityRequestSchema,
+  type ToggleAvailabilityRequest,
+  ToggleAvailabilityRequestSchema,
 } from "../shared/ipc";
 import type { PanelFit } from "./window-options";
 
@@ -43,7 +43,7 @@ export type Gateway = {
   /** `C5` — `01-F60`'s resolution and `01-F53`'s capture, both on the trusted side. */
   addLine: (req: unknown) => AppendResult;
   /** `02-F7` — the 86, with `01-F57`'s supersedes link built here from the fold's own heads. */
-  setAvailability: (req: unknown) => AppendResult;
+  toggleAvailability: (req: unknown) => AppendResult;
 };
 
 /**
@@ -484,15 +484,15 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
    * explicitly does not host it). Not an `01-F17` block either — `01-F59` keeps an 86'd item
    * deliberately sellable and `02-F31` owns the oversell path, so nothing here refuses a sale.
    */
-  setAvailability: (req: unknown): AppendResult => {
-    const parsed: SetAvailabilityRequest = SetAvailabilityRequestSchema.parse(req);
+  toggleAvailability: (req: unknown): AppendResult => {
+    const parsed: ToggleAvailabilityRequest = ToggleAvailabilityRequestSchema.parse(req);
     // The item must EXIST. `01-F55` keeps a tombstoned entry resolvable for display, so `lookup`
     // is deliberately not the test — 86-ing a deleted item would append a toggle nothing can ever
     // see or clear, permanently (`01-F1`), against a row the grid does not draw.
     const known = deps.menu().some((entry) => entry.id === parsed.item_id);
     if (!known) {
       throw new Error(
-        `setAvailability: ${parsed.item_id} is not a live catalog item (01-F55) — ` +
+        `toggleAvailability: ${parsed.item_id} is not a live catalog item (01-F55) — ` +
           `a toggle against it could never be seen or cleared`,
       );
     }

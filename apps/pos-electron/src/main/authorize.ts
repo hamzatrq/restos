@@ -166,12 +166,12 @@ export type AuthorizedWrites = {
   append: (req: unknown) => AppendResult;
   addLine: (req: unknown) => AppendResult;
   /** `02-F7`/`02-F46` — the 86, guarded like every other renderer-originated append. */
-  setAvailability: (req: unknown) => AppendResult;
+  toggleAvailability: (req: unknown) => AppendResult;
 };
 
 export type AuthorizedWritesDeps = {
   /** The unguarded writes this wraps. Narrowed by name so nothing else can slip past. */
-  writes: Pick<Gateway, "append" | "addLine" | "setAvailability">;
+  writes: Pick<Gateway, "append" | "addLine" | "toggleAvailability">;
   /**
    * `01-F26`/`01-F28` — the assignments come from the SYNCED staff registry on this device, and
    * `store.identity` is where the org and branch come from. Neither is anything the renderer
@@ -368,7 +368,7 @@ export const authorizeWrites = (deps: AuthorizedWritesDeps): AuthorizedWrites =>
       return deps.writes.addLine(req);
     },
     /**
-     * `02-F7` — the event type is fixed by the channel (`gateway.setAvailability` always appends
+     * `02-F7` — the event type is fixed by the channel (`gateway.toggleAvailability` always appends
      * `availability.changed`), so the action is known before the request is read, exactly as for
      * `addLine` above.
      *
@@ -378,9 +378,9 @@ export const authorizeWrites = (deps: AuthorizedWritesDeps): AuthorizedWrites =>
      * bypass — a renderer-originated append reaching the ledger with no matrix verdict. The
      * `Pick` above is what makes forgetting this a typecheck error.
      */
-    setAvailability: (req: unknown): AppendResult => {
+    toggleAvailability: (req: unknown): AppendResult => {
       guard("availability.changed", {});
-      return deps.writes.setAvailability(req);
+      return deps.writes.toggleAvailability(req);
     },
   };
 };

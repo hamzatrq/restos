@@ -33,7 +33,7 @@ const bridge: RestosBridge = {
   // `02-F7` — the 86. Optional on the contract, always served here, for the reason `cashState`
   // and `alarms` record above: this bridge is the one main actually ships. It carries no
   // `supersedes` link; main reads `01-F57`'s heads off the fold at append time.
-  setAvailability: (req) => ipcRenderer.invoke(CHANNELS.setAvailability, req),
+  toggleAvailability: (req) => ipcRenderer.invoke(CHANNELS.toggleAvailability, req),
   // `02-F20`'s local manager-PIN path. Optional on the contract, always served here, for the
   // reason `cashState` and `alarms` record above: this bridge is the one main actually ships.
   // The offer is display data read off the matrix; the approval is the credential call.

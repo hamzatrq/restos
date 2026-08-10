@@ -528,7 +528,10 @@ describe("C1 is NOT a tab (screen-map §3.1, 27-F4)", () => {
     // same breaking change under the amendment as it was before it.
     const rail = await screen.findByRole("navigation", { name: "Main" });
     const tabs = within(rail).getAllByRole("button");
-    expect(tabs).toHaveLength(5);
+    // SIX since `02-F7` (August 2026). **The count is not what this test is about** — the loop
+    // below is, and it is unchanged: no tab in the rail may be an unlock/sign-in/staff surface.
+    // `C1` is still not a tab, which is this describe block's whole claim.
+    expect(tabs).toHaveLength(6);
     for (const tab of tabs) {
       expect(
         /unlock|sign ?in|log ?in|pin|switch user|staff/i.test(tab.textContent ?? ""),

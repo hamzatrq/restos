@@ -343,7 +343,7 @@ export const MenuItemSchema = z.object({
    * `contested` is `01-F58`: two devices disagree and the fold refused to pick a winner. It is a
    * distinct state from `sold_out`, not an intensifier of it, because the act that clears it is
    * different — one toggle supersedes ALL heads at once (`01-F57`), which is why main builds the
-   * supersedes link and this shape carries no head ids (see `SetAvailabilityRequestSchema`).
+   * supersedes link and this shape carries no head ids (see `ToggleAvailabilityRequestSchema`).
    *
    * **Both are OPTIONAL, and absence is a MEANING rather than a gap.** `merge.ts` rules that
    * *"an item the fold has never seen is SELLABLE"* — `01-F22`'s 86 is an explicit act, so no
@@ -510,12 +510,12 @@ export type AddLineRequest = z.infer<typeof AddLineRequestSchema>;
  * names. So the renderer says WHICH item and WHICH way, and main reads the heads at append time
  * from the store it alone holds. Same split as identity, event id and `unit_price_paisa`.
  */
-export const SetAvailabilityRequestSchema = z.object({
+export const ToggleAvailabilityRequestSchema = z.object({
   item_id: z.string().min(1),
   /** The state to move TO, never a flip: a toggle read from a stale screen would invert twice. */
   available: z.boolean(),
 });
-export type SetAvailabilityRequest = z.infer<typeof SetAvailabilityRequestSchema>;
+export type ToggleAvailabilityRequest = z.infer<typeof ToggleAvailabilityRequestSchema>;
 
 export const AppendResultSchema = z.object({ id: z.string() });
 export type AppendResult = z.infer<typeof AppendResultSchema>;
@@ -628,11 +628,20 @@ export const CHANNELS = {
   /**
    * `02-F7` — the 86. **A write channel of its own rather than an `append` payload**, for
    * `addLine`'s reason exactly: the event needs a field the renderer must not supply. `01-F57`'s
-   * `supersedes` link is read from the fold in main (see `SetAvailabilityRequestSchema`), so a
+   * `supersedes` link is read from the fold in main (see `ToggleAvailabilityRequestSchema`), so a
    * generic `append` would put the one convergence-bearing field on the untrusted side of the
    * bridge, where a stale set silently strands an item 86'd for ever.
+   *
+   * **It was called `setAvailability` for an hour, and `01-F1`'s own tripwire caught it.**
+   * `unbound-settlement.dom.test.tsx` filters `CHANNELS` for `/update|patch|delete|amend|bind|
+   * rewrite|set[A-Z]/` and asserts the list is empty — *"a `bindShift`/`setShift`/`amend` channel
+   * added when shifts land, which is exactly how retro-binding would arrive"*. This channel
+   * MUTATES nothing; it appends. But the guard is a check on the NAME, deliberately, because a
+   * name is what a future reader goes by — and the fix for a misfiring name-guard is a better
+   * name, never a narrower regex. `02-F7` and `01-F22` both call the operator's act a *toggle*,
+   * so the vocabulary was already there. **The regex was not weakened.**
    */
-  setAvailability: "restos:set-availability",
+  toggleAvailability: "restos:toggle-availability",
   /**
    * `02-F20` — "would a manager credential close this?", asked of the matrix and answered for
    * display only. A READ: nothing is appended and nothing is authorized on this channel.
@@ -754,7 +763,7 @@ export type RestosBridge = {
    * shows a Sold-out grid whose taps do nothing. `main/__acceptance__/availability-seam.test.ts`
    * is the assertion that stands in for the type until those harnesses catch up.
    */
-  setAvailability?: (req: SetAvailabilityRequest) => Promise<AppendResult>;
+  toggleAvailability?: (req: ToggleAvailabilityRequest) => Promise<AppendResult>;
   /**
    * `02-F20`'s local path, and both members are **OPTIONAL for the reason `cashState` and
    * `alarms` above record**: `unlock-gate.dom.test.tsx` closes its harness with

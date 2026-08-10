@@ -105,6 +105,9 @@ const openOrdersTab = async () => {
 };
 
 describe("§A — 27-F4: the tab is ENABLED IN PLACE, and the rail did not change shape", () => {
+  // `27-F4` — SIX since `02-F7`'s Sold-out tab landed (August 2026). The assertion is unchanged
+  // in what it protects: the five that existed keep their labels AND their order, and the new one
+  // is APPENDED so no learned position moves. A reorder or a removal still fails this line.
   it("still carries screen-map §3.1's five surfaces, in order", async () => {
     mountWith([]);
     await openOrdersTab();
@@ -115,7 +118,7 @@ describe("§A — 27-F4: the tab is ENABLED IN PLACE, and the rail did not chang
     // Building this surface must change exactly ONE thing: `unavailable` goes away. Adding,
     // removing or reordering an operational item is a breaking change (`27-F4`), so the
     // positions are pinned rather than merely the membership.
-    expect(labels).toEqual(["Order", "Orders", "Pay", "Cash", "Me"]);
+    expect(labels).toEqual(["Order", "Orders", "Pay", "Cash", "Me", "Sold out"]);
   });
 
   it("is no longer disabled, and no longer says it is unbuilt", async () => {
@@ -301,8 +304,10 @@ describe("§E — ANTI-SCOPE: C20 and C32 are BLOCKED and must not be drawn", ()
     mountWith([order({ order_id: "counter-1" }), order({ order_id: "counter-2" })]);
     await openOrdersTab();
     await screen.findByText("Open orders");
-    // Only the rail's five tabs remain. No row control, and no pager at this panel size.
-    expect(screen.getAllByRole("button")).toHaveLength(5);
+    // Only the RAIL's tabs remain. No row control, and no pager at this panel size. The count
+    // is a proxy for "this surface draws no control of its own", so it moved 5 → 6 with the rail
+    // (`02-F7`'s Sold-out tab) and the anti-scope property it guards is untouched.
+    expect(screen.getAllByRole("button")).toHaveLength(6);
   });
 });
 
