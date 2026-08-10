@@ -33,7 +33,7 @@
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { hashPin } from "@restos/domain";
+import { businessDayBoundsOfDate, hashPin } from "@restos/domain";
 import superjson from "superjson";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LISTENING_PREFIX } from "../server.js";
@@ -288,6 +288,77 @@ describe("a published menu reaches the sync gateway (the seam, out of process)",
     );
     expect(saved.status).not.toBe(200);
     expect(JSON.stringify(saved.body)).toContain("channel counter (01-F60)");
+  });
+
+  /**
+   * **`12-F10`'S SEAM, AND IT WAS MEASURED INVISIBLE BEFORE THIS TEST EXISTED.**
+   *
+   * `server.ts` binds a THIRD port on the same `GatewayLink` — `createGatewayDayLedger` — and the
+   * mutant that swaps it for `unconfiguredDayLedger()` failed **0 of 204** api tests: the process
+   * boots, logs in, gates every procedure, publishes a menu, and the owner summary is unreachable.
+   * Same shape as G1 above, one port over, and the whole point of this file is that only an
+   * assertion which inspects **what the peer received** can separate those two worlds.
+   *
+   * So this seeds one order into the fake gateway's ledger and asks the RUNNING PROCESS for the
+   * business day that contains it. A refusing fallback throws; a stub answering `[]` would report
+   * `Rs 0`, which is why the assertion is the FIGURE and not the status code.
+   */
+  it("folds the nightly summary from the gateway's ledger, not from a local stub (12-F10)", async () => {
+    const day = businessDayBoundsOfDate("2026-08-09");
+    const rung = day.start_ms + 8 * 3_600_000; // 13:00 Karachi
+    gateway.seedLedger(
+      ORG,
+      [
+        {
+          id: "seam-ev-1",
+          type: "order.created",
+          branch_id: BRANCH,
+          branch_created_at: rung,
+          time_basis: "branch",
+          actor_user_id: null,
+          payload: { order_id: "seam-ord-1", channel: "counter" },
+        },
+        {
+          id: "seam-ev-2",
+          type: "order.line_added",
+          branch_id: BRANCH,
+          branch_created_at: rung,
+          time_basis: "branch",
+          actor_user_id: null,
+          payload: {
+            order_id: "seam-ord-1",
+            line_id: "seam-line-1",
+            item_id: "item-chicken-karahi",
+            qty: 2,
+            unit_price_paisa: 145_000,
+          },
+        },
+      ],
+      rung,
+    );
+
+    const before = gateway.received.length;
+    const reply = await query(
+      running.base,
+      `summary.nightly?input=${encodeURIComponent(
+        JSON.stringify(superjson.serialize({ business_date: "2026-08-09" })),
+      )}`,
+      auth,
+    );
+    expect(reply.status, JSON.stringify(reply.body)).toBe(200);
+    expect(gateway.received.length, "the summary never left the process").toBeGreaterThan(before);
+
+    const summary = dataOf(reply) as {
+      sales: { total_paisa: number; orders: number };
+      branch_ids: readonly string[];
+      omissions: readonly unknown[];
+    };
+    // 2 × Rs 1,450 — the figure, because a stub answering `[]` would give a 200 and a zero.
+    expect(summary.sales.total_paisa).toBe(290_000);
+    expect(summary.sales.orders).toBe(1);
+    expect(summary.branch_ids).toEqual([BRANCH]);
+    // The omissions travel over the real wire too, not only in-process (Commandment 2).
+    expect(summary.omissions.length).toBeGreaterThan(0);
   });
 
   /**

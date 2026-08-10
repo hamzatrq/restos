@@ -275,6 +275,40 @@ describe("§A · 12-F10 — the blocks this ledger can answer", () => {
     ]);
   });
 
+  /**
+   * **THE TIE, AND THE FIXTURE THAT DID NOT EXIST.** The ranking above has no two items at the
+   * same revenue, so the tiebreak branch was never executed: the mutant that replaces it with
+   * `return 0` — leaving the order to whatever `Array.prototype.sort` and insertion order agree on
+   * — survived **0 of 204**. That is the round-3 defect exactly (`AGENTS.md`: the mechanism was
+   * built correctly and never aimed at the case that matters), found by mutating rather than by
+   * reading, inside the work that cites the law.
+   *
+   * Two items at identical revenue, delivered in BOTH orders, must rank identically — and by
+   * `item_id`, which is a PAYLOAD field. An envelope-id tiebreak would be min-wall-clock in a
+   * disguise (`26 §8`) and would let delivery order decide which dish an owner is shown first.
+   */
+  it("resolves a REVENUE TIE by item_id, identically under both delivery orders (26 §8)", () => {
+    const tie = (first: string, second: string): SummaryEvent[] => [
+      event("order.created", { order_id: "tie", channel: "counter" }, { at: at(12) }),
+      event(
+        "order.line_added",
+        { order_id: "tie", line_id: "t1", item_id: first, qty: 1, unit_price_paisa: 700_00 },
+        { at: at(12) },
+      ),
+      event(
+        "order.line_added",
+        { order_id: "tie", line_id: "t2", item_id: second, qty: 1, unit_price_paisa: 700_00 },
+        { at: at(12) },
+      ),
+    ];
+    const zebra = fold(tie("item-zebra", "item-apple"));
+    const apple = fold(tie("item-apple", "item-zebra"));
+    expect(zebra.top_items.map((row) => row.item_id)).toEqual(["item-apple", "item-zebra"]);
+    expect(apple.top_items.map((row) => row.item_id)).toEqual(["item-apple", "item-zebra"]);
+    // Both really are tied — otherwise this would be an ordinary ranking test wearing a costume.
+    expect(zebra.top_items[0]?.revenue_paisa).toBe(zebra.top_items[1]?.revenue_paisa);
+  });
+
   it("buckets the hourly curve on each line's own branch stamp (12-F10, 01-F43)", () => {
     const summary = fold(onlyBranch(day(), BRANCH_A));
     expect(summary.hourly).toHaveLength(24);

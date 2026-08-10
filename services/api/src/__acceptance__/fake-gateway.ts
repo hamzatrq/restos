@@ -29,6 +29,22 @@ import {
 export type Recorded = { readonly path: string; readonly body: unknown };
 
 /**
+ * One `kernel.events` row as `12-F10`'s window projects it — **exactly the seven envelope fields
+ * `01-F34` permits a fold to read**. `global_seq`, `lamport_seq`, `device_created_at` and
+ * `server_received_at` are absent here for the same reason they are absent from the real route's
+ * projection: an ordering field that never crosses cannot reach a projected value.
+ */
+export type FakeLedgerRow = {
+  readonly id: string;
+  readonly type: string;
+  readonly branch_id: string;
+  readonly branch_created_at: number;
+  readonly time_basis: string;
+  readonly actor_user_id: string | null;
+  readonly payload: Record<string, unknown>;
+};
+
+/**
  * One `kernel.device_registry` row as this fake holds it (`14-F12`).
  *
  * **The revocation SEMANTICS below are the real gateway's, restated once and no further.** Only the
@@ -62,6 +78,8 @@ export type FakeGateway = {
   refuseWith(path: string, status: number, message: string): void;
   /** `14-F12` — seed a registry row. `revoked_at` seeds an already-revoked device. */
   registerDevice(org_id: string, row: FakeDeviceRow): void;
+  /** `12-F10` — seed the merged org log this fake will window over. */
+  seedLedger(org_id: string, rows: readonly FakeLedgerRow[], latest_arrival_ms?: number): void;
   /** The registry as it stands now, so a test can assert `revoked_at` actually MOVED. */
   devices(org_id: string): readonly FakeDeviceRow[];
   close(): Promise<void>;
@@ -75,6 +93,8 @@ export const startFakeGateway = async (): Promise<FakeGateway> => {
   const received: Recorded[] = [];
   const refusals = new Map<string, { status: number; message: string }>();
   const registry = new Map<string, FakeDeviceRow[]>();
+  const ledgerRows = new Map<string, FakeLedgerRow[]>();
+  const ledgerArrival = new Map<string, number>();
   /**
    * The real gateway stamps `revoked_at` from the DATABASE clock. A monotonic counter here keeps
    * two revocations in one millisecond distinguishable, which `Date.now()` does not — and the
@@ -155,6 +175,35 @@ export const startFakeGateway = async (): Promise<FakeGateway> => {
         send(200, { devices: [...(registry.get(org_id) ?? [])] });
         return;
       }
+      /**
+       * `12-F10`'s window. It applies the SAME two filters the real reader applies — the branch
+       * stamp range and the branch list — because the seam assertion is "did a request carrying
+       * this scope actually leave the process", and a fake that ignored either could not tell a
+       * correctly-scoped request from a wide one.
+       *
+       * The `01-F46` boundary arithmetic is deliberately NOT reproduced here: the caller states
+       * the window in milliseconds, so this fake never has an opinion about what a business day
+       * is. That interpretation lives in `services/api` and is asserted against real Postgres in
+       * `services/sync-gateway/src/__acceptance__/day-ledger-http.test.ts`.
+       */
+      if (req.method === "GET" && url.pathname === "/internal/ledger/window") {
+        const from = Number(url.searchParams.get("from_ms"));
+        const to = Number(url.searchParams.get("to_ms"));
+        const raw = url.searchParams.get("branch_ids");
+        const branches = raw === null ? null : raw.split(",");
+        const inWindow = (ledgerRows.get(org_id) ?? []).filter(
+          (row) =>
+            row.branch_created_at >= from &&
+            row.branch_created_at < to &&
+            (branches === null || branches.includes(row.branch_id)),
+        );
+        send(200, {
+          events: inWindow,
+          truncated: false,
+          latest_arrival_ms: ledgerArrival.get(org_id) ?? null,
+        });
+        return;
+      }
       if (req.method === "POST" && url.pathname === "/internal/devices/revoke") {
         const input = body as { org_id: string; device_id: string };
         const row = (registry.get(input.org_id) ?? []).find(
@@ -206,6 +255,10 @@ export const startFakeGateway = async (): Promise<FakeGateway> => {
     },
     registerDevice: (org_id, row) => {
       registry.set(org_id, [...(registry.get(org_id) ?? []), { ...row }]);
+    },
+    seedLedger: (org_id, rows, latest_arrival_ms) => {
+      ledgerRows.set(org_id, [...rows]);
+      if (latest_arrival_ms !== undefined) ledgerArrival.set(org_id, latest_arrival_ms);
     },
     devices: (org_id) => [...(registry.get(org_id) ?? [])],
     close: () =>
