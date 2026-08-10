@@ -181,24 +181,35 @@ const MAX_FAILED_ATTEMPTS = 5;
 /**
  * The kitchen printer this device believes it has (`03 §7` layer 3).
  *
- * **PINNED, not measured, and env-overridable for the same reason `RESTOS_CLOUD_URL` is:** the
- * printer registry `03-F2` routes through is doc-14 work and admission (`01-F47`) is what will
- * carry the assignment, so there is nowhere else for this to come from yet. Nothing has verified
- * that a TH230 is attached to this device — nothing is attached at all (K-8).
+ * **NOT measured, and env-overridable for the same reason `RESTOS_CLOUD_URL` is:** the printer
+ * registry `03-F2` routes through is doc-14 work and admission (`01-F47`) is what will carry the
+ * assignment, so there is nowhere else for this to come from yet. Nothing is attached at all (K-8).
  *
- * `TH230` rather than `UNKNOWN_PRINTER_CAPABILITY` because the conservative default reports 32
- * Font-A columns, `03-F49` gives `kot` a floor of 42, and every confirm would then take
- * `03-F34`'s refusal path — which is correct behaviour for a 58 mm printer and the wrong SENTENCE
- * for a device that simply has none. It is also the only shipped 80 mm row that claims no feature
- * (`has_native_qr: false`, `cols_font_a: 44`), so the pin under-claims in every direction it can.
+ * **This defaulted to `TH230` until August 2026, and that was a LIVE DEFECT rather than an
+ * awkward label (`DEC-HW-001` (1)).** The old comment argued the conservative record gave "the
+ * wrong SENTENCE for a device that simply has none", and traded a wrong sentence for a wrong
+ * CAPABILITY: `TH230` claims 44 Font-A columns, 576 dots, a cutter and raster, none of it
+ * verified. `render()` lays out against the record it is handed, so attaching the corpus's own
+ * baseline **BC-58U** (`03-F10`, 384 dots) without setting `RESTOS_KOT_PRINTER` produced a
+ * 44-column ticket on 58 mm paper — **measured: 320 dots discarded, a whole word off the edge,
+ * with nothing to tell the cook.** That is the silent degradation `03-F34` bans, aimed at the
+ * named Pakistani installed base, and it shipped behind a green suite because every test injects
+ * its own capability and none exercised this default.
  *
- * The value doubles as `03-F5`'s printer NAME (`printerCapability` keeps the requested id
- * precisely so "the alert can name the printer the operator is actually standing at"), so
- * `RESTOS_KOT_PRINTER="grill printer"` is a legal and useful setting — it names the band and
- * takes the conservative record, which then refuses the KOT under `03-F49` until a real model id
- * is supplied. Both halves are honest; neither invents a capability.
+ * So the default is now `03 §7`'s own: *"defaulting **conservatively to 32** for an unknown
+ * model"*. `printerCapability` returns `UNKNOWN_PRINTER_CAPABILITY` for any unrecognised id while
+ * KEEPING that id, so the record under-claims in every direction (`has_native_qr: false`,
+ * `has_cutter: false`, 32 Font-A columns) and the id is still `03-F5`'s printer NAME. The KOT then
+ * takes `03-F49`'s floor and `03-F34`'s S1 band, which names both column counts — *"refused:
+ * min_columns_not_met — needs 42 columns, this printer has 32"*. **That refusal is the correct
+ * signal for a till with no printer, not a regression**: the alternative is a device that claims
+ * hardware it has never seen and truncates real tickets the moment that hardware appears.
+ *
+ * `RESTOS_KOT_PRINTER="TH230"` restores the old behaviour for anyone who genuinely has one, and
+ * a real 80 mm model id is what makes the KOT printable — which is the assignment doc 14 owes.
  */
-const kotCapability = () => printerCapability(process.env["RESTOS_KOT_PRINTER"] ?? "TH230");
+const kotCapability = () =>
+  printerCapability(process.env["RESTOS_KOT_PRINTER"] ?? "no printer configured");
 
 /**
  * What this terminal is called (`00 §5.7` — the strip names the device beside the operator).
