@@ -902,17 +902,33 @@ const optionsOf = (mod, name) => {
   return body ? typeMembers(body.inner, brace + 1) : null;
 };
 
-/** Every shipping call site of `name`, with the top-level keys of its object argument. */
-const callSites = (name) => {
+/**
+ * Every shipping call site of `name`, with the top-level keys of its object argument.
+ *
+ * `declFile` is the module that DECLARES `name`, and it is a call site like any other when it is
+ * itself a shipping file. That case could not arise while Rule B walked only `packages/` — a
+ * package's declaring file is never in `shippingFiles` — and it is the normal shape one group
+ * over: an app constructs its own subsystems at its boot site, with no import to find.
+ * `services/api/src/server.ts` declares `createApiServer` and calls it 195 lines below in
+ * `start()`. Requiring an import there returned zero sites, and zero sites SKIPS the factory —
+ * so the seam went unexamined and the run stayed clean, which is this rail's own disease.
+ */
+const callSites = (name, declFile) => {
   const sites = [];
   const callRe = new RegExp(`\\b${name}\\s*\\(`, "g");
   for (const file of shippingFiles) {
     const mod = modules.get(file);
     if (!mod) continue;
-    // Only where the symbol is actually imported here — a same-named local is not this factory.
+    // Only where the symbol is actually imported here — a same-named local is not this factory —
+    // or where it is declared, which needs no import to be the real thing.
     const imported = mod.imports.some((imp) => imp.names.includes(name));
-    if (!imported) continue;
+    if (!imported && file !== declFile) continue;
     for (let m = callRe.exec(mod.code); m !== null; m = callRe.exec(mod.code)) {
+      // `export function createFoo(` is the DECLARATION of the factory, not a call of it. Only
+      // reachable now that the declaring file can be its own call site: counting it would read
+      // the parameter list as an argument list and call every member "supplied".
+      if (/(?:function|class)\s+$/.test(mod.code.slice(Math.max(0, m.index - 24), m.index)))
+        continue;
       const openParen = m.index + m[0].length - 1;
       const args = matchBraces(mod.code, openParen, "(", ")");
       if (!args) continue;
@@ -925,58 +941,109 @@ const callSites = (name) => {
   return sites;
 };
 
+/**
+ * The workspace groups whose DECLARED factories Rule B examines: ALL of them.
+ *
+ * This read `["packages"]` until 2026-08-10, and the restriction was never stated or reasoned —
+ * the section header above explains a DIFFERENT narrowing (only factories shipping code already
+ * calls) and says nothing about where the factory is declared. Best reconstruction: Rule B was
+ * built from instances 2 and 5, both `packages/` factories wired by an app, and "declared in a
+ * package" was read off those two examples as if it were part of the defect. It is not. The rail
+ * exists to catch a subsystem with no seam to the PRODUCT, and it was not looking at the product.
+ *
+ * Measured before the change, on `03-F51`'s routing seam: with `routesToPaper` deleted from
+ * `main/index.ts`, and again with it stubbed `() => true`, `pnpm seams:check` was exit 0 and
+ * CLEAN, reporting the same `5 optional seams` both times — the member was never a candidate.
+ */
+const RULE_B_GROUPS = WORKSPACE_GROUPS;
+const ruleBExamines = (mod) => RULE_B_GROUPS.includes(groupOf(mod.file));
+
 const ruleBFindings = [];
 let ruleBCandidates = 0;
+/** Candidates per workspace group, so each half of the scope can be asserted on its own. */
+const ruleBByGroup = new Map();
+
+/**
+ * Rule B's per-export scan: every optional member of `name`'s options bag that no shipping call
+ * site supplies, minus the ones carrying a reasoned marker.
+ */
+const scanSeams = (mod, name, decl) => {
+  if (!decl.valueLike) return;
+  // The SAME two-part reach Rule A uses, and for the same reason. `reachedSymbols` only records
+  // symbols demanded across an import, so a factory an app declares and constructs in one file is
+  // absent from it — `createApiServer` was, and Rule B's old one-part gate dropped it silently.
+  // A silent drop in the safe-looking direction is the defect this rail is named after.
+  const imported = shipping.reachedSymbols.has(key(mod.file, name));
+  const internal = !imported && shipping.reachedFiles.has(mod.file) && usedInOwnModule(mod, name);
+  if (!imported && !internal) return;
+  const members = optionsOf(mod, name);
+  if (!members) return;
+  const optional = members.filter((member) => member.optional);
+  if (optional.length === 0) return;
+  const sites = callSites(name, mod.file);
+  if (sites.length === 0) return;
+  if (sites.some((site) => site.keys.includes("..."))) return; // spread — cannot be read statically
+  const supplied = new Set(sites.flatMap((site) => site.keys));
+  const whole = fileMarker(mod);
+  for (const member of optional) {
+    ruleBCandidates++;
+    const group = groupOf(mod.file);
+    ruleBByGroup.set(group, (ruleBByGroup.get(group) ?? 0) + 1);
+    const label = `${name}({ ${member.name} })`;
+    const line = lineOf(mod.raw, member.offset);
+    const where = `${relative(ROOT, mod.file)}:${line}`;
+    const marker = whole ?? markerAbove(mod.raw, line);
+    if (supplied.has(member.name)) {
+      if (marker && marker.reason.length >= REASON_MIN) {
+        staleMarkers.push({ where, name: label, reason: marker.reason, marker: marker.marker });
+      }
+      continue;
+    }
+    if (marker) {
+      if (marker.reason.length < REASON_MIN) {
+        emptyReasons.push({ where, name: label, marker: marker.marker });
+      } else if (marker.owed) {
+        owed.push({ where, name: label, reason: marker.reason });
+      } else {
+        byDesign.push({ where, name: label, reason: marker.reason });
+      }
+      continue;
+    }
+    ruleBFindings.push({
+      where,
+      factory: name,
+      option: member.name,
+      sites: sites.map((s) => `${relative(ROOT, s.file)}:${s.line}`),
+    });
+  }
+};
 
 for (const mod of modules.values()) {
-  if (groupOf(mod.file) !== "packages") continue;
-  for (const [name, decl] of mod.declared) {
-    if (!decl.valueLike) continue;
-    if (!shipping.reachedSymbols.has(key(mod.file, name))) continue;
-    const members = optionsOf(mod, name);
-    if (!members) continue;
-    const optional = members.filter((member) => member.optional);
-    if (optional.length === 0) continue;
-    const sites = callSites(name);
-    if (sites.length === 0) continue;
-    if (sites.some((site) => site.keys.includes("..."))) continue; // spread — cannot be read statically
-    const supplied = new Set(sites.flatMap((site) => site.keys));
-    const whole = fileMarker(mod);
-    for (const member of optional) {
-      ruleBCandidates++;
-      const label = `${name}({ ${member.name} })`;
-      const line = lineOf(mod.raw, member.offset);
-      const where = `${relative(ROOT, mod.file)}:${line}`;
-      const marker = whole ?? markerAbove(mod.raw, line);
-      if (supplied.has(member.name)) {
-        if (marker && marker.reason.length >= REASON_MIN) {
-          staleMarkers.push({ where, name: label, reason: marker.reason, marker: marker.marker });
-        }
-        continue;
-      }
-      if (marker) {
-        if (marker.reason.length < REASON_MIN) {
-          emptyReasons.push({ where, name: label, marker: marker.marker });
-        } else if (marker.owed) {
-          owed.push({ where, name: label, reason: marker.reason });
-        } else {
-          byDesign.push({ where, name: label, reason: marker.reason });
-        }
-        continue;
-      }
-      ruleBFindings.push({
-        where,
-        factory: name,
-        option: member.name,
-        sites: sites.map((s) => `${relative(ROOT, s.file)}:${s.line}`),
-      });
-    }
-  }
+  if (!ruleBExamines(mod)) continue;
+  for (const [name, decl] of mod.declared) scanSeams(mod, name, decl);
 }
 
-if (ruleBCandidates === 0)
+/**
+ * `24-F14`, ASSERTED PER SCOPE HALF — and the reason is a tripwire this very change broke.
+ *
+ * One global `ruleBCandidates === 0` was sufficient while Rule B walked a single group. Widening
+ * it to three made the global count a place for a dead half to hide: measured 2026-08-10,
+ * renaming `packages/` HARD-FAILED the old rail on exactly this assert and left the widened one
+ * **clean at exit 0**, because the five app/service seams kept the total non-zero. Widening a
+ * rail's scope had silently removed one of its own tripwires, which is this file's named defect
+ * committed by the file itself.
+ *
+ * So each half is asserted separately and neither can go inert behind the other.
+ */
+const ruleBSeen = (groups) => groups.reduce((n, g) => n + (ruleBByGroup.get(g) ?? 0), 0);
+
+if (ruleBSeen(["packages"]) === 0)
   fail(
-    "EMPTY MATCH — Rule B found zero optional seams on any factory that shipping code calls. Either the options-type parser stopped matching or the app stopped constructing subsystems; both make this rail inert (24-F14).",
+    "EMPTY MATCH — Rule B found zero optional seams on any PACKAGE factory that shipping code calls. Either the options-type parser stopped matching or the apps stopped constructing kernel subsystems; both make this rail inert (24-F14).",
+  );
+if (ruleBSeen(SHIPPING_GROUPS) === 0)
+  fail(
+    `EMPTY MATCH — Rule B found zero optional seams on any factory declared under ${SHIPPING_GROUPS.join("/, ")}/. Rule B walked packages/ ONLY until 2026-08-10, and this assert is what stops it regressing to that silently — the failure it would hide is an app-declared subsystem switched off in the product. If every app-declared factory has genuinely made its dependencies required, that is a real and good change: relax this assert deliberately and say so here (24-F14).`,
   );
 
 // ---------------------------------------------------------------------------------------------
