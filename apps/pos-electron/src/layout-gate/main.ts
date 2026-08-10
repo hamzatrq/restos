@@ -254,14 +254,32 @@ const PANELS = [
 ] as const;
 
 /**
- * The number of surfaces one panel contributes: one lock surface, five tabs in two device states,
- * and two escalation steps.
+ * The number of surfaces one panel contributes: **both** of `01-F61`'s lock steps, five tabs in
+ * two device states, and two escalation steps.
+ *
+ * ⚠ *This read `1 + 5 * 2 + 2` until August 2026, and the `1` was the identity grid ALONE.* The
+ * fixture unlocked by calling `window.restos.unlock(...)`, which moves the session without ever
+ * rendering step two — so the PIN pad an operator meets 20–60 times a shift had never been laid
+ * out in Blink at all. See the lock block in `run()` for what that cost.
  *
  * Derived rather than typed so `MIN_SURFACES` below cannot rot when a tab is added — the tab list
  * is read from the DOM precisely so another session's tab is measured without touching this file,
  * and a hand-typed floor would then be the one thing that did need touching.
  */
-const SURFACES_PER_PANEL = 1 + 5 * 2 + 2;
+const SURFACES_PER_PANEL = 2 + 5 * 2 + 2;
+
+/**
+ * How many of those surfaces have **no `<main>`**, and therefore contribute no extent: `01-F61`'s
+ * two lock steps. `02-F18` puts the lock OVER the shell, so neither step has an `AppShell` and
+ * neither can enter the composition or `27-F11c` twin comparisons.
+ *
+ * **Named rather than absorbed into a `-1`, which is what it used to be.** The twin floor below
+ * read `SURFACES_PER_PANEL - 1` and was exactly right *by coincidence* while there was exactly one
+ * extentless surface. Adding the PIN pad made that coincidence a false RED on a correct tree — the
+ * check would have demanded 13 comparable surfaces from a sweep that can only ever offer 12. A
+ * constant that happens to equal the right answer is a constant nobody can maintain.
+ */
+const EXTENTLESS_SURFACES_PER_PANEL = 2;
 
 /**
  * `24-F14` empty-match protection: a gate that measured nothing must FAIL, never pass.
@@ -271,6 +289,17 @@ const SURFACES_PER_PANEL = 1 + 5 * 2 + 2;
  * this guards is no longer "nothing ran" but "one row silently stopped loading".
  */
 const MIN_SURFACES = (PANELS.length - 1) * SURFACES_PER_PANEL;
+
+/**
+ * The same floor for the checks that can only see surfaces with a work area.
+ *
+ * Previously these two guards were floored at `MIN_SURFACES - PANELS.length`, which subtracted
+ * *one* extentless surface per panel by arithmetic rather than by name. With two of them that
+ * expression drifts in the dangerous direction as panels are added — it grows by 13 per panel
+ * while the thing it bounds grows by 12 — so it would eventually red a correct tree, at 15 panels.
+ * Derived from the extent-bearing count instead, it tracks whatever the sweep can actually produce.
+ */
+const MIN_EXTENTS = (PANELS.length - 1) * (SURFACES_PER_PANEL - EXTENTLESS_SURFACES_PER_PANEL);
 
 /**
  * `27-F8`'s keypad target, and what it must MEASURE as on each panel — `27 §1a`'s own published
@@ -927,6 +956,30 @@ const run = async (): Promise<number> => {
     );
 
   /**
+   * **`24-F14` — did `01-F61`'s PIN pad actually render?**
+   *
+   * The tile press below returns whether the *grid* had a tile to press; this asks the separate
+   * question of whether pressing it produced step **two**. They are different failures — a roster
+   * that stopped arriving, versus an `App.tsx` that stopped drawing the pad — and collapsing them
+   * would report the wrong one.
+   *
+   * It asks the DOM rather than the fixture, deliberately, so it also fires if the pad's twelfth
+   * key loses its label or `chosen` stops switching the surface. Without it the whole PIN step
+   * could silently stop being produced and the sweep would report a healthy 143 surfaces: with
+   * step two gone the per-panel count falls to 13 and `MIN_SURFACES` (140) does not notice, which
+   * is `escalationFor: () => null` retiring `ManagerApproval` for weeks, one surface along.
+   *
+   * `=== 'Unlock'` and not `startsWith`: this is the pad's twelfth cell, the confirming act
+   * `27-F4` pins to bottom-right, and a prefix match would also accept a future control merely
+   * beginning with the word.
+   */
+  const unlockPadPresent = (): Promise<boolean> =>
+    window.webContents.executeJavaScript(
+      `[...document.querySelectorAll('button')]
+         .some((e) => (e.getAttribute('aria-label') || '').trim() === 'Unlock')`,
+    );
+
+  /**
    * **`27-F68`, measured in millimetres of glass.** Reads a `keypad`-posture control's rendered
    * height out of Blink and converts through the panel the renderer was told it is on — so this
    * is the operator's actual thumb target, not a number the app agrees with itself about.
@@ -1097,15 +1150,91 @@ const run = async (): Promise<number> => {
 
     const on = (surface: string): string => `${panel.label} ${surface}`;
 
-    // `02-F18` — a locked device shows only the unlock screen.
+    // -------------------------------------------------------------------------------------
+    // `02-F18` / `01-F61` — THE LOCK SURFACE, BOTH OF ITS STEPS, driven through its own controls.
+    //
+    // ⚠ **This block used to be one `judge` of the identity grid followed by
+    // `window.restos.unlock('user-hina', '1234')` — a call that MOVES THE SESSION WITHOUT EVER
+    // RENDERING STEP TWO.** So `01-F61`'s PIN pad had never been laid out in Blink at all, on any
+    // panel, in any mode. It is covered by `unlock-gate.dom.test.tsx` under happy-dom, which
+    // performs no layout — every `getBoundingClientRect` there is zeroes — so the coverage was
+    // *presence*, never *geometry*.
+    //
+    // **The measured cost, and it is this rail's own blind spot biting a third time:** a mutant
+    // shrinking a keypad target to 13.88 mm, under `27-F8`'s 20 mm ergonomic floor, was caught on
+    // `escalation:pin` and NOWHERE ELSE. The alarm-band defects were invisible until the fixture
+    // raised a band; `ManagerApproval`'s dead controls until `escalationFor` returned an offer;
+    // this is the same sentence with a different surface in it. *"It only sees the states its
+    // fixture produces"* is not a caveat, it is the coverage boundary.
+    //
+    // **Why this surface earns it ahead of the others still unscripted:** an operator meets it
+    // 20–60 times a shift, it is `01-F61`'s credential entry, and `02-F18`'s idle lock returns
+    // her to it. A shrunken or clipped target here is a cashier who cannot sign in — and unlike
+    // every tab below it, there is no other route to the till.
+    //
+    // **Driven through the real controls, never assembled here.** The grid becomes the pad
+    // because `App.tsx`'s own `chosen` state says so; a fixture that mounted its own copy of that
+    // arrangement would be asserting against a hand-copy, which is `K-3`'s dead-oracle defect and
+    // has recurred three times in this repo this week — once inside the fix for it.
+    // -------------------------------------------------------------------------------------
+
+    // Step one: `01-F61`'s identity grid. `02-F18` — a locked device shows only the unlock screen.
     judge(on("unlock"), "alarm", await measure());
     await shoot(window, `${panel.label}--unlock`);
 
-    await window.webContents.executeJavaScript(
-      "window.restos.unlock('user-hina', '1234')",
-      // `01-F26`'s session, taken the way the operator takes it. Hina is the branch manager in
-      // the dev roster, so role-gated surfaces render rather than refusing.
-    );
+    /**
+     * Step two, reached by the operator's own first tap. Hina is the branch manager in the dev
+     * roster, so the role-gated surfaces below render rather than refusing — the same choice the
+     * programmatic call made, now made by pressing her card. `PersonTile` puts the name in its
+     * `aria-label`, which is what `press` reads.
+     */
+    const identified = await press("Hina Raza");
+    await new Promise((r) => setTimeout(r, 400));
+    if (!identified) {
+      failures.push({
+        surface: on("unlock:pin"),
+        state: "alarm",
+        detail:
+          "EMPTY MATCH — no roster tile to identify with, so 01-F61's PIN step never rendered and " +
+          "the highest-frequency entry surface in the product went unmeasured on this panel. " +
+          "Either the fixture stopped serving `staff()` or the grid stopped drawing it (24-F14).",
+      });
+    } else if (!(await unlockPadPresent())) {
+      failures.push({
+        surface: on("unlock:pin"),
+        state: "alarm",
+        detail:
+          "EMPTY MATCH — a roster tile was pressed and no PIN pad came up. 01-F61 makes " +
+          "identify-then-PIN two steps, and the second one is not on the screen: either " +
+          "App.tsx stopped switching on `chosen`, or the pad's twelfth key stopped carrying the " +
+          "`Unlock` label this check and 27-F4 both rest on (24-F14).",
+      });
+    } else {
+      judge(on("unlock:pin"), "alarm", await measure());
+      await shoot(window, `${panel.label}--unlock-pin`);
+    }
+
+    /**
+     * **And the unlock itself is now the pad's own twelfth key**, not a bridge call.
+     *
+     * The digits go in first because that is what an operator does and because `press` drives
+     * `App.tsx`'s real `setPin` — the fixture ignores the value (`preload.ts`'s `unlock` resolves
+     * a user, main is what checks a PIN), so the keying buys fidelity rather than an assertion.
+     * The pad is measured ABOVE this, in its arrival state with nothing keyed, because that is
+     * the state the surface is in every time it appears.
+     */
+    for (const digit of ["1", "2", "3", "4"]) await press(digit);
+    const unlocked = await press("Unlock");
+    if (!unlocked) {
+      failures.push({
+        surface: on("unlock:pin"),
+        state: "alarm",
+        detail:
+          "EMPTY MATCH — the pad has no `Unlock` key, so the sweep could not leave the lock " +
+          "surface the way an operator does. Every tab surface below this line is measured on a " +
+          "till that never signed in (24-F14).",
+      });
+    }
     await new Promise((r) => setTimeout(r, 600));
 
     const shell = await measure();
@@ -1322,13 +1451,15 @@ const run = async (): Promise<number> => {
         });
       }
     }
-    if (twinsCompared < SURFACES_PER_PANEL - 1) {
+    const twinsExpected = SURFACES_PER_PANEL - EXTENTLESS_SURFACES_PER_PANEL;
+    if (twinsCompared < twinsExpected) {
       failures.push({
         surface: "gate",
         state: "quiet",
         detail:
           `EMPTY MATCH — only ${twinsCompared} surface(s) were comparable across ${a} and ${b}, ` +
-          `expected about ${SURFACES_PER_PANEL - 1}. 27-F11c's twin check is inert (24-F14).`,
+          `expected ${twinsExpected} (every surface but 01-F61's two lock steps, which have no ` +
+          "<main> to take a ratio of). 27-F11c's twin check is inert (24-F14).",
       });
     }
   }
@@ -1373,7 +1504,7 @@ const run = async (): Promise<number> => {
       });
     }
   }
-  if (compositionAxesJudged < MIN_SURFACES - PANELS.length) {
+  if (compositionAxesJudged < MIN_EXTENTS) {
     failures.push({
       surface: "gate",
       state: "quiet",
@@ -1388,7 +1519,7 @@ const run = async (): Promise<number> => {
   // `24-F14` — the composition check must have looked at something too. Without this a change
   // that stopped `<main>` being found would silently retire the whole check while every other
   // number in the summary stayed healthy, which is precisely how row M8's fixture defect worked.
-  if (extentsMeasured < MIN_SURFACES - PANELS.length) {
+  if (extentsMeasured < MIN_EXTENTS) {
     failures.push({
       surface: "gate",
       state: "quiet",
