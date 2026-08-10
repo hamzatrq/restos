@@ -134,6 +134,11 @@ export const PERMISSION_ACTIONS = [
   // request at all — and `14-F13` puts an immediate, irreversible kill switch on an
   // authenticated back-office screen. Commandment 8 has to have something to refuse against.
   "device.manage",
+  // ── The counter's 86 (`02-F46`, which decides it alone). ───────────────────────────────
+  // Appendix A has no availability row either, so before `02-F46` the matrix could not answer
+  // a toggle request and `authorize.ts`'s fail-closed default denied every one of them —
+  // `02-F7`'s control could not be built. Same shape as `device.manage` directly above.
+  "availability.toggle",
   "history.edit_delete",
   "approval.grant",
   "report.sales_view",
@@ -160,6 +165,29 @@ type VerdictAction = Exclude<PermissionAction, ScopedAction>;
 const VERDICTS: Readonly<Record<VerdictAction, Readonly<Record<Role, AuthOutcome>>>> = {
   // `Create order / print KOT` — ✔ · ✔ · — · ✔
   "order.create": {
+    cashier: "allow",
+    branch_manager: "allow",
+    storekeeper: "deny",
+    owner: "allow",
+  },
+  /**
+   * `02-F46` — the 86 toggle. **No Appendix A row**; this cell is the FR's, and it copies
+   * `order.create`'s row directly above rather than inventing a shape.
+   *
+   * **The `cashier: "allow"` cell is the one that matters and it is not a convenience.**
+   * `02-F40` rules that in a printer-only kitchen 86-ing is a COUNTER action performed on the
+   * chef's word, and `27-F11e` makes that most deployments — so `escalate` or `deny` here means
+   * a T1 branch whose manager has gone home cannot stop the platform selling a dish the kitchen
+   * ran out of, for the rest of the shift. `01-F61` refuses a lockout with no automatic end on
+   * exactly this reasoning: a control whose only holder may not be in the building is a control
+   * that does not exist.
+   *
+   * `storekeeper: "deny"` follows `order.create`: Appendix A's storekeeper column is stock-only
+   * and `02-F40` calls this a counter act, not a stock one. Note it is NOT `stock.*` — auto-86
+   * from stock levels is `restaurant-os.md`'s autonomy ladder and does not exist yet; this is a
+   * human at a till saying the karahi is finished.
+   */
+  "availability.toggle": {
     cashier: "allow",
     branch_manager: "allow",
     storekeeper: "deny",
