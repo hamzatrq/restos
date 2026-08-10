@@ -250,10 +250,22 @@ describe("27-F2 / 27 §1a — capacity is an AREA question, so HEIGHT participat
    * own hardware spans, holding width fixed and changing height must change the answer. Where
    * that happens is the implementer's call and this oracle deliberately does not own it.
    */
-  it("is NOT a function of width alone — some height changes the mode at a fixed width", () => {
-    // Three widths, each drawn from a real surface in the corpus (`27 §1a`'s tablet and counter,
-    // `27-F11f`'s pass panel), swept over a height range the corpus's own hardware spans: the
-    // 10.1″ tablet is 126 mm tall and the 24″ desktop is 299 mm.
+  it("is NOT a function of width alone — height changes the mode at MORE THAN ONE width", () => {
+    /**
+     * Four widths, each drawn from a real surface (`27 §1a`'s tablet and counter, `27-F11f`'s 22″
+     * pass panel, and the 24″ desktop this product's own gate sweeps), over a height range the
+     * corpus's own hardware spans: its 10.1″ tablet is 126 mm tall and a 24″ panel is 299 mm.
+     *
+     * **`>= 2` rather than `>= 1`, and the difference is the point.** One is satisfiable by a
+     * selector that reads height in a single arm — a `wide` tier that also wants a tall panel,
+     * with everything below it decided on width alone. That is *nearly* the defect: on the
+     * corpus's own hardware the two surfaces that collapse together are `27 §1a`'s 69 × 150 mm
+     * phone and a 13.3″ 286 × 179 mm laptop, and both sit below any plausible `wide` boundary.
+     * Requiring height to bite at two independent widths refuses the one-arm reading without
+     * pinning where either boundary is.
+     *
+     * A width-only selector scores **0** here.
+     */
     const widths = [
       HARDWARE.tablet.widthMm,
       HARDWARE.counter1366.widthMm,
@@ -269,37 +281,30 @@ describe("27-F2 / 27 §1a — capacity is an AREA question, so HEIGHT participat
 
     expect(
       varying.length,
-      "HEIGHT IS NOT PARTICIPATING. At every width tried — 27 §1a's tablet, its counter, " +
-        '27-F11f\'s 22" pass panel and a 24" desktop — the mode was the same for a 60 mm-tall ' +
-        "surface and a 320 mm-tall one. 27-F2 derives page capacity from the surface's usable " +
-        "AREA and 27 §1a's own capacity column is rows x columns (11x8, 7x5, 2x6), so a selector " +
-        "that reads one axis is answering a different question from the one the corpus asks. " +
-        "Measured consequence, from this repo's own layout gate: every below-floor failure " +
-        "except the phone's is a HEIGHT failure, and PANEL_FLOOR_MM is two numbers for that " +
-        "reason.",
-    ).toBeGreaterThan(0);
+      `HEIGHT IS BARELY PARTICIPATING — it changed the mode at ${varying.length} of ` +
+        `${widths.length} widths tried (27 §1a's tablet, its counter, 27-F11f's 22" pass panel, ` +
+        'a 24" desktop), each swept from 60 mm to 320 mm tall. 27-F2 derives page capacity from ' +
+        "the surface's usable AREA and 27 §1a's own capacity column is rows x columns (11x8, " +
+        "7x5, 2x6), so a selector that reads one axis — or reads the second one in a single " +
+        "top-end arm — is answering a different question from the one the corpus asks. Measured " +
+        "consequence, from this repo's own layout gate: every below-floor failure except the " +
+        "phone's is a HEIGHT failure, and PANEL_FLOOR_MM is two numbers for that reason.",
+    ).toBeGreaterThanOrEqual(2);
   });
 
-  it("separates 27 §1a's PHONE from a landscape surface of the same width", () => {
-    /**
-     * `27-F11b` is explicit that the phone is the one surface where "~6 per page" applies, and
-     * `27 §1a` gives it **2×6** — two columns, six rows. Its glass is 69 × 150 mm: NARROW and
-     * TALL. A 69 × 40 mm strip has the same width and a sixth of the area, and `27-F2` sizes a
-     * page from area — so a selector that cannot tell them apart is sizing the phone's page from
-     * a number that says nothing about how many rows fit.
-     *
-     * Stated as "must differ" rather than "must be mode X", because the corpus names no mode for
-     * either surface and `SurfaceMode`'s members are the implementation's vocabulary.
-     */
-    const strip: PhysicalSize = { widthMm: HARDWARE.phone.widthMm, heightMm: 40 };
-    expect(
-      mode(strip),
-      `27 §1a's phone (${HARDWARE.phone.widthMm.toFixed(0)} x ` +
-        `${HARDWARE.phone.heightMm.toFixed(0)} mm, 2 columns x SIX rows) and a ` +
-        `${strip.widthMm.toFixed(0)} x 40 mm strip resolved to the same mode. They have the same ` +
-        "width and the strip holds no rows at all; 27-F2 derives capacity from area.",
-    ).not.toBe(mode(HARDWARE.phone));
-  });
+  /**
+   * **NOT ASSERTED, and named rather than left looking like an oversight.**
+   *
+   * A first draft of this file demanded that `27 §1a`'s 69 × 150 mm PHONE and a 69 × 40 mm strip
+   * of the same width resolve to different modes. It was over-reach and it would have blocked a
+   * correct implementation: below any plausible width boundary a threshold selector has nothing
+   * left to say, and the corpus gives the phone no mode of its own — `27-F11b` gives it a page
+   * SIZE, and both this product's window floor and its layout gate treat a portrait layout as
+   * separate work that does not exist yet (`phone-6.5` is deliberately absent from the sweep).
+   * "Capacity considers height" is `27-F2`, and `ItemGrid` already discharges it by taking
+   * `heightMm` directly; "the MODE ENUM distinguishes those two surfaces" is a further claim no
+   * FR makes. The assertion above is the part the corpus actually supports.
+   */
 
   it("does not let a WIDE-AND-SHORT panel inherit a tall panel's mode (27-F2)", () => {
     /**
