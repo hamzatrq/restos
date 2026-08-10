@@ -27,12 +27,19 @@
 //           for measurement-first-with-config-as-correction.
 //
 // ⚠ WHAT THIS SUITE DOES NOT CLAIM.
-//  1. **`02-F31`'s settlement → `served` half is not built**, because `in_prep → served` is
-//     illegal under `01 §4` while `02-F31` forbids fabricating `ready`. §D pins the refusal and
-//     `line-advance-seam.test.ts` §D is the anti-scope guard on the trigger. Nothing here says
-//     the FR is satisfied.
-//  2. **The delivery exclusion is untested because it is unreachable** — it belongs to the
-//     settlement half. There is no code anywhere in this product that expresses it yet.
+//  1. ~~**`02-F31`'s settlement → `served` half is not built**~~ — **BUILT (August 2026).**
+//     `DEC-HW-002` ruled `LEGAL_NEXT.in_prep` gains `served`, and §E–§H cover the half that used
+//     to be refused. The three assertions that pinned the refusal were INVERTED rather than
+//     deleted; §E's header says exactly what each one said before.
+//  2. ~~**The delivery exclusion is untested because it is unreachable**~~ — **§F, and it is the
+//     section to read first.** It is a producer-side ALLOWLIST and not a legality rule: `01 §4`
+//     sends delivery down `picked_up → delivered`, and a delivery line at `ready` could reach
+//     `served` perfectly legally, so `LEGAL_NEXT` cannot express it. §F's fixtures are identical
+//     on every other axis so a refusal can only be about `order_type`.
+//  2b. **What is still NOT claimed here: `preds`.** The settlement edge ships `preds: []` and the
+//     fold therefore flags the two edges it supersedes `terminal_regression`. §H pins that as a
+//     MEASURED fact rather than hiding it — the state is right, the flag is derived, and closing
+//     it needs head ids on a `sync-client` cell shape. Owed, not done.
 //  3. **The tier is `assumed`, never `derived`, on any real device today.** `tierFromRoster` is
 //     tested against rosters no host can currently produce; that is the point of testing it.
 
@@ -254,7 +261,15 @@ const IDENTITY = {
 type Appended = { type: string; payload: LineStateChangedPayload };
 
 /** A store seeded with one two-line order, plus the emitter wired to append into it for real. */
-const rig = (opts: { tier?: "T1" | "T2" | "T3"; idPrefix?: string; clock?: number } = {}) => {
+const rig = (
+  opts: {
+    tier?: "T1" | "T2" | "T3";
+    idPrefix?: string;
+    clock?: number;
+    /** `01 §4`'s service-mode axis — the one input the delivery exclusion reads. */
+    orderType?: string;
+  } = {},
+) => {
   const dir = mkdtempSync(join(tmpdir(), "restos-line-advance-"));
   const store = openStore({ path: join(dir, "device.db"), identity: IDENTITY });
   const prefix = opts.idPrefix ?? "0199bbbb";
@@ -275,7 +290,11 @@ const rig = (opts: { tier?: "T1" | "T2" | "T3"; idPrefix?: string; clock?: numbe
     });
     return id;
   };
-  put("order.created", { order_id: ORDER_ID, channel: "counter", order_type: "dine_in" });
+  put("order.created", {
+    order_id: ORDER_ID,
+    channel: "counter",
+    order_type: opts.orderType ?? "dine_in",
+  });
   for (const line_id of [LINE_A, LINE_B]) {
     put("order.line_added", {
       order_id: ORDER_ID,
@@ -298,7 +317,22 @@ const rig = (opts: { tier?: "T1" | "T2" | "T3"; idPrefix?: string; clock?: numbe
     const row = store.openOrders().find((r) => r.order_id === ORDER_ID);
     return JSON.parse((row as { json_lines: string }).json_lines);
   };
-  return { store, dir, lines, appended, cells };
+  /**
+   * Tender the whole bill through a REAL `payment.recorded`, so `pay_total` is the fold's own
+   * `01-F31` keyed sum rather than a number this test typed onto a stub row. Two lines at
+   * Rs 450 = 90_000 paisa; `02-F37`'s null shift is the honest value here (no shift is open).
+   */
+  const payFull = (): void => {
+    put("payment.recorded", {
+      order_id: ORDER_ID,
+      amount_paisa: 90_000,
+      method: "cash",
+      settlement_attempt_id: `${prefix}-attempt-1`,
+      shift_id: null,
+      purpose: "settles_order",
+    });
+  };
+  return { store, dir, lines, appended, cells, payFull };
 };
 
 describe("§C 01 §4 — the kernel accepts these edges and the projection MOVES", () => {
@@ -427,44 +461,300 @@ describe("§D 01-F34 — the emitted edge reads no ordering metadata", () => {
   });
 });
 
-describe("§D 02-F31/01 §4 — the settlement half is REFUSED, not silently skipped", () => {
-  it("01 §4 forbids in_prep → served, and this is the line that makes it a fact", () => {
-    // The conflict, pinned as an executable statement rather than as prose: `02-F31` requires
-    // settlement → `served` AND forbids fabricating `ready`, while `LEGAL_NEXT` reaches `served`
-    // only from `ready`. If this expectation ever fails, the kernel has been amended and
-    // `02-F31`'s settlement half is newly buildable — go and build it.
-    expect(LEGAL_NEXT.in_prep).not.toContain("served");
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// §E — `02-F31`'s SETTLEMENT HALF, unblocked by `DEC-HW-002`.
+//
+// This section REPLACED an anti-scope block titled *"the settlement half is REFUSED, not silently
+// skipped"*, whose three tests asserted (1) `LEGAL_NEXT.in_prep` does NOT contain `served`,
+// (2) `advanceEdgesFor(…, "served")` returns null from `in_prep`, and (3) `LineAdvance` has exactly
+// two methods. All three were correct while the conflict stood and all three are false now; the
+// first even said so in its own comment — *"if this expectation ever fails, the kernel has been
+// amended and `02-F31`'s settlement half is newly buildable — go and build it."* Each has been
+// INVERTED rather than deleted, so the same facts are still pinned, from the other side.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+describe("§E DEC-HW-002/01 §4 — `served` has a legal predecessor at T1, and only the ruled one", () => {
+  it("LEGAL_NEXT.in_prep gains `served` — the amendment, as an executable statement", () => {
+    // The inverse of the old anti-scope assertion. `DEC-HW-002`: a line in a restaurant with no
+    // pass goes from being cooked to being handed over with no observed moment of readiness.
+    expect(LEGAL_NEXT.in_prep).toContain("served");
+    // The pass-owning route is UNCHANGED — the ruling added an edge, it did not replace one.
     expect(LEGAL_NEXT.ready).toContain("served");
+    // And the ruling stopped where it stopped. A line still at `confirmed` (a till whose KOT never
+    // printed) is NOT reachable to `served`: that would be inventing past `DEC-HW-002`, and
+    // `DEC-HW-001`'s second open sub-question — is there a tier below T1? — is the founder's.
+    expect(LEGAL_NEXT.confirmed).not.toContain("served");
+    // `03-F26` / `02-F31`: no `ready` is fabricated, so nothing may make `in_prep → ready`
+    // automatic. The edge still exists for the T2/T3 device that OBSERVES readiness.
+    expect(LEGAL_NEXT.in_prep).toContain("ready");
   });
 
-  it("advanceEdgesFor refuses a `served` edge from in_prep rather than lying about from_states", () => {
-    // The dangerous implementation is not the one that emits an illegal edge — it is the one that
-    // writes `from_states: ["ready"]` on a line that never reached `ready`, because that edge is
-    // LEGAL on its face and would work. This asserts the refusal, and `line-advance-seam.test.ts`
-    // §D asserts that no trigger calls it at all.
-    expect(advanceEdgesFor(orderWith({ [LINE_A]: { states: ["in_prep"] } }), "served")).toBeNull();
+  it("02-F31 — the edge declares the state the line is REALLY in, never a lie about `ready`", () => {
+    // The dangerous implementation was never the one that emits an illegal edge — it is the one
+    // that writes `from_states: ["ready"]` on a line that never reached `ready`, because that edge
+    // is legal on its face and would work. `DEC-HW-002` removed the temptation by making the TRUE
+    // statement legal; this asserts the true statement is what gets written.
+    const built = advanceEdgesFor(orderWith({ [LINE_A]: { states: ["in_prep"] } }), "served");
+    expect(built?.line_context[LINE_A]?.to).toBe("served");
+    expect(built?.line_context[LINE_A]?.from_states).toEqual(["in_prep"]);
+    // From `confirmed` it is still refused — not vacuously, since the line above proves the same
+    // call builds an edge one state along.
     expect(
       advanceEdgesFor(orderWith({ [LINE_A]: { states: ["confirmed"] } }), "served"),
     ).toBeNull();
-    // Not vacuous: from `ready` it WOULD build one, so the two lines above are refusals about
-    // `01 §4`'s table and not about the function being inert.
-    const ok = advanceEdgesFor(orderWith({ [LINE_A]: { states: ["ready"] } }), "served");
-    expect(ok?.line_context[LINE_A]?.to).toBe("served");
   });
 
-  it("03-F26 — nothing anywhere in this module fabricates `ready`", () => {
-    // `02-F31`'s explicit prohibition, and the easiest thing here to get wrong by being helpful:
-    // a T1 branch honestly produces no ready-marks, so it honestly produces no prep-time samples.
+  it("03-F26 — no code path here ever emits `ready`", () => {
+    // `02-F31`'s explicit prohibition and the easiest thing to get wrong by being helpful. The
+    // surface is now THREE methods; the old assertion pinned two as an anti-scope guard, and this
+    // pins the same property the right way round — the settlement method exists, and none of the
+    // three can be talked into a ready-mark.
     const appended: Appended[] = [];
     const lines = createLineAdvance({
-      store: { openOrders: () => [orderWith({ [LINE_A]: { states: ["in_prep"] } })] } as never,
+      store: {
+        openOrders: () => [
+          {
+            ...orderWith({ [LINE_A]: { states: ["in_prep"] } }),
+            order_type: "dine_in",
+            pay_total: 45_000,
+          },
+        ],
+      } as never,
       tier: () => "T1",
       append: (type, payload) => appended.push({ type, payload }),
     });
+    expect(Object.keys(lines).sort()).toEqual(["confirmed", "printEvent", "settled"]);
     lines.confirmed(ORDER_ID);
     lines.printEvent("kot.printed", { order_id: ORDER_ID });
-    expect(appended).toHaveLength(0);
-    // And the surface itself offers no way to ask for one: `LineAdvance` has exactly two methods.
-    expect(Object.keys(lines).sort()).toEqual(["confirmed", "printEvent"]);
+    lines.settled(ORDER_ID);
+    // Exactly one event — the settlement edge. `confirmed` and `in_prep` are both already past.
+    expect(appended).toHaveLength(1);
+    expect(appended[0]?.payload.state).toBe("served");
+    // The whole emitted corpus, checked for the forbidden word rather than only its `state` field:
+    // a `ready` smuggled into `from_states` or into a second line's context would show here.
+    expect(JSON.stringify(appended)).not.toContain("ready");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// §F — THE DELIVERY EXCLUSION. `01 §4` is canonical and `02-F31` points at it:
+//
+//   "terminal service state — `served` (dine-in/takeaway/pickup) OR `picked_up → delivered`
+//    (delivery, rider-driven only — never advanced by payment/settlement, 09)"
+//
+// ⚠ EVERY FIXTURE HERE IS PAID IN FULL, AT T1, AND ELIGIBLE ON EVERY OTHER AXIS, so a refusal can
+// only be about `order_type`. That is deliberate: `K-4`'s defect was a suite that varied everything
+// except the one field it existed to test.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+describe("§F 02-F31/01 §4 — delivery lines are NEVER advanced by settlement", () => {
+  /** One order, fully tendered, at a state from which `served` is legal. Only the type varies. */
+  const settle = (order_type: string | null, states: string[] = ["in_prep"]) => {
+    const appended: Appended[] = [];
+    const lines = createLineAdvance({
+      store: {
+        openOrders: () => [
+          { ...orderWith({ [LINE_A]: { states } }), order_type, pay_total: 45_000 },
+        ],
+      } as never,
+      tier: () => "T1",
+      append: (type: string, payload: LineStateChangedPayload) => appended.push({ type, payload }),
+    });
+    lines.settled(ORDER_ID);
+    return appended;
+  };
+
+  it("a DELIVERY order is refused — the food is still in the building", () => {
+    // `served` is TERMINAL (`01-F35`), so this is not a delayed advance a later edge fixes: it is a
+    // permanent record of a handover that did not happen. COD settles at the door or on rider
+    // return, and doc 09's `rider.picked_up`/`rider.delivered` own the real transition.
+    expect(settle("delivery")).toHaveLength(0);
+  });
+
+  it("a delivery line at `ready` is refused too — the exclusion is not the legality change", () => {
+    // THE ROW THAT SEPARATES THE TWO MECHANISMS. `ready → served` was legal long before
+    // `DEC-HW-002`, so if the exclusion were quietly resting on `LEGAL_NEXT` this would advance.
+    // A T2 branch whose pass screen marked a delivery line ready, settled at the counter, is the
+    // real configuration this protects.
+    expect(settle("delivery", ["ready"])).toHaveLength(0);
+  });
+
+  it.each(["dine_in", "takeaway", "pickup"])(
+    "%s IS advanced — the CONTROL, without which the refusals above prove nothing",
+    (order_type) => {
+      const appended = settle(order_type);
+      expect(appended).toHaveLength(1);
+      expect(appended[0]?.payload.state).toBe("served");
+    },
+  );
+
+  it("01 §4 is read as an ALLOWLIST — an unknown or absent type does NOT advance", () => {
+    // `order_type` is an OPEN string in `registry.ts` (`02-F42` closed `channel` and left this axis
+    // open), so every value below is constructible and a `!== "delivery"` denylist would advance
+    // all of them. The harm is asymmetric and recoverable in only one direction: refusing costs a
+    // queue row that lingers; advancing wrongly writes a terminal falsehood `01-F1` will not let
+    // anyone remove. `"Delivery"` is in the list precisely because it is the one a denylist misses
+    // while looking correct.
+    for (const order_type of [null, "", "Delivery", "delivery_cod", "dine-in", "DINE_IN"]) {
+      expect(settle(order_type)).toHaveLength(0);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// §G — THE OTHER TWO GATES.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+describe("§G 02-F31 — the tier gate, and what counts as settlement completing", () => {
+  /** Two lines at Rs 450 = 90_000 paisa billed. Only tier and tender vary. */
+  const drive = (opts: { tier?: "T1" | "T2" | "T3"; pay_total: number }) => {
+    const appended: Appended[] = [];
+    const lines = createLineAdvance({
+      store: {
+        openOrders: () => [
+          {
+            ...orderWith({ [LINE_A]: { states: ["in_prep"] }, [LINE_B]: { states: ["in_prep"] } }),
+            order_type: "dine_in",
+            pay_total: opts.pay_total,
+          },
+        ],
+      } as never,
+      tier: () => opts.tier ?? "T1",
+      append: (type: string, payload: LineStateChangedPayload) => appended.push({ type, payload }),
+    });
+    lines.settled(ORDER_ID);
+    return appended;
+  };
+
+  it("02-F31 — a T2 or T3 device does NOT auto-advance on settlement", () => {
+    // `03-F24` gives the ready signal to a pass screen on T2/T3, and the line's service state with
+    // it. The CONTROL is the full-tender T1 row below: exactly one input differs.
+    expect(drive({ tier: "T2", pay_total: 90_000 })).toHaveLength(0);
+    expect(drive({ tier: "T3", pay_total: 90_000 })).toHaveLength(0);
+  });
+
+  it("02-F13 — a PARTIAL tender advances nothing; the full one advances both lines", () => {
+    // `served` is terminal, so marking lines handed-over at the first half of a split settlement is
+    // not a timing quibble — it is unrecoverable. This is also what keeps the open
+    // `TAKE CASH`-on-an-empty-entry defect out of line state: a Rs 0 tender leaves
+    // `pay_total < billed_effective`.
+    expect(drive({ pay_total: 0 })).toHaveLength(0);
+    expect(drive({ pay_total: 89_999 })).toHaveLength(0);
+    const full = drive({ pay_total: 90_000 });
+    expect(full).toHaveLength(1);
+    expect([...(full[0]?.payload.line_ids ?? [])].sort()).toEqual([LINE_A, LINE_B].sort());
+    // Overpayment (change due) settles too — `>=`, never `===`.
+    expect(drive({ pay_total: 100_000 })).toHaveLength(1);
+  });
+
+  it("01-F17 — settling an order this device cannot read is a no-op, never a throw", () => {
+    const lines = createLineAdvance({
+      store: { openOrders: () => [] } as never,
+      tier: () => "T1",
+      append: () => {},
+    });
+    expect(() => lines.settled("0199ffff-0000-7000-8000-00000000dead")).not.toThrow();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// §H — THE REAL FOLD AGAIN, for the settlement half. Nothing here can pass vacuously.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+describe("§H 01 §4 — the kernel accepts the settlement edge and the line reaches `served`", () => {
+  const rigs: { store: DeviceStore; dir: string }[] = [];
+  afterEach(() => {
+    for (const r of rigs.splice(0)) {
+      r.store.close();
+      rmSync(r.dir, { recursive: true, force: true });
+    }
+  });
+  const open = (opts?: Parameters<typeof rig>[0]) => {
+    const r = rig(opts);
+    rigs.push(r);
+    return r;
+  };
+
+  it("02-F31 — confirm, print, settle: the line ends at `served` through the REAL fold", () => {
+    // Every payload goes through a real `sync-client` store and the projection is read back, so an
+    // edge this module thinks is well-formed and the kernel does not fails HERE rather than in a
+    // unit assertion about our own object.
+    const r = open();
+    r.lines.confirmed(ORDER_ID);
+    r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
+    expect(r.cells()[LINE_A]?.states).toEqual(["in_prep"]);
+    r.payFull();
+    r.lines.settled(ORDER_ID);
+    expect(r.cells()[LINE_A]?.states).toEqual(["served"]);
+    expect(r.cells()[LINE_B]?.states).toEqual(["served"]);
+  });
+
+  it("⚠ MEASURED — the terminal edge carries `preds: []`, and the fold flags the two it supersedes", () => {
+    // NOT an aspiration and NOT a bug being hidden. `line-advance.ts` PREDICTED this before the
+    // half was buildable; the prediction is now pinned as a fact so it cannot change silently.
+    //
+    // `projectLine` retires heads ONLY through `preds`. This emitter cannot build them — the
+    // `json_lines` cell carries `states` and no head edge ids — so the `confirmed` and `in_prep`
+    // edges remain live heads beside a terminal one and `01-F35`'s absorption rule flags both.
+    //
+    // Why it ships anyway, with each clause asserted rather than merely claimed:
+    //  - the projected STATE is correct regardless (the test above);
+    //  - the flag is DERIVED — every edge here is legal, so nothing wrong enters the append-only
+    //    ledger, and a refold clears it the day `preds` can be built;
+    //  - the cloud Auditor filters to `illegal_transition` by name, so this raises no finding.
+    const r = open();
+    r.lines.confirmed(ORDER_ID);
+    r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
+    r.payFull();
+    r.lines.settled(ORDER_ID);
+    const flags = Object.values(r.cells()[LINE_A]?.anomalies ?? {});
+    expect(flags).toEqual(["terminal_regression", "terminal_regression"]);
+    // The point of the row: NOT `illegal_transition`. If that ever appears the EDGE is wrong and
+    // the ledger carries it for ever (`01-F1`) — a different and far worse fact.
+    expect(flags).not.toContain("illegal_transition");
+    expect(flags).not.toContain("inconsistent_predecessor");
+  });
+
+  it("02-F31 — a DELIVERY order rings up and settles, and its lines stay at `in_prep`", () => {
+    // The exclusion driven end to end through the real store rather than against a stub row,
+    // because the fixture is the coverage boundary: `01 §4` sends these lines down
+    // `picked_up → delivered` on a rider event this device does not emit.
+    const r = open({ orderType: "delivery" });
+    r.lines.confirmed(ORDER_ID);
+    r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
+    r.payFull();
+    r.lines.settled(ORDER_ID);
+    expect(r.cells()[LINE_A]?.states).toEqual(["in_prep"]);
+    // And no anomaly either — refusing to emit is silent, not a rejected edge in the ledger.
+    expect(r.cells()[LINE_A]?.anomalies ?? {}).toEqual({});
+  });
+
+  it("01 §4 — a line still at `confirmed` is not advanced by settlement", () => {
+    // The till whose KOT never printed. `LEGAL_NEXT.confirmed` excludes `served`, so
+    // `advanceEdgesFor` finds no eligible line and appends NOTHING — no illegal edge is written.
+    // `restaurant-os.md:47` defines T1 as "terminal + printers", so this is outside the corpus
+    // rather than a gap in it (`DEC-HW-001` sub-question 2).
+    const r = open();
+    r.lines.confirmed(ORDER_ID);
+    r.payFull();
+    r.lines.settled(ORDER_ID);
+    expect(r.cells()[LINE_A]?.states).toEqual(["confirmed"]);
+    expect(r.cells()[LINE_A]?.anomalies ?? {}).toEqual({});
+  });
+
+  it("01-F34 — the settlement edge reads no ordering metadata either", () => {
+    // Law 1 on the new emitter, on §D's shape: the two rigs differ in every envelope id and in the
+    // device clock, and the emitted payloads must be BYTE-identical.
+    const a = open({ idPrefix: "0199bbbb", clock: 1_754_300_000_000 });
+    const b = open({ idPrefix: "0199eeee", clock: 1_500_000_000_000 });
+    for (const r of [a, b]) {
+      r.lines.confirmed(ORDER_ID);
+      r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
+      r.payFull();
+      r.lines.settled(ORDER_ID);
+    }
+    expect(JSON.stringify(a.appended)).toBe(JSON.stringify(b.appended));
+    // Anchored: the payloads are not empty, so the equality above is not two empty arrays.
+    expect(a.appended.map((e) => e.payload.state)).toEqual(["confirmed", "in_prep", "served"]);
   });
 });
