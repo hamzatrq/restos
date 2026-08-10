@@ -974,8 +974,7 @@ const scanSeams = (mod, name, decl) => {
   // absent from it — `createApiServer` was, and Rule B's old one-part gate dropped it silently.
   // A silent drop in the safe-looking direction is the defect this rail is named after.
   const imported = shipping.reachedSymbols.has(key(mod.file, name));
-  const internal =
-    !imported && shipping.reachedFiles.has(mod.file) && usedInOwnModule(mod, name);
+  const internal = !imported && shipping.reachedFiles.has(mod.file) && usedInOwnModule(mod, name);
   if (!imported && !internal) return;
   const members = optionsOf(mod, name);
   if (!members) return;
