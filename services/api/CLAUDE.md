@@ -366,3 +366,64 @@ count alone would not separate "the assertion bites" from "the suite is brittle"
 test green). The package was copied to a scratchpad, mutated there, and only
 `services/api/node_modules/@restos/domain` — a gitignored symlink, not source — was repointed at the
 copy for the two runs. `permissions.ts` was verified byte-identical by checksum before and after.
+
+## `12-F10` — the nightly owner summary, and the two mutants that SURVIVED the first run
+
+`summary.ts` (the fold), `summary-router.ts` (the gated procedure), `ledger.ts` (the port).
+Oracles: `__acceptance__/summary.test.ts` (35) plus the `12-F10` seam test in
+`catalog-gateway-seam.test.ts`. Control **206/206** green; every row below is the FULL package
+suite, in-tree with byte-exact backups and a restore trap (all four files verified by checksum
+after every run). Nothing here weakens a security CONSTANT — each mutant reds a test rather than
+downgrading a credential, which is the narrow case AGENTS.md's out-of-tree rule leaves in-tree.
+
+| # | mutant (exactly one branch) | tests failed | pre-existing 169 |
+|---|---|---|---|
+| S1 | **`summaryBranchScope` returns `null` always — `reportScope` deleted** | **2** | **all green** |
+| S1b | the resolver stops re-filtering the rows it received | 1 | all green |
+| S3 | **`server.ts` supplies `unconfiguredDayLedger()` — THE seam mutant** | **1** | **all green** |
+| S3b | the quieter twin: the port supplied with a stub answering `[]` | 1 | all green |
+| S4 | **the law-3 guard removed — an inexact total TRUNCATED instead of zero + `money_overflow`** | 1 | all green |
+| S5 | over/short RE-DERIVED instead of read as `26 §7`'s carried fact | 1 | all green |
+| S6 | **the top-item tiebreak deleted (`return 0`)** | **1** | **all green** |
+| S7 | `agreed()` picks the first member instead of disputing (`01-F31`) | 1 | all green |
+| S8 | `OMISSIONS` stops travelling with the answer | 1 | all green |
+| S9 | **NEGATIVE CONTROL: `sortedKeys` gains a no-op `.slice(0)`** | **0** | all green |
+| S4x | **RETIRED — a MIS-DESIGNED mutant. See below.** | 0 | all green |
+
+The gateway half lives beside its own suite: `day-ledger-http.test.ts`, control **330/330**, and
+**S2** (the window moved from `branch_created_at` to `server_received_at`) kills **7 — all in the
+new file, 317 pre-existing gateway tests green**.
+
+**S1 and S3 are the two to re-run after any change here.** S1's number is the honest one: only 2 of
+35 assertions are pointed at the width of the answer, because the other refusals (a cashier, a
+foreign branch, an org roll-up asked for by a branch manager) are already refused by `can()` in the
+middleware. Those two are the leak, and nothing else in this repo can see it.
+
+⚠ **S3 AND S6 SURVIVED THE FIRST RUN — 0 of 204 EACH — and that is the finding worth keeping.**
+Both are this wave's named defects reproduced *inside the work that cites them*.
+
+- **S3 is the integration-coverage defect.** `server.ts` binds a third gateway port beside the
+  publisher and the ledger appender, and swapping it for the refusing fallback left **every one of
+  204 tests green**: the process boots, logs in, gates every procedure, publishes a menu — and the
+  owner summary is unreachable. `summary.test.ts` builds its own host with its own ledger, so it is
+  structurally incapable of seeing what the composition root wired, exactly as
+  `journey-catalog.test.ts`'s first draft was. Closed by an assertion in
+  `catalog-gateway-seam.test.ts` that drives the DECLARED `start` script and checks **the figure**
+  (Rs 2,900, not a 200) — which is also what kills S3b, the stub that reports success.
+- **S6 is the round-3 defect verbatim: the mechanism was correct and no fixture aimed at it.** The
+  ranking fixture had no two items at equal revenue, so the tiebreak branch never executed and
+  deleting it changed nothing. Closed by a tie delivered in both orders.
+
+⚠ **S4x is a MIS-DESIGNED mutant, kept because a survivor that proves nothing is worth a row.** The
+first law-3 mutant replaced `BigInt(qty) * BigInt(price)` with `BigInt(Math.round(qty * price))` —
+byte-identical for every value either side can hold, so it survived while changing no behaviour at
+all. `services/sync-gateway/CLAUDE.md`'s N5 records the same lesson: **check what a mutant does
+before recording what its survival means.**
+
+⚠ **AN HONEST LIMIT ON LAW 3 HERE, measured while designing S4.** BigInt accumulation and the
+`Number.isSafeInteger` guard are **not separable by test** in this fold, because every total it sums
+is non-negative: a double sum of positives can only diverge from the exact sum above 2^53, and
+everything above 2^53 is already refused by the guard. So S4 mutates the guard, and BigInt stays for
+a reason the current fixtures cannot demonstrate — the moment a signed accumulation lands here
+(netting `payment.refunded` by method, which `shift-cash.ts` already does), the equivalence breaks
+and the guard alone stops being enough.

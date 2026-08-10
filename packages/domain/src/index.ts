@@ -8,6 +8,7 @@ export {
   BUSINESS_TIMEZONE,
   businessDate,
   businessDayBounds,
+  businessDayBoundsOfDate,
 } from "./business-day.js";
 export { canonicalJson } from "./canonical.js";
 // 01-F60 — the sellable-kind set, declared once here (18 §2) after three copies drifted apart.

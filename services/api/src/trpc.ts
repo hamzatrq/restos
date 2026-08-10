@@ -39,6 +39,7 @@ import superjson from "superjson";
 import { z } from "zod";
 import type { DeviceDirectory } from "./devices.js";
 import { IntegrationError } from "./errors.js";
+import type { DayLedger } from "./ledger.js";
 import type { CatalogRuntime } from "./publish.js";
 import { verifySessionToken } from "./session.js";
 import type { UserStore } from "./users.js";
@@ -66,6 +67,12 @@ export type ApiContext = {
    * that reports success. See `unconfiguredDeviceDirectory`.
    */
   readonly devices: DeviceDirectory;
+  /**
+   * `12-F10`. Required for `catalog`'s reason and one sharper: the fallback `createApiServer`
+   * resolves REFUSES every read rather than answering emptily, so an unconfigured host cannot
+   * render `Rs 0 · 0 orders` over a day that took any amount at all. See `ledger.ts`.
+   */
+  readonly ledger: DayLedger;
 };
 
 /**
