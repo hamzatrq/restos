@@ -44,6 +44,7 @@ import {
   createReceiptPrinter,
   PUMP_INTERVAL_MS,
 } from "./printing";
+import { refuseDoubleSettlement } from "./settlement-guard";
 import {
   describeStationRouting,
   resolveStationRouting,
@@ -688,8 +689,29 @@ app.whenReady().then(async () => {
    * `01-F60`'s precedent (an optional completeness input means a forgetful caller silently skips
    * the check), and the pin itself is stated and reasoned in `authorize.ts`.
    */
+  /**
+   * `DEC-MONEY-009` — **THE SEAM FOR THE DOUBLE-SETTLEMENT REFUSAL, and its position is the
+   * decision.**
+   *
+   * It wraps the RAW gateway and is itself wrapped by `authorizeWrites`, so the order a renderer
+   * request travels is **matrix → duplicate check → ledger**. Commandment 8 first, deliberately: a
+   * session with no `payment.settle` permission must be told it may not settle, not told the bill
+   * is already paid.
+   *
+   * **`store` is the ONLY thing it is handed, and that narrowness IS commandment 4.** The refusal
+   * is a local read of this device's own converged fold — no transport, no lock, no peer — because
+   * a till that must ask the cloud whether an order is settled stops selling when the WAN drops
+   * (`01-F17`, `00 §5.1`, `05-F8`). A till that reads its own state and declines to settle an
+   * order it already knows is settled is refusing a **duplicate**, not blocking a sale.
+   *
+   * **It does not close the defect and must not be described as doing so:** two PARTITIONED tills
+   * have not converged, so neither can know and both accept. See `settlement-guard.ts`'s header
+   * and `DEC-MONEY-009`'s residual column.
+   */
+  const settlementGuarded = refuseDoubleSettlement({ writes: gateway, store });
+
   const writes = authorizeWrites({
-    writes: gateway,
+    writes: settlementGuarded,
     store,
     session,
     paidOutApprovalThresholdPaisa: PAID_OUT_APPROVAL_THRESHOLD_PAISA,

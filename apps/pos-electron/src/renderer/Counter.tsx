@@ -2,6 +2,7 @@ import { newId, paisa } from "@restos/domain";
 import {
   AppShell,
   Cart,
+  formatPaisa,
   ItemGrid,
   space,
   type Tab,
@@ -134,6 +135,30 @@ const STATE_LINE: React.CSSProperties = {
   letterSpacing: typography["text-label"].letterSpacing,
   marginLeft: space["space-2"],
 };
+
+/**
+ * `DEC-MONEY-009` — **is this order already tendered for in full, on THIS device's own fold?**
+ *
+ * Exported so a suite can drive the predicate directly rather than only through a render, and so
+ * the Pay surface below cannot drift from what a test asserts.
+ *
+ * **It is the SAME comparison `main/settlement-guard.ts` makes, on the same two numbers**, and
+ * that is the point rather than a duplication: `gateway.ts` projects `total_paisa` from the
+ * engine's own `billedEffectiveFromJsonLines` and `paid_paisa` from the fold's `pay_total`, so
+ * this reads the guard's two inputs after one lossless mapping. The refusal is decided in main
+ * (Commandment 8's side of `18 §9`); this decides only what the cashier is TOLD, and a screen that
+ * used a different rule would offer a `TAKE CASH` the ledger then refuses.
+ *
+ * **`total_paisa > 0` is the same narrowing and for the same reason** — `0 >= 0` would make every
+ * empty order read as settled, and refusing a sale that has not happened is the `01-F17` break
+ * this design exists to avoid. It also leaves the OPEN Rs 0-tender defect exactly where it is.
+ *
+ * **Law 1 (`01-F34`) is not at risk here:** both fields are fold projections (a set derivation and
+ * a `26 §7` unique-keyed sum), and this reads them without consulting delivery order, an envelope
+ * id, a clock or anything about the reading device.
+ */
+export const isAlreadySettled = (order: Pick<OpenOrder, "total_paisa" | "paid_paisa">): boolean =>
+  order.total_paisa > 0 && order.paid_paisa >= order.total_paisa;
 
 const ORDER_TYPES: readonly { id: string; label: string }[] = [
   { id: "dine_in", label: "Dine-in" },
@@ -268,6 +293,37 @@ export const Counter = () => {
    */
   const [pendingChannel, setPendingChannel] = useState<string | null>(null);
   /**
+   * `02-F1` / `01 §4` / `02-F11` — **WHICH open order this till is working on.**
+   *
+   * ⚠ **This was `orders[0]`, and it was the contributing defect behind `DEC-MONEY-009`.** Two
+   * cashiers on two tills serving two customers both got the FIRST row of a branch-wide list —
+   * `02-F11` makes an order started on one terminal visible on every other — so they rang two
+   * customers into **one bill**, and the double settlement that follows was trivial to trigger
+   * rather than exotic. The other half of the same defect was that the order-type row was greyed
+   * whenever anything was open (`current !== undefined`), so **there was no way to start a second
+   * order at all**: the array was the cart and the array was not this till's.
+   *
+   * `01 §4` puts an order in play from `order.created` until its money side closes and nothing in
+   * `02-F1` limits a branch — or a terminal — to one at a time, so several concurrently open
+   * orders is ordinary, specified behaviour. What was missing is only the renderer's answer to
+   * *which one am I on*, and that is **screen state and not a ledger fact**: `02-F4`'s
+   * `order.parked`/`order.unparked` are the ledger-visible, branch-wide version of the question
+   * and they have **no payload schema in `packages/domain`**, so `01-F4` makes them unemittable
+   * and C10 stays owed. Nothing here emits anything.
+   *
+   * **`null` falls back to `orders[0]`, which is deliberate and is the whole of the compatibility
+   * story.** A till that has started nothing this session — a fresh launch, or one whose order has
+   * just settled out of the projection — behaves exactly as it did. What changes is that the
+   * moment this till starts an order, THAT order is its cart, whatever else the branch has open.
+   *
+   * **Owed, and named rather than left to look intentional:** an order started on this till and
+   * then abandoned to a relaunch is reachable only through `orders[0]`. `02-F10`'s recall is the
+   * FR that closes it and the Orders tab is its surface, but `orders-tab.dom.test.tsx` §E is an
+   * oracle asserting that an open-order row carries **no control at all** — so putting a recall
+   * action there is a change for that file's test owner to make, not for this session (`24 §3`).
+   */
+  const [cartOrderId, setCartOrderId] = useState<string | null>(null);
+  /**
    * `02-F7`'s grid measures its OWN box. A second `usePhysicalSize` rather than sharing the Order
    * tab's, because only one of the two is mounted at a time and a shared ref would hold the
    * measurement of whichever surface rendered last — a grid costed for a box it is not in is how
@@ -285,10 +341,11 @@ export const Counter = () => {
    * against `pendingChannel` while a foodpanda order is open would offer tiles the append then
    * refuses — the grid lying about what is sellable.
    *
-   * Read off `orders` rather than `current` because hooks may not sit below the early return,
-   * and it is the same row: `current` is `orders[0]`.
+   * Declared HERE, above the early return, because hooks may not sit below it and `menuChannel`
+   * feeds `reload`'s dependency list. It is the same row the render below draws.
    */
-  const menuChannel = orders[0]?.channel ?? pendingChannel ?? GRID_PREVIEW_CHANNEL;
+  const current = orders.find((o) => o.order_id === cartOrderId) ?? orders[0];
+  const menuChannel = current?.channel ?? pendingChannel ?? GRID_PREVIEW_CHANNEL;
 
   const reload = useCallback(async () => {
     // Three reads, never a join in the renderer: the folds already hold these projections and
@@ -331,8 +388,6 @@ export const Counter = () => {
   // the one case where there is genuinely nothing to draw, so it says so in a word rather
   // than rendering an empty counter that looks like a working one with no orders.
   if (!device) return <p>Starting…</p>;
-
-  const current = orders[0];
 
   /**
    * `02-F22` — the shift a settlement binds to, read from the SAME projection and through the
@@ -441,13 +496,24 @@ export const Counter = () => {
    */
   const startOrder = (order_type: string) => {
     if (pendingChannel === null) return;
+    const order_id = newId();
     write(
       window.restos.append({
         type: "order.created",
-        payload: { order_id: newId(), channel: pendingChannel, order_type },
+        payload: { order_id, channel: pendingChannel, order_type },
         refs: [],
       }),
     );
+    // **THE ORDER THIS TILL JUST STARTED IS NOW ITS CART** — see `cartOrderId`. Set from the id
+    // minted two lines above rather than from the reload that follows, because `orders` is a
+    // BRANCH-wide list (`02-F11`) with no "mine" in it: picking the new row out of the refreshed
+    // array would need a rule about which of several open orders is this terminal's, which is the
+    // question that produced the defect. The id is the only unambiguous answer and it is in hand.
+    //
+    // Set unconditionally, before the append resolves. `01-F17` — the append is not gated on
+    // anything and neither is this: if the write is refused, `orders` never gains the row, `find`
+    // misses and the cart falls back exactly as it did before the tap.
+    setCartOrderId(order_id);
     // `02-F1` — the ledger owns the channel from here. Clearing it means the NEXT order starts
     // from no default again rather than inheriting this one's, which is the same ruling applied
     // to the second order of the shift as to the first.
@@ -591,13 +657,53 @@ export const Counter = () => {
       <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
         No order to settle — start one on Order.
       </p>
+    ) : isAlreadySettled(current) ? (
+      /*
+        `DEC-MONEY-009` — **THE REFUSAL, SAID ON THE GLASS.**
+
+        `00 §5.7`: a surface reports what is true. Main refuses the second settlement
+        (`main/settlement-guard.ts`) and a refusal a cashier cannot see is a dead button she keys
+        Rs 2,240 into — so this surface says the bill is covered BEFORE she reaches for the pad,
+        off the same two projected numbers the guard reads. The screen and the guard therefore
+        cannot disagree about whether the bill is covered; they are one comparison, made twice.
+
+        **A sentence rather than a greyed `TAKE CASH`.** `27-F5` bans context-dependent and
+        invisible controls, and an inert primary control is that FR's own failure mode — this
+        package's guide says so in terms about the neighbouring Rs 0-tender defect. The Pay
+        surface already answers "there is nothing to settle" with exactly this shape one branch
+        up, so a second fact of the same kind gets the same treatment rather than a new idiom.
+
+        **`27-F12` — the state is carried by a WORD and a NUMBER, never by colour.** `Already
+        settled` is the word, the rupee figure is the number, and the muted foreground here is the
+        same one the empty state uses: nothing on this branch is colour-coded, so there is no
+        status hue to mis-read (`27-F14`'s allocation is untouched).
+
+        **It cannot say WHO settled it, and that silence is deliberate.** `02-F45` puts attribution
+        on the envelope's `actor_user_id`; `OpenOrderRow` — the fold's pinned projection — carries
+        the money and not the actor, so "settled by Ayesha on Counter 2" is **owed at the fold**
+        and inventing it here would be commandment 2. What is on the glass is what this device
+        actually knows.
+      */
+      <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
+        {`Already settled — ${formatPaisa(paisa(current.paid_paisa))} taken on this bill. Nothing more is due.`}
+      </p>
     ) : (
       <TenderPanel
         dueP={paisa(current.total_paisa)}
         takenP={paisa(current.paid_paisa)}
         onTender={({ amountP, method }) => {
-          void window.restos
-            .append({
+          /*
+            `DEC-MONEY-009` — through `write`, not a bare `void … .then(reload)`.
+
+            Main can now REFUSE this append (a duplicate settlement), and this call site was the
+            one write on the surface that handled no rejection: `write`'s own header records that
+            an unhandled rejection in a renderer surfaces as a process-level error rather than as
+            anything a cashier can act on. `write` catches, then `reload`s — so a refused tender
+            re-reads the projection and the surface flips to the branch directly above, which is
+            how the refusal becomes visible when the screen was a moment stale.
+          */
+          write(
+            window.restos.append({
               type: "payment.recorded",
               payload: {
                 order_id: current.order_id,
@@ -640,8 +746,8 @@ export const Counter = () => {
                 shift_id: openShift?.shift_id ?? null,
               },
               refs: [],
-            })
-            .then(reload);
+            }),
+          );
         }}
       />
     );
@@ -937,11 +1043,27 @@ export const Counter = () => {
                   key={t.id}
                   posture="counter"
                   label={t.label}
-                  onPress={current === undefined ? () => startOrder(t.id) : undefined}
+                  /*
+                    `DEC-MONEY-009`'s contributing defect, and this is the half that made the
+                    double settlement easy to reach. These three tiles were greyed by
+                    `current !== undefined`, so **once anything in the branch was open this till
+                    could not start an order at all** — and `02-F11` puts every terminal's open
+                    orders in one list, so a second cashier's only cart was the first cashier's
+                    bill. Two customers, one bill, and then two settlements against it.
+
+                    Nothing in `02-F1` or `01 §4` limits a terminal to one open order; the tiles
+                    were greyed because the cart was `orders[0]` and had nowhere else to point.
+                    With `cartOrderId` there is somewhere, so a type tap always starts a NEW
+                    order and that order becomes this till's cart.
+
+                    `27-F4` is untouched: no tile is added, removed or moved. A greying is
+                    lifted, which is precisely what that FR calls a non-breaking change.
+                  */
+                  onPress={() => startOrder(t.id)}
                   // Greyed while no channel is latched, because `02-F1` requires BOTH axes at
                   // creation and `startOrder` refuses without one. `27-F4`: disabled IN PLACE
                   // with the reason on the surface's state line — never removed, never moved.
-                  unavailable={current !== undefined || pendingChannel === null}
+                  unavailable={pendingChannel === null}
                 />
               ))}
               {/*
@@ -988,8 +1110,19 @@ export const Counter = () => {
                 cashier learned for this row still describes this row. Which row is actionable is
                 said by the greying, not by re-writing a line about a different control.
               */}
+              {/*
+                ⚠ The second half of this sentence changed with `DEC-MONEY-009`, because the
+                control it describes changed. It read `Order in progress` beside three tiles that
+                were inert, which was true of both. The tiles are live now — a type tap starts
+                ANOTHER order — so a line that only named the current order would leave a cashier
+                with no way to know that, and `27-F5` requires an action to have a visible,
+                labelled target. The first branch is untouched, so the sentence a cashier learned
+                for an empty counter is the one she still reads there.
+              */}
               <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
-                {current === undefined ? "Choose an order type first" : "Order in progress"}
+                {current === undefined
+                  ? "Choose an order type first"
+                  : "Order in progress — a type starts another order"}
               </p>
             </div>
             {/*
@@ -1007,10 +1140,15 @@ export const Counter = () => {
               visible and labelled at all times, so there is no context-dependent control here
               (`27-F5`) — a selector that collapsed to the chosen value would be exactly that.
 
-              **The tiles never disappear once an order is open.** They grey in place with the
-              reason, the same discipline as the type row above, because `02-F1` fixes the
-              channel at creation and never infers it later — so the honest state after creation
-              is "this is decided", not "this control is gone".
+              **The tiles never disappear once an order is open.** ⚠ *They used to grey once one
+              was, and that greying is LIFTED (`DEC-MONEY-009`).* It was the other half of "there
+              is no way to start a second order": `startOrder` refuses without a latched channel
+              (`02-F1` wants both axes at creation), so a greyed channel row made the ungreyed
+              type row above unusable. This row has always meant *the channel the NEXT order will
+              be created on* — its own state declares that in those words — and that meaning does
+              not change because one order happens to be open. `02-F1` still fixes a channel at
+              creation and never infers it later: nothing here touches the open order, and the
+              state line below says which channel that order is on until a new one is latched.
             */}
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               {ORDER_CHANNELS_AT_COUNTER.map((c) => (
@@ -1018,9 +1156,8 @@ export const Counter = () => {
                   key={c.id}
                   posture="counter"
                   label={c.label}
-                  selected={current === undefined && pendingChannel === c.id}
-                  onPress={current === undefined ? () => setPendingChannel(c.id) : undefined}
-                  unavailable={current !== undefined}
+                  selected={pendingChannel === c.id}
+                  onPress={() => setPendingChannel(c.id)}
                 />
               ))}
               {/*
@@ -1028,16 +1165,22 @@ export const Counter = () => {
                 caller marking a tile selected still says so in words"* (`27-F66`). This line is
                 those words, and it names the PRICE consequence rather than the tag — which is
                 what `01-F60` makes the choice actually mean to a cashier.
+
+                ⚠ **The branches are the same three sentences; only their ORDER changed.** A
+                latched channel now wins over an open order, because with the row live the pending
+                choice is the newer fact and it is the one that decides the next `order.created`.
+                With nothing latched an open order still reports its own fixed channel, so the
+                sentence a cashier reads mid-order is unchanged from before this ruling.
               */}
               <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
-                {current !== undefined
-                  ? `This order is ${current.channel ?? "counter"} — its prices are fixed`
-                  : pendingChannel === null
-                    ? "Choose a channel first — it sets the price"
-                    : `Selling at ${
-                        ORDER_CHANNELS_AT_COUNTER.find((c) => c.id === pendingChannel)?.label ??
-                        pendingChannel
-                      } prices`}
+                {pendingChannel !== null
+                  ? `Selling at ${
+                      ORDER_CHANNELS_AT_COUNTER.find((c) => c.id === pendingChannel)?.label ??
+                      pendingChannel
+                    } prices`
+                  : current !== undefined
+                    ? `This order is ${current.channel ?? "counter"} — its prices are fixed`
+                    : "Choose a channel first — it sets the price"}
               </p>
             </div>
             {/*
