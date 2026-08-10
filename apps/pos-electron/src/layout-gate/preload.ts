@@ -146,11 +146,76 @@ let alarms: Alarm[] = [
   },
 ];
 
+/**
+ * **A MID-SERVICE DRAWER, and this fixture was `{ shifts: [], days: [] }` — which is why nobody
+ * had ever measured the Cash or Me tabs doing their actual job.**
+ *
+ * `main.ts`'s own blind-spot list names this state by hand: *"the states still NOT scripted are
+ * the ones to worry about — **an open shift with a counted drawer**, a 300-item catalogue …"*. It
+ * matters more here than the phrasing suggests, because both surfaces are almost entirely
+ * CONDITIONAL on it: with no shift open, Cash draws two tiles and no reconciliation at all, and
+ * `MeSurface` draws one sentence. The gate was measuring the empty case on five panels and
+ * reporting 65 green surfaces, and `02-F23`'s five-row expected-by-method statement, the
+ * over/short figure, the opening float and `02-F43`'s unbound bucket had **never been laid out by
+ * anything but happy-dom**, which lays nothing out.
+ *
+ * Every value below is a shape the `shift_cash` fold really produces (`FOLDS.md`): `expected_json`
+ * carries only the methods actually tendered, a closed shift carries its `expected_at_close_json`
+ * snapshot and a signed `variance_paisa`, and the unbound bucket is `02-F37`/`02-F43`'s.
+ */
 const CASH_STATE: CashState = {
-  shifts: [],
-  days: [],
-  unbound: [],
-  unbound_drawer: { no_sale_count: 0, paid_out_paisa: 0, exceptions_json: "[]" },
+  shifts: [
+    {
+      shift_id: "shift-open",
+      cashier: "user-hina",
+      prev_shift_id: "shift-earlier",
+      open_at: 1_754_000_000_000,
+      expected_json: JSON.stringify({ cash: 1_284_500, card: 340_000, raast: 96_000 }),
+      paid_out_paisa: 30_000,
+      no_sale_count: 2,
+      closed: 0,
+      counted_cash_paisa: null,
+      expected_at_close_json: null,
+      variance_paisa: null,
+      exceptions_json: "[]",
+    },
+    {
+      shift_id: "shift-earlier",
+      cashier: "user-hina",
+      prev_shift_id: null,
+      open_at: 1_753_900_000_000,
+      expected_json: JSON.stringify({ cash: 872_000, card: 155_000 }),
+      paid_out_paisa: 0,
+      no_sale_count: 0,
+      closed: 1,
+      counted_cash_paisa: 877_500,
+      expected_at_close_json: JSON.stringify({ cash: 872_000, card: 155_000 }),
+      variance_paisa: 5_500,
+      exceptions_json: "[]",
+    },
+  ],
+  days: [
+    {
+      day_id: "day-open",
+      business_date: "2026-08-07",
+      prev_day_id: null,
+      opening_float_paisa: 500_000,
+      deposit_paisa: 0,
+      closed: 0,
+      counted_cash_paisa: null,
+      exceptions_json: "[]",
+    },
+  ],
+  unbound: [
+    {
+      settlement_attempt_id: "attempt-unbound",
+      order_id: "order-9",
+      method: "cash",
+      amount_paisa: 45_000,
+      anomaly: "unbound_settlement",
+    },
+  ],
+  unbound_drawer: { no_sale_count: 3, paid_out_paisa: 12_000, exceptions_json: "[]" },
 };
 
 /** `01-F26` — `null` is LOCKED. The gate unlocks by calling `unlock`, like the operator does. */
