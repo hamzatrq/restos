@@ -389,6 +389,90 @@ in principle**, but see the owed item below — the manifest table itself was no
   `27 §1a`'s ~224-PPI tablet and ~405-PPI phone are 1.4x and 2.5x their old rendered size. No
   rail looks at either, and `apps/waiter` / `apps/rider` are stubs.
 
+## THE GROUPING ROUND (August 2026) — Cash, Me, Orders and ManagerApproval, and what LOOKING cost
+
+**Read this for the two measurements, not for the prose.** The four surfaces were *composed* and
+not *designed*: the Cash tab in particular was **eleven sibling `Tile`s in three wrapping rows on
+a bare page**, where day controls, shift controls and the paid-out sequence read as one
+undifferentiated field and nothing on the glass said that `Supplier` and `Receipt photo` are
+preconditions of `Paid out`. All four now build from `packages/ui`'s new `Panel` — a bounded,
+captioned region — and the paid-out is a sub-region inside The drawer.
+
+**1. HEIGHT IS THE HARDWARE FLOOR AND CASH SETS IT.** A parallel sweep measured chrome at 37.4 mm
+and Cash at 94–96 mm of work area, so **this one surface decides which glass can run RestOS**
+under the founder's bring-your-own-hardware ruling. Two decisions in `CashSurfaces.tsx` follow
+from that and are not styling: the entry instrument carries **no `Panel`** (its caption, gap and
+padding are 64 dp ≈ 10 mm, landing straight on the floor), and the amount readout moved from
+UNDER the pad to BESIDE it — a `27-F4` positional change, justified in the file, taking the entry
+band from 632 dp to **536 dp = 85 mm**. `COUNTED Rs 0` was also the measured casualty of the old
+position: cut in half at 1024×600 on 10.1″ glass under `03-F5`'s band.
+
+**The groups flow in a `flex-direction: column; flex-wrap: wrap` container at the work area's
+height, so the column count is derived from the glass and never written down.** A wrapping ROW
+was tried first and MEASURED WORSE — a 536 dp pad on line one makes anything on line two cost its
+full height (964 dp of content in a 638 dp box on the 10.1″ panel). Three arrangements were built
+and measured before this one; two of them looked fine in a screenshot and failed the gate.
+
+**2. `safe center`, and what it exposed.** `Counter.tsx`'s work-area centring is
+`alignItems: "safe center"` now. With content taller than the box a plain `center` overflows in
+**both** directions — that is how a keypad row rendered at `y = -33` — and the sweep's own words
+for it are *"the cut is split top and bottom, which is why no control is reported lost even
+though content is being lost."* ⚠ **It also means the gate's composition check can now SEE a
+too-tall surface as ANCHORED, where a centred overflow used to read as symmetric slack and pass.**
+That is a property of the gate worth knowing: **`center` hides an overflow from the composition
+check; `safe center` shows it.**
+
+**3. THE FIXTURE WAS `{ shifts: [], days: [] }` AND ONE ORDER, so four states had never been laid
+out by anything but happy-dom.** `main.ts`'s own blind-spot list names *"an open shift with a
+counted drawer"* as unscripted, and it was worse than that: with an always-empty inbox,
+`OrderList`'s `action` — `02-F9`'s Accept tile — had **never been measured by this gate at all**,
+on a component whose recorded defect is an accept tile overflowing its row. `preload.ts` now
+carries an open day, an open shift, a closed shift with a signed variance, `02-F43`'s unbound
+bucket, a second open order and an unaccepted storefront one. **It earned its place immediately:
+it turned three plausible arrangements red, and the control run proves the fixture itself is
+sound — the PRE-fix layout passes the gate under it.**
+
+**4. A `27-F7` DEFECT FOUND BY LOOKING, IN THE FIX FOR `27-F7`.** The Orders tab now says its
+ordering rule out loud (`oldest first`) because that FR makes a list's visual order its work
+order and an operator had no way to know `03-F46`'s rule was in force. The first draft drew the
+note whenever the list had more than one row — and the very first screenshot showed it over
+`A-015` above `A-014`, because `byOldestConfirmFirst` sends a row with **no** confirm anchor to
+the end (`01-F54`). A caption asserting a rule the rows do not follow is worse than no caption.
+It now renders only when every row carries the key it is sorted by. **The inbox deliberately gets
+a COUNT and no ordering rule**: its work order is arrival order, every row in it is unconfirmed,
+and the projection carries no created-at — so this device cannot know it, and saying so would be
+the placeholder-that-looks-like-data commandment 2 forbids. Owed at the fold.
+
+**5. `27-F16` WAS READ RATHER THAN ASSUMED FOR `ManagerApproval`, AND IT DOES NOT GOVERN IT.**
+That FR is about MONEY and there is no money on that surface. `27-F14` governs it and names the
+claimant **by name** — amber, *"abnormal, attention required … pending approval"* — so this is
+the one surface in the app where the allocation is being spent on exactly what it was allocated
+for. Three refusals, each on a resolving FR: **not red** (`27-F14`'s fault claimants are
+enumerated and `03-F5`'s band owns red here); **not a blue `Approve`** (it would colour one pad's
+twelfth key and not the unlock pad's, teaching two habits for one gesture — `27-F4`); and the
+marker goes on the **identity column**, not around the surface, because the pad is 536 dp against
+a 540 dp work area at the tightest swept panel and a `Panel` around both columns costs 64 dp the
+surface does not have. That is defect 5's arithmetic, avoided rather than repeated.
+
+**WHAT IS STILL OWED ON THESE FOUR, named rather than left to look intentional.**
+- **`ManagerApproval` never says WHAT is being approved.** A manager keys a PIN against an act
+  she cannot see. `05-F27` wants *"the pending request visible on the terminal without searching
+  for it"* and `05-F5` lists what a remote interrupt card shows; the local path shows the roles
+  and nothing else. `Counter.tsx` holds `pending.req` and could pass it, but rendering it needs a
+  words table for event types (the `CATALOG_REFUSAL_WORDS` shape) and that is a vocabulary no FR
+  supplies — commandment 2. **The single biggest remaining gap on these surfaces.**
+- **`Me` prints a raw fold enum**: *"Taken with no shift open — `unbound_settlement`"*. The
+  sentence carries the meaning and the code carries nothing an operator can use, but dropping it
+  loses information a manager wants and `02-F37`'s anomaly set is not closed anywhere this screen
+  can read. Needs the same words table.
+- **The shift panel cannot say WHEN a shift opened or WHOSE it is.** `open_at` is branch-time
+  epoch and the branch timezone is `00 §7` layer-2 config the renderer does not have, so a clock
+  time would be a guess; `CashShift.cashier` is a `user_id` and the roster that maps it to a name
+  is a bridge member the Cash surface's own oracle forbids it from reading. The direction doc's
+  *"day open since 09:00 · Bilal on shift"* is therefore **half-owed at the seam**, not here.
+- **Cash needs ~260 mm of width to stay one pad tall.** Below that the columns multiply and the
+  surface grows. That is the number for whoever defines the mode below `compact`.
+
 ## What is deliberately not real yet
 
 - **`27-F26`'S TYPEFACE IS NAMED BUT NOT DELIVERED — no webfont is bundled.** The token chain is
