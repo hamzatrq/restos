@@ -345,6 +345,8 @@ const note = (s: string): void => {
 let surfacesMeasured = 0;
 let controlsMeasured = 0;
 let clippingBoxesSeen = 0;
+/** Distinct clipping boxes the ancestor walk reached, summed over surfaces (`24-F14`). */
+let clippingAncestorsSeen = 0;
 
 const judge = (surface: string, state: State, r: SurfaceReport): void => {
   surfacesMeasured += 1;
@@ -361,6 +363,23 @@ const judge = (surface: string, state: State, r: SurfaceReport): void => {
         "renderer needs is probably missing from the gate's stub), so this check proves nothing (24-F14).",
     });
     return;
+  }
+
+  // `24-F14` — the ancestor walk must have found something to walk. `index.html` clips `html`,
+  // `body` and `#root`, so three is the floor on every surface in this product; zero means the
+  // walk is inert and every `clippedBy: null` below is a non-answer rather than a pass.
+  clippingAncestorsSeen += r.clippingAncestors;
+  if (r.clippingAncestors === 0) {
+    failures.push({
+      surface,
+      state,
+      detail:
+        `EMPTY MATCH — ${r.controls.length} control(s) measured and NOT ONE clipping ancestor ` +
+        "found on any of their chains. index.html sets `overflow: hidden` on html, body and " +
+        "#root, so the floor here is three: the ancestor walk in probe.ts has stopped working " +
+        "and every control on this surface is being reported as unclipped without being " +
+        "measured (24-F14).",
+    });
   }
 
   for (const o of r.overflows) {
@@ -411,6 +430,57 @@ const judge = (surface: string, state: State, r: SurfaceReport): void => {
             : `Its centre still hit-tests, so it can be pressed — but ${overhang}px of a target ` +
               "27-F8 sizes deliberately has been taken away, which 27-F11d does not permit an " +
               "alarm to do to the work underneath."),
+      });
+      continue;
+    }
+    /**
+     * **CLIPPED BY AN ANCESTOR — the verdict this gate did not have, and its absence was a rail
+     * defect rather than a missing nicety.**
+     *
+     * Measured 2026-08-10 on `netbook-1024` (1024×600 @10.1″): the gate reported **0 clipped
+     * controls** on the Order tab while five menu tiles were visibly sliced by the pager. Every
+     * one of them was inside the viewport, so `withinViewport` was true and nothing fired; the
+     * only signal was a box-level `OVERFLOW` line, which names the BOX and not the controls. A
+     * count that reads cleaner than the screenshot is worse than no count.
+     *
+     * **The wording is load-bearing, and this file has the receipts.** A `withinViewport`
+     * failure once concluded *"this control cannot be touched"* for a key overhanging by 31 px
+     * of 126 whose centre hit-tests fine; that sentence propagated into a `CLAUDE.md`, then into
+     * a task brief, and an agent was dispatched to fix a blocker that did not exist. So this
+     * message states three facts and never infers a fourth: **what is cut, by how much, and —
+     * separately — whether the centre still hit-tests.**
+     *
+     * It supersedes the `COVERED` check below for this control rather than stacking with it. A
+     * control whose centre is clipped away also fails `elementFromPoint`, and reporting one
+     * defect twice under two names is how a violation count stops meaning anything.
+     */
+    if (c.clippedBy !== null) {
+      const k = c.clippedBy;
+      const edges = (["top", "right", "bottom", "left"] as const)
+        .filter((e) => k.lost[e] > 0)
+        .map((e) => `${k.lost[e]}px off its ${e}`)
+        .join(", ");
+      failures.push({
+        surface,
+        state,
+        fit: true,
+        detail:
+          `CLIPPED BY ANCESTOR: ${c.label} at (${c.rect.x},${c.rect.y}) ${c.rect.w}x${c.rect.h} ` +
+          `is entirely inside the ${r.viewport.w}x${r.viewport.h} viewport, and its ancestor ` +
+          `${k.by} (overflow: ${k.overflow}) cuts ${edges} — ${k.visible.w}x${k.visible.h} of ` +
+          `${c.rect.w}x${c.rect.h} survives. ` +
+          (k.overflow === "hidden" || k.overflow === "clip"
+            ? "That box CLIPS, so the lost pixels are not painted at all."
+            : "That box SCROLLS, so the lost pixels are reachable only by scrolling, which 27-F2 " +
+              "forbids for anything actionable.") +
+          " SEPARATELY, and this is a different question: " +
+          (c.hitTestable
+            ? "its centre DOES still hit-test, so the control can be pressed — this is a target " +
+              "27-F8 sizes deliberately being made smaller by a layout, not a control that is " +
+              "out of reach."
+            : "its centre does NOT hit-test, so on this surface the control cannot be pressed " +
+              "at all.") +
+          " The box-level OVERFLOW verdict names the container; this names what the operator loses.",
       });
       continue;
     }
@@ -988,7 +1058,8 @@ const run = async (): Promise<number> => {
   note(
     `measured ${surfacesMeasured} surfaces, ${controlsMeasured} controls, ` +
       `${extentsMeasured} compositions, ${twinsCompared} 27-F11c twin pairs, ` +
-      `${clippingBoxesSeen} overflowing boxes`,
+      `${clippingBoxesSeen} overflowing boxes, ` +
+      `${clippingAncestorsSeen} clipping ancestors walked`,
   );
 
   if (probe.length > 0) {
