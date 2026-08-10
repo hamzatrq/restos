@@ -1223,12 +1223,12 @@ fallback. `02-F10`'s recall is the FR and the Orders tab is its surface, but
 all* — so the recall action is a change for that file's test owner, not for an implementing
 session (`24 §3`).
 
-### Mutation matrix — control: pos-electron **641/641** green (613 pre-existing + 28 new), `pnpm verify` exit 0, `seams:check` clean
+### Mutation matrix — control: pos-electron **642/642** green (613 pre-existing + 29 new), `pnpm verify` exit 0, `seams:check` clean
 
 In-tree, one branch per mutant, `git checkout --` restoring byte-exactly from a committed tree.
 **The right-hand column is the finding**, and it is the calibration this file keeps asking for.
 
-| # | mutant (exactly one branch) | new (28) | pre-existing 613 |
+| # | mutant (exactly one branch) | new (29) | pre-existing 613 |
 |---|---|---|---|
 | M1 | **THE SEAM** — `authorizeWrites({ writes: gateway })`; the guard built and unreached | **1** | **all green** |
 | M2a | **THE ROUND-TRIP, OPTIONAL DEP** — an `uplink` short-circuit the host never supplies | **0 — SURVIVES** | all green |
@@ -1241,6 +1241,7 @@ In-tree, one branch per mutant, `git checkout --` restoring byte-exactly from a 
 | M7 | **CONTROL for M6** — `orders[0]` alone, rows left live | **1** | all green |
 | M8 | **THE SCREEN GOES SILENT** — `isAlreadySettled` always false; main still refuses | 3 | all green |
 | M9 | **THE SCREEN OVER-FIRES** — any money taken reads as settled (`02-F13` broken) | 2 | all green |
+| M11 | **THE UNCONVERGED TILL** — an order this device has no row for is REFUSED | **1** | all green |
 | M10 | **NEGATIVE CONTROL** — a real refactor of `refusalFor` into early-return form | **0** | **all green** |
 
 **M10 is what makes every red row mean anything:** a genuine one-branch restructuring of the very
@@ -1271,6 +1272,15 @@ scan found ONE other factory in this shape: `packages/sync-client/src/pin-audit.
 `createPinAuditSink`** — its options are all required today, so nothing is hidden, but it is a
 PROTECTED path and the next optional added there would be invisible. **Reported, not fixed:**
 `check-seams.mjs` is a CI rail with its own blast radius and `24 §3b` forbids the drive-by.
+
+**⚠ M11 SURVIVED ITS FIRST RUN AT 28/28, AND THE ASSERTION THAT KILLS IT WAS ADDED BECAUSE OF
+THAT — the round-3 law's shape on this round's own work.** A device that has not converged has **no
+row** for the order; that is what *"hasn't heard from anyone"* looks like from inside
+`openOrders()`. The plausible wrong implementation is *"if I do not know about this order, refuse"*
+— it reads like caution and it is the `01-F17` break the whole ruling exists to avoid, a till that
+stops selling because it is behind. **Every other assertion in the suite settles an order the
+fixture created, so all 28 passed under it.** §C now settles an order id the store has never seen.
+Reading the suite would not have found that; running the mutant did.
 
 **Two fixture defects were found by RUNNING and would not have been found by reading.** (1) Two
 `02-F13` partial tenders sharing one `settlement_attempt_id` are two divergent members of ONE key —

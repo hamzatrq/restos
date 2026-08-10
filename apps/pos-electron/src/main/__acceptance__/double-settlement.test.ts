@@ -364,6 +364,28 @@ describe("§C 01-F17/00 §5.1 — the decision touches nothing but this device's
     expect(t.landed).toHaveLength(1);
     expect(t.cashInDrawer()).toBe(BILL_PAISA);
   });
+
+  it("SETTLES AN ORDER THIS DEVICE HAS NEVER HEARD OF (01-F17)", () => {
+    // ⚠ **THIS ASSERTION EXISTS BECAUSE A MUTANT SURVIVED WITHOUT IT**, and it is the round-3
+    // law's shape exactly: the mechanism was built and the guard was never pointed at the
+    // dangerous case. A device that has not converged has NO ROW for the order — that is what
+    // "hasn't heard from anyone" looks like from inside `openOrders()` — and the plausible wrong
+    // implementation is *"if I do not know about this order, refuse"*. It reads like caution and
+    // it is the `01-F17` break the ruling exists to avoid: a till that stops selling because it
+    // is behind. Absence of knowledge is not knowledge of a duplicate.
+    //
+    // Every other assertion in this file settles an order the fixture created, so all of them
+    // passed under that mutant. This is the one that kills it.
+    const t = till();
+    expect(() =>
+      t.guarded.append({
+        type: "payment.recorded",
+        payload: { ...tender(), order_id: "0199aaaa-0000-7000-8000-00000000dead" },
+        refs: [],
+      }),
+    ).not.toThrow();
+    expect(t.landed).toHaveLength(1);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
