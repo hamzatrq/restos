@@ -759,19 +759,105 @@ in principle**, but see the owed item below — the manifest table itself was no
     later: `packages/domain/src/registry.ts` carries **six** `order.*` schemas and this is not one,
     and `01-F4` makes emitting an unknown type a build-time *and* runtime error. Closing it is a
     SACRED-path change (`18 §2`) that must also fix the shape of `06-F20`'s reason list. **Owed.**
-  - **`C32` (mark ready) — four independent blockers, any one sufficient.** (1) **Nothing advances
-    a line past `placed`**: no production code in this repo emits `order.line_state_changed` (only
-    test builders do), and `02-F31`'s `kot.printed → in_prep` auto-advance is explicitly
-    *projection-inert* in `sync-client/src/folds/merge.ts`. (2) So the edge `C32` would emit is
-    **illegal** — `LEGAL_NEXT.placed` is `["confirmed","voided","cancelled"]`, and the fold records
-    `illegal_transition` and refuses to apply it. A Ready control would be a control that can never
-    succeed. (3) The seam carries **no per-line state and no head edge ids**, so
-    `line_context.preds` cannot be built; `preds: []` would make the line a contested MVR rather
-    than ready. (4) **`03-F24`'s ready-signal-ownership config does not exist** anywhere in code, so
-    `02-F33`'s gate has no source and inventing one is a commandment-2 violation. **What ships is
-    `02-F33`'s own fallback and it is spec-conformant, not a gap:** *"otherwise the panel is
-    read-only for states."* `orders-tab.dom.test.tsx` §E is an **anti-scope guard** that fails if
-    either control is drawn before its blocker clears.
+  - **`C32` (mark ready) — was four independent blockers; THREE HAVE MOVED and the fourth still
+    decides it (August 2026).** ⚠ Re-read this whole bullet before quoting any part of it: the
+    first three sentences were true when written and three of them are not true now.
+    - ~~(1) **Nothing advances a line past `placed`**~~ — **CLEARED.** `main/line-advance.ts` is
+      the production emitter for `order.line_state_changed` (`02-F31`), wired in `main/index.ts`:
+      `order.confirmed` → lines `confirmed` (`01 §4`'s own first transition, the precondition
+      without which `02-F31`'s rule cannot fire) and `kot.printed` → lines `in_prep` on T1. The
+      *fold* remains projection-inert for `kot.printed` and that was never the blocker — the
+      missing piece was a producer, and `merge.ts` was not touched.
+    - ~~(2) the edge would be **illegal**~~ — **PARTLY CLEARED, and read the state, not the FR.**
+      A line now reaches `in_prep`, and `LEGAL_NEXT.in_prep` **does** contain `ready`. A line still
+      at `confirmed` (no printer attached, so no `kot.printed`) still cannot go to `ready`.
+    - ~~(3) `preds` cannot be built~~ — **WEAKENED BY MEASUREMENT, and the old claim was wrong.**
+      It said *"`preds: []` would make the line a contested MVR rather than ready"*. It would not:
+      `projectLine` takes ≼-max over **all legal edges**, not over heads, so an unretired lower
+      edge cannot change a NON-TERMINAL watermark — and `ready` is non-terminal. The emitter ships
+      `preds: []` and `main/__acceptance__/line-advance.test.ts` §C asserts an EMPTY anomaly map
+      through the real merge engine. Retirement decides something only for a TERMINAL edge.
+    - **(4) `03-F24`'s ready-signal-ownership config does not exist** anywhere in code — unchanged,
+      and **sufficient on its own**. `02-F33`'s gate has no source and inventing one is a
+      commandment-2 violation. **What ships is `02-F33`'s own fallback and it is spec-conformant,
+      not a gap:** *"otherwise the panel is read-only for states."* `orders-tab.dom.test.tsx` §E is
+      an **anti-scope guard** that still holds — but ⚠ **its comment now gives a stale reason**
+      (*"Nothing advances a line past `placed`"*). The assertion is right and the rationale is not;
+      that is a finding for the file's test owner, not an edit for an implementing session.
+
+## `02-F31` — THE TIER, AND THE PRODUCER THAT DID NOT EXIST (August 2026)
+
+`order.line_state_changed` had a `packages/domain` schema and a `merge.ts` fold consumer and **no
+production emitter anywhere**, so every line of every order this product ever rang sat at `placed`
+for ever. `pnpm seams:check` is structurally blind to that shape and says so — **a key in an object
+literal is not an export** — which is exactly how `audit.print_acknowledged` sat in the registry
+with nothing emitting it. Two files close it: `main/hardware-tier.ts` and `main/line-advance.ts`,
+with `main/__acceptance__/line-advance-seam.test.ts` as the hand-written assertion no rail can make.
+
+**The tier is `assumed`, not derived, and that is the finding rather than a shortcut.** `02-F31`'s
+detection rule reads *"the branch device registry"*, and **no part of that registry reaches a
+device**: `01-F62` makes `device.registered`/`device.revoked` org-scoped (*"it never enters a branch
+stream and no device folds it"*), `hello_ack` carries seven additive fields and no roster, and the
+device store has no table one could be persisted in for an offline boot (commandment 4). The LAN
+mesh's `PeerInfo.device_class` is not the answer either, twice over: no host runs the mesh, and
+peers are **liveness** where `02-F31` says **registry** — a pass screen that is switched off is
+still a registered pass screen. So `resolveHardwareTier` takes the roster as a real, tested input
+and the shipped host passes `null`, `00 §7` layer 2's already-declared `hardware tier (T1/T2/T3)`
+key is the correction (`RESTOS_HARDWARE_TIER`), and the boot line says which was used at length.
+
+**`02-F31`'s settlement → `served` half is NOT built and is BLOCKED IN THE KERNEL.** The FR requires
+settlement → `served` *and*, in the next clause, forbids fabricating `ready` — which together demand
+the edge `in_prep → served`, and `01 §4` / `LEGAL_NEXT` reach `served` only from `ready`. Every
+route was checked; the full argument, three candidate resolutions and why none is a session's call
+are at the foot of `main/line-advance.ts`. **Needs a ruling, not an edit** — and note the trap: the
+"safe" implementation that filters by legality and emits nothing is the WORST option, because it
+looks finished and every gate stays green. `line-advance-seam.test.ts` §D fails if a settlement
+trigger appears before the conflict is closed. The **delivery exclusion** (`01 §4`: rider-driven
+only, never advanced by payment/settlement) is part of that blocked half and is expressed nowhere.
+
+**Mutation matrix — control 472/472 green (438 pre-existing + 34 new), `pnpm verify` exit 0,
+`seams:check` exit 0.** In-tree, byte-exact backups with a restore trap, full package suite under
+every mutant. **The right-hand column is the finding.**
+
+| # | mutant (exactly one branch) | new (34) | pre-existing 438 | seams:check |
+|---|---|---|---|---|
+| M1 | **THE SEAM** — `index.ts` drops `lines.printEvent(type, payload)` | 1 | **all green** | — |
+| M2 | **THE SEAM** — `index.ts` drops `lines.confirmed(order_id)` | 1 | **all green** | — |
+| M3 | **THE STUB SUPPLY** — `append: () => {}` | 1 | **all green** | **exit 0, CLEAN** |
+| M4 | **THE DEFECT VERBATIM** — no producer at all (the pre-fix tree) | 3 | **all 438 green** | **exit 1** |
+| M5 | **CONTROL** — the tier gate dropped, one branch | 2 | all green | — |
+| M6 | the `LEGAL_NEXT` filter dropped — illegal edges are emitted | 6 | all green | — |
+| M7 | **THE LIE** — judge legality against the chain's expected parent | 6 | all green | — |
+| M8 | the contested-arity guard weakened (`!== 1` → `=== 0`) | 1 | all green | — |
+| M10 | the `kot.printed` type guard dropped — a FAILED print advances | 1 | all green | — |
+| M9 | **NEGATIVE CONTROL** — a real refactor of the same loop | **0** | **all green** | — |
+
+**M4 is the number to remember: the defect that left every line in the product at `placed` since
+the first order was rung leaves all 438 pre-existing tests green.** M3 is the other one — the port
+supplied with a stub is invisible to `seams:check`, exactly as `AGENTS.md` measures it, and M4 is
+the case the rail DOES catch (`createLineAdvance` becomes an unreached export under Rule A).
+**M9 is what makes every red row mean anything:** a real one-branch edit reddens nothing.
+
+**⚠ THREE MUTANTS SURVIVED THEIR FIRST DRAFT, and each was a defect in the guard, not in the code.**
+1. **M7 survived** because the mutant did not reproduce the defect: it lied in the recorded
+   `from_states` while still judging legality against the true state, so the filter caught it
+   anyway. The dangerous implementation — the one a helpful session actually writes — judges
+   legality against the *assumed* parent. Rewritten, it kills 6.
+2. **M8 survived** because the contested-arity guard is masked by the legality filter: every
+   contested cell `merge.ts` produces is all-terminal, and `LEGAL_NEXT` maps a terminal to `[]`.
+   The fixture could not distinguish the guard from its absence. A directed fixture (a multi-state
+   cell whose first member *would* advance legally) replaces it.
+3. **M10 was killed by a source string and by nothing behavioural**, because the seam suite
+   asserted against a **hand-copy** of `index.ts`'s `type === "kot.printed"` branch — `K-3`'s
+   dead-oracle defect reproduced inside the fix for a different defect. The branch moved into
+   `LineAdvance.printEvent`, so the host passes the callback straight through and the test drives
+   the real one.
+   **Reading the suite found none of these. Only mutating did.**
+
+**And the rail caught the documentation:** the first draft of `hardware-tier.ts`'s header *quoted*
+the literal `@unreached-owed` marker from `mesh-session.ts`, and `seams:check` attributed it to four
+of this file's exports and reddened — its anti-rot rule working correctly on a comment. Write the
+marker's meaning in words, never the token.
   - **The S2 CHIME IS OWED; the count badge ships.** `screen-map §5` rules the arrival signal is
     *"S2 chime + count badge"* and forbids a popup. The badge is real (`TabRail.badge`, set in
     `Counter`). **There is no audio anywhere in this app** — `03-F5`'s S1 "repeating distinct
