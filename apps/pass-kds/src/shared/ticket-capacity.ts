@@ -76,8 +76,106 @@ export const TICKET_HEIGHT_MM = REFERENCE_PANEL_HEIGHT_MM / REFERENCE_TICKETS;
  * A panel below one ticket's height is **supported and labelled**, per the FR's own amendment: it
  * costs situational awareness and never reachability, because page 1 always holds the oldest work.
  */
-export const ticketsPerPage = (heightMm: number): number =>
-  Math.max(1, Math.floor(heightMm / TICKET_HEIGHT_MM));
+/**
+ * # ⚠ THE FIRST SCREENSHOT REJECTED THE FIRST DESIGN, AND THE GATE HAD PASSED IT
+ *
+ * `27-F28` costs a ticket in **height** — *"only physical height buys capacity"* — so the first
+ * implementation stacked full-width tickets in one column. It passed every check in
+ * `layout:check`: nothing clipped, nothing overflowed, every target measured 15.24 mm. **And the
+ * screenshot is a screen a founder rejects on sight**: on the 22" panel `27-F11f` names, three
+ * tickets stretched to 487 mm each — a DONE bar nearly two feet wide — over a page that was
+ * **55% empty**. `AGENTS.md` warns about exactly this pair of facts: *"passing the gate is not
+ * evidence a screen is good; two screens the founder rejected on sight passed every gate this
+ * repo had."* `surface-mode.tsx` names the same defect one app over: *"`layout:check` asked
+ * whether things FIT and fitting is not using the room."*
+ *
+ * ## The corpus's own model for this surface is a GRID, and it is `27-F2` rather than a preference
+ *
+ * > 27-F2 **Flat paged grids, not scrolling lists, for anything actionable.** … **page capacity is
+ * > derived from the surface's usable area** and 27-F8's target size, never fixed by this document.
+ *
+ * *Usable area* is two-dimensional, and `27-F11a` derives the counter's ~88 tiles as **11 × 8**
+ * from exactly that. So a single column was not the FR's model — it was one axis of it.
+ *
+ * **`27-F28` is not weakened and that is the load-bearing check.** Its measurement is about
+ * legibility: ~9.5 *item lines* at 1.5 m is a statement about **type at distance** (`27-F27`), and
+ * columns change no type size at all. Its one non-negotiable clause — *"a panel too small for its
+ * distance shows FEWER tickets, never smaller type"* — is untouched: `TICKET_HEIGHT_MM` is
+ * unchanged, every card renders at the same size on every panel, and a narrow panel gets **one**
+ * column rather than a squeezed three.
+ *
+ * ## Where the column width comes from — a multiple the component itself declares
+ *
+ * `TicketCard` declares `minWidth: 320` dp = **50.8 mm**, which is the width below which its own
+ * content clips. A column AT that minimum is a column at the clip boundary, which is the mistake
+ * `window-options.ts` names about floors: *"one set at the bottom of a measured range admits the
+ * panel that clips."* **Three times the declared minimum** is the comfortable width, and it is a
+ * stated multiple of a number that already exists rather than a new constant.
+ *
+ * It also lands on the founder's own figure by a different route: 152.4 mm gives `27-F11f`'s 22"
+ * panel (487 mm) **three columns**, which is the *"three tickets"* that ruling names — now three
+ * ACROSS at full height instead of three stacked over an empty page.
+ *
+ * **The tension is recorded rather than won**, exactly as `27-F28` records its own with `27-F11f`:
+ * a 22" panel now yields **9** tickets (3 × 3) where the FR's single-column arithmetic said 3.
+ * Nine is what that glass genuinely holds at unchanged type, and `27-F28`'s amendment says the
+ * product REPORTS what a panel yields. Whether 9 is *desirable* — against `27-F2`'s glance budget
+ * and `03-F23`'s refusal to help the chef prioritise — is a founder call and a pilot question
+ * (`21-F13`'s rush shadowing), not this module's.
+ */
+const TICKET_MIN_WIDTH_MM = 50.8;
+export const TICKET_WIDTH_MM = TICKET_MIN_WIDTH_MM * 3;
+
+/** How many ticket COLUMNS this much width holds. Floored at 1: a narrow panel is one column. */
+export const ticketColumns = (widthMm: number): number =>
+  Math.max(1, Math.floor(widthMm / TICKET_WIDTH_MM + KNIFE_EDGE));
+
+/** How many ticket ROWS this much height holds — `27-F28`'s own axis, unchanged. */
+export const ticketRows = (heightMm: number): number =>
+  Math.max(1, Math.floor(heightMm / TICKET_HEIGHT_MM + KNIFE_EDGE));
+
+/**
+ * `27-F2`'s page capacity, derived from the surface's usable AREA.
+ *
+ * The width argument is optional and defaults to one column so that every caller which only has a
+ * height — the boot line, the gate's per-panel report — keeps `27-F28`'s own single-column
+ * arithmetic and stays comparable with the FR's stated figures.
+ */
+export const ticketsPerPage = (heightMm: number, widthMm?: number): number =>
+  ticketRows(heightMm) * (widthMm === undefined ? 1 : ticketColumns(widthMm));
+
+/**
+ * # ⚠ THE REFERENCE PANEL WAS KNIFE-EDGE ON ITS OWN DEFINITION — FOUND BY RUNNING THE GATE
+ *
+ * Measured 2026-08-10 on the first `layout:check` run, and it is a `27-F11c` violation of exactly
+ * the kind that FR exists to forbid:
+ *
+ * ```
+ *   [pass-22]    274 mm of glass → 3 ticket(s) per page
+ *   [pass-22-hd] 274 mm of glass → 2 ticket(s) per page
+ * ```
+ *
+ * **The same 22" panel, at two resolutions, held different amounts of ticket** — *"a 1366×768 and
+ * a 1920×1080 15.6" panel hold the SAME number of 12 mm tiles. Extra pixels buy sharpness; only
+ * inches buy room."*
+ *
+ * The cause is arithmetic and not a wrong constant. `1920×1080` is exactly 16:9 and `1366×768` is
+ * **not** (1.77865 against 1.77778), so the second panel's derived height is **273.89 mm** against
+ * the first's **273.95** — a 0.06 mm difference, 0.02%. `TICKET_HEIGHT_MM` is defined as exactly a
+ * third of the reference panel, so the reference panel divides to **exactly 3.0**, and `floor`
+ * over a knife edge sends anything a hair under it to 2.
+ *
+ * **The fix is a tolerance and not a smaller ticket** (`27-F68` (b) — never trim the millimetres).
+ * 0.5% of a ticket is 0.46 mm: far larger than any aspect-ratio residue, far smaller than any real
+ * difference in glass. A panel genuinely 0.4 mm short of `n` tickets is `n` tickets, and the
+ * alternative — rounding — would claim a ticket the panel is up to half a ticket short of, which
+ * `03-F46` turns into a clipped card rather than a page.
+ *
+ * **Kept as a worked example rather than fixed quietly**, because the shape recurs: a constant
+ * derived from a reference case makes that reference case the exact boundary of a `floor`, and the
+ * first panel to disagree by a rounding error is the one the FR calls identical.
+ */
+const KNIFE_EDGE = 0.005;
 
 /**
  * `00 §5.7` — what the operator is told about the glass they are standing in front of.

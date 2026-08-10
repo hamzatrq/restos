@@ -167,6 +167,20 @@ export const TicketCard = ({
           type="button"
           onClick={onBump}
           style={{
+            /*
+              **The bump sits at the BOTTOM of the card, and that is `27-F4` rather than styling.**
+
+              Found by looking (August 2026, the pass screen's first grid screenshot): tickets in a
+              grid are all the height of the tallest one, so with the control following the items a
+              one-line ticket put DONE near the top of its cell and a four-line ticket put it
+              two-thirds down — **the same control in a different place on every card in the same
+              glance**. `27-F4` protects an operator's positional memory, `27-F9` is about a wet
+              hand landing where it aimed, and a kitchen at 1–2 m is where both bite hardest.
+
+              `marginTop: auto` pins it to the bottom of the flex column, so DONE is on the same
+              line across the whole page whatever the tickets hold.
+            */
+            marginTop: "auto",
             // 27-F8 kitchen row: 96 dp, above the standing-counter minimum, because this is the
             // surface where the 21.34% wet-hand error was measured and it is read at 1–2 m.
             minHeight: targetFor("kitchen"),

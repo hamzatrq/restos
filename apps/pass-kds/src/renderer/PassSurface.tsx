@@ -1,7 +1,7 @@
 import { space, TicketCard, Tile, typography, useColor, usePhysicalSize } from "@restos/ui";
 import { useEffect, useState } from "react";
 import type { PassTicketWire } from "../shared/ipc";
-import { ticketsPerPage } from "../shared/ticket-capacity";
+import { ticketColumns, ticketsPerPage } from "../shared/ticket-capacity";
 
 /**
  * # THE PASS QUEUE — `03-F13`, `03-F14`, `03-F15`, `03-F16`, `03-F23`, `03-F46`
@@ -60,12 +60,15 @@ export const PassSurface = ({ tickets, onBump, readySignalOwner }: PassSurfacePr
   const label = typography["text-label"];
 
   // `27-F11c` — capacity is a physical question and `size` is `null` until the box is measured.
-  // One ticket is the floor (`ticketsPerPage`), so there is never a page with nothing on it.
+  // `27-F2` — page capacity comes from the surface's usable AREA, so both axes are read. One
+  // ticket is the floor, so there is never a page with nothing on it.
   const heightMm = size?.heightMm ?? 0;
-  const naive = ticketsPerPage(heightMm);
+  const widthMm = size?.widthMm ?? 0;
+  const columns = ticketColumns(widthMm);
+  const naive = ticketsPerPage(heightMm, widthMm);
   const overflows = tickets.length > naive;
   // The pager only costs height when it is DRAWN, which is the half `OrderList` got wrong first.
-  const perPage = overflows ? ticketsPerPage(Math.max(0, heightMm - PAGER_MM)) : naive;
+  const perPage = overflows ? ticketsPerPage(Math.max(0, heightMm - PAGER_MM), widthMm) : naive;
   const pages = Math.max(1, Math.ceil(tickets.length / perPage));
   // `03-F46` — bumping a ticket pulls the next one up, so the page index can outrun the queue.
   // Clamping rather than resetting keeps an operator on page 2 while page 2 still exists.
@@ -115,13 +118,28 @@ export const PassSurface = ({ tickets, onBump, readySignalOwner }: PassSurfacePr
         </div>
       ) : null}
 
+      {/*
+        `27-F2`'s flat paged GRID, filled ROW-MAJOR — and the fill order is `27-F7` rather than a
+        CSS choice. `03-F13` is strictly chronological and `27-F7` makes the visual order the work
+        order, so the oldest ticket must be where a reader starts: top-left, then across, then
+        down. A column-major flow (`grid-auto-flow: column`) would put the second-oldest ticket
+        BELOW the oldest and the fourth at the top of the next column, which is a different work
+        order wearing the same rows.
+
+        `gridTemplateRows` is explicit rather than `auto`, so every card gets an equal share of
+        the height the capacity math costed it at — otherwise a one-line ticket and a four-line
+        ticket in the same row would leave the page short of the rows it promised.
+      */}
       <div
         style={{
           flex: 1,
           minHeight: 0,
-          display: "flex",
-          flexDirection: "column",
+          display: "grid",
+          gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+          gridAutoRows: "minmax(0, 1fr)",
+          gridAutoFlow: "row",
           gap: space["space-3"],
+          alignContent: "start",
         }}
       >
         {shown.length === 0 ? (
