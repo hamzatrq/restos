@@ -7,6 +7,17 @@ import {
   counterWindowOptions,
   PANEL_FLOOR_MM,
 } from "../main/window-options";
+// ── MODE CONTRACT (added August 2026) — three call sites, all marked like this one. ──────────
+// `27-F4`/`27-F8` BETWEEN panels, i.e. between modes. Lives in its own file because the layout
+// gate is worked on by several sessions at once and a cross-panel check has nothing to say about
+// any single surface. See `mode-contract.ts` for what it pins and why.
+import {
+  beginModePanel,
+  judgeModeContract,
+  modeContractSummary,
+  recordModeSurface,
+} from "./mode-contract";
+// ── end MODE CONTRACT import ─────────────────────────────────────────────────────────────────
 import { measureSurface, type SurfaceReport } from "./probe";
 
 /**
@@ -476,6 +487,13 @@ let clippingBoxesSeen = 0;
 let clippingAncestorsSeen = 0;
 
 const judge = (surface: string, state: State, r: SurfaceReport): void => {
+  // ── MODE CONTRACT call site 1 of 3 ─────────────────────────────────────────────────────────
+  // Every surface this gate judges is also one half of a cross-panel comparison. Recorded here
+  // rather than beside each `judge(...)` call so a surface another session adds — a new tab, a
+  // new escalation step — is compared across modes with no coordination, which is the same
+  // property the tab list read from the DOM already has.
+  recordModeSurface(surface, state, r);
+  // ── end MODE CONTRACT call site 1 ──────────────────────────────────────────────────────────
   surfacesMeasured += 1;
   controlsMeasured += r.controls.length;
 
@@ -1034,6 +1052,9 @@ const run = async (): Promise<number> => {
   // gets `03-F5`'s band up exactly like the first instead of inheriting an acknowledged one.
   // ---------------------------------------------------------------------------------------
   for (const panel of PANELS) {
+    // ── MODE CONTRACT call site 2 of 3 ───────────────────────────────────────────────────────
+    beginModePanel(panel);
+    // ── end MODE CONTRACT call site 2 ────────────────────────────────────────────────────────
     // The window's declared floor is 1366x768 of CONTENT, so a panel is never requested below it
     // and Electron never clamps one. Asserted rather than assumed: a clamped panel would be
     // measured under the wrong label, which is worse than not measuring it.
@@ -1378,6 +1399,15 @@ const run = async (): Promise<number> => {
     });
   }
 
+  // ── MODE CONTRACT call site 3 of 3 ───────────────────────────────────────────────────────
+  // ⚠ DELIBERATELY ABOVE `fatal`, per the warning in the next block: a check that pushes below
+  // that line pushes into an array nobody reads again, which the twin check already did for one
+  // round while printing a healthy summary. `27-F4`/`27-F8` verdicts carry no `fit` flag, so they
+  // bind on every panel including `ships: false` ones — `27-F68` (b) forbids shrinking a
+  // millimetre to fit, and small glass is precisely where that temptation lives.
+  for (const f of judgeModeContract()) failures.push(f);
+  // ── end MODE CONTRACT call site 3 ────────────────────────────────────────────────────────
+
   // ---------------------------------------------------------------------------------------
   // 5. THE OWED REGISTER — exempt the known fourth defect, and FAIL if it has been fixed.
   //
@@ -1424,6 +1454,9 @@ const run = async (): Promise<number> => {
       `${clippingBoxesSeen} overflowing boxes, ` +
       `${clippingAncestorsSeen} clipping ancestors walked`,
   );
+  // ── MODE CONTRACT: its own counts, printed separately so a healthy total cannot cover for a
+  // dead cross-panel check. Notes only — the verdicts were pushed above `fatal`.
+  note(modeContractSummary());
 
   if (probe.length > 0) {
     note("");
