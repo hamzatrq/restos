@@ -124,6 +124,19 @@ describe("registry growth must fail this suite before it can silently no-op (fix
    * ORDER- and ITEM-keyed type. No assertion changed meaning: the two below are the union and
    * the disjointness, and neither ever read the narrower sense. */
   const PINNED_FOLD_CONSUMED = [
+    // ── AMENDED August 2026 (05-F7) ──────────────────────────────────────────────────────
+    // The manager console's event extension. Pinned HERE rather than in `PINNED_NOT_FOLDED`
+    // on `kot.print_failed`'s reasoning ten lines down: that set states `01-F52`'s "not an
+    // input to ANY fold", and these three are consumed by the order-keyed engine exactly as
+    // the two print facts are — counted, projection-inert, no device projection in `26`'s
+    // ratified matrix. `05-F6`'s resulting `void/comp/discount.recorded` is what carries an
+    // approval into a projection, and it is a separate event appended by the requesting POS.
+    // `01-F36`'s "first response wins" lives on the pending QUEUE (`05 §5`, `01-F7`), not
+    // here: expressing it in a fold would need a total order `01-F34` forbids inventing.
+    // These three lines are the "spec-PR + oracle-pin event" the assertion below demands.
+    "approval.denied",
+    "approval.granted",
+    "approval.requested",
     "availability.changed",
     "cash.deposit_recorded",
     "cash.drawer_opened",

@@ -7,6 +7,46 @@
 - Money = branded integer paisas; quantities = branded integer mg/ml/units. No floats, ever.
 - **IMPLEMENTED (Wave 0).** See `README.md` for the module map. Changes here are spec-PR + senior review (SACRED path, 18 §2).
 
+## Mutation matrix — `05-F7`'s approval family (round-3 law), control **338/338** green
+
+`approval.requested / granted / denied` were in the `01 §4` catalog and had **no payload schema
+here**, so `01-F4` made every emit an `UnknownEventTypeError` and `02-F20`'s remote path was
+*unbuildable*. `__acceptance__/approval-schemas.test.ts` is the oracle.
+
+Mutated **in-tree** with a checksum restore trap (`registry.ts` verified byte-identical after —
+`32cbfeda…`). Nothing here is a security constant: each mutant is a schema branch that reds a test
+rather than downgrading a credential, which is the narrow case AGENTS.md's out-of-tree rule leaves
+in-tree. Every row is the FULL package suite. **In EVERY row the failing FILE was
+`approval-schemas.test.ts` alone, so all 328 pre-existing domain tests stayed green under every
+mutant** — the kills are attributable to the new file rather than to the suite at large.
+
+| # | mutant (exactly one branch) | new 10 failed | pre-existing 328 |
+|---|---|---|---|
+| A1 | **THE `02-F41` MUTANT — `approval.granted` collapses to ONE identity (`requester_user_id` dropped)** | **1** | **all green** |
+| A2 | the quieter twin — `requester_user_id` made `.optional()`, so a caller may omit it | 1 | all green |
+| A3 | `approval_type` opened to a free string (`02-F42`'s precedent undone) | 1 | all green |
+| A4 | **THE DEFECT VERBATIM — the three types unregistered (the pre-change tree)** | **2** | **all green** |
+| A5 | **NEGATIVE CONTROL — `reason` and `amount_paisa` swap position; same behaviour** | **0** | all green |
+
+**A1 is the one to re-run after any change here.** It is the remote form of the defect the local
+path spends a whole second `createPinSession` avoiding: `unlock()` MOVES the session, so approving
+through the cashier's own would sign her out and `02-F41` would attribute her next twenty orders to
+whoever authorised one paid-out. A *remote* grant crosses a plane with no session to move, so no
+mechanism protects it — only this schema does, and A1 is what proves the schema bites rather than
+merely describing the intent.
+
+**A5 is what makes every red row mean anything:** a real one-branch edit to the same object reddens
+nothing, so the oracle holds the PROPERTY and is not pinning field order.
+
+**⚠ Two mutants are NOT in the table because they are not test kills — they fail COMPILE, and both
+were observed live rather than constructed.** Adding three types to `payloadSchemas` immediately
+broke `pnpm typecheck` in two places, which is `18 §3`'s exhaustive-`switch`-with-`never` rule and
+`merge-workcounter.test.ts`'s compile-level registry pin working exactly as designed:
+`folds/merge.ts` had no case (`Argument of type '"approval.denied" | …' is not assignable to
+parameter of type 'never'`) and the oracle's partition had no disposition for them (`Type 'true' is
+not assignable to type 'never'`). **The registry cannot grow silently here**, and that is a stronger
+guarantee than any assertion in this package — reverting either fix is a red build, not a red test.
+
 ## Mutation matrix — `14-F30`'s `device.manage` row (round-3 law)
 
 `14-F13` puts an immediate, irreversible kill switch on an authenticated back-office screen, and

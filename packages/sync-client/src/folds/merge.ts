@@ -743,6 +743,27 @@ export const createMergeEngine = (): MergeEngine => {
         // costs one counted no-op rather than a phantom order row.
         return;
       }
+      case "approval.requested":
+      case "approval.granted":
+      case "approval.denied": {
+        // `05-F7`'s extension, registered August 2026. Consumed and projection-inert here for
+        // the same reason as the two print facts above: `26`'s ratified matrix declares no
+        // device projection for an approval, and the thing an approval *changes* is a
+        // `void/comp/discount.recorded` that `05-F6` has the requesting POS append separately —
+        // so projecting the decision here would give one fact two homes and let a fold and a
+        // ledger event disagree about whether an act was authorised.
+        //
+        // `01-F36`'s idempotency ("applies only while its request is pending; duplicates and
+        // stale responses are logged no-ops") is deliberately NOT enforced here either. It is a
+        // rule about the pending QUEUE, which `05 §5` materialises on the manager device and
+        // `01-F7` puts in a cloud read model — and expressing "first response wins" in a fold
+        // would need a total order this engine does not have and `01-F34` forbids inventing.
+        //
+        // Deliberately NOT in `PARKING_TYPES`, on `kot.print_failed`'s reasoning: this case
+        // touches no entity, so an early straggler costs one counted no-op rather than a
+        // phantom row.
+        return;
+      }
       case "order.table_assigned": {
         const p = event.payload as TableAssignedP;
         const e = entity(p.order_id);
