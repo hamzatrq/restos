@@ -21,6 +21,7 @@ import {
   sellableMenu,
   stationResolver,
 } from "./catalog";
+import { DEV_IDENTITY, describeDeviceIdentity, resolveDeviceIdentity } from "./device-identity";
 import { printerTransport } from "./file-printer";
 import { createGateway } from "./gateway";
 import {
@@ -64,13 +65,6 @@ import { counterWindowOptions, describePanelFit, resolvePanelFit } from "./windo
  */
 
 /**
- * `01-F13` — a device's identity is issued at admission and persisted, never generated at
- * boot. This is a DEV SEED and is marked as one: a device that mints a fresh `device_id`
- * every launch would fork its own outbox on every restart. Admission (`01-F47`) replaces this
- * and is Wave-1 work that has not landed; until it does, the ids are stable constants rather
- * than `newId()` calls so that a relaunch resumes the same store instead of orphaning it.
- */
-/**
  * This bundle's own directory.
  *
  * NOT `__dirname`: `package.json` declares `"type": "module"` and electron-vite emits main as
@@ -96,14 +90,8 @@ const electronAddonPath = (): string =>
     "better-sqlite3.node",
   );
 
-const DEV_IDENTITY = {
-  org_id: "00000000-0000-7000-8000-000000000001",
-  branch_id: "00000000-0000-7000-8000-000000000002",
-  device_id: "00000000-0000-7000-8000-000000000003",
-} as const;
-
 /**
- * **A DEV SEED ROSTER, exactly like `DEV_IDENTITY` above — and unlike its predecessor it
+ * **A DEV SEED ROSTER, exactly like `DEV_IDENTITY` (`main/device-identity.ts`) — and unlike its
  * verifies for real.**
  *
  * What was here was a four-digit dev constant and a string comparison against it, which
@@ -164,7 +152,7 @@ const seedDevStaff = async (store: ReturnType<typeof openStore>): Promise<void> 
       user_id,
       display_name,
       pin_hash,
-      assignments: [{ role, branch_id: DEV_IDENTITY.branch_id }],
+      assignments: [{ role, branch_id: store.identity.branch_id }],
     })),
   });
 };
@@ -220,7 +208,7 @@ const kotCapability = () =>
 /**
  * What this terminal is called (`00 §5.7` — the strip names the device beside the operator).
  *
- * A marked DEV SEED like `DEV_IDENTITY` above: admission (`01-F47`) is what will carry a real
+ * A marked DEV SEED like `DEV_IDENTITY` (`main/device-identity.ts`): admission (`01-F47`) is what will carry a real
  * terminal name. One constant rather than two literals because `gateway.ts` takes it twice, and
  * a device that disagreed with itself about its own name is the shape of defect this whole file
  * is being read for.
@@ -430,9 +418,12 @@ const fatal = (error: unknown): void => {
 };
 
 app.whenReady().then(async () => {
+  // Resolved BEFORE the store, and inside `whenReady` so a refusal reaches `fatal`'s dialog
+  // rather than dying at module load with no window and nothing on screen.
+  const identity = resolveDeviceIdentity(process.env);
   const store = openStore({
     path: join(app.getPath("userData"), "device.db"),
-    identity: DEV_IDENTITY,
+    identity,
     // The Electron-ABI addon, built by `pnpm rebuild:native`. One checkout serves two V8 ABIs
     // and `bindings` resolves `build/Release/` first, so leaving this to discovery means the
     // Electron build overwrites the one Node's test suites need — they fight over one file.
@@ -488,10 +479,10 @@ app.whenReady().then(async () => {
   const pins = createPinSession({
     // `01-F28` — the synced credential hashes, on disk, verified with the WAN cable pulled.
     registry: store.staff,
-    // `01-F27`'s other axis. `registered: true` because `DEV_IDENTITY` above stands in for an
+    // `01-F27`'s other axis. `registered: true` because the resolved identity stands in for an
     // admitted device; when `01-F47` lands this reads the real admission state and an
     // unpaired terminal refuses every PIN (`01-F25`, `01-F48` fail-closed).
-    device: { device_id: DEV_IDENTITY.device_id, registered: true },
+    device: { device_id: store.identity.device_id, registered: true },
     idle_lock_ms: IDLE_LOCK_MS,
     max_failed_attempts: MAX_FAILED_ATTEMPTS,
     now: () => wallClock.now(),
@@ -621,6 +612,8 @@ app.whenReady().then(async () => {
    * screen is visibly broken. So the source is printed, and the `assumed` case says so at
    * length. This is the same argument as `catalogBootSummary` directly above.
    */
+  console.log(describeDeviceIdentity(store.identity, process.env));
+
   console.log(describePanelDensity(panelDensity()));
 
   /**
@@ -746,7 +739,7 @@ app.whenReady().then(async () => {
    */
   const approvals = createPinSession({
     registry: store.staff,
-    device: { device_id: DEV_IDENTITY.device_id, registered: true },
+    device: { device_id: store.identity.device_id, registered: true },
     idle_lock_ms: IDLE_LOCK_MS,
     max_failed_attempts: MAX_FAILED_ATTEMPTS,
     now: () => wallClock.now(),
@@ -993,7 +986,7 @@ app.whenReady().then(async () => {
        * `01-F26`'s per-(user, location) assignment, projected for the identification grid.
        *
        * **This branch's assignment, not the first one in the list.** A user may hold different
-       * roles at different branches and this till is one branch (`DEV_IDENTITY.branch_id`, and
+       * roles at different branches and this till is one branch (`store.identity.branch_id`, and
        * the gateway's own device identity in a real deployment), so taking `[0]` would show a
        * cashier here the manager role she holds somewhere else. `main/authorize.ts` already
        * matches on `branch_id` for exactly this reason when it answers Commandment 8; this is the
@@ -1003,7 +996,7 @@ app.whenReady().then(async () => {
        * rather than guessing, and a guessed role is a false claim about a person's authority.
        * It authorizes nothing either way: see `RosterMember`.
        */
-      role: m.assignments.find((a) => a.branch_id === DEV_IDENTITY.branch_id)?.role ?? null,
+      role: m.assignments.find((a) => a.branch_id === store.identity.branch_id)?.role ?? null,
     })),
   );
   /**
