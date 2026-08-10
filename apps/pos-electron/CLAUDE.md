@@ -56,7 +56,7 @@ Three failures found by launching, each of which builds cleanly and dies at load
 `main/index.ts` uses `import.meta.url`, never `__dirname` — `"type": "module"` means the main
 bundle is ESM and `__dirname` does not exist there.
 
-## The window is 1366x768 of PAGE, and its FLOOR is 215 x 134 mm of GLASS
+## The window is 1366x768 of PAGE, and its FLOOR is 220 x 125 mm of GLASS
 
 `main/index.ts` passes `useContentSize: true`, which is `27 §1a`'s counter panel measured as the
 renderer sees it. Without it those numbers describe the window FRAME and the renderer
@@ -76,12 +76,30 @@ It over-blocked the most likely BYO device and under-blocked a broken one, becau
 count is not a size** (`27-F11c`). 1024x600 and 1366x768 on the same 10.1" glass are 78% apart in
 pixels and give the same two clipped surfaces — the pixels bought nothing.
 
-`window-options.ts` declares `PANEL_FLOOR_MM = { width: 215, height: 134 }` and converts it per
-panel through `27-F68`'s density: 851x530 css px on the 100.5-PPI counter, 1314x819 on a 155-PPI
-tablet. **Do not pin either pair** — `27-F68` (a) forbids it by name and `panel-fit-seam.test.ts`
-fails if any two measured panels share a pixel floor. The height is 37.4 mm of chrome under
-`03-F5`'s band plus Cash's 94-96 mm work area, taking the TOP of the measured range because a
-floor at the bottom of one admits the panel that clips; the width is the **Order tab's** measured
+**⚠ THE FLOOR IS `220 x 125` AND THE TABLE ABOVE IS HISTORY. This section said `215 x 134`, and
+said the 10.1" tablet "clips two surfaces" — both true until August 2026, both retired in the
+same change.** `packages/ui`'s `compact` mode stopped being three numbers and became an
+arrangement: the tab rail turns vertical (85 dp of chrome off every surface), `TenderPanel` drops
+panel chrome it does not need at that size (42 dp), `Panel` tightens its inset, and Cash's tile
+rows finally have something to wrap against. The 10.1" tablet class now renders **every** surface
+with zero violations and it `ships: true`. **No target moved** — the gate measures a 20.00 mm
+keypad key on that panel — so `27-F68` (b) is not engaged; the arrangement changed, not the
+millimetres. The old note argued the tablet "cannot GATE, because the only way to make the
+counter fit 126 mm is to shrink `27-F8`'s keys". That reasoned from *the pad is 528 dp and the box
+is 485* straight to *no layout can fit*, skipping the question of how much CHROME stood between
+them. The answer was 85 dp of it.
+
+`window-options.ts` declares `PANEL_FLOOR_MM = { width: 220, height: 125 }` and converts it per
+panel through `27-F68`'s density. **Do not pin any pixel pair** — `27-F68` (a) forbids it by name
+and `panel-fit-seam.test.ts` fails if any two measured panels share a pixel floor. Each axis sits
+just under its smallest RENDERED-CLEAN panel (`netbook-1024` at 221.3 mm wide, `tablet-10.1` at
+125.7 mm tall) and `layout:check`'s `probe-below-floor` row (201.6 x 118.1 mm, 23 violations,
+three controls UNREACHABLE) is what stops the floor being a claim with no failing case behind it.
+**Pay is the height-binding surface (593 dp) and Cash is the width-binding one** — the old text
+said Cash set the height, which stopped being true when the grouping round moved its readout
+beside the pad, and the figure was carried forward with the wrong name on it. Cash's width demand
+is a FUNCTION of the height it gets, because its groups column-wrap: 1705 dp in a 485 dp box,
+1318 dp in a 569 dp box. The width used to be the **Order tab's** measured
 1356 dp and not `TenderPanel`'s 147 mm, because the floor must hold for every surface.
 
 **Above the floor it still binds; below it, it CLAMPS to the glass and the till STARTS.**
@@ -107,12 +125,15 @@ controls clip (defect 2's shape). No diagonal is safe in both directions, so the
 made visible instead — and **`unmeasured` outranks `too_small`**, because a floor computed from a
 guessed density is itself a guess.
 
-**⚠ WHAT IS UNMEASURED, stated rather than papered over.** Height was rendered at 126, 130, 174
-and 179 mm — two failures and two passes — so **nothing between 130 mm and 174 mm has ever been
-measured**, and the 134 mm floor sits inside that gap. Width was rendered at 69 mm (structurally
-broken) and 221 mm (clean); **69-215 mm is unmeasured.** Both numbers are the best reading of the
-evidence there is; neither is a verified boundary, and a panel in either gap gets the floor's
-verdict on an arithmetic argument rather than on a screenshot.
+**⚠ WHAT IS UNMEASURED, stated rather than papered over.** *This said "nothing between 130 mm and
+174 mm has ever been measured, and the 134 mm floor sits inside that gap" — **that gap is now
+closed**: `tablet-11.6` (144 mm), `laptop-12.5` (156 mm) and `laptop-13.3-hd` (166 mm) were added
+to the sweep and all three render clean.* What is still open is narrower and is a bracket rather
+than a walk: **118.1–125.7 mm of height and 201.6–221.3 mm of width** are bounded by one failing
+panel (`probe-below-floor`) and one passing panel each, so the floor is known to within ~8 mm on
+each axis and no closer. Nothing between 294 mm and 345 mm of width is rendered either. And every
+panel here is SIMULATED on a macOS host — the Windows till this ships to, with different font
+metrics, is still measured by nothing.
 
 **⚠ IF YOU CHANGE A COUNTER LAYOUT, LAUNCH IT AND MEASURE IT.** Every suite in this repo was
 green while a cashier could not settle an order. `pnpm -C apps/pos-electron test` renders in
@@ -227,16 +248,25 @@ reckoning — three controls unreachable become zero, but 46 dp is still lost an
 still clipped — and the composition check goes quiet. A verdict that flips on where an overflow
 was cut is measuring the cut, not the composition.
 
-**It sweeps SEVEN panels** (`DEC-UI-001` (e), extended August 2026), reloading between each so
-every one gets `03-F5`'s band rather than inheriting an acknowledged one:
+**It sweeps ELEVEN panels** (`DEC-UI-001` (e), extended August 2026 — this said SEVEN), reloading
+between each so every one gets `03-F5`'s band rather than inheriting an acknowledged one:
 
-| row | window px | diagonal | glass | ships |
-|---|---|---|---|---|
-| `counter-1366` / `counter-1920` | 1366x768 / 1920x1080 | 15.6" | 345 x 194 mm | yes |
-| `laptop-1280` | 1280x800 | 13.3" | 286 x 179 mm | **yes** — the BYO device the app used to refuse |
-| `tablet-10.1` / `netbook-1024` | 1366x768 / 1024x600 | 10.1" | 224 x 126 / 221 x 130 mm | no — below the floor |
-| `desktop-24` | 1920x1080 | 24" | 531 x 299 mm | yes |
-| `ultrawide-32` | 3840x1080 | 32" | 782 x 220 mm | yes |
+| row | window px | diagonal | glass | mode | ships |
+|---|---|---|---|---|---|
+| `counter-1366` / `counter-1920` | 1366x768 / 1920x1080 | 15.6" | 345 x 194 mm | counter | yes |
+| `laptop-1280` | 1280x800 | 13.3" | 286 x 179 mm | counter | **yes** — the BYO device the app used to refuse |
+| `laptop-13.3-hd` | 1366x768 | 13.3" | 294 x 166 mm | counter | yes — same diagonal as the row above, **different glass** (16:9 vs 16:10) |
+| `laptop-12.5` | 1920x1080 | 12.5" | 277 x 156 mm | counter | yes — **the tightest `counter` panel**, 6 mm over the mode's height threshold |
+| `tablet-11.6` | 1366x768 | 11.6" | 257 x 144 mm | compact | yes |
+| `tablet-10.1` / `netbook-1024` | 1366x768 / 1024x600 | 10.1" | 224 x 126 / 221 x 130 mm | compact | **yes** — the cheap Android class, and the shortest/narrowest that work |
+| `probe-below-floor` | 1024x600 | 9.2" | 202 x 118 mm | compact | **no — the failing case the floor rests on** |
+| `desktop-24` | 1920x1080 | 24" | 531 x 299 mm | wide | yes |
+| `ultrawide-32` | 3840x1080 | 32" | 782 x 220 mm | wide | yes |
+
+The four middle rows were added to close the 130–174 mm height gap the floor sat inside;
+`probe-below-floor` exists because every other row is evidence that hardware WORKS, and a floor
+is a claim about hardware that does not. **If `probe-below-floor` ever goes quiet, the floor has
+become too conservative and should come down** — the anti-rot direction this table never had.
 
 The two counter rows are the same 13.6 x 7.6 inches of glass, so under `27-F68` they must hold
 the SAME layout at different pixel counts; that is `27-F11c` stated as a test rather than as

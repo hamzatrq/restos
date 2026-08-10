@@ -12,6 +12,7 @@ export {
   PanelRoot,
   type PanelRootProps,
   type PhysicalSize,
+  usePanelSize,
   usePhysicalSize,
 } from "./physical";
 // 27-F11c — a layout mode is a PHYSICAL question too: `27 §1a` lists four deployment surfaces

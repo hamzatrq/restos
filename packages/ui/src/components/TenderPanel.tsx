@@ -145,10 +145,38 @@ export const TenderPanel = ({ dueP, takenP = paisa(0), onTender }: TenderPanelPr
       style={{
         display: "flex",
         gap: space["space-5"],
-        padding: space["space-5"],
-        background: color["bgColor-surface-raised"],
-        border: `1px solid ${color["borderColor-default"]}`,
-        borderRadius: space["space-2"],
+        /**
+         * **`compact` DROPS THE PANEL CHROME, and this is a precedent being followed rather than
+         * a new idea.** `CashSurfaces.tsx` made exactly this call on exactly this ground: *"THE
+         * ENTRY INSTRUMENT — no panel chrome, and that is the hardware floor talking … a `Panel`
+         * around this would cost 64 dp ≈ 10 mm of height on the surface that decides which glass
+         * can run RestOS."*
+         *
+         * Here it is **42 dp — 6.7 mm** of the vertical budget (`space-5` top and bottom, plus
+         * the rule), and it is the last thing standing between this surface and `27 §1a`'s 10.1″
+         * tablet class: measured with the band up, Pay held 585 dp of content in a 569 dp box,
+         * and 585 − 42 = 543 fits with room.
+         *
+         * **What is given up is nothing this panel needs on that glass.** A border earns its
+         * place by separating a region from what surrounds it, and on a 126 mm panel this
+         * section IS the work area — the rule was drawn ~4 dp inside `main`'s edge, boxing the
+         * whole screen and separating it from nothing. On `counter` and `wide` it is a composed
+         * object in a field of space (`Counter.tsx` centres it), the separation is real, and the
+         * chrome stays.
+         *
+         * `27-F66` is untouched: a boundary carries a region, and where there is no longer a
+         * distinct region there is nothing to carry. No control changes size — `27-F68` (b) is
+         * about millimetres of TARGET, and every key, every method button and `TAKE CASH` keep
+         * theirs to the dp.
+         */
+        ...(mode === "compact"
+          ? {}
+          : {
+              padding: space["space-5"],
+              background: color["bgColor-surface-raised"],
+              border: `1px solid ${color["borderColor-default"]}`,
+              borderRadius: space["space-2"],
+            }),
         alignItems: "flex-start",
         // The panel is as wide as the two columns need and no wider. Left to fill the work
         // area it stretched `TAKE CASH` to ~850 px and threw the `DUE` figure to the far side

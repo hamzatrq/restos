@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { WorkSurface } from "../surface-mode";
+import { useSurfaceMode, WorkSurface } from "../surface-mode";
 import { inverse, ThemeProvider, useColor, usePolarity } from "../theme";
 import { space } from "../tokens/index";
 import type { Alarm } from "./AlarmBand";
@@ -140,6 +140,12 @@ const Shell = ({
   children,
 }: AppShellProps) => {
   const color = useColor();
+  /**
+   * `compact` rearranges the SHELL, not just what is inside it, and the two changes below are
+   * the whole of it. Both are pure "where and how big" (`surface-mode.tsx`'s `27-F4` contract):
+   * nothing is added, removed, reordered or shrunk below a `27-F8` target.
+   */
+  const compact = useSurfaceMode() === "compact";
   return (
     <div
       style={{
@@ -202,19 +208,58 @@ const Shell = ({
         alarms={alarms}
         onAcknowledgeAlarm={onAcknowledgeAlarm}
       />
-      <TabRail tabs={tabs} activeId={activeTabId} onSelect={onSelectTab} />
+      {/*
+        **THE RAIL AND THE WORK AREA SIT SIDE BY SIDE ON SHORT GLASS.**
 
-      {/* The work surface. The shell never scrolls it — 27-F2 pages instead — so a child that
-        overflows is a layout bug to see, not to hide behind a scrollbar.
+        `TabRail` decides its own orientation from the same mode (see its header for why the
+        rail is the biggest single height lever in the shell, and for the four laws the move does
+        NOT break). What has to happen HERE is the box around it: a horizontal rail is a row in
+        the shell's column, and a vertical one has to become a column in a row beside `main`, or
+        it would draw itself sideways in a full-width band and change nothing at all.
 
-        `WorkSurface` measures it ONCE and tells every surface inside what size of glass it is
-        on (`27-F11c`). It goes here rather than in each tab for the reason `PanelRoot` is at
-        the app root: two surfaces that measure separately can disagree about the panel they are
-        on, invisibly. It measures the box AFTER the strip, the rail and `03-F5`'s band have
-        taken their share, which is the surface a layout actually has. */}
-      <main style={{ flex: 1, minHeight: 0, padding: space["space-4"], overflow: "hidden" }}>
-        <WorkSurface>{children}</WorkSurface>
-      </main>
+        The status strip stays across the top in both arrangements, `03-F5`'s band with it. That
+        is `27-F11d`: the band is chrome over a work area that does not move, and putting it in a
+        side column would make it narrower exactly when it has the most to say.
+      */}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: compact ? "row" : "column",
+          flex: 1,
+          minHeight: 0,
+          minWidth: 0,
+        }}
+      >
+        <TabRail tabs={tabs} activeId={activeTabId} onSelect={onSelectTab} />
+
+        {/* The work surface. The shell never scrolls it — 27-F2 pages instead — so a child that
+          overflows is a layout bug to see, not to hide behind a scrollbar.
+
+          ⚠ This comment used to say `WorkSurface` "measures it ONCE and tells every surface
+          inside what size of glass it is on". It does not any more, and the distinction is the
+          point: the box below is the WORK AREA, which `03-F5`'s band shortens by 102 dp and the
+          vertical rail narrows — so a MODE read from it would change under a cashier the moment
+          a printer stopped answering, and would read its own output here. The mode comes from
+          `PanelRoot`'s measurement of the GLASS (`usePanelSize`), which does not move.
+          `WorkSurface` is the box; the panel is the mode. Capacity still measures the box, in
+          `ItemGrid` and `OrderList`.
+
+          The padding halves in `compact`. It is `space-4` → `space-2`, a token step and not a
+          literal, and it is 32 dp of the vertical budget on a panel that has ~790 to spend —
+          worth taking because a margin is the one thing on the surface that is not a control,
+          a number or a label. `27-F68` (b) is untouched: padding is not a target. */}
+        <main
+          style={{
+            flex: 1,
+            minHeight: 0,
+            minWidth: 0,
+            padding: compact ? space["space-2"] : space["space-4"],
+            overflow: "hidden",
+          }}
+        >
+          <WorkSurface>{children}</WorkSurface>
+        </main>
+      </div>
     </div>
   );
 };

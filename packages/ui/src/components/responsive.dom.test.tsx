@@ -24,60 +24,127 @@ import { Readout } from "./Readout";
 describe("surfaceModeFor — 27-F11c, and the boundaries are hardware, not round numbers", () => {
   /**
    * `27 §1a`'s own table, converted the way `27-F68` converts everything: a panel's physical
-   * width is `diagonalInches × (pixelWidth / hypot) × 25.4`, in which the RESOLUTION CANCELS.
-   * These are the surfaces this product actually deploys to, and the assertion is that each one
-   * lands in the mode its ergonomics belong to.
+   * size is `diagonalInches × (pixels / hypot) × 25.4`, in which the RESOLUTION CANCELS. These
+   * are the surfaces this product actually deploys to, and the assertion is that each one lands
+   * in the mode its ergonomics belong to.
+   *
+   * **⚠ EVERY CALL BELOW GAINED A SECOND ARGUMENT IN AUGUST 2026 AND THAT IS THE POINT OF THE
+   * ROUND, not a mechanical fixup.** `surfaceModeFor` took width only, and the layout gate's own
+   * sweep is what refuted it: of the two panels reporting violations, **the Pay tab's was a pure
+   * HEIGHT failure** (593 dp of content in a 485 dp box) and Cash's width overflow was a height
+   * failure wearing a width costume — its groups column-wrap, so a shorter box makes more columns
+   * and therefore more width. A mode that cannot see the short axis cannot arrange for it.
    */
-  const glassWidthMm = (diagonalIn: number, w: number, h: number): number =>
-    ((diagonalIn * w) / Math.hypot(w, h)) * 25.4;
+  const glassMm = (diagonalIn: number, w: number, h: number): { width: number; height: number } => {
+    const perPixel = (diagonalIn / Math.hypot(w, h)) * 25.4;
+    return { width: w * perPixel, height: h * perPixel };
+  };
+  const modeOf = (diagonalIn: number, w: number, h: number) => {
+    const g = glassMm(diagonalIn, w, h);
+    return surfaceModeFor(g.width, g.height);
+  };
 
   it("puts BOTH of 27 §1a's counter panels in the same mode — the whole of 27-F11c", () => {
     // "A 1366×768 and a 1920×1080 15.6″ panel hold the SAME number of 12 mm tiles. Extra pixels
     // buy sharpness; only inches buy room." A pixel-keyed breakpoint gets this backwards, which
     // is the entire reason this function takes millimetres.
-    const small = glassWidthMm(15.6, 1366, 768);
-    const large = glassWidthMm(15.6, 1920, 1080);
-    expect(Math.round(small)).toBe(345);
-    expect(Math.round(large)).toBe(345);
-    expect(surfaceModeFor(small)).toBe("counter");
-    expect(surfaceModeFor(large)).toBe("counter");
+    const small = glassMm(15.6, 1366, 768);
+    const large = glassMm(15.6, 1920, 1080);
+    expect(Math.round(small.width)).toBe(345);
+    expect(Math.round(large.width)).toBe(345);
+    expect(Math.round(small.height)).toBe(194);
+    expect(Math.round(large.height)).toBe(194);
+    expect(surfaceModeFor(small.width, small.height)).toBe("counter");
+    expect(surfaceModeFor(large.width, large.height)).toBe("counter");
   });
 
   it("separates a 24-inch desktop from a 15.6-inch counter at IDENTICAL pixels", () => {
     // The pair that made the founder's defect invisible: same 1920×1080, 1.5× the glass. If these
     // two ever return the same mode, the product has gone back to laying out against pixels.
-    expect(surfaceModeFor(glassWidthMm(15.6, 1920, 1080))).toBe("counter");
-    expect(surfaceModeFor(glassWidthMm(24, 1920, 1080))).toBe("wide");
+    expect(modeOf(15.6, 1920, 1080)).toBe("counter");
+    expect(modeOf(24, 1920, 1080)).toBe("wide");
   });
 
   it("puts 27 §1a's ~10.1-inch waiter tablet in compact, at the same pixels as the counter", () => {
-    expect(surfaceModeFor(glassWidthMm(10.1, 1366, 768))).toBe("compact");
+    expect(modeOf(10.1, 1366, 768)).toBe("compact");
   });
 
   it("puts 27-F11f's 22-inch pass panel and a 32-inch ultrawide in wide", () => {
-    expect(surfaceModeFor(glassWidthMm(22, 1920, 1080))).toBe("wide");
-    expect(surfaceModeFor(glassWidthMm(32, 3840, 1080))).toBe("wide");
+    expect(modeOf(22, 1920, 1080)).toBe("wide");
+    expect(modeOf(32, 3840, 1080)).toBe("wide");
   });
 
-  it("is closed and total: every boundary is inclusive-below and there is no gap", () => {
-    // A mutant that flips a `>=` to a `>` leaves one width with no mode; a mutant that reorders
-    // the ternary silently makes `wide` unreachable. Both die here.
-    expect(surfaceModeFor(SURFACE_MODE_MIN_MM.counter - 0.01)).toBe("compact");
-    expect(surfaceModeFor(SURFACE_MODE_MIN_MM.counter)).toBe("counter");
-    expect(surfaceModeFor(SURFACE_MODE_MIN_MM.wide - 0.01)).toBe("counter");
-    expect(surfaceModeFor(SURFACE_MODE_MIN_MM.wide)).toBe("wide");
-    expect(surfaceModeFor(0)).toBe("compact");
-    expect(surfaceModeFor(10_000)).toBe("wide");
+  /**
+   * **THE DEFECT THE SECOND AXIS EXISTS TO CLOSE, as the pair that used to collide.**
+   *
+   * A 6.5″ phone (69 × 150 mm) and a 13.3″ laptop (286 × 179 mm) resolved to the SAME mode under
+   * the width-only rule — one of them structurally broken at 151 layout violations, the other
+   * completely clean at zero. They are now different modes, and neither answer is a coincidence
+   * of the threshold: the phone fails the width test and the laptop passes both.
+   */
+  it("no longer collides a 6.5-inch phone with a 13.3-inch laptop", () => {
+    expect(modeOf(6.5, 1080, 2340)).toBe("compact");
+    expect(modeOf(13.3, 1280, 800)).toBe("counter");
+  });
+
+  /**
+   * **SHORT BEATS WIDE, and this is the assertion that pins the ORDER of the two tests.**
+   *
+   * A panel 783 mm across and 140 mm tall clears `wide`'s width by 323 mm and cannot hold the
+   * standard vertical arrangement at all. Reaching `wide` first would spend the roomy axis on a
+   * bigger money column while `27-F8`'s untouchable 528 dp keypad hung off the bottom edge. An
+   * implementation that tests `wide` before `compact` passes every other case in this file.
+   */
+  it("calls a very wide but SHORT panel compact, never wide", () => {
+    expect(surfaceModeFor(783, 140)).toBe("compact");
+    expect(surfaceModeFor(783, 220)).toBe("wide");
+  });
+
+  it("is closed and total on BOTH axes: inclusive-below, no gap, no unreachable mode", () => {
+    // A mutant that flips a `>=` to a `>` leaves one size with no mode; a mutant that reorders
+    // the ternary silently makes `wide` unreachable. Both die here, now on two axes.
+    const { widthMm: cw, heightMm: ch } = SURFACE_MODE_MIN_MM.counter;
+    expect(surfaceModeFor(cw - 0.01, ch)).toBe("compact");
+    expect(surfaceModeFor(cw, ch - 0.01)).toBe("compact");
+    expect(surfaceModeFor(cw, ch)).toBe("counter");
+    expect(surfaceModeFor(SURFACE_MODE_MIN_MM.wide.widthMm - 0.01, ch)).toBe("counter");
+    expect(surfaceModeFor(SURFACE_MODE_MIN_MM.wide.widthMm, ch)).toBe("wide");
+    expect(surfaceModeFor(0, 0)).toBe("compact");
+    expect(surfaceModeFor(10_000, 10_000)).toBe("wide");
+    // Each axis alone must be able to force `compact`, or one of them is decorative.
+    expect(surfaceModeFor(10_000, ch - 0.01)).toBe("compact");
+    expect(surfaceModeFor(cw - 0.01, 10_000)).toBe("compact");
   });
 
   it("has NO hardware sitting near a boundary — the margins are the safety", () => {
-    // The nearest panel on either side of 300 mm is the counter's work surface (~337) and the
-    // tablet (~224). A boundary a few millimetres of chrome could cross would reclassify a till.
-    const counter = glassWidthMm(15.6, 1366, 768);
-    const tablet = glassWidthMm(10.1, 1366, 768);
-    expect(counter - SURFACE_MODE_MIN_MM.counter).toBeGreaterThan(40);
-    expect(SURFACE_MODE_MIN_MM.counter - tablet).toBeGreaterThan(40);
-    expect(SURFACE_MODE_MIN_MM.wide - counter).toBeGreaterThan(100);
+    /**
+     * **⚠ THIS ASSERTION USED TO DEMAND 40 mm ON THE WIDTH AXIS AND IT IS 25 NOW. Read the
+     * reason before treating it as a weakening, because the basis moved twice.**
+     *
+     * 1. **The old rationale is void rather than relaxed.** It read *"a boundary a few
+     *    millimetres of chrome could cross would reclassify a till"* — true when the input was
+     *    the WORK SURFACE, whose width chrome genuinely moves. The input is the GLASS now
+     *    (`usePanelSize`), and no amount of chrome moves the glass. What margin still buys is
+     *    tolerance to hardware variety, not to layout edits.
+     * 2. **40 mm is arithmetically unavailable once a 13.3″ laptop must be `counter`.** The
+     *    nearest hardware below the boundary is the 10.1″ tablet at 223.6 mm and the nearest
+     *    above is the laptop at 286.4 mm — a 62.8 mm gap in total, so the best possible split is
+     *    31.4 mm a side and no threshold can give 40. The gap got smaller because the SWEEP got
+     *    denser, which is the rail doing its job.
+     *
+     * The height axis is where the room is, and it keeps a real margin.
+     */
+    const counter = glassMm(15.6, 1366, 768);
+    const tablet = glassMm(10.1, 1366, 768);
+    const laptop = glassMm(13.3, 1280, 800);
+    expect(counter.width - SURFACE_MODE_MIN_MM.counter.widthMm).toBeGreaterThan(25);
+    expect(SURFACE_MODE_MIN_MM.counter.widthMm - tablet.width).toBeGreaterThan(25);
+    expect(laptop.width - SURFACE_MODE_MIN_MM.counter.widthMm).toBeGreaterThan(25);
+    expect(SURFACE_MODE_MIN_MM.wide.widthMm - counter.width).toBeGreaterThan(100);
+    // Height: the tablet is 24 mm below and every shipping panel is 29 mm or more above.
+    expect(SURFACE_MODE_MIN_MM.counter.heightMm - tablet.height).toBeGreaterThan(20);
+    expect(laptop.height - SURFACE_MODE_MIN_MM.counter.heightMm).toBeGreaterThan(25);
+    expect(counter.height - SURFACE_MODE_MIN_MM.counter.heightMm).toBeGreaterThan(40);
   });
 });
 

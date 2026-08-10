@@ -1,5 +1,5 @@
-import { createContext, type ReactNode, useContext } from "react";
-import { usePhysicalSize } from "./physical";
+import type { ReactNode } from "react";
+import { usePanelSize } from "./physical";
 
 /**
  * # The layout mode a surface is in — **derived from millimetres, never from pixels**
@@ -41,97 +41,147 @@ import { usePhysicalSize } from "./physical";
 export type SurfaceMode = "compact" | "counter" | "wide";
 
 /**
- * The two boundaries, in **millimetres of usable work surface width**, each named against the
- * hardware it separates rather than rounded to something tidy.
+ * # THE BOUNDARIES, ON **BOTH** AXES, IN MILLIMETRES OF **GLASS**
  *
- * | mode | width | what lands here |
+ * Two things changed here in August 2026 and each closed a measured defect.
+ *
+ * ## 1. Height is an axis. It was not, and every below-floor failure in the product was one.
+ *
+ * This read *"deliberately takes **width only** … a short surface is a clipping question and
+ * `layout:check` already measures every clipping box"*. That reasoning has a hole the sweep
+ * itself reported: of the two panels the gate found violations on, **the Pay tab's was a pure
+ * height failure (593 dp of content in a 485 dp box) and Cash's width overflow was a height
+ * failure in disguise** — Cash's groups column-wrap, so a shorter box produces more columns and
+ * therefore more width. Measuring the clipping is not the same as being able to do anything
+ * about it: a mode that cannot see the short axis cannot arrange for it.
+ *
+ * It also meant a 6.5″ phone (69 × 150 mm) and a 13.3″ laptop (286 × 179 mm) resolved to the
+ * **same mode** — one of them structurally broken, the other completely clean.
+ *
+ * ## 2. The input is the PANEL, not the work surface — see `usePanelSize`
+ *
+ * The work area shrinks by 102 dp when `03-F5`'s band goes up, which on this device is every
+ * confirm. Keying the mode on it would reflow the whole layout mid-service and destroy the one
+ * property that makes reflow legal under `27-F4` at all (below). The glass does not move.
+ *
+ * ## The table
+ *
+ * | mode | glass | what lands here |
  * |---|---|---|
- * | `compact` | < 300 mm | `27 §1a`'s ~10.1″ waiter tablet (**223 mm** wide), and any window smaller than the counter panel |
- * | `counter` | 300–459 mm | `27 §1a`'s 15.6″ counter, **both** resolutions (345 mm of glass, ~337 mm of work surface under `AppShell`'s padding) |
- * | `wide` | ≥ 460 mm | `27-F11f`'s 22″ pass panel (487 mm), a 24″ desktop (531 mm), the maximised window the defect was found on |
+ * | `compact` | width < 260 **or** height < 150 | `27 §1a`'s ~10.1″ tablet (223 × 126), a 1024×600 netbook (221 × 130), and anything short |
+ * | `counter` | ≥ 260 × 150 | `27 §1a`'s 15.6″ counter at **both** resolutions (345 × 194), a 13.3″ laptop (286 × 179) |
+ * | `wide` | width ≥ 460 | `27-F11f`'s 22″ pass panel, a 24″ desktop (531 × 299), a 32″ ultrawide (783 × 220) |
  *
- * **300** sits below the counter's work surface with real slack and above the tablet with more:
- * the nearest hardware on either side is 337 mm and 223 mm, so no panel in `27 §1a` is near the
- * edge and a few millimetres of chrome moving cannot reclassify a till.
+ * **260 mm is not invented and it is not this file's opinion.** `CashSurfaces.tsx` measured it
+ * and wrote it down for exactly this purpose: *"Holding this surface at one pad of height needs
+ * roughly 260 mm of work-surface width; below that the groups take a second column and the
+ * surface grows. **That width figure is the number for whoever defines the mode below
+ * `compact`.**"* The Cash tab is the surface that spends width, so the Cash tab is where the
+ * boundary comes from. It replaces **300**, which was chosen as a gap-splitter between 223 and
+ * 337 and had the side effect of classifying a perfectly roomy 13.3″ laptop as compact.
  *
- * **460** is the top of the 15.6″–19″ band. A 19″ 16:9 panel is 421 mm and is still a counter by
- * every property that matters; 22″ is 487 mm and is `27-F11f`'s pass-screen hardware, which is a
- * genuinely different surface. Putting the boundary between them is the only place it can go
- * that separates two things doc 27 actually distinguishes.
+ * **150 mm is the counter ARRANGEMENT's own worst case plus a cushion**, and it is measured the
+ * same way. With `03-F5`'s band up, a horizontal tab rail and the honesty strip inflated to
+ * three lines by its own too-small notice, the tallest surface (Pay, holding `27-F8`'s
+ * untouchable 528 dp pad) needs 879 dp = **140 mm** of glass. Below that the counter arrangement
+ * cannot be drawn without cutting a control, so the compact arrangement is not a preference
+ * there — it is the only legal layout. 150 leaves 10 mm rather than sitting on the boundary, for
+ * the reason `window-options.ts` gives about floors: one set at the bottom of a measured range
+ * admits the panel that clips.
+ *
+ * **460 mm** is unchanged and keeps its old derivation: the top of the 15.6″–19″ band, where a
+ * 19″ panel (421 mm) is still a counter by every property that matters and 22″ (487 mm) is
+ * `27-F11f`'s pass-screen hardware.
+ *
+ * **The keys carry their UNIT and that is not decoration.** A bare `height: 150` in this package
+ * is indistinguishable — to a reader, and to `discipline-ast.oracle.test.ts`'s `27-F8` scan,
+ * which flagged this exact line the first time it was written — from a hardcoded CSS touch
+ * target, the one thing a component here may never write. These are millimetres of glass and
+ * nothing lays out against them.
  */
-export const SURFACE_MODE_MIN_MM = { counter: 300, wide: 460 } as const;
+export const SURFACE_MODE_MIN_MM = {
+  counter: { widthMm: 260, heightMm: 150 },
+  wide: { widthMm: 460 },
+} as const;
 
 /**
  * The whole decision, as a pure function, so it can be asserted directly and mutated directly.
  *
- * Deliberately takes **width only**. Height varies independently — a short surface is a
- * *clipping* question and `layout:check` already measures every clipping box against its content
- * — and folding both into one enum produces modes nobody can reason about ("wide-but-short") for
- * a distinction no layout here needs. Where a surface genuinely cares about its height it should
- * read the millimetres, which `usePhysicalSize` already gives it.
+ * **Short beats wide, and the order of these two tests is the rule rather than an
+ * implementation detail.** A panel that is 783 mm wide and 140 mm tall is not a `wide` surface
+ * that happens to be short — it is a surface with no room for the standard vertical arrangement,
+ * and giving it `wide`'s roomier money column while the keypad hangs off the bottom edge would
+ * be spending the axis that has room to make the axis that does not worse. `compact` is tested
+ * first and on either axis; `wide` is only ever reached by a panel that already cleared both.
  */
-export const surfaceModeFor = (widthMm: number): SurfaceMode =>
-  widthMm >= SURFACE_MODE_MIN_MM.wide
-    ? "wide"
-    : widthMm >= SURFACE_MODE_MIN_MM.counter
-      ? "counter"
-      : "compact";
+export const surfaceModeFor = (widthMm: number, heightMm: number): SurfaceMode =>
+  widthMm < SURFACE_MODE_MIN_MM.counter.widthMm || heightMm < SURFACE_MODE_MIN_MM.counter.heightMm
+    ? "compact"
+    : widthMm >= SURFACE_MODE_MIN_MM.wide.widthMm
+      ? "wide"
+      : "counter";
 
 /**
- * `counter` is the default, and unlike `usePhysicalSize`'s deliberate `null` this default is
- * legitimate — the difference is what a wrong guess costs.
+ * **The mode of the panel this tree is rendering on**, derived from `PanelRoot`'s measurement.
  *
- * A guessed *capacity* puts tiles on a page with no pager to reach them, which on a counter is
- * an item that cannot be sold, so `usePhysicalSize` refuses to guess. A guessed *mode* costs one
- * frame of the wrong margins before the observer fires; nothing becomes unreachable, because
- * every mode lays out completely. Rendering nothing until measured would be the worse trade: it
- * puts a blank frame on the unlock surface 20–60× a shift, and under a `ResizeObserver` that
- * never fires — happy-dom performs no layout at all — it would blank every surface in every
- * renderer suite in the repo.
+ * `counter` when the panel has not been measured yet or when there is no `PanelRoot` above —
+ * and unlike `usePhysicalSize`'s deliberate `null` this default is legitimate, the difference
+ * being what a wrong guess costs. A guessed *capacity* puts tiles on a page with no pager to
+ * reach them, which on a counter is an item that cannot be sold, so `usePhysicalSize` refuses to
+ * guess. A guessed *mode* costs one frame of the wrong margins before the observer fires;
+ * nothing becomes unreachable, because every mode lays out completely. Rendering nothing until
+ * measured would be the worse trade: it puts a blank frame on the unlock surface 20–60× a shift,
+ * and under a `ResizeObserver` that never fires — happy-dom performs no layout at all — it would
+ * blank every surface in every renderer suite in the repo.
  *
  * `counter` rather than `compact` because it is `27 §1a`'s reference panel and the one this
  * product ships on: a default should be the common case, not the smallest case.
  */
-const SurfaceModeContext = createContext<SurfaceMode>("counter");
-
-/** The mode of the nearest enclosing `WorkSurface`. `counter` outside one (see above). */
-export const useSurfaceMode = (): SurfaceMode => useContext(SurfaceModeContext);
+export const useSurfaceMode = (): SurfaceMode => {
+  const panel = usePanelSize();
+  return panel === null ? "counter" : surfaceModeFor(panel.widthMm, panel.heightMm);
+};
 
 export type WorkSurfaceProps = {
   children: ReactNode;
 };
 
 /**
- * **Measures a work area once and tells everything inside it what size of surface it is on.**
+ * **The work area's own box** — a plain flex column filling whatever the shell left over.
  *
- * One measurement per screen, not one per component, for the same reason `PanelRoot` is the one
- * place a dp becomes a pixel: two components that measure separately are two components that can
- * disagree about what surface they are on, and the disagreement is invisible in a diff. It also
- * means the mode is derived from the **work area** — after the status strip, the tab rail and
- * `03-F5`'s band have taken their share — which is the surface a layout actually has, rather
- * than from the window, which is the surface it wishes it had.
+ * It is not a `<main>` and it draws no chrome of its own: `AppShell` owns the shell and puts
+ * this inside it, and `02-F18`'s lock surface — which sits OVER the shell and has no `AppShell`
+ * at all — uses one directly, so both surfaces are built the same way.
  *
- * It renders a plain flex column filling its parent. It is not a `<main>` and it draws no chrome
- * of its own: `AppShell` owns the shell and puts this inside it, and `02-F18`'s lock surface —
- * which sits OVER the shell and has no `AppShell` at all — uses one directly, so both surfaces
- * answer the same question the same way.
+ * **⚠ THIS COMPONENT USED TO DECIDE THE MODE AND NO LONGER DOES** (August 2026). It measured
+ * itself and published `surfaceModeFor(its own width)`, on the reasoning that *"the mode is
+ * derived from the work area … which is the surface a layout actually has, rather than from the
+ * window, which is the surface it wishes it had"*. That argument is correct about **capacity**
+ * and wrong about **mode**, and the difference bites in two places:
+ *
+ * - `03-F5`'s band takes 102 dp out of this box and puts it back on acknowledgement. A mode
+ *   read from here therefore changes when a kitchen printer stops answering — which on this
+ *   device is every confirm, about 20 s later. `27-F4` tolerates reflow for exactly one stated
+ *   reason: a till lives in one mode for its whole service life and no operator ever watches
+ *   the layout change under them. A band-triggered flip is precisely an operator watching it.
+ * - `compact` moves the tab rail out of the vertical chrome and into this box's width, so a
+ *   mode read from here would be reading its own output.
+ *
+ * The mode is `usePanelSize`'s job now — the glass, measured once at `PanelRoot`, which is
+ * where `27-F68` already puts the one fact about physical size the whole tree shares. This box
+ * is still the right thing for a grid to measure for CAPACITY, and `ItemGrid`/`OrderList` still
+ * do exactly that through their own `usePhysicalSize`.
  */
-export const WorkSurface = ({ children }: WorkSurfaceProps) => {
-  const [ref, size] = usePhysicalSize();
-  return (
-    <div
-      ref={ref}
-      style={{
-        height: "100%",
-        minHeight: 0,
-        minWidth: 0,
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
-      <SurfaceModeContext.Provider value={size === null ? "counter" : surfaceModeFor(size.widthMm)}>
-        {children}
-      </SurfaceModeContext.Provider>
-    </div>
-  );
-};
+export const WorkSurface = ({ children }: WorkSurfaceProps) => (
+  <div
+    style={{
+      height: "100%",
+      minHeight: 0,
+      minWidth: 0,
+      display: "flex",
+      flexDirection: "column",
+    }}
+  >
+    {children}
+  </div>
+);

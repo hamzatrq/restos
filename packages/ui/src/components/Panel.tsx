@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useSurfaceMode } from "../surface-mode";
 import { useColor } from "../theme";
 import { space, typography } from "../tokens/index";
 
@@ -97,17 +98,37 @@ export const Panel = ({
   const color = useColor();
   const t = typography["text-label"];
   const abnormal = tone === "abnormal";
+  /**
+   * **A region's INSET tightens by one token step on short glass, and its boundary does not.**
+   *
+   * A `Panel` spends `2 × space-4` on each axis, and the Cash tab stacks up to four of them —
+   * two nested, since the paid-out sequence is a region inside The drawer. That is 128 dp of
+   * padding on a panel with ~790 dp of glass to spend, and it was the last thing between the
+   * counter and `27 §1a`'s 10.1″ tablet class after the tab rail turned sideways.
+   *
+   * **What does NOT change is the part that does the work.** `27-F66` makes the BOUNDARY what
+   * carries a region — *"a neutral region is carried by its boundary, never by the fill step"* —
+   * and the border, the radius, the tone outline and the caption are all untouched. Padding is
+   * the space between a boundary and its contents; a region with a slightly tighter inset is
+   * still unambiguously a region, and on this glass the alternative is not a roomier panel but a
+   * control off the right-hand edge.
+   *
+   * It is a token step (`space-4` → `space-3`, `space-3` → `space-2`) and never a literal, and
+   * it touches no target: every `Tile` inside keeps `targetFor(posture)` to the dp, so `27-F68`
+   * (b) is untouched.
+   */
+  const compact = useSurfaceMode() === "compact";
   return (
     <section
       aria-label={title}
       style={{
         display: "flex",
         flexDirection: "column",
-        gap: space["space-3"],
+        gap: compact ? space["space-2"] : space["space-3"],
         minWidth: 0,
         minHeight: 0,
         ...(grow === undefined ? {} : { flex: grow }),
-        padding: space["space-4"],
+        padding: compact ? space["space-2"] : space["space-4"],
         borderRadius: space["space-2"],
         background:
           elevation === "raised"

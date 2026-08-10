@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useRef, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useRef, useState } from "react";
 import { DP_PER_INCH, mmFromDp } from "./tokens/index";
 
 /**
@@ -129,21 +129,71 @@ export type PanelRootProps = {
  *   which is that panel's 13.6″ × 7.6″ expressed in dp — and the 1920×1080 panel reported
  *   2176×1224, the same physical surface, which is `27-F11c` holding by construction.
  */
-export const PanelRoot = ({ panelPpi, devicePixelRatio, children }: PanelRootProps) => (
-  <div
-    style={{
-      zoom: cssPxPerDp(
-        panelPpi,
-        devicePixelRatio ?? (typeof window === "undefined" ? 1 : window.devicePixelRatio),
-      ),
-      height: "100%",
-    }}
-  >
-    {children}
-  </div>
-);
+export const PanelRoot = ({ panelPpi, devicePixelRatio, children }: PanelRootProps) => {
+  const [ref, size] = usePhysicalSize();
+  return (
+    <div
+      style={{
+        zoom: cssPxPerDp(
+          panelPpi,
+          devicePixelRatio ?? (typeof window === "undefined" ? 1 : window.devicePixelRatio),
+        ),
+        height: "100%",
+      }}
+    >
+      {/*
+        **The GLASS, measured once, so `surfaceModeFor` can key on a size that never moves.**
+
+        This div exists only to be measured, and it is measured rather than `PanelRoot` itself
+        for a mechanical reason: `zoom` is applied to the element that carries it, so that
+        element's own `contentRect` is in a coordinate system one step away from the one every
+        length inside it resolves against. A child of the zoomed element is unambiguously in dp,
+        which is the unit `mmFromDp` expects and the unit every other measurement in this package
+        already uses.
+
+        `height: 100%` on a `PanelRoot` that is itself `height: 100%` of the window makes this
+        the whole panel — chrome included, before the status strip, the tab rail or `03-F5`'s
+        band have taken anything.
+      */}
+      <div ref={ref} style={{ height: "100%", minHeight: 0 }}>
+        <PanelSizeContext.Provider value={size}>{children}</PanelSizeContext.Provider>
+      </div>
+    </div>
+  );
+};
 
 export type PhysicalSize = { widthMm: number; heightMm: number };
+
+/**
+ * # THE PANEL'S OWN SIZE, AND WHY IT IS A SEPARATE FACT FROM THE WORK AREA'S
+ *
+ * `WorkSurface` measures the box a layout actually gets — after the strip, the rail and
+ * `03-F5`'s band have taken their share — and that is the right input for **capacity**: how
+ * many tiles fit on a page is a question about the room a grid has right now.
+ *
+ * It is the WRONG input for **mode**, and the difference is not academic:
+ *
+ * - **`03-F5`'s band shrinks the work area by 102 dp and nothing else changes.** A mode keyed
+ *   on the work area would therefore flip the whole layout over the moment a kitchen printer
+ *   stopped answering — which on this device is *every confirm*, about 20 s later. `27-F4`
+ *   permits reflow across panels for exactly one reason, stated in `surface-mode.tsx`: a till
+ *   lives in one mode for its whole service life, so **no operator ever watches the layout
+ *   change under them.** A band-triggered mode flip breaks that premise and takes the
+ *   justification with it.
+ * - **A compact layout that moves the tab rail into the work area's width feeds its own output
+ *   back into its input.** Rail goes vertical → work area narrows → still compact → stable
+ *   here, but one threshold nudge away from oscillating on a resize.
+ *
+ * The panel does not move. It is the glass, and the glass is what `27-F11c` says capacity and
+ * arrangement are properties of: *"Physical size, never resolution, sets capacity."*
+ *
+ * `null` until the first measurement, for `usePhysicalSize`'s reason — a default is a guessed
+ * panel by another name. `useSurfaceMode` handles the null rather than inventing millimetres.
+ */
+const PanelSizeContext = createContext<PhysicalSize | null>(null);
+
+/** The measured size of the whole panel in millimetres, or `null` outside a `PanelRoot`. */
+export const usePanelSize = (): PhysicalSize | null => useContext(PanelSizeContext);
 
 /**
  * The measured physical size of an element, kept current as it resizes.

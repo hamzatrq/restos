@@ -17,6 +17,7 @@ import {
   space,
   Tile,
   typography,
+  useSurfaceMode,
 } from "@restos/ui";
 import { Fragment, useState } from "react";
 import type { AppendRequest, CashShift, CashState } from "../shared/ipc";
@@ -339,6 +340,33 @@ const PAID_OUT_REASONS = ["Supplier", "Repair", "Advance", "Other"] as const;
  */
 const ENTRY_READOUT_DP = 160;
 
+/**
+ * # THE WIDEST A GROUP'S TILE ROW MAY GET ON SHORT GLASS — `compact` only
+ *
+ * **The defect, measured.** Cash's groups flow `column` + `wrap`, so a column is exactly as wide
+ * as its widest item's **max-content** width — and a `flexWrap: "wrap"` row only ever wraps
+ * against a constraint that column flow never supplies. `PAY OUT OF THE DRAWER`'s four reason
+ * tiles therefore laid out in one unbreakable 465 dp line, and that single row set the width of
+ * the whole surface: 1385 dp of content in the 1270 dp `netbook-1024` gives it, with `Other`,
+ * `Receipt photo` and `Paid out` cut off the right edge — three of them **UNREACHABLE**, on the
+ * sequence `02-F26` makes a precondition of money leaving the drawer.
+ *
+ * The `flexWrap` was already there and had simply never been given anything to wrap against.
+ * This is that constraint, and it converts width into height on the one surface that now has
+ * height to spare: after the tab rail turned vertical, Cash holds 506 dp in a 569 dp box.
+ *
+ * **320 dp ≈ 51 mm is measured, not chosen for tidiness.** It is two `Tile`s of the widest label
+ * in the pick-list plus their `27-F8` gap plus `Panel`'s own padding, i.e. the width at which the
+ * four reasons become 2 × 2 rather than 4 × 1. The surface then closes at
+ * `578 (instrument) + 20 + 320 + 16 + 320 = 1254 dp`, inside both below-floor panels.
+ *
+ * **It is a cap and never a size**: every `Tile` keeps `targetFor("counter")` on both axes and
+ * simply takes the next line, so `27-F68` (b) — *"reducing the millimetres to make a layout fit
+ * is forbidden"* — is untouched. Nothing is added, removed or reordered; the reasons read
+ * `Supplier · Repair` / `Advance · Other` in the same sequence they read across (`27-F4`).
+ */
+const COMPACT_TILE_ROW_DP = 320;
+
 export type CashSurfaceProps = {
   cash: CashState;
   /** Appends through `Counter`'s one write path, which re-reads the folds either way. */
@@ -368,6 +396,20 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
    * photo-shaped hole in an append-only ledger with nothing to point at.
    */
   const [photoRef, setPhotoRef] = useState<string | null>(null);
+
+  /**
+   * Every row of tiles in the three groups, as one style. They were five identical inline
+   * objects; they are one because `COMPACT_TILE_ROW_DP` has to reach all of them — a cap applied
+   * to four rows out of five is a surface that still has one unbreakable line in it, and which
+   * one it is would depend on which group the wrap happened to put in the last column.
+   */
+  const compact = useSurfaceMode() === "compact";
+  const tileRow = {
+    display: "flex",
+    gap: space["space-2"],
+    flexWrap: "wrap",
+    ...(compact ? { maxWidth: COMPACT_TILE_ROW_DP } : {}),
+  } as const;
 
   const enteredPaisa = (Number(entry) || 0) * 100;
   const openShift = openShiftOf(cash);
@@ -424,7 +466,10 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
       */
       style={{
         display: "flex",
-        gap: space["space-5"],
+        // `compact` tightens every gap on this surface by one token step. Cash is the only
+        // width-bound surface in the product and these three gaps are 44 dp of it — spent on
+        // nothing an operator reads, on the panel with the least to spare.
+        gap: compact ? space["space-3"] : space["space-5"],
         justifyContent: "safe center",
         height: "100%",
         minHeight: 0,
@@ -446,7 +491,7 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
           display: "flex",
           alignItems: "center",
           alignSelf: "center",
-          gap: space["space-5"],
+          gap: compact ? space["space-3"] : space["space-5"],
         }}
       >
         {/*
@@ -517,7 +562,7 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
           // `safe` so a column taller than the glass falls back to `start` instead of hanging
           // over both edges — the same reason `Counter`'s work-area centring uses it.
           justifyContent: "safe center",
-          gap: space["space-4"],
+          gap: compact ? space["space-2"] : space["space-4"],
           height: "100%",
           minHeight: 0,
         }}
@@ -540,7 +585,7 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
               : `open · float ${formatPaisa(paisa(openDay.opening_float_paisa))}`
           }
         >
-          <div style={{ display: "flex", gap: space["space-2"], flexWrap: "wrap" }}>
+          <div style={tileRow}>
             <Tile
               posture="counter"
               label="Open the day"
@@ -614,7 +659,7 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
         belonging to nothing.
       */}
         <Panel title="My shift" note={openShift === null ? "not open" : "open"}>
-          <div style={{ display: "flex", gap: space["space-2"], flexWrap: "wrap" }}>
+          <div style={tileRow}>
             <Tile
               posture="counter"
               label="Open my shift"
@@ -716,7 +761,7 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
           child stretches to the region's width — and a `27-F8` target stretched to 400 dp is a
           control whose size no longer says what posture it is.
         */}
-          <div style={{ display: "flex", gap: space["space-2"], flexWrap: "wrap" }}>
+          <div style={tileRow}>
             <Tile
               posture="counter"
               label="No-sale drawer open"
@@ -765,7 +810,7 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
             {...(reason === null ? {} : { note: reason })}
           >
             <Readout caption="REASON">
-              <div style={{ display: "flex", gap: space["space-2"], flexWrap: "wrap" }}>
+              <div style={tileRow}>
                 {PAID_OUT_REASONS.map((r) => (
                   <Tile
                     key={r}
@@ -781,7 +826,7 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
                 ))}
               </div>
             </Readout>
-            <div style={{ display: "flex", gap: space["space-2"], flexWrap: "wrap" }}>
+            <div style={tileRow}>
               <Tile
                 posture="counter"
                 label="Receipt photo"
