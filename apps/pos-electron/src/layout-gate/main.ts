@@ -541,6 +541,17 @@ const note = (s: string): void => {
  */
 let lockStepsMeasured = 0;
 
+/**
+ * `24-F14` — how many panels had `27-F26`'s typeface actually interrogated.
+ *
+ * Same argument as the lock steps above, and the same reason it cannot ride on `MIN_SURFACES`: a
+ * font verdict is not a surface, so dropping the probe entirely would change no surface count at
+ * all. Without this counter, deleting the `await fontFacts()` call — or moving it inside a branch
+ * that stops being taken — leaves a gate that reports a clean sweep and has stopped asking the
+ * question, which is the exact shape this rail exists to name.
+ */
+let fontPanelsMeasured = 0;
+
 /** Totals, so the rail can prove to itself that it actually looked at something. */
 let surfacesMeasured = 0;
 let controlsMeasured = 0;
@@ -1068,6 +1079,83 @@ const run = async (): Promise<number> => {
       })()`,
     );
 
+  /**
+   * **`27-F26` — is the TYPEFACE actually loaded, or merely named?**
+   *
+   * This gate's own blind-spot list said *"it judges nothing about legibility, contrast or
+   * typography"* and named `27-F26`'s missing webfont as untouched. It was right: until August
+   * 2026 **no font file of any kind existed in this repo**, so the token named IBM Plex Sans and
+   * every surface rendered whatever generic sans the host had — a different one on macOS, Linux
+   * and the Windows till. `tokens.test.ts` asserted the STRING matched `/IBM Plex Sans/` and not
+   * `/Roboto/`, and both passed throughout, because a string is all happy-dom can see.
+   *
+   * Blink is the only place the question can be asked, which is why it is asked here.
+   *
+   * **Three facts, because they fail independently and only one of them is about the CSS.**
+   *
+   * 1. **Registered and DECODED.** `document.fonts` is walked for the family, and each weight is
+   *    explicitly `load()`ed so a face whose bytes are corrupt, truncated or refused by the CSP
+   *    ends at `status: "error"` rather than sitting at `"unloaded"` and looking innocent. This is
+   *    the one that catches `font-src` being wrong: the `@font-face` rules parse perfectly and
+   *    every face is blocked, which otherwise looks exactly like success.
+   * 2. **Rendering DIFFERENTLY from a face that does not exist.** The same string is measured in
+   *    the token's family and in a deliberately absent one. If the bundled face is not really in
+   *    play both fall back to the same host default and the widths are equal — so this is the
+   *    assertion that would have failed on the shipped tree, and it does not care *why* the font
+   *    is missing.
+   * 3. **`27-F26`'s two named PROPERTIES, on the face actually in use.** Digit advances must all
+   *    be equal (tabular with no feature flag) and `I` must not measure as `l`. These do not
+   *    detect a missing font — several fallbacks are tabular too — they detect the face being
+   *    swapped for one the FR forbids. **Roboto fails the second by construction**, which is the
+   *    first time that ban has been checkable against pixels rather than against a token string.
+   *
+   * ⚠ **`document.fonts.check()` is reported and deliberately NOT judged.** It answers *"are the
+   * matching faces loaded"*, and when NO `@font-face` matches the family there are no faces to be
+   * unloaded, so it returns **true** — vacuously true in exactly the state this check exists to
+   * catch. It is carried in the report so the mutant run can show that, and nothing branches on
+   * it.
+   */
+  const fontFacts = (): Promise<{
+    weights: readonly number[];
+    errored: readonly number[];
+    named: number;
+    bogus: number;
+    tabular: boolean;
+    iMatchesL: boolean;
+    check: boolean;
+  }> =>
+    window.webContents.executeJavaScript(
+      `(async () => {
+        const FAMILY = 'IBM Plex Sans';
+        await document.fonts.ready;
+        // Force each weight through the loader: a face nobody has painted with yet sits at
+        // 'unloaded', which is indistinguishable from a face that CANNOT load.
+        for (const w of [400, 500, 600]) {
+          try { await document.fonts.load(w + " 64px '" + FAMILY + "'"); } catch (e) {}
+        }
+        const mine = [...document.fonts].filter(
+          (f) => f.family.replace(/['"]/g, '') === FAMILY,
+        );
+        const c = document.createElement('canvas').getContext('2d');
+        const w = (family) => { c.font = "64px " + family; return c.measureText('HImlO0123456789 Rs 1,000').width; };
+        // A family that certainly does not exist, so it resolves to the host default. If the
+        // bundled face is not really in play, the token family resolves there too and the two
+        // widths are identical.
+        const bogus = w("'__restos_no_such_face__'");
+        const named = w("'" + FAMILY + "'");
+        c.font = "64px '" + FAMILY + "'";
+        const digits = '0123456789'.split('').map((d) => c.measureText(d).width);
+        return {
+          weights: mine.filter((f) => f.status === 'loaded').map((f) => parseInt(f.weight, 10)).sort(),
+          errored: mine.filter((f) => f.status === 'error').map((f) => parseInt(f.weight, 10)).sort(),
+          named, bogus,
+          tabular: digits.every((d) => Math.abs(d - digits[0]) < 0.01),
+          iMatchesL: Math.abs(c.measureText('I').width - c.measureText('l').width) < 0.01,
+          check: document.fonts.check("64px '" + FAMILY + "'"),
+        };
+      })()`,
+    );
+
   // ---------------------------------------------------------------------------------------
   // 1. THE WINDOW ITSELF (defect 3). `27 §1a` promises the counter a 1366x768 PANEL.
   // ---------------------------------------------------------------------------------------
@@ -1345,6 +1433,70 @@ const run = async (): Promise<number> => {
     }
 
     /**
+     * `27-F26` — the typeface, judged on this panel's own page load.
+     *
+     * Once per panel rather than once per run, because each panel RELOADS the renderer: this is
+     * the face the app got on this load, not a fact carried over from the first one. It is not a
+     * `fit` verdict, so it binds on `probe-below-floor` too — a font is not a size.
+     */
+    const font = await fontFacts();
+    fontPanelsMeasured += 1;
+    const missing = [400, 500, 600].filter((w) => !font.weights.includes(w));
+    if (missing.length > 0 || font.errored.length > 0) {
+      failures.push({
+        surface: on("27-F26 typeface"),
+        state: "alarm",
+        detail:
+          `27-F26 BROKEN — IBM Plex Sans is not loaded. Weights loaded: ` +
+          `[${font.weights.join(", ")}]; missing: [${missing.join(", ")}]; ` +
+          `FAILED to decode: [${font.errored.join(", ")}]. A face in "error" means the bytes were ` +
+          `refused — the likeliest cause is index.html's CSP missing \`font-src 'self' data:\`, ` +
+          `which parses cleanly and blocks every face. Note document.fonts.check() reports ` +
+          `${font.check}, which is why nothing here branches on it: with NO matching @font-face ` +
+          `it has no faces to call unloaded and returns true vacuously.`,
+      });
+    }
+    if (Math.abs(font.named - font.bogus) < 0.01) {
+      failures.push({
+        surface: on("27-F26 typeface"),
+        state: "alarm",
+        detail:
+          `27-F26 BROKEN — the token's family renders IDENTICALLY to a family that does not ` +
+          `exist (${font.named.toFixed(2)}px vs ${font.bogus.toFixed(2)}px for the same string), ` +
+          `so this panel is falling back to the host's default sans and the tabular digits and ` +
+          `distinct I/l the FR selected the face FOR are not on the glass. This is the assertion ` +
+          `that fails on a tree where the font is named and not delivered.`,
+      });
+    }
+    if (!font.tabular) {
+      failures.push({
+        surface: on("27-F26 typeface"),
+        state: "alarm",
+        detail:
+          "27-F26 BROKEN — the digits in force are NOT tabular at equal advance, so a money " +
+          "column does not align by place value. 27-F26 chose this face on FAIL-SAFE DEFAULTS " +
+          "precisely so no `tnum` has to be bound and verified on every render path; a face that " +
+          "needs one is a face the FR does not permit without that binding.",
+      });
+    }
+    if (font.iMatchesL) {
+      failures.push({
+        surface: on("27-F26 typeface"),
+        state: "alarm",
+        detail:
+          "27-F26 BROKEN — `I` and `l` measure identically in the face actually rendering, which " +
+          "is the property the FR bans ROBOTO for by name (identical I/l outlines, no slashed " +
+          "zero, no disambiguation set, unfixable). Roboto is the default sans on Android and " +
+          "ChromeOS and is what `system-ui` resolved to before it left this token's stack.",
+      });
+    }
+    note(
+      `  [${panel.label}] 27-F26 IBM Plex Sans weights [${font.weights.join(", ")}] · ` +
+        `${font.named.toFixed(1)}px vs ${font.bogus.toFixed(1)}px absent-family · ` +
+        `tabular ${font.tabular} · I≠l ${!font.iMatchesL} · fonts.check ${font.check}`,
+    );
+
+    /**
      * BOTH STATES, every tab. The band is up first because that is the state a cashier is in
      * after any confirm on this device (no printer is attached — see `preload.ts`), and it is
      * the tighter of the two vertical budgets. Tabs come from the DOM, so a tab another session
@@ -1508,6 +1660,19 @@ const run = async (): Promise<number> => {
         "every panel still clears it. That is exactly how the PIN pad went unmeasured — the " +
         "fixture called `unlock()` and skipped straight past the surface an operator meets 20–60 " +
         "times a shift (24-F14).",
+    });
+  }
+
+  if (fontPanelsMeasured < PANELS.length) {
+    failures.push({
+      surface: "gate",
+      state: "quiet",
+      detail:
+        `EMPTY MATCH — 27-F26's typeface was interrogated on only ${fontPanelsMeasured} of ` +
+        `${PANELS.length} panels. A font verdict is not a surface, so removing the probe changes ` +
+        "no surface count and no control count: the sweep would report exactly the totals it " +
+        "reports now while having stopped asking whether the face is on the glass. That is the " +
+        "shape this rail is named for, so it is counted rather than assumed (24-F14).",
     });
   }
 

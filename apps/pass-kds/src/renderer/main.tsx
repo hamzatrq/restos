@@ -1,4 +1,4 @@
-import { color, ThemeProvider, typography } from "@restos/ui";
+import { color, installFontFaces, ThemeProvider, typography } from "@restos/ui";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
@@ -12,12 +12,18 @@ if (!root) throw new Error("index.html has no #root — the renderer cannot moun
  * component, and any plain element between them inherits from `body`, which otherwise names no
  * family and renders the browser's default serif.
  *
- * ⚠ **NO WEBFONT IS BUNDLED HERE EITHER.** The token chain is `'IBM Plex Sans', system-ui,
- * sans-serif`, so this names Plex and renders whatever the machine already has. `27-F26` picked
- * Plex on *fail-safe defaults* — tabular digits and a distinct `I`/`l` with no feature flags —
- * and on a pass screen the payload is the ticket identifier and the age, both digits, read at
- * 1–2 m. Left unbundled on **process**: `18 §15` makes a new asset a senior-approved step, and
- * `apps/pos-electron` and `apps/backoffice` both made the same call. **Owed, in all three.**
+ * ⚠ **THE FONT IS BUNDLED NOW — this block used to say it was not** (August 2026). It read *"NO
+ * WEBFONT IS BUNDLED HERE EITHER … Owed, in all three"*, and on a pass screen the cost was the
+ * sharpest of the three: the payload is the ticket identifier and the age, both digits, read at
+ * 1–2 m, in whatever face the machine happened to have.
+ *
+ * `installFontFaces()` (`packages/ui`) is the one seam all three planes now call, and
+ * `index.html`'s CSP gains `font-src 'self' data:` to let the base64 faces load — without it the
+ * rules parse and every face is blocked, which looks exactly like success.
+ *
+ * ⚠ **This app's gate does NOT yet assert the face is loaded the way `apps/pos-electron`'s does.**
+ * `27-F27`'s angular cap-height is measured by nothing here either, and the two are related: a
+ * ticket can be perfectly composed, in the correct face, and unreadable at 1.5 m.
  */
 const base = typography["text-body"];
 document.body.style.fontFamily = base.fontFamily;

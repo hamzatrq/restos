@@ -13,6 +13,7 @@
  * light-by-default law is about the COUNTER; this is not one.
  */
 
+import { fontFaceCss } from "@restos/ui/fonts";
 import { colorDark, color as colorLight, tokens, typography } from "@restos/ui/tokens";
 
 const block = (palette: Record<string, string>): string =>
@@ -34,10 +35,23 @@ const block = (palette: Record<string, string>): string =>
  * `text-*` styles — reading it is not the `27-F42` decomposition that rule forbids, which is
  * about assembling a size/line-height pairing the system never designed.
  *
- * **No webfont is bundled and none is fetched.** The token's own fallback chain ends at
- * `system-ui`, so a machine without IBM Plex Sans installed renders the system face — which is
- * what this app did before, now stated by the token instead of by omission. Shipping a webfont
- * is a dependency and a build-time download for an internal tool, which `24-F23` does not buy.
+ * ⚠ **A WEBFONT IS BUNDLED NOW — this block used to say none was** (August 2026). It read *"No
+ * webfont is bundled and none is fetched. The token's own fallback chain ends at `system-ui`, so
+ * a machine without IBM Plex Sans installed renders the system face"*, and it was accurate: no
+ * font file of any kind existed anywhere in this repo, so `27-F26` was declared in the manifest,
+ * re-derived by `tokens.test.ts` on every commit, and true of no pixel on any machine that did
+ * not happen to have Plex installed. None of ours does.
+ *
+ * The old reasoning — *"a dependency and a build-time download for an internal tool"* — turned
+ * out to be false on both halves: no dependency is added (the binaries are committed and the
+ * `@font-face` is ours) and nothing is downloaded at build or at run, because the faces are
+ * base64 in the CSS this function already emits. What it does cost is ~95 KB of that string,
+ * stated here rather than discovered in a bundle report.
+ *
+ * **`system-ui` is also gone from the stack**, and that was the sharper defect: it resolves to
+ * ROBOTO on Android and ChromeOS, which `27-F26` bans outright for numerals — so the ban was
+ * reachable while the token string never contained the word, which is all `tokens.test.ts` can
+ * see.
  */
 const family = tokens.typography.$family;
 
@@ -80,6 +94,11 @@ const typeBlock = (): string =>
  * The type scale is polarity-independent and is emitted once.
  */
 export const themeCss = (): string =>
+  // `27-F26`'s faces come FIRST, and server-side: this string is emitted inline in the root
+  // layout's `<head>`, so the face is present in the first byte of HTML rather than after
+  // hydration. A `@font-face` after the rules that use it is legal CSS, but leading with it keeps
+  // the reading order the same as the loading order.
+  `${fontFaceCss()}` +
   `:root{${block(colorLight)}--rx-fontFamily-default:${family};${typeBlock()}}` +
   `@media (prefers-color-scheme: dark){:root:not(.light){${block(colorDark)}}}` +
   `.dark{${block(colorDark)}}`;
