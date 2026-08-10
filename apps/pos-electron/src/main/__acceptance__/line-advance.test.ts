@@ -197,13 +197,41 @@ describe("§B 01-F34/01-F35 — advanceEdgesFor builds edges, never values", () 
   });
 
   it("01-F31 — a CONTESTED line is left alone; a fold never picks a winner and nor does this", () => {
-    // `merge.ts` renders a contested line as its full terminal MVR set. Advancing one would
-    // launder a disputed line into a decided one, permanently, through the emitter's back door.
+    // `merge.ts` renders a contested line as its full terminal MVR set, so today every contested
+    // cell is refused twice over — by the arity guard AND by the legality filter, since every
+    // member is terminal and `LEGAL_NEXT` maps a terminal to `[]`.
+    //
+    // ⚠ **THIS ASSERTION ALONE DOES NOT DISCRIMINATE, and it was measured rather than assumed.**
+    // Mutant M8 (`states.length !== 1` weakened to `=== 0`) left all 469 tests green, because the
+    // legality filter catches this fixture on its own. That is the round-3 shape — a guard aimed
+    // one case away from the dangerous one — so the NEXT assertion is the one that bites.
     expect(
       advanceEdgesFor(orderWith({ [LINE_A]: { states: ["served", "voided"] } }), "in_prep"),
     ).toBeNull();
-    // And an empty state array (a shape no fold produces, but a defensive read must survive) is
-    // skipped rather than crashing the confirm that triggered it (`01-F17`).
+  });
+
+  it("01-F31 — a multi-state cell is refused EVEN WHEN a member would advance legally", () => {
+    // A two-element set containing a non-terminal is a shape `merge.ts` does not produce today
+    // (`states` is the terminal MVR set when contested and a single watermark otherwise). It is
+    // asserted anyway, and this is the one place this suite deliberately tests a shape the current
+    // fold cannot emit: `merge.ts` is a PROTECTED path this work does not own, `states` is typed
+    // `string[]`, and an emitter that reached for `states[0]` on a set would be picking a winner —
+    // which is precisely what `01-F31` says a reader may never do.
+    //
+    // This is what kills M8. Without the arity guard `states[0]` is `confirmed`, `confirmed →
+    // in_prep` is legal, and the emitter advances a line whose state is disputed.
+    expect(
+      advanceEdgesFor(orderWith({ [LINE_A]: { states: ["confirmed", "placed"] } }), "in_prep"),
+    ).toBeNull();
+    // Not vacuous: the SAME cell with the contest resolved DOES advance.
+    expect(
+      advanceEdgesFor(orderWith({ [LINE_A]: { states: ["confirmed"] } }), "in_prep"),
+    ).not.toBeNull();
+  });
+
+  it("01-F17 — an empty state array is skipped, never a crash on the confirm that triggered it", () => {
+    // Also a shape no fold produces; `applyLineState(undefined, …)` would throw inside a handler
+    // the operator cannot get out of, and the append that triggered this has already landed.
     expect(advanceEdgesFor(orderWith({ [LINE_A]: { states: [] } }), "confirmed")).toBeNull();
   });
 
@@ -308,7 +336,7 @@ describe("§C 01 §4 — the kernel accepts these edges and the projection MOVES
   it("02-F31 — kot.printed then advances them to `in_prep`, still with NO anomaly", () => {
     const r = open();
     r.lines.confirmed(ORDER_ID);
-    r.lines.kotPrinted(ORDER_ID);
+    r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
     expect(r.cells()[LINE_A]?.states).toEqual(["in_prep"]);
     expect(r.cells()[LINE_A]?.anomalies ?? {}).toEqual({});
     expect(r.appended.map((e) => e.type)).toEqual([
@@ -320,9 +348,9 @@ describe("§C 01 §4 — the kernel accepts these edges and the projection MOVES
   it("03-F2 — a SECOND station's print appends nothing at all", () => {
     const r = open();
     r.lines.confirmed(ORDER_ID);
-    r.lines.kotPrinted(ORDER_ID);
-    r.lines.kotPrinted(ORDER_ID);
-    r.lines.kotPrinted(ORDER_ID);
+    r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
+    r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
+    r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
     // Not "idempotent by luck": `LEGAL_NEXT.in_prep` excludes `in_prep`, so there is no eligible
     // line and no event is written. One order, one advance, whatever the station count.
     expect(r.appended).toHaveLength(2);
@@ -331,7 +359,7 @@ describe("§C 01 §4 — the kernel accepts these edges and the projection MOVES
 
   it("02-F31 — kot.printed BEFORE a confirm advances nothing (placed → in_prep is illegal)", () => {
     const r = open();
-    r.lines.kotPrinted(ORDER_ID);
+    r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
     expect(r.appended).toHaveLength(0);
     expect(r.cells()[LINE_A]?.states).toEqual(["placed"]);
   });
@@ -340,7 +368,7 @@ describe("§C 01 §4 — the kernel accepts these edges and the projection MOVES
     // The CONTROL for the tier gate, in the fold: exactly one input differs from the T1 rig.
     const r = open({ tier: "T2" });
     r.lines.confirmed(ORDER_ID);
-    r.lines.kotPrinted(ORDER_ID);
+    r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
     // `03-F24` — on T2 the pass screen owns the signal and auto-advancing would race a human.
     expect(r.cells()[LINE_A]?.states).toEqual(["confirmed"]);
     expect(r.appended).toHaveLength(1);
@@ -376,7 +404,7 @@ describe("§D 01-F34 — the emitted edge reads no ordering metadata", () => {
     rigs.push(a, b);
     for (const r of [a, b]) {
       r.lines.confirmed(ORDER_ID);
-      r.lines.kotPrinted(ORDER_ID);
+      r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
     }
     // Byte-identical, not merely equivalent: an emitter that put an envelope id into `preds`, or
     // sorted lines by id, or stamped a time, would differ here.
@@ -389,7 +417,7 @@ describe("§D 01-F34 — the emitted edge reads no ordering metadata", () => {
     const r = rig();
     rigs.push(r);
     r.lines.confirmed(ORDER_ID);
-    r.lines.kotPrinted(ORDER_ID);
+    r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
     const ids = new Set(r.store.readAllEvents().map((e) => (e as { id: string }).id));
     const text = JSON.stringify(r.appended);
     for (const id of ids) expect(text).not.toContain(id);
@@ -434,9 +462,9 @@ describe("§D 02-F31/01 §4 — the settlement half is REFUSED, not silently ski
       append: (type, payload) => appended.push({ type, payload }),
     });
     lines.confirmed(ORDER_ID);
-    lines.kotPrinted(ORDER_ID);
+    lines.printEvent("kot.printed", { order_id: ORDER_ID });
     expect(appended).toHaveLength(0);
     // And the surface itself offers no way to ask for one: `LineAdvance` has exactly two methods.
-    expect(Object.keys(lines).sort()).toEqual(["confirmed", "kotPrinted"]);
+    expect(Object.keys(lines).sort()).toEqual(["confirmed", "printEvent"]);
   });
 });

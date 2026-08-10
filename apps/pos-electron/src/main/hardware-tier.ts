@@ -35,11 +35,16 @@
  *    `queue`, `parked`, `availability`, `catalog`, `pin_attempts`, `staff`. There is nowhere for a
  *    roster to have been persisted for an offline boot, which commandment 4 would require.
  *  - The LAN mesh would carry `PeerInfo { device_id, device_class }`, which looks like the answer
- *    and **is not**, twice over: `mesh-session.ts` carries `@unreached-owed NO HOST RUNS THE LAN
- *    MESH YET`, and — the part that would still be wrong if it ran — peers are **liveness**, and
- *    `02-F31` says **registry**. A pass screen that is switched off is still a registered pass
- *    screen, and a T2 branch whose pass tablet is charging must not silently start auto-advancing
- *    the lines a human owns (`03-F24`).
+ *    and **is not**, twice over: `mesh-session.ts` carries a seams-register marker saying no host
+ *    runs the LAN mesh yet, and — the part that would still be wrong if it ran — peers are
+ *    **liveness**, and `02-F31` says **registry**. A pass screen that is switched off is still a
+ *    registered pass screen, and a T2 branch whose pass tablet is charging must not silently start
+ *    auto-advancing the lines a human owns (`03-F24`).
+ *
+ *    (Written out in words rather than quoted: `pnpm seams:check` scans for the marker token
+ *     itself, so pasting one into a comment attributes it to this file's exports and the rail's
+ *     own anti-rot rule — "a marker on something REACHED fails" — reddens. Measured, not guessed:
+ *     the first draft of this header did exactly that and took four exports down with it.)
  *
  * So the roster input is real, typed, and tested — `tierFromRoster` is `02-F31`'s rule and it is
  * ready for the day the roster is reachable — and today the only host passes `null` for it. That

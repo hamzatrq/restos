@@ -76,15 +76,17 @@ describe("§A 02-F31 — main/index.ts wires the line advance", () => {
     );
   });
 
-  it("triggers the in_prep edge from kot.printed, and from NOTHING ELSE on that callback", () => {
-    // The KOT printer's `append` callback carries three event types — `kot.printed`,
-    // `kot.print_failed` and `audit.print_acknowledged`. Advancing a line because a ticket FAILED
-    // to print is the exact inversion of `02-F31`, and `01-F1` makes it permanent, so the guard on
-    // the type is load-bearing rather than defensive.
+  it("routes the KOT printer's whole append callback into the emitter", () => {
+    // That callback carries three event types — `kot.printed`, `kot.print_failed` and
+    // `audit.print_acknowledged` — and §B drives the branch that tells them apart against the REAL
+    // `printEvent`. THIS assertion is only that the host reaches the emitter at all; keeping the
+    // two apart is what stops either half being a hand-copy of the other.
     const kotCall = mainSrc.slice(mainSrc.indexOf("createKotPrinter({"));
     const args = kotCall.slice(0, kotCall.indexOf("\n  });"));
-    expect(args).toContain("lines.kotPrinted(order_id)");
-    expect(args).toContain('type === "kot.printed"');
+    // The whole callback signature is passed through, so the discriminating branch lives in the
+    // module §B can drive rather than in a host no test can import. That is the fix for the
+    // hand-copy oracle §B documents; the assertion here is only that the pass-through exists.
+    expect(args).toContain("lines.printEvent(type, payload)");
   });
 
   it("00 §5.7 — the tier is resolved with an explicit null roster, and reported at boot", () => {
@@ -102,7 +104,17 @@ describe("§A 02-F31 — main/index.ts wires the line advance", () => {
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 describe("§B 02-F31 — the KOT callback's contract, driven", () => {
-  /** The shape `index.ts` builds: one `append` callback, three event types through it. */
+  /**
+   * The REAL `printEvent`, not a hand-copy of `index.ts`'s branch.
+   *
+   * **The first draft of this section WAS a hand-copy** — it reimplemented the `type ===
+   * "kot.printed"` guard inside the test and asserted against that, which is `K-3`'s dead-oracle
+   * defect: an oracle pinning its own copy of the thing it exists to pin. The mutation matrix
+   * measured the consequence — deleting the guard from `index.ts` was killed by §A's *source
+   * string* and by nothing behavioural, so the copy could have drifted from the product silently.
+   * The guard moved into `line-advance.ts` and `index.ts` now passes the callback straight
+   * through, which is why the two assertions below are real.
+   */
   const kotCallback = (tier: "T1" | "T2") => {
     const appended: { type: string; payload: LineStateChangedPayload }[] = [];
     const lines = createLineAdvance({
@@ -110,30 +122,31 @@ describe("§B 02-F31 — the KOT callback's contract, driven", () => {
       tier: () => tier,
       append: (type, payload) => appended.push({ type, payload }),
     });
-    // Verbatim the branch in `index.ts`'s `createKotPrinter({ append })`.
-    const onPrintEvent = (type: string, payload: Record<string, unknown>): void => {
-      if (type === "kot.printed") {
-        const order_id = payload.order_id;
-        if (typeof order_id === "string") lines.kotPrinted(order_id);
-      }
-    };
-    return { appended, onPrintEvent };
+    return { appended, lines };
   };
 
   it("a FAILED print advances nothing", () => {
     const r = kotCallback("T1");
-    r.onPrintEvent("kot.print_failed", { order_id: ORDER_ID, printer_name: "TH230" });
-    r.onPrintEvent("audit.print_acknowledged", { alarm_id: "x", order_id: ORDER_ID });
+    // The three types this one callback carries in the shipped host.
+    r.lines.printEvent("kot.print_failed", { order_id: ORDER_ID, printer_name: "TH230" });
+    r.lines.printEvent("audit.print_acknowledged", { alarm_id: "x", order_id: ORDER_ID });
     expect(r.appended).toHaveLength(0);
     // Not vacuous: the SAME rig advances on the real event.
-    r.onPrintEvent("kot.printed", { order_id: ORDER_ID });
+    r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
     expect(r.appended).toHaveLength(1);
     expect(r.appended[0]?.payload.state).toBe("in_prep");
   });
 
-  it("the tier gate is read through the callback, not around it", () => {
+  it("the tier gate is read inside printEvent, not around it", () => {
     const r = kotCallback("T2");
-    r.onPrintEvent("kot.printed", { order_id: ORDER_ID });
+    r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
+    expect(r.appended).toHaveLength(0);
+  });
+
+  it("a kot.printed with no usable order id is a no-op, never a throw (01-F17)", () => {
+    const r = kotCallback("T1");
+    expect(() => r.lines.printEvent("kot.printed", {})).not.toThrow();
+    expect(() => r.lines.printEvent("kot.printed", null)).not.toThrow();
     expect(r.appended).toHaveLength(0);
   });
 });
@@ -166,7 +179,7 @@ describe("§D 02-F31/01 §4 — the settlement trigger is BLOCKED and absent", (
       tier: () => "T1",
       append: () => {},
     });
-    expect(Object.keys(lines).sort()).toEqual(["confirmed", "kotPrinted"]);
+    expect(Object.keys(lines).sort()).toEqual(["confirmed", "printEvent"]);
   });
 
   it("the module records WHY, so the next reader does not rediscover it as a bug", () => {

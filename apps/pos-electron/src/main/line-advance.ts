@@ -192,6 +192,17 @@ export type LineAdvance = {
   /**
    * `02-F31` — *"`kot.printed` → lines `in_prep`"*, on T1 only.
    *
+   * **It takes the KOT printer's whole `append` callback signature, not an order id, and that is
+   * deliberate.** That callback carries three event types — `kot.printed`, `kot.print_failed` and
+   * `audit.print_acknowledged` — so the discriminating branch has to live somewhere, and putting
+   * it in the host would put it where no test can drive it: a suite would have to hand-copy the
+   * branch, which is `K-3`'s dead-oracle defect (an oracle asserting against its own copy of the
+   * thing it exists to pin). Measured — with the guard in `index.ts`, the mutant that advances a
+   * line on a FAILED print was killed by a source-string assertion and by nothing behavioural.
+   *
+   * Advancing because a ticket did NOT print is the exact inversion of the FR, and `01-F1` makes
+   * it permanent.
+   *
    * **Order-granular, because `kot.printed` is.** `03-F2` fans one confirm out to N station
    * tickets and this device prints one per station, but the event's payload is `{ order_id }` with
    * no station, so the first station's print advances every line of the order. That is faithful to
@@ -203,13 +214,15 @@ export type LineAdvance = {
    * `LEGAL_NEXT.in_prep` excludes `in_prep`, so `advanceEdgesFor` finds no eligible line and
    * appends nothing at all. Nothing is written twice and nothing is refused loudly.
    */
-  readonly kotPrinted: (order_id: string) => void;
+  readonly printEvent: (type: string, payload: unknown) => void;
 };
 
 /** `01 §4` vocabulary, named once so a typo cannot make this module advance nothing. */
 const CONFIRMED: OrderLineState = "confirmed";
 const IN_PREP: OrderLineState = "in_prep";
 const LINE_STATE_CHANGED = "order.line_state_changed";
+/** `01 §4`'s print fact, and the ONLY member of the KOT callback that advances anything. */
+const KOT_PRINTED = "kot.printed";
 
 export const createLineAdvance = (deps: LineAdvanceDeps): LineAdvance => {
   const advance = (order_id: string, to: OrderLineState): void => {
@@ -225,9 +238,14 @@ export const createLineAdvance = (deps: LineAdvanceDeps): LineAdvance => {
 
   return {
     confirmed: (order_id) => advance(order_id, CONFIRMED),
-    kotPrinted: (order_id) => {
+    printEvent: (type, payload) => {
+      if (type !== KOT_PRINTED) return;
       if (!autoAdvancesLines(deps.tier())) return;
-      advance(order_id, IN_PREP);
+      // The payload has already been through `parseEvent` by the time the ledger holds it, but
+      // this is the printer's own callback and not the store's, so the narrowing is real — and it
+      // must survive a null: `01-F17`, the print is downstream of a sale that already completed.
+      const order_id = (payload as { order_id?: unknown } | null)?.order_id;
+      if (typeof order_id === "string") advance(order_id, IN_PREP);
     },
   };
 };

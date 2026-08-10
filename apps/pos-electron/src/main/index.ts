@@ -740,13 +740,11 @@ app.whenReady().then(async () => {
       // event, because `01 §4` gives line state its own type and `merge.ts` keeps `kot.printed`
       // projection-inert on purpose (the confirm is the age anchor, so a print can never move it).
       //
-      // Guarded on the type because this callback also carries `kot.print_failed` and
-      // `audit.print_acknowledged` — advancing a line because a ticket FAILED to print would be
-      // the exact inversion of the FR, permanently (`01-F1`).
-      if (type === "kot.printed") {
-        const order_id = (payload as { order_id?: unknown }).order_id;
-        if (typeof order_id === "string") lines.kotPrinted(order_id);
-      }
+      // The WHOLE callback signature goes in, not an order id: this callback also carries
+      // `kot.print_failed` and `audit.print_acknowledged`, and the branch that tells them apart
+      // belongs where a test can drive it rather than here, where a suite could only hand-copy it.
+      // `LineAdvance.printEvent` has the measurement that decided that.
+      lines.printEvent(type, payload);
       notifyChanged();
     },
   });
