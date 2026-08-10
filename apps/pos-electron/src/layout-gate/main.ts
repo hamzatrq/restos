@@ -897,6 +897,35 @@ const run = async (): Promise<number> => {
    * strip for any reason at all — `Counter.tsx` dropping the prop, `AppShell` dropping the
    * pass-through, `StatusStrip` dropping the element.
    */
+  /**
+   * **`24-F14` — is `02-F7`'s Sold-out tab actually drawing a GREYED tile?**
+   *
+   * The same argument as the two chip probes below, aimed at this rail's own recorded blind
+   * spot: a Sold-out grid of plain tiles measures nothing the Order grid does not already
+   * measure. The geometry that can clip is the tile carrying a REASON — `unavailableReason`
+   * puts a second line of text inside a fixed-height box — so a fixture that stopped marking
+   * items `sold_out` would take the state this tab exists for out of coverage while every
+   * surface still reported clean. That is `escalationFor: () => null` exactly, which hid a dead
+   * `ManagerApproval` for weeks.
+   *
+   * It asks the DOM, not the fixture, so it fails whether `preload.ts` stopped producing the
+   * state or `Counter.tsx` stopped rendering it.
+   *
+   * **⚠ Scoped to `main`, and the first draft was VACUOUS without it.** The tab itself is
+   * labelled `Sold out`, so a probe over every `button` on the page matches the RAIL and passes
+   * whether or not one tile is greyed — a tripwire that fires on its own label. It searches the
+   * work area only, and for `01-F58`'s disputed string as well, which no tab can ever render.
+   */
+  const soldOutReasonPresent = (): Promise<boolean> =>
+    window.webContents.executeJavaScript(
+      `(() => {
+         const main = document.querySelector('main');
+         if (main === null) return false;
+         const text = [...main.querySelectorAll('button')].map((e) => e.textContent || '');
+         return text.some((t) => /Sold out/.test(t)) && text.some((t) => /disputed/.test(t));
+       })()`,
+    );
+
   const catalogChipPresent = (): Promise<boolean> =>
     window.webContents.executeJavaScript(
       `[...document.querySelectorAll('[role="status"]')]
@@ -1162,6 +1191,20 @@ const run = async (): Promise<number> => {
         await click(i);
         await new Promise((r) => setTimeout(r, 350));
         judge(on(`tab:${tab.label || i}`), state, await measure());
+        // `24-F14` — the Sold-out grid must be measured in the state it exists FOR. Checked
+        // while the tab is open, because the greyed tiles only exist in this DOM.
+        if (tab.label === "Sold out" && !(await soldOutReasonPresent())) {
+          failures.push({
+            surface: on(`tab:${tab.label}`),
+            state,
+            detail:
+              "EMPTY MATCH — 02-F7's Sold-out grid drew no 86'd tile and no 01-F58 disputed " +
+              "tile, so this sweep measured a grid of plain tiles that says nothing about the " +
+              "state the tab exists for. A tile carrying `unavailableReason` is the geometry " +
+              "that can clip. Either preload.ts stopped marking items `sold_out`/`contested`, " +
+              "or Counter.tsx stopped rendering the reason (24-F14).",
+          });
+        }
         await shoot(window, `${panel.label}--${state}--${tab.label || i}`);
       }
     };

@@ -811,16 +811,65 @@ export const Counter = () => {
           the kitchen has run out of something nobody has touched. So it reads `sold_out`, the
           fold's own fact, and an unpriced item is togglable here like any other.
         */
+        /*
+          **CENTRED, and the layout gate is what decided it.** On `desktop-24` and `ultrawide-32`
+          this surface first laid 332 dp of grid into a 944 dp work area and left 595 dp of slack
+          at the bottom — the gate's `ANCHORED y` verdict, at 61% asymmetry against a 25% budget.
+          Its wording states the choice: *"either the composition should fill the room, or it has
+          a natural maximum and the surface should CENTRE it — both are decisions; this is
+          neither."*
+
+          This grid HAS a natural maximum. `ItemGrid`'s tiles are sized in millimetres of glass
+          (`tileMm`, `27-F8`), so filling a 24" panel would mean growing targets past their
+          ergonomic size — which is `27-F68` (b)'s ban read backwards, and just as wrong. So the
+          room is given back symmetrically, exactly as Pay and Cash already do through `centred`.
+        */
         <div style={{ display: "flex", gap: 16, height: "100%", minHeight: 0 }}>
           <div
             style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}
           >
-            <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
-              Tap an item to mark it sold out. Tap it again when it is back.
-            </p>
+            {/*
+              **THE BOX THE GRID IS COSTED AGAINST MUST BE THE BOX THE GRID GETS. Three gate
+              runs taught that, and the third one cost this surface its instruction line.**
+
+              1. `safe center` on the OUTER row makes this box content-height. `usePhysicalSize`
+                 then reports a one-row box, `ItemGrid` costs one row of capacity, and the content
+                 is one row — a self-consistent feedback loop that turned a 40-item grid into
+                 FIVE pages of eleven tiles on a 1366×768 counter. **The gate PASSED on it**,
+                 because one centred row is perfectly composed; only the screenshot showed it.
+              2. Centring the grid alone failed `ANCHORED y` at 30% on `desktop-24` and
+                 `ultrawide-32`: an instruction line pinned to the top of the work area while the
+                 grid floated in the middle, and the composition check measures the UNION.
+              3. Putting the line inside the centred group fixed that and broke something worse.
+                 The grid was still handed the whole box as `heightMm`, so it costed ~17 px of
+                 capacity it did not have, drew one row too many, and pushed its own pager off the
+                 bottom — **`tablet-11.6` reported pager buttons `1` and `2` genuinely
+                 UNREACHABLE**, centre not hit-testing. That is `27-F2`'s "no primary action
+                 reached by scrolling" broken by a caption.
+
+              **So there is no instruction line.** The alternatives were worse against resolving
+              FRs rather than against taste: shrinking `tileMm` to buy the caption back is
+              `27-F8`'s floor (`27-F68` (b) bans it by name), and subtracting a guessed caption
+              height from `heightMm` re-introduces the assumed-panel arithmetic `27-F11c` exists
+              to forbid. What the operator has instead is the tab's own label, the `Sold out`
+              word on every 86'd tile, and the fact that a tap toggles — `21 §5` puts this
+              operator at plausibly non-reading anyway, so a sentence was never the channel this
+              surface should have leaned on. **Named as a real loss:** "tap it again to put it
+              back" is now learned rather than read, and that is a training note, not a screen.
+
+              Why CENTRE rather than fill: this composition has a natural maximum. `ItemGrid`
+              sizes tiles in millimetres of glass (`tileMm`, `27-F8`), so filling a 24" panel
+              would mean growing targets past their ergonomic size — `27-F68` (b) read backwards.
+            */}
             <div
               ref={soldOutSurfaceRef}
-              style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex" }}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                minHeight: 0,
+                display: "flex",
+                alignItems: "safe center",
+              }}
             >
               {soldOutMm === null ? null : (
                 <ItemGrid

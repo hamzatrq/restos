@@ -136,7 +136,27 @@ const MENU: MenuItem[] = [
   "Gulab Jamun",
   "Ras Malai",
   "Falooda",
-].map((label, i) => ({ id: `item-${i}`, label }));
+].map((label, i) => ({
+  id: `item-${i}`,
+  label,
+  /**
+   * **`02-F7`'s two 86 states, produced by the FIXTURE — which is this gate's real coverage
+   * boundary** (`main.ts`'s own blind-spot list: *"it only sees the states its fixture
+   * produces"*). A Sold-out grid of plain tiles would measure nothing that the Order grid does
+   * not already measure, and the geometry that can actually clip is the tile carrying a REASON:
+   * `unavailableReason` adds a line of text inside a fixed-height tile, and `Sold out —
+   * disputed` (`01-F58`) is the longest string this surface can render.
+   *
+   * **Indices `0` and `1`, and that is not arbitrary — it is what the tripwire caught.** They
+   * were `3`/`11`/`29` first, and `probe-below-floor` (202 × 118 mm) draws a grid small enough
+   * that page one held neither, so the EMPTY MATCH fired on that panel alone. A fixture state
+   * that only exists on large glass is a fixture state the tightest panels are not covered by,
+   * which is this gate's whole recorded lesson. The first two tiles are on page one of ANY grid
+   * that draws two tiles at all; `29` is kept so a paging grid still shows one further in.
+   */
+  ...(i === 0 || i === 1 || i === 29 ? { sold_out: true } : {}),
+  ...(i === 1 ? { contested: true } : {}),
+}));
 
 const ORDER: OpenOrder = {
   order_id: "order-gate-1",
@@ -422,6 +442,9 @@ const bridge: RestosBridge = {
     }),
   openOrders: () => Promise.resolve([ORDER, SECOND_ORDER, CLOUD_ORDER]),
   kitchenQueue: () => Promise.resolve([]),
+  // The channel argument is ignored HERE on purpose: the gate measures geometry, and greying an
+  // item for `01-F60`'s unpriced case renders the same box as greying it for an 86. What the
+  // fixture must vary is the tile CONTENT (see `MENU`'s reason strings), not the channel.
   menu: () => Promise.resolve(MENU),
   staff: () => Promise.resolve(STAFF),
   cashState: () => Promise.resolve(CASH_STATE),
@@ -461,6 +484,10 @@ const bridge: RestosBridge = {
       ? Promise.reject(new Error("cash.paid_out above the org threshold (05-F19)"))
       : Promise.resolve({ id: "evt-gate" }),
   addLine: () => Promise.resolve({ id: "evt-gate" }),
+  // `02-F7`. Supplied so the Sold-out grid's tiles are real controls rather than inert boxes —
+  // `measureSurface` walks `button`s, and a tile with no handler is still a button, but a
+  // fixture that omitted this would be measuring a surface the app cannot actually drive.
+  toggleAvailability: () => Promise.resolve({ id: "evt-gate-86" }),
   escalationFor: (req) =>
     Promise.resolve(
       (req as { type?: string }).type === "cash.paid_out"
