@@ -1159,6 +1159,126 @@ nowhere — which is why the boot line says so at length and why `03-F51`'s refu
   `27-F5`'s own failure mode, and the `M4` row of the `shift_id` matrix measured that the plausible
   safe repair — gating settlement on a precondition — kills six existing `02-F37` tests that exist
   precisely to stop an `01-F17` violation. A finding for the `02-F13`/`02-F37` owner.
+## ✅ TWO CASHIERS SETTLED ONE BILL AND THE CASH DOUBLED — `DEC-MONEY-009` (August 2026)
+
+**Measured 2026-08-10 in the first two-till run this product has ever had.** Both cashiers keyed
+**Rs 2,240** against a Rs 2,240 order and pressed `TAKE CASH` together: two `payment.recorded`
+events, 224000 paisa each, two different `settlement_attempt_id`s, both `shift_cash` folds reading
+**Cash Rs 4,480**, both screens reading `DUE Rs 0`, nothing anywhere flagged. The shift then closes
+**Rs 2,240 short against a correct drawer** — both devices agree, so no human has a discrepancy to
+notice, and `01-F1` makes it permanent.
+
+**The idempotency algebra is NOT broken and this is not a fix to it.** `01-F31`'s
+`settlement_attempt_id` protects double-taps and crash-retries; two cashiers are two GENUINE
+attempts, so `26 §7`'s unique-keyed sum correctly adds them. `DEC-MONEY-008` guards the opposite
+failure. Neither was ever aimed at concurrent human settlement.
+
+**RULED (founder): refuse the second settlement at the till.** `main/settlement-guard.ts` decides
+it from **one synchronous read of this device's own `open_orders` projection** — no transport, no
+lock, no peer. That narrowness is the whole difference between an implementable ruling and a
+commandment-4 violation: a till that must ask the cloud whether an order is settled stops selling
+when the WAN drops (`01-F17`, `00 §5.1`, `05-F8`); a till that reads its own converged state and
+declines an order it already knows is settled is refusing a **duplicate**, not blocking a sale. The
+guard sits INSIDE `authorizeWrites` (matrix → duplicate check → ledger), so a session without
+`payment.settle` is told it may not settle rather than told the bill is already paid.
+
+**It is NOT built on `order.settlement_closed`.** `01-F33`'s closing act has no production emitter
+anywhere, so `OpenOrderRow.settled` is `0` on every order this device has ever held — a guard on
+that column could never fire, which is this wave's named defect built deliberately. Emitting the
+act would be *defining a closing act*, a founder question. What ships is the reading `printing.ts`
+already uses for `02-F15` and `line-advance.ts` for `02-F31`, at the same call site: **tendered for
+in full, `pay_total >= billed_effective`**, both `01-F34`-clean.
+
+**⚠ THE PARTITION CASE IS STILL OPEN, BY CONSTRUCTION, AND NOTHING HERE MAY BE READ AS A CLOSURE.**
+Two tills partitioned from each other have not converged, so neither can know and both accept — the
+doubling survives exactly where nothing local can see it. `__acceptance__/double-settlement.test.ts`
+§F is a **passing test whose subject is the residual**. Still owed for it and recorded in
+`DEC-MONEY-009`'s own residual column: an emitter for `01-F33`'s closing act, a scheduled Auditor
+(`runAuditor` carries `@unreached-owed`), and a decision on `EXCESS_TENDER_IS_EXCEPTION`.
+
+**What the cashier sees, and what it CANNOT say.** The Pay surface reads the same two projected
+numbers the guard reads and says so *before* she reaches for the pad: `Already settled — Rs 2,240
+taken on this bill. Nothing more is due.` A **word** and a **number** (`27-F12`), in place of
+`TAKE CASH` rather than beside a greyed one — an inert primary control is `27-F5`'s own failure
+mode, and this surface already answers "there is nothing to settle" in exactly this shape one
+branch up. **It cannot name WHO settled it or WHERE:** `02-F45` puts attribution on the envelope's
+`actor_user_id` and `OpenOrderRow` — the pinned projection — carries the money and not the actor,
+so *"already settled by Ayesha on Counter 2"* is **owed at the fold** (a `sync-client` cell-shape
+change on a protected path) and inventing it here would be commandment 2.
+
+**THE CONTRIBUTING DEFECT, fixed, and it is why the double settlement was trivial rather than
+exotic.** `Counter.tsx` bound `current = orders[0]` — a **branch-wide** list (`02-F11`) — and greyed
+the order-type row whenever anything was open. So a second cashier's cart was the first cashier's
+bill and **there was no way to start a second order at all**. Two customers, one bill, then two
+settlements against it. Nothing in `02-F1` or `01 §4` limits a terminal to one open order; the row
+was greyed because the cart was `orders[0]` and had nowhere else to point. `cartOrderId` is
+**renderer state and not a ledger fact** — `02-F4`'s `order.parked`/`order.unparked` are the
+branch-wide version and have **no payload schema in `packages/domain`**, so `01-F4` makes them
+unemittable and C10 stays owed. It falls back to `orders[0]` when this till has started nothing, so
+a fresh launch behaves exactly as before. `27-F4` is untouched: no tile added, removed or moved — a
+greying was lifted.
+**Owed, named:** an order started here and abandoned to a relaunch is reachable only through that
+fallback. `02-F10`'s recall is the FR and the Orders tab is its surface, but
+`orders-tab.dom.test.tsx` §E is an **oracle** asserting an open-order row carries *no control at
+all* — so the recall action is a change for that file's test owner, not for an implementing
+session (`24 §3`).
+
+### Mutation matrix — control: pos-electron **641/641** green (613 pre-existing + 28 new), `pnpm verify` exit 0, `seams:check` clean
+
+In-tree, one branch per mutant, `git checkout --` restoring byte-exactly from a committed tree.
+**The right-hand column is the finding**, and it is the calibration this file keeps asking for.
+
+| # | mutant (exactly one branch) | new (28) | pre-existing 613 |
+|---|---|---|---|
+| M1 | **THE SEAM** — `authorizeWrites({ writes: gateway })`; the guard built and unreached | **1** | **all green** |
+| M2a | **THE ROUND-TRIP, OPTIONAL DEP** — an `uplink` short-circuit the host never supplies | **0 — SURVIVES** | all green |
+| M2b | **THE ROUND-TRIP, REQUIRED DEP** — an `uplink` the host must supply, and does | **10** | all green |
+| M2c | **THE ROUND-TRIP, THROUGH THE STORE** — the guard consults `store.status()` | **1** | all green |
+| M3 | **THE OFFLINE OVER-FIRE** — refuse whenever ANY money has arrived | 2 | all green |
+| M4 | **THE ZERO-BILL NARROWING DROPPED** — `0 >= 0` makes every empty order settled | 3 | all green |
+| M5 | **THE PURPOSE GATE DROPPED** — a `DEC-MONEY-007` khata repayment is refused too | 1 | all green |
+| M6 | **THE CONTRIBUTING DEFECT VERBATIM** — `orders[0]` **and** both rows re-greyed | 3 | all green |
+| M7 | **CONTROL for M6** — `orders[0]` alone, rows left live | **1** | all green |
+| M8 | **THE SCREEN GOES SILENT** — `isAlreadySettled` always false; main still refuses | 3 | all green |
+| M9 | **THE SCREEN OVER-FIRES** — any money taken reads as settled (`02-F13` broken) | 2 | all green |
+| M10 | **NEGATIVE CONTROL** — a real refactor of `refusalFor` into early-return form | **0** | **all green** |
+
+**M10 is what makes every red row mean anything:** a genuine one-branch restructuring of the very
+function under test reddens nothing, so the suite holds behaviour and not shape.
+
+**M1's column is the number to remember: the seam going dead — the guard correct, tested and
+unreached — leaves all 613 pre-existing tests green.** Exactly one assertion separates the wired
+product from `writes: gateway`, and it is a **source read** (`main/index.ts` builds an Electron app
+at module scope and no suite here can import it), the same weak instrument
+`line-advance-seam.test.ts` §A already uses. One guard, not two.
+
+**M6 against M7 is the attribution for the contributing defect.** They differ in whether the two
+tile rows are re-greyed, so the two extra kills belong to the *"a second order can be started"*
+half and the shared kill to the *"which order is the cart"* half. Neither subsumes the other, which
+is why the fix is both.
+
+**⚠ M2a SURVIVED, AND IT IS THE MOST USEFUL ROW HERE — `seams:check` COULD NOT SEE IT EITHER, FOR A
+REASON WORTH FIXING IN THE RAIL.** An optional `uplink` member with a short-circuit is behaviourally
+dead in the shipped wiring (nothing supplies it), so no behavioural test can distinguish it — that
+is precisely the case Rule B exists for, and **the rail was exit 0 and CLEAN at `11 optional
+seams`.** Root cause, isolated by changing one thing: `check-seams.mjs`'s `optionsOf` requires the
+single options parameter's type annotation to match `/^([A-Za-z_$][\w$]*)$/`, and a signature Biome
+has **wrapped** leaves a trailing comma (`deps: SettlementGuardDeps,`) which fails it — so the whole
+factory becomes invisible to Rule B. Collapse the signature to one line and change nothing else:
+**exit 1 at 12 optional seams, naming the member.** This module now names its return type
+(`RendererWrites`) purely so its signature fits on one line and stays under the rail. **A repo-wide
+scan found ONE other factory in this shape: `packages/sync-client/src/pin-audit.ts`'s
+`createPinAuditSink`** — its options are all required today, so nothing is hidden, but it is a
+PROTECTED path and the next optional added there would be invisible. **Reported, not fixed:**
+`check-seams.mjs` is a CI rail with its own blast radius and `24 §3b` forbids the drive-by.
+
+**Two fixture defects were found by RUNNING and would not have been found by reading.** (1) Two
+`02-F13` partial tenders sharing one `settlement_attempt_id` are two divergent members of ONE key —
+the fold marks it disputed and **both contribute zero** (`01-F31`), so the first draft read Rs 0 in
+the drawer and the algebra was right while the fixture was not. (2) A renderer fixture that mutates
+`openOrders` and waits is asserting the screen's **stale** state: `Counter` re-reads on main's
+`changed` push and on nothing else, so the harness has to move the fold and then send the push.
+
 - **THE STRIP SAID `dev` WHILE THE LEDGER SAID AYESHA — CLOSED AUGUST 2026.** `DeviceState`
   carries two identity fields. `user` is the `01-F26` session, added by S-0c and stamped into
   every envelope as `actor_user_id`. `actor` is older — it shipped with the first launch commit,

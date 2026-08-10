@@ -143,9 +143,30 @@ const settlementRefused = (fact: AlreadySettled): SettlementRefusedError => {
   return error;
 };
 
+/**
+ * The three write methods the renderer's channels reach — `authorizeWrites`' own surface, named.
+ *
+ * ⚠ **Naming it is what puts this factory under `pnpm seams:check` Rule B, and that is a finding
+ * about the rail rather than a style preference.** `check-seams.mjs`'s `optionsOf` reads the
+ * single options parameter's type annotation and requires it to match `/^([A-Za-z_$][\w$]*)$/` —
+ * so a signature Biome has WRAPPED, which leaves a trailing comma after the annotation
+ * (`deps: SettlementGuardDeps,`), fails that test and **the whole factory becomes invisible to
+ * Rule B**. Measured 2026-08-10: with an optional `uplink` member added and the signature wrapped,
+ * `pnpm seams:check` is **exit 0 and CLEAN at 11 optional seams**; collapse the signature to one
+ * line and nothing else, and it is **exit 1 at 12**, naming the member. Inlining this return type
+ * is what makes the signature short enough to stay on one line at a 100-column width.
+ *
+ * `SettlementGuardDeps` has no optional members today, so nothing is hidden here — the point is
+ * that the next one added would be. **A repo-wide scan found ONE other factory in this shape:
+ * `packages/sync-client/src/pin-audit.ts`'s `createPinAuditSink`,** whose options are both
+ * required today and which is on a PROTECTED path. Reported, not fixed here — `check-seams.mjs`
+ * is a CI rail with its own blast radius and `24 §3b` forbids the drive-by.
+ */
+export type RendererWrites = Pick<Gateway, "append" | "addLine" | "toggleAvailability">;
+
 export type SettlementGuardDeps = {
   /** The unguarded writes this wraps. Narrowed by name so nothing else can slip past. */
-  readonly writes: Pick<Gateway, "append" | "addLine" | "toggleAvailability">;
+  readonly writes: RendererWrites;
   /**
    * **THE ONLY INPUT, and its narrowness is the commandment-4 guarantee.** One synchronous read
    * of this device's own projection. There is no transport here, no uplink, no mesh session, no
@@ -171,9 +192,7 @@ export type SettlementGuardDeps = {
  * surface (`Counter.tsx`) — which reads the same two numbers off the same projection, so the
  * screen and this guard can never disagree about whether the bill is covered.
  */
-export const refuseDoubleSettlement = (
-  deps: SettlementGuardDeps,
-): Pick<Gateway, "append" | "addLine" | "toggleAvailability"> => ({
+export const refuseDoubleSettlement = (deps: SettlementGuardDeps): RendererWrites => ({
   append: (req: unknown): AppendResult => {
     // Re-parsed rather than read raw: `req` is `unknown` from an untrusted renderer. On anything
     // malformed this narrowing simply misses and the real validator downstream throws — fail-open
