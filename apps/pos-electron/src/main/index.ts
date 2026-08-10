@@ -23,7 +23,14 @@ import {
 } from "./catalog";
 import { printerTransport } from "./file-printer";
 import { createGateway } from "./gateway";
+import {
+  describeHardwareTier,
+  HARDWARE_TIER_ENV,
+  type ResolvedHardwareTier,
+  resolveHardwareTier,
+} from "./hardware-tier";
 import { openJobStore } from "./job-store";
+import { createLineAdvance } from "./line-advance";
 import {
   describePanelDensity,
   measurePhysicalWidthMm,
@@ -237,6 +244,29 @@ const panelDensity = (): PanelDensity => {
     }),
   });
   return panelDensityCache;
+};
+
+/**
+ * `02-F31` / `00 §7` layer 2 — the hardware tier, resolved once per process.
+ *
+ * **Cached for the process rather than read per call**, on `panelDensity`'s reasoning one function
+ * up: it is read on every confirm and every KOT print, the answer cannot change without a restart
+ * (the roster is unreachable, so only the environment decides it), and a till that changed tier
+ * mid-service would start or stop advancing line states halfway through an order.
+ *
+ * `roster: null` is the whole finding of this work and it is passed explicitly rather than
+ * defaulted: `02-F31`'s detection rule reads the branch device registry, and `01-F62` keeps
+ * `device.registered`/`device.revoked` out of every branch stream while `hello_ack` carries no
+ * roster and the device store has no table for one. `hardware-tier.ts`'s header has the full
+ * check; the boot line below says it out loud to the operator.
+ */
+let hardwareTierCache: ResolvedHardwareTier | null = null;
+const hardwareTier = (): ResolvedHardwareTier => {
+  hardwareTierCache ??= resolveHardwareTier({
+    roster: null,
+    configured: process.env[HARDWARE_TIER_ENV],
+  });
+  return hardwareTierCache;
 };
 
 const createWindow = (): BrowserWindow => {
@@ -506,6 +536,14 @@ app.whenReady().then(async () => {
   console.log(describePanelDensity(panelDensity()));
 
   /**
+   * `00 §5.7` again, and for a value with the same property: a wrong tier is invisible from the
+   * screen. A T1 till silently advances line states nothing else will; a T2 till that thinks it is
+   * T1 races the human who owns the ready signal (`03-F24`). The source travels with the value and
+   * the `assumed` case names the correction, exactly as the density line above does.
+   */
+  console.log(describeHardwareTier(hardwareTier()));
+
+  /**
    * **Say what the grid will actually show, at boot.** Without this the till renders item names
    * with `no price set` under every tile and NOTHING anywhere explains why — which is exactly how
    * a first look at this app ended: six tiles, six refusals, and no way to tell a stale dev store
@@ -660,6 +698,29 @@ app.whenReady().then(async () => {
     transport: printerTransport(kotCapability(), process.env),
     store: jobs,
   });
+  /**
+   * `02-F31` — **the producer for `order.line_state_changed`**, which this product did not have.
+   *
+   * The event type has had a `packages/domain` schema and a `merge.ts` fold consumer throughout,
+   * and no production emitter, so every line of every order has sat at `placed` since the first
+   * order was rung. `seams:check` is structurally blind to that shape — a key in an object literal
+   * is not an export — which is the same blind spot `audit.print_acknowledged` fell through, and
+   * `__acceptance__/line-advance-seam.test.ts` is this one's hand-written assertion.
+   *
+   * `gateway`, not `writes`: `WRITE_ACTIONS` fails closed and carries no row for this type, so the
+   * authorized surface would DENY it. That is right for the renderer's channel and wrong here, for
+   * the reason the `kot` printer above already takes the raw gateway — `02-F31`'s advance is by
+   * definition the case *"where no device exists to signal them"*, i.e. an act nobody performs.
+   * `line-advance.ts`'s `append` dep carries the full argument and the limits on it.
+   */
+  const lines = createLineAdvance({
+    store,
+    tier: () => hardwareTier().tier,
+    append: (type, payload) => {
+      gateway.append({ type, payload, refs: [] });
+      notifyChanged();
+    },
+  });
   const kot = createKotPrinter({
     spooler,
     store,
@@ -673,6 +734,17 @@ app.whenReady().then(async () => {
     // The push is what makes the band appear without the renderer polling.
     append: (type, payload) => {
       gateway.append({ type, payload, refs: [] });
+      // `02-F31` — **THE SEAM.** *"line statuses auto-advance where no device exists to signal
+      // them: `kot.printed` → lines `in_prep`"*. It hangs off the completed append rather than
+      // replacing it: `kot.printed` is the ledger fact and the line edge is a second, separate
+      // event, because `01 §4` gives line state its own type and `merge.ts` keeps `kot.printed`
+      // projection-inert on purpose (the confirm is the age anchor, so a print can never move it).
+      //
+      // The WHOLE callback signature goes in, not an order id: this callback also carries
+      // `kot.print_failed` and `audit.print_acknowledged`, and the branch that tells them apart
+      // belongs where a test can drive it rather than here, where a suite could only hand-copy it.
+      // `LineAdvance.printEvent` has the measurement that decided that.
+      lines.printEvent(type, payload);
       notifyChanged();
     },
   });
@@ -883,7 +955,17 @@ app.whenReady().then(async () => {
     const confirm = AppendRequestSchema.safeParse(req);
     if (confirm.success && confirm.data.type === "order.confirmed") {
       const order_id = confirm.data.payload.order_id;
-      if (typeof order_id === "string") kot.confirmed(order_id);
+      if (typeof order_id === "string") {
+        // `01 §4`'s first transition — `placed → confirmed` — and it is the PRECONDITION for
+        // `02-F31`'s auto-advance rather than part of it: `LEGAL_NEXT.placed` excludes `in_prep`,
+        // so without this edge the KOT advance below can never fire and lines stay at `placed`
+        // for ever (which is what they have done). It is deliberately NOT tier-gated — the device
+        // that signals a confirm is this one, on every tier — and that reading is an
+        // INTERPRETATION stated in full on `LineAdvance.confirmed`. Before the print, because the
+        // print's own advance reads the state this one writes.
+        lines.confirmed(order_id);
+        kot.confirmed(order_id);
+      }
     }
     // S-7 — THE SAME HANDOFF FOR THE TWO CASH DOCUMENTS, and it hangs off the same completed
     // append for the same reason: `02-F23`'s slip carries facts the fold projects off
