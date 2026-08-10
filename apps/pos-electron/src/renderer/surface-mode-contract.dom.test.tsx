@@ -247,11 +247,10 @@ const DEVICE = (over: Partial<DeviceState> = {}): DeviceState =>
  */
 const ALARMS: Alarm[] = [
   {
-    alarm_id: "alarm-1",
-    severity: "S1",
-    title: "KITCHEN TICKET DID NOT PRINT",
-    detail: "Counter 1 — order A-014",
-  } as Alarm,
+    id: "alarm-1",
+    subject: "Counter 1 — order A-014",
+    message: "KITCHEN TICKET DID NOT PRINT",
+  },
 ];
 
 const ONE_ORDER: OpenOrder[] = [
@@ -260,7 +259,16 @@ const ONE_ORDER: OpenOrder[] = [
     reference: "A-014",
     total_paisa: 77_000,
     paid_paisa: 0,
-    lines: [{ line_id: "l1", name: "Chicken Karahi", quantity: 1, modifiers: [], removals: [] }],
+    lines: [
+      {
+        line_id: "l1",
+        name: "Chicken Karahi",
+        quantity: 1,
+        modifiers: [],
+        removals: [],
+        note: null,
+      },
+    ],
   } as OpenOrder,
 ];
 
