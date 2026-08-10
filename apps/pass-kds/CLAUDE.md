@@ -262,8 +262,17 @@ page 2 looks like a bug to a helpful session and it is not.
 - **`03-F15`'s "waiting on naan"** — the counts ship (`2 of 3 ready`), the *sentence* does not.
 - **`27-F19`'s dark KDS opt-in.** `27 §9`'s first open question is a pilot A/B and this ships the
   documented default; the opt-in is one prop and a layer-3 key when the pilot answers.
-- **`27-F26`'s typeface.** No webfont is bundled — the same `18 §15` process call
-  `apps/pos-electron` and `apps/backoffice` both made. **Owed in all three.**
+- ~~**`27-F26`'s typeface.** No webfont is bundled.~~ **CLOSED in all three (August 2026)** —
+  `packages/ui/src/fonts` bundles it and `main.tsx` calls `installFontFaces()`; this app's own
+  gate asserts all three weights are LOADED on all 21 surfaces, not merely named. The `18 §15`
+  call the old note rested on was right and is now satisfied: no npm dependency, a `18 §14` row,
+  and `18 §1`'s allowlist widened to OFL 1.1 for font assets (**senior approval owed**).
+  ⚠ **The first run of that check failed 42 times and the bug was the import landing without the
+  call** — the wave's own defect, in the change that closed it. Biome called it a warning; the
+  gate called it fatal.
+  ⚠ **`◀`/`▶` — this app's pager arrows — are in NO IBM Plex Sans subset**, so they are OS glyphs
+  permanently and a residue of platform-dependent metrics survives there. An icon component, not
+  a bigger font, is the fix if it ever matters.
 
 ## ⚠ TWO MODULES AND THE PROBE ARE IMPORTED ACROSS THE APP BOUNDARY
 

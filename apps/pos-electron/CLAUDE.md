@@ -513,11 +513,20 @@ photo → Paid out), measuring both escalation steps on both panels.
    showing `REFUSAL_WORDS`, training mode's `27-F67` inversion, and on the unlock pad specifically
    **a PIN part-keyed and `01-F61`'s refusal line** (`preload.ts`'s `unlock` resolves any known
    user, so the fixture cannot currently produce a refusal at all).
-3. **It does not judge legibility, contrast, typography or target size.** `27-F26`'s missing
-   webfont is untouched — a control can be reachable and still unreadable. **`27-F8`'s target
-   size is now the ONE exception**: since `27-F68` the gate measures a keypad target in
-   millimetres of glass on both panels and fails below 20 mm ± 0.6. It judges that number and
-   nothing else about type.
+3. **It does not judge legibility or contrast — a control can be reachable and still unreadable.**
+   There are now **two** exceptions and this line used to say there were none. **`27-F8`'s target
+   size**: since `27-F68` the gate measures a keypad target in millimetres of glass on every panel
+   and fails below 20 mm ± 0.6. **`27-F26`'s typeface** (August 2026; this item said *"`27-F26`'s
+   missing webfont is untouched"*, which stopped being true when the face was bundled): the gate
+   asks `document.fonts` whether all three weights are LOADED, whether the token family renders
+   differently from a family that does not exist, and whether the digits are tabular and `I ≠ l`.
+   It still judges **nothing** about size-vs-distance (`27-F27`), contrast, or whether a human can
+   read the result.
+   - ⚠ **`document.fonts.check()` cannot be the assertion, measured not reasoned.** With no
+     matching `@font-face` it has no face it can call unloaded and returns **true** — confirmed
+     under the mutant, where it reported `true` beside zero loaded weights and identical fallback
+     widths. A check built on it alone would have been vacuous in exactly the state it existed to
+     catch. The gate prints it and branches on nothing.
 4. **Two panels, one DPI, one platform.** `27 §1a`'s 1366x768 **and** 1920x1080 are both swept
    (`DEC-UI-001` (e)) — but both are SIMULATED on a macOS host at devicePixelRatio 2 with a
    derived density. The **Windows till this ships to is still not measured**, and font metrics
@@ -829,16 +838,21 @@ nowhere — which is why the boot line says so at length and why `03-F51`'s refu
 
 ## What is deliberately not real yet
 
-- **`27-F26`'S TYPEFACE IS NAMED BUT NOT DELIVERED — no webfont is bundled.** The token chain is
-  `'IBM Plex Sans', system-ui, sans-serif`, so the till renders Plex only if the machine already
-  has it: SF Pro on a Mac, **Segoe UI on the Windows counter this app ships to**. The renderer's
-  CSP is `'self'`, so no external font URL can load and delivering it means committing the woff2
-  files as a local asset. **It is not cosmetic:** `27-F26` chose Plex on *fail-safe defaults* —
-  "tabular digits and distinct `I`/`l` with no feature flags" — and Segoe UI's figures are
-  proportional by default, so money columns do not align on the surface where `27-F25` makes
-  digits the payload. Left unbundled on **process**: `18 §15` requires a §14 entry and a senior
-  approval for a new asset, which a session fixing a layout blocker cannot give itself.
-  `apps/backoffice` made the same call for the same reason. **Owed.**
+- ~~**`27-F26`'S TYPEFACE IS NAMED BUT NOT DELIVERED**~~ **— CLOSED (August 2026).**
+  `packages/ui/src/fonts` bundles IBM Plex Sans (Latin, 400/500/600, OFL 1.1) as base64
+  `@font-face` rules and `main.tsx` calls `installFontFaces()`. `index.html`'s CSP gained
+  `font-src 'self' data:`; without it the rules parse and every face is blocked, which looks
+  exactly like success. **`18 §15` is satisfied rather than bypassed** — no npm dependency, `18
+  §14` gains a vendored-asset row, and `18 §1`'s licence allowlist gained **OFL 1.1 scoped to font
+  assets** because it did not list OFL at all. **Senior approval on that spec change is still
+  owed.** Asserted, not assumed: `layout:check` measures `document.fonts` on all 11 panels
+  (weights [400,500,600], 846.8 px against 744.9 px for an absent family).
+  - ⚠ **THE SUBSET DOES NOT COVER THIS APP'S OWN SYMBOLS, and no bundle can fix it.** `⌫` (the
+    keypad's backspace, a `27-F8` target), `◀`/`▶` (the pagers), `✓` and `→` are **absent from
+    every IBM Plex Sans subset** — checked against latin, latin-ext, cyrillic, cyrillic-ext, greek
+    and vietnamese, not assumed. Those glyphs are supplied by the OS permanently, so a residue of
+    platform-dependent metrics survives exactly where the UI draws a symbol. If that ever needs to
+    go, the answer is an icon component, not a bigger font.
 - **Device identity is a marked DEV SEED** with stable ids, and it stays one — a device minting a
   fresh `device_id` per launch would fork its own outbox on every restart. **What changed in August
   2026 is the OTHER side:** the gateway can now admit this identity through a declared command

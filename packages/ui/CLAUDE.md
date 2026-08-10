@@ -109,6 +109,45 @@ finds both lists by their heading) while the glass still gets the instrument cap
 `panel.dom.test.tsx` pins which mechanism is in use, so a future edit that upper-cases the
 STRING fails here rather than five assertions away.
 
+## `27-F26`'s typeface is BYTES, and it lives here (`src/fonts`)
+
+**The FR named IBM Plex Sans and this repo shipped no font file of any kind until August 2026** —
+`find` for `*.woff2|woff|ttf|otf` outside `node_modules` returned nothing. So the token named a
+family the machine did not have and every surface rendered a different OS fallback. `tokens.test.ts`
+asserted the STRING matched `/IBM Plex Sans/` and not `/Roboto/`, and both passed the whole time,
+because a string is all happy-dom can see.
+
+It is not cosmetic: the face was chosen *for numeral disambiguation on money surfaces*. Verified
+against the binaries rather than read off the FR — every digit advance is 600/1000 em in all three
+weights (**no `tnum` in the GSUB at all**, which is what "no feature flags" means) and `I`
+(400/414/423) differs from `l` (272/285/294) in advance and outline.
+
+- **`installFontFaces()`** is the seam every DOM host calls; the back office inlines
+  `fontFaceCss()` server-side instead. Both Electron CSPs need `font-src 'self' data:`.
+- **Three weights, Latin only** — the scale spends exactly 400/500/600, and commandment 7 makes
+  the UI English. No `unicode-range`, so a codepoint outside the subset falls through to the next
+  family, which is correct.
+- **`local()` is per WEIGHT.** `local('IBM Plex Sans')` on all three faces is a real bug that
+  looks right: it matches the *Regular* face, so on a machine with Plex installed the scale
+  silently flattens.
+- **`PRIMARY_FAMILY` is derived from `tokens.json`'s `$family`**, never typed twice — a face
+  declared under a name the tokens do not ask for is a font that loads and is never used.
+- **`font-display: swap`**, chosen on the FAILURE mode: `block`/`auto` render invisible text for
+  up to 3 s and a cashier who cannot read the total mid-rush is worse than one who reads it in the
+  wrong face for a frame; `optional` may decline the face for a whole page load.
+
+⚠ **Nothing in THIS package can assert the face loads** — happy-dom performs no layout and loads
+no fonts. `fonts.test.ts` guards the CSS shape, the binary↔base64 drift and the family name; *"it
+is loaded"* is asserted in Blink by both `layout:check` gates.
+
+⚠ **A negative regex over `fontFaceCss()` is UNSOUND** and this was caught by a correct
+implementation going red: base64 draws on `[A-Za-z0-9+/]`, so `ss02` occurs by chance at index
+2047 of the weight-600 payload. Negative assertions run on a payload-stripped view.
+
+⚠ **`⌫`, `◀`, `▶`, `✓` and `→` are in NO IBM Plex Sans subset** (checked across all six, not
+assumed), so the UI's own symbols are OS glyphs permanently and a residue of platform-dependent
+metrics survives there. An icon component, not a bigger font, is the fix if it matters.
+
 ## Storybook
 
 `pnpm storybook` (dev) · `pnpm build-storybook`. Every component gets stories for every
