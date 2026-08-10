@@ -50,6 +50,17 @@ export const PAYMENT_METHODS = [
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 /**
+ * `05-F7`'s `approval_type`, transcribed: *"`void | comp | discount | price_override | paid_out`"*.
+ *
+ * CLOSED, on `02-F42`'s precedent one field over. An approval type is not a report category — it
+ * decides which matrix row `02-F20`'s escalation was refused under, and an open string means an
+ * approval recorded against an act nothing can name, permanently (`01-F1`). The five members are
+ * exactly `02-F20`'s four escalatable acts plus `05-F19`'s paid-out; adding a sixth is an FR.
+ */
+export const APPROVAL_TYPES = ["void", "comp", "discount", "price_override", "paid_out"] as const;
+export type ApprovalType = (typeof APPROVAL_TYPES)[number];
+
+/**
  * `02-F23`'s "system-expected cash (by method)" — EXHAUSTIVE over the closed tender set, with
  * explicit zeros. Derived from `PAYMENT_METHODS` rather than transcribed, so a sixth tender
  * cannot be added to the enum and silently skipped here.
@@ -349,6 +360,92 @@ const payloadSchemas = {
     amount_paisa: z.number().int().nonnegative(),
     // 02-F24 emits the deposit record with the day close, so it buckets to a day (26 §7).
     day_id: z.string().min(1),
+  }),
+  /**
+   * `05-F7`'s event extension, transcribed. The `01 §4` catalog has carried
+   * `approval.requested / granted / denied` since its July 2026 absorption of the module
+   * extensions; only the payload schemas were missing, so `01-F4` made every one of them an
+   * emit-time `UnknownEventTypeError` and `02-F20`'s REMOTE path had nothing it could say.
+   * `apps/pos-electron/src/main/authorize.ts` maps the escalatable acts to matrix actions ahead
+   * of their events for the same reason and says so at its `WRITE_ACTIONS` table.
+   *
+   * **`requester_id` is a payload field and that is NOT a `02-F45` breach.** That FR forbids
+   * duplicating the ACTOR into the payload, and on `approval.requested` the actor IS the
+   * requester — so on this event alone the field would be a second source for one fact. It is
+   * required anyway, for a reason `02-F45` does not reach: the GRANT is a different event with a
+   * different actor, and `02-F38`'s refusal compares the approver against the requester. A grant
+   * that cannot name its requester cannot be checked against `02-F38` at all, and the alternative
+   * — resolving the requester by joining the request's envelope at grant time — is a read the
+   * granting plane may not be able to perform (`05-F9` grants remotely, over cloud). `05-F5` also
+   * lists "requester (name, role)" among what the interrupt card must show before a decision.
+   */
+  "approval.requested": z.looseObject({
+    // `05-F7`: "Grants reference the request id, are idempotent, and the first response wins."
+    // `01-F36` scopes that idempotency to a request that is still pending, so the id is the key
+    // both responses carry and the only thing that makes a duplicate grant a logged no-op.
+    request_id: z.string().min(1),
+    approval_type: z.enum(APPROVAL_TYPES),
+    // `05-F7`: "refs[] (order/line/paid-out ids)". The ENVELOPE's `refs[]` carries the kernel's
+    // soft references (`00 §6`); this is the payload's own business list, and it may be empty
+    // for an act whose subject is not addressable yet.
+    approval_refs: z.array(z.string().min(1)),
+    // `05-F7`: "amounts". Integer paisa (`00 §6`), a magnitude like `cash.paid_out`'s — the
+    // direction is carried by what is being approved, never by a sign.
+    amount_paisa: z.number().int().nonnegative(),
+    // `05-F5`: "stated reason".
+    reason: z.string().min(1),
+    // `05-F7`: "requester_id, requesting device_id".
+    requester_id: z.string().min(1),
+    requesting_device_id: z.string().min(1),
+  }),
+  /**
+   * `05-F6`/`05-F7`. **TWO IDENTITIES, AND THE SCHEMA IS WHERE LOSING ONE BECOMES
+   * UNREPRESENTABLE.**
+   *
+   * `02-F41` rules that attribution is whoever's PIN is in, with no "acting for" concept. The
+   * local path protects that mechanically: `apps/pos-electron/src/main/index.ts` builds a SECOND
+   * `createPinSession` for approvals, because `unlock()` MOVES the session — approving through
+   * the cashier's own would sign her out, and `02-F41` would then attribute her next twenty
+   * orders to whoever authorised one paid-out, permanently, in a ledger `01-F1` forbids
+   * correcting in place. `02-F20` asks for the opposite: *"the recorded event carries actor +
+   * approver either way"*.
+   *
+   * A REMOTE grant has to preserve the same property across a plane boundary, where there is no
+   * session to move and therefore no mechanism that protects it by construction. So it is
+   * protected by the shape instead: `approver_user_id` and `requester_user_id` are BOTH required
+   * and are DIFFERENT fields, so a grant that collapsed the two into one identity does not
+   * typecheck and does not parse.
+   *
+   * **The envelope's `actor_user_id` on THIS event is the APPROVER** — the manager acted, on the
+   * manager's own device, and granting is their act. It is not the cashier. A grant whose
+   * envelope named the cashier would be the local path's defect committed on the remote one: the
+   * session moved, one identity where there must be two.
+   *
+   * `05-F6`'s resulting `void/comp/discount.recorded` then carries `actor_user_id = requester`
+   * (unchanged) and `approver_user_id` as a payload field — the envelope has exactly one identity
+   * slot, which is why the approver is a payload field there and why it must be one here too, in
+   * the shape the escalated write will consume.
+   */
+  "approval.granted": z.looseObject({
+    request_id: z.string().min(1),
+    approver_user_id: z.string().min(1),
+    requester_user_id: z.string().min(1),
+  }),
+  /**
+   * `05-F7`. A denial is a RECORD, never the absence of one — `05 §4`'s paid-out flow reads its
+   * reason back at the counter (*"the paid-out stays pending at the POS with the denial reason;
+   * cash does not leave the drawer against the ledger"*), and under `01-F1` a decision that left
+   * no row could not be distinguished later from a request nobody ever saw.
+   *
+   * Both identities for `approval.granted`'s reason: a denial is a decision about somebody, and
+   * `02-F38` binds it identically — a requester may not deny their own request into the ledger
+   * any more than they may grant it.
+   */
+  "approval.denied": z.looseObject({
+    request_id: z.string().min(1),
+    approver_user_id: z.string().min(1),
+    requester_user_id: z.string().min(1),
+    reason: z.string().min(1),
   }),
 } as const;
 
