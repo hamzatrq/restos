@@ -43,6 +43,12 @@ import {
   createReceiptPrinter,
   PUMP_INTERVAL_MS,
 } from "./printing";
+import {
+  describeStationRouting,
+  resolveStationRouting,
+  STATION_ROUTES_ENV,
+  type StationRouting,
+} from "./station-routing";
 import { createUplink } from "./sync";
 import { counterWindowOptions, describePanelFit, resolvePanelFit } from "./window-options";
 
@@ -305,6 +311,31 @@ const panelFacts = (): {
     // minimum that includes it is a minimum the operator can never satisfy.
     workArea: { width: display.workAreaSize.width, height: display.workAreaSize.height },
   };
+};
+
+/**
+ * `03-F22`/`03-F51` / `00 §7` layer 2 — where each station's ticket GOES, resolved once per process.
+ *
+ * Cached for `hardwareTier`'s reason exactly: it is read on every confirm, only the environment can
+ * change it, and a till that changed a station's route mid-service would print half an order's
+ * tickets and not the rest.
+ *
+ * **`kitchen_screen` is the ONE place a tier touches a hardware question, and the mapping is drawn
+ * narrowly on purpose.** `DEC-HW-003`'s checkable rule is *"no code may branch on the tier to decide
+ * whether a piece of hardware EXISTS"*, and this does not: it feeds `02-F31`'s answer into a
+ * CONFIGURATION-TIME validator and nowhere else, and the routing decision itself (`routesToPaper`,
+ * read per ticket) never sees a tier at all. An `assumed` tier is passed as **`null`** rather than
+ * as T1 — an assumption is not a registry, and `03-F51` says an unknown is not a blessing. That is
+ * every shipped device today, so today the check reports `unverified` and never refuses.
+ */
+let stationRoutingCache: StationRouting | null = null;
+const stationRouting = (): StationRouting => {
+  const tier = hardwareTier();
+  stationRoutingCache ??= resolveStationRouting({
+    configured: process.env[STATION_ROUTES_ENV],
+    kitchen_screen: tier.source === "assumed" ? null : tier.tier !== "T1",
+  });
+  return stationRoutingCache;
 };
 
 const createWindow = (): BrowserWindow => {
@@ -609,6 +640,16 @@ app.whenReady().then(async () => {
   console.log(describePanelFit(resolvePanelFit(panelFacts())));
 
   /**
+   * `00 §5.7` a third time, and this value is the worst of the three to be wrong about because it
+   * is wrong SILENTLY IN BOTH DIRECTIONS. A station left on paper at a branch with no printer bands
+   * for ever and appends a permanent `kot.print_failed` per ticket (`01-F1`); a station routed to a
+   * screen that does not exist cooks nothing and **cannot** raise `03-F5`, because the FR is about
+   * a job that failed and no job was made. So the line names the screen-only stations by name and
+   * says whether anything confirmed they have somewhere to appear.
+   */
+  console.log(describeStationRouting(stationRouting()));
+
+  /**
    * **Say what the grid will actually show, at boot.** Without this the till renders item names
    * with `no price set` under every tile and NOTHING anywhere explains why — which is exactly how
    * a first look at this app ended: six tiles, six refusals, and no way to tell a stale dev store
@@ -793,6 +834,15 @@ app.whenReady().then(async () => {
     // 03-F50 — the station cooks the line, resolved up the 01-F21 chain by the catalog itself.
     // An unrouted line lands on DEFAULT_STATION rather than vanishing off every ticket.
     station: stationResolver(store),
+    // `03-F22`/`03-F51` — **THE SEAM.** A station configured screen-only enqueues no job, so a
+    // printerless kitchen produces no failed transmit, no exhausted budget, no permanent
+    // `kot.print_failed` (`01-F1`) and no vendor page (`15-F14`). Passing the REAL resolution and
+    // not a literal is the point: `() => true` here is a product with no `03-F51` in it at all,
+    // and **no rail in this repo can see the difference** — `seams:check` Rule B only walks
+    // factories declared under `packages/`, so `createKotPrinter`'s optional members are not
+    // candidates and the check is exit-0 CLEAN with this argument deleted (measured). The only
+    // guard is `__acceptance__/station-routing-seam.test.ts` §E, which reads this construction.
+    routesToPaper: (at) => stationRouting().routesToPaper(at),
     capability: kotCapability(),
     // 03-F5's `kot.print_failed` and 02-F31's `kot.printed`, through the gateway so the envelope
     // is stamped exactly like every other append (02-F41's read-at-append attribution included).

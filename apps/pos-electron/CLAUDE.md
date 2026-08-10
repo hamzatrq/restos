@@ -596,6 +596,79 @@ surface does not have. That is defect 5's arithmetic, avoided rather than repeat
 - **Cash needs ~260 mm of width to stay one pad tall.** Below that the columns multiply and the
   surface grows. That is the number for whoever defines the mode below `compact`.
 
+## ✅ A PRINTERLESS KITCHEN IS A SUPPORTED CONFIGURATION — `03-F22` / `03-F51` (August 2026)
+
+**The harm removed, measured rather than argued.** With no printer, every transmit reported no
+answer, `03-F4`'s budget exhausted, `03-F5` banded for ever with a repeating sound, `printing.ts`
+appended a **permanent** `kot.print_failed` per exhausted job into an append-only ledger (`01-F1`),
+`05-F3` alarmed the manager and `15-F14` paged vendor support on *"`kot.print_failed` rates"* — so
+a restaurant that owns no thermal printer generated real, unbounded support load for ever, and
+`15-F10` gated doc 14's go-live checklist on a printer so it could not finish onboarding either.
+`03-F22` had specified the fix since Draft 1 (*"replace them per station — layer-2 choice"*) and
+**nothing in the product ever read it.**
+
+`main/station-routing.ts` is the whole decision: a `00 §7` layer-2 key (`RESTOS_STATION_ROUTES`,
+e.g. `*=screen,tandoor=paper`) parsed into a per-station route of `paper | screen | both`. A
+station routed `screen` **enqueues nothing** — no bytes, no attempt, no band, no ledger event.
+
+**THE ONE LAW, and it is the thing to protect when you touch this:** *absence is decided BEFORE a
+job exists, from configuration; failure is decided AFTER a job exists, from a transport outcome.*
+The consult sits before `render()` and before `spooler.job()` in `confirmed()`, and appears nowhere
+downstream. Move it later — into `reconcile`, into the transport, into a band filter — and the two
+collapse, and the first real printer that dies at 20:40 on a Friday goes silent. `03-F5` is
+untouched where paper IS the route.
+
+**The tier is NOT consulted to decide what hardware exists** (`DEC-HW-003`). It reaches this feature
+in exactly one expression, in `main/index.ts`, feeding `02-F31`'s answer to the CONFIGURATION-TIME
+validator — and an `assumed` tier is passed as **`null`**, never as T1, because an assumption is not
+a registry. Every shipped device is `assumed` today, so the check reports `unverified` and never
+refuses. `03-F51`: *an unknown is not a blessing.*
+
+**⚠ `seams:check` CANNOT SEE THIS SEAM, and that was measured, not assumed.** Rule B opens with
+`if (groupOf(mod.file) !== "packages") continue;`, so a factory declared in an APP has no Rule-B
+candidates. The rail is **exit 0 and CLEAN** with the `routesToPaper` argument deleted from
+`main/index.ts` *and* with it stubbed to `() => true`, reporting the same `5 optional seams` both
+times. `__acceptance__/station-routing-seam.test.ts` §E is the only guard. **`CashPrinterDeps.append`
+carries the opposite claim about Rule B and it is wrong for the same reason — a finding for that
+dep's owner, not fixed here.**
+
+**`03-F9`'s CASH DRAWER IS NOT A FAULT, checked rather than assumed.** `cash.drawer_opened` is
+emitted, authorized and folded, and **nothing executes a kick**: `packages/escpos` ships no
+drawer-pulse encoder and no code path attempts one, so absence of a drawer costs nothing today.
+The hazard is forward-looking and is recorded in `03-F51`: the kick rides the *receipt printer's*
+RJ11, so whoever builds it inherits that transport and this exact defect unless the drawer is a
+declared capability refused at configuration time.
+
+**Mutation matrix — control 503/503 green (472 pre-existing + 31 new), `pnpm verify` exit 0.**
+In-tree, byte-exact backups with a restore trap, full package suite under every mutant, run twice
+with identical results. **The right-hand column is the finding.**
+
+| # | mutant (exactly one branch) | new (31) | pre-existing 472 |
+|---|---|---|---|
+| M1 | **THE SEAM** — `index.ts` drops the `routesToPaper` argument (the pre-`03-F51` call site) | 1 | **all 472 green** |
+| M2 | **THE STUB SUPPLY** — `routesToPaper: () => true` | 1 | **all 472 green** |
+| M3 | **THE COLLAPSE** — the route is consulted in `reconcile`, after the job exists | 3 | **all 472 green** |
+| M4 | **SILENT FAILURE** — `reconcile` drops its `failed` arm (`03-F5` weakened outright) | 3 | **9** |
+| M5 | the guard inverted — screen prints, paper does not | 6 | 24 |
+| M6 | **THE VALIDATOR** — an unknown roster reports VERIFIED | 2 | all green |
+| M7 | **THE REFUSAL APPLIES** — a refused configuration is applied anyway | 1 | all green |
+| M8 | **THE TIER MAPPING** — an `assumed` tier passed as `false`, not `null` | 1 | all green |
+| M10 | **THE DANGEROUS DEFAULT** — the optional dep defaults to screen-only | 1 | 24 |
+| M9 | **NEGATIVE CONTROL** — a real refactor of `routeFor`, no behaviour change | **0** | **all green** |
+
+**M4 is the keep-them-apart row and its middle column is the reassurance:** making a genuine
+printer failure silent reds 3 new *and* 9 pre-existing `03-F5` tests, so the FR is defended from
+both sides and this work did not weaken it. **M3 is the same defect in the form this change makes
+newly possible** — routing reaching a job that already exists — and **not one of the 472
+pre-existing tests can see it.** **M9 is what makes every red row mean anything.**
+
+**What is owed:** `apps/pass-kds` is still a one-file stub, so a screen-only station's lines reach
+the branch queue projection (`kitchenQueue()`, filtered by the catalog's `station`) and **no screen
+draws them**. That is the seam this work stops at deliberately: the data is already there, nothing
+new is needed from the kernel, and what is missing is the surface and `03-F24`'s ready-signal
+ownership. Until it exists, configuring a station to `screen` on a real branch means its tickets go
+nowhere — which is why the boot line says so at length and why `03-F51`'s refusal exists.
+
 ## What is deliberately not real yet
 
 - **`27-F26`'S TYPEFACE IS NAMED BUT NOT DELIVERED — no webfont is bundled.** The token chain is
