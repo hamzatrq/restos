@@ -102,11 +102,24 @@ export const alreadySettled = (order: {
   return { order_id: order.order_id, billed_paisa: billed, paid_paisa: order.pay_total };
 };
 
-/** The refusal, thrown, with the fact attached so a caller can tell it from a permission deny. */
+/**
+ * The refusal, thrown, with the fact attached under a name a caller can test for.
+ *
+ * ⚠ **NOTHING IN THE SHIPPING PRODUCT READS `already_settled` TODAY, and that is stated rather
+ * than left to look designed.** `ipcMain.handle` serializes a thrown error to its MESSAGE and
+ * drops attached properties — `Counter.tsx` records exactly that about `authorize.ts`'s
+ * `WriteRefusal`, which is why `02-F20` needed a second IPC channel (`escalationFor`) to get its
+ * refusal across the bridge at all. So the discriminator cannot reach a renderer, and the cashier
+ * learns the same fact the honest way instead: the Pay surface reads the two numbers off its own
+ * projection and says so *before* she reaches for the pad.
+ *
+ * The property is two lines and is kept because the SUITE asserts on it — an assertion on the
+ * message alone could not tell "refused for being a duplicate" from any refusal, which is `F60`'s
+ * amendment-test defect recorded in AGENTS.md. **A type-guard export was written here and deleted:
+ * `pnpm seams:check` correctly called it out as an export no shipping code reaches — the wave's
+ * named defect, caught by the rail, inside the fix for a different defect.**
+ */
 export type SettlementRefusedError = Error & { readonly already_settled: AlreadySettled };
-
-export const isSettlementRefusal = (error: unknown): error is SettlementRefusedError =>
-  error instanceof Error && "already_settled" in error;
 
 /**
  * `00 §5.7` — the message names what is true and nothing more.

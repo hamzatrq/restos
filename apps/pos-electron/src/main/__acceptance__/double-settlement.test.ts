@@ -50,7 +50,19 @@ import { type DeviceStore, openStore } from "@restos/sync-client";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AppendResult } from "../../shared/ipc";
 import type { Gateway } from "../gateway";
-import { alreadySettled, isSettlementRefusal, refuseDoubleSettlement } from "../settlement-guard";
+import {
+  alreadySettled,
+  refuseDoubleSettlement,
+  type SettlementRefusedError,
+} from "../settlement-guard";
+
+/**
+ * Local, because a shipping predicate for this would be an export no shipping code reaches — the
+ * wave's named defect, and `pnpm seams:check` said so about the first draft of this file's
+ * counterpart in `settlement-guard.ts`. See that module's note on `SettlementRefusedError`.
+ */
+const isSettlementRefusal = (error: unknown): error is SettlementRefusedError =>
+  error instanceof Error && "already_settled" in error;
 
 const ORG = "00000000-0000-7000-8000-000000000001";
 const BRANCH = "00000000-0000-7000-8000-000000000002";
