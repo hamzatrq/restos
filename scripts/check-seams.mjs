@@ -925,53 +925,63 @@ const callSites = (name) => {
   return sites;
 };
 
+/** The workspace groups whose DECLARED factories Rule B examines. */
+const RULE_B_GROUPS = ["packages"];
+const ruleBExamines = (mod) => RULE_B_GROUPS.includes(groupOf(mod.file));
+
 const ruleBFindings = [];
 let ruleBCandidates = 0;
 
-for (const mod of modules.values()) {
-  if (groupOf(mod.file) !== "packages") continue;
-  for (const [name, decl] of mod.declared) {
-    if (!decl.valueLike) continue;
-    if (!shipping.reachedSymbols.has(key(mod.file, name))) continue;
-    const members = optionsOf(mod, name);
-    if (!members) continue;
-    const optional = members.filter((member) => member.optional);
-    if (optional.length === 0) continue;
-    const sites = callSites(name);
-    if (sites.length === 0) continue;
-    if (sites.some((site) => site.keys.includes("..."))) continue; // spread — cannot be read statically
-    const supplied = new Set(sites.flatMap((site) => site.keys));
-    const whole = fileMarker(mod);
-    for (const member of optional) {
-      ruleBCandidates++;
-      const label = `${name}({ ${member.name} })`;
-      const line = lineOf(mod.raw, member.offset);
-      const where = `${relative(ROOT, mod.file)}:${line}`;
-      const marker = whole ?? markerAbove(mod.raw, line);
-      if (supplied.has(member.name)) {
-        if (marker && marker.reason.length >= REASON_MIN) {
-          staleMarkers.push({ where, name: label, reason: marker.reason, marker: marker.marker });
-        }
-        continue;
+/**
+ * Rule B's per-export scan: every optional member of `name`'s options bag that no shipping call
+ * site supplies, minus the ones carrying a reasoned marker.
+ */
+const scanSeams = (mod, name, decl) => {
+  if (!decl.valueLike) return;
+  if (!shipping.reachedSymbols.has(key(mod.file, name))) return;
+  const members = optionsOf(mod, name);
+  if (!members) return;
+  const optional = members.filter((member) => member.optional);
+  if (optional.length === 0) return;
+  const sites = callSites(name);
+  if (sites.length === 0) return;
+  if (sites.some((site) => site.keys.includes("..."))) return; // spread — cannot be read statically
+  const supplied = new Set(sites.flatMap((site) => site.keys));
+  const whole = fileMarker(mod);
+  for (const member of optional) {
+    ruleBCandidates++;
+    const label = `${name}({ ${member.name} })`;
+    const line = lineOf(mod.raw, member.offset);
+    const where = `${relative(ROOT, mod.file)}:${line}`;
+    const marker = whole ?? markerAbove(mod.raw, line);
+    if (supplied.has(member.name)) {
+      if (marker && marker.reason.length >= REASON_MIN) {
+        staleMarkers.push({ where, name: label, reason: marker.reason, marker: marker.marker });
       }
-      if (marker) {
-        if (marker.reason.length < REASON_MIN) {
-          emptyReasons.push({ where, name: label, marker: marker.marker });
-        } else if (marker.owed) {
-          owed.push({ where, name: label, reason: marker.reason });
-        } else {
-          byDesign.push({ where, name: label, reason: marker.reason });
-        }
-        continue;
-      }
-      ruleBFindings.push({
-        where,
-        factory: name,
-        option: member.name,
-        sites: sites.map((s) => `${relative(ROOT, s.file)}:${s.line}`),
-      });
+      continue;
     }
+    if (marker) {
+      if (marker.reason.length < REASON_MIN) {
+        emptyReasons.push({ where, name: label, marker: marker.marker });
+      } else if (marker.owed) {
+        owed.push({ where, name: label, reason: marker.reason });
+      } else {
+        byDesign.push({ where, name: label, reason: marker.reason });
+      }
+      continue;
+    }
+    ruleBFindings.push({
+      where,
+      factory: name,
+      option: member.name,
+      sites: sites.map((s) => `${relative(ROOT, s.file)}:${s.line}`),
+    });
   }
+};
+
+for (const mod of modules.values()) {
+  if (!ruleBExamines(mod)) continue;
+  for (const [name, decl] of mod.declared) scanSeams(mod, name, decl);
 }
 
 if (ruleBCandidates === 0)
