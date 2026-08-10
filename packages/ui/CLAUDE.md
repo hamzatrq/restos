@@ -148,6 +148,30 @@ implementation going red: base64 draws on `[A-Za-z0-9+/]`, so `ss02` occurs by c
 assumed), so the UI's own symbols are OS glyphs permanently and a residue of platform-dependent
 metrics survives there. An icon component, not a bigger font, is the fix if it matters.
 
+### ⚠ THE COMPOSITE IS SPENT APART 34 TIMES OUT OF 36 — found while chasing the last 3 dp, OWED
+
+Bundling the face made macOS and Linux agree on almost everything (`layout:check` went **44 fatal
+violations → 1** on Linux). The survivor is `tablet-10.1 tab:Cash` under `03-F5`'s band: **570 dp
+of content in a 567 dp box**, Linux only, macOS clean. It is **pre-existing, not introduced** —
+the same surface was 570 dp in a **543 dp** box before the font landed, so the content never moved
+and the box grew 24 dp.
+
+The mechanism, measured across `src/components`: **36 `fontSize:` spends and 2 `lineHeight:`
+spends.** `27-F42` makes typography COMPOSITE — *"take `text-body` whole … never destructure a
+size out of one"* — and the line-height half is dropped in 19 of 20 components, including
+`StatusStrip` and `AlarmBand`, which are exactly the chrome sitting above that box. With no
+explicit `line-height` Blink derives the line box from the font's ascent/descent **as resolved by
+the platform backend** (CoreText vs FreeType), so a line box can differ by a pixel or two for an
+identical font file. That is the whole of the residual platform dependence.
+
+**It is NOT a drive-by fix and the arithmetic says why.** `text-label` is 14/20; the font-derived
+line box at 14 px Plex is ≈18. Honouring the composite therefore makes chrome **TALLER**, which
+shrinks `main` and makes this same Cash overflow **worse** before it makes anything better. The
+package guide already records that *"Pay has 38 px spare, Cash has 0"* — so the correct fix is
+"honour the composite everywhere **and** re-cost the Cash arrangement", one piece of work, with
+both `layout:check` gates on **both** platforms in its blast radius. Scheduled consolidation
+(`24 §3b`), not a drive-by, and the 3 dp is the symptom rather than the defect.
+
 ## Storybook
 
 `pnpm storybook` (dev) · `pnpm build-storybook`. Every component gets stories for every
