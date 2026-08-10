@@ -559,6 +559,21 @@ const judge = (surface: string, state: State, r: SurfaceReport): void => {
 
 /** Totals for the composition check, so it too can prove it looked at something (`24-F14`). */
 let extentsMeasured = 0;
+/** Axes actually judged for composition, and axes skipped because the content did not fit. */
+let compositionAxesJudged = 0;
+let compositionAxesSkipped = 0;
+/**
+ * Every axis the fit precondition skipped, kept so the `24-F14` guard below can check the claim
+ * that makes the suppression safe: **a skipped axis must be a surface the FIT checks report.**
+ */
+const skippedComposition: { surface: string; state: State; axis: "x" | "y" }[] = [];
+
+/**
+ * 1 dp of slack, matching `probe.ts`' own floor and a deliberate floor rather than slack: a
+ * sub-pixel rounding on a border must not retire an axis from the composition check, while every
+ * real overflow measured here has been tens of dp (46, 90, 108).
+ */
+const COMPOSITION_FIT_TOLERANCE = 1;
 
 /**
  * # `27-F11c` AS A TEST — the two counter panels must lay out IDENTICALLY
@@ -630,6 +645,83 @@ const judgeComposition = (surface: string, state: State, r: SurfaceReport): void
   ];
   for (const { axis, a, b, span, ends, exempt } of axes) {
     if (exempt === true || span <= 0) continue;
+    /**
+     * # THE PRECONDITION: THERE HAS TO BE LEFTOVER ROOM BEFORE YOU CAN ASK WHERE IT WENT
+     *
+     * **This check is only defined on content that FITS, and for one round it was not told so.**
+     * Every sentence of its own design note above presupposes it — *"content with a natural
+     * maximum size, centred in a surface **larger than it**, has equal margins"*, *"the leftover
+     * room"*, *"all of the slack on two sides"*. Slack is leftover room. When the content is
+     * TALLER than its box the slack goes negative, there is no leftover room to have placed
+     * anywhere, and `|top − bottom|` stops answering the question this check exists to ask.
+     *
+     * ## What it answers instead, in closed form
+     *
+     * Let the content overrun the box by `D > 0`. Then `top + bottom = box − content = −D`,
+     * always, so `|top − bottom| = |2·top + D|`:
+     *
+     * | alignment under overflow | top | asymmetry | verdict |
+     * |---|---|---|---|
+     * | `center` — the cut is split across BOTH ends | `−D/2` | **0, for any D** | passes |
+     * | `safe center` → falls back to start | `+padding` | `2·padding + D` | fails past tolerance |
+     *
+     * So on overflowing content this is **a function of the alignment mode and not of the loss**:
+     * a centred overflow of any magnitude — ten pixels or ten thousand — has asymmetry exactly
+     * zero and always passes, while the same content pushed to one edge fails. That is a FIT
+     * fact, wearing a composition verdict's clothes.
+     *
+     * ## Measured, not argued — and the incentive was inverted
+     *
+     * `Counter.tsx` centres its work area with **`safe center`**, chosen deliberately (see its
+     * own note) because a plain `center` splits the cut top and bottom and *"hides half of itself
+     * above the viewport, where nothing looks for it"*. Reverting that one keyword on the shipped
+     * tree, changing nothing else — layout gate, `tablet-10.1 tab:Pay`, band up:
+     *
+     * | | overflow | fit verdicts | ANCHORED | gate |
+     * |---|---|---|---|---|
+     * | `center` — loss split across both ends | 46 dp | 6 controls clipped, **0 unreachable** | none | **PASSED** |
+     * | `safe center` — loss at the bottom edge | 108 dp | **3 controls UNREACHABLE** | fires | **FAILED** |
+     *
+     * The check was **passing the arrangement that hides its loss off the top of the screen and
+     * failing the one that puts it where an operator and a screenshot both look.** Whichever of
+     * those two layouts is better is not this rail's call; producing opposite verdicts on the
+     * same lost pixels is what makes it unsound rather than merely redundant.
+     *
+     * ## Why suppressing it here silences NOTHING — the load-bearing claim
+     *
+     * The fit checks already own an overflowing surface, and they own it far better: on that
+     * exact surface they report `OVERFLOW y: main holds 593px in a 485px box` **plus three
+     * `UNREACHABLE` verdicts naming `C`, `0` and `⌫` by label**. An `OVERFLOW` carries
+     * `fit: true`, so **on a shipping panel it is FATAL** — a genuinely broken shipping surface
+     * still reddens the gate, under the verdict that is true. `judgeComposition` runs after the
+     * fit checks for exactly this reason, and the `24-F14` guard below asserts the pairing rather
+     * than assuming it.
+     *
+     * ## What this is NOT, stated because it is one keystroke away from being it
+     *
+     * **It is not a panel exemption.** It names no panel, no `ships` flag and no size floor, and
+     * it behaves identically on `counter-1366` and on `tablet-10.1`. A surface whose content FITS
+     * is judged strictly on **every** panel — including the two below `PANEL_FLOOR_MM`, where
+     * `tab:Me`, `tab:Orders` and `tab:Order` all fit and all remain fully bound. Suppressing
+     * composition *by floor* would have silenced those, which is the change this deliberately is
+     * not; the mutation matrix in `apps/pos-electron/CLAUDE.md` carries the row that proves it.
+     *
+     * Per AXIS, not per surface: content routinely fits horizontally while overflowing
+     * vertically, and the horizontal composition judgement stays perfectly meaningful there.
+     */
+    const fits = a >= -COMPOSITION_FIT_TOLERANCE && b >= -COMPOSITION_FIT_TOLERANCE;
+    if (!fits) {
+      compositionAxesSkipped += 1;
+      skippedComposition.push({ surface, state, axis });
+      note(
+        `  [${state}] ${surface}: composition ${axis} NOT JUDGED — the content overruns its work ` +
+          `area (${Math.round(a)}dp / ${Math.round(b)}dp of slack, one of them negative), so there ` +
+          "is no leftover room whose placement could be judged. The FIT checks above own this " +
+          "surface.",
+      );
+      continue;
+    }
+    compositionAxesJudged += 1;
     const asymmetry = Math.abs(a - b);
     if (asymmetry <= span * COMPOSITION_TOLERANCE) continue;
     failures.push({
@@ -639,8 +731,16 @@ const judgeComposition = (surface: string, state: State, r: SurfaceReport): void
         `ANCHORED ${axis}: the content occupies ${e.content.w}x${e.content.h} of a ${e.box.w}x${e.box.h} ` +
         `work area with ${Math.round(a)}dp and ${Math.round(b)}dp of slack on its ${ends} — an ` +
         `asymmetry of ${Math.round(asymmetry)}dp, ${Math.round((asymmetry / span) * 100)}% of the axis, ` +
-        `over the ${Math.round(COMPOSITION_TOLERANCE * 100)}% this gate allows. It FITS and every ` +
-        "control is reachable; that is the point. Content pinned against one edge with all the " +
+        `over the ${Math.round(COMPOSITION_TOLERANCE * 100)}% this gate allows. ` +
+        // **THIS SENTENCE IS A CLAIM AND IT HAS TO BE TRUE.** It read "It FITS and every control
+        // is reachable" unconditionally, and it fired on a surface holding 593 dp in a 485 dp box
+        // with three controls whose centres did not hit-test — the verdict asserting the exact
+        // opposite of four other verdicts on the same surface. The fit precondition above is what
+        // makes the first clause true by construction now, and the second is dropped: content
+        // fitting `<main>` is not the same claim as no control overhanging the viewport, and this
+        // gate has already paid once for a verdict that concluded more than it measured.
+        "The content FITS its work area — this check does not run otherwise, because slack that " +
+        "does not exist cannot have been placed anywhere. Content pinned against one edge with all the " +
         "leftover room on the other is a layout that ran out of opinions, and it is what a founder " +
         'called "unusable for a human" on a screen every other check here passed. Either the ' +
         "composition should fill the room, or it has a natural maximum and the surface should " +
@@ -1137,6 +1237,58 @@ const run = async (): Promise<number> => {
     }
   }
 
+  /**
+   * # `24-F14` — THE PRECONDITION MUST NOT BECOME A BACK DOOR, AND THIS IS THE ASSERTION
+   *
+   * The fit precondition in `judgeComposition` creates a brand-new way for the composition check
+   * to go quiet: make every surface overflow and every axis is skipped. Its whole safety argument
+   * is one sentence — *"the FIT checks already own an overflowing surface"* — and an argument in
+   * a comment is not a guard, which is this repo's most-repeated lesson.
+   *
+   * So the pairing is CHECKED. For every axis the precondition skipped, this demands at least one
+   * `fit` verdict on the same surface in the same state. If a composition axis is retired for
+   * overflow and nothing else reported that surface, content is being lost with no verdict at all
+   * — the exact silence the suppression is claimed not to create.
+   *
+   * It is not hypothetical. The extent measures the union of INK against `<main>`'s border box,
+   * while `OVERFLOW` compares `scrollHeight` to `clientHeight` — and **`scrollHeight` does not
+   * count content overflowing the TOP of a box.** A purely upward overflow is therefore visible to
+   * this check and invisible to that one, which is precisely the state a plain `center` produces.
+   * `CLIPPED BY ANCESTOR` catches it whenever a CONTROL is in the lost region; a surface losing
+   * only non-control ink upward is a real blind spot, and this guard is what surfaces it instead
+   * of hiding it behind a skip.
+   */
+  for (const s of skippedComposition) {
+    const reported = failures.some(
+      (f) => f.fit === true && f.surface === s.surface && f.state === s.state,
+    );
+    if (!reported) {
+      failures.push({
+        surface: s.surface,
+        state: s.state,
+        detail:
+          `EMPTY MATCH — composition ${s.axis} was NOT JUDGED here because the content overruns ` +
+          "its work area, and NO fit verdict was raised on this surface either. So content is " +
+          "being lost and nothing in this gate says so. The composition precondition is only " +
+          "safe because the fit checks own an overflowing surface; here they did not. The likely " +
+          "cause is an overflow that runs UPWARD only — `scrollHeight` does not count content " +
+          "above a box's top edge, so the OVERFLOW check cannot see it, and CLIPPED BY ANCESTOR " +
+          "sees it only where a control sits in the lost region (24-F14).",
+      });
+    }
+  }
+  if (compositionAxesJudged < MIN_SURFACES - PANELS.length) {
+    failures.push({
+      surface: "gate",
+      state: "quiet",
+      detail:
+        `EMPTY MATCH — the composition check JUDGED only ${compositionAxesJudged} axes and skipped ` +
+        `${compositionAxesSkipped} for overflow. The fit precondition is meant to retire the few ` +
+        "surfaces the fit checks already own, not the check itself; at this level the one check " +
+        "here that is not about fitting has gone inert (24-F14).",
+    });
+  }
+
   // `24-F14` — the composition check must have looked at something too. Without this a change
   // that stopped `<main>` being found would silently retire the whole check while every other
   // number in the summary stayed healthy, which is precisely how row M8's fixture defect worked.
@@ -1191,7 +1343,9 @@ const run = async (): Promise<number> => {
   note("");
   note(
     `measured ${surfacesMeasured} surfaces, ${controlsMeasured} controls, ` +
-      `${extentsMeasured} compositions, ${twinsCompared} 27-F11c twin pairs, ` +
+      `${extentsMeasured} compositions (${compositionAxesJudged} axes judged, ` +
+      `${compositionAxesSkipped} not judged — content overran its box), ` +
+      `${twinsCompared} 27-F11c twin pairs, ` +
       `${clippingBoxesSeen} overflowing boxes, ` +
       `${clippingAncestorsSeen} clipping ancestors walked`,
   );
