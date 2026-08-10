@@ -178,9 +178,17 @@ changes are load-bearing rather than cosmetic, and each replaced a duplicate or 
   reasons (including why `businessDate()` is **not** called) live in that file.
 - **`theme-css.ts` now emits `27-F26`'s typeface**, not only the colours. The type half of the
   tokens export was declared in the manifest, re-derived by `packages/ui`'s `tokens.test.ts` on
-  every commit, and true of no pixel here. No webfont is bundled — the token's own chain falls
-  back to `system-ui`, so on a machine without IBM Plex Sans this renders what it rendered
-  before, now *stated by the token* instead of by omission.
+  every commit, and true of no pixel here. ⚠ **This bullet ended *"No webfont is bundled — the
+  token's own chain falls back to `system-ui`"* and BOTH halves are retired (August 2026).**
+  `theme-css.ts` now inlines `fontFaceCss()` server-side, so the face is in the first byte of HTML
+  rather than after hydration, and it costs ~95 KB of that string — stated here rather than
+  discovered in a bundle report. **`system-ui` is gone from the stack** and that was the sharper
+  defect: it resolves to **Roboto** on Android and ChromeOS, which `27-F26` bans outright for
+  numerals, so the ban was reachable while the token string never contained the word — which is
+  all `tokens.test.ts` can see.
+  - ⚠ **No gate renders these screens at any width**, so nothing here asserts the face LOADS. That
+    assertion exists only in the two Electron gates. This app's font is verified by construction
+    (one shared `fontFaceCss()`), not by measurement, and that is a real difference.
 - **`globals.css` maps `fgColor-status-abnormal` and `outlineColor-status-abnormal`.** Without
   them the only way to tint a warning glyph was `text-warning`, i.e. `--warning` = a **`bgColor-`**
   token on a text property, which is the `27-F40` prefix violation `packages/ui`'s own discipline

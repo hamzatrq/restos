@@ -109,6 +109,69 @@ finds both lists by their heading) while the glass still gets the instrument cap
 `panel.dom.test.tsx` pins which mechanism is in use, so a future edit that upper-cases the
 STRING fails here rather than five assertions away.
 
+## `27-F26`'s typeface is BYTES, and it lives here (`src/fonts`)
+
+**The FR named IBM Plex Sans and this repo shipped no font file of any kind until August 2026** —
+`find` for `*.woff2|woff|ttf|otf` outside `node_modules` returned nothing. So the token named a
+family the machine did not have and every surface rendered a different OS fallback. `tokens.test.ts`
+asserted the STRING matched `/IBM Plex Sans/` and not `/Roboto/`, and both passed the whole time,
+because a string is all happy-dom can see.
+
+It is not cosmetic: the face was chosen *for numeral disambiguation on money surfaces*. Verified
+against the binaries rather than read off the FR — every digit advance is 600/1000 em in all three
+weights (**no `tnum` in the GSUB at all**, which is what "no feature flags" means) and `I`
+(400/414/423) differs from `l` (272/285/294) in advance and outline.
+
+- **`installFontFaces()`** is the seam every DOM host calls; the back office inlines
+  `fontFaceCss()` server-side instead. Both Electron CSPs need `font-src 'self' data:`.
+- **Three weights, Latin only** — the scale spends exactly 400/500/600, and commandment 7 makes
+  the UI English. No `unicode-range`, so a codepoint outside the subset falls through to the next
+  family, which is correct.
+- **`local()` is per WEIGHT.** `local('IBM Plex Sans')` on all three faces is a real bug that
+  looks right: it matches the *Regular* face, so on a machine with Plex installed the scale
+  silently flattens.
+- **`PRIMARY_FAMILY` is derived from `tokens.json`'s `$family`**, never typed twice — a face
+  declared under a name the tokens do not ask for is a font that loads and is never used.
+- **`font-display: swap`**, chosen on the FAILURE mode: `block`/`auto` render invisible text for
+  up to 3 s and a cashier who cannot read the total mid-rush is worse than one who reads it in the
+  wrong face for a frame; `optional` may decline the face for a whole page load.
+
+⚠ **Nothing in THIS package can assert the face loads** — happy-dom performs no layout and loads
+no fonts. `fonts.test.ts` guards the CSS shape, the binary↔base64 drift and the family name; *"it
+is loaded"* is asserted in Blink by both `layout:check` gates.
+
+⚠ **A negative regex over `fontFaceCss()` is UNSOUND** and this was caught by a correct
+implementation going red: base64 draws on `[A-Za-z0-9+/]`, so `ss02` occurs by chance at index
+2047 of the weight-600 payload. Negative assertions run on a payload-stripped view.
+
+⚠ **`⌫`, `◀`, `▶`, `✓` and `→` are in NO IBM Plex Sans subset** (checked across all six, not
+assumed), so the UI's own symbols are OS glyphs permanently and a residue of platform-dependent
+metrics survives there. An icon component, not a bigger font, is the fix if it matters.
+
+### ⚠ THE COMPOSITE IS SPENT APART 34 TIMES OUT OF 36 — found while chasing the last 3 dp, OWED
+
+Bundling the face made macOS and Linux agree on almost everything (`layout:check` went **44 fatal
+violations → 1** on Linux). The survivor is `tablet-10.1 tab:Cash` under `03-F5`'s band: **570 dp
+of content in a 567 dp box**, Linux only, macOS clean. It is **pre-existing, not introduced** —
+the same surface was 570 dp in a **543 dp** box before the font landed, so the content never moved
+and the box grew 24 dp.
+
+The mechanism, measured across `src/components`: **36 `fontSize:` spends and 2 `lineHeight:`
+spends.** `27-F42` makes typography COMPOSITE — *"take `text-body` whole … never destructure a
+size out of one"* — and the line-height half is dropped in 19 of 20 components, including
+`StatusStrip` and `AlarmBand`, which are exactly the chrome sitting above that box. With no
+explicit `line-height` Blink derives the line box from the font's ascent/descent **as resolved by
+the platform backend** (CoreText vs FreeType), so a line box can differ by a pixel or two for an
+identical font file. That is the whole of the residual platform dependence.
+
+**It is NOT a drive-by fix and the arithmetic says why.** `text-label` is 14/20; the font-derived
+line box at 14 px Plex is ≈18. Honouring the composite therefore makes chrome **TALLER**, which
+shrinks `main` and makes this same Cash overflow **worse** before it makes anything better. The
+package guide already records that *"Pay has 38 px spare, Cash has 0"* — so the correct fix is
+"honour the composite everywhere **and** re-cost the Cash arrangement", one piece of work, with
+both `layout:check` gates on **both** platforms in its blast radius. Scheduled consolidation
+(`24 §3b`), not a drive-by, and the 3 dp is the symptom rather than the defect.
+
 ## Storybook
 
 `pnpm storybook` (dev) · `pnpm build-storybook`. Every component gets stories for every

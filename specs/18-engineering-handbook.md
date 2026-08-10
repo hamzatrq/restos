@@ -18,7 +18,7 @@
 | Module system | ESM only (`"type": "module"`) everywhere | No CommonJS anywhere; CJS-only deps are disqualified or isolated behind a wrapper package |
 | Lint + format | Biome (single tool) | One shared config in `packages/config`; zero per-package overrides without a rule change here; `console.log` banned outside CLIs (use logger) |
 | Dependency pinning | Exact versions (`save-exact=true` in `.npmrc`) | No `^`/`~` ranges; upgrades arrive only as Renovate PRs (weekly batch), reviewed like code |
-| Licenses | Allowlist: MIT, Apache-2.0, BSD-2/3, ISC, 0BSD | GPL/AGPL/SSPL NEVER in shipped code; CI license check blocks merge |
+| Licenses | Allowlist: MIT, Apache-2.0, BSD-2/3, ISC, 0BSD, **SIL OFL 1.1 (font assets only)** | GPL/AGPL/SSPL NEVER in shipped code; CI license check blocks merge. OFL 1.1 is scoped to embedded FONT files because its reciprocity binds derivative *fonts* and never the software that renders them; it is not a licence for code and must not be read as one. Its one operative condition here is the Reserved Font Name: a modified copy may not keep the name, so a subset or re-hint of a bundled face must be renamed — which is also why `packages/ui/src/fonts` ships the upstream binaries unmodified. |
 | Secrets | `.env` local only (gitignored); platform secret store in cloud | Secrets NEVER in code, config files in repo, or logs; env access only through the validated env module (§5) |
 | Commits | Conventional Commits (`feat:`, `fix:`, `chore:`…), scope = package/app name | Enforced by commitlint in CI; trunk-based, short-lived branches, PR + senior review always |
 
@@ -174,6 +174,7 @@ Anything not listed (or not added via §15) is not allowed. Grouped; exact pins 
 - **React Native:** `expo` + official `expo-*` modules (router, notifications, camera, secure-store, updates), `@op-engineering/op-sqlite`, `nativewind`, `@shopify/flash-list`, `react-native-reanimated`, `react-native-ble-plx`, `victory-native` (charts), `@sentry/react-native`
 - **Electron:** `electron`, `electron-vite`, `electron-builder`, `better-sqlite3`, `serialport`, `usb`
 - **Printing:** `pngjs` (virtual printer, logo/QR raster)
+- **Vendored assets (not npm packages, so no lockfile pin — the hash in git is the pin):** IBM Plex Sans, Latin subset, weights 400/500/600, `.woff2`, in `packages/ui/src/fonts` with `OFL.txt` — `27-F26` names this face for numeral disambiguation on money surfaces (tabular digits and a distinct `I`/`l` with no feature flags), and until August 2026 the token named it while **no font file of any kind existed in this repo**, so every surface rendered a different OS fallback and the property the FR selected for was discarded. No npm dependency is added: the binaries are committed and the `@font-face` is ours (§15 rule 1 — written, not installed). Three weights because the type scale spends exactly three; Latin only because commandment 7 makes the UI English.
 - **Testing:** `vitest`, `fast-check`, `@playwright/test`, `msw`, `testcontainers`, Maestro (CLI)
 
 ## 15. Adding a dependency (the process)

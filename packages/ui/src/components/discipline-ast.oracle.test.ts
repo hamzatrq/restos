@@ -433,6 +433,24 @@ describe("the guard suite actually covers the package", () => {
         // it live in one module deliberately — two of either is two answers to "how big is a
         // dp", which is the defect the ruling exists to close.
         "physical.tsx",
+        /**
+         * ADDED with `27-F26`'s typeface (August 2026), and this canary did exactly its job: the
+         * font work tripped it on the first full run of the package suite, which is the
+         * acknowledgement the pin exists to force.
+         *
+         * Neither file is a component and both are squarely source the token rules bear on.
+         * `fonts/index.ts` builds the `@font-face` block, and the ONE raw value it could have
+         * carried — the family name — it deliberately does not: it derives `PRIMARY_FAMILY` from
+         * `tokens.json`'s own `$family`, because a face declared under a name the tokens do not
+         * ask for is a font that loads and is never used.
+         *
+         * `fonts/plex-latin.ts` is GENERATED (`scripts/generate-font-module.mjs`) and is base64,
+         * so it is the one file here a reader should not read. It is scanned anyway rather than
+         * excluded: an exclusion is a hole, and the guards pass on it. `fonts/fonts.test.ts` is
+         * absent from this list for the ordinary reason tests are — the scan takes source only.
+         */
+        "fonts/index.ts",
+        "fonts/plex-latin.ts",
       ].sort(),
     );
   });

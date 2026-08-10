@@ -1,4 +1,4 @@
-import { color, ThemeProvider, typography } from "@restos/ui";
+import { color, installFontFaces, ThemeProvider, typography } from "@restos/ui";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
@@ -24,24 +24,29 @@ if (!root) throw new Error("index.html has no #root — the renderer cannot moun
  * Light, per `27-F19`, matching the provider below. `27-F67`'s training inversion happens
  * inside `AppShell`, which paints its own full-height surface over this one.
  *
- * ⚠ **WHAT THIS DOES NOT DO: DELIVER THE TYPEFACE. NO WEBFONT IS BUNDLED.** The token's chain
- * is `'IBM Plex Sans', system-ui, sans-serif`, so this names Plex and then renders whatever the
- * machine already has — SF Pro on the Mac these screenshots came from, **Segoe UI on the Windows
- * till this app actually ships to**. The renderer's CSP is `'self'`, so no external font URL can
- * ever load; delivering it means committing the woff2 files as a local asset.
+ * ⚠ **THE TYPEFACE IS DELIVERED NOW — this block used to say it was not** (August 2026). It read
+ * *"WHAT THIS DOES NOT DO: DELIVER THE TYPEFACE. NO WEBFONT IS BUNDLED"*, and it was right: the
+ * token named Plex and the machine rendered whatever it already had — SF Pro on a Mac, **Segoe UI
+ * on the Windows till this app ships to**, whose figures are proportional by default, so a column
+ * of money did not align on the one surface (`27-F25`) where digits are the operational payload.
  *
- * **That is a real gap and not a cosmetic one**, which is why it is written here rather than
- * left to be discovered. `27-F26` did not pick Plex on taste — it picked it on *fail-safe
- * defaults*, "tabular digits and distinct `I`/`l` with **no feature flags**". Segoe UI gives
- * neither without opting in: its figures are proportional by default, so a column of money does
- * not align, on the one surface (`27-F25`) where digits are the operational payload.
+ * `installFontFaces()` is the seam that closes it: `packages/ui` bundles the Latin subset at the
+ * three weights the scale spends, as base64 `@font-face` rules, so nothing is fetched and the
+ * renderer's `'self'` CSP is never asked to reach the network. **`index.html`'s CSP gains
+ * `font-src 'self' data:`** — the same allowance `img-src` already carries there — and without it
+ * the rules parse and every face is blocked, which is a failure that looks exactly like success.
  *
- * **Not bundled here deliberately, on process rather than preference.** `18 §15` makes adding an
- * asset a reviewed step — "PR adds it to §14 with one line of justification; **senior
- * approves**" — and a session fixing a layout blocker cannot approve its own dependency. The
- * matching call was made in `apps/backoffice` for the same reason, so both planes are honest in
- * the same direction. **Owed, and named in `apps/pos-electron/CLAUDE.md`.**
+ * The old block declined to bundle on **process**, citing `18 §15`, and that reading was correct
+ * and is now satisfied rather than bypassed: no npm dependency is added (the binaries are
+ * committed and the `@font-face` is ours — §15 rule 1's "written, not installed"), `18 §14` gains
+ * the asset with its justification, and `18 §1`'s licence allowlist gains **SIL OFL 1.1 scoped to
+ * font assets**, because it did not list OFL at all and §14 is exhaustive. **`18 §15` rule 3's
+ * senior approval is still owed on that spec change.**
+ *
+ * It is asserted rather than assumed: `pnpm layout:check` measures `document.fonts` in Blink on
+ * every panel. `packages/ui`'s own suite cannot — happy-dom loads no fonts.
  */
+installFontFaces();
 const base = typography["text-body"];
 document.body.style.fontFamily = base.fontFamily;
 document.body.style.fontSize = `${base.fontSize}px`;

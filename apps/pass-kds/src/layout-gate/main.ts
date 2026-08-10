@@ -189,6 +189,9 @@ const run = async (): Promise<void> => {
   let emptySurfaces = 0;
   let pagersDrawn = 0;
   let targetsMeasured = 0;
+  // `24-F14` — a font verdict is not a surface, so deleting the probe would change no surface
+  // count and no control count while the gate quietly stopped asking (see the counter's gate).
+  let fontSurfacesMeasured = 0;
 
   for (const panel of PANELS) {
     window.setContentSize(panel.width, panel.height);
@@ -211,6 +214,71 @@ const run = async (): Promise<void> => {
 
       surfaces += 1;
       controls += report.controls.length;
+
+      /**
+       * `27-F26` — is the TYPEFACE loaded, or merely named?
+       *
+       * `apps/pos-electron`'s gate asks the same question and the reasoning is there; this is the
+       * second render path and a render path with no assertion is the shape both recurring
+       * defects in this repo are named for. On THIS screen the cost of a fallback is sharper than
+       * on the counter: the payload is the ticket identifier and the age, both digits, read at
+       * 1–2 m, so tabular alignment and a distinct `I`/`l` are the whole legibility story.
+       *
+       * The three facts are the same three, and the second is the one that would have failed on
+       * the tree that shipped: the family must not render identically to a family that does not
+       * exist. `document.fonts.check()` is deliberately not consulted — with no matching
+       * `@font-face` it has no face it can call unloaded and answers TRUE, which is exactly the
+       * state being checked for.
+       */
+      const font: {
+        weights: number[];
+        errored: number[];
+        named: number;
+        bogus: number;
+        iMatchesL: boolean;
+      } = await window.webContents.executeJavaScript(
+        `(async () => {
+          await document.fonts.ready;
+          for (const w of [400, 500, 600]) {
+            try { await document.fonts.load(w + " 64px 'IBM Plex Sans'"); } catch (e) {}
+          }
+          const mine = [...document.fonts].filter((f) => f.family.replace(/['"]/g, '') === 'IBM Plex Sans');
+          const c = document.createElement('canvas').getContext('2d');
+          const w = (f) => { c.font = "64px " + f; return c.measureText('HImlO0123456789').width; };
+          const bogus = w("'__restos_no_such_face__'");
+          const named = w("'IBM Plex Sans'");
+          c.font = "64px 'IBM Plex Sans'";
+          return {
+            weights: mine.filter((f) => f.status === 'loaded').map((f) => parseInt(f.weight, 10)).sort(),
+            errored: mine.filter((f) => f.status === 'error').map((f) => parseInt(f.weight, 10)).sort(),
+            named, bogus,
+            iMatchesL: Math.abs(c.measureText('I').width - c.measureText('l').width) < 0.01,
+          };
+        })()`,
+      );
+      fontSurfacesMeasured += 1;
+      const missingWeights = [400, 500, 600].filter((w) => !font.weights.includes(w));
+      if (missingWeights.length > 0 || font.errored.length > 0) {
+        fail(
+          `${surface}: 27-F26 BROKEN — IBM Plex Sans is not loaded. Loaded [${font.weights.join(", ")}], ` +
+            `missing [${missingWeights.join(", ")}], FAILED to decode [${font.errored.join(", ")}]. ` +
+            `A face in "error" means the bytes were refused — likeliest cause is index.html's CSP ` +
+            `missing \`font-src 'self' data:\`, which parses cleanly and blocks every face.`,
+        );
+      }
+      if (Math.abs(font.named - font.bogus) < 0.01) {
+        fail(
+          `${surface}: 27-F26 BROKEN — the token family renders IDENTICALLY to one that does not ` +
+            `exist (${font.named.toFixed(2)}px vs ${font.bogus.toFixed(2)}px), so this panel is on ` +
+            `the host's default sans and a ticket's digits are not the ones the FR selected.`,
+        );
+      }
+      if (font.iMatchesL) {
+        fail(
+          `${surface}: 27-F26 BROKEN — \`I\` and \`l\` measure identically in the face rendering, ` +
+            `the property 27-F26 bans ROBOTO for by name.`,
+        );
+      }
 
       const bumps = report.controls.filter((c) => c.label.includes("DONE"));
       const pager = report.controls.filter((c) => c.label.includes("◀") || c.label.includes("▶"));
@@ -311,6 +379,12 @@ const run = async (): Promise<void> => {
   if (bumpControls === 0) fail("EMPTY MATCH — 03-F16's bump control was never measured");
   if (pagersDrawn === 0) fail("EMPTY MATCH — 03-F46's pager was never drawn on any panel");
   if (targetsMeasured === 0) fail("EMPTY MATCH — 27-F8's kitchen target was never measured");
+  if (fontSurfacesMeasured < PANELS.length * STATES.length) {
+    fail(
+      `EMPTY MATCH — 27-F26's typeface was interrogated on only ${fontSurfacesMeasured} of ` +
+        `${PANELS.length * STATES.length} surfaces (24-F14)`,
+    );
+  }
 
   process.stdout.write(
     `\npass layout: ${surfaces} surfaces, ${controls} controls, ${bumpControls} bump controls, ` +
