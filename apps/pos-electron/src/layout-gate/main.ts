@@ -2,7 +2,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow } from "electron";
-import { COUNTER_WINDOW_OPTIONS } from "../main/window-options";
+import {
+  COUNTER_WINDOW_OPTIONS,
+  counterWindowOptions,
+  PANEL_FLOOR_MM,
+} from "../main/window-options";
 import { measureSurface, type SurfaceReport } from "./probe";
 
 /**
@@ -57,29 +61,49 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * resolution and must produce the SAME layout, while the tablet row shares a resolution with one
  * of them and must not.
  *
- * ## The five, each earning its row
+ * ## The seven, each earning its row
  *
- * | row | window px | diagonal | glass | why it is here |
- * |---|---|---|---|---|
- * | `counter-1366` | 1366×768 | 15.6″ | 345 × 194 mm | `27 §1a` counter, and `COUNTER_WINDOW_OPTIONS`' own floor |
- * | `counter-1920` | 1920×1080 | 15.6″ | 345 × 194 mm | `27 §1a` counter — `DEC-UI-001` (e); same glass, different pixels |
- * | `tablet-10.1` | 1366×768 | 10.1″ | 223 × 126 mm | `27 §1a` waiter tablet — the NARROW and SHORT case |
- * | `desktop-24` | 1920×1080 | 24″ | 531 × 299 mm | **the founder's window.** Same pixels as row 2, 1.5× the glass |
- * | `ultrawide-32` | 3840×1080 | 32″ | 783 × 220 mm | the deliberately awkward one: 3.56:1, very wide and short |
+ * | row | window px | diagonal | glass | ships | why it is here |
+ * |---|---|---|---|---|---|
+ * | `counter-1366` | 1366×768 | 15.6″ | 345 × 194 mm | yes | `27 §1a` counter, the preferred panel |
+ * | `counter-1920` | 1920×1080 | 15.6″ | 345 × 194 mm | yes | `27 §1a` counter — `DEC-UI-001` (e); same glass, different pixels |
+ * | `laptop-1280` | 1280×800 | 13.3″ | 286 × 179 mm | yes | **the most likely BYO device, and the app used to REFUSE it** |
+ * | `tablet-10.1` | 1366×768 | 10.1″ | 223 × 126 mm | no | `27 §1a` waiter tablet — the NARROW and SHORT case |
+ * | `netbook-1024` | 1024×600 | 10.1″ | 221 × 130 mm | no | the same glass at 78% fewer pixels — `27-F11c` as an experiment |
+ * | `desktop-24` | 1920×1080 | 24″ | 531 × 299 mm | yes | **the founder's window.** Same pixels as row 2, 1.5× the glass |
+ * | `ultrawide-32` | 3840×1080 | 32″ | 783 × 220 mm | yes | the deliberately awkward one: 3.56:1, very wide and short |
  *
- * Rows 2 and 4 are the pair that matters most and they are why this cannot be a pixel sweep:
+ * Rows 2 and 6 are the pair that matters most and they are why this cannot be a pixel sweep:
  * **identical `1920×1080`, and the layout must differ**, because one is a 15.6″ counter and the
  * other is a 24″ desktop. A gate keyed on pixels is blind to the entire defect by construction.
+ * Rows 4 and 5 are the same argument from below — the same 10.1″ glass at 1366×768 and 1024×600,
+ * 78% apart in pixels, producing the same two clipped surfaces.
  *
  * `ultrawide-32` is a real product (32:9 at 32″) rather than an invented viewport, and it is the
  * stress row: 783 mm of width against 220 mm of height, where the vertical budget is tightest and
  * the horizontal one is absurd. It is included on the brief's own instruction to sweep *"a
  * deliberately awkward one (very wide-short, and narrow) to catch what the founder hit."*
  *
- * **The window's declared floor still binds** (`COUNTER_WINDOW_OPTIONS.minWidth/minHeight`), so
- * every row is at or above 1366×768 in PIXELS while spanning 223→783 mm of GLASS. Nothing here
+ * ## ⚠ WHAT THIS PARAGRAPH USED TO SAY, AND WHY THE CORRECTION IS THE INTERESTING PART
+ *
+ * It read: *"The window's declared floor still binds (`COUNTER_WINDOW_OPTIONS.minWidth/minHeight`),
+ * so every row is at or above 1366×768 in PIXELS while spanning 223→783 mm of GLASS. Nothing here
  * probes below a size the shipped app refuses to be, which would measure a state no operator can
- * reach.
+ * reach."* Every clause was true and the conclusion was a cage: **the pixel floor made the defect
+ * it caused unmeasurable.** Adding `netbook-1024` while it stood produced `THE PANEL WAS NOT THE
+ * PANEL: asked for 1024x600 and the renderer got 1366x768` — Electron clamped the probe — so the
+ * one rail that could have shown that `minWidth: 1366` refuses clean hardware was prevented from
+ * looking by that same constant.
+ *
+ * The floor is `PANEL_FLOOR_MM` now: **215 × 134 mm of glass**, clamped to the display rather
+ * than refused (`window-options.ts`). `laptop-1280` therefore enters as a SHIPPING row — it is
+ * 286 × 179 mm, it clears the floor, and it was measured completely clean on all 13 surfaces in
+ * both device states before it was added here. The two below-floor rows stay `ships: false`.
+ *
+ * **`phone-6.5` (1080×2340 @6.5″) is deliberately absent and must stay absent.** It is 69 × 150 mm
+ * — a portrait surface the counter has no layout for — and it fails two COMPOSITION checks, which
+ * bind on every panel regardless of `ships`. Admitting it would red the gate for everyone, and
+ * weakening the gate to admit a panel is backwards. A portrait layout is separate work.
  */
 const PANELS = [
   {
@@ -90,6 +114,17 @@ const PANELS = [
     ships: true,
   },
   { label: "counter-1920", width: 1920, height: 1080, diagonalIn: 15.6, ships: true },
+  /**
+   * **`ships: true` — the row that the old pixel floor made illegal, and the reason it moved.**
+   *
+   * 1280×800 on 13.3″ glass is 286 × 179 mm. It is the most ordinary piece of
+   * bring-your-own-hardware there is, it renders every surface of this product with **zero**
+   * violations in both device states, and `minWidth: 1366` REFUSED IT — the app would not open at
+   * that size. Meanwhile 1366×768 on 10.1″ glass satisfied the same floor exactly and clips two
+   * surfaces. That pair is the whole argument for `PANEL_FLOOR_MM`, and this row is what stops it
+   * regressing: if a layout change pushes the counter past what 286 × 179 mm holds, this reddens.
+   */
+  { label: "laptop-1280", width: 1280, height: 800, diagonalIn: 13.3, ships: true },
   /**
    * **`ships: false` — this glass is `27 §1a`'s WAITER row, not the counter's, and the
    * distinction is what stops this panel demanding a forbidden fix.**
@@ -111,6 +146,23 @@ const PANELS = [
    * useful thing — how much counter this hardware cannot hold.
    */
   { label: "tablet-10.1", width: 1366, height: 768, diagonalIn: 10.1, ships: false },
+  /**
+   * **`ships: false` — the BYO netbook, and it is here as a tripwire rather than as a target.**
+   *
+   * 1024×600 on 10.1″ glass is 221 × 130 mm — the *same* physical surface as `tablet-10.1`
+   * above at **78% fewer pixels**, and it produces near-identical results. That pair is
+   * `27-F11c` demonstrated on hardware rather than asserted: pixels bought nothing.
+   *
+   * It cannot gate for the same reason the tablet cannot: 130 mm of glass height is under the
+   * measured floor (`window-options.ts`' `PANEL_FLOOR_MM`), and the only way to make the counter
+   * fit it is to shrink `27-F8`'s 20 mm keys, which `27-F68` (b) forbids by name. A gate whose
+   * only available remedy is a spec violation is a gate that gets suppressed.
+   *
+   * What it buys is a live tripwire on two defects that bite only below the floor and that no
+   * suite in this repo can see: `ItemGrid`'s pager clipping the row beneath it, and the
+   * `COUNTED Rs 0` echo going under `03-F5`'s band on Cash.
+   */
+  { label: "netbook-1024", width: 1024, height: 600, diagonalIn: 10.1, ships: false },
   { label: "desktop-24", width: 1920, height: 1080, diagonalIn: 24, ships: true },
   { label: "ultrawide-32", width: 3840, height: 1080, diagonalIn: 32, ships: true },
 ] as const;
@@ -659,6 +711,29 @@ const run = async (): Promise<number> => {
     );
 
   /**
+   * **`24-F14` — is `27-F11c`'s panel-fit notice actually on the strip?**
+   *
+   * Same argument as `catalogChipPresent` directly above and the same failure mode:
+   * `PanelHealth` renders `null` when the glass clears the floor (`27-F16`) and it is not a
+   * control, so `measureSurface` — which walks clipping boxes and `button`s — reports a
+   * perfectly clean strip whether it is there or not. One reverted line in `preload.ts` would
+   * retire the surface from the sweep in silence, which is exactly what
+   * `escalationFor: () => null` did to `ManagerApproval`.
+   *
+   * It asks the DOM rather than the fixture, so it also fails if the notice stops reaching the
+   * strip for any reason at all — `Counter.tsx` dropping the prop, `AppShell` dropping the
+   * pass-through, `StatusStrip` dropping the element. That matters more here than for the
+   * catalog chip: this notice is the ONLY thing telling an operator that the window's floor
+   * clamped instead of refusing, so a silent drop turns the founder's ruling back into a plain
+   * regression.
+   */
+  const panelChipPresent = (): Promise<boolean> =>
+    window.webContents.executeJavaScript(
+      `[...document.querySelectorAll('[role="status"]')]
+         .some((e) => (e.getAttribute('aria-label') || '').startsWith('Screen: '))`,
+    );
+
+  /**
    * **`27-F68`, measured in millimetres of glass.** Reads a `keypad`-posture control's rendered
    * height out of Blink and converts through the panel the renderer was told it is on — so this
    * is the operator's actual thumb target, not a number the app agrees with itself about.
@@ -706,30 +781,75 @@ const run = async (): Promise<number> => {
     });
   }
 
-  // The MINIMUM is the same 1366x768 (27 §1a's smaller counter target is a floor, not a
-  // preference), so the smallest supported size is checked by proving the floor REFUSES rather
-  // than degrades: AppShell clips instead of scrolling, so a window allowed below the panel
-  // hides controls silently. That is how defect 2 reached a cashier.
-  window.setContentSize(1024, 600);
+  /**
+   * # THE FLOOR IS MILLIMETRES NOW, AND IT IS CHECKED ON A WINDOW OF ITS OWN
+   *
+   * **Why a second window.** The floor used to be `COUNTER_WINDOW_OPTIONS.minWidth/minHeight`, a
+   * pixel pair, and the sweep window could carry it because every panel in `PANELS` was above
+   * 1366×768 in pixels by construction — the old `PANELS` doc comment said so and treated it as
+   * a virtue. That is precisely what stopped this rail from ever measuring small glass: adding
+   * `netbook-1024` to the sweep produced `THE PANEL WAS NOT THE PANEL: asked for 1024x600 and
+   * the renderer got 1366x768`, because Electron clamped it. **The pixel floor made the defect
+   * it caused unmeasurable**, which is the tidiest possible demonstration of why it had to go.
+   *
+   * So the sweep window carries **no minimum at all** and can be set to any panel, and the
+   * shipped floor is exercised here on a throwaway window built from the SAME
+   * `counterWindowOptions` the app calls — imported, not retyped, for this file's founding
+   * reason.
+   *
+   * The density is stated rather than read off the host, so the expected pixel figure is
+   * deterministic on any machine: `27 §1a`'s 1366×768 counter is 100.5 PPI at `devicePixelRatio`
+   * 1, where `PANEL_FLOOR_MM`'s 215 × 134 mm is **851 × 530 css px**. `27-F68` (a) forbids
+   * pinning that pair anywhere, which is why it is computed here too.
+   */
+  const FLOOR_TEST_PANEL = {
+    panelPpi: (Math.hypot(1366, 768) / 15.6) as number,
+    devicePixelRatio: 1,
+    // Deliberately unbounded: this window is testing the FLOOR, not the clamp, and a work-area
+    // clamp would silently lower the number the assertion is made against.
+    workArea: { width: 100_000, height: 100_000 },
+  };
+  const floorOptions = counterWindowOptions(FLOOR_TEST_PANEL);
+  const floorWindow = new BrowserWindow({ ...floorOptions, show: false });
+  floorWindow.setContentSize(200, 200);
   await new Promise((r) => setTimeout(r, 200));
-  const shrunk = await window.webContents.executeJavaScript(
-    "JSON.stringify([window.innerWidth, window.innerHeight])",
+  const [fw, fh] = floorWindow.getContentSize() as [number, number];
+  note(
+    `window: 27-F11c floor is ${PANEL_FLOOR_MM.width} x ${PANEL_FLOOR_MM.height} mm = ` +
+      `${floorOptions.minWidth}x${floorOptions.minHeight} css px at ` +
+      `${FLOOR_TEST_PANEL.panelPpi.toFixed(1)} PPI; a resize to 200x200 left it at ${fw}x${fh}`,
   );
-  const [sw, sh] = JSON.parse(shrunk) as [number, number];
-  note(`window: after a resize to 1024x600 the renderer holds ${sw}x${sh} css px`);
-  if (sw < COUNTER_WINDOW_OPTIONS.minWidth || sh < COUNTER_WINDOW_OPTIONS.minHeight) {
+  if (fw < floorOptions.minWidth || fh < floorOptions.minHeight) {
     failures.push({
       surface: "window",
       state: "alarm",
       detail:
-        `THE FLOOR DID NOT HOLD: a resize below the panel left the renderer at ${sw}x${sh}, under ` +
-        `the declared minimum of ${COUNTER_WINDOW_OPTIONS.minWidth}x${COUNTER_WINDOW_OPTIONS.minHeight}. ` +
-        "AppShell clips and does not scroll (27-F2), so a smaller window does not get tighter — it " +
-        "silently hides controls.",
+        `THE FLOOR DID NOT HOLD: a resize to 200x200 left the window at ${fw}x${fh}, under the ` +
+        `derived minimum of ${floorOptions.minWidth}x${floorOptions.minHeight} css px — which is ` +
+        `27-F11c's ${PANEL_FLOOR_MM.width} x ${PANEL_FLOOR_MM.height} mm floor converted through ` +
+        `a ${FLOOR_TEST_PANEL.panelPpi.toFixed(1)} PPI panel. AppShell clips and does not scroll ` +
+        "(27-F2), so above the floor a smaller window does not get tighter — it hides controls. " +
+        "The floor CLAMPS to the display below it (bring-your-own-hardware), and that is the " +
+        "clamp's job, not this one's.",
     });
   }
-  window.setContentSize(COUNTER_WINDOW_OPTIONS.width, COUNTER_WINDOW_OPTIONS.height);
-  await new Promise((r) => setTimeout(r, 200));
+  /**
+   * **`24-F14` — and this one is the trap the mm floor introduces.** `counterWindowOptions`
+   * clamps its minimum to the work area, so a bug that clamped it to zero, or a `PANEL_FLOOR_MM`
+   * edited down to nothing, would make the check above pass vacuously: every resize satisfies a
+   * floor of 0. The floor must be a real size before "it held" means anything.
+   */
+  if (floorOptions.minWidth <= 0 || floorOptions.minHeight <= 0) {
+    failures.push({
+      surface: "window",
+      state: "alarm",
+      detail:
+        `EMPTY MATCH — the derived floor is ${floorOptions.minWidth}x${floorOptions.minHeight} ` +
+        "css px, so the resize check above asserts nothing: every window satisfies a floor of " +
+        "zero. Either PANEL_FLOOR_MM has been emptied or the conversion is broken (24-F14).",
+    });
+  }
+  floorWindow.destroy();
 
   // ---------------------------------------------------------------------------------------
   // 2. EVERY SURFACE, IN BOTH DEVICE STATES, ON BOTH OF `27 §1a`'s COUNTER PANELS.
@@ -807,6 +927,20 @@ const run = async (): Promise<number> => {
           "surface below was measured WITHOUT it and this sweep says nothing about the state it " +
           "was extended to cover. Either preload.ts stopped serving `deviceState().catalog`, or " +
           "the fact stopped reaching StatusStrip through Counter.tsx / AppShell (24-F14).",
+      });
+    }
+
+    if (!(await panelChipPresent())) {
+      failures.push({
+        surface: on("panel-fit"),
+        state: "alarm",
+        detail:
+          "EMPTY MATCH — 27-F11c's panel-fit notice is not on the status strip, so every surface " +
+          "below was measured WITHOUT it. That notice is the ONLY thing that tells an operator " +
+          "the window's physical floor CLAMPED to their glass instead of refusing to open, so " +
+          "losing it silently turns a founder ruling back into a plain regression. Either " +
+          "preload.ts stopped serving `deviceState().panelFit`, or the fact stopped reaching " +
+          "StatusStrip through Counter.tsx / AppShell (24-F14).",
       });
     }
 

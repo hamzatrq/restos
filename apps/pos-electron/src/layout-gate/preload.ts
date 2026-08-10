@@ -235,6 +235,32 @@ const bridge: RestosBridge = {
         message:
           "this till refused the update it was sent — it needs a full menu, not a change list",
       },
+      /**
+       * **`27-F11c` / `00 §5.7` — the panel-fit notice, raised for the whole sweep, and raised
+       * for the same reason the catalog refusal above is.**
+       *
+       * The healthy state is the strictly SMALLER layout — `PanelHealth` renders nothing at all
+       * (`27-F16`) — so measuring the raised one measures the worst case, which is what a fixture
+       * is for. Left `null`, this whole element would be absent from every strip the gate ever
+       * looks at, and the surface would be retired from coverage silently: exactly what
+       * `escalationFor: () => null` did to `ManagerApproval` for weeks and what
+       * `catalog: null` would do one chip to the left. `main.ts` carries a `24-F14` presence
+       * check for it on that precedent.
+       *
+       * `unmeasured` rather than `too_small`, chosen on the same "faithful, not convenient" rule
+       * as the catalog message: it is the **longer** of the two sentences main formats, and this
+       * chip sits in a `space-between` row that already carries the actor, three link chips, a
+       * catalog notice and the business day. It is also the state a dev machine genuinely is in
+       * — macOS reports no physical size, so `panel-density.ts` returns `assumed` on every host
+       * this gate has ever run on.
+       */
+      panelFit: {
+        reason: "unmeasured" as const,
+        glass: "not measured",
+        message:
+          "this till could not read its own screen size from the operating system, so every " +
+          "touch target on it is drawn from an assumption — 27 §1a's 15.6\" counter panel.",
+      },
       user: session,
     }),
   openOrders: () => Promise.resolve([ORDER]),

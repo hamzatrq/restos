@@ -68,6 +68,9 @@ const gatewayOver = (over: Partial<GatewayDeps> = {}) =>
     catalogRefusal: () => null,
     businessDay: () => "2026-08-08",
     panelPpi: () => 100.5,
+    // `27-F11c` — required, so a host that forgets the panel-fit notice is a typecheck
+    // error rather than a silent no-op. `null` = this fixture's glass clears the floor.
+    panelFit: () => null,
     ...over,
   });
 

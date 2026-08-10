@@ -37,7 +37,7 @@ import {
   PUMP_INTERVAL_MS,
 } from "./printing";
 import { createUplink } from "./sync";
-import { COUNTER_WINDOW_OPTIONS } from "./window-options";
+import { counterWindowOptions, describePanelFit, resolvePanelFit } from "./window-options";
 
 /**
  * The main process: the only thing in this app that touches SQLite, and the only thing that
@@ -239,13 +239,48 @@ const panelDensity = (): PanelDensity => {
   return panelDensityCache;
 };
 
+/**
+ * The panel this device is actually on: its density, its work area and whether that glass
+ * clears `27-F11c`'s physical floor. Resolved from the same `panelDensity()` the renderer's
+ * `27-F68` conversion runs on, so the window's floor and the layout's dp cannot disagree.
+ *
+ * A FUNCTION rather than a value for the same reason `panelDensity` is one: `screen` throws
+ * before `app.whenReady()`, and a till moved to another display should be re-read rather than
+ * keep the panel it booted on.
+ */
+const panelFacts = (): {
+  panelPpi: number;
+  devicePixelRatio: number;
+  densitySource: PanelDensity["source"];
+  workArea: { width: number; height: number };
+} => {
+  const display = screen.getPrimaryDisplay();
+  const density = panelDensity();
+  return {
+    panelPpi: density.ppi,
+    devicePixelRatio: display.scaleFactor,
+    densitySource: density.source,
+    // `workAreaSize` and not `size`: the taskbar's share is not glass this window can use, and a
+    // minimum that includes it is a minimum the operator can never satisfy.
+    workArea: { width: display.workAreaSize.width, height: display.workAreaSize.height },
+  };
+};
+
 const createWindow = (): BrowserWindow => {
   const window = new BrowserWindow({
     /**
-     * `27 §1a`'s panel, from the module the LAYOUT GATE also reads (`main/window-options.ts`).
-     * Spread first so nothing below can silently widen the contract without the gate seeing it.
+     * `27 §1a`'s panel and `27-F11c`'s floor, from the module the LAYOUT GATE also reads
+     * (`main/window-options.ts`). Spread first so nothing below can silently widen the contract
+     * without the gate seeing it.
+     *
+     * **The floor is millimetres now, and it CLAMPS instead of refusing** — see that module's
+     * header for the measurements. The short version is that `minWidth: 1366` refused a
+     * 1280×800 @13.3″ laptop that renders the whole counter with zero violations and admitted a
+     * 1366×768 @10.1″ tablet that clips two surfaces, because a pixel count is not a size. Under
+     * bring-your-own-hardware a till that will not start is worse than a till that starts and
+     * says what it cannot do (`00 §5.7`), which is what `panelFit` below carries to the strip.
      */
-    ...COUNTER_WINDOW_OPTIONS,
+    ...counterWindowOptions(panelFacts()),
     show: false,
     // 27 §1a's counter target is a 15.6" panel, and a POS is never windowed on one.
     autoHideMenuBar: true,
@@ -495,6 +530,17 @@ app.whenReady().then(async () => {
      * before `app.whenReady()`, and this function outlives the call that builds the gateway.
      */
     panelPpi: () => panelDensity().ppi,
+    /**
+     * `00 §5.7` / `27-F11c` — whether the glass in front of the operator is big enough for the
+     * counter layout, and `null` when it is (`27-F16` spends nothing on the base case).
+     *
+     * A GETTER for the same reason `panelPpi` is one, and REQUIRED for the reason
+     * `catalogRefusal` is: this is the seam the founder ruling exists to create, and an optional
+     * dep with no supplier is `seams:check` Rule B's own defect. The floor now CLAMPS rather than
+     * refusing, so without this the degradation ships completely silent — which is worse than
+     * the refusal it replaced.
+     */
+    panelFit: () => resolvePanelFit(panelFacts()),
   });
 
   /**
@@ -504,6 +550,14 @@ app.whenReady().then(async () => {
    * length. This is the same argument as `catalogBootSummary` directly above.
    */
   console.log(describePanelDensity(panelDensity()));
+
+  /**
+   * `27-F11c` / `00 §5.7` — and the same argument one line down from the density it depends on.
+   * The window's floor is millimetres now and it CLAMPS instead of refusing, so a till on glass
+   * too small for its own layout starts and runs; this line, and `CatalogHealth`'s neighbour on
+   * the strip, are the whole of what stops that being silent.
+   */
+  console.log(describePanelFit(resolvePanelFit(panelFacts())));
 
   /**
    * **Say what the grid will actually show, at boot.** Without this the till renders item names

@@ -3,6 +3,7 @@ import { space, typography } from "../tokens/index";
 import { type Alarm, AlarmBand } from "./AlarmBand";
 import { CatalogHealth, type CatalogRefusal } from "./CatalogHealth";
 import { ConnectionFacts, type Fact } from "./ConnectionFacts";
+import { PanelHealth, type PanelNotice } from "./PanelHealth";
 
 /**
  * The shell's **honesty surface** — the only chrome that changes (screen-map §1.1).
@@ -43,6 +44,16 @@ export type StatusStripProps = {
    * `apps/pos-electron` holds it with a hand-written seam assertion rather than with the type.
    */
   catalog?: CatalogRefusal | null | undefined;
+  /**
+   * `27-F11c` / `00 §5.7` — the GLASS, when it is smaller than the counter layout needs or when
+   * the device could not measure it at all. `null` on hardware that clears the floor.
+   *
+   * Optional for `catalog`'s reason and with the same stated cost: a host that has not been
+   * taught the fact composes unchanged, and a host that stops supplying it goes quiet — which is
+   * why `apps/pos-electron` holds it with a hand-written seam assertion rather than with the
+   * type. See `PanelHealth` for why it is a peer of `ConnectionFacts` and not a fourth chip.
+   */
+  panelFit?: PanelNotice | null | undefined;
   alarms: readonly Alarm[];
   onAcknowledgeAlarm: (id: string) => void;
 };
@@ -55,6 +66,7 @@ export const StatusStrip = ({
   cloud,
   businessDay,
   catalog = null,
+  panelFit = null,
   alarms,
   onAcknowledgeAlarm,
 }: StatusStripProps) => {
@@ -87,6 +99,12 @@ export const StatusStrip = ({
         */}
         <ConnectionFacts lan={lan} hub={hub} cloud={cloud} />
         <CatalogHealth refusal={catalog} />
+        {/*
+          `27-F12`'s POSITION channel again: panel health sits immediately after catalog health
+          and before the day, always, raised or not. The order is the order the facts get further
+          from the network and closer to the operator's own hands — link, menu, glass.
+        */}
+        <PanelHealth notice={panelFit} />
         <span style={{ color: color["fgColor-muted"], fontVariantNumeric: "tabular-nums" }}>
           Day {businessDay}
         </span>

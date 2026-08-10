@@ -18,6 +18,7 @@ import {
   OpenOrderSchema,
   type Session,
 } from "../shared/ipc";
+import type { PanelFit } from "./window-options";
 
 /**
  * The main-process side of the bridge: the only place that touches the store.
@@ -144,6 +145,20 @@ export type GatewayDeps = {
    * in `AGENTS.md`) reproduced on the one field that decides whether `27-F8` holds.
    */
   panelPpi: () => number;
+  /**
+   * `27-F11c` / `00 §5.7` — the glass this device is on measured against the layout's physical
+   * floor, or `null` when it clears (`27-F16`).
+   *
+   * **This dep exists because the window's floor stopped refusing.** `minWidth: 1366` used to
+   * make an undersized panel unreachable; under bring-your-own-hardware it clamps to the glass
+   * instead (`window-options.ts`), so the till now STARTS on a screen the counter does not fit —
+   * and a degradation nobody is told about is the dishonesty `00 §5.7` forbids, not a feature.
+   *
+   * REQUIRED and a GETTER, on `catalogRefusal`'s reasoning exactly: required so a host that
+   * forgets it is a typecheck error rather than a silent no-op, a getter because a till moved to
+   * another display changes this answer while the process runs.
+   */
+  panelFit: () => PanelFit | null;
 };
 
 /**
@@ -280,6 +295,17 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
         // `27-F68` — read on EVERY `deviceState()`, which is what makes it follow a panel that
         // changes rather than one that was true when the process booted.
         panelPpi: deps.panelPpi(),
+        /**
+         * `27-F11c` / `00 §5.7` — crosses whole, sentence included, for `CatalogRefusal`'s
+         * reason: the operator-facing wording is formatted on the TRUSTED side of `18 §9`'s
+         * bridge, never assembled in the renderer from a code, one copy per screen.
+         *
+         * `reason` crosses as well as `message` because the two states are not degrees of one
+         * thing — *"this screen is too small"* is a measurement and *"this till cannot measure
+         * its screen"* is an admission that the measurement does not exist — and `PanelHealth`
+         * needs the distinction to pick `27-F12`'s WORD.
+         */
+        panelFit: deps.panelFit(),
         deviceLabel: deps.deviceLabel,
         businessDay: deps.businessDay(),
         training: deps.training,

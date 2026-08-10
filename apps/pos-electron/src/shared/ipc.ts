@@ -125,6 +125,38 @@ export const DeviceStateSchema = z.object({
    * sizes that only appear if a real density arrived.
    */
   panelPpi: z.number().positive().optional(),
+  /**
+   * `27-F11c` / `00 §5.7` — the glass this device is on, measured against the counter layout's
+   * physical floor, or `null` when it clears.
+   *
+   * **This field is the price of the founder's bring-your-own-hardware ruling.** The window used
+   * to declare `minWidth: 1366, minHeight: 768` and Electron *prevented* the resize; that floor
+   * refused a 1280×800 @13.3″ laptop which renders the whole counter with **zero** violations and
+   * admitted a 1366×768 @10.1″ tablet which **clips two surfaces**, because a pixel count is not
+   * a size (`27-F11c`). The floor is millimetres now and it clamps to the glass rather than
+   * refusing — so the till starts on hardware the layout does not fit, and **this is the only
+   * thing that says so on the surface a cashier stands at.**
+   *
+   * **Optional, on the identical trade `panelPpi` and `catalog` above record**, and with the
+   * identical cost stated rather than denied: every fixture in this app's renderer suites builds
+   * a `DeviceState` by hand, and a required key is a compile error in oracle files this session
+   * may not edit (`24 §3` step 2). The price is that an absent value means "the panel is fine",
+   * which is this wave's recurring defect in miniature — a host that supplies nothing and green
+   * tests — so it is held by a hand-written seam assertion
+   * (`__acceptance__/panel-fit-seam.test.ts`) and by the layout gate's fixture, exactly as the
+   * other two are. **Required is where it belongs once those harnesses catch up.**
+   */
+  panelFit: z
+    .object({
+      /** Closed set: a measured shortfall, or an admission that nothing was measured. */
+      reason: z.enum(["too_small", "unmeasured"]),
+      /** The operator's sentence, formatted in main (`18 §9`) — never a reason code. */
+      message: z.string().min(1),
+      /** `27-F12`'s NUMBER: the glass as this device believes it, or that it does not know. */
+      glass: z.string().min(1),
+    })
+    .nullable()
+    .optional(),
 });
 export type DeviceState = z.infer<typeof DeviceStateSchema>;
 

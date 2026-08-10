@@ -46,6 +46,31 @@ export type PanelDensity = { readonly ppi: number; readonly source: PanelDensity
  * `27 §1a` — the counter POS is a **15.6″** panel at 1366×768 or 1920×1080. Used only as the
  * `assumed` fallback: it is right for the hardware this ships to and wrong on a dev laptop,
  * which is exactly why the source is carried and printed rather than swallowed.
+ *
+ * ## ⚠ THE FALLBACK IS A DEFECT AND IT CANNOT BE FIXED BY PICKING A BETTER NUMBER
+ *
+ * Under bring-your-own-hardware this guess is wrong far more often than it is right, and the
+ * cost is measured rather than theoretical: on a ~10.1″ tablet (~224 PPI of real glass) assuming
+ * 15.6″ yields ~100 PPI, so `cssPxPerDp` renders **every `27-F8` target at about 45% of its
+ * ergonomic size** — a 20 mm keypad key at 9 mm — and **nothing on the screen looks wrong**. It
+ * is a wrong guess presented as a fact, on the one field where being wrong is invisible.
+ *
+ * **The obvious repair — assume a safer diagonal — does not exist, and this was checked rather
+ * than assumed.** The two directions fail in opposite ways and no single value avoids both:
+ *
+ * - Guessing the panel **larger** than it is under-reports the density, which SHRINKS every
+ *   target below `27-F8`'s floor. `27-F68` (b) forbids reducing the millimetres to make a layout
+ *   fit, and this reduces them without even the excuse of fitting one.
+ * - Guessing it **smaller** over-reports the density, which GROWS every target until controls
+ *   clip — the shape of layout defect 2, where a cashier could not settle an order.
+ *
+ * There is no diagonal that is safe in both directions, so the fallback stays what `27 §1a`
+ * names and **the consequence is made visible instead**: `resolvePanelFit` in `window-options.ts`
+ * turns `source: "assumed"` into a standing amber notice on the status strip, `describePanelDensity`
+ * below says it at length on the boot line, and the notice **outranks** the too-small verdict
+ * because a floor computed from a guessed density is itself a guess. That is `00 §7`'s own
+ * argument for this key (*"a number a technician types is a number a technician mistypes, and
+ * the failure is silent"*) applied to the number nobody typed.
  */
 export const REFERENCE_COUNTER_DIAGONAL_IN = 15.6;
 
