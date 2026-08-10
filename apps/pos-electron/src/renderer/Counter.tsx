@@ -564,6 +564,15 @@ export const Counter = () => {
       */
       catalog={device.catalog}
       /*
+        `27-F11c` / `00 §5.7` — the GLASS, and the price of the founder's bring-your-own-hardware
+        ruling. The window's floor stopped refusing and started clamping, so this till now runs on
+        screens the counter layout does not fit; `PanelHealth` on the strip is the only thing that
+        tells the cashier so. Passed WHOLE for `catalog`'s reason directly above — the sentence is
+        main's, formatted on the trusted side of `18 §9`, and a renderer that took it apart could
+        reassemble it differently on the next surface.
+      */
+      panelFit={device.panelFit ?? null}
+      /*
         `03-F5`/`27-F11d` — the print-failure band, and it is REAL now. This was `[]` with a
         recorded reason ("nothing constructs one yet"), which was honest then and would be the
         silent KOT failure the FR forbids now that K-7's spooler does construct them.

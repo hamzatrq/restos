@@ -98,6 +98,44 @@ const MENU: MenuItem[] = [
   "Soft Drink 345ml",
   "Mineral Water 1.5L",
   "Kheer",
+  /**
+   * **⚠ THE LIST ABOVE STOPPED HERE, AND THAT MADE THE PAGER UNMEASURABLE ON SHIPPING GLASS.**
+   *
+   * 24 items fit on ONE page of every shipping panel in `PANELS`, so `ItemGrid` never drew a
+   * pager on any of them and the gate had never measured one. That is the fixture boundary this
+   * rail's own blind-spot list names — *"it only sees the states its fixture produces"* — and it
+   * cost something concrete: `ItemGrid`'s pager-overlap defect sliced five tiles at 1024×600 and
+   * was **reported rather than fatal**, because the only panel that paged was a `ships: false`
+   * probe whose FIT verdicts are downgraded by design.
+   *
+   * The extra rows below take the menu past one page on `laptop-1280`, the smallest SHIPPING
+   * panel, so a pager regression now reddens the gate for real. They are not padding: `02-N2`
+   * specifies a 300-item catalogue and `27-F11a` sizes a tab at ~25 items, so a 24-item fixture
+   * was **smaller than the product's own design case** and a paging grid is the ordinary state of
+   * this surface, not an edge one.
+   */
+  "Beef Pulao",
+  "Chicken Handi",
+  "Mutton Handi",
+  "Chapli Kebab",
+  "Bihari Boti",
+  "Reshmi Kebab",
+  "Fish Fry",
+  "Prawn Karahi",
+  "Aloo Gosht",
+  "Bhindi Masala",
+  "Daal Chawal",
+  "Chicken Corn Soup",
+  "Hot & Sour Soup",
+  "Russian Salad",
+  "Sheermal",
+  "Paratha",
+  "Lassi Sweet",
+  "Lassi Salted",
+  "Kashmiri Chai",
+  "Gulab Jamun",
+  "Ras Malai",
+  "Falooda",
 ].map((label, i) => ({ id: `item-${i}`, label }));
 
 const ORDER: OpenOrder = {
@@ -234,6 +272,32 @@ const bridge: RestosBridge = {
         version: 4,
         message:
           "this till refused the update it was sent — it needs a full menu, not a change list",
+      },
+      /**
+       * **`27-F11c` / `00 §5.7` — the panel-fit notice, raised for the whole sweep, and raised
+       * for the same reason the catalog refusal above is.**
+       *
+       * The healthy state is the strictly SMALLER layout — `PanelHealth` renders nothing at all
+       * (`27-F16`) — so measuring the raised one measures the worst case, which is what a fixture
+       * is for. Left `null`, this whole element would be absent from every strip the gate ever
+       * looks at, and the surface would be retired from coverage silently: exactly what
+       * `escalationFor: () => null` did to `ManagerApproval` for weeks and what
+       * `catalog: null` would do one chip to the left. `main.ts` carries a `24-F14` presence
+       * check for it on that precedent.
+       *
+       * `unmeasured` rather than `too_small`, chosen on the same "faithful, not convenient" rule
+       * as the catalog message: it is the **longer** of the two sentences main formats, and this
+       * chip sits in a `space-between` row that already carries the actor, three link chips, a
+       * catalog notice and the business day. It is also the state a dev machine genuinely is in
+       * — macOS reports no physical size, so `panel-density.ts` returns `assumed` on every host
+       * this gate has ever run on.
+       */
+      panelFit: {
+        reason: "unmeasured" as const,
+        glass: "not measured",
+        message:
+          "this till could not read its own screen size from the operating system, so every " +
+          "touch target on it is drawn from an assumption — 27 §1a's 15.6\" counter panel.",
       },
       user: session,
     }),

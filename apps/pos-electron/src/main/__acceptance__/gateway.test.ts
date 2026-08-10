@@ -51,6 +51,9 @@ const deps = (over: Partial<GatewayDeps> = {}): GatewayDeps => ({
   // 27-F68 — the density of the glass. Required on GatewayDeps, so no gateway can be
   // constructed without one; 100.5 is 27 §1a's 1366x768 counter panel.
   panelPpi: () => 100.5,
+  // `27-F11c` — required, so a host that forgets the panel-fit notice is a typecheck
+  // error rather than a silent no-op. `null` = this fixture's glass clears the floor.
+  panelFit: () => null,
   ...over,
 });
 

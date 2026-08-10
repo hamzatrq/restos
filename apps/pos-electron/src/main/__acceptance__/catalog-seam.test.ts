@@ -195,6 +195,9 @@ const gatewayOver = (target: DeviceStore, over: Partial<GatewayDeps> = {}) =>
     businessDay: () => "2026-08-06",
     // 27-F68 — the density of the glass, required on GatewayDeps.
     panelPpi: () => 100.5,
+    // `27-F11c` — required, so a host that forgets the panel-fit notice is a typecheck
+    // error rather than a silent no-op. `null` = this fixture's glass clears the floor.
+    panelFit: () => null,
     ...over,
   });
 

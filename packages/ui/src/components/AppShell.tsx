@@ -5,6 +5,7 @@ import { space } from "../tokens/index";
 import type { Alarm } from "./AlarmBand";
 import type { CatalogRefusal } from "./CatalogHealth";
 import type { Fact } from "./ConnectionFacts";
+import type { PanelNotice } from "./PanelHealth";
 import { StatusStrip } from "./StatusStrip";
 import { type Tab, TabRail } from "./TabRail";
 
@@ -51,6 +52,12 @@ export type AppShellProps = {
    * and not an `03-F5` band.
    */
   catalog?: CatalogRefusal | null | undefined;
+  /**
+   * `27-F11c` / `00 §5.7` — the glass this device is on, when it is under the counter layout's
+   * physical floor or when the device could not measure it. Passed straight through to
+   * `StatusStrip`; see `PanelHealth` for why the honesty surface is where it belongs.
+   */
+  panelFit?: PanelNotice | null | undefined;
   alarms: readonly Alarm[];
   onAcknowledgeAlarm: (id: string) => void;
   tabs: readonly Tab[];
@@ -70,6 +77,7 @@ export const AppShell = ({
   hub,
   cloud,
   catalog = null,
+  panelFit = null,
   alarms,
   onAcknowledgeAlarm,
   tabs,
@@ -96,6 +104,7 @@ export const AppShell = ({
         hub={hub}
         cloud={cloud}
         catalog={catalog}
+        panelFit={panelFit}
         alarms={alarms}
         onAcknowledgeAlarm={onAcknowledgeAlarm}
         tabs={tabs}
@@ -120,6 +129,7 @@ const Shell = ({
   hub,
   cloud,
   catalog,
+  panelFit,
   alarms,
   onAcknowledgeAlarm,
   tabs,
@@ -188,6 +198,7 @@ const Shell = ({
         cloud={cloud}
         businessDay={businessDay}
         catalog={catalog}
+        panelFit={panelFit}
         alarms={alarms}
         onAcknowledgeAlarm={onAcknowledgeAlarm}
       />

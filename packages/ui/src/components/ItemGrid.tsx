@@ -147,10 +147,41 @@ export const ItemGrid = ({
 }: ItemGridProps) => {
   const color = useColor();
   const tile = tileMm ?? targetMm(posture);
-  const shape = pageGrid({ widthMm, heightMm, posture, tileMm: tile });
-  const perPage = shape.capacity;
   /** mm → px. The render step, and the only step that knows what a pixel is. */
   const px = (mm: number): number => Math.round((mm / 25.4) * ppi);
+  /**
+   * **THE PAGER LIVES INSIDE THE MEASURED BOX, SO ITS HEIGHT IS NOT THE GRID'S TO SPEND.**
+   *
+   * This component's own header has warned about the consequence since it was written — *"items
+   * on the page, invisible, with no pager to reach them, which on a counter is an item that
+   * cannot be sold"* — and the bug it warns about was **in this file the whole time**: capacity
+   * was costed against the full `heightMm` while the pager took a row out of the same flex
+   * column, so the last tile row was drawn into space the pager occupies and clipped by the
+   * grid's own `overflow: hidden`. `OrderList` hit it first (a two-row inbox costed for two rows
+   * plus a pager) and fixed it there; the note left here said *"`ItemGrid` has the same latent
+   * bug and it is NOT fixed here … its box is large enough that it has not bitten yet."*
+   *
+   * **It bites below the physical floor, and it is measured rather than reasoned.** Layout gate,
+   * 2026-08-10, 1024×600 @10.1″ (221 × 130 mm of glass), Order tab with `03-F5`'s band up: the
+   * grid held **360 dp of content in a 329 dp box** and FIVE tiles — Seekh Kebab, Chicken Tikka,
+   * Malai Boti, Dal Makhani, Palak Paneer — each lost **20 px of 123** off the bottom. Every one
+   * of them was inside the viewport and every centre still hit-tested, which is why the gate
+   * reported **0 clipped controls** there until it learned to judge a control against its
+   * clipping ancestors and not only against the window.
+   *
+   * The resolution is `OrderList`'s, verbatim, because it is the same defect: cost the page at
+   * full height first, and **only if the items actually overflow that** — i.e. only if a pager
+   * will exist — re-cost with the pager's own height removed. Two-step rather than circular, and
+   * `pageGrid`'s `Math.max(1, …)` keeps a very short surface at one reachable tile rather than
+   * none. `27-F8`'s millimetres are untouched: the tile does not shrink, the PAGE does.
+   */
+  const pagerMm = ((targetFor("floor") + space["space-1"] * 2 + space["space-2"]) / ppi) * 25.4;
+  const unpaged = pageGrid({ widthMm, heightMm, posture, tileMm: tile });
+  const shape =
+    items.length <= unpaged.capacity
+      ? unpaged
+      : pageGrid({ widthMm, heightMm: heightMm - pagerMm, posture, tileMm: tile });
+  const perPage = shape.capacity;
   const pages = Math.max(1, Math.ceil(items.length / perPage));
   const current = Math.min(Math.max(0, page), pages - 1);
   const shown = items.slice(current * perPage, current * perPage + perPage);

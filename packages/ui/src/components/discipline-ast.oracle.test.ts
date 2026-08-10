@@ -334,6 +334,22 @@ describe("the guard suite actually covers the package", () => {
         "components/OrderList.stories.tsx",
         "components/OrderList.tsx",
         /**
+         * ADDED with the bring-your-own-hardware round (August 2026), and this pin caught it on
+         * the first run — which is the acknowledgement it exists to force.
+         *
+         * `PanelHealth` says out loud that the glass the till is running on is smaller than the
+         * counter layout needs, or that the device could not measure its own screen at all. It
+         * exists because the window's floor moved from `minWidth: 1366` — a pixel count, which
+         * `27-F11c` says is the wrong quantity — to 215 × 134 mm of glass, **clamped to the
+         * display instead of refusing it**. The till now starts on hardware the layout does not
+         * fit, and `00 §5.7` makes naming that shortfall the condition of being allowed to.
+         *
+         * It paints a `27-F14` status fill, so the outline rule (`27-F64`) and the polarity rule
+         * (`27-F67`) both bear on it, exactly as they do on `CatalogHealth` above.
+         */
+        "components/PanelHealth.stories.tsx",
+        "components/PanelHealth.tsx",
+        /**
          * ADDED with the responsive round (August 2026), and the acknowledgement this pin exists
          * to force is worth writing down because **the guards caught this component twice on its
          * first run**:
