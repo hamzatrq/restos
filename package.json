@@ -21,7 +21,7 @@
     "bench:perf": "node bench/run.mjs bench",
     "tokens:check": "node scripts/check-tokens.mjs",
     "seams:check": "node scripts/check-seams.mjs",
-    "layout:check": "pnpm -C apps/pos-electron layout:check"
+    "layout:check": "pnpm -C apps/pos-electron layout:check && pnpm -C apps/pass-kds layout:check"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.4",

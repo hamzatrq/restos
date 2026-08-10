@@ -23,8 +23,21 @@ export type AgeBadgeProps = {
 
 type Level = "normal" | "abnormal" | "fault";
 
-// @unreached-owed With `AgeBadge` below — `apps/pass-kds` is a one-file stub, so `03-F47`'s aging
-// badge has no screen to appear on. Both exports land together when the pass screen does.
+/**
+ * ⚠ **THIS AND `AgeBadge` CARRIED SEAMS-REGISTER DEBT MARKERS UNTIL 2026-08-10, AND THE RAIL IS
+ * WHY THEY ARE GONE.** `apps/pass-kds` was a one-file stub, so `03-F47`'s aging badge had no
+ * screen to appear on and both exports were recorded as owing a shipping caller. The pass screen
+ * landed; `PassSurface.tsx` renders `TicketCard`, which renders this. `pnpm seams:check` **fails
+ * on a marker for something now reached**, by design — *"so the register cannot rot"* — so
+ * deleting those two comments was a required part of building the screen rather than a tidy-up.
+ * A green-to-red the rail causes on purpose.
+ *
+ * (Written in WORDS and not with the marker token, which is a trap this repo has sprung before:
+ * `hardware-tier.ts`'s first draft quoted the literal token in its header and the rail attributed
+ * it to four of that file's exports. It did it again here — the first draft of THIS note quoted
+ * the token to explain its own removal and `seams:check` reddened on it, which is the anti-rot
+ * rule working correctly on a comment.)
+ */
 export const ageLevel = (minutes: number, amberAt: number, redAt: number): Level =>
   minutes >= redAt ? "fault" : minutes >= amberAt ? "abnormal" : "normal";
 
@@ -51,8 +64,6 @@ const ON: Record<Level, ColorName> = {
   fault: "fgColor-on-status-fault",
 };
 
-// @unreached-owed `03-F47`'s aging badge, waiting on the pass/KDS screen (`apps/pass-kds` is a
-// one-file stub; `plans/wave-1/screen-map.md`). Stories and the happy-dom suite exercise it.
 export const AgeBadge = ({ minutes, amberAt, redAt }: AgeBadgeProps) => {
   const color = useColor();
   const level = ageLevel(minutes, amberAt, redAt);
