@@ -63,6 +63,17 @@ import type { CatalogResolver } from "./gateway";
  */
 export type StationResolver = (item_id: string) => string;
 
+/**
+ * `03-F22`/`03-F51` — does this station take paper?
+ *
+ * A function seam for `StationResolver`'s reason (this file must test without a config source), and
+ * a BOOLEAN rather than `FulfilmentRoute` on purpose: the printer's only legitimate question is
+ * whether to make a job. A printer that could read `"screen"` is a printer that could grow a second
+ * opinion about what a screen-only station means, and `station-routing.ts` would stop being the one
+ * place that decides.
+ */
+export type PaperRouteResolver = (station: string) => boolean;
+
 export type KotPrinterDeps = {
   /** `03-F4`'s durable queue. CONSTRUCTED BY THE HOST, so `main/index.ts` is its caller. */
   spooler: Spooler;
@@ -71,6 +82,22 @@ export type KotPrinterDeps = {
   /** `01-F54` — an unknown item degrades to its identifier rather than vanishing off the chit. */
   catalog: CatalogResolver;
   station: StationResolver;
+  /**
+   * `03-F51` — the per-station fulfilment route, as the one boolean this file may ask.
+   *
+   * **OPTIONAL, defaulting to `paper` everywhere, and the reason is `24 §3` step 2 rather than
+   * design taste.** `__acceptance__/kot-printing.test.ts` and `__acceptance__/print-ack-audit.
+   * test.ts` both construct this printer and both predate this dep; they are oracles this session
+   * may not edit, so a REQUIRED member would redden two suites for a surface neither exercises.
+   * The default is `() => true`, which is the behaviour of every branch before `03-F51` existed —
+   * so an omission cannot change what any existing caller does.
+   *
+   * That makes it exactly the shape AGENTS.md warns about (an optional seam nobody supplies), and
+   * two things hold it: `pnpm seams:check` Rule B, and — because Rule B is satisfied by any supply
+   * at all, including a stub — `__acceptance__/station-routing-seam.test.ts`, which drives the
+   * REAL `resolveStationRouting` through the host's own construction.
+   */
+  routesToPaper?: PaperRouteResolver;
   /** `03 §7` layer 3. `03-F49`'s column floor is checked against this, inside `render()`. */
   capability: PrinterCapability;
   /**
@@ -228,6 +255,11 @@ export const createKotPrinter = ({
   store,
   catalog,
   station,
+  // `03-F51` — see `KotPrinterDeps.routesToPaper`. The default is the pre-`03-F51` product: every
+  // station prints. It is `true` and not `false` because the fallback must be the LOUD one — a
+  // branch whose configuration never arrived gets paper it may not be able to print, which
+  // `03-F5` reports within 45 s, rather than silence nothing can report.
+  routesToPaper = () => true,
   capability,
   append,
 }: KotPrinterDeps): KotPrinter => {
@@ -322,6 +354,23 @@ export const createKotPrinter = ({
     }
 
     for (const [at, lines] of byStation) {
+      // ── `03-F51`'s ROUTING SEAM, and its position in this loop is the whole design ────────────
+      //
+      // A station configured screen-only makes NO JOB: no bytes, no `spooler.enqueue`, no attempt,
+      // no retry budget, no exhaustion, no `03-F5` band, no `kot.print_failed`. There is nothing to
+      // suppress, because nothing was created — which is why this is not a weakening of `03-F5`.
+      //
+      // It sits BEFORE `render()` and before `spooler.job()` deliberately. `03-F51`: absence is
+      // decided before a job exists, from configuration; failure is decided after a job exists,
+      // from a transport outcome. Move this check any later — into `reconcile`, into the transport,
+      // into a band filter — and the two collapse, and the first real printer that dies at 20:40 on
+      // a Friday goes silent. `03-F5`'s "silent KOT failure is forbidden" is about a job that
+      // FAILED; this is about a job nobody asked for.
+      //
+      // `03-F34`'s refusal is likewise unreachable here and that is correct: a document that was
+      // never rendered cannot be refused for want of columns, and a 58 mm printer at a screen-only
+      // station is not a fact about anything (`03-F49`).
+      if (!routesToPaper(at)) continue;
       const job_id = `${order_id}::${at}`;
       // A duplicate KOT means the dish is cooked twice, and `03-F7`/`03-F37` make a reprint a
       // deliberate, logged, REPRINT-banded act — which a second `order.confirmed` for the same
