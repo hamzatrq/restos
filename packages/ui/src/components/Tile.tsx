@@ -29,6 +29,24 @@ export type TileProps = {
    * wet hand touches. Marking a tile destructive is what lets a layout test assert that.
    */
   destructive?: boolean | undefined;
+  /**
+   * **This tile is the one CHOSEN from a pick-list** (`02-F26`'s paid-out reason, `27-F6`'s
+   * "reasons are pick-lists of tiles, or voice").
+   *
+   * `27-F66` decides the shape and it is not a preference: *"a state difference between two
+   * neutral fills is carried by an independent mark meeting 3:1 — an accent rule, a border
+   * change, a glyph — never by the fill step alone"*, because the elevation fills sit ~1.1:1
+   * apart and cannot carry perceivability. So this draws the accent rule at the tile's lower
+   * edge — the identical mark `TabRail` uses for the active tab and `TenderPanel` for the
+   * selected payment method, which is `27-F4`'s argument as much as `27-F66`'s: three surfaces
+   * on one device that mark "this one is chosen" three different ways teach three habits.
+   *
+   * **It is never the only signal.** `27-F12` requires state to be carried by a word or a glyph
+   * and never by colour alone, so a caller marking a tile selected still says so in words —
+   * `CashSurfaces` renders `chosen` as the tile's child. This prop adds the preattentive half;
+   * it does not replace the readable one.
+   */
+  selected?: boolean | undefined;
 };
 
 export const Tile = ({
@@ -39,6 +57,7 @@ export const Tile = ({
   unavailable = false,
   unavailableReason,
   destructive = false,
+  selected = false,
 }: TileProps) => {
   const color = useColor();
   const min = targetFor(posture);
@@ -112,6 +131,12 @@ export const Tile = ({
         // (27-F66). A destructive tile was rendering `borderColor-default` over a fault fill,
         // which is the boundary for the surface it is NOT on.
         border: `1px solid ${color[destructive ? "outlineColor-status-fault" : "borderColor-default"]}`,
+        // 27-F66 — the chosen state is an independent MARK, never the fill step (1.15:1, which
+        // carries nothing). The transparent rule is always present so selecting a tile does not
+        // change its height and move the row under a hand already reaching (27-F4).
+        borderBottom: selected
+          ? `3px solid ${color["bgColor-interactive"]}`
+          : "3px solid transparent",
       }}
     >
       <span>{label}</span>
