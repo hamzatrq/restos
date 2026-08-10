@@ -171,9 +171,16 @@ export const resolveHardwareTier = (input: {
  * The proxy is **branch-wide and `03-F22` is per-station** — *"KDS may run alongside printers or
  * replace them per station — layer-2 choice"* — so a T2 branch with one printer-only station has
  * lines nothing will signal and this predicate answers `false` for them. That refinement is owed
- * and is deliberately not guessed here: it needs `03-F22`'s layer-2 choice to exist in code, and
- * it needs `kot.printed` to carry a station (its payload is `{ order_id }`; `packages/domain`'s
- * registry is a protected path).
+ * and is deliberately not guessed here. It had TWO blockers and **one has cleared (August 2026):**
+ * `03-F22`'s layer-2 choice now exists in code as `main/station-routing.ts` (`03-F51`). The other
+ * still binds and is sufficient on its own — `kot.printed` carries no station (its payload is
+ * `{ order_id }`), so this predicate could not tell which of a fanned-out order's tickets printed
+ * even with the routes in hand, and `packages/domain`'s registry is a protected path.
+ *
+ * Note the direction of the remaining gap, because it is the opposite of what a reader expects:
+ * `03-F51` makes a screen-only station emit no `kot.printed` at all, so its lines are never
+ * auto-advanced by this predicate under any tier — which is correct, since a screen's bump
+ * (`03-F19`) is the right owner. The unresolved case is a printer-only station at a T2/T3 branch.
  */
 export const autoAdvancesLines = (tier: HardwareTier): boolean => tier === "T1";
 

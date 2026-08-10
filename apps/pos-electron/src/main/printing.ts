@@ -93,9 +93,19 @@ export type KotPrinterDeps = {
    * so an omission cannot change what any existing caller does.
    *
    * That makes it exactly the shape AGENTS.md warns about (an optional seam nobody supplies), and
-   * two things hold it: `pnpm seams:check` Rule B, and — because Rule B is satisfied by any supply
-   * at all, including a stub — `__acceptance__/station-routing-seam.test.ts`, which drives the
-   * REAL `resolveStationRouting` through the host's own construction.
+   * **`pnpm seams:check` DOES NOT HOLD IT — measured, not assumed.** Rule B's loop opens with
+   * `if (groupOf(mod.file) !== "packages") continue;` (`scripts/check-seams.mjs`), so it only ever
+   * examines factories declared under `packages/`. Every factory in this file is in an APP, so
+   * none of their optional members is a Rule-B candidate at all. Both mutants were run: deleting
+   * the supply in `main/index.ts` outright, and replacing it with `() => true`. `pnpm seams:check`
+   * is **exit 0 and CLEAN under both**, and its own summary line reports the same `5 optional
+   * seams` either way — this member was never counted.
+   *
+   * So the ONLY thing standing between this seam and the wave's named defect is the hand-written
+   * `__acceptance__/station-routing-seam.test.ts` §E, which drives the host's own construction.
+   * (⚠ `CashPrinterDeps.append` below carries the opposite claim about Rule B, written before this
+   * was measured. It is wrong for the same reason and is a finding for that dep's owner, not a
+   * drive-by edit here.)
    */
   routesToPaper?: PaperRouteResolver;
   /** `03 §7` layer 3. `03-F49`'s column floor is checked against this, inside `render()`. */
