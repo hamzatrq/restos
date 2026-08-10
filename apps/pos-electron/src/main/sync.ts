@@ -74,16 +74,38 @@ export const createUplink = (opts: {
   session.start();
 
   /**
-   * The fold-movement signal. The session has no callback for "events landed", so this polls
-   * the store's own cursor and fires only on CHANGE.
+   * The fold-movement signal, and — since August 2026 — **the only thing in this product that
+   * makes a locally appended event leave the device while the socket stays up.**
    *
-   * Polling is the honest choice here rather than the lazy one: the alternative is a callback
-   * seam through `sync-client`, which is a protected path, for a signal the host app is the
-   * only consumer of. A 1 s tick is well inside `01-F15`'s LAN budget and costs one integer
-   * read. When the mesh session lands it brings its own edges and this goes.
+   * `CloudSession.notifyAppended` is `01-F15`'s host-app fast path and it had **zero production
+   * callers**: `cloud-session.ts` drains the outbox on `hello_ack`, chains the next page after a
+   * `push_ack`, and otherwise pushes only when a host asks it to. No host asked. So a till
+   * pushed its outbox **at connect and never again** — every order rung after the socket came up
+   * sat in the outbox until the next reconnect, and `02-F11` (an order started on till A is
+   * visible on till B) was true only across a bounce.
+   *
+   * Measured, two tills against a real gateway: A opened the day and both tills opened a shift,
+   * five events durably appended locally, `kernel.events` held **0 rows**; restarting the gateway
+   * put all five in and each till then held the other's — the whole replication path is correct
+   * and it had no trigger.
+   *
+   * **This is the same defect as the fold-movement signal directly below it, one direction over**,
+   * which is why it is one call and not a new mechanism: the tick is already here, it already
+   * pays for a store read, and `notifyAppended` on an empty outbox sends nothing (`drainPush`
+   * returns on an empty `nextBatch`). **It is called BEFORE the change check on purpose** — the
+   * cursor below moves when events *arrive*, and a till that is only *sending* never moves it, so
+   * draining inside that branch would reproduce the defect for the single-till case.
+   *
+   * **OWED: the actual fast path.** `01-F15` wants a push on the append, not up to a second later,
+   * and the seam for it exists (`notifyAppended` is a declared member of `CloudSession`). Wiring
+   * it needs a call at every place main completes an append — eight `notifyChanged()` sites plus
+   * the printing and line-advance producers — and forgetting one is this exact defect again, so
+   * it wants one funnel rather than eight edits. A 1 s ceiling is well inside `01-F15`'s LAN
+   * budget, which is the same argument the fold-movement signal below already rests on.
    */
   let lastSeen = opts.store.status().last_global_seq ?? 0;
   const tick = setInterval(() => {
+    session.notifyAppended();
     const now = opts.store.status().last_global_seq ?? 0;
     if (now === lastSeen) return;
     lastSeen = now;
