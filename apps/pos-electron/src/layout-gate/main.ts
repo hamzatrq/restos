@@ -145,7 +145,29 @@ const PANELS = [
    * that stops working when the glass gets SMALL, and the report tells a reader the true and
    * useful thing — how much counter this hardware cannot hold.
    */
-  { label: "tablet-10.1", width: 1366, height: 768, diagonalIn: 10.1, ships: false },
+  /**
+   * **`ships: true` since August 2026 — this is the row the compact arrangement was built for,
+   * and the founder's bring-your-own-hardware ruling is not true in the product without it.**
+   *
+   * 1366×768 on 10.1″ glass is **223.6 × 125.7 mm**: the cheap Android tablet class most
+   * Pakistani restaurants already own. It sat at `ships: false` with **25 violations** —
+   * `TAKE CASH`'s pad clipped, `Other` / `Receipt photo` / `Paid out` off the right edge and
+   * genuinely UNREACHABLE on `02-F26`'s precondition sequence — and the note here argued the row
+   * *"cannot GATE, because the only way to make the counter fit 126 mm of glass height is to
+   * shrink `27-F8`'s 20 mm keys, which `27-F68` (b) and `DEC-UI-001` forbid by name."*
+   *
+   * **That premise was false and this row is the disproof.** The keys are untouched — the gate
+   * measures them at 20.00 mm on this very panel — and the surfaces fit because the ARRANGEMENT
+   * changed: the tab rail moved to the side (85 dp), Pay dropped panel chrome it did not need at
+   * this size (42 dp), and Cash's tile rows gained something to wrap against. Nothing was
+   * trimmed; things were put in different places. The old note reasoned from *"the pad is 528 dp
+   * and the box is 485"* to *"no layout can fit"*, which skipped the question of how much chrome
+   * was standing between them.
+   *
+   * It keeps its value as the tightest shipping panel in the sweep: 2.6 mm of width and 0.7 mm of
+   * height over `PANEL_FLOOR_MM`. If any surface grows, this reddens first.
+   */
+  { label: "tablet-10.1", width: 1366, height: 768, diagonalIn: 10.1, ships: true },
   /**
    * **`ships: false` — the BYO netbook, and it is here as a tripwire rather than as a target.**
    *
@@ -162,7 +184,24 @@ const PANELS = [
    * suite in this repo can see: `ItemGrid`'s pager clipping the row beneath it, and the
    * `COUNTED Rs 0` echo going under `03-F5`'s band on Cash.
    */
-  { label: "netbook-1024", width: 1024, height: 600, diagonalIn: 10.1, ships: false },
+  { label: "netbook-1024", width: 1024, height: 600, diagonalIn: 10.1, ships: true },
+  /**
+   * # THE PROBE **BELOW** THE FLOOR — the row that keeps `PANEL_FLOOR_MM` from being a guess
+   *
+   * 1024×600 on 9.2″ glass is **201.6 × 118.1 mm**, about 9% under the floor on each axis. It is
+   * here for one job: a floor is a claim that hardware below it does NOT work, and every other
+   * row in this table is evidence for the opposite claim. Without a failing panel, `220 × 125`
+   * would rest on the absence of a measurement — which is precisely the criticism
+   * `window-options.ts` levelled at the 134 mm floor it replaced (*"a panel in either gap gets
+   * the floor's verdict on an arithmetic argument, not on a screenshot"*).
+   *
+   * `ships: false`, so its FIT verdicts report rather than gate — the point is to SEE the
+   * failure, not to be blocked by it. Its composition verdicts still bind, like every panel's.
+   *
+   * **If this row ever goes quiet, the floor has become too conservative and should come down**
+   * — which is the anti-rot direction this table has never had a check for.
+   */
+  { label: "probe-below-floor", width: 1024, height: 600, diagonalIn: 9.2, ships: false },
   /**
    * # THE THREE ROWS THAT FILL `130–174 mm`, THE BAND NOBODY HAD EVER RENDERED
    *

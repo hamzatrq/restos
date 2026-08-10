@@ -70,40 +70,66 @@ export const COUNTER_WINDOW_OPTIONS = {
  *   millimetres. A refusal an operator cannot act on is not a safety measure; it is a device that
  *   will not turn on.
  *
- * ## Where the two numbers come from — MEASURED, not derived, and that is a liability
+ * ## Where the two numbers come from — RENDERED PANELS, not arithmetic
  *
- * From the same sweep, in glass millimetres:
+ * **⚠ THE FLOOR WAS `215 × 134` AND IS `220 × 125`. The height came DOWN 9 mm, and the reason is
+ * not a relaxed tolerance — it is that the layout changed.** `packages/ui`'s `compact` mode used
+ * to alter three numbers (a money column, a change-figure size, a card width) and no arrangement
+ * at all; it now moves the tab rail to the side, drops panel chrome Pay does not need at that
+ * size, and gives Cash's tile rows something to wrap against. `27-F8`'s targets are untouched to
+ * the dp — the gate measures a **20.00 mm** keypad key on the smallest shipping panel — and
+ * `27-F68` (b)'s ban on trimming millimetres to make a layout fit is not engaged, because
+ * nothing was trimmed.
  *
- * | requirement | measured |
- * |---|---|
- * | chrome above the work area, `03-F5`'s band UP | 235–237 dp = **37.4 mm** |
- * | tallest work area any surface needs (**Cash, band up**) | 593–604 dp = **94–96 mm** |
- * | ⇒ minimum glass HEIGHT | **131–134 mm** — the top of the range is taken |
- * | `TenderPanel` natural width, `compact` | 896 dp = 142 mm (+ padding ⇒ ≈147 mm) |
- * | **Order tab** natural width (grid + cart) | 1356 dp = **215 mm** — the binding one |
+ * **Every number below is a panel that was rendered and measured, in both device states, with
+ * `03-F5`'s band up and the honesty strip carrying its longest notice** (the gate's fixture pins
+ * `unmeasured`, which inflates the strip from 51 dp to ~123 dp — so these are worst-case, and a
+ * real till that clears the floor has ~70 dp more than this table assumes):
  *
- * The height is the top of its measured range on purpose: **a floor set at the bottom of a range
- * admits the panel that clips.** The width is the Order tab's and not `TenderPanel`'s, because the
- * floor has to hold for every surface and Order is a surface.
+ * | panel | glass | verdict |
+ * |---|---|---|
+ * | `probe-below-floor` | **201.6 × 118.1 mm** | **FAILS** — this is what below the floor looks like |
+ * | `netbook-1024` | **221.3 × 129.7 mm** | clean — the narrowest panel that works |
+ * | `tablet-10.1` | **223.6 × 125.7 mm** | clean — the shortest panel that works |
+ * | `tablet-11.6` | 256.9 × 144.4 mm | clean |
+ * | `laptop-12.5` | 276.7 × 155.7 mm | clean — the tightest `counter`-mode panel |
+ * | `laptop-13.3-hd` | 294.5 × 165.6 mm | clean |
+ *
+ * So the floor is **each axis set just under its smallest measured pass**: 220 against 221.3 of
+ * measured width, 125 against 125.7 of measured height. It is deliberately NOT rounded up past a
+ * panel that demonstrably works — `27 §1a`'s own 10.1″ tablet row is 125.7 mm, and a floor of
+ * 126 would have reported the cheapest hardware in the corpus as too small **while it rendered
+ * every surface cleanly**, which is a false alarm on the honesty surface and the exact opposite
+ * of what `00 §5.7` is for.
+ *
+ * **⚠ THE OLD TABLE ATTRIBUTED THE HEIGHT TO THE WRONG SURFACE, and it is worth keeping.** It
+ * read *"tallest work area any surface needs (**Cash**, band up) 593–604 dp"*. Re-measured, the
+ * tallest surface is **Pay at 593 dp and Cash is 506** — Cash stopped being the tallest when the
+ * grouping round moved its amount readout beside the pad, and the number was carried forward
+ * with the wrong name attached to it. The figure was right and the attribution was three
+ * paragraphs of reasoning pointed at the wrong file. **Cash is the WIDTH-binding surface, not
+ * the height-binding one**, and its width demand is a function of the height it is given,
+ * because its groups column-wrap: 1705 dp at 485 dp of box, 1318 dp at 569 dp.
  *
  * **⚠ These are measurements of THIS layout, not constants of the universe, and they can rot.**
  * Change the chrome or the tallest work surface and they are wrong. What keeps them honest is
- * `layout:check`: `netbook-1024` and `tablet-10.1` sit below the floor and report, every shipping
- * panel sits above it and binds, and a layout that grows past the floor reddens on a panel that
- * used to be clean.
+ * `layout:check`: **every panel above the floor now SHIPS and binds**, `probe-below-floor` sits
+ * under it and reports, and a layout that grows past the floor reddens on a panel that used to
+ * be clean — `tablet-10.1` first, with 2.6 mm of width and 0.7 mm of height to spare.
  *
- * **⚠ AND THE MEASURED EVIDENCE HAS A HOLE THAT MUST NOT BE PAPERED OVER.** Height was measured
- * at 126, 130, 174 and 179 mm — two failures and two passes — so **nothing between 130 mm and
- * 174 mm has ever been rendered**, and 134 sits inside that gap. Width was measured at 69 mm
- * (structurally broken) and 221 mm (clean); **69–215 mm is unmeasured**. Both numbers are the
- * best reading of the evidence there is and neither is a verified boundary. A panel in either gap
- * gets the floor's verdict on an arithmetic argument, not on a screenshot.
+ * **⚠ WHAT IS STILL UNMEASURED, stated rather than papered over.** The old note flagged
+ * 130–174 mm as never rendered; that gap is closed (144, 156, 166 mm are in the sweep). What
+ * remains open: **118.1–125.7 mm on height and 201.6–221.3 mm on width are bracketed by one
+ * failing panel and one passing panel, not walked** — so the floor is known to within ~8 mm on
+ * each axis and no closer. Nothing between 294 mm and 345 mm of width is rendered either. And
+ * every panel here is SIMULATED on a macOS host: the Windows till this ships to, with different
+ * font metrics, is still not measured by anything.
  */
 export const PANEL_FLOOR_MM = {
-  /** The Order tab's natural width — grid plus cart — measured at 1356 dp. */
-  width: 215,
-  /** `03-F5`'s band up: 37.4 mm of chrome over Cash's 96 mm work area. */
-  height: 134,
+  /** `netbook-1024` renders clean at 221.3 mm; Cash is the surface that spends the width. */
+  width: 220,
+  /** `tablet-10.1` renders clean at 125.7 mm; Pay is the surface that spends the height. */
+  height: 125,
 } as const;
 
 /** Millimetres per inch. Spelled out because every conversion here goes through it. */
