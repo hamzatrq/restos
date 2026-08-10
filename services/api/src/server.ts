@@ -20,9 +20,11 @@ import { createMemoryStagedEditStore } from "./catalog.js";
 import { type DeviceDirectory, unconfiguredDeviceDirectory } from "./devices.js";
 import {
   createGatewayCatalogPublisher,
+  createGatewayDayLedger,
   createGatewayDeviceDirectory,
   createGatewayLedgerAppender,
 } from "./gateway-client.js";
+import { type DayLedger, unconfiguredDayLedger } from "./ledger.js";
 import {
   type CatalogDeps,
   createCatalogRuntime,
@@ -68,6 +70,16 @@ export type ApiServerOptions = {
    * entire subject is a stolen tablet.
    */
   readonly devices?: DeviceDirectory;
+  /**
+   * `12-F10`'s ledger reader. Optional here for `devices`' reason — suites that predate the
+   * summary still have to boot — and REQUIRED once resolved.
+   *
+   * **The fallback is `unconfiguredDayLedger`, which refuses every read**, not a memory stub. On
+   * this surface a stub answering `[]` is the most dangerous shape in the file: it renders a
+   * complete, confident, entirely wrong summary — `Rs 0`, no shifts, no variance — for a
+   * restaurant that traded normally, and nothing about the screen says anything is missing.
+   */
+  readonly ledger?: DayLedger;
 };
 
 /**
@@ -111,6 +123,7 @@ export const createApiServer = async (options: ApiServerOptions): Promise<Fastif
   // pending set than the sweep reads (`14-F28`).
   const catalog = createCatalogRuntime(options.catalog ?? unconfiguredCatalog(options.now));
   const devices = options.devices ?? unconfiguredDeviceDirectory();
+  const ledger = options.ledger ?? unconfiguredDayLedger();
 
   await app.register(fastifyTRPCPlugin, {
     prefix: "/trpc",
@@ -123,6 +136,7 @@ export const createApiServer = async (options: ApiServerOptions): Promise<Fastif
         bearer: bearerOf(req.headers.authorization),
         catalog,
         devices,
+        ledger,
       }),
     },
   });
@@ -294,6 +308,11 @@ const start = async (): Promise<FastifyInstance> => {
   // `__acceptance__/device-seam.test.ts` exists to redden.
   const devices: DeviceDirectory = createGatewayDeviceDirectory(link);
 
+  // `12-F10`. Same `/internal` link again. Swap it for `unconfiguredDayLedger()` and the process
+  // still starts, still serves, still gates — and every summary request refuses loudly instead of
+  // rendering `Rs 0` over a day that traded. That mutant is `summary-seam.test.ts`'s S3.
+  const ledger: DayLedger = createGatewayDayLedger(link);
+
   const app = await createApiServer({
     store: createMemoryUserStore(bootstrapUsers(env)),
     sessionSecret: env.SESSION_SECRET,
@@ -301,6 +320,7 @@ const start = async (): Promise<FastifyInstance> => {
     now,
     catalog,
     devices,
+    ledger,
   });
 
   // `14-F28`'s day-end landing, in production. `unref` so the sweep never holds the process open.

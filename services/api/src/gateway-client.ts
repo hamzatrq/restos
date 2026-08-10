@@ -43,6 +43,7 @@ import {
   DeviceRevokedPayload,
 } from "./devices.js";
 import { IntegrationError } from "./errors.js";
+import type { DayLedger } from "./ledger.js";
 import type { CatalogPublisher, LedgerAppender, LedgerRecord } from "./publish.js";
 
 /**
@@ -111,6 +112,31 @@ const CatalogChangedPayload = z.object({
 });
 
 const ErrorBody = z.object({ error: z.string() });
+
+/**
+ * `12-F10`'s window, as the gateway answers it. **Only the seven envelope fields the fold is
+ * allowed to read** — `global_seq`, `lamport_seq`, `device_created_at` and `server_received_at` are
+ * absent from the row schema, so `01-F34`'s ban is enforced by the WIRE and not only by the fold's
+ * own discipline: an ordering field cannot reach a projected value if it never crosses the
+ * boundary. `z.object` strips unknown keys, so a gateway that started sending one would find it
+ * dropped here rather than quietly available to the next person editing `summary.ts`.
+ */
+const LedgerWindowResponse = z.object({
+  events: z.array(
+    z.object({
+      id: z.string(),
+      type: z.string(),
+      branch_id: z.string(),
+      branch_created_at: z.number().int(),
+      time_basis: z.string(),
+      actor_user_id: z.union([z.string(), z.null()]),
+      payload: z.record(z.string(), z.unknown()),
+    }),
+  ),
+  truncated: z.boolean(),
+  /** `12-F8`. The ONE `server_received_at` that crosses, and it never reaches the fold. */
+  latest_arrival_ms: z.union([z.number().int(), z.null()]),
+});
 
 /** `14-F12`'s list as the gateway's registry answers it. Parsed, for `OrgEventResponse`'s reason. */
 const DeviceListResponse = z.object({
@@ -247,18 +273,25 @@ const postJson = async (
   return response.json();
 };
 
+const getQuery = async (
+  link: GatewayLink,
+  path: string,
+  params: Readonly<Record<string, string>>,
+  what: string,
+): Promise<unknown> => {
+  const url = new URL(endpoint(link, path));
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+  const response = await reach(link, url, { headers: authHeaders(link) }, what);
+  if (!response.ok) await refuse(response, what);
+  return response.json();
+};
+
 const getJson = async (
   link: GatewayLink,
   path: string,
   org_id: string,
   what: string,
-): Promise<unknown> => {
-  const url = new URL(endpoint(link, path));
-  url.searchParams.set("org_id", org_id);
-  const response = await reach(link, url, { headers: authHeaders(link) }, what);
-  if (!response.ok) await refuse(response, what);
-  return response.json();
-};
+): Promise<unknown> => getQuery(link, path, { org_id }, what);
 
 /**
  * `CatalogPublisher`, bound to a real gateway.
@@ -409,5 +442,41 @@ export const createGatewayLedgerAppender = (link: GatewayLink): LedgerAppender =
           },
         };
       });
+  },
+});
+
+/**
+ * `12-F10`'s `DayLedger`, bound to the gateway's merged org log (`01-F7`).
+ *
+ * **The window is `branch_created_at`, and the gateway is told so explicitly** — see `ledger.ts`
+ * for why bucketing by `server_received_at` would bank an offline branch's whole evening into the
+ * following business day and put the cloud in permanent disagreement with the till's own
+ * `shift-cash` fold.
+ *
+ * **`branch_ids` travels as a REPEATED query parameter, and its absence means "all".** The
+ * distinction between "no filter" and "an empty filter" is exactly the one `01-F60`'s explicit
+ * zero exists for, so the gateway refuses an empty list rather than reading it as no filter — a
+ * `reportScope` narrowing that arrived empty must never widen into an org roll-up.
+ *
+ * The response is PARSED rather than cast, for the reason `OrgEventResponse` is: this crosses a
+ * service boundary, and an unparsed body would let a gateway-side rename reach an owner's screen
+ * as `undefined` rendered beside a real rupee figure — the failure that looks like data rather
+ * than like a bug.
+ */
+export const createGatewayDayLedger = (link: GatewayLink): DayLedger => ({
+  read: async (window) => {
+    const params: Record<string, string> = {
+      org_id: window.org_id,
+      from_ms: String(window.from_ms),
+      to_ms: String(window.to_ms),
+    };
+    if (window.branch_ids !== null) params.branch_ids = window.branch_ids.join(",");
+    const body = await getQuery(link, "/internal/ledger/window", params, "day ledger");
+    const parsed = LedgerWindowResponse.parse(body);
+    return {
+      events: parsed.events,
+      truncated: parsed.truncated,
+      latest_arrival_ms: parsed.latest_arrival_ms,
+    };
   },
 });

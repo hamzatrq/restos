@@ -3,6 +3,7 @@ import { CatalogEntryWire } from "@restos/sync-protocol";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { type CatalogEntry, catalogPage, publishCatalog } from "./catalog.js";
+import { readDayWindow } from "./day-ledger.js";
 import { appendOrgEvent, orgEventHistory } from "./org-events.js";
 import { listDevices } from "./registry.js";
 // `revoke-device.ts` carries a main-module entry guard, so importing it runs nothing. Reaching for
@@ -92,6 +93,20 @@ const OrgQuery = z.object({ org_id: z.string().min(1) });
 const DeviceRevokeRequest = z.strictObject({
   org_id: z.string().min(1),
   device_id: z.string().min(1),
+});
+
+/**
+ * `12-F10`'s window query. `branch_ids` is a comma-separated list, and its ABSENCE is what means
+ * "every branch" — an empty string is refused, because a `reportScope` narrowing that resolved to
+ * nothing must never widen into an org roll-up (`day-ledger.ts` states the same rule at the
+ * function). `coerce` is used because query parameters are strings; `int()` is what stops
+ * `from_ms=abc` becoming `NaN` and selecting nothing while reporting success.
+ */
+const LedgerWindowQuery = z.object({
+  org_id: z.string().min(1),
+  from_ms: z.coerce.number().int(),
+  to_ms: z.coerce.number().int(),
+  branch_ids: z.string().min(1).optional(),
 });
 
 /**
@@ -340,6 +355,43 @@ export const registerPublishRoutes = (app: FastifyInstance, deps: PublishDeps): 
       return reply.code(200).send(outcome);
     } catch (error: unknown) {
       return reply.code(refusalStatus(error)).send({ error: messageOf(error) });
+    }
+  });
+
+  /**
+   * `12-F10` — one business day of the merged org log, for the nightly owner summary.
+   *
+   * **This route SERVES rows and interprets none of them.** No fold, no money, no notion of a
+   * business day: the caller states the window in milliseconds and `services/api` — where the
+   * `can()` check that decides how wide the answer may be already lives — does the rest. Same
+   * split as the catalog: *the API publishes, the gateway serves*, one surface over.
+   *
+   * The projected row carries **only** the seven envelope fields `01-F34` permits a fold to read.
+   * `global_seq`, `lamport_seq`, `device_created_at` and `server_received_at` never cross, so an
+   * ordering field cannot reach a projected value even by accident on the far side — which is a
+   * stronger guarantee than the fold's own discipline, because it survives the next person editing
+   * `summary.ts`. `latest_arrival_ms` is the one exception and it is a scalar about the ORG's
+   * freshness (`12-F8`), never attachable to an event.
+   */
+  app.get("/internal/ledger/window", async (request, reply) => {
+    const parsed = LedgerWindowQuery.safeParse(request.query);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: `day ledger: ${z.prettifyError(parsed.error)}` });
+    }
+    const { org_id, from_ms, to_ms, branch_ids } = parsed.data;
+    try {
+      const result = await readDayWindow(deps.db, {
+        org_id,
+        // Absent ⇒ every branch. A present-but-empty value cannot occur: the schema pins
+        // `min(1)`, so `branch_ids=` is a 400 rather than a silent org-wide widening.
+        branch_ids: branch_ids === undefined ? null : branch_ids.split(","),
+        from_ms,
+        to_ms,
+      });
+      return reply.code(200).send(result);
+    } catch (error: unknown) {
+      request.log.error({ err: error }, "day ledger: window read failed");
+      return reply.code(refusalStatus(error)).send({ error: databaseFailure("day ledger", error) });
     }
   });
 };

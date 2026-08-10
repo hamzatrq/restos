@@ -16,6 +16,7 @@ import { z } from "zod";
 import { catalogProcedures } from "./catalog-router.js";
 import { deviceProcedures } from "./device-router.js";
 import { issueSessionToken } from "./session.js";
+import { summaryProcedures } from "./summary-router.js";
 import {
   type ApiMeta,
   authorized,
@@ -111,11 +112,20 @@ const opsRouter = router({
  */
 const deviceRouter = router(deviceProcedures);
 
+/**
+ * `12-F9`/`12-F10` — the nightly owner summary, gated on Appendix A's `View sales reports` row.
+ * Built with `authorized(...)` like everything else, so `assertEveryProcedureIsGated` sees it and
+ * **neither exemption list changed**: a day's takings are not the caller's own identity, and
+ * putting a sales report on `PUBLIC_PROCEDURES` needs no explanation.
+ */
+const summaryRouter = router(summaryProcedures);
+
 export const appRouter = router({
   auth: authRouter,
   session: sessionRouter,
   catalog: catalogRouter,
   devices: deviceRouter,
+  summary: summaryRouter,
   ops: opsRouter,
 });
 
