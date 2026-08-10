@@ -1024,17 +1024,106 @@ still a registered pass screen. So `resolveHardwareTier` takes the roster as a r
 and the shipped host passes `null`, `00 §7` layer 2's already-declared `hardware tier (T1/T2/T3)`
 key is the correction (`RESTOS_HARDWARE_TIER`), and the boot line says which was used at length.
 
-**`02-F31`'s settlement → `served` half is NOT built and is BLOCKED IN THE KERNEL.** The FR requires
-settlement → `served` *and*, in the next clause, forbids fabricating `ready` — which together demand
-the edge `in_prep → served`, and `01 §4` / `LEGAL_NEXT` reach `served` only from `ready`. Every
-route was checked; the full argument, three candidate resolutions and why none is a session's call
-are at the foot of `main/line-advance.ts`. **Needs a ruling, not an edit** — and note the trap: the
-"safe" implementation that filters by legality and emits nothing is the WORST option, because it
-looks finished and every gate stays green. `line-advance-seam.test.ts` §D fails if a settlement
-trigger appears before the conflict is closed. The **delivery exclusion** (`01 §4`: rider-driven
-only, never advanced by payment/settlement) is part of that blocked half and is expressed nowhere.
+**✅ `02-F31`'s settlement → `served` HALF IS BUILT (August 2026, `DEC-HW-002`).** ⚠ *This paragraph
+read "NOT built and BLOCKED IN THE KERNEL … needs a ruling, not an edit" and it was correct until the
+ruling landed.* The FR requires settlement → `served` *and*, in the next clause, forbids fabricating
+`ready` — which together demand the edge `in_prep → served`, and `01 §4` / `LEGAL_NEXT` reached
+`served` only from `ready`. **RULED: `LEGAL_NEXT.in_prep` gains `served`** — a line in a restaurant
+with no pass goes from being cooked to being handed over with no observed moment of readiness, and
+the table encoded *"a pass exists to observe readiness"* as universal law (`DEC-HW-001`'s
+T3-assumed-universal error reaching the kernel). A **tier-conditional** legality was refused as a
+standing-law-1 violation, not on taste: `26 §7` row 65 makes legality a pure function of one edge's
+payload, so gating it on the branch's tier would make a projected value depend on the reading
+device's configuration (`01-F34`).
 
-**Mutation matrix — control 472/472 green (438 pre-existing + 34 new), `pnpm verify` exit 0,
+`main/line-advance.ts` gains `settled(order_id)`, wired in `main/index.ts` off the SAME
+`payment.recorded` narrowing that already drives `receipts.settled`. Three gates, all inside the
+module where a suite drives the real branch: **tier** (`autoAdvancesLines`, as `printEvent` does),
+**delivery**, and **completion**.
+
+**The delivery exclusion is an ALLOWLIST and that is the load-bearing choice.** `01 §4` is canonical
+— *"`served` (dine-in/takeaway/pickup) **or** `picked_up → delivered` (delivery, **rider-driven
+only** — never advanced by payment/settlement, 09)"*. `order_type` is an **open string** in
+`registry.ts` (`02-F42` closed `channel` and left this axis open), so the allowlist and a
+`!== "delivery"` denylist differ on exactly the unknown and absent values — and the harm is
+recoverable in only one direction. Refusing costs a queue row that lingers; advancing wrongly writes
+a handover that never happened, **terminally** (`01-F35`) and **unremovably** (`01-F1`). It is not a
+legality rule and could not be: a delivery line at `ready` may legally reach `served`, so
+`LEGAL_NEXT` cannot express it.
+
+**Completion is `pay_total >= billed_effective`** — the same reading `printing.ts` uses at the same
+call site for `02-F15`. `01-F33`'s `order.settlement_closed` has no emitter anywhere, so
+`OpenOrderRow.settled` is `0` on every order and waiting for it would advance nothing; advancing on
+*any* `payment.recorded` would serve the lines at the first `02-F13` partial tender. It also keeps
+the open `TAKE CASH`-on-an-empty-entry defect out of line state (a Rs 0 tender leaves the bill
+uncovered).
+
+**Two limits are deliberate and must not be "fixed" without a ruling.** `confirmed → served` stays
+**illegal**, so a till whose KOT never printed advances nothing on settlement — `restaurant-os.md:47`
+defines T1 as *"terminal + printers"*, and whether a tier below T1 exists is `DEC-HW-001`'s second
+open sub-question. And no `ready` is fabricated anywhere (`02-F31`, `03-F26`).
+
+**⚠ MEASURED AND OWED — the terminal edge ships `preds: []`.** `line-advance.ts` predicted this
+before the half was buildable and the prediction was exactly right. Measured through a real store,
+three edges deep, `preds` the only variable:
+
+| settlement edge | projected states | anomalies |
+|---|---|---|
+| `preds: []` (shipped) | `["served"]` | `terminal_regression` ×2 (the `confirmed` and `in_prep` edges) |
+| `preds: [<in_prep edge>]` | `["served"]` | `{}` |
+
+It ships anyway, for three bounded reasons rather than by dismissal: the **state is correct either
+way**; the flag is **DERIVED** — every edge is legal, so nothing wrong enters the append-only ledger
+and a refold clears it retroactively, which is the whole difference from the illegal-edge route the
+ruling refused; and **the cloud Auditor already excludes it by name** (`auditor.ts` filters to
+`illegal_transition` under *"the other anomaly classes are fold renderings, not illegalities"*). No
+money value moves — `billedCellPaisa` reads `states` only. **Closing it needs head ids on
+`BilledLineCell`**, which is an oracle-pinned cell shape (contract ruling C8) in a second protected
+package; the precedent exists one projection over (`AvailabilityRow.head_ids_json`, *"exported so an
+operator surface can build a correct"* supersedes link, with its own `01-F34` bijection test).
+**OWED, named, and deliberately not taken in the change that closed the FR.** `line-advance.test.ts`
+§H pins the two flags as a fact so it cannot change silently.
+
+**Mutation matrix — control pos-electron 488/488 + domain 328/328 green, `pnpm verify` exit 0,
+`seams:check` clean.** In-tree, byte-exact backups with a restore trap, a no-op-mutant guard, and the
+FULL suite of both packages under every mutant. 472 pos-electron tests existed before this work.
+
+| # | mutant (exactly one branch) | new (16) | pre-existing 472 | domain 328 |
+|---|---|---|---|---|
+| M1 | **THE SEAM** — `index.ts` drops `lines.settled(order_id)` | **1** | **all green** | all green |
+| M2 | **THE DELIVERY EXCLUSION REMOVED** — directed | 5 | **all green** | all green |
+| M3 | **THE PLAUSIBLE WRONG READING** — denylist `!== "delivery"` | **1** | **all green** | all green |
+| M4 | **`LEGAL_NEXT` REVERTED** — the pre-ruling kernel | 11 | **all green** | **1** |
+| M5 | **CONTROL** — the tier gate dropped from `settled` only | 2 | all green | all green |
+| M6 | the completion test dropped — any `payment.recorded` serves | 1 | all green | all green |
+| M7 | **THE LIE** — `from_states: ["ready"]` on an `in_prep` line | 2 | all green | all green |
+| M8 | **NEGATIVE CONTROL** — a real refactor of the same two functions | **0** | **all green** | all green |
+
+**M8 is what makes every red row mean anything:** a genuine one-branch refactor (expression body →
+early returns; the duplicated row lookup extracted into one helper) reddens nothing, so the suite is
+holding behaviour rather than shape.
+
+**M4's FAILURE MODE IS NOT THE ONE `DEC-HW-002` PREDICTED, and the difference is the finding.** The
+ruling says an `in_prep → served` edge against the old table *"is recorded `illegal_transition`
+permanently"*. It is not — because `advanceEdgesFor`'s legality filter (rule 2, which predates this
+work) refuses the line first. What actually happens is `expected [] to have a length of 1` and
+`expected ['in_prep'] to deeply equal ['served']`: **the trigger is wired and emits nothing**, which
+is the *other* outcome the ruling names and calls **the worst option available**, because it looks
+finished with every gate green. The only reason it is not silent is that
+`line-advance-seam.test.ts` §D was INVERTED into a positive assertion rather than deleted.
+
+**M1's kill count is 1, and it is a SOURCE READ — state that plainly.** `main/index.ts` builds an
+Electron app at module scope and no suite in this package can import it, so the one guard on "does
+the host call the emitter" is a string match, exactly as it already is for `lines.confirmed`. The
+behavioural test beside it constructs its own emitter and stays green under M1. That is the known
+shape of this seam, not a new weakness — but it means the seam has exactly **one** guard, and M10 of
+the producer round is the standing warning about what a source string alone is worth.
+
+**M3 is the row to re-run after any change to the exclusion.** Exactly one assertion in this repo
+separates `01 §4`'s allowlist from the denylist that reads like `02-F31`'s sentence, and all 472
+pre-existing tests plus all 328 domain tests stay green under the wrong one.
+
+**Mutation matrix (the PRODUCER round, kept as history) — control 472/472 green (438 pre-existing + 34 new), `pnpm verify` exit 0,
 `seams:check` exit 0.** In-tree, byte-exact backups with a restore trap, full package suite under
 every mutant. **The right-hand column is the finding.**
 

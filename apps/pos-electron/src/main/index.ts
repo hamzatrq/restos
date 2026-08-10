@@ -1052,7 +1052,23 @@ app.whenReady().then(async () => {
     // what makes a `02-F13` split print one receipt rather than one per tender.
     if (confirm.success && confirm.data.type === "payment.recorded") {
       const order_id = confirm.data.payload.order_id;
-      if (typeof order_id === "string") receipts.settled(order_id);
+      if (typeof order_id === "string") {
+        receipts.settled(order_id);
+        // `02-F31` — **THE SETTLEMENT SEAM**: *"settlement → lines `served` —
+        // dine-in/takeaway/pickup only"*. Blocked in the kernel until `DEC-HW-002` ruled
+        // `LEGAL_NEXT.in_prep` gains `served`; the whole argument is in `line-advance.ts`.
+        //
+        // It hangs off the completed append for the same reason the three handoffs above do
+        // (`01-F17` — the money is already in the ledger and a customer may not be held at the
+        // counter), and it reads the SAME narrowing the receipt does rather than adding a second
+        // one: two definitions of "a payment landed" on one event is the `02-F45` shape.
+        //
+        // The tier gate, the delivery exclusion and the tendered-in-full test all live inside
+        // `lines.settled` where a suite can drive the real branch — never here, where a test could
+        // only hand-copy it. That is `K-3`'s dead-oracle defect, and this file has already paid
+        // for it once (mutant M10 of the producer round was killed by a source string alone).
+        lines.settled(order_id);
+      }
     }
     // NOTIFY FROM INSIDE THE HANDLER. This was `ipcMain.on(CHANNELS.append, notifyChanged)`,
     // which never fired once: `invoke` dispatches only to the `handle` table, and `.on` is the

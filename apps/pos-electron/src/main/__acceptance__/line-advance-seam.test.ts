@@ -152,43 +152,104 @@ describe("§B 02-F31 — the KOT callback's contract, driven", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-// §D — ANTI-SCOPE. `02-F31`'s settlement half is BLOCKED and must not be drawn.
+// §D — THE SETTLEMENT SEAM. `02-F31`'s second half, unblocked by `DEC-HW-002` (August 2026).
+//
+// ⚠ THIS SECTION WAS AN ANTI-SCOPE GUARD AND IS NOW ITS OWN INVERSE, so what it used to assert is
+// recorded here rather than lost in a diff. It was titled *"the settlement trigger is BLOCKED and
+// absent"* and it asserted:
+//
+//   (a) the 400 characters after `confirm.data.type === "payment.recorded"` do NOT contain
+//       `lines.`  — i.e. no settlement path calls the line advance;
+//   (b) `index.ts` does not contain the string `"served"` anywhere;
+//   (c) `LineAdvance` has exactly the two keys `["confirmed", "printEvent"]`, because "a
+//       `LineAdvance` with a third method would be a settlement path by another name";
+//   (d) the module still records the CONFLICT — `line-advance.ts` contains `in_prep → served`,
+//       `LEGAL_NEXT.in_prep` and `rider-driven only`.
+//
+// Its own instruction was *"delete the guard in the same change that closes the conflict, and not
+// before"*. The conflict is closed by ruling, so (a) and (c) are inverted below — the trigger must
+// now be PRESENT and reachable — and (d) is kept almost unchanged, because the module must still
+// carry the reasoning; only what it has to say has moved from "why this is refused" to "why this
+// is legal and where the ruling stopped". (b) is dropped outright: it was a proxy for (a) and the
+// string is now expected.
+//
+// **The inversion is not a weakening.** An anti-scope guard fails when the thing appears; this
+// fails when it disappears OR when it appears without its gates, which is the strictly larger
+// claim. The failure mode it now defends against is the one `line-advance.ts` called the worst
+// option available: a trigger that is wired and inert, looking finished with every gate green.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
-describe("§D 02-F31/01 §4 — the settlement trigger is BLOCKED and absent", () => {
+describe("§D 02-F31/DEC-HW-002 — the settlement trigger is PRESENT, reachable and gated", () => {
   const mainSrc = readSrc("index.ts");
   const moduleSrc = readSrc("line-advance.ts");
 
-  it("no settlement path calls the line advance", () => {
-    // `02-F31` requires settlement → `served` AND forbids fabricating `ready`, while `01 §4` and
-    // `LEGAL_NEXT` reach `served` only from `ready`. Wiring a trigger anyway gives one of two bad
-    // outcomes: a permanently illegal edge on every settled order, or — worse, because it looks
-    // finished — a call site that advances nothing and turns the gap into a green suite.
-    //
-    // **If a later session closes the conflict, this test is the reminder that the trigger is now
-    // owed** — delete it in the same PR that builds settlement, and not before. The same shape as
-    // `orders-tab.dom.test.tsx` §E for `C20`/`C32`.
+  it("the settlement handler reaches the line advance — the SEAM", () => {
+    // The inverse of assertion (a). A source read is a weak instrument and is used here for the
+    // reason this file's header gives: `main/index.ts` builds an Electron app at module scope and
+    // no suite in this package can import it. Sliced from the `payment.recorded` narrowing so this
+    // measures THAT handler and not some other `lines.` call elsewhere in a 20k-character file.
     const settleHandler = mainSrc.slice(
       mainSrc.indexOf('confirm.data.type === "payment.recorded"'),
     );
-    expect(settleHandler.slice(0, 400)).not.toContain("lines.");
-    expect(mainSrc).not.toContain('"served"');
-    // A `LineAdvance` with a third method would be a settlement path by another name.
+    const body = settleHandler.slice(0, 1400);
+    expect(body).toContain("lines.settled(order_id)");
+    // It hangs off the SAME narrowing the receipt does rather than adding a second one — two
+    // definitions of "a payment landed" on one event is the `02-F45` shape.
+    expect(body).toContain("receipts.settled(order_id)");
+  });
+
+  it("the surface carries the third method, and it is the settlement one", () => {
+    // The inverse of assertion (c), which read `["confirmed", "printEvent"]` on the grounds that a
+    // third method "would be a settlement path by another name". It is exactly that, and it is now
+    // required rather than forbidden.
     const lines = createLineAdvance({
       store: { openOrders: () => [] } as never,
       tier: () => "T1",
       append: () => {},
     });
-    expect(Object.keys(lines).sort()).toEqual(["confirmed", "printEvent"]);
+    expect(Object.keys(lines).sort()).toEqual(["confirmed", "printEvent", "settled"]);
+  });
+
+  it("BEHAVIOUR, not a source string — the trigger moves a real line and is really gated", () => {
+    // ⚠ THE ASSERTION THAT MATTERS, and the reason it exists is measured rather than assumed:
+    // mutant M10 of the producer round was killed by a source string and by NOTHING behavioural,
+    // because the seam suite asserted against a hand-copy of the host's branch (`K-3`'s
+    // dead-oracle defect). The source read above proves the host CALLS the emitter; this proves
+    // the emitter it calls is not inert — which is the half a wired-and-inert trigger would pass.
+    const rig = (tier: "T1" | "T2", order_type: string) => {
+      const appended: { type: string; payload: LineStateChangedPayload }[] = [];
+      const lines = createLineAdvance({
+        store: {
+          openOrders: () => [{ ...orderAt("in_prep"), order_type, pay_total: 45_000 }],
+        } as never,
+        tier: () => tier,
+        append: (type, payload) => appended.push({ type, payload }),
+      });
+      lines.settled(ORDER_ID);
+      return appended;
+    };
+    // It fires, and it fires with the state `02-F31` names.
+    const served = rig("T1", "dine_in");
+    expect(served).toHaveLength(1);
+    expect(served[0]?.payload.state).toBe("served");
+    // The tier gate is read INSIDE `settled`, not around it at the call site — same property §B
+    // pins for `printEvent`, and the same reason: a gate in the host is a gate no test can drive.
+    expect(rig("T2", "dine_in")).toHaveLength(0);
+    // `01 §4`'s delivery rule, on an order identical in every other respect.
+    expect(rig("T1", "delivery")).toHaveLength(0);
   });
 
   it("the module records WHY, so the next reader does not rediscover it as a bug", () => {
-    // An owed item filed with no reason is one nobody re-checks — `01-F56`'s catalog refusal sat
-    // for a wave behind "no FR exists" when the FR did exist. The conflict, the three candidate
-    // resolutions and the reason none is a session's call are in the module, not only in a commit.
-    expect(moduleSrc).toContain("in_prep → served");
+    // Assertion (d), kept. An owed item filed with no reason is one nobody re-checks — `01-F56`'s
+    // catalog refusal sat for a wave behind "no FR exists" when the FR did exist. What the module
+    // must now carry is the RULING and the boundary it stopped at, not the old conflict.
+    expect(moduleSrc).toContain("DEC-HW-002");
     expect(moduleSrc).toContain("LEGAL_NEXT.in_prep");
-    // The delivery rule is part of the blocked half and is named rather than quietly dropped.
+    // The delivery rule is quoted from `01 §4` rather than paraphrased from `02-F31`.
     expect(moduleSrc).toContain("rider-driven only");
+    // And the two live limits, so neither can be quietly closed by a session being helpful:
+    // `confirmed → served` stays illegal, and the terminal edge's missing `preds` is a named,
+    // measured debt rather than an unremarked side effect.
+    expect(moduleSrc).toContain("terminal_regression");
   });
 });
