@@ -74,6 +74,9 @@ export {
   KOT_TWO_HEAD_TABLE_HEADER,
 } from "./product-constants.js";
 export {
+  // 05-F7 — the closed `approval_type` set of the manager console's event extension.
+  APPROVAL_TYPES,
+  type ApprovalType,
   AUDIT_EVENT_TYPES,
   type AuditEventType,
   // 14-F3 — one moved price cell on `catalog.changed`, so the history can render "450 → 480".
