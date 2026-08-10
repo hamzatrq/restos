@@ -629,8 +629,20 @@ surface does not have. That is defect 5's arithmetic, avoided rather than repeat
   transport exists (`18 §10`, K-8 owed). So **every confirm raises a print-failure band about
   20 s later**, naming the printer and the order. That is the honest state of this device, not
   a bug: `03-F5` forbids a silent KOT failure, and the alternative is a till that claims to
-  have printed. The printer model is `RESTOS_KOT_PRINTER` (default `TH230`, a PINNED value and
-  not a measurement — see `main/index.ts`). The queue is **DURABLE as of August 2026**:
+  have printed. The printer model is `RESTOS_KOT_PRINTER`, and its **default changed in August
+  2026 (`DEC-HW-001` (1)): `no printer configured`, which resolves to `03 §7`'s conservative
+  32-column record**, so an unconfigured till now takes `03-F49`'s refusal and `03-F34`'s S1 band
+  ("needs 42 columns, this printer has 32") instead of failing later at transmit. **It defaulted
+  to `TH230` before that, and the pin was a live defect rather than an awkward label:** `render()`
+  lays out against the record it is handed, `TH230` claims 44 Font-A columns on 576 dots, so
+  attaching `03-F10`'s baseline **BC-58U** (384 dots) without setting the variable produced a
+  44-column ticket on 58 mm paper — **measured at 320 discarded dots and a whole word off the
+  right edge**, which is exactly the silent degradation `03-F34` bans, aimed at the corpus's own
+  named installed base. Every printing suite injects its own capability, so nothing ever evaluated
+  the default; `__acceptance__/printer-default.test.ts` is the assertion, and it pins the PROPERTY
+  (the default must resolve to a record claiming nothing) rather than the string.
+  `RESTOS_KOT_PRINTER=TH230` restores the old behaviour for anyone who has one. The queue is
+  **DURABLE as of August 2026**:
   `createSpooler` is handed `openJobStore` (`main/job-store.ts` — SQLite + WAL, `print-spool.db`
   in `userData`), so `03-F4`'s crash clause holds and a relaunch keeps its queued tickets, their
   bytes, their state and their attempt counts. It was process-lifetime for one round, because K-7

@@ -109,11 +109,29 @@ export type ColumnRefusal = {
 export type ColumnDecision = { ok: true; columns: number } | ColumnRefusal;
 
 /**
- * The gate. **Reads Font A**, and the FR's own consequence is what settles which font:
- * `03-F49` states that "a 58 mm printer cannot print kitchen tickets". A 58 mm printer has 32
- * Font-A columns and 384 printable dots, which is `floor(384 ÷ 9) = 42` Font-B columns — exactly
- * the KOT's minimum. So a Font-B gate would admit the printer the FR says is excluded, making the
- * FR false on its own stated example.
+ * The gate. **Reads Font A — on LEGIBILITY, which is a different basis from the one this comment
+ * used to give (`DEC-HW-001` (1), founder ruling August 2026).**
+ *
+ * The superseded reasoning was circular and is recorded here because the shape recurs: it said a
+ * Font-B gate "would admit the printer the FR says is excluded, making the FR false on its own
+ * stated example" — i.e. the font was chosen to keep `03-F49`'s sentence true, rather than
+ * `03-F49` resting on a property of the paper. The founder re-opened it on legibility grounds and
+ * the answer came back the same, so the gate does not move; **only its reason does.**
+ *
+ * **The reason, measured (full numbers in `DEC-HW-001`).** At 203 dpi Font A's cap is 1.75–2.13 mm
+ * and Font B's is 1.13–1.50 mm. A KOT read at 0.45 m — an ASSUMPTION, since `27-F27` is scoped to
+ * glass and `27-F11h` says the corpus has no design language for thermal paper at all — puts
+ * Font A at 13.4–16.2 arcmin against ISO 9241-303's 16 minimum, and Font B at 8.6–11.5. The KOT's
+ * type is **already at the floor** in Font A, and the item NAME renders at `normal` because
+ * `27-F56` spends the 2× rung on the quantity and the identifier. Font B removes ~30% of a cap
+ * height with nothing left to give.
+ *
+ * **A second, independent reason this cannot be a one-line change: the encoder cannot emit Font B.**
+ * `encoder.ts` has no `ESC M`, `simulate.ts` has one face and no font state, and `ESC M` is not in
+ * K-2's allowlist. So a Font-B gate today admits a 58 mm printer to a **Font-A** render: measured,
+ * a realistic ticket then discards 320 dots and drops a whole word off the paper — precisely the
+ * silent degradation `03-F34` bans. `cols_font_b` consequently has **no production reader**, and
+ * that is deliberate rather than an oversight.
  *
  * A passing decision carries the printer's OWN column count, never the minimum: `03-F36` makes
  * the floor something the layout must survive, not a width it is clamped to.
