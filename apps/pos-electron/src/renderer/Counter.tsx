@@ -76,6 +76,32 @@ const TABS: readonly Tab[] = [
   // reordered, which is what that FR calls a breaking change.
   { id: "cash", label: "Cash" },
   { id: "me", label: "Me" },
+  /**
+   * `02-F7` — the 86, and a **`27-F4` BREAKING CHANGE requiring PR justification. Here it is,
+   * and a reviewer should accept or reject it explicitly.**
+   *
+   * 1. **It is APPENDED, so no existing tab moves.** `01-F61` reached the same answer for the
+   *    other grid a cashier learns by position — *"new members append"* — because ordering by
+   *    any key that can re-sort destroys the muscle memory `27-F4` protects. Every one of the
+   *    five tabs above keeps its index and its position; a sixth appears to the right of `Me`.
+   * 2. **Why a TAB and not a control on the Order screen.** `02-F7` says the toggle is reachable
+   *    *"from any POS screen"*, and the tab rail is the only chrome `27-F1` guarantees is on
+   *    every screen — so one tab is one tap from everywhere, where a per-screen control would be
+   *    five `27-F4` breaking changes instead of one.
+   * 3. **Why not a mode on the existing item grid.** That is the tempting shape and `27-F5`
+   *    forbids it by name: *"no soft keys"*. A grid tile whose meaning depends on a mode is a
+   *    soft key, and here the two meanings are "sell one" (~300×/shift) and "stop the whole
+   *    organisation selling it" (`01-F22` fast-paths it to every device and channel driver).
+   *    Those must not share a target. On this surface a tile means exactly one thing, always.
+   *
+   * **The label is `Sold out` and not `86`.** The jargon is what `02-F40` and the FRs use, but
+   * `00 §5.6` is English-only UI and 86 is American restaurant slang with no standing in
+   * Pakistan; `21 §5` puts the operator at plausibly non-reading, and two digits she has to be
+   * TAUGHT are worse than two words she may already know. The tile state still reads `86` — that
+   * word is on the tile because `gateway.menu()` writes it, and changing the fold's vocabulary
+   * is not this surface's call.
+   */
+  { id: "soldout", label: "Sold out" },
 ];
 
 /**
@@ -116,12 +142,51 @@ const ORDER_TYPES: readonly { id: string; label: string }[] = [
 ];
 
 /**
- * `02-F1` — the counter app is the `counter` channel, always. Written as a named constant
- * rather than inline because `02-F42` makes this a **price key**: it selects which of the
- * catalog's per-channel prices a line snapshots (`01-F60`), so it is a money-bearing value
- * and not a label. A phone order taken at this till is `phone` and is `C18`, not this path.
+ * `02-F1`/`02-F42` — **the channels a counter operator may ORIGINATE an order on**, and this
+ * row is a price key rather than a label: it selects which of the catalog's per-channel prices
+ * every line of the order snapshots (`01-F60`), frozen by `01-F53` in a ledger `01-F1` forbids
+ * correcting in place. `restaurant-os.md` §8 names this item and gives it its reason — *"plus
+ * POS quick-entry for phone and foodpanda orders (channel-tagged, ≤30 s — so the 'one queue,
+ * all channels' law holds from the first pilot day)"*. Until August 2026 this file pinned
+ * `counter` and `02-F28`/`02-F30` had no surface at all.
+ *
+ * **It is THREE of `02-F42`'s five, and the narrowing is an INTERPRETATION — stated, not
+ * silent.** `storefront` and `whatsapp` are absent because no FR has a counter operator keying
+ * one in: `02-F9` puts cloud orders from docs 06/07 in an INBOX pane where they are *accepted*,
+ * and `08-F8` auto-confirms aggregator API orders on ingest. A counter-created `storefront`
+ * order would be fabricated provenance in the channel-economics axis (docs 12/13) that `02-F42`
+ * closed the set to protect. The three that remain each have an FR that puts them here:
+ * `counter` (`02-F1`), `phone` (`02-F27`/`02-F28`), `foodpanda` (`02-F30`).
+ *
+ * **The simpler alternative, named rather than dismissed:** offer all five. Widening is additive
+ * and costs one line; the wrong guess the other way writes a channel into an append-only ledger
+ * that no report can ever attribute. `counter-channel-row.dom.test.tsx` §A is the tripwire so
+ * this cannot widen or narrow by accident.
+ *
+ * **There is NO DEFAULT, extending `C4`'s founder ruling one axis over.** `ORDER_TYPES` below
+ * records why order type has none: pre-selecting *"would save one tap on ~75 orders a shift and
+ * would silently corrupt the axis"*. Every word of that applies harder here, because
+ * `order_type` is a reporting axis and `channel` is MONEY — a phone order rung on a
+ * pre-selected `counter` chip bills at counter prices, and `01-F53` freezes the mistake. Cost,
+ * stated: one extra tap on the counter's second-most-frequent act. **Flagged for founder review
+ * as a pinned interpretation, not a transcription** — the ruling was made about `order_type`.
  */
-const COUNTER_CHANNEL = "counter";
+const ORDER_CHANNELS_AT_COUNTER: readonly { id: string; label: string }[] = [
+  { id: "counter", label: "Counter" },
+  { id: "phone", label: "Phone" },
+  { id: "foodpanda", label: "Foodpanda" },
+];
+
+/**
+ * Which channel the GRID is greyed against before any order exists.
+ *
+ * `01-F60` makes "unpriced" a question about a `(branch, channel)` pair, so the grid must name
+ * one even when there is nothing to sell into yet. This is a DISPLAY choice and touches no
+ * money: `gateway.addLine` resolves the price from the ORDER's own channel on the trusted side.
+ * `counter` because that is the column an untagged till would sell on, and because the tiles it
+ * greys are inert anyway until a channel and a type are chosen.
+ */
+const GRID_PREVIEW_CHANNEL = "counter";
 
 export const Counter = () => {
   const [device, setDevice] = useState<DeviceState | null>(null);
@@ -190,6 +255,40 @@ export const Counter = () => {
    * left two thirds of the window dead.
    */
   const [surfaceRef, gridMm] = usePhysicalSize();
+  /**
+   * `02-F1`/`02-F42` — the channel the NEXT order will be created on. `null` until chosen, and
+   * that is `ORDER_CHANNELS_AT_COUNTER`'s no-default ruling: there is no pre-selected chip
+   * behind which a phone order could be rung at counter prices.
+   *
+   * Renderer state and not a fold read, deliberately. Nothing is appended until `startOrder`, so
+   * re-tapping costs nothing and commits nothing — the property `01-F61` requires of the staff
+   * grid, where *"selecting a person is not submitting an attempt"*. Once the order exists the
+   * LEDGER holds its channel and this stops being the authority (`02-F1`: set at creation, never
+   * inferred later), which is why `menuChannel` below reads the order first.
+   */
+  const [pendingChannel, setPendingChannel] = useState<string | null>(null);
+  /**
+   * `02-F7`'s grid measures its OWN box. A second `usePhysicalSize` rather than sharing the Order
+   * tab's, because only one of the two is mounted at a time and a shared ref would hold the
+   * measurement of whichever surface rendered last — a grid costed for a box it is not in is how
+   * tiles land off-page with no pager to reach them (`ItemGrid`'s own recorded hazard).
+   */
+  const [soldOutSurfaceRef, soldOutMm] = usePhysicalSize();
+  const [soldOutPage, setSoldOutPage] = useState(0);
+
+  /**
+   * Which channel the GRID is greyed against — the open order's own, else the pending choice,
+   * else `counter`.
+   *
+   * **The open order wins, and that precedence is the point.** `01-F60` resolves a line's price
+   * from the ORDER's channel, so the grid must ask the question `addLine` will ask. Greying
+   * against `pendingChannel` while a foodpanda order is open would offer tiles the append then
+   * refuses — the grid lying about what is sellable.
+   *
+   * Read off `orders` rather than `current` because hooks may not sit below the early return,
+   * and it is the same row: `current` is `orders[0]`.
+   */
+  const menuChannel = orders[0]?.channel ?? pendingChannel ?? GRID_PREVIEW_CHANNEL;
 
   const reload = useCallback(async () => {
     // Three reads, never a join in the renderer: the folds already hold these projections and
@@ -198,7 +297,9 @@ export const Counter = () => {
     const [d, o, m, c, a] = await Promise.all([
       window.restos.deviceState(),
       window.restos.openOrders(),
-      window.restos.menu(),
+      // `01-F60` — the grid is greyed against ONE channel and this is it. DISPLAY only: the
+      // price a line snapshots is resolved in main from the ORDER's channel, never from here.
+      window.restos.menu(menuChannel),
       // A FOURTH read, and optional-chained because the member is optional on the contract —
       // see `RestosBridge.cashState` for why that asymmetry exists and what it owes.
       window.restos.cashState?.(),
@@ -212,7 +313,12 @@ export const Counter = () => {
     setItems(m);
     setCash(c ?? null);
     setAlarms(a ?? []);
-  }, []);
+    // `menuChannel` is a real dependency and not a lint appeasement: the grid's greying answers
+    // an `01-F60` question about a `(branch, channel)` pair, so switching channel MUST re-ask it.
+    // The effect below re-subscribes when this identity changes, which is what re-fetches the
+    // menu the moment a channel is chosen or an order opens. It converges — once `orders`
+    // settles, `orders[0]?.channel` is stable — and the cost of the extra fetch is one IPC read.
+  }, [menuChannel]);
 
   useEffect(() => {
     void reload();
@@ -326,15 +432,48 @@ export const Counter = () => {
    * main stamps identity — it does not. `01-F1`'s stamped identity is the ENVELOPE's (`id`,
    * `device_id`, `branch_created_at`), all of which main still owns. An `order_id` is a payload
    * key, and it has to be minted by whoever will reference it in the same breath.
+   *
+   * **The channel is the latched choice and there is no fallback here.** `?? "counter"` would
+   * be the no-default ruling undone in one operator, silently: a type tapped before a channel
+   * would ring at counter prices and look like it worked. The type row is greyed until a channel
+   * is latched, and this refusal is the same guard on the trusted-ish side of that greying —
+   * `27-F5` keeps the tiles tappable-looking, so the greying alone cannot refuse a tap.
    */
   const startOrder = (order_type: string) => {
+    if (pendingChannel === null) return;
     write(
       window.restos.append({
         type: "order.created",
-        payload: { order_id: newId(), channel: COUNTER_CHANNEL, order_type },
+        payload: { order_id: newId(), channel: pendingChannel, order_type },
         refs: [],
       }),
     );
+    // `02-F1` — the ledger owns the channel from here. Clearing it means the NEXT order starts
+    // from no default again rather than inheriting this one's, which is the same ruling applied
+    // to the second order of the shift as to the first.
+    setPendingChannel(null);
+  };
+
+  /**
+   * `02-F7` — 86 an item, or put it back.
+   *
+   * One call, and it carries neither the `01-F57` supersedes link nor any price: main reads the
+   * fold's own heads at append time (`ToggleAvailabilityRequestSchema` says why). The renderer names
+   * WHICH item and WHICH way, exactly as `addLine` names what to add and never what it costs.
+   *
+   * `available` is a target state rather than a flip. A flip computed from a screen that has not
+   * re-read yet inverts twice under a concurrent toggle from the pass or the manager console
+   * (`01-F22` puts the control on all three), and a CONTESTED item (`01-F58`) has no single
+   * state to flip from at all.
+   */
+  const toggleAvailability = (item_id: string, available: boolean) => {
+    // Optional on the contract (`RestosBridge.toggleAvailability` records why), so a host that does
+    // not serve it degrades to a grid whose taps do nothing rather than throwing on the counter
+    // — `01-F17`/`01-F54`'s rule for a read the host cannot serve, applied to a write. The
+    // shipped preload always serves it, and `__acceptance__/availability-seam.test.ts` is what
+    // stands in for the type until the three oracle harnesses can carry a required member.
+    const op = window.restos.toggleAvailability?.({ item_id, available });
+    if (op !== undefined) write(op);
   };
 
   /**
@@ -648,6 +787,129 @@ export const Counter = () => {
           onOpenPageChange={setOpenPage}
           onAccept={acceptCloudOrder}
         />
+      ) : activeTab === "soldout" ? (
+        /*
+          `02-F7` — THE 86, and the first surface in the product that can emit
+          `availability.changed`. The fold, the lattice, the store table and `menu()`'s join have
+          all shipped since July 2026 with no producer, so until now a restaurant that ran out of
+          a dish could not stop RestOS selling it.
+
+          **The same `ItemGrid`, in the same order, at the same positions as the Order tab.**
+          `27-F4` protects a tile learned by position, and an operator who reaches for the karahi
+          on one surface must find it in the same cell on the other — so this draws `items`
+          unmodified rather than, say, the 86'd ones first. A "sold out at the top" grid would
+          re-rank itself on every toggle, which is `27-F4`'s adaptive-ordering ban exactly.
+
+          **A tap here means ONE thing, always** — that is why this is a tab and not a mode on
+          the Order grid (`27-F5`: "no soft keys"). Nothing on this surface adds a line, so a
+          mis-tap costs a re-tap and never a wrong sale.
+
+          **`unavailable` here means 86'd and NOTHING else.** `menu()`'s `unavailable` also
+          covers `01-F60`'s unpriced case, and that FR calls the two dispositions opposites — an
+          86'd item has a known price and stays deliberately sellable (`01-F59`), an unpriced one
+          has nothing to sell at. Greying an unpriced item on THIS grid would tell the operator
+          the kitchen has run out of something nobody has touched. So it reads `sold_out`, the
+          fold's own fact, and an unpriced item is togglable here like any other.
+        */
+        /*
+          **CENTRED, and the layout gate is what decided it.** On `desktop-24` and `ultrawide-32`
+          this surface first laid 332 dp of grid into a 944 dp work area and left 595 dp of slack
+          at the bottom — the gate's `ANCHORED y` verdict, at 61% asymmetry against a 25% budget.
+          Its wording states the choice: *"either the composition should fill the room, or it has
+          a natural maximum and the surface should CENTRE it — both are decisions; this is
+          neither."*
+
+          This grid HAS a natural maximum. `ItemGrid`'s tiles are sized in millimetres of glass
+          (`tileMm`, `27-F8`), so filling a 24" panel would mean growing targets past their
+          ergonomic size — which is `27-F68` (b)'s ban read backwards, and just as wrong. So the
+          room is given back symmetrically, exactly as Pay and Cash already do through `centred`.
+        */
+        <div style={{ display: "flex", gap: 16, height: "100%", minHeight: 0 }}>
+          <div
+            style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}
+          >
+            {/*
+              **THE BOX THE GRID IS COSTED AGAINST MUST BE THE BOX THE GRID GETS. Three gate
+              runs taught that, and the third one cost this surface its instruction line.**
+
+              1. `safe center` on the OUTER row makes this box content-height. `usePhysicalSize`
+                 then reports a one-row box, `ItemGrid` costs one row of capacity, and the content
+                 is one row — a self-consistent feedback loop that turned a 40-item grid into
+                 FIVE pages of eleven tiles on a 1366×768 counter. **The gate PASSED on it**,
+                 because one centred row is perfectly composed; only the screenshot showed it.
+              2. Centring the grid alone failed `ANCHORED y` at 30% on `desktop-24` and
+                 `ultrawide-32`: an instruction line pinned to the top of the work area while the
+                 grid floated in the middle, and the composition check measures the UNION.
+              3. Putting the line inside the centred group fixed that and broke something worse.
+                 The grid was still handed the whole box as `heightMm`, so it costed ~17 px of
+                 capacity it did not have, drew one row too many, and pushed its own pager off the
+                 bottom — **`tablet-11.6` reported pager buttons `1` and `2` genuinely
+                 UNREACHABLE**, centre not hit-testing. That is `27-F2`'s "no primary action
+                 reached by scrolling" broken by a caption.
+
+              **So there is no instruction line.** The alternatives were worse against resolving
+              FRs rather than against taste: shrinking `tileMm` to buy the caption back is
+              `27-F8`'s floor (`27-F68` (b) bans it by name), and subtracting a guessed caption
+              height from `heightMm` re-introduces the assumed-panel arithmetic `27-F11c` exists
+              to forbid. What the operator has instead is the tab's own label, the `Sold out`
+              word on every 86'd tile, and the fact that a tap toggles — `21 §5` puts this
+              operator at plausibly non-reading anyway, so a sentence was never the channel this
+              surface should have leaned on. **Named as a real loss:** "tap it again to put it
+              back" is now learned rather than read, and that is a training note, not a screen.
+
+              Why CENTRE rather than fill: this composition has a natural maximum. `ItemGrid`
+              sizes tiles in millimetres of glass (`tileMm`, `27-F8`), so filling a 24" panel
+              would mean growing targets past their ergonomic size — `27-F68` (b) read backwards.
+            */}
+            <div
+              ref={soldOutSurfaceRef}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                minHeight: 0,
+                display: "flex",
+                alignItems: "safe center",
+              }}
+            >
+              {soldOutMm === null ? null : (
+                <ItemGrid
+                  items={items.map((i) => ({
+                    id: i.id,
+                    label: i.label,
+                    // `01-F58` — CONTESTED is its own state and not an intensifier: two devices
+                    // disagree and the fold refused to pick a winner (`01-F31`). It resolves to
+                    // unavailable, and one tap here supersedes ALL heads at once, which is what
+                    // makes it clearable in a single operator act.
+                    ...(i.sold_out === true
+                      ? {
+                          unavailable: true,
+                          unavailableReason:
+                            i.contested === true ? "Sold out — disputed" : "Sold out",
+                        }
+                      : {}),
+                  }))}
+                  posture="counter"
+                  widthMm={soldOutMm.widthMm}
+                  heightMm={soldOutMm.heightMm}
+                  tileMm={28}
+                  page={soldOutPage}
+                  onPageChange={setSoldOutPage}
+                  /*
+                    `Tile` fires `onPress` even when unavailable (`01-F59`'s requirement on the
+                    Order tab), which is exactly what this surface needs: the greyed tiles are
+                    the ones that must be tappable to be put BACK. So the target state is
+                    computed from the fold's fact, never from the tile's appearance.
+                  */
+                  onSelect={(item_id) => {
+                    const item = items.find((i) => i.id === item_id);
+                    if (item === undefined) return;
+                    toggleAvailability(item_id, item.sold_out === true);
+                  }}
+                />
+              )}
+            </div>
+          </div>
+        </div>
       ) : activeTab === "pay" ? (
         centred(paySurface)
       ) : activeTab === "cash" || activeTab === "me" ? (
@@ -676,7 +938,10 @@ export const Counter = () => {
                   posture="counter"
                   label={t.label}
                   onPress={current === undefined ? () => startOrder(t.id) : undefined}
-                  unavailable={current !== undefined}
+                  // Greyed while no channel is latched, because `02-F1` requires BOTH axes at
+                  // creation and `startOrder` refuses without one. `27-F4`: disabled IN PLACE
+                  // with the reason on the surface's state line — never removed, never moved.
+                  unavailable={current !== undefined || pendingChannel === null}
                 />
               ))}
               {/*
@@ -717,8 +982,62 @@ export const Counter = () => {
                 The tiles keep the greyed fill, their labels and their positions — nothing
                 moves, which is the half of `27-F4` that actually protects muscle memory.
               */}
+              {/*
+                Unchanged wording, deliberately. Each row now states ITS OWN precondition — this
+                line is about the type row, the channel row below has its own — so the sentence a
+                cashier learned for this row still describes this row. Which row is actionable is
+                said by the greying, not by re-writing a line about a different control.
+              */}
               <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
                 {current === undefined ? "Choose an order type first" : "Order in progress"}
+              </p>
+            </div>
+            {/*
+              `C18`/`C21` — THE CHANNEL ROW (`02-F1`, `02-F28`, `02-F30`, `restaurant-os.md` §8).
+
+              **`27-F4` BREAKING CHANGE, justified: this row is ADDED BELOW the `C4` row and
+              NOTHING that exists moves.** Above would read in work order (channel, then type)
+              and would push the three type tiles and `Send to kitchen` down by a row — moving
+              the most-used controls on the surface. Keeping a learned control where a finger
+              already goes is the stronger half of `27-F4`; the reading order is the cost, and it
+              is paid by the state line above, which names the sequence in words.
+
+              **A pick-list of tiles, not a dropdown or a typed field** (`27-F6`: 24 of 27 field
+              subjects could not type a word; `27-F2`: flat, not hierarchical). Every channel is
+              visible and labelled at all times, so there is no context-dependent control here
+              (`27-F5`) — a selector that collapsed to the chosen value would be exactly that.
+
+              **The tiles never disappear once an order is open.** They grey in place with the
+              reason, the same discipline as the type row above, because `02-F1` fixes the
+              channel at creation and never infers it later — so the honest state after creation
+              is "this is decided", not "this control is gone".
+            */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {ORDER_CHANNELS_AT_COUNTER.map((c) => (
+                <Tile
+                  key={c.id}
+                  posture="counter"
+                  label={c.label}
+                  selected={current === undefined && pendingChannel === c.id}
+                  onPress={current === undefined ? () => setPendingChannel(c.id) : undefined}
+                  unavailable={current !== undefined}
+                />
+              ))}
+              {/*
+                `Tile.selected` is explicit that a selection is *"never by colour alone, so a
+                caller marking a tile selected still says so in words"* (`27-F66`). This line is
+                those words, and it names the PRICE consequence rather than the tag — which is
+                what `01-F60` makes the choice actually mean to a cashier.
+              */}
+              <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
+                {current !== undefined
+                  ? `This order is ${current.channel ?? "counter"} — its prices are fixed`
+                  : pendingChannel === null
+                    ? "Choose a channel first — it sets the price"
+                    : `Selling at ${
+                        ORDER_CHANNELS_AT_COUNTER.find((c) => c.id === pendingChannel)?.label ??
+                        pendingChannel
+                      } prices`}
               </p>
             </div>
             {/*

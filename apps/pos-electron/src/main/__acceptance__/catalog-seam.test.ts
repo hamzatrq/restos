@@ -268,7 +268,7 @@ describe("01-F53 — a line's price is captured at line-add and a later catalog 
         refs: [],
       }),
     ).not.toThrow();
-    expect(gateway.menu()).toEqual([]);
+    expect(gateway.menu("counter")).toEqual([]);
     expect(store.openOrders().map((o) => o.order_id)).toEqual([order_id]);
   });
 });
@@ -311,7 +311,7 @@ describe("the dev menu seed — env-gated, version-0, and never over a real menu
     // thing that can show a screen; this is everything short of one.
     seedDevMenu(store, { RESTOS_DEV_MENU: "1" });
     const gateway = gatewayOver(store);
-    const grid = gateway.menu();
+    const grid = gateway.menu("counter");
     expect(grid.length).toBeGreaterThan(0);
     // NOT ONE GREYED TILE. `menu()` marks an unpriced item `unavailable: true` with reason
     // "no price set", and a grid of those is a full-looking grid that sells nothing — which is

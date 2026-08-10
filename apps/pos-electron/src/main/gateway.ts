@@ -13,10 +13,13 @@ import {
   DeviceStateSchema,
   type KitchenTicket,
   KitchenTicketSchema,
+  MenuChannelSchema,
   type MenuItem,
   type OpenOrder,
   OpenOrderSchema,
   type Session,
+  type ToggleAvailabilityRequest,
+  ToggleAvailabilityRequestSchema,
 } from "../shared/ipc";
 import type { PanelFit } from "./window-options";
 
@@ -32,12 +35,15 @@ export type Gateway = {
   deviceState: () => DeviceState;
   openOrders: () => OpenOrder[];
   kitchenQueue: () => KitchenTicket[];
-  menu: () => MenuItem[];
+  /** The grid, greyed for ONE channel — see the `menu` implementation and `RestosBridge.menu`. */
+  menu: (channel: unknown) => MenuItem[];
   /** `02-F23`/`02-F37`/`02-F43` — the `shift_cash` fold, for the Cash and Me surfaces. */
   cashState: () => CashState;
   append: (req: unknown) => AppendResult;
   /** `C5` — `01-F60`'s resolution and `01-F53`'s capture, both on the trusted side. */
   addLine: (req: unknown) => AppendResult;
+  /** `02-F7` — the 86, with `01-F57`'s supersedes link built here from the fold's own heads. */
+  toggleAvailability: (req: unknown) => AppendResult;
 };
 
 /**
@@ -71,9 +77,6 @@ export type CatalogList = () => { id: string; name: string }[];
  * sets genuinely different.
  */
 export type PriceResolver = (item_id: string, channel: string) => number | null;
-
-/** The counter app is the `counter` channel (`02-F1`, `02-F42`). */
-const COUNTER_CHANNEL = "counter";
 
 export type GatewayDeps = {
   store: DeviceStore;
@@ -400,7 +403,11 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
     });
   },
 
-  menu: () => {
+  menu: (channelArg: unknown) => {
+    // Validated HERE, on the trusted side, like every other renderer-supplied value. It decides
+    // GREYING only — `addLine` reads the ORDER's channel for the price (`01-F60`) — but an
+    // unvalidated string would reach `priceOf` and quietly grey the whole grid for a typo.
+    const channel = MenuChannelSchema.parse(channelArg);
     // 01-F22 — availability is an OPERATIONAL toggle held by a fold, and the catalog knows
     // nothing about it. Joining them here rather than in either one is what keeps 01-F52 true:
     // the fold never reads a name, the catalog never reads an event, and the only place the two
@@ -426,14 +433,90 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
       // 86'd item stays deliberately sellable (01-F59): its price is known and 02-F31 owns the
       // oversell path. An unpriced one has no number to sell at, and inventing one is worse than
       // refusing — so it is greyed for a DIFFERENT reason and the counter cannot add it.
-      const unpriced = deps.priceOf(entry.id, COUNTER_CHANNEL) === null;
+      // `01-F60`, and the channel is the ORDER's, not this device's. A foodpanda order prices
+      // from foodpanda's column, so the grid must ask the same question `addLine` will ask —
+      // otherwise it offers a tile that the append then refuses, which is the grid lying about
+      // what is sellable. This argument used to be pinned to `counter`, which was correct only
+      // for as long as `Counter.tsx` could not start any other kind of order.
+      const unpriced = deps.priceOf(entry.id, channel) === null;
       const reason = off ? (contested ? "86 — disputed" : "86") : unpriced ? "no price set" : null;
       return {
         id: entry.id,
         label: entry.name,
         ...(reason === null ? {} : { unavailable: true, unavailableReason: reason }),
+        // `02-F7`'s own surface reads these two rather than `unavailable`, which is a DISPLAY
+        // verdict collapsing the 86 and the unpriced case that `01-F60` calls opposites.
+        //
+        // Spread conditionally, on the SAME convention as `unavailable` directly above and for
+        // the same reason: absence is the fold's own answer for an item it has never seen
+        // (`merge.ts` — "an item the fold has never seen is SELLABLE"), so a tile with nothing
+        // to say carries nothing rather than two false flags.
+        ...(off ? { sold_out: true } : {}),
+        ...(contested ? { contested: true } : {}),
       };
     });
+  },
+
+  /**
+   * `02-F7` — the 86, and the only production emitter of `availability.changed` in the product.
+   *
+   * The fold, its lattice, the store table and the join above have all shipped since July 2026
+   * and **nothing has ever appended one**, so a restaurant that ran out of a dish could not stop
+   * RestOS selling it. This is the seam, and everything convergence-bearing is decided here.
+   *
+   * ── `01-F57`'s link, built from the store and never from the caller ──────────────────────────
+   *
+   * The FR makes this event converge on a carried `supersedes` array: the fold takes the maximal
+   * un-superseded set and *"reads nothing else"* — no clock (`01-F45`), no id comparison
+   * (`01-F34`). So a toggle that names the wrong heads does not fail loudly, it fails as a
+   * PERMANENT contest: `01-F58` resolves a disagreement to unavailable, and an item whose other
+   * head was never superseded stays 86'd for ever with no act that clears it. `merge.ts` exports
+   * `head_ids_json` to prevent exactly that — *"superseding only the head your screen happened to
+   * show leaves the other head standing"* — and this reads it fresh at append time.
+   *
+   * **Superseding ALL heads is what makes `01-F58`'s contest clearable in one operator act**, and
+   * it is why the request carries a target state rather than a flip: a flip read off a stale
+   * screen inverts twice, and a contested item has no single state to flip from.
+   *
+   * ── What it is NOT ──────────────────────────────────────────────────────────────────────────
+   *
+   * Not a catalog edit (`01-F22`, `14 §1`: availability is operational and the back office
+   * explicitly does not host it). Not an `01-F17` block either — `01-F59` keeps an 86'd item
+   * deliberately sellable and `02-F31` owns the oversell path, so nothing here refuses a sale.
+   */
+  toggleAvailability: (req: unknown): AppendResult => {
+    const parsed: ToggleAvailabilityRequest = ToggleAvailabilityRequestSchema.parse(req);
+    // The item must EXIST. `01-F55` keeps a tombstoned entry resolvable for display, so `lookup`
+    // is deliberately not the test — 86-ing a deleted item would append a toggle nothing can ever
+    // see or clear, permanently (`01-F1`), against a row the grid does not draw.
+    const known = deps.menu().some((entry) => entry.id === parsed.item_id);
+    if (!known) {
+      throw new Error(
+        `toggleAvailability: ${parsed.item_id} is not a live catalog item (01-F55) — ` +
+          `a toggle against it could never be seen or cleared`,
+      );
+    }
+    // Read at APPEND, from the store this side alone holds. `projectItemKey`'s row is the fold's
+    // own answer for one item; an item never toggled has no row and supersedes nothing, which is
+    // the correct empty link rather than a special case.
+    const heads = deps.store.availability().find((row) => row.item_id === parsed.item_id);
+    const supersedes: string[] = heads === undefined ? [] : JSON.parse(heads.head_ids_json);
+    const identity = deps.store.identity;
+    const envelope = deps.store.append({
+      id: newId(),
+      org_id: identity.org_id,
+      branch_id: identity.branch_id,
+      device_id: identity.device_id,
+      // `02-F19` names "availability toggle" among the attributed actions in terms, and `02-F41`
+      // makes that whoever's PIN is in. Read at append like the other two write sites.
+      actor_user_id: deps.session()?.user_id ?? null,
+      device_created_at: wallClock.now(),
+      type: "availability.changed",
+      schema_version: 1,
+      payload: { item_id: parsed.item_id, available: parsed.available, supersedes },
+      refs: [],
+    });
+    return { id: envelope.id };
   },
 
   /**

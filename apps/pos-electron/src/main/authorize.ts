@@ -112,6 +112,11 @@ export const WRITE_ACTIONS: Readonly<Record<string, PermissionAction>> = {
   "order.line_price_overridden": "order.price_override",
   "approval.granted": "approval.grant",
   "approval.denied": "approval.grant",
+  // `02-F7` → `02-F46`'s action. **Appendix A has no availability row**, so before that FR this
+  // event type hit the fail-closed default below and every 86 was DENIED — which is why the
+  // toggle could not be built, not merely why it was not. See `02-F46` for why the cashier cell
+  // is `allow` and why this is neither `order.create` nor `catalog.edit_menu_prices`.
+  "availability.changed": "availability.toggle",
 };
 
 /** The one event type whose verdict needs an amount, so it never reaches `WRITE_ACTIONS`. */
@@ -160,11 +165,13 @@ export type WriteRefusedError = Error & { readonly refusal: WriteRefusal };
 export type AuthorizedWrites = {
   append: (req: unknown) => AppendResult;
   addLine: (req: unknown) => AppendResult;
+  /** `02-F7`/`02-F46` — the 86, guarded like every other renderer-originated append. */
+  toggleAvailability: (req: unknown) => AppendResult;
 };
 
 export type AuthorizedWritesDeps = {
-  /** The unguarded writes this wraps. Narrowed to two methods so nothing else can slip past. */
-  writes: Pick<Gateway, "append" | "addLine">;
+  /** The unguarded writes this wraps. Narrowed by name so nothing else can slip past. */
+  writes: Pick<Gateway, "append" | "addLine" | "toggleAvailability">;
   /**
    * `01-F26`/`01-F28` — the assignments come from the SYNCED staff registry on this device, and
    * `store.identity` is where the org and branch come from. Neither is anything the renderer
@@ -359,6 +366,21 @@ export const authorizeWrites = (deps: AuthorizedWritesDeps): AuthorizedWrites =>
     addLine: (req: unknown): AppendResult => {
       guard("order.line_added", {});
       return deps.writes.addLine(req);
+    },
+    /**
+     * `02-F7` — the event type is fixed by the channel (`gateway.toggleAvailability` always appends
+     * `availability.changed`), so the action is known before the request is read, exactly as for
+     * `addLine` above.
+     *
+     * **This wrapper is why the method exists on its own channel rather than as an `append`
+     * payload.** `authorizeWrites` guards the two renderer-facing write channels and nothing
+     * else, so a third write channel wired straight to the gateway would be a Commandment 8
+     * bypass — a renderer-originated append reaching the ledger with no matrix verdict. The
+     * `Pick` above is what makes forgetting this a typecheck error.
+     */
+    toggleAvailability: (req: unknown): AppendResult => {
+      guard("availability.changed", {});
+      return deps.writes.toggleAvailability(req);
     },
   };
 };

@@ -657,7 +657,12 @@ app.whenReady().then(async () => {
    * `00 §5.7` is the rule this serves: a surface reports what is TRUE. A log line is the cheapest
    * place to be true about a state the operator cannot otherwise diagnose.
    */
-  console.log(catalogBootSummary(store, gateway.menu()));
+  // `"counter"` explicitly: a boot line has to name ONE channel to count unpriced tiles
+  // against, and `01-F60` makes "unpriced" a question about a `(branch, channel)` pair with no
+  // channel-free answer. This reports the counter column and says so, rather than implying the
+  // count holds for every channel the org sells on — a phone or foodpanda order resolves its
+  // own column and may be greyed differently.
+  console.log(catalogBootSummary(store, gateway.menu("counter")));
 
   /**
    * **COMMANDMENT 8, and this is the line that makes it true of this product.**
@@ -935,7 +940,7 @@ app.whenReady().then(async () => {
   ipcMain.handle(CHANNELS.deviceState, () => gateway.deviceState());
   ipcMain.handle(CHANNELS.openOrders, () => gateway.openOrders());
   ipcMain.handle(CHANNELS.kitchenQueue, () => gateway.kitchenQueue());
-  ipcMain.handle(CHANNELS.menu, () => gateway.menu());
+  ipcMain.handle(CHANNELS.menu, (_event, channel: unknown) => gateway.menu(channel));
   // `02-F23`/`02-F37`/`02-F43` — the Cash and Me surfaces' one read, SCOPED to the asking
   // subject (`reportScope`). Never `gateway.cashState()`: that is the unscoped projection, and
   // serving it here would put every cashier's drawer on the untrusted side of `18 §9`'s bridge
@@ -1047,6 +1052,21 @@ app.whenReady().then(async () => {
   ipcMain.handle(CHANNELS.addLine, (_event, req: unknown) => {
     touch();
     const result = writes.addLine(req);
+    notifyChanged();
+    return result;
+  });
+  /**
+   * `02-F7` — the 86. `writes`, not `gateway`, for the reason directly above: this is a
+   * renderer-originated append and Commandment 8 puts the matrix on the trusted side.
+   *
+   * `notifyChanged()` is what makes `01-F15`'s fast path visible ON THIS DEVICE — every open
+   * surface re-reads, so the grid greys under the cashier's hand rather than at the next poll.
+   * Propagation to OTHER devices is the sync layer's and needs nothing here: the append is an
+   * ordinary ledger event and rides the same outbox as every other.
+   */
+  ipcMain.handle(CHANNELS.toggleAvailability, (_event, req: unknown) => {
+    touch();
+    const result = writes.toggleAvailability(req);
     notifyChanged();
     return result;
   });

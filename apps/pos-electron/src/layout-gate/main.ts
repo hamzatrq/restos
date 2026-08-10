@@ -254,19 +254,37 @@ const PANELS = [
 ] as const;
 
 /**
- * The number of surfaces one panel contributes: **both** of `01-F61`'s lock steps, five tabs in
- * two device states, and two escalation steps.
+ * The number of surfaces one panel contributes: **both** of `01-F61`'s lock steps, **SIX** tabs in
+ * two device states, and two escalation steps. The sixth tab is `02-F7`'s `Sold out`, appended
+ * after `Me` so no existing tab changes index (`27-F4`).
  *
  * ⚠ *This read `1 + 5 * 2 + 2` until August 2026, and the `1` was the identity grid ALONE.* The
  * fixture unlocked by calling `window.restos.unlock(...)`, which moves the session without ever
  * rendering step two — so the PIN pad an operator meets 20–60 times a shift had never been laid
  * out in Blink at all. See the lock block in `run()` for what that cost.
+=======
+ * The number of surfaces one panel contributes: one lock surface, SIX tabs in two device states,
+ * and two escalation steps.
+>>>>>>> worktree-agent-a4d261efec1f284be
  *
- * Derived rather than typed so `MIN_SURFACES` below cannot rot when a tab is added — the tab list
- * is read from the DOM precisely so another session's tab is measured without touching this file,
- * and a hand-typed floor would then be the one thing that did need touching.
+ * ⚠ **THIS SAID FIVE, AND ITS OWN COMMENT CLAIMED IT COULD NOT ROT WHEN A TAB WAS ADDED.** The
+ * claim was *"derived rather than typed so `MIN_SURFACES` below cannot rot when a tab is added —
+ * the tab list is read from the DOM precisely so another session's tab is measured without
+ * touching this file"*. Both halves are true of the SWEEP and neither is true of this line: the
+ * `5` is a literal, and `02-F7`'s Sold-out tab (August 2026) is the first tab added since it was
+ * written. Nothing failed — `MIN_SURFACES` is a FLOOR — which is precisely the problem: the gate
+ * measured 165 surfaces against a floor of 130, so the comment two blocks down promising that
+ * *"losing any single panel reds the gate"* had quietly become false, and a whole panel could
+ * have stopped loading in silence.
+ *
+ * **So it is hand-typed, and this comment says so.** Update it when a tab lands. A genuinely
+ * derived floor would have to run the sweep first, which is the thing the floor exists to check.
+ *
+ * ⚠ **MERGE NOTE for the pass-screen branch:** that branch changes the leading `1` to `2` (both
+ * of `01-F61`'s lock steps). The merged value is `2 + 6 * 2 + 2`, not either side alone — a
+ * textual merge of these two edits will take one number and drop the other.
  */
-const SURFACES_PER_PANEL = 2 + 5 * 2 + 2;
+const SURFACES_PER_PANEL = 2 + 6 * 2 + 2;
 
 /**
  * How many of those surfaces have **no `<main>`**, and therefore contribute no extent: `01-F61`'s
@@ -941,6 +959,35 @@ const run = async (): Promise<number> => {
    * strip for any reason at all — `Counter.tsx` dropping the prop, `AppShell` dropping the
    * pass-through, `StatusStrip` dropping the element.
    */
+  /**
+   * **`24-F14` — is `02-F7`'s Sold-out tab actually drawing a GREYED tile?**
+   *
+   * The same argument as the two chip probes below, aimed at this rail's own recorded blind
+   * spot: a Sold-out grid of plain tiles measures nothing the Order grid does not already
+   * measure. The geometry that can clip is the tile carrying a REASON — `unavailableReason`
+   * puts a second line of text inside a fixed-height box — so a fixture that stopped marking
+   * items `sold_out` would take the state this tab exists for out of coverage while every
+   * surface still reported clean. That is `escalationFor: () => null` exactly, which hid a dead
+   * `ManagerApproval` for weeks.
+   *
+   * It asks the DOM, not the fixture, so it fails whether `preload.ts` stopped producing the
+   * state or `Counter.tsx` stopped rendering it.
+   *
+   * **⚠ Scoped to `main`, and the first draft was VACUOUS without it.** The tab itself is
+   * labelled `Sold out`, so a probe over every `button` on the page matches the RAIL and passes
+   * whether or not one tile is greyed — a tripwire that fires on its own label. It searches the
+   * work area only, and for `01-F58`'s disputed string as well, which no tab can ever render.
+   */
+  const soldOutReasonPresent = (): Promise<boolean> =>
+    window.webContents.executeJavaScript(
+      `(() => {
+         const main = document.querySelector('main');
+         if (main === null) return false;
+         const text = [...main.querySelectorAll('button')].map((e) => e.textContent || '');
+         return text.some((t) => /Sold out/.test(t)) && text.some((t) => /disputed/.test(t));
+       })()`,
+    );
+
   const catalogChipPresent = (): Promise<boolean> =>
     window.webContents.executeJavaScript(
       `[...document.querySelectorAll('[role="status"]')]
@@ -1308,6 +1355,20 @@ const run = async (): Promise<number> => {
         await click(i);
         await new Promise((r) => setTimeout(r, 350));
         judge(on(`tab:${tab.label || i}`), state, await measure());
+        // `24-F14` — the Sold-out grid must be measured in the state it exists FOR. Checked
+        // while the tab is open, because the greyed tiles only exist in this DOM.
+        if (tab.label === "Sold out" && !(await soldOutReasonPresent())) {
+          failures.push({
+            surface: on(`tab:${tab.label}`),
+            state,
+            detail:
+              "EMPTY MATCH — 02-F7's Sold-out grid drew no 86'd tile and no 01-F58 disputed " +
+              "tile, so this sweep measured a grid of plain tiles that says nothing about the " +
+              "state the tab exists for. A tile carrying `unavailableReason` is the geometry " +
+              "that can clip. Either preload.ts stopped marking items `sold_out`/`contested`, " +
+              "or Counter.tsx stopped rendering the reason (24-F14).",
+          });
+        }
         await shoot(window, `${panel.label}--${state}--${tab.label || i}`);
       }
     };

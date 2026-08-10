@@ -162,6 +162,12 @@ if (agents.split("\n").length > 120)
       // likewise pass silently; the rule cannot tell them apart, and only the count above would.
       "order.price_override",
       "approval.grant",
+      // `02-F46`'s action and the row it copies. Both are infinitives of an act and both have a
+      // past-tense event beside them in the same family — `availability.toggle` the action versus
+      // `availability.changed` the event, `order.create` versus `order.created` — so by this
+      // block's own test neither can ever become an emission.
+      "availability.toggle",
+      "order.create",
       "shift.open_close",
       "cash.count",
       "cash.drawer_no_sale",

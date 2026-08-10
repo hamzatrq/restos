@@ -313,12 +313,49 @@ export type KitchenTicket = z.infer<typeof KitchenTicketSchema>;
  * line-add, so the grid never needs one and a stale catalog costs a word rather than a rupee.
  * A price here would be a second source of truth for money, and the wrong one.
  */
+/**
+ * Which channel's prices the grid is greyed against (`RestosBridge.menu`).
+ *
+ * `z.enum(ORDER_CHANNELS)` and not `z.string()`, because `02-F42` closed this set and an unknown
+ * value is an `01-F4` error at emit. Refusing it HERE, on a display read, is what stops the two
+ * ends drifting: a channel the grid can grey against but no order can carry would show a cashier
+ * a sellable tile for a channel that cannot exist.
+ */
+export const MenuChannelSchema = z.enum(ORDER_CHANNELS);
+
 export const MenuItemSchema = z.object({
   id: z.string(),
   label: z.string(),
   /** `01-F22` — an operational 86, projected by the availability fold and joined here. */
   unavailable: z.boolean().optional(),
   unavailableReason: z.string().optional(),
+  /**
+   * `01-F22` / `01-F58` — the availability fold's own two facts, carried SEPARATELY from the
+   * rendered `unavailable` pair above, and that separation is the point rather than duplication.
+   *
+   * `unavailable` is a DISPLAY verdict on the Order tab that collapses two different dispositions
+   * `01-F60` insists are opposites: an 86'd item (price known, deliberately still sellable —
+   * `01-F59`) and an unpriced one (nothing to sell at, refused). One boolean cannot carry both,
+   * and `02-F7`'s own surface has to render the first without inheriting the second — a Sold-out
+   * grid that greyed unpriced items would be telling the operator they are 86'd when nobody has
+   * touched them.
+   *
+   * `contested` is `01-F58`: two devices disagree and the fold refused to pick a winner. It is a
+   * distinct state from `sold_out`, not an intensifier of it, because the act that clears it is
+   * different — one toggle supersedes ALL heads at once (`01-F57`), which is why main builds the
+   * supersedes link and this shape carries no head ids (see `ToggleAvailabilityRequestSchema`).
+   *
+   * **Both are OPTIONAL, and absence is a MEANING rather than a gap.** `merge.ts` rules that
+   * *"an item the fold has never seen is SELLABLE"* — `01-F22`'s 86 is an explicit act, so no
+   * toggle means available and uncontested. A falsy read is therefore the fold's own answer for
+   * an untoggled item, not a default standing in for one. (It is also what keeps the ten oracle
+   * harnesses that predate this field compiling, which is the reason `cashState` and `alarms`
+   * above record for their own optionality — but it is not the reason here, and would not have
+   * been sufficient on its own: a required field whose absence meant something ELSE would have
+   * had to red those suites instead.)
+   */
+  sold_out: z.boolean().optional(),
+  contested: z.boolean().optional(),
 });
 export type MenuItem = z.infer<typeof MenuItemSchema>;
 
@@ -457,6 +494,29 @@ export const AddLineRequestSchema = z.object({
 });
 export type AddLineRequest = z.infer<typeof AddLineRequestSchema>;
 
+/**
+ * `02-F7` — 86 an item, or put it back. **Carries no `supersedes` link**, and that absence is
+ * this shape's whole design, exactly as `AddLineRequest` carries no money.
+ *
+ * `01-F57` makes `availability.changed` converge on a carried causal link: each toggle names the
+ * toggles it replaces, and the fold takes the maximal un-superseded set. The heads come from the
+ * fold's own `AvailabilityRow.head_ids_json`, which `merge.ts` exports for precisely this purpose
+ * — *"so an operator surface can build a correct superseding toggle WITHOUT re-deriving the
+ * supersedes-DAG"*.
+ *
+ * That surface is main, not the renderer. A renderer echoing head ids back over the bridge could
+ * echo a stale set, and superseding only the head your screen happened to show leaves the other
+ * head standing — the item stays 86'd for ever, which is the failure `merge.ts`'s own comment
+ * names. So the renderer says WHICH item and WHICH way, and main reads the heads at append time
+ * from the store it alone holds. Same split as identity, event id and `unit_price_paisa`.
+ */
+export const ToggleAvailabilityRequestSchema = z.object({
+  item_id: z.string().min(1),
+  /** The state to move TO, never a flip: a toggle read from a stale screen would invert twice. */
+  available: z.boolean(),
+});
+export type ToggleAvailabilityRequest = z.infer<typeof ToggleAvailabilityRequestSchema>;
+
 export const AppendResultSchema = z.object({ id: z.string() });
 export type AppendResult = z.infer<typeof AppendResultSchema>;
 
@@ -566,6 +626,23 @@ export const CHANNELS = {
   append: "restos:append",
   addLine: "restos:add-line",
   /**
+   * `02-F7` — the 86. **A write channel of its own rather than an `append` payload**, for
+   * `addLine`'s reason exactly: the event needs a field the renderer must not supply. `01-F57`'s
+   * `supersedes` link is read from the fold in main (see `ToggleAvailabilityRequestSchema`), so a
+   * generic `append` would put the one convergence-bearing field on the untrusted side of the
+   * bridge, where a stale set silently strands an item 86'd for ever.
+   *
+   * **It was called `setAvailability` for an hour, and `01-F1`'s own tripwire caught it.**
+   * `unbound-settlement.dom.test.tsx` filters `CHANNELS` for `/update|patch|delete|amend|bind|
+   * rewrite|set[A-Z]/` and asserts the list is empty — *"a `bindShift`/`setShift`/`amend` channel
+   * added when shifts land, which is exactly how retro-binding would arrive"*. This channel
+   * MUTATES nothing; it appends. But the guard is a check on the NAME, deliberately, because a
+   * name is what a future reader goes by — and the fix for a misfiring name-guard is a better
+   * name, never a narrower regex. `02-F7` and `01-F22` both call the operator's act a *toggle*,
+   * so the vocabulary was already there. **The regex was not weakened.**
+   */
+  toggleAvailability: "restos:toggle-availability",
+  /**
    * `02-F20` — "would a manager credential close this?", asked of the matrix and answered for
    * display only. A READ: nothing is appended and nothing is authorized on this channel.
    *
@@ -606,7 +683,24 @@ export type RestosBridge = {
   deviceState: () => Promise<DeviceState>;
   openOrders: () => Promise<OpenOrder[]>;
   kitchenQueue: () => Promise<KitchenTicket[]>;
-  menu: () => Promise<MenuItem[]>;
+  /**
+   * The grid. **The `channel` argument decides GREYING ONLY and never a price** — say that
+   * plainly, because `02-F42` makes channel a price key and this is the one place it crosses the
+   * bridge from the untrusted side.
+   *
+   * `01-F60` gives an unpriced item a disposition opposite to an 86'd one: it cannot be added at
+   * all, and is *"rendered disabled in place with its reason"*. Whether an item is unpriced is a
+   * question about a `(branch, channel)` pair, so the grid cannot answer it without knowing which
+   * channel the operator is working in — and a grid that answered it for `counter` while a
+   * foodpanda order was open would grey the wrong tiles and, worse, offer tiles that `addLine`
+   * then refuses. That is the grid lying about what is sellable.
+   *
+   * **No money is at risk in getting this wrong.** `gateway.addLine` resolves `unit_price_paisa`
+   * from the ORDER's own channel, read out of the store on the trusted side (`01-F60`, `02-F1`:
+   * set at creation, never inferred later). A renderer that passed a wrong channel here mis-greys
+   * its own grid and cannot mis-price a line. The two reads are deliberately not shared.
+   */
+  menu: (channel: string) => Promise<MenuItem[]>;
   /**
    * `01-F61` — who could sign in on this device. **The ORDER is part of the contract**
    * (`27-F4`): main supplies it and the renderer renders it unsorted, because a renderer-side
@@ -660,6 +754,16 @@ export type RestosBridge = {
   append: (req: AppendRequest) => Promise<AppendResult>;
   /** `C5`/`01-F60` — main resolves the price; no money crosses this call. */
   addLine: (req: AddLineRequest) => Promise<AppendResult>;
+  /**
+   * `02-F7` — 86 an item, or put it back. **OPTIONAL for the reason `cashState` and `alarms`
+   * above record**: three oracle suites this session may not edit stub the bridge and close it
+   * with `satisfies RestosBridge`, and all three predate this channel.
+   *
+   * The cost is the same shape and is named rather than accepted quietly: a host that forgets it
+   * shows a Sold-out grid whose taps do nothing. `main/__acceptance__/availability-seam.test.ts`
+   * is the assertion that stands in for the type until those harnesses catch up.
+   */
+  toggleAvailability?: (req: ToggleAvailabilityRequest) => Promise<AppendResult>;
   /**
    * `02-F20`'s local path, and both members are **OPTIONAL for the reason `cashState` and
    * `alarms` above record**: `unlock-gate.dom.test.tsx` closes its harness with

@@ -96,6 +96,18 @@ describe("18 §6 / 18 §9 — the renderer's whole surface", () => {
     // paid: `02-F23`'s own-shifts-only scoping is a filter, and because this channel cannot
     // express one it must be applied on the trusted side (commandment 8), never by the renderer
     // choosing which rows to draw.
+    //
+    // EIGHT since `02-F7`'s toggle, and the widening is acknowledged on the same terms as the
+    // three above it. `toggleAvailability` exists because `01-F57` makes `availability.changed`
+    // converge on a carried `supersedes` link read off the fold's own heads — which live on this
+    // side. Routing it through the generic `append` would have meant the RENDERER supplying that
+    // link, and a stale set strands an item 86'd for ever with no act that clears it. Exactly
+    // `addLine`'s argument with a causal link in place of a price.
+    //
+    // Still a CLOSED vocabulary: it names an item and a target state. No table, no filter, and
+    // no mutation — it APPENDS, which is why `01-F1`'s channel-name tripwire in
+    // `unbound-settlement.dom.test.tsx` had to be satisfied by naming it honestly rather than by
+    // loosening the regex.
     expect(Object.keys(createGateway(deps())).sort()).toEqual([
       "addLine",
       "append",
@@ -104,6 +116,7 @@ describe("18 §6 / 18 §9 — the renderer's whole surface", () => {
       "kitchenQueue",
       "menu",
       "openOrders",
+      "toggleAvailability",
     ]);
   });
 
@@ -114,7 +127,7 @@ describe("18 §6 / 18 §9 — the renderer's whole surface", () => {
     //
     // No price: 01-F53 snapshots unit_price_paisa into the event at line-add, so a price on a
     // grid tile would be a second source of truth for money, and the wrong one.
-    const grid = createGateway(deps()).menu();
+    const grid = createGateway(deps()).menu("counter");
     expect(grid).toEqual([{ id: "i-karahi", label: "Chicken Karahi" }]);
     expect(grid[0]).not.toHaveProperty("price");
     expect(grid[0]).not.toHaveProperty("unit_price_paisa");
@@ -149,9 +162,26 @@ describe("18 §6 / 18 §9 — the renderer's whole surface", () => {
         { id: "i-roti", name: "Roti" },
       ],
     });
-    expect(createGateway(withToggles).menu()).toEqual([
-      { id: "i-karahi", label: "Chicken Karahi", unavailable: true, unavailableReason: "86" },
-      { id: "i-daal", label: "Daal", unavailable: true, unavailableReason: "86 — disputed" },
+    expect(createGateway(withToggles).menu("counter")).toEqual([
+      // `sold_out` / `contested` are the availability fold's own two facts, added August 2026
+      // for `02-F7`'s toggle surface: `unavailable` is a DISPLAY verdict that also covers the
+      // unpriced case, and `01-F60` calls those two dispositions opposites. The greying
+      // assertions either side of them are unchanged.
+      {
+        id: "i-karahi",
+        label: "Chicken Karahi",
+        unavailable: true,
+        unavailableReason: "86",
+        sold_out: true,
+      },
+      {
+        id: "i-daal",
+        label: "Daal",
+        unavailable: true,
+        unavailableReason: "86 — disputed",
+        sold_out: true,
+        contested: true,
+      },
       // Never toggled, so sellable. Defaulting the other way would empty the grid on day one.
       { id: "i-roti", label: "Roti" },
     ]);
