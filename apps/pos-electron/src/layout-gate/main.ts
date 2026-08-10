@@ -508,6 +508,21 @@ const note = (s: string): void => {
   lines.push(s);
 };
 
+/**
+ * `24-F14` — how many of `01-F61`'s **two** lock steps were measured, summed over panels.
+ *
+ * **`MIN_SURFACES` cannot carry this and the arithmetic says why.** It is deliberately set one
+ * whole panel low, so it tolerates losing up to `SURFACES_PER_PANEL` surfaces *anywhere*: with the
+ * PIN pad dropped from every panel the sweep measures 143 against a floor of 140 and passes,
+ * reporting a healthy-looking total. That is precisely how the pad came to be unmeasured in the
+ * first place — nothing was ever counting the surfaces a panel is supposed to yield, only the
+ * grand total.
+ *
+ * So this counts the thing itself. It is the one surface in the sweep with no alternative route:
+ * a cashier who cannot sign in cannot reach any of the tabs below.
+ */
+let lockStepsMeasured = 0;
+
 /** Totals, so the rail can prove to itself that it actually looked at something. */
 let surfacesMeasured = 0;
 let controlsMeasured = 0;
@@ -1180,6 +1195,7 @@ const run = async (): Promise<number> => {
 
     // Step one: `01-F61`'s identity grid. `02-F18` — a locked device shows only the unlock screen.
     judge(on("unlock"), "alarm", await measure());
+    lockStepsMeasured += 1;
     await shoot(window, `${panel.label}--unlock`);
 
     /**
@@ -1211,6 +1227,7 @@ const run = async (): Promise<number> => {
       });
     } else {
       judge(on("unlock:pin"), "alarm", await measure());
+      lockStepsMeasured += 1;
       await shoot(window, `${panel.label}--unlock-pin`);
     }
 
@@ -1409,6 +1426,27 @@ const run = async (): Promise<number> => {
       surface: "gate",
       state: "quiet",
       detail: "EMPTY MATCH — zero controls measured across every surface (24-F14).",
+    });
+  }
+  /**
+   * `24-F14` — **both** of `01-F61`'s lock steps, on **every** panel.
+   *
+   * The per-panel checks in the lock block fire when the app stops PRODUCING a step; this fires
+   * when the gate stops DRIVING to it, which is the failure that put the PIN pad out of coverage
+   * for the whole life of this rail. They are disjoint causes and neither implies the other.
+   */
+  if (lockStepsMeasured < PANELS.length * 2) {
+    failures.push({
+      surface: "gate",
+      state: "quiet",
+      detail:
+        `EMPTY MATCH — only ${lockStepsMeasured} of ${PANELS.length * 2} lock steps were measured ` +
+        `(01-F61 is identify THEN PIN, so it is two per panel across ${PANELS.length} panels). ` +
+        "A step that is not driven is a step that is not measured, and the grand total does not " +
+        "notice: MIN_SURFACES sits one whole panel low by design, so dropping one surface from " +
+        "every panel still clears it. That is exactly how the PIN pad went unmeasured — the " +
+        "fixture called `unlock()` and skipped straight past the surface an operator meets 20–60 " +
+        "times a shift (24-F14).",
     });
   }
 
