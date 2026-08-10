@@ -1,6 +1,10 @@
 // Spec: specs/21-ux-system.md (system) + specs/27-design-language.md (visual language).
 // A CLOSED vocabulary (Commandment 6): app code composes these, never raw primitives.
 export * from "./components/index";
+// 27-F26 — the typeface as BYTES. Naming a family the machine does not have is not shipping it,
+// and until August 2026 this repo contained no font file at all. `installFontFaces` is the seam
+// every DOM host calls; the back office inlines `fontFaceCss()` server-side instead.
+export { fontFaceCss, installFontFaces, PRIMARY_FAMILY } from "./fonts/index";
 // 27-F11c — capacity is a PHYSICAL question, so a surface is measured rather than assumed.
 // 27-F68 — and a dp is a PHYSICAL size, so `PanelRoot` is the one place it becomes a pixel.
 // `mmFromCssPx`/`cssPxFromMm` are gone with that ruling: they converted at the CSS reference
