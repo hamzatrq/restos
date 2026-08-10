@@ -28,6 +28,15 @@ Two rules the FR forbids breaking, both easy to break by accident:
 - **Never trim the millimetres to make a layout fit.** `27-F8`'s numbers are a measured
   ergonomic minimum; the ruling changed how they *render*, never what they *are*.
 
+**The same rule now governs the WINDOW, not just the targets inside it** (August 2026, founder
+ruling: bring-your-own-hardware). `apps/pos-electron` declared `minWidth: 1366, minHeight: 768`
+and that pixel floor **refused** a 1280x800 @13.3" laptop which renders every surface here with
+zero violations, while **admitting** a 1366x768 @10.1" tablet which clips two of them. The floor
+is `215 x 134 mm` of glass now and it CLAMPS to the display instead of refusing it, so the till
+starts on hardware this package's layouts do not fit — and **`PanelHealth` is the component that
+says so**. When a layout here stops fitting 215 x 134 mm, that is a real regression and
+`layout:check` reddens on `laptop-1280`; the remedy is never a smaller millimetre.
+
 Inside `PanelRoot` the CSS pixel Blink lays out in **is** the dp, which is why
 `usePhysicalSize` converts through `mmFromDp` and why `ItemGrid`/`OrderList` default `ppi`
 to `DP_PER_INCH`. A component reaching for `CSS_PX_PER_INCH` to size something is almost

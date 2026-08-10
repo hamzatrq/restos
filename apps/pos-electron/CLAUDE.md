@@ -56,17 +56,63 @@ Three failures found by launching, each of which builds cleanly and dies at load
 `main/index.ts` uses `import.meta.url`, never `__dirname` — `"type": "module"` means the main
 bundle is ESM and `__dirname` does not exist there.
 
-## The window is 1366x768 of PAGE, and the layout is checked against that
+## The window is 1366x768 of PAGE, and its FLOOR is 215 x 134 mm of GLASS
 
-`main/index.ts` passes `useContentSize: true` with `minWidth`/`minHeight` at **1366x768**, which
-is `27 §1a`'s counter panel — the smaller of the two it lists, so a floor rather than a
-preference. Without `useContentSize` those numbers describe the window FRAME and the renderer
+`main/index.ts` passes `useContentSize: true`, which is `27 §1a`'s counter panel measured as the
+renderer sees it. Without it those numbers describe the window FRAME and the renderer
 got **736** css px of height; every capacity figure in doc 27, `27-F11a`'s ~88 tiles included, is
 computed against the panel and not against what the title bar leaves over.
 
-The minimums refuse rather than degrade because `AppShell` **clips and does not scroll**
-(`27-F2` bans reaching a primary action by scrolling), so a window dragged smaller does not get
-tighter — it silently hides controls. That is how the defect below shipped.
+**⚠ THIS SECTION SAID `minWidth`/`minHeight` ARE 1366x768 AND THAT "the minimums refuse rather
+than degrade". BOTH HALVES ARE RETIRED (August 2026, founder ruling: bring-your-own-hardware).**
+That contract was wrong on both sides at once, and the measurements need no interpretation:
+
+| panel | glass | pixel floor said | layout gate measured |
+|---|---|---|---|
+| 1280x800 @13.3" | 287 x 179 mm | **REFUSED** | **0 violations, 13 surfaces, both states** |
+| 1366x768 @10.1" | 224 x 126 mm | **admitted** | **clips two surfaces** |
+
+It over-blocked the most likely BYO device and under-blocked a broken one, because **a pixel
+count is not a size** (`27-F11c`). 1024x600 and 1366x768 on the same 10.1" glass are 78% apart in
+pixels and give the same two clipped surfaces — the pixels bought nothing.
+
+`window-options.ts` declares `PANEL_FLOOR_MM = { width: 215, height: 134 }` and converts it per
+panel through `27-F68`'s density: 851x530 css px on the 100.5-PPI counter, 1314x819 on a 155-PPI
+tablet. **Do not pin either pair** — `27-F68` (a) forbids it by name and `panel-fit-seam.test.ts`
+fails if any two measured panels share a pixel floor. The height is 37.4 mm of chrome under
+`03-F5`'s band plus Cash's 94-96 mm work area, taking the TOP of the measured range because a
+floor at the bottom of one admits the panel that clips; the width is the **Order tab's** measured
+1356 dp and not `TenderPanel`'s 147 mm, because the floor must hold for every surface.
+
+**Above the floor it still binds; below it, it CLAMPS to the glass and the till STARTS.**
+`AppShell` clips rather than scrolling (`27-F2`), so above the floor a smaller window hides
+controls and refusing the drag costs nothing. Below it no drag helps — the glass is simply small
+— and a restaurant running this on the laptop it already owns is not helped by a device that will
+not turn on. `counterWindowOptions` clamps the initial size AND the minimum to the display's work
+area.
+
+**Starting degraded is only defensible if the degradation is NAMED (`00 §5.7`).** `packages/ui`'s
+`PanelHealth` is `CatalogHealth`'s peer on the honesty strip — amber, no control, nothing at all
+when healthy (`27-F16`) — carrying either `Screen TOO SMALL` with the measured millimetres or
+`Screen UNMEASURED`. `GatewayDeps.panelFit` is REQUIRED so a host that forgets it is a typecheck
+error, and `__acceptance__/panel-fit-seam.test.ts` §C is the only thing separating that from a
+host that supplies `() => null`.
+
+**The density fallback is the other half and it CANNOT be made safe.** With no OS physical size
+`panel-density.ts` assumes `27 §1a`'s 15.6" — on a 10.1" tablet that is ~100 PPI against ~224 of
+real glass, so **every `27-F8` target renders at ~45% of its ergonomic size and nothing on screen
+looks wrong**. Checked rather than assumed: guessing the panel LARGER shrinks targets below
+`27-F8`'s floor (`27-F68` (b) forbids exactly that), guessing it SMALLER grows them until
+controls clip (defect 2's shape). No diagonal is safe in both directions, so the consequence is
+made visible instead — and **`unmeasured` outranks `too_small`**, because a floor computed from a
+guessed density is itself a guess.
+
+**⚠ WHAT IS UNMEASURED, stated rather than papered over.** Height was rendered at 126, 130, 174
+and 179 mm — two failures and two passes — so **nothing between 130 mm and 174 mm has ever been
+measured**, and the 134 mm floor sits inside that gap. Width was rendered at 69 mm (structurally
+broken) and 221 mm (clean); **69-215 mm is unmeasured.** Both numbers are the best reading of the
+evidence there is; neither is a verified boundary, and a panel in either gap gets the floor's
+verdict on an arithmetic argument rather than on a screenshot.
 
 **⚠ IF YOU CHANGE A COUNTER LAYOUT, LAUNCH IT AND MEASURE IT.** Every suite in this repo was
 green while a cashier could not settle an order. `pnpm -C apps/pos-electron test` renders in
@@ -99,11 +145,88 @@ have been **wrong** — driving a headless page you *set* the viewport to 1366x7
 it. Main is deliberately **not** real: it would drag in `better-sqlite3` and make a layout check
 cost a native rebuild.
 
-**It sweeps BOTH of `27 §1a`'s counter panels** (`DEC-UI-001` (e), August 2026) — 1366x768 and
-1920x1080, reloading between so the second gets `03-F5`'s band rather than inheriting an
-acknowledged one. They are the same 13.6 x 7.6 inches of glass, so under `27-F68` they must hold
+## ⚠ THE GATE JUDGED EVERY CONTROL AGAINST THE VIEWPORT ALONE — CLOSED (August 2026)
+
+`AppShell`'s `<main>` and `index.html`'s `html, body, #root` all set `overflow: hidden`, so there
+are at least two clipping boxes between any control and the viewport — **and the gate looked at
+the last one only.** Measured on 1024x600 @10.1": **0 clipped controls reported on the Order tab
+while five menu tiles were visibly sliced by the pager.** Both facts held at once. The only hint
+was a box-level `OVERFLOW` line, which names the container and never says which controls the
+operator loses.
+
+`probe.ts` walks every clipping ancestor now and reports the per-edge loss under their
+intersection. Two details are correctness rather than polish: `overflow` clips to the **padding
+box**, and `getComputedStyle`'s border widths come back in the element's OWN units (dp inside
+`PanelRoot`) while the rect is in post-zoom viewport px — so the scale is recovered from the
+element itself (`rect.width / offsetWidth`). That is the unit mix that already produced a
+negative slack in the extent check.
+
+**`CLIPPED BY ANCESTOR`'s wording is load-bearing.** A `withinViewport` failure once concluded
+*"this control cannot be touched"* for a key overhanging by 31 px of 126 whose centre hit-tests
+fine; that sentence reached a `CLAUDE.md`, then a task brief, and an agent was dispatched to fix
+a blocker that did not exist. The verdict states what is cut, by how much, what survives, and —
+**SEPARATELY, and saying so** — whether the centre still hit-tests. It supersedes `COVERED` for
+the same control rather than stacking, so one defect is one verdict.
+
+`SurfaceReport.clippingAncestors` is the `24-F14` tripwire: three is the floor on every screen
+here, and a surface with controls and zero of them FAILS rather than reporting a clean sweep of
+`clippedBy: null`.
+
+**Mutation matrix — the clipping check and the physical floor.** Control: shipped tree, gate
+GREEN (91 surfaces, 1689 controls, 343 clipping ancestors), pos **461/461**, ui **261/261**. Each
+mutant is exactly one branch, in-tree with byte-exact backups and a restore trap.
+
+| # | mutant | gate | netbook Order clips | shipping-panel clips | pos 461 | ui 261 |
+|---|---|---|---|---|---|---|
+| M1 | **THE PAGER DEFECT VERBATIM** — `ItemGrid` costs its page at full height | **RED, 20** (18 `CLIPPED BY ANCESTOR` + 2 `OVERFLOW`) | **5** | **18** | **all green** | **all green** |
+| M2 | **CONTROL** — M1 *plus* the pre-fix rail: viewport-only judgement | RED, **2** (the 2 `OVERFLOW` only) | **0** | **0** | all green | all green |
+| M3 | **NEGATIVE CONTROL** — `StatusStrip` row gap `space-4` → `space-3` | **GREEN** | 0 | 0 | all green | all green |
+| M4 | **THE SEAM, STUBBED** — `index.ts` `panelFit: () => null` | **GREEN** | 0 | 0 | **460** (1) | all green |
+| M5 | **THE CLAMP REMOVED** — the BYO ruling undone in one branch | **GREEN** | 0 | 0 | **460** (1) | all green |
+| M6 | **`24-F14`** — `clipOf` never finds a clipping ancestor | **RED, 91** EMPTY MATCH, `0 clipping ancestors walked` | 0 | 0 | all green | all green |
+
+**M1 against M2 is the attribution and the whole point of the task.** They differ in exactly one
+branch — the ancestor walk — so the **18 fatal verdicts and 5 probe verdicts belong to the new
+check and to nothing else.** What the old rail did catch (M2's 2 rows) names a BOX: *"this div
+holds 912px of content in an 884px box"*. What it could not say is which eighteen tiles a cashier
+loses, by how much, and whether they still respond.
+
+**M1's right-hand columns are the second finding: 722 tests cannot tell the pager defect from its
+fix.** Only the gate sees it.
+
+**M3 is what makes every red row mean anything** — a real one-branch geometry edit to shipped
+chrome reddens nothing, so the gate discriminates rather than firing at any change.
+
+**M4 and M5 are GREEN on the gate on purpose, and that is the honest limit.** The gate drives its
+own preload fixture, so a main-process seam going to a stub is structurally invisible to it —
+`seams:check` Rule B is satisfied by any supply and `() => null` is a supply. Exactly **one test
+in this repo** separates each from the shipped wiring, and it is `panel-fit-seam.test.ts`.
+
+**It sweeps SEVEN panels** (`DEC-UI-001` (e), extended August 2026), reloading between each so
+every one gets `03-F5`'s band rather than inheriting an acknowledged one:
+
+| row | window px | diagonal | glass | ships |
+|---|---|---|---|---|
+| `counter-1366` / `counter-1920` | 1366x768 / 1920x1080 | 15.6" | 345 x 194 mm | yes |
+| `laptop-1280` | 1280x800 | 13.3" | 286 x 179 mm | **yes** — the BYO device the app used to refuse |
+| `tablet-10.1` / `netbook-1024` | 1366x768 / 1024x600 | 10.1" | 224 x 126 / 221 x 130 mm | no — below the floor |
+| `desktop-24` | 1920x1080 | 24" | 531 x 299 mm | yes |
+| `ultrawide-32` | 3840x1080 | 32" | 782 x 220 mm | yes |
+
+The two counter rows are the same 13.6 x 7.6 inches of glass, so under `27-F68` they must hold
 the SAME layout at different pixel counts; that is `27-F11c` stated as a test rather than as
-prose, and it is the assertion a pinned pixel constant cannot pass.
+prose, and it is the assertion a pinned pixel constant cannot pass. The two 10.1" rows are the
+same argument from below — 78% apart in pixels, identical verdicts.
+
+**`phone-6.5` is deliberately absent and must stay absent** until a portrait layout exists: it is
+69 x 150 mm, it fails two COMPOSITION checks, and those bind regardless of `ships`. Weakening the
+gate to admit a panel is backwards.
+
+**⚠ The fixture menu is 46 items and that number is load-bearing.** At 24 it fit on ONE page of
+every shipping panel, so `ItemGrid` never drew a pager on any of them and the pager was
+measurable only on a `ships: false` probe — where FIT verdicts are downgraded by design. That is
+how the M1 row above went from PASSED to RED. `02-N2` specifies a 300-item catalogue and
+`27-F11a` sizes a tab at ~25 items, so 24 was smaller than the product's own design case.
 
 **And it has ONE check that is not about fitting:** `27-F8`'s keypad target measured in
 **millimetres of glass**, with the density read back out of the same seam the renderer was handed
