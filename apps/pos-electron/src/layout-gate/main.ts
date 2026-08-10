@@ -1451,9 +1451,10 @@ const run = async (): Promise<number> => {
           `[${font.weights.join(", ")}]; missing: [${missing.join(", ")}]; ` +
           `FAILED to decode: [${font.errored.join(", ")}]. A face in "error" means the bytes were ` +
           `refused — the likeliest cause is index.html's CSP missing \`font-src 'self' data:\`, ` +
-          `which parses cleanly and blocks every face. Note document.fonts.check() reports ` +
-          `${font.check}, which is why nothing here branches on it: with NO matching @font-face ` +
-          `it has no faces to call unloaded and returns true vacuously.`,
+          `which parses cleanly and blocks every face. (document.fonts.check() said ` +
+          `${font.check} here and NOTHING branches on it, because it is unreliable in one ` +
+          `direction: with no matching @font-face at all it has no face it can call unloaded and ` +
+          `answers TRUE. Read it as a diagnostic, never as the verdict.)`,
       });
     }
     if (Math.abs(font.named - font.bogus) < 0.01) {

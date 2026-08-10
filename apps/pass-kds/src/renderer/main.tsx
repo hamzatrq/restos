@@ -21,10 +21,12 @@ if (!root) throw new Error("index.html has no #root — the renderer cannot moun
  * `index.html`'s CSP gains `font-src 'self' data:` to let the base64 faces load — without it the
  * rules parse and every face is blocked, which looks exactly like success.
  *
- * ⚠ **This app's gate does NOT yet assert the face is loaded the way `apps/pos-electron`'s does.**
- * `27-F27`'s angular cap-height is measured by nothing here either, and the two are related: a
- * ticket can be perfectly composed, in the correct face, and unreadable at 1.5 m.
+ * This app's own `layout:check` asserts the face is LOADED on all 21 surfaces, not merely named —
+ * a render path with no assertion is the shape both of this repo's recurring defects are named
+ * for. What is still measured by NOTHING is `27-F27`'s angular cap-height, and the two are
+ * related: a ticket can be perfectly composed, in the correct face, and unreadable at 1.5 m.
  */
+installFontFaces();
 const base = typography["text-body"];
 document.body.style.fontFamily = base.fontFamily;
 document.body.style.fontSize = `${base.fontSize}px`;
