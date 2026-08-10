@@ -48,7 +48,7 @@
  */
 
 import { applyLineState, type OrderLineState } from "@restos/domain";
-import type { DeviceStore } from "@restos/sync-client";
+import { billedEffectiveFromJsonLines, type DeviceStore } from "@restos/sync-client";
 import { autoAdvancesLines, type HardwareTier } from "./hardware-tier";
 
 /**
@@ -103,15 +103,50 @@ export type LineStateChangedPayload = {
  *    restaurant"*), so there is no concurrent emitter whose edge this one would need to name.
  *  - **For a NON-TERMINAL advance the projection is provably identical either way**: `projectLine`
  *    takes ≼-max over ALL legal edges rather than over heads, so an unretired lower edge cannot
- *    change the watermark. Retirement only decides anything when a TERMINAL head is involved — and
- *    the terminal half of `02-F31` is blocked (below), so this emitter never produces one.
+ *    change the watermark. Retirement only decides anything when a TERMINAL head is involved.
  *  - `__acceptance__/line-advance.test.ts` folds the emitted payload through the **real** merge
  *    engine and asserts the projected state AND that the anomaly map is empty. A wrong `preds`
  *    would show up there as `inconsistent_predecessor` or `terminal_regression`.
  *
- * When the settlement half is unblocked this becomes load-bearing and must be revisited: a
- * terminal edge with empty `preds` leaves the preceding non-terminal head alive and `projectLine`
- * flags it `terminal_regression`, on every settled order.
+ * ## ⚠ THE TERMINAL EDGE IS THE EXCEPTION, AND IT IS MEASURED RATHER THAN PREDICTED
+ *
+ * This block used to close *"when the settlement half is unblocked this becomes load-bearing and
+ * must be revisited: a terminal edge with empty `preds` leaves the preceding non-terminal head
+ * alive and `projectLine` flags it `terminal_regression`, on every settled order."* **That
+ * prediction was exactly right, and here is the measurement** (`DEC-HW-002`, August 2026 — the same
+ * three-edge walk through a real store, `preds` the only thing that differs):
+ *
+ * ```
+ *   served with preds: []          states ["served"]   anomalies { <confirmed edge>:
+ *                                                                  "terminal_regression",
+ *                                                                  <in_prep edge>:
+ *                                                                  "terminal_regression" }
+ *   served with preds: [<in_prep>] states ["served"]   anomalies {}
+ * ```
+ *
+ * So the **projected state is correct either way** and the cost is two flags per line on every
+ * settled order. `preds: []` ships anyway, and the reasoning is bounded rather than dismissive:
+ *
+ *  - **It is a DERIVED flag, not ledger history.** `projectLine` recomputes `anomalies` from the
+ *    edge set on every fold, and the edges themselves are all LEGAL — nothing wrong is written to
+ *    the append-only store, so this is not `01-F1`'s permanence and it clears retroactively on a
+ *    refold the day `preds` can be built. That is the whole difference from the illegal-edge case
+ *    the footer below refused.
+ *  - **No value moves.** `billedCellPaisa` reads `states` only, `cookingDone` is true either way,
+ *    and the money columns are untouched — verified in the same run.
+ *  - **The cloud Auditor already excludes it by name.** `services/sync-gateway/src/auditor.ts`
+ *    filters to `illegal_transition` under the comment *"the other anomaly classes are fold
+ *    renderings, not illegalities"*, so this raises no finding and pages nobody.
+ *
+ * **What it would take to close, and why that is not this change.** The emitter cannot build the
+ * head set: `json_lines` carries per-line `states` and no head edge ids, so the ids simply are not
+ * on the read path (`apps/pos-electron/CLAUDE.md` records this as `C32`'s third blocker). The fix
+ * has a precedent one projection over — `AvailabilityRow.head_ids_json` exists for exactly this
+ * reason, *"exported so an operator surface can build a correct"* supersedes link, with its own
+ * `01-F34` id-bijection invariance test — so the shape is known: `BilledLineCell` would gain the
+ * same. That is a `packages/sync-client` fold change to an **oracle-pinned cell shape** (contract
+ * ruling C8) in a second protected package, for a derived flag no consumer reads. **OWED, named
+ * here, and deliberately not taken in the change that closes the FR.**
  */
 export const advanceEdgesFor = (
   order: { readonly order_id: string; readonly json_lines: string },
@@ -135,6 +170,85 @@ export const advanceEdgesFor = (
   // derived from the same object rather than assembled separately so the two cannot disagree.
   return { order_id: order.order_id, line_ids, state: to, line_context };
 };
+
+/**
+ * `01 §4`'s canonical rule, read off the sentence itself rather than off `02-F31`'s restatement
+ * of it — `02-F31` ends *"canonical rule in 01 §4"*, so this is the authority:
+ *
+ * > terminal service state — `served` (dine-in/takeaway/pickup) **or** `picked_up → delivered`
+ * > (delivery, **rider-driven only** — never advanced by payment/settlement, 09)
+ *
+ * **The rule assigns `served` to three named service modes and gives delivery a DIFFERENT terminal
+ * path** (`picked_up → delivered`), driven by `rider.picked_up`/`rider.delivered` or doc 09's
+ * on-behalf dispatch entries. A delivery line advanced by settlement is a line recorded as handed
+ * over while the food is still in the building — and `served` is TERMINAL under `01-F35`, so no
+ * later edge can walk it back and `01-F1` forbids removing it.
+ *
+ * ## It is an ALLOWLIST, and that is the load-bearing choice
+ *
+ * `order_type` is an **open string** in `packages/domain/src/registry.ts`
+ * (`z.string().min(1).optional()`) — `02-F42` closed `channel` and explicitly left this axis open —
+ * so an unrecognised value and an absent value are both constructible, and the two readings differ
+ * on exactly those cases:
+ *
+ *  - **allowlist** (this) — advance only the three modes `01 §4` names. An unknown or absent type
+ *    leaves the line at `in_prep`. Nothing false is written, the state is non-terminal, and a later
+ *    edge can still move it.
+ *  - **denylist** (`order_type !== "delivery"`) — advance everything else. A delivery order whose
+ *    type is spelled any other way (`"Delivery"`, a doc 09 variant, a future aggregator mode) is
+ *    marked `served`, terminally and permanently.
+ *
+ * The harm is asymmetric and only in one direction is it recoverable, so the open string decides
+ * it: refusing to advance costs a queue row that lingers, advancing wrongly costs a false record of
+ * handover that `01-F1` will not let anyone correct. The corpus is also written as an allowlist —
+ * `01 §4` enumerates who reaches `served` rather than who is excluded from it.
+ *
+ * `pickup` is in the set on `01 §4`'s and `02-F31`'s authority (both name *dine-in/takeaway/pickup*)
+ * even though **nothing in this product writes it yet**: `Counter.tsx` offers `02-F1`'s three types
+ * and doc 06's storefront owns the pickup door (`06-F8`), which is unbuilt. Transcribing the FR's
+ * third mode is not speculative scope — omitting it would silently narrow the rule to the two modes
+ * this app happens to author today, and the next writer of a pickup order would find the FR quietly
+ * un-implemented.
+ */
+const SETTLEMENT_SERVES: ReadonlySet<string> = new Set(["dine_in", "takeaway", "pickup"]);
+
+/**
+ * `02-F31`'s settlement precondition as a pure predicate over ONE order row, exported so it can be
+ * driven directly and so the closure below cannot drift from what a test asserts (the `K-3`
+ * dead-oracle shape: an oracle pinning its own copy of the branch it exists to pin).
+ *
+ * Two questions, and the second is an INTERPRETATION with the simpler alternative named.
+ *
+ * 1. **Is this order's type one `01 §4` sends to `served`?** See `SETTLEMENT_SERVES`.
+ *
+ * 2. **Has settlement actually COMPLETED?** `02-F31` says *"settlement → lines `served`"* and does
+ *    not define the moment. `01-F33`'s closing act `order.settlement_closed` would define it and
+ *    **has no production emitter anywhere**, so `OpenOrderRow.settled` is `0` on every order this
+ *    device has ever held — waiting for it would advance nothing, ever, which is this wave's named
+ *    defect built deliberately. So the trigger is the same observable fact `printing.ts` already
+ *    uses at the *same call site* for `02-F15`'s receipt: the order is **tendered for in full**,
+ *    `pay_total >= billed_effective`, both off the fold's own keyed sums.
+ *
+ *    **Reusing that reading rather than inventing a second one is the point.** Both hang off one
+ *    `payment.recorded` in `index.ts`; two different definitions of "settled" firing from one event
+ *    would be two sources for one fact, which is the shape `02-F45` names and refuses. The simpler
+ *    alternative — advance on *any* `payment.recorded` — is rejected because `02-F13` splits a
+ *    settlement across methods, so it would mark lines `served` at the first partial tender, before
+ *    the customer has paid and irreversibly (`01-F35`). It also protects against the open
+ *    `TAKE CASH`-on-an-empty-entry defect recorded in this package's guide: a `Rs 0` tender leaves
+ *    `pay_total < billed_effective`, so a phantom settlement moves no line.
+ *
+ *    `pay_total` is `01-F31`'s keyed sum — a contested attempt contributes zero — and excludes
+ *    `repays_receivable` (`DEC-MONEY-007`), so a khata tab repaid later cannot settle the original
+ *    order twice.
+ */
+export const advancesOnSettlement = (order: {
+  readonly order_type: string | null;
+  readonly pay_total: number;
+  readonly json_lines: string;
+}): boolean =>
+  SETTLEMENT_SERVES.has(order.order_type ?? "") &&
+  order.pay_total >= billedEffectiveFromJsonLines(order.json_lines);
 
 export type LineAdvanceDeps = {
   /** The projection this reads `from_states` out of. Narrowed to one method on purpose. */
@@ -215,11 +329,47 @@ export type LineAdvance = {
    * appends nothing at all. Nothing is written twice and nothing is refused loudly.
    */
   readonly printEvent: (type: string, payload: unknown) => void;
+  /**
+   * `02-F31` — *"settlement → lines `served` — **dine-in/takeaway/pickup only**"*, on T1 only.
+   *
+   * **This half was BLOCKED IN THE KERNEL until August 2026 and is now open by ruling**, not by a
+   * session's judgement: `01 §4`'s chain reached `served` only from `ready` while `02-F31`'s next
+   * clause forbids fabricating `ready`, so the two clauses could not both hold. `DEC-HW-002` ruled
+   * `LEGAL_NEXT.in_prep` gains `served` — the honest model of a restaurant with no pass, where a
+   * line goes from being cooked to being handed over with no observed moment of readiness. The
+   * reasoning lives on the table itself in `packages/domain/src/states.ts`.
+   *
+   * **Order-granular and order-id shaped**, matching `receipts.settled(order_id)` beside it at the
+   * same call site rather than taking the whole callback the way `printEvent` does. There is no
+   * discriminating branch to hand-copy here: `index.ts` already narrows `payment.recorded` once for
+   * the receipt, and both consumers hang off that single narrowing.
+   *
+   * **Tier-gated, exactly as `printEvent` is.** `02-F31`'s auto-advance is defined by *"where no
+   * device exists to signal them"*; on T2/T3 a pass screen owns the ready signal (`03-F24`) and the
+   * line's own service state with it, and auto-advancing would race a human who is about to act.
+   *
+   * **What it does NOT do, measured rather than assumed:**
+   *
+   *  - It never fabricates `ready` (`02-F31`, and `03-F26` depends on it — T1 produces no ready
+   *    samples, which is why T1 restaurants honestly get aging timers and never learned ETAs). The
+   *    edge emitted is `in_prep → served`, one step, and `advanceEdgesFor`'s legality filter is
+   *    `domain`'s own predicate so it cannot disagree with the fold.
+   *  - It advances **nothing** on a line still at `confirmed` — `LEGAL_NEXT.confirmed` excludes
+   *    `served`, so `advanceEdgesFor` finds no eligible line and appends no event at all. That is
+   *    the state of a till whose KOT never printed, and it is `01 §4`'s answer rather than a gap:
+   *    `restaurant-os.md:47` defines T1 as *"terminal + printers"*, so a printerless branch is
+   *    outside the corpus (`DEC-HW-001`'s second open sub-question asks whether a tier below T1
+   *    exists). Widening the table again to reach it would be inventing past the ruling.
+   *  - It writes **no `preds`**, and the consequence is measured and named on `advanceEdgesFor`.
+   */
+  readonly settled: (order_id: string) => void;
 };
 
 /** `01 §4` vocabulary, named once so a typo cannot make this module advance nothing. */
 const CONFIRMED: OrderLineState = "confirmed";
 const IN_PREP: OrderLineState = "in_prep";
+/** `DEC-HW-002` — `01 §4`'s terminal service state for dine-in, takeaway and pickup. */
+const SERVED: OrderLineState = "served";
 const LINE_STATE_CHANGED = "order.line_state_changed";
 /** `01 §4`'s print fact, and the ONLY member of the KOT callback that advances anything. */
 const KOT_PRINTED = "kot.printed";
@@ -247,64 +397,88 @@ export const createLineAdvance = (deps: LineAdvanceDeps): LineAdvance => {
       const order_id = (payload as { order_id?: unknown } | null)?.order_id;
       if (typeof order_id === "string") advance(order_id, IN_PREP);
     },
+    settled: (order_id) => {
+      // `02-F31` — the tier gate, read INSIDE the method for `printEvent`'s reason: a host cannot
+      // forget it and no suite can assert against a copy of it.
+      if (!autoAdvancesLines(deps.tier())) return;
+      const order = deps.store.openOrders().find((row) => row.order_id === order_id);
+      // `01-F17` — this hangs off a `payment.recorded` that has already landed; an order this
+      // device cannot read must never cost the customer the settlement they just made.
+      if (order === undefined) return;
+      // `01 §4`'s delivery rule and `01-F33`'s completion question, both on one exported predicate
+      // so this branch is the one a test drives rather than a copy of it.
+      if (!advancesOnSettlement(order)) return;
+      const payload = advanceEdgesFor(order, SERVED);
+      if (payload === null) return;
+      deps.append(LINE_STATE_CHANGED, payload);
+    },
   };
 };
 
 /**
- * # ⚠ `02-F31`'s SETTLEMENT HALF IS BLOCKED IN THE KERNEL — a spec conflict, not a gap
+ * # ✅ `02-F31`'s SETTLEMENT HALF — the kernel conflict, and the ruling that closed it
+ *
+ * **Kept as a worked example rather than deleted.** The block that stood here said the settlement
+ * half was BLOCKED and must not be built, and it was right for as long as it stood; the shape of
+ * the argument is why `DEC-HW-002` exists, and a reader who finds `LEGAL_NEXT.in_prep` carrying
+ * `served` should be able to find out here why it does.
  *
  * `02-F31` requires *"settlement → lines `served` — **dine-in/takeaway/pickup only**"* **and**, in
  * the very next clause, *"no `ready` state is fabricated"* (with `03-F26` giving the reason: T1
  * branches honestly produce no ready samples, so fabricating one would poison the timing pipeline
- * with invented data).
+ * with invented data). Those two clauses together require the edge `in_prep → served`, and until
+ * August 2026 `packages/domain/src/states.ts` forbade it — `LEGAL_NEXT.in_prep` was
+ * `["ready", "voided", "cancelled"]`, so `served` was reachable only from `ready`.
  *
- * Those two clauses together require the edge `in_prep → served`. **`01 §4` forbids it.** The
- * canonical chain is `placed → confirmed → in_prep → ready →` terminal, and
- * `packages/domain/src/states.ts` encodes it: `LEGAL_NEXT.in_prep` is `["ready", "voided",
- * "cancelled"]`. `served` is reachable only from `ready`.
+ * **Every route out was checked and each failed for a different reason. They are worth keeping,
+ * because three of them are still wrong and a later session may reach for one:**
  *
- * **Every route was checked and each fails for a different reason:**
- *
- *  - `from_states: ["in_prep"], to: "served"` — `edgeLegal` refuses it, the fold records
- *    `illegal_transition`, the line stays at `in_prep`, and `01-F1` makes the bad edge permanent.
- *    A T1 restaurant would accumulate one for every order it ever sold.
  *  - `from_states: ["ready"], to: "served"` on a line that is at `in_prep` — legal on its face, so
  *    it would *work*; and it is a lie about a state the branch never reached. `projectLine`'s
  *    `inconsistent_predecessor` check catches it the moment `preds` names the real `in_prep` edge,
  *    and with `preds: []` it is simply a false statement written into an append-only ledger.
+ *    **Still forbidden.**
  *  - The adoption clause (`|from_states| > 1 ∧ to ∈ from_states`) is *"a choice among already-
- *    emitted terminals"* and does not apply to a first transition.
- *  - Emitting `ready` first is what `02-F31`'s own next clause forbids by name.
- *  - Filtering by legality and letting the settlement trigger emit nothing (which
- *    `advanceEdgesFor` would do quite happily) is the worst option available: it looks built,
- *    every gate stays green, and no line ever reaches `served`. That is this wave's named defect
- *    manufactured deliberately, so the trigger is **not wired at all**.
+ *    emitted terminals"* and does not apply to a first transition. **Still true.**
+ *  - Emitting `ready` first is what `02-F31`'s own next clause forbids by name, and `03-F26`
+ *    depends on the prohibition. **Still forbidden — nothing in this module emits `ready`.**
+ *  - Filtering by legality and letting the trigger emit nothing is the worst option available: it
+ *    looks built, every gate stays green, and no line ever reaches `served`. That is this wave's
+ *    named defect manufactured deliberately. **Still the trap**, and it is now guarded from the
+ *    other side: `line-advance-seam.test.ts` §D asserts the trigger is PRESENT and that it moves a
+ *    real line through the real fold, so a regression to "wired but inert" reddens.
+ *  - `from_states: ["in_prep"], to: "served"` against the OLD table — `edgeLegal` refused it, the
+ *    fold recorded `illegal_transition`, and `01-F1` made the bad edge permanent. **This is the one
+ *    the ruling changed**, and it changed it in the table rather than at the emitter.
  *
- * **What a resolution needs, and why it is not a session's call** (commandment 2 and commandment 9:
- * order states live in `01 §4` only, and `specs/DECISIONS.md` carries no row on this). Three
- * candidate shapes, none chosen here:
+ * ## RULED — `specs/DECISIONS.md` → `DEC-HW-002` (August 2026), shape (a)
  *
- *  (a) `LEGAL_NEXT` gains `in_prep → served` and `01 §4`'s chain records the T1 skip. This is the
- *      only shape consistent with the merge design's own law that **legality is a pure function of
- *      one edge's payload** (matrix row 65) — a tier-conditional legality is not expressible,
- *      because the fold cannot know the emitting branch's tier. Its cost is that the skip becomes
- *      legal on every tier, so a T2 KDS bug could also jump `ready`.
- *  (b) `02-F31`'s settlement clause is narrowed to lines already at `ready`, which makes T1 lines
- *      terminate at `in_prep` — contradicting the FR's own text and leaving `03-F17`'s *"an order
- *      leaves the queue when all its lines reach a terminal service state"* unreachable in T1.
- *  (c) A different terminal for T1 settlement. This invents a state and commandment 2 forbids it.
+ * `LEGAL_NEXT.in_prep` gains `served`. Not as a concession to T1 but because it is the honest
+ * model: **in a restaurant with no pass, a line goes from being cooked to being handed over with no
+ * observed moment of readiness**, and the table as written encoded *"a pass exists to observe
+ * readiness"* as universal law — `DEC-HW-001`'s T3-assumed-universal error reaching the kernel.
  *
- * `packages/domain/src/states.ts` is a protected path with its own oracle
- * (`__acceptance__/line-states.test.ts`), so (a) is a spec PR plus a senior review, not an edit.
+ * **The refused alternative is the one that looks safest, and the reason is a law and not a
+ * preference.** A tier-conditional legality is a standing-law-1 violation: `26 §7` row 65 makes
+ * legality a pure function of ONE edge's payload, so gating it on the branch's tier would make a
+ * projected value depend on the reading device's configuration and convergence would depend on who
+ * is looking (`01-F34`). Nothing in this module reads tier to decide LEGALITY — `autoAdvancesLines`
+ * gates *whether this device emits at all*, which is a producer's question, and the emitted edge is
+ * judged by `domain`'s own predicate exactly as every other edge here is.
  *
- * **Nothing in the delivery rule is built either, and it is part of this blocked half.** `01 §4`
- * is canonical — delivery lines are *"rider-driven only — never advanced by payment/settlement"* —
- * and `02-F31` repeats it. When the settlement trigger is wired it must exclude every line of an
- * order whose type is delivery, and there is currently no code anywhere expressing that.
+ * Permissive legality is not a mandate: a T2/T3 branch has a device that emits `ready` (`03-F24`),
+ * `LineAdvance.settled` refuses to run on those tiers, and the skip's cost — that a T2 KDS bug
+ * could also jump `ready` — was weighed and accepted in the ruling.
  *
- * **This block is load-bearing and is asserted against.** `__acceptance__/line-advance-seam.test.ts`
- * §D is an anti-scope guard on the shape `orders-tab.dom.test.tsx` §E uses for `C20`/`C32`: it
- * fails if a settlement trigger appears in `index.ts` before the conflict is ruled on, and it
- * pins that `advanceEdgesFor(..., "served")` refuses an `in_prep` line rather than lying about it.
- * Delete the guard in the same change that closes the conflict, and not before.
+ * ## What the ruling did NOT license
+ *
+ *  - **`confirmed → served` is still illegal**, and is left illegal. A till whose KOT never printed
+ *    holds its lines at `confirmed` and settlement moves nothing — measured, not assumed. That is
+ *    `01 §4`'s answer and not a gap: `restaurant-os.md:47` defines T1 as *"terminal + printers"*,
+ *    so a printerless branch is outside the corpus, and `DEC-HW-001`'s second open sub-question is
+ *    precisely *"is there a tier BELOW T1?"*. It is the founder's, not a session's.
+ *  - **The delivery exclusion is not a legality question and is not implemented as one.** `01 §4`
+ *    sends delivery down `picked_up → delivered` instead, and a delivery line at `ready` could
+ *    legally reach `served` — so `LEGAL_NEXT` cannot express the rule and an explicit producer-side
+ *    allowlist does. See `SETTLEMENT_SERVES` and `advancesOnSettlement` above.
  */
