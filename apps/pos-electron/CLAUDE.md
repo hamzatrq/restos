@@ -155,9 +155,21 @@ finds a control that is off the screen, and neither does any suite here. `pnpm -
 layout:check` (~7 s) builds the real renderer, opens a real `BrowserWindow` from the app's real
 `COUNTER_WINDOW_OPTIONS`, mounts the shipped React app against a scripted bridge
 (`src/layout-gate/`), and measures in **Blink**: every clipping box against the content it holds,
-and every control against the viewport and against `elementFromPoint`. It sweeps the unlock
-surface and every tab in **both** device states — `03-F5`'s band up and acknowledged — with tabs
-read from the DOM so a tab someone adds is measured without touching the gate.
+and every control against the viewport and against `elementFromPoint`. It sweeps **both** of
+`01-F61`'s lock steps and every tab in **both** device states — `03-F5`'s band up and
+acknowledged — with tabs read from the DOM so a tab someone adds is measured without touching the
+gate.
+
+⚠ *That said "the unlock surface" and meant step ONE.* Until August 2026 the fixture reached the
+counter by calling `window.restos.unlock('user-hina', '1234')` — which moves the session **without
+ever rendering step two** — so `01-F61`'s **PIN pad had never been laid out in Blink at all**, on
+any panel, in any mode. It is the surface an operator meets 20–60 times a shift, it is the
+credential entry, `02-F18`'s idle lock returns her to it, and unlike every tab it has no
+alternative route: a cashier who cannot sign in reaches nothing. The gate now presses Hina's
+`PersonTile`, measures the pad in its arrival state, and leaves through the pad's own `Unlock`
+key — the app's `chosen` state does the switching, so nothing here is a hand-copy of the
+arrangement (`K-3`'s dead-oracle defect). **143 → 154 surfaces, 2585 → 2728 controls, 550 → 660
+`27-F8` keypad targets.**
 
 **No dependency was added** (`18 §15` rule 1): `electron` is already a devDependency and ships the
 same Blink the product renders in. `@playwright/test` is on `18 §14`'s allowlist and would still
@@ -211,6 +223,59 @@ branch — the ancestor walk — so the **18 fatal verdicts and 5 probe verdicts
 check and to nothing else.** What the old rail did catch (M2's 2 rows) names a BOX: *"this div
 holds 912px of content in an 884px box"*. What it could not say is which eighteen tiles a cashier
 loses, by how much, and whether they still respond.
+
+**Mutation matrix — `01-F61`'S UNLOCK PAD ENTERS THE SWEEP (August 2026).** Control: gate GREEN,
+**154 surfaces, 2728 controls, 660 keypad targets, 11 panels**; pos-electron **556/556**, ui
+**280/280**; `pnpm verify` exit 0; `pnpm test --force --continue --concurrency=3` **2854 / 24 of
+24**. In-tree, byte-exact backups, `shasum`-verified restore, both full suites under every mutant.
+**The right-hand columns are the finding.**
+
+| # | mutant (exactly one branch) | gate | unlock verdicts | pos 556 | ui 280 |
+|---|---|---|---|---|---|
+| U1 | **THE DEFECT VERBATIM** — the fixture back to programmatic `unlock()` | **RED, 1** (`24-F14` lock steps) | 154→**143** surfaces, 660→**550** targets | **all green** | all green |
+| U2 | **THE 27-F8 TRUE POSITIVE** — the unlock pad's twelve cells `keypad`→`counter` posture | **RED, 110** | **110**, `unlock:pin` on all 11 panels, at **12.14 mm** | **all green** | **all green** |
+| U3 | **CONTROL for U2** — U2 *plus* the pre-fix fixture: the OLD rail against the new defect | **0 of the 110** | **none** | all green | all green |
+| U4 | **THE CLIPPING TRUE POSITIVE** — `STEP_TWO` stacks identity above the pad | **RED, 16** | `Clear`/`0`/`Unlock` **UNREACHABLE** on `tablet-10.1` + `netbook-1024` | **all green** | **all green** |
+| U5a | **`24-F14`, app half** — `App.tsx` never advances past step one | **RED, 74** | 11× *no PIN pad came up*, 11× *no `Unlock` key*, 1× lock steps | 541 (**15**) | all green |
+| U5b | **`24-F14`, fixture half** — `preload.ts` serves an empty roster | **RED, 86** | 11× *no roster tile*, 1× lock steps | **all green** | **all green** |
+| U6 | **NEGATIVE CONTROL** — a real refactor of the lock block into two early-return helpers | **GREEN**, numbers identical to control | 22, unchanged | all green | all green |
+
+**U2 against U3 is the attribution, and it reproduces the finding that motivated the work.** They
+differ in exactly one branch — whether the fixture walks through the pad or around it — so the
+**110 verdicts belong to the new coverage and to nothing else.** U3's number is the one to
+remember: under the old rail an unlock key rendered at **12.14 mm against `27-F8`'s 20 mm floor**
+— 39% under the ergonomic floor, on the surface that gates every other — and the gate found
+**nothing**, because the surface was not in the sweep. That is the historical 13.88 mm mutant
+being caught on `escalation:pin` and nowhere else, re-measured.
+
+**U1 is why the lock-step tripwire exists, and it was added because the mutant asked for it.**
+`MIN_SURFACES` sits one whole panel low by design, so dropping one surface from *every* panel
+still clears it: 143 against a floor of 140. The first draft of this work therefore had U1
+passing **GREEN with a healthy-looking total** — the same silence that hid the pad in the first
+place. `lockStepsMeasured` demands `2 × PANELS.length` and names the count. **Reading the diff
+would not have found that; running the mutant did.**
+
+**U5a and U5b are the same surface leaving coverage by two different doors, and their right-hand
+columns are the point.** The app-half defect is *structural*, so happy-dom sees it (15 `pos`
+tests). The fixture-half defect is invisible to **all 836** tests, because no suite has an
+opinion about a fixture — only the gate's own `24-F14` tripwires catch it, and they fire 12
+times rather than sweeping zero surfaces and passing.
+
+**U4's columns are this gate's thesis on a new surface:** three controls a cashier must press to
+sign in are genuinely off the glass on two SHIPPING panels, and **all 836 tests stay green.**
+It is defect 5's shape (`ManagerApproval`'s dead `Approve`) one surface along.
+
+**U6 is what makes every red row mean anything** — a genuine restructuring of the very block
+under test reddens nothing and reproduces the control's numbers exactly, so the gate is holding
+behaviour rather than shape.
+
+**What the pad measured, and it is a clean result rather than a defect hunt:** 13 controls, zero
+violations, on all eleven panels — `probe-below-floor` (202 × 118 mm) included, where `tab:Pay`
+has three controls UNREACHABLE. It fits where the counter surfaces do not because it carries no
+`AppShell` chrome at all: no status strip, no tab rail, no `03-F5` band, and `02-F18` gives it
+the whole panel. So the two small panels that just came into range (`tablet-10.1`,
+`netbook-1024`) needed no arrangement change and **no target was moved** — `27-F68` (b) is not
+engaged.
 
 **M1's right-hand columns are the second finding: 722 tests cannot tell the pager defect from its
 fix.** Only the gate sees it.
@@ -286,7 +351,10 @@ how the M1 row above went from PASSED to RED. `02-N2` specifies a 300-item catal
 **And it has ONE check that is not about fitting:** `27-F8`'s keypad target measured in
 **millimetres of glass**, with the density read back out of the same seam the renderer was handed
 it on. Every other check asks whether a thing FITS, and 126 CSS px fits a 1920x1080 panel
-perfectly while being 22.7 mm instead of 20. Current run — 26 surfaces, 450 controls:
+perfectly while being 22.7 mm instead of 20. Current run — **154 surfaces, 2728 controls, 660
+keypad targets across 11 panels** (this line said *26 surfaces, 450 controls*, measured five
+rounds of panels ago; the gate prints the true figures on every run and they should be read off
+it, never carried forward):
 
 ```
   [1366x768]  126 dp keypad =  79.1 css px at 200.9 PPI = 20.00 mm
@@ -435,9 +503,16 @@ photo → Paid out), measuring both escalation steps on both panels.
    never rendered, and defect 5 (a manager who cannot approve, in *both* states) sat unmeasured
    behind that one line. Both are fixed and the boundary has not moved: **mutation row M8 shows
    that putting that single line back takes the whole surface out of coverage again**, now caught
-   as a `24-F14` EMPTY MATCH rather than as a silent pass. The states still NOT scripted are the
-   ones to worry about — an open shift with a counted drawer, a 300-item catalogue, a refused
-   escalation showing `REFUSAL_WORDS`, training mode's `27-F67` inversion.
+   as a `24-F14` EMPTY MATCH rather than as a silent pass. **It cost a THIRD one, and that one was
+   not a line of fixture data but a line of fixture NAVIGATION** — the programmatic `unlock()`
+   call, which walked past `01-F61`'s PIN pad rather than through it (see the unlock-pad matrix
+   above). Worth separating, because the first two are answers a stub gave and this was a route
+   the fixture took: **grep the fixture for calls that reach a destination the operator reaches by
+   pressing something**, not only for stubbed reads. The states still NOT scripted are the ones to
+   worry about — an open shift with a counted drawer, a 300-item catalogue, a refused escalation
+   showing `REFUSAL_WORDS`, training mode's `27-F67` inversion, and on the unlock pad specifically
+   **a PIN part-keyed and `01-F61`'s refusal line** (`preload.ts`'s `unlock` resolves any known
+   user, so the fixture cannot currently produce a refusal at all).
 3. **It does not judge legibility, contrast, typography or target size.** `27-F26`'s missing
    webfont is untouched — a control can be reachable and still unreadable. **`27-F8`'s target
    size is now the ONE exception**: since `27-F68` the gate measures a keypad target in
