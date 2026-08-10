@@ -106,16 +106,22 @@ import type { AppendRequest, CashShift, CashState } from "../shared/ipc";
  *      reads its figures in a column beside the pad rather than under it.
  *
  * **WHAT THIS TRADE COSTS, named rather than left to be rediscovered.** Height and width are
- * exchanged, not created: the band is 536 dp tall and about **1640 dp ≈ 260 mm wide**, where the
- * arrangement it replaces was 632 dp tall and about 1420 dp ≈ 225 mm wide. On `27 §1a`'s counter
- * — 2143 dp of work surface — the band fits in one line with ~500 dp of field to spare and the
- * 15 mm is a straight gain. **On glass narrower than ~260 mm it wraps, and a wrapped band is
- * TALLER than the arrangement it replaced**, because a 536 dp pad on the first row plus anything
- * on the second exceeds what the old two-column packing needed. That is a real regression on
- * small glass and it is a finding for whoever defines the mode below `compact`: the number to
- * design against is that a 126 dp pad plus this surface's four regions cannot be held at one pad
- * of height in less than ~260 mm of width, and no arrangement changes that without removing a
- * control, which `27-F4` forbids.
+ * exchanged, not created. Holding this surface at one pad of height needs roughly **260 mm of
+ * work-surface width**; below that the groups take a second column and the surface grows. On
+ * `27 §1a`'s counter — 2143 dp ≈ 340 mm — it is one pad tall with field to spare, and the 15 mm
+ * is a straight gain. **That width figure is the number for whoever defines the mode below
+ * `compact`**, and it is a property of the arithmetic rather than of this arrangement: a 126 dp
+ * pad is 536 dp of the height, so everything else must sit BESIDE it, and nothing shortens that
+ * without removing a control (`27-F4`) or trimming the millimetres (`27-F68` (b)).
+ *
+ * ⚠ **This paragraph claimed a different number for one commit and the correction is the point.**
+ * It said the band was *"1640 dp ≈ 260 mm wide"* and that *"on glass narrower than ~260 mm it
+ * wraps and a wrapped band is TALLER than the arrangement it replaced"* — both true of the
+ * wrapping ROW this started as, and both stale the moment the column flow replaced it. The
+ * column flow is measured to fit `27 §1a`'s 10.1″ panel with `03-F5`'s band up, where the
+ * arrangement it replaces overflowed Cash by 36 dp and Me by 5 dp. **A design note written
+ * against a layout that was then changed is the same defect class as a green test defending an
+ * overruled rule**, and this file is one of the places this repo keeps finding it.
  */
 
 /**
