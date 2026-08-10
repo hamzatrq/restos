@@ -53,6 +53,27 @@ That is the test to apply to every prop you are tempted to add:
 - `AgeBadge` takes **minutes and thresholds**, never a colour (03-F47, 27-F12).
 - `QuantityItemLine` has no `align` and no `columns` prop, because a right-aligned quantity
   column *is* the defect 27-F57 names.
+- `Panel` takes a **tone**, never a colour, and the only tone above neutral is `abnormal`
+  (27-F14's amber). There is deliberately no `fault` tone: red's claimants in 27-F14 are
+  enumerated and `03-F5`'s S1 band owns them, so a second red region is how the band stops
+  being the loudest thing on the glass. Its fill sits on the CAPTION and never on the body,
+  so money inside an abnormal region is still uncoloured (27-F16).
+
+## The two idioms this package is meant to be recognised by
+
+**`Readout` pairs a caption with one FACT. `Panel` pairs a caption with one GROUP.** Between
+them they are how every surface in the product says "here is a thing and here is what it is
+called", and reaching for a third way is the drift 27-F43 describes: *"leaving the pairing in
+prose produced a publicly-reported failure that remains unfixed years later."* Before `Panel`
+there were three hand-rolled regions in the tree — `OrdersSurface`'s `TRAY`, `TenderPanel`'s
+inline `<section>`, `App.tsx`'s `MASTHEAD` — each with its own padding, radius and caption.
+
+**`Panel` upper-cases its title in CSS, not at the call site**, and that is the one place it
+differs from `Readout` on purpose. `text-transform` leaves `textContent` untouched, so a
+title can be natural-language text an acceptance oracle matches (`orders-tab.dom.test.tsx`
+finds both lists by their heading) while the glass still gets the instrument capital.
+`panel.dom.test.tsx` pins which mechanism is in use, so a future edit that upper-cases the
+STRING fails here rather than five assertions away.
 
 ## Storybook
 

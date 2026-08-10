@@ -334,6 +334,19 @@ describe("the guard suite actually covers the package", () => {
         "components/OrderList.stories.tsx",
         "components/OrderList.tsx",
         /**
+         * ADDED with the grouping round (August 2026), and the acknowledgement this pin forces is
+         * the whole reason `Panel` is under the guards at all: it is the **only** component in
+         * the package that takes a `27-F14` status tone as a PROP, so a caller can ask for amber
+         * where every other component decides its own colour internally. Three rules bear on it
+         * directly — the outline rule (`27-F64`: it paints `bgColor-status-abnormal`, so it must
+         * name `outlineColor-status-abnormal`), the polarity rule (`27-F67`: a region that read
+         * the static record would stay production-coloured inside a training shell), and the
+         * role-prefix rule (`27-F40`, since the abnormal caption uses a fill AND its `on-`
+         * pairing in one style object).
+         */
+        "components/Panel.stories.tsx",
+        "components/Panel.tsx",
+        /**
          * ADDED with the bring-your-own-hardware round (August 2026), and this pin caught it on
          * the first run — which is the acknowledgement it exists to force.
          *

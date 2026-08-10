@@ -8,6 +8,7 @@ export { type GridItem, ItemGrid, pageCapacity } from "./ItemGrid";
 export { formatPaisa, MoneyValue } from "./MoneyValue";
 export { acceptKeystroke, NumericKeypad } from "./NumericKeypad";
 export { OrderList, type OrderRow, orderPageRows } from "./OrderList";
+export { Panel, type PanelProps } from "./Panel";
 export { PanelHealth, type PanelNotice } from "./PanelHealth";
 export { PersonTile, type PersonTileProps } from "./PersonTile";
 export { QuantityItemLine, type QuantityItemLineProps } from "./QuantityItemLine";

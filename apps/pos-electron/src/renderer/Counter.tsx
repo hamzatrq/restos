@@ -414,14 +414,30 @@ export const Counter = () => {
    * watches this reflow. And under `03-F5`'s band a centred panel moves by HALF the band's height
    * where a top-anchored one moved by all of it.
    */
+  /**
+   * **`safe center`, not `center` — and the keyword is the whole difference between losing the
+   * bottom of a surface and losing both ends of it.**
+   *
+   * Measured August 2026 on glass below the current size floor: with the work area shorter than
+   * the content, a plain `center` overflows in BOTH directions, so the top row of the Cash
+   * keypad rendered at `y = -33` and the surface was cut at the top *and* the bottom. The layout
+   * gate's own summary of that state — *"the cut is split top and bottom, which is why no
+   * control is reported lost even though content is being lost"* — is the reason it survived: a
+   * centred overflow hides half of itself above the viewport, where nothing looks for it.
+   *
+   * `safe` makes the alignment fall back to `start` exactly when the item would otherwise
+   * overflow, and changes nothing at all when it fits. It does not make a short panel fit —
+   * `27-F2` still forbids scrolling to a primary action and the gate still reddens — but it
+   * makes the failure a bottom edge, which is where an operator and a screenshot both look.
+   */
   const centred = (children: React.ReactNode) => (
     <div
       style={{
         flex: 1,
         minHeight: 0,
         display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
+        alignItems: "safe center",
+        justifyContent: "safe center",
       }}
     >
       {children}
