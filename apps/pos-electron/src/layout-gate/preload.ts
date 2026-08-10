@@ -134,6 +134,60 @@ const ORDER: OpenOrder = {
 };
 
 /**
+ * **A SECOND OPEN ORDER AND AN UNACCEPTED CLOUD ONE — because with one order and an empty inbox
+ * the Orders tab had two states nobody had ever measured.**
+ *
+ * `02-F9`'s Accept tile lives on an inbox row, so a fixture whose inbox is always empty means
+ * `OrderList`'s `action` had **never been laid out by this gate at all** — and an accept tile
+ * overflowing its row is one of the two defects `apps/pos-electron/CLAUDE.md` records as found by
+ * launching rather than by any suite. `03-F46`'s ordering note is likewise only drawn when there
+ * is more than one row to order, so a one-row list could not show it.
+ *
+ * `confirmed_at` is the branch-consensus confirm anchor (`01-F43`) and the second open order is
+ * given a LATER one than `A-014`, so `byOldestConfirmFirst` has something to actually sort.
+ */
+const SECOND_ORDER: OpenOrder = {
+  order_id: "order-gate-2",
+  reference: "A-015",
+  channel: "counter",
+  order_type: "takeaway",
+  confirmed_at: 1_754_000_500_000,
+  total_paisa: 96_000,
+  paid_paisa: 0,
+  lines: [
+    {
+      line_id: "line-4",
+      name: "Seekh Kebab",
+      quantity: 2,
+      modifiers: [],
+      removals: [],
+      note: null,
+    },
+  ],
+};
+
+/** `02-F9`'s inbox row: a storefront order that has arrived and has not been accepted. */
+const CLOUD_ORDER: OpenOrder = {
+  order_id: "order-gate-3",
+  reference: "W-207",
+  channel: "storefront",
+  order_type: "delivery",
+  confirmed_at: null,
+  total_paisa: 132_500,
+  paid_paisa: 0,
+  lines: [
+    {
+      line_id: "line-5",
+      name: "Chapli Kebab",
+      quantity: 3,
+      modifiers: [],
+      removals: [],
+      note: null,
+    },
+  ],
+};
+
+/**
  * `03-F5`'s S1 — the one that must be acknowledgeable. `27-F11g` makes this band the ONLY
  * signal that food is not being cooked where paper is the only kitchen channel, so its
  * acknowledgement being reachable is the highest-consequence instance of this whole gate.
@@ -302,7 +356,7 @@ const bridge: RestosBridge = {
       },
       user: session,
     }),
-  openOrders: () => Promise.resolve([ORDER]),
+  openOrders: () => Promise.resolve([ORDER, SECOND_ORDER, CLOUD_ORDER]),
   kitchenQueue: () => Promise.resolve([]),
   menu: () => Promise.resolve(MENU),
   staff: () => Promise.resolve(STAFF),

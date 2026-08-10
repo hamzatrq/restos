@@ -1,4 +1,4 @@
-import { PersonTile, space, Tile, typography, useColor } from "@restos/ui";
+import { Panel, PersonTile, Readout, space, Tile, typography, useColor } from "@restos/ui";
 import { useState } from "react";
 import type { EscalationRefusal, RosterMember, Session } from "../shared/ipc";
 
@@ -81,7 +81,41 @@ const GATE: React.CSSProperties = {
   height: "100%",
 };
 
-/** The identity half: who this is about, what has been keyed, and the ways out. */
+/**
+ * ── THE ONE SURFACE WHERE `27-F16`'s COLOUR IS GENUINELY APPROPRIATE, DECIDED RATHER THAN
+ * ASSUMED ────────────────────────────────────────────────────────────────────────────────────
+ *
+ * **`27-F16` does not govern this and reading it as if it did is the mistake to avoid.** That FR
+ * is about MONEY — *"money is never coloured by default … colouring the commonest number on
+ * screen spends the whole preattentive channel on the base case"* — and there is no money on this
+ * surface at all. What governs a non-money signal is `27-F14`, whose four-slot allocation names
+ * this claimant **by name**: *"amber — abnormal, attention required — ticket approaching due, low
+ * stock, **pending approval**, unaccepted channel order, sync degraded"*. This is `02-F20`'s
+ * pending approval, which is the literal words of the table.
+ *
+ * So amber is not a stretch here, it is the allocation being spent on exactly what it was
+ * allocated for — and it is the only surface in this app that can say that.
+ *
+ * **Three things it deliberately does NOT do, each refused on a resolving FR.**
+ *
+ * 1. **It is not RED.** `27-F14`'s fault claimants are enumerated — *"ticket overdue, print
+ *    failure, cash variance past threshold, void & refund actions, revoked device"* — and an
+ *    escalation is none of them. `03-F5`'s S1 band owns red on this device, and `27-F11d` makes
+ *    that band's loudness the whole point; a second red region beside it would take that away.
+ * 2. **`Approve` does NOT become the blue primary.** `27-F14` allocates blue to *"any control the
+ *    operator may press"* and `TenderPanel` spends it on one control per surface, so the argument
+ *    for a blue `Approve` is real. It is refused because this pad and `App.tsx`'s unlock pad were
+ *    deliberately brought into agreement — same twelve cells, same confirming act bottom-right —
+ *    and colouring one pad's twelfth key and not the other's teaches two habits for one gesture,
+ *    which is `27-F4`'s muscle-memory break in a new channel.
+ * 3. **The amber goes on the IDENTITY column, not around the whole surface.** Measured: the pad
+ *    is 536 dp and the tightest work area this device is swept at is 540 dp with `03-F5`'s band
+ *    up, so a `Panel` wrapping both columns costs 64 dp the surface does not have and the
+ *    escalation pad — `02-F20`'s only built path — goes off the bottom for the second time. The
+ *    identity column is ~300 dp beside a 536 dp pad, so bounding THAT costs nothing at all. The
+ *    marker lands where the operator is already reading, and the pad keeps every pixel `27-F8`
+ *    gives it.
+ */
 const IDENTITY: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
@@ -110,11 +144,23 @@ const PROMPT: React.CSSProperties = {
   margin: 0,
 };
 
-/** `27-F25` — the payload here is WHO the event will record, so it is the largest word. */
+/**
+ * `27-F25` — the payload here is WHO the event will record, so it is the largest word.
+ *
+ * **Raised from `text-numeric-primary` to `-hero`, which is the size `App.tsx` already uses one
+ * screen earlier and for a reason that applies here verbatim:** *"a name that shrinks between
+ * choosing it and confirming it tells the operator the fact got less important exactly as it
+ * became irreversible."* This surface is `01-F61`'s two-step act performed a second time — the
+ * approver picks a `PersonTile`, then confirms — and it was drawing the confirmation at 28 dp
+ * where the choice was at 48. Two surfaces on one device that draw one act at two sizes teach two
+ * habits (`27-F4`), and `02-F20` makes this the identity the event will carry as `approver`.
+ */
 const NAME: React.CSSProperties = {
-  fontFamily: typography["text-numeric-primary"].fontFamily,
-  fontSize: typography["text-numeric-primary"].fontSize,
-  fontWeight: typography["text-numeric-primary"].fontWeight,
+  fontFamily: typography["text-numeric-hero"].fontFamily,
+  fontSize: typography["text-numeric-hero"].fontSize,
+  lineHeight: `${typography["text-numeric-hero"].lineHeight}px`,
+  fontWeight: typography["text-numeric-hero"].fontWeight,
+  letterSpacing: typography["text-numeric-hero"].letterSpacing,
   margin: 0,
 };
 
@@ -224,12 +270,17 @@ export const ManagerApproval = ({
     return (
       <div style={STEP}>
         {/*
-          Which credential closes it, in the matrix's own words. `02-F20`'s two paths are
-          equivalent, so this deliberately does not claim the remote one is unavailable — it
-          says who can approve, and doc 05 will add the other route without changing the line.
+          `27-F14`'s amber, on the caption of a bounded region — see the note above `IDENTITY` for
+          why this claimant is the FR's own words and why it is not red and not the pad.
         */}
-        <p style={PROMPT}>Manager approval needed — {satisfiedBy.join(" or ")}</p>
-        {/*
+        <Panel title="Approval needed" tone="abnormal">
+          {/*
+            Which credential closes it, in the matrix's own words. `02-F20`'s two paths are
+            equivalent, so this deliberately does not claim the remote one is unavailable — it
+            says who can approve, and doc 05 will add the other route without changing the line.
+          */}
+          <p style={PROMPT}>Manager approval needed — {satisfiedBy.join(" or ")}</p>
+          {/*
           `PersonTile`, the SAME component the unlock door draws its roster with, and that is a
           `27-F4` argument rather than a tidiness one: this is `01-F61`'s identification step
           performed a second time — identify, then PIN — and two surfaces on one device that draw
@@ -238,67 +289,93 @@ export const ManagerApproval = ({
           that HOLDS the permission, so "which of these people is a manager" is the question the
           operator is actually answering.
         */}
-        <div style={ROW}>
-          {approvers.map((member) => (
-            <PersonTile
-              key={member.user_id}
-              name={member.display_name}
-              {...(member.role === null || member.role === undefined
-                ? {}
-                : { staffRole: member.role })}
-              onPress={() => setChosen(member)}
-            />
-          ))}
-        </div>
-        {/*
-          `01-F17` — the sale is never blocked, and neither is the cashier: backing out costs
-          nothing and leaves the counter exactly as it was. The act simply did not happen.
-        */}
-        <Tile posture="counter" label="Cancel" onPress={onCancel} />
-        {refusal === null ? null : (
-          <p style={{ ...PROMPT, color: color["fgColor-status-fault"] }}>
-            {REFUSAL_WORDS[refusal]}
-          </p>
-        )}
+          <div style={ROW}>
+            {approvers.map((member) => (
+              <PersonTile
+                key={member.user_id}
+                name={member.display_name}
+                {...(member.role === null || member.role === undefined
+                  ? {}
+                  : { staffRole: member.role })}
+                onPress={() => setChosen(member)}
+              />
+            ))}
+          </div>
+          {/*
+            `01-F17` — the sale is never blocked, and neither is the cashier: backing out costs
+            nothing and leaves the counter exactly as it was. The act simply did not happen.
+          */}
+          <Tile posture="counter" label="Cancel" onPress={onCancel} />
+          {refusal === null ? null : (
+            <p style={{ ...PROMPT, color: color["fgColor-status-fault"] }}>
+              {REFUSAL_WORDS[refusal]}
+            </p>
+          )}
+        </Panel>
       </div>
     );
   }
 
   return (
     <div style={GATE}>
-      <div style={IDENTITY}>
-        <p style={{ ...PROMPT, color: color["fgColor-muted"] }}>Approving as</p>
-        {/* `02-F20` — whose approval the event will record. She has to see it before submitting. */}
-        <p style={NAME}>{chosen.display_name}</p>
-        {/* One mark per digit; `01-F61` records that shoulder-surfing is the norm at a counter. */}
-        <p
-          style={{
-            ...MARKS,
-            background: color["bgColor-surface-sunken"],
-            border: `1px solid ${color["borderColor-default"]}`,
-          }}
-        >
-          {"•".repeat(pin.length)}
-        </p>
-        {/* `01-F61` — re-choosing costs NOTHING and submits nothing; the counter is charged only
-            when a PIN is actually submitted against a user. `posture="counter"`, beside the
-            identity it undoes, exactly as `App.tsx` places "Not you?". */}
-        <Tile
-          posture="counter"
-          label="Not them?"
-          onPress={() => {
-            setChosen(null);
-            setPin("");
-          }}
-        />
-        {/* `01-F17` — backing out costs nothing. `27-F9` puts it a column away from the pad. */}
-        <Tile posture="counter" label="Cancel" onPress={onCancel} />
-        {refusal === null ? null : (
-          <p style={{ ...PROMPT, color: color["fgColor-status-fault"] }}>
-            {REFUSAL_WORDS[refusal]}
-          </p>
-        )}
-      </div>
+      {/*
+        The marked region is the IDENTITY column and not the whole surface — see the note above
+        `IDENTITY` for the measurement that decides it. Wrapping this column costs no height at
+        all beside a 536 dp pad, and it puts `27-F14`'s amber where the operator's eye already is.
+      */}
+      <Panel title="Approval needed" tone="abnormal">
+        <div style={IDENTITY}>
+          {/*
+            `02-F20` — whose approval the event will record. She has to see it before submitting.
+
+            `Readout` rather than a loose label over a loose name: it is the caption-above-fact
+            pairing every money surface on this device uses and the one `App.tsx` uses for
+            `SIGNING IN AS` one screen earlier. This surface had its own dialect — a muted
+            sentence-case `<p>` — which is the drift `27-F43` describes for pairings left in
+            prose.
+          */}
+          <Readout caption="APPROVING AS">
+            <p style={NAME}>{chosen.display_name}</p>
+          </Readout>
+          {/* One mark per digit; `01-F61` records that shoulder-surfing is the norm at a counter. */}
+          <Readout caption="PIN">
+            <p
+              style={{
+                ...MARKS,
+                background: color["bgColor-surface-sunken"],
+                border: `1px solid ${color["borderColor-default"]}`,
+              }}
+            >
+              {"•".repeat(pin.length)}
+            </p>
+          </Readout>
+          {/* `01-F61` — re-choosing costs NOTHING and submits nothing; the counter is charged only
+              when a PIN is actually submitted against a user. `posture="counter"`, beside the
+              identity it undoes, exactly as `App.tsx` places "Not you?".
+
+              The two ways out share a ROW rather than stacking. They are peers — both leave the
+              ledger untouched — and stacking them read as two primary acts under the name, which
+              is weight the identity should be carrying. `27-F9` is unaffected: both are still a
+              column away from `Clear`, which is the mis-tap this rule is about. */}
+          <div style={{ display: "flex", gap: space["space-2"], flexWrap: "wrap" }}>
+            <Tile
+              posture="counter"
+              label="Not them?"
+              onPress={() => {
+                setChosen(null);
+                setPin("");
+              }}
+            />
+            {/* `01-F17` — backing out costs nothing. `27-F9` puts it a column away from the pad. */}
+            <Tile posture="counter" label="Cancel" onPress={onCancel} />
+          </div>
+          {refusal === null ? null : (
+            <p style={{ ...PROMPT, color: color["fgColor-status-fault"] }}>
+              {REFUSAL_WORDS[refusal]}
+            </p>
+          )}
+        </div>
+      </Panel>
 
       <div style={PAD}>
         {DIGITS.slice(0, 9).map((d) => (
