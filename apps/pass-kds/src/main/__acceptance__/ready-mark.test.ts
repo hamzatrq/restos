@@ -174,6 +174,18 @@ describe("§A 01 §4 — the walk", () => {
     expect(emitted[0]?.line_context.L0?.from_states).toEqual(["confirmed"]);
     expect(emitted[1]?.line_context.L0?.from_states).toEqual(["in_prep"]);
 
+    // ⚠ **AND NOT ONE EVENT CLAIMING `in_prep`.** The dangerous implementation — the one a
+    // helpful session writes when it discovers `confirmed → ready` is illegal — is a SINGLE
+    // `ready` edge whose `from_states` says `in_prep`: legal on its face, so it works, and a
+    // false statement about a state the branch never reached, permanent under `01-F1`.
+    // `line-advance.ts` names it first among the routes that are "still wrong".
+    expect(emitted).toHaveLength(2);
+    expect(emitted.some((e) => e.state === "ready" && emitted.length === 1)).toBe(false);
+    // The `in_prep` edge is REAL — it is emitted, so the branch genuinely reaches that state
+    // before anything claims to leave it. That is the whole difference between a walk and a lie.
+    expect(emitted[0]?.state).toBe("in_prep");
+    expect(emitted[0]?.line_context.L0?.to).toBe("in_prep");
+
     // THE ANCHOR: the real merge engine's own answer, not this module's.
     expect(statesOf(store)).toEqual({ L0: ["ready"], L1: ["ready"] });
     // `preds: []` costs nothing here because `ready` is NON-terminal — `projectLine` takes ≼-max
@@ -322,6 +334,26 @@ describe("§C — the refusals", () => {
     const { mark } = markOn(store);
     mark.mark(ORDER, null);
     expect(mark.mark(ORDER, null)).toEqual({ ok: false, reason: "nothing_to_mark" });
+  });
+
+  it("01-F31 — a DIRECTED contested cell whose first member WOULD advance is still refused", () => {
+    // ⚠ **THIS FIXTURE EXISTS BECAUSE THE MUTANT ABOVE SURVIVED.** The arity guard
+    // (`states.length !== 1`) is MASKED by the done-check for every contested cell `merge.ts` can
+    // actually produce: a contested cell is always all-TERMINAL, so relaxing the guard to take
+    // `states[0]` still hits `KITCHEN_DONE` and still refuses. The store-driven test in this
+    // section therefore could not tell the guard from its absence — the same masking
+    // `apps/pos-electron`'s M8 row records one module over.
+    //
+    // A multi-state cell whose FIRST member would advance legally is not something the fold emits
+    // today, and that is exactly why it has to be built by hand: the guard has to hold if the fold
+    // ever renders one, and `01-F31`'s rule — *"a fold never picks a winner"* — is about the
+    // emitter not picking one either.
+    const contested = {
+      A: { item_id: "i", qty: 1, unit_price_paisa: 1, states: ["in_prep", "ready"] },
+    };
+    expect(readyEdgesFor({ order_id: ORDER, json_lines: JSON.stringify(contested) }, null)).toEqual(
+      [],
+    );
   });
 
   it("readyEdgesFor is pure — it decides from a projection and needs no store", () => {

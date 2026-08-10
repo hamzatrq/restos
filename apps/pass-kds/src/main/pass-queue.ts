@@ -1,5 +1,5 @@
 import { ORDER_LINE_STATES, type OrderLineState, TERMINAL_LINE_STATES } from "@restos/domain";
-import type { DeviceStore, KitchenQueueRow, OpenOrderRow } from "@restos/sync-client";
+import type { DeviceStore, OpenOrderRow } from "@restos/sync-client";
 import type { AgingPolicy } from "./aging";
 
 /**

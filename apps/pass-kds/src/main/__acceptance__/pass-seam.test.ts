@@ -68,9 +68,23 @@ describe("§B 03-F13 — the queue reaches the renderer, on BRANCH time", () => 
   });
 
   it("01-F43 — the age clock is BRANCH time and not this device's raw clock", () => {
-    // The whole of standing law 2 on this surface, in one expression. A `Date.now()` here would
-    // make every age on the pass a function of one device's clock rather than the branch's.
-    expect(MAIN).toContain("wallClock.now() + store.branchTimeStatus().offset_ms");
+    // The whole of standing law 2 on this surface, in one expression: a raw `wallClock.now()` here
+    // would make every age on the pass a function of ONE device's clock rather than the branch's.
+    //
+    // ⚠ **THE FIRST DRAFT OF THIS ASSERTION SURVIVED ITS OWN MUTANT, and the reason is worth more
+    // than the row it replaced.** It read `expect(MAIN).toContain("wallClock.now() + store.branch…")`
+    // — and that string appears TWICE in this host, on the age clock and on `businessDay`. So the
+    // mutant that dropped the offset from the QUEUE's clock left the assertion green, matching the
+    // other occurrence. The guard was built correctly and pointed one call site away from the one
+    // it existed to hold, which is the round-3 law's shape on a source read.
+    //
+    // It is anchored on the ARGUMENT NAME now, so the two call sites are distinguishable.
+    expect(MAIN).toContain("now: () => wallClock.now() + store.branchTimeStatus().offset_ms");
+    // …and the business day takes the same correction, asserted separately for the same reason.
+    expect(MAIN).toContain("businessDate(wallClock.now() + store.branchTimeStatus().offset_ms)");
+    // No raw device clock reaches either. `01-F45` bans `device_created_at` from a read model and
+    // this is the host-side analogue: a bare `Date.now()` on this surface is the same defect.
+    expect(MAIN).not.toContain("Date.now()");
   });
 });
 
