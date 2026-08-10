@@ -163,6 +163,42 @@ const PANELS = [
    * `COUNTED Rs 0` echo going under `03-F5`'s band on Cash.
    */
   { label: "netbook-1024", width: 1024, height: 600, diagonalIn: 10.1, ships: false },
+  /**
+   * # THE THREE ROWS THAT FILL `130–174 mm`, THE BAND NOBODY HAD EVER RENDERED
+   *
+   * `window-options.ts` said so itself, in a warning it kept rather than papered over: height
+   * was measured at 126, 130, 174 and 179 mm — *"so **nothing between 130 mm and 174 mm has ever
+   * been rendered**, and 134 sits inside that gap … a panel in either gap gets the floor's
+   * verdict on an arithmetic argument, not on a screenshot."*
+   *
+   * A floor is a claim about the boundary between hardware that works and hardware that does
+   * not, and the boundary was the one place with no measurements. These three put a rendered
+   * panel at **144, 156 and 166 mm**, which brackets both the old floor (134) and the new one.
+   *
+   * They are ordinary laptop and tablet glass rather than invented viewports, and each one is
+   * chosen to land on a different side of a mode boundary so the sweep exercises the arrangement
+   * a real device of that size would actually get:
+   *
+   * | row | glass | mode | what it probes |
+   * |---|---|---|---|
+   * | `tablet-11.6` | 257 × 144 | `compact` | 144 mm — under `counter`'s 150 mm on BOTH axes by a small margin |
+   * | `laptop-12.5` | 277 × 156 | `counter` | **the tightest panel that is still `counter`** — 6 mm over the height threshold |
+   * | `laptop-13.3-hd` | 294 × 166 | `counter` | the counter arrangement with a little room, between 156 and 179 |
+   *
+   * **`laptop-12.5` is the load-bearing one.** `SURFACE_MODE_MIN_MM.counter.heightMm` is an
+   * assertion that the *counter* arrangement fits 150 mm of glass, and this row is the only
+   * thing in the repo that renders it near there. If the counter arrangement ever grows past
+   * what 156 mm holds, this reddens and the threshold is wrong — which is exactly the failure a
+   * threshold set by arithmetic cannot report on itself.
+   *
+   * Note `laptop-13.3-hd` shares its 13.3″ diagonal with `laptop-1280` and is **different
+   * glass**: 1366×768 is 16:9 and 1280×800 is 16:10, so the same diagonal gives 294 × 166 and
+   * 286 × 179. That is `27-F11c` from a third direction — same inches, different room — and it
+   * is why the twin check keys on the glass and not on the diagonal.
+   */
+  { label: "tablet-11.6", width: 1366, height: 768, diagonalIn: 11.6, ships: true },
+  { label: "laptop-12.5", width: 1920, height: 1080, diagonalIn: 12.5, ships: true },
+  { label: "laptop-13.3-hd", width: 1366, height: 768, diagonalIn: 13.3, ships: true },
   { label: "desktop-24", width: 1920, height: 1080, diagonalIn: 24, ships: true },
   { label: "ultrawide-32", width: 3840, height: 1080, diagonalIn: 32, ships: true },
 ] as const;
