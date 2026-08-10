@@ -304,8 +304,15 @@ export const ManagerApproval = ({
           {/*
             `01-F17` — the sale is never blocked, and neither is the cashier: backing out costs
             nothing and leaves the counter exactly as it was. The act simply did not happen.
+
+            In a row of its own so the tile is CONTENT-SIZED. `Panel` is a flex column, so a bare
+            child stretches to the region's width — found by looking at the gate's screenshot,
+            where `Cancel` ran the full width of the card and read as the surface's primary act
+            rather than as its way out.
           */}
-          <Tile posture="counter" label="Cancel" onPress={onCancel} />
+          <div style={{ display: "flex" }}>
+            <Tile posture="counter" label="Cancel" onPress={onCancel} />
+          </div>
           {refusal === null ? null : (
             <p style={{ ...PROMPT, color: color["fgColor-status-fault"] }}>
               {REFUSAL_WORDS[refusal]}
