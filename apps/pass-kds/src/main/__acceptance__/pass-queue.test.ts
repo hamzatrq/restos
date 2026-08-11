@@ -26,9 +26,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { resolveAging } from "@restos/device-config";
 import { type DeviceStore, openStore } from "@restos/sync-client";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveAging } from "../aging";
 import { byConfirmTime, type PassTicket, passQueue } from "../pass-queue";
 
 const ORG = "0199aaaa-0000-7000-8000-000000000001";

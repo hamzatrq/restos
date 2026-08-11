@@ -22,9 +22,9 @@
 //   18 §5/§9  server-side authorization always; the renderer is the untrusted end of the bridge.
 
 import { readFileSync } from "node:fs";
+import { resolveAging } from "@restos/device-config";
 import type { DeviceStore } from "@restos/sync-client";
 import { describe, expect, it, vi } from "vitest";
-import { resolveAging } from "../../../../pass-kds/src/main/aging";
 import {
   type AuthorizedWrites,
   authorizeWrites,

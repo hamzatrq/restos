@@ -168,15 +168,17 @@ export type GatewayDeps = {
    * > 03-F47 … Thresholds stay org-configurable per order type (defaults: dine-in 10/20,
    * > delivery 15/25).
    *
-   * This is `AgingPolicy.thresholdsFor` from `apps/pass-kds/src/main/aging.ts`, imported **across
-   * the app boundary on purpose**. `03-F14` describes ONE org policy and `05-F1` alarms the
-   * manager off *"the red aging threshold (03-F14)"*, so a counter reading neutral while the pass
-   * reads red and the console alarms is not a cosmetic divergence — it is three surfaces
-   * disagreeing about whether the food is late. A copy would also duplicate a **judgement call**
-   * the FRs do not state (that module's pinned reading for takeaway, pickup and an absent type),
-   * which is the one thing worst suited to living in two places. `apps/pass-kds` already imports
-   * two pure `00 §7` resolvers out of this directory for exactly this reason and records the
-   * shared-module refactor as OWED; this joins that debt rather than creating a second kind.
+   * This is `AgingPolicy.thresholdsFor` from `@restos/device-config`. It was `apps/pass-kds`'s
+   * and was imported **across the app boundary** until August 2026, when `18 §2`'s MUST (*"Apps
+   * NEVER import ... other apps"*) and `DEC-ARCH-001`'s EXTRACT-at-the-second-consumer rule moved
+   * it into a package; the counter and the pass now read one table over an `apps → packages` edge.
+   * The reason for sharing rather than copying is unchanged and is the whole point: `03-F14`
+   * describes ONE org policy and `05-F1` alarms the manager off *"the red aging threshold
+   * (03-F14)"*, so a counter reading neutral while the pass reads red and the console alarms is
+   * not a cosmetic divergence — it is three surfaces disagreeing about whether the food is late.
+   * A copy would also duplicate a **judgement call** the FRs do not state (that module's pinned
+   * reading for takeaway, pickup and an absent type), which is the one thing worst suited to
+   * living in two places.
    *
    * **REQUIRED, on `catalogRefusal`'s and `panelFit`'s precedent in this same type:** an optional
    * member of an options bag that no call site passes is `seams:check` Rule B's shape and half

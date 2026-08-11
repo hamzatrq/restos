@@ -1,19 +1,20 @@
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  AGING_THRESHOLDS_ENV,
+  DEV_IDENTITY,
+  describeAging,
+  describeDeviceIdentity,
+  describePanelDensity,
+  measurePhysicalWidthMm,
+  resolveAging,
+  resolveDeviceIdentity,
+  resolvePanelDensity,
+} from "@restos/device-config";
 import { businessDate } from "@restos/domain";
 import { openStore, wallClock } from "@restos/sync-client";
 import { app, BrowserWindow, ipcMain, screen } from "electron";
-import {
-  DEV_IDENTITY,
-  describeDeviceIdentity,
-  resolveDeviceIdentity,
-} from "../../../pos-electron/src/main/device-identity";
-import {
-  describePanelDensity,
-  measurePhysicalWidthMm,
-  resolvePanelDensity,
-} from "../../../pos-electron/src/main/panel-density";
 import {
   CHANNELS,
   MarkReadyRequestSchema,
@@ -22,7 +23,6 @@ import {
   PassTicketSchema,
 } from "../shared/ipc";
 import { describeCapacity } from "../shared/ticket-capacity";
-import { AGING_THRESHOLDS_ENV, describeAging, resolveAging } from "./aging";
 import { passQueue } from "./pass-queue";
 import { createReadyMark } from "./ready-mark";
 import { describeReadySignal, READY_SIGNAL_OWNER_ENV, resolveReadySignal } from "./ready-signal";
@@ -35,24 +35,20 @@ import { passWindowOptions } from "./window-options";
  * `18 §9`'s process split: this process owns SQLite and `sync-client`; the renderer has no Node
  * access and reaches exactly the four members of `shared/ipc.ts`'s bridge.
  *
- * ## ⚠ TWO MODULES ARE IMPORTED ACROSS THE APP BOUNDARY, AND IT IS DELIBERATE
+ * ## THE THREE SHARED RESOLVERS ARE `@restos/device-config` NOW — THE APP→APP EDGE IS GONE
  *
- * `device-identity.ts` and `panel-density.ts` come from `apps/pos-electron/src/main/`. Both are
- * **pure `00 §7` resolvers** — they read an environment record and a display fact and return a
- * value with its source — and neither touches Electron, a store or a screen.
+ * `resolveDeviceIdentity`, `resolvePanelDensity` and `resolveAging` used to be imported across the
+ * app boundary — the first two out of `apps/pos-electron/src/main/`, and `aging.ts` out of THIS
+ * directory into the counter, which made the two apps a cycle. `18 §2` states the dependency
+ * direction as a MUST (*"Apps NEVER import ... other apps"*) and `DEC-ARCH-001` rules EXTRACT at
+ * the moment a module acquires its second consumer, so all three moved into a package and this is
+ * now an ordinary `apps → packages` edge.
  *
- * Copying them was the obvious alternative and is refused on this repo's own precedent: two
- * interpretations of one rule diverge, and then the counter and the pass screen disagree about
- * what `RESTOS_PANEL_PPI` means or about whether a padded `RESTOS_DEVICE_ID` refuses. `turbo.json`
- * records the same argument for the ESC/POS byte→page walk (*"two interpretations of one command
- * set is the defect the shared module exists to prevent"*), and `03-F40`'s two incompatible sensor
- * bit layouts is the corpus's own instance of what it costs.
- *
- * **What it costs, stated:** this app's build now depends on two files in a package it does not
- * declare a dependency on. The honest fix is to move both into a shared module — most likely
- * `packages/ui` for the density (it is the consumer of `27-F68`) and a new host-support module for
- * the identity — and that is a cross-app refactor with `apps/pos-electron`'s suites in its blast
- * radius, which is scheduled consolidation work rather than a drive-by (`24 §3b`). **OWED.**
+ * Copying was the alternative and stays refused for the reason recorded there: two interpretations
+ * of one rule diverge, and then the counter and the pass screen disagree about what
+ * `RESTOS_PANEL_PPI` means, about whether a padded `RESTOS_DEVICE_ID` refuses, or — worst —
+ * about whether the food is late (`05-F1` alarms the manager off `03-F14`'s red threshold, so
+ * that one is three surfaces disagreeing, not two).
  *
  * ## `02-F19` AND THE THING THIS APP DOES NOT HAVE
  *

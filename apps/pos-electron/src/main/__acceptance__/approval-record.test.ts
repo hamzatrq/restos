@@ -128,11 +128,11 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { resolveAging } from "@restos/device-config";
 import { parseEvent } from "@restos/domain";
 import type { BlockedCursor, DeviceStore } from "@restos/sync-client";
 import { openStore } from "@restos/sync-client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resolveAging } from "../../../../pass-kds/src/main/aging";
 import type { AppendRequest, AppendResult, Session } from "../../shared/ipc";
 import { recordApprovals } from "../approval-record";
 import {

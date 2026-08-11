@@ -5,9 +5,9 @@
 // time, 26 §8 one fold implementation. Owed an independent oracle pass with the rest of
 // Wave 1's UI work.
 
+import { resolveAging } from "@restos/device-config";
 import type { BlockedCursor, DeviceStore } from "@restos/sync-client";
 import { describe, expect, it, vi } from "vitest";
-import { resolveAging } from "../../../../pass-kds/src/main/aging";
 import { createGateway, type GatewayDeps } from "../gateway";
 
 const JSON_LINES = JSON.stringify({

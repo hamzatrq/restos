@@ -38,9 +38,9 @@
 //       `catalog-seam.test.ts` §D, `kot-printing.test.ts` §G).
 
 import { readFileSync } from "node:fs";
+import { resolveAging } from "@restos/device-config";
 import type { DeviceStore } from "@restos/sync-client";
 import { describe, expect, it, vi } from "vitest";
-import { resolveAging } from "../../../../pass-kds/src/main/aging";
 import { createGateway, type GatewayDeps } from "../gateway";
 
 const AYESHA = { user_id: "user-ayesha", display_name: "Ayesha" } as const;

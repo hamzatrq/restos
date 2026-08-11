@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
 import {
   describePanelDensity,
   measurePhysicalWidthMm,
@@ -8,7 +7,8 @@ import {
   ppiFromWidthMm,
   REFERENCE_COUNTER_DIAGONAL_IN,
   resolvePanelDensity,
-} from "../panel-density";
+} from "@restos/device-config";
+import { describe, expect, it } from "vitest";
 
 /**
  * # `27-F68` / `00 §7` layer 3 — the panel's density, and the seam it arrives on

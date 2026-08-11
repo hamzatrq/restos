@@ -16,9 +16,9 @@
 // PROVENANCE: written alongside the implementation, like `gateway.test.ts` beside it, and owed
 // the same independent oracle pass.
 
+import { resolveAging } from "@restos/device-config";
 import type { DeviceStore } from "@restos/sync-client";
 import { describe, expect, it, vi } from "vitest";
-import { resolveAging } from "../../../../pass-kds/src/main/aging";
 import { createGateway, type GatewayDeps } from "../gateway";
 
 const JSON_LINES = JSON.stringify({

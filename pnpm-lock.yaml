@@ -112,6 +112,9 @@ importers:
 
   apps/pass-kds:
     dependencies:
+      '@restos/device-config':
+        specifier: workspace:*
+        version: link:../../packages/device-config
       '@restos/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -172,6 +175,9 @@ importers:
 
   apps/pos-electron:
     dependencies:
+      '@restos/device-config':
+        specifier: workspace:*
+        version: link:../../packages/device-config
       '@restos/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -255,6 +261,8 @@ importers:
         version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(postgres@3.4.9)
 
   packages/config: {}
+
+  packages/device-config: {}
 
   packages/domain:
     dependencies:

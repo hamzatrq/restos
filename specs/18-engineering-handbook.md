@@ -54,6 +54,10 @@ restos/
     auditor/           # 20 §4.2's Auditor: the READ-ONLY refold of one org's
                        # ledger, shared by services/jobs (the nightly host) and
                        # services/sync-gateway (DEC-ARCH-001)
+    device-config/     # 00 §7 configuration a DEVICE HOST resolves at boot —
+                       # 03-F14 aging thresholds, 01-F2 identity, 27-F68 panel
+                       # density — shared by pos-electron and pass-kds
+                       # (DEC-ARCH-001 applied to an apps → apps edge)
     escpos/            # ESC/POS encoder + transport interfaces (§11)
     ui/                # RN component kit + design tokens (web consumes tokens only)
     config/            # tsconfig base, Biome config, env validation factory

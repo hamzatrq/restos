@@ -38,9 +38,9 @@
 // that keeps every assertion in that file, including `expect(arg.actor_user_id).toBe("user-1")`,
 // asserting exactly what it asserts now. It is a rename at the dep, not a weakening.
 
+import { resolveAging } from "@restos/device-config";
 import type { DeviceStore } from "@restos/sync-client";
 import { describe, expect, it, vi } from "vitest";
-import { resolveAging } from "../../../../pass-kds/src/main/aging";
 import { createGateway, type GatewayDeps } from "../gateway";
 
 const AYESHA = { user_id: "user-ayesha", display_name: "Ayesha" } as const;
