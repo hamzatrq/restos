@@ -68,9 +68,9 @@
 
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { defineEnv } from "@restos/config";
+import { defineEnv, redactedDsn } from "@restos/config";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { DATABASE_URL_DEFAULT, redactedDsn } from "./database-url.js";
+import { DATABASE_URL_DEFAULT } from "./database-url.js";
 import { type GatewayDb, REVOCATION_SWEEP_INTERVAL_MS } from "./gateway.js";
 import { readRegistryRow, revokeDevice } from "./registry.js";
 

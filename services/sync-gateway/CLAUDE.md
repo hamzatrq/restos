@@ -173,29 +173,34 @@
     defect in an operator's sentence instead of a test's. Mutant R5 is that row.
   - Everything goes to **stdout** here, unlike `provision-device`, whose prose is on stderr only
     because stdout carries a credential. A revocation produces no token, so this follows `migrate.ts`.
-- **THE AUDITOR IS SCHEDULED NOW, AND THIS PACKAGE HAS AN `exports` MAP FOR THE FIRST TIME
-  (August 2026).** `runAuditor` had **zero production callers** from Wave 0 — AGENTS.md's recurring
-  defect, and `20 §4.2` puts the Auditor in Wave 0 *"with the kernel, not later"*, so it was overdue
-  rather than deferred. `services/jobs` now runs it per org on a BullMQ repeatable and the debt
-  marker on `runAuditor` is **deleted** (a marker on something reached fails `seams:check`).
-  - ⚠ **That import crosses a service boundary, which `18 §2`'s dependency-direction MUST forbids,
-    and the ruling is OWED.** `services/jobs/src/index.ts`'s header carries the full argument and
-    the two rejected alternatives; the correct end state is `auditor.ts` moved into a package (its
-    substance already is — `@restos/domain` + `@restos/sync-client/fold-engine`), which is a
-    PROTECTED-path restructure across ~15 files plus the purity harness and wants its own spec PR.
-  - **`exports` is `{ "./auditor", "./database-url" }` and nothing else** — the whole package used
-    to be importable. It is not decoration: `check-seams.mjs` resolves `@restos/*` **only** through
-    an `exports` field, so without the map the new caller would be invisible to the rail and
-    `runAuditor` would still read as unreached. `redactedDsn` is imported rather than re-typed in
-    the worker for the reason this file already gives for `REVOCATION_SWEEP_INTERVAL_MS`: a second
-    copy is a second interpretation of which part of a DSN may reach a log store (`18 §5`).
+- **THE AUDITOR IS SCHEDULED, AND IT NO LONGER LIVES HERE (August 2026).** `runAuditor` had **zero
+  production callers** from Wave 0 — AGENTS.md's recurring defect, and `20 §4.2` puts the Auditor in
+  Wave 0 *"with the kernel, not later"*, so it was overdue rather than deferred. `services/jobs` now
+  runs it per org on a BullMQ repeatable, and that second consumer is what moved the file:
+  **`DEC-ARCH-001` (RULED) put it in `packages/auditor`**, the only home both services may import
+  under `18 §2`. For the window in between, this package published an `exports` map
+  (`./auditor`, `./database-url`) so the cross-service edge was at least enumerated; **that field is
+  now DELETED and this service publishes nothing again, like every other one.**
+  - **`src/index.ts` still re-exports `runAuditor` and its four public types, now from
+    `@restos/auditor` — that is load-bearing, not tidiness.** `__acceptance__/auditor-builders.ts`
+    reads the Auditor off this barrel (`import * as gatewayModule from "../index.js"`), so ten
+    suites did not move with the file and this service stayed at 330/330 through the move.
+    Re-pointing those suites at the package instead would leave every one of them green while
+    silently narrowing this service's public surface — `services/jobs`' `§F` is the only assertion
+    that survives that repair.
+  - **`redactedDsn` went to `@restos/config` on the same ruling; `DATABASE_URL_DEFAULT` stayed
+    here.** One is a shared interpretation of which part of a DSN may reach a log store (`18 §5`) —
+    a second copy is the hazard this file already names for `REVOCATION_SWEEP_INTERVAL_MS`. The
+    other is a fact about THIS service's boot: a shared default would hand every service a database
+    it never named.
   - **Landing the caller made a previously-INVISIBLE gap visible, and that is the rail earning its
     keep.** With no shipping constructor, Rule B had no candidate on `runAuditor`; with one, it
     reported `read_model` as an optional seam nothing supplies — `20 §4.2`'s **read-model diff leg**,
-    the FR's own headline sentence. It is now a recorded debt at the member's declaration, because
-    the cloud maintains no incrementally-maintained projection to diff against (`01-F7`'s row shapes
-    are projected device-side by `@restos/sync-client`; this service projects only the catalog), and
-    diffing a snapshot this process refolded itself would always pass.
+    the FR's own headline sentence. It is a recorded debt at the member's declaration (now in
+    `packages/auditor/src/auditor.ts`), because the cloud maintains no incrementally-maintained
+    projection to diff against (`01-F7`'s row shapes are projected device-side by
+    `@restos/sync-client`; this service projects only the catalog), and diffing a snapshot the
+    Auditor's own host refolded would always pass.
   - ⚠ **That marker reds one assertion in `services/jobs`'s acceptance suite** (`§H` bans the marker
     token anywhere in `auditor.ts`, not just on `runAuditor`). Measured both ways, the conflict is
     real and unavoidable; see `services/jobs/CLAUDE.md` before changing either side.

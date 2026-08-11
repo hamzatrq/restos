@@ -7,11 +7,11 @@
 // (no error wire kind exists in the closed PROTOCOL.md set, assumption 10).
 import { pathToFileURL } from "node:url";
 import websocket from "@fastify/websocket";
-import { defineEnv } from "@restos/config";
+import { defineEnv, redactedDsn } from "@restos/config";
 import { createFrameCodec } from "@restos/sync-protocol";
 import { drizzle } from "drizzle-orm/postgres-js";
 import Fastify, { type FastifyInstance } from "fastify";
-import { DATABASE_URL_DEFAULT, redactedDsn } from "./database-url.js";
+import { DATABASE_URL_DEFAULT } from "./database-url.js";
 import { createGateway, REVOCATION_SWEEP_INTERVAL_MS } from "./gateway.js";
 import { pendingMigrations } from "./migrate.js";
 import { registerPublishRoutes } from "./publish-http.js";

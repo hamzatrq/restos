@@ -1,9 +1,14 @@
 /**
- * The DSN facts shared by this service's TWO entry points — `server.ts` (the running gateway) and
- * `migrate.ts` (the deploy step). They live here rather than in either one because a second copy of
- * the default would let the two commands point at different databases while both report success,
- * and "which database" is precisely the question that cost real time when it had no answer
- * (`server.ts`'s boot lines exist for it).
+ * The DSN fact shared by this service's entry points — `server.ts` (the running gateway),
+ * `migrate.ts` (the deploy step) and the two device commands. It lives here rather than in any one
+ * of them because a second copy of the default would let the commands point at different databases
+ * while all reporting success, and "which database" is precisely the question that cost real time
+ * when it had no answer (`server.ts`'s boot lines exist for it).
+ *
+ * `redactedDsn` used to live here too and now lives in `@restos/config` (`DEC-ARCH-001`): it
+ * acquired a second consumer in `services/jobs`, and one redaction is one interpretation of which
+ * part of a DSN may reach a log store. The default did NOT go with it — see below for why it is
+ * this service's fact and not a shared one.
  */
 
 /**
@@ -22,16 +27,3 @@
  * anyone anything; a default secret would.
  */
 export const DATABASE_URL_DEFAULT = "postgres://postgres:postgres@localhost:5432/restos";
-
-/**
- * The DSN with its password removed, for anything this service prints. `18 §5` logs are structured
- * JSON that ends up in a log store; a connection password is the one part of a DSN that must never
- * reach one, and the host/port/database — the part an operator actually needs to diagnose "why can
- * it not reach the database" — are the parts kept.
- */
-export const redactedDsn = (raw: string): string => {
-  const url = URL.parse(raw);
-  if (url === null) return "(unparseable DATABASE_URL)";
-  if (url.password !== "") url.password = "*****";
-  return url.toString();
-};

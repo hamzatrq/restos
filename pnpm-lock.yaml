@@ -242,6 +242,18 @@ importers:
 
   apps/waiter: {}
 
+  packages/auditor:
+    dependencies:
+      '@restos/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@restos/sync-client':
+        specifier: workspace:*
+        version: link:../sync-client
+      drizzle-orm:
+        specifier: 0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(postgres@3.4.9)
+
   packages/config: {}
 
   packages/domain:
@@ -443,12 +455,12 @@ importers:
 
   services/jobs:
     dependencies:
+      '@restos/auditor':
+        specifier: workspace:*
+        version: link:../../packages/auditor
       '@restos/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@restos/sync-gateway':
-        specifier: workspace:*
-        version: link:../sync-gateway
       bullmq:
         specifier: 5.81.3
         version: 5.81.3
@@ -483,6 +495,9 @@ importers:
       '@fastify/websocket':
         specifier: 11.3.0
         version: 11.3.0
+      '@restos/auditor':
+        specifier: workspace:*
+        version: link:../../packages/auditor
       '@restos/config':
         specifier: workspace:*
         version: link:../../packages/config

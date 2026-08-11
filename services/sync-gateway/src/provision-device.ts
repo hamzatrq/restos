@@ -54,10 +54,10 @@
 
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { defineEnv } from "@restos/config";
+import { defineEnv, redactedDsn } from "@restos/config";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { DEVICE_TOKEN_TTL_MS, issueDeviceToken } from "./auth.js";
-import { DATABASE_URL_DEFAULT, redactedDsn } from "./database-url.js";
+import { DATABASE_URL_DEFAULT } from "./database-url.js";
 import type { GatewayDb } from "./gateway.js";
 import { readRegistryRow, recordTokenExpiry, registerDevice } from "./registry.js";
 
