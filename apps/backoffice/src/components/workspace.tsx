@@ -21,12 +21,18 @@ import { strings } from "../lib/strings";
 import { cn } from "../lib/utils";
 import { CatalogScreen } from "./catalog-screen";
 import { DeviceList } from "./device-list";
+import { OwnerSummary } from "./owner-summary";
 
-type Section = "menu" | "devices";
+type Section = "menu" | "devices" | "summary";
 
+/**
+ * `14-F31` APPENDED the third tab and did not reorder the first two. `27-F4`'s positional contract
+ * binds muscle memory, so a new section goes after the sections that exist — never between them.
+ */
 const TABS: readonly { readonly id: Section; readonly label: string }[] = [
   { id: "menu", label: strings.nav.menu },
   { id: "devices", label: strings.nav.devices },
+  { id: "summary", label: strings.nav.summary },
 ];
 
 export const Workspace = (): ReactNode => {
@@ -75,7 +81,13 @@ export const Workspace = (): ReactNode => {
       </nav>
       {/* Mounted, not hidden: the inactive section's queries should not run, and a hidden device
           list would go on polling a fleet nobody is looking at. */}
-      {section === "menu" ? <CatalogScreen /> : <DeviceList />}
+      {section === "menu" ? (
+        <CatalogScreen />
+      ) : section === "devices" ? (
+        <DeviceList />
+      ) : (
+        <OwnerSummary />
+      )}
     </div>
   );
 };

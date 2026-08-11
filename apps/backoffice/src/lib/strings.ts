@@ -148,10 +148,134 @@ export const strings = {
       "kitchen station — are recorded as a catalog version only (14-F3, owed).",
   },
 
-  /** The two sections this app has. `14-F12`/`14-F13` gave it a second one. */
+  /**
+   * The sections this app has. `14-F12`/`14-F13` gave it a second one; `14-F31` a third.
+   *
+   * **Appended, never inserted.** `27-F4`'s positional contract is about muscle memory: the two
+   * tabs that existed keep their positions and their order, and the new one goes after them.
+   */
   nav: {
     menu: "Menu",
     devices: "Devices",
+    summary: "Summary",
+  },
+
+  /**
+   * `14-F31` — the nightly owner summary as a READ-ONLY desk view, rendering `12-F10`'s blocks.
+   *
+   * **Four of these sentences exist because the honest answer is an absence**, and `00 §5.7` makes
+   * saying so the requirement rather than a shortfall: the missing `12-F12` narrative, an open
+   * shift's four nulls, a truncated window, and a branch that has never been heard from. None of
+   * them may render as a zero — a zero is a measurement, and `12-F11` states the rule for its own
+   * block in the corpus's words: never guessed, never shown as zero.
+   *
+   * ⚠ **The word "provisional" appears in exactly ONE of these strings** — `dayOpen`, which is
+   * `12-F9`'s banner. `01-F44`'s raw-clock stamps are called a raw device clock and NOT
+   * "provisional stamps", even though the ledger's own marker is `branch_provisional`: two
+   * different facts sharing one word on one screen is how an owner reads "some events had odd
+   * clocks" as "the day is not closed yet".
+   */
+  summary: {
+    heading: "Nightly summary",
+    businessDay: "Business day",
+    /** `12-F13` — history is browsable by date, and the day shown is the one the SERVER answered. */
+    dayShown: "Figures for the business day",
+    branch: "Branch",
+    /** `12-F22` — the roll-up is the default view; a branch is a drill-in from it. */
+    allBranches: "Every branch in this organisation",
+    branchHelp:
+      "Only branches this answer covers are offered. The scope is the server's (12-F2), so a " +
+      "branch missing here is one this sign-in is not authorised to read.",
+    /**
+     * `12-F12`. The narrative is the doc 13 nightly brief, doc 13 is Wave 4, and its service is a
+     * scaffold stub — so there is no brief. Unlike every other absence on this screen this one
+     * does NOT arrive in the server's omission list, because that list covers blocks of numbers.
+     */
+    noNarrative:
+      "No narrative. 12-F12 makes this summary's words the doc 13 nightly brief, and doc 13 is " +
+      "not built — so there is no brief to render and none is written here. What follows is the " +
+      "numbers, and only the numbers.",
+    notAnswered: "This summary was not answered.",
+    notAnsweredHelp:
+      "No figure is shown because none was received. Nothing on this screen is estimated in the " +
+      "meantime, and nothing has changed.",
+
+    sales: {
+      heading: "Sales",
+      total: "Billed",
+      orders: "orders",
+      byChannel: "By channel",
+      empty: "No order was rung on any channel.",
+    },
+
+    /**
+     * `12-F10` bullet 2. The row is per SHIFT because that is what the drawer count is per — one
+     * cashier can work two shifts and two cashiers can share a day.
+     */
+    cash: {
+      heading: "Cash, expected against counted",
+      help: "One row per shift, as the drawer was counted at close (02-F23).",
+      expected: "Expected",
+      counted: "Counted",
+      variance: "Variance",
+      /** Four nulls on one row: no expected figure, no count, no variance, no cashier. */
+      notCounted: "Still open — not counted yet",
+      cashierNotRecorded: "cashier not recorded",
+      empty: "No shift was opened.",
+    },
+
+    items: {
+      heading: "Top items by revenue",
+      sold: "sold",
+      empty: "No item was sold.",
+    },
+
+    hourly: {
+      heading: "Hourly sales",
+      help: "One bucket per hour of the business day, labelled with the wall clock (01-F46).",
+      empty: "No hour of this day carries an order.",
+    },
+
+    /**
+     * `00 §5.7` — a surface reports what is true, including about itself. Never called an alert:
+     * these are the ledger's own fold facts, and `13-F14a`'s alert classes cannot fire at all
+     * (the server's own omission list says why).
+     */
+    honesty: {
+      heading: "What this summary knows about itself",
+      events: "Events read for this business day:",
+      deviceClock: "Events stamped on a raw device clock (01-F44):",
+      openShifts: "Shifts with money still in an open drawer:",
+      allDaysClosed: "Every branch closed its day.",
+      dayOpen: "A branch has not closed its day, so every figure here is provisional (12-F9).",
+      truncated:
+        "The read hit the service's row cap, so this day is incomplete: every total below is a " +
+        "floor and not the whole.",
+      whole: "The whole business day was read.",
+      anomalies: "The fold reported:",
+      noAnomalies: "The fold reported nothing odd.",
+    },
+
+    omissions: {
+      heading: "Not in this report",
+      help:
+        "What this product cannot answer today, with the requirement that decides each absence. " +
+        "A block named here is not a zero — it is not measured.",
+      none: "Every block this report covers was answered.",
+    },
+
+    /** `12-F8` — the age is the SERVER's, computed from the two instants it sends. */
+    sync: {
+      heading: "Data age",
+      lastSynced: "Last synced",
+      minutesAgo: "minutes ago",
+      hoursAgo: "hours ago",
+      daysAgo: "days ago",
+      live: "Live — an event reached the cloud within the last minute.",
+      never:
+        "Nothing has ever been received for this day, so there is no age to state and nothing " +
+        "here is live.",
+    },
   },
 
   /**
