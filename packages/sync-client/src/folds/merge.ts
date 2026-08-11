@@ -786,6 +786,39 @@ export const createMergeEngine = (): MergeEngine => {
         // order row.
         return;
       }
+      case "order.rejected":
+      case "order.parked":
+      case "order.unparked": {
+        // `02-F9`/`06-F20`'s rejection and `02-F4`'s park pair, registered August 2026 — all three
+        // were `01 §4` vocabulary with no payload schema, so `01-F4` made them unemittable and a
+        // cashier could neither reject a cloud order nor set one aside. Consumed and
+        // **projection-inert**, and like the escalatable writes above that is a stated DEBT rather
+        // than a settled disposition: `26 §7` makes a merge rule an ORACLE-PINNED decision, not an
+        // implementer's, and what `01-F4` was blocking was the EMIT.
+        //
+        // What is owed, named so it is not discovered in the field:
+        //   · `order.rejected` — a rejected order goes on appearing in every till's `open_orders`.
+        //     Genuinely UNDECIDED rather than merely unbuilt: `06-F20`'s consumer is the storefront
+        //     status page, a cloud read model on the other plane (`18 §6`), and `01 §4`'s canonical
+        //     states carry no `rejected` at all (its exit states are `voided / cancelled`). Guessing
+        //     a removal here would invent an order state (commandment 2).
+        //   · `order.parked` / `order.unparked` — a parked order is indistinguishable from an active
+        //     one, so a later `02-F10` recall surface cannot filter on it. **`02-F4`'s stated
+        //     requirement needs no new projection**: "visible to every terminal in the branch" holds
+        //     because `open_orders` folds from the branch stream and the order has been in it since
+        //     its `order.created`. Projection-inert is therefore CORRECT for `02-F4` as written and
+        //     owed only for the parked FLAG. The `supersedes` link both halves carry is the causal
+        //     edge that fold will need (`01-F34`); nothing reads it yet.
+        //
+        // ⚠ Deliberately NOT in `PARKING_TYPES`, and here that is more than the `kot.print_failed`
+        // reasoning it shares. That set and `parked()` are `01-F10`'s KEY-PRESENCE HOLD and have
+        // nothing to do with `02-F4` — the collision is purely lexical, and wiring `order.parked`
+        // into it would move a real, operator-visible order's event into a delivery-layer holding
+        // table (`DEC-SYNC-011`'s stuck-cursor shape wearing a POS feature's name). This case
+        // touches no entity, so an early straggler costs one counted no-op rather than a phantom
+        // order row.
+        return;
+      }
       case "order.table_assigned": {
         const p = event.payload as TableAssignedP;
         const e = entity(p.order_id);

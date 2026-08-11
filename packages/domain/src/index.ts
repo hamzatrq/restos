@@ -87,7 +87,10 @@ export {
   isAuditEvent,
   type KnownEventType,
   ORDER_CHANNELS,
+  // 06-F20 — the closed rejection-reason list `02-F9`'s Reject control chooses from.
+  ORDER_REJECTION_REASONS,
   type OrderChannel,
+  type OrderRejectionReason,
   PAYMENT_METHODS,
   type ParsedEvent,
   type PaymentMethod,

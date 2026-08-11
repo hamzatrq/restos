@@ -61,6 +61,35 @@ export const APPROVAL_TYPES = ["void", "comp", "discount", "price_override", "pa
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
 /**
+ * `06-F20`'s rejection reasons, transcribed: *"The branch may reject a queued order
+ * (`order.rejected`, reason: closed, item unavailable, out of delivery range); the status page
+ * states the reason plainly."* Declared once, here, on the `18 §4` rule the four sets above follow —
+ * `02-F9`'s inbox renders the three choices and `06-F20`'s status page maps each to prose on the
+ * OTHER plane, and neither may hand-copy the list.
+ *
+ * **CLOSED, and the contrast that decides it is in this file already.**
+ * `cash.drawer_opened.reason` a hundred lines down is deliberately OPEN because "`02-F21` names one
+ * value and implies others exist, and closing it here would be inventing an FR". `06-F20` names
+ * THREE and calls them a list, and `02-F9` says "**Reject** with a reason **from the 06-F20
+ * list**" — so closing this one is the transcription and leaving it open would be the invention.
+ * The cost of the open version is `payment.recorded.method`'s, one family over: a typo'd reason
+ * fails nowhere and becomes a fourth category, printed plainly to a customer on a page the branch
+ * cannot take back (`01-F1`).
+ *
+ * `item_unavailable`'s spelling is not a choice — `06-F27`'s worked scenario already writes it as a
+ * backticked identifier. The other two are that same form applied to `06-F20`'s own words.
+ * `closed` is transcribed rather than improved: it means *the branch is closed*, and a clearer
+ * `branch_closed` would be a word `06-F20` does not use (commandment 2). Display prose is the
+ * status page's job, on `06-F18`'s "display label, not a state" precedent.
+ */
+export const ORDER_REJECTION_REASONS = [
+  "closed",
+  "item_unavailable",
+  "out_of_delivery_range",
+] as const;
+export type OrderRejectionReason = (typeof ORDER_REJECTION_REASONS)[number];
+
+/**
  * `02-F23`'s "system-expected cash (by method)" — EXHAUSTIVE over the closed tender set, with
  * explicit zeros. Derived from `PAYMENT_METHODS` rather than transcribed, so a sixth tender
  * cannot be added to the enum and silently skipped here.
@@ -129,6 +158,74 @@ const payloadSchemas = {
   }),
   "order.confirmed": z.looseObject({
     order_id: z.string().min(1),
+  }),
+  /**
+   * `02-F9`'s other half: *"**Reject** with a reason from the 06-F20 list → `order.rejected`."*
+   * The type has been `01 §4` vocabulary since the July 2026 absorption — which names THIS event
+   * as the one that "blocked a Wave-1 cashier task" — and had no payload schema here, so `01-F4`
+   * made it **unemittable rather than merely unbuilt** and the inbox could ship Accept only.
+   *
+   * `reason` is the closed `ORDER_REJECTION_REASONS`; the argument is at its declaration.
+   *
+   * **NO `supersedes`, and the asymmetry with the park pair below is deliberate.** A rejection is
+   * terminal and has no inverse anywhere in `01 §4` — `06-F19` puts post-confirmation reversal on a
+   * phone call and a `void.recorded`, not on an un-reject event — so it is the same monotone shape
+   * as `order.confirmed` directly above, whose payload is the order key alone.
+   *
+   * **No `rejected_by`** (`02-F45`): the envelope's `actor_user_id` is the one home for who acted,
+   * and a payload copy is a second answer that can disagree with it permanently (`01-F1`).
+   */
+  "order.rejected": z.looseObject({
+    // `06-F22` makes the reversal metering event "idempotent on order id", and `26 §3`'s sidecar
+    // answers `order:<payload.order_id>` — a rejection naming no order reverses nothing and
+    // reaches no projection.
+    order_id: z.string().min(1),
+    reason: z.enum(ORDER_REJECTION_REASONS),
+  }),
+  /**
+   * `02-F4`: *"Park/resume open orders: `order.parked` / `order.unparked`. A parked order is
+   * durable (00 §5.2) and visible to every terminal in the branch."* Both types were `01 §4`
+   * vocabulary with no schema, so parking was an `01-F4` `UnknownEventTypeError` inside
+   * `store.append` — `apps/pos-electron` holds `cartOrderId` in renderer state for exactly that
+   * reason, and an order abandoned to a relaunch is reachable only through an `orders[0]` fallback.
+   *
+   * **Each half carries a REQUIRED `supersedes` (`[]` legal), and this is the interpretation to
+   * argue with.** The simpler alternative is `{ order_id }` alone — literally what `02-F4` lists —
+   * and it is refused for two reasons, in this order:
+   *
+   *   (i) This is the catalog's first REPEATABLE toggle on one key: `02-F11` has an order "parked
+   *       there and resumed, extended, or settled on another", so park → resume → park again is
+   *       ordinary rather than exotic. A set of bare facts cannot tell the second park from the
+   *       first without arrival order, a clock or an id comparison — all three banned by `01-F34`
+   *       and `01-F45`. `availability.changed` and `order.table_assigned` are the corpus's two
+   *       worked answers to this exact shape, and both say so in their notes above: the carried
+   *       causal link is "the ONLY thing that makes this converge".
+   *   (ii) The failure modes are ASYMMETRIC, which is the decisive half. A field that turns out
+   *       unnecessary costs a column that is always `[]` and can be relaxed later. A field omitted
+   *       and later needed cannot be added as required at all — `01-F1` makes every `order.parked`
+   *       already written unparseable — and adding it `.optional()` then confuses "a root park"
+   *       with "a writer forgot", the distinction `payment.recorded.shift_id` and
+   *       `catalog.changed.price_changes` are both written up here to preserve.
+   *
+   * **A STATED COST, so it is not discovered later:** no fold projects a park today (see the
+   * disposition below), so an emitter has no head set to read and every shipped park honestly
+   * carries `[]`. That is a root, exactly what `order.table_assigned` writes for a root assignment.
+   *
+   * **OWED, and named rather than left to look intentional.** `packages/sync-client`'s merge engine
+   * consumes all three as **projection-inert**, so a parked order is indistinguishable from an
+   * active one and a rejected order goes on appearing in every till's `open_orders`. `26 §7` makes
+   * a merge rule an ORACLE-PINNED decision rather than an implementer's, and it is not what `01-F4`
+   * was blocking. `02-F4`'s own requirement is already met without a new projection: "visible to
+   * every terminal in the branch" holds because `open_orders` folds from the branch stream and the
+   * order has been in it since its `order.created`.
+   */
+  "order.parked": z.looseObject({
+    order_id: z.string().min(1),
+    supersedes: z.array(z.string().min(1)),
+  }),
+  "order.unparked": z.looseObject({
+    order_id: z.string().min(1),
+    supersedes: z.array(z.string().min(1)),
   }),
   "order.line_added": z.looseObject({
     order_id: z.string().min(1),
