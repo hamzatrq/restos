@@ -576,6 +576,32 @@ describe("§E 02-F1/02-F42/01-F60 — the phone order's lines snapshot the PHONE
 
 describe("§F Commandment 8 / 02-F27 — a cashier may record the caller she is speaking to", () => {
   const appended: unknown[] = [];
+  /**
+   * The stub write surface, deliberately cast rather than typed.
+   *
+   * ⚠ **THIS CAST IS LOAD-BEARING AND IT WAS ADDED BECAUSE THE OMISSION BIT DURING MUTATION.**
+   * A correct implementation of `02-F27` may well add a guarded `recordCustomer` member to
+   * `AuthorizedWrites` (that is what `addLine` and `toggleAvailability` each did for their own
+   * FR), and `AuthorizedWritesDeps.writes` is a `Pick` over `Gateway`, so a strictly-typed
+   * literal here becomes a TYPECHECK ERROR the moment the member lands — the suite would go red
+   * under exactly the implementation it exists to demand, which is the failure this round's law
+   * names as equally damaging to a vacuous test. Measured: adding the member broke this file and
+   * five pre-existing suites at `tsc` before the cast.
+   *
+   * The cast costs nothing here because §F asserts a VERDICT, not a delegation shape: every
+   * claim below goes through `append`, which is on the surface in every version of it.
+   */
+  const writeStub = () =>
+    ({
+      append: vi.fn((req: unknown) => {
+        appended.push(req);
+        return { id: "evt-1" };
+      }),
+      addLine: vi.fn(() => ({ id: "evt-2" })),
+      toggleAvailability: vi.fn(() => ({ id: "evt-3" })),
+      recordCustomer: vi.fn(() => ({ id: "evt-4" })),
+    }) as unknown as Parameters<typeof authorizeWrites>[0]["writes"];
+
   const rig = (role: string): AuthorizedWrites => {
     appended.length = 0;
     const store = {
@@ -590,14 +616,7 @@ describe("§F Commandment 8 / 02-F27 — a cashier may record the caller she is 
       },
     } as unknown as Pick<DeviceStore, "identity" | "staff">;
     return authorizeWrites({
-      writes: {
-        append: vi.fn((req: unknown) => {
-          appended.push(req);
-          return { id: "evt-1" };
-        }),
-        addLine: vi.fn(() => ({ id: "evt-2" })),
-        toggleAvailability: vi.fn(() => ({ id: "evt-3" })),
-      },
+      writes: writeStub(),
       store,
       session: () => ({ user_id: "u-ayesha", display_name: "Ayesha" }),
       paidOutApprovalThresholdPaisa: PAID_OUT_APPROVAL_THRESHOLD_PAISA,
@@ -640,11 +659,7 @@ describe("§F Commandment 8 / 02-F27 — a cashier may record the caller she is 
     // The control, and it must keep passing whatever the FR decides: a device identity is never
     // promoted into a user identity, so "nobody is signed in" is not "the device may".
     const locked = authorizeWrites({
-      writes: {
-        append: vi.fn(() => ({ id: "evt-1" })),
-        addLine: vi.fn(() => ({ id: "evt-2" })),
-        toggleAvailability: vi.fn(() => ({ id: "evt-3" })),
-      },
+      writes: writeStub(),
       store: {
         identity: { org_id: "org-1", branch_id: "br-1", device_id: "dev-1" },
         staff: { lookup: () => null },

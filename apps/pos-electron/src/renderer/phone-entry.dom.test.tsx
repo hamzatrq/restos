@@ -165,7 +165,7 @@ const choosePhone = async () => {
  * expected shape), a text field as the fallback that `27-F6` explicitly permits for numerals.
  * Neither is required by this file; ONE of them is.
  */
-const enterNumber = (digits: string) => {
+const tryEnterNumber = (digits: string): boolean => {
   const key = (d: string) => screen.queryAllByRole("button", { name: new RegExp(`^${d}$`) })[0];
   if (key(digits[0] as string) !== undefined) {
     for (const d of digits) {
@@ -178,17 +178,21 @@ const enterNumber = (digits: string) => {
       }
       fireEvent.click(k);
     }
-    return;
+    return true;
   }
   const field = screen.queryAllByRole("textbox")[0];
-  if (field === undefined) {
-    throw new Error(
-      "02-F27/02-F28 red-awaiting-implementation: the phone channel offers no way to enter a " +
-        "number — no digit keys and no field. `02-F27` begins \"operator types the caller's " +
-        'number" and `02-F28` measures 30 seconds FROM THAT ACT.',
-    );
-  }
+  if (field === undefined) return false;
   fireEvent.change(field, { target: { value: digits } });
+  return true;
+};
+
+const enterNumber = (digits: string) => {
+  if (tryEnterNumber(digits)) return;
+  throw new Error(
+    "02-F27/02-F28 red-awaiting-implementation: the phone channel offers no way to enter a " +
+      "number — no digit keys and no field. `02-F27` begins \"operator types the caller's " +
+      'number" and `02-F28` measures 30 seconds FROM THAT ACT.',
+  );
 };
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -214,13 +218,24 @@ describe("§A 02-F27 — choosing Phone puts a number-entry surface in front of 
     // this operator; a customer-lookup pad that is always present on a walk-in sale is a control
     // with no task behind it, which `21 §5` calls feature tourism in terms.
     //
-    // NOTE the direction: this asserts the LOOKUP is not performed on the counter channel, not
-    // that some pad is absent from the DOM — the Cash tab owns a keypad of its own and a
-    // presence assertion would be measuring that.
+    // NOTE the direction: this asserts the LOOKUP is not performed for a counter order, and
+    // deliberately NOT that a caller field is absent from the DOM. Two reasons, both measured.
+    // The Cash tab owns a keypad of its own, so a presence assertion could be measuring that;
+    // and `27-F5` can be read as pushing the OTHER way — an always-visible caller field is
+    // arguably the less context-dependent design — so a test forbidding it would redden under a
+    // plausible, arguably-correct implementation, which this round's law calls as damaging as a
+    // vacuous one.
+    //
+    // ⚠ **THE `tryEnterNumber` LINE IS WHAT MAKES THIS BITE, AND IT WAS ADDED AFTER A SURVIVOR.**
+    // Without it, a mutant that drops the channel condition on the lookup effect survived all 30
+    // tests — because with no digits typed on the counter channel the effect had nothing to look
+    // up, so the assertion could not distinguish "the LOOKUP is gated on the channel" from "the
+    // PAD is". Typing first removes the second explanation without forbidding either design.
     mount();
     render(<Counter />);
     await screen.findByRole("button", { name: /^Counter$/i });
     tap(/^Counter$/i);
+    tryEnterNumber(DIALLED);
     tap(/^Takeaway$/i);
 
     await waitFor(() => expect(appended).toHaveLength(1));
@@ -402,6 +417,30 @@ describe("§E 01-F17 — a failed lookup does not wedge the counter", () => {
     // forgets to guard. `01-F54` is the same disposition one layer down: the loss is a WORD.
     await waitFor(() => expect(appended).toHaveLength(1));
     expect(appended[0]?.payload).toMatchObject({ channel: "phone" });
+  });
+
+  it("starts the order while the lookup is STILL IN FLIGHT", async () => {
+    // ⚠ **ADDED AFTER A SURVIVOR, AND IT IS THE ONE THAT AIMS §E AT THE REAL CASE.** The mutant
+    // this section was written against — dropping the `.catch` so the rejection is unhandled —
+    // killed NOTHING: an unhandled rejection logs, it does not wedge a React tree, so the order
+    // still started and every assertion passed. The defect `01-F17` actually forbids is the
+    // implementation that WAITS: a surface that will not release the order-type row until the
+    // customer file has answered.
+    //
+    // This is not a hypothetical shape. It is the natural way to write "look her up, then take
+    // the order", and it fails in the one condition that matters — a slow or unreachable seam,
+    // with a caller on the line. A lookup that never settles is exactly what an `01-F17` block
+    // looks like from the cashier's side, and it is indistinguishable from a hang.
+    mount({ lookup: () => new Promise(() => {}) as Promise<LookupAnswer> });
+    render(<Counter />);
+    await choosePhone();
+    await waitFor(() => enterNumber(DIALLED));
+    await waitFor(() => expect(lookedUp.length).toBeGreaterThan(0));
+
+    tap(/^Delivery$/i);
+
+    await waitFor(() => expect(appended).toHaveLength(1));
+    expect(appended[0]?.payload).toMatchObject({ channel: "phone", order_type: "delivery" });
   });
 
   it("does not fabricate a customer answer out of a failed lookup", async () => {
