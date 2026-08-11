@@ -151,9 +151,10 @@
  * then. Reading the test did not show that; mutating it did.
  */
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BROKEN_DATABASE_URL_ENV, REDIS_URL_ENV } from "./global-setup.js";
@@ -851,17 +852,51 @@ describe("services/jobs hosts the Auditor as a running process (20 §4.2)", () =
         );
       }
       const errors: string[] = [];
+      let entry: string | undefined;
       try {
-        return { specifier, path: fileURLToPath(import.meta.resolve(specifier)) };
+        entry = fileURLToPath(import.meta.resolve(specifier));
       } catch (err) {
         errors.push(`import.meta.resolve: ${String(err)}`);
       }
-      try {
-        return { specifier, path: createRequire(import.meta.url).resolve(specifier) };
-      } catch (err) {
-        errors.push(`require.resolve: ${String(err)}`);
+      if (entry === undefined) {
+        try {
+          entry = createRequire(import.meta.url).resolve(specifier);
+        } catch (err) {
+          errors.push(`require.resolve: ${String(err)}`);
+        }
       }
-      throw new Error(`cannot resolve "${specifier}" from ${HOST_ENTRY}\n${errors.join("\n")}`);
+      if (entry === undefined) {
+        throw new Error(`cannot resolve "${specifier}" from ${HOST_ENTRY}\n${errors.join("\n")}`);
+      }
+
+      /**
+       * **ONE BARREL HOP, and it is the repo's own rule rather than a convenience.**
+       * `seams:check` Rule A insists *"a barrel re-export is not a use"*; the same distinction
+       * applies to a MEASUREMENT. `DEC-ARCH-001` moved the Auditor into `packages/auditor`, whose
+       * entry point is a barrel that re-exports `runAuditor` from `./auditor.js` — so resolving the
+       * host's specifier lands on a file that **declares nothing**, and every assertion below would
+       * have been vacuous. That is not hypothetical: this is exactly the survivor the move's own
+       * mutation pass reported (re-pointing a hardcoded path at a sibling in the same package took
+       * the whole suite green at 43/43 with nothing asserting the target), and it was caught here
+       * only because H2's anti-vacuity guard fires BEFORE the marker assertions.
+       *
+       * So: if the resolved module does not declare it, follow the re-export that names it — once,
+       * deliberately. A loop would chase an arbitrary chain and quietly make "which file did we
+       * measure" unanswerable; one hop covers a package entry point, which is the shape the corpus
+       * has. If the hop still does not land on a declaration, H2's guard throws with both paths in
+       * the message rather than passing.
+       */
+      const entrySource = await readFile(entry, "utf8");
+      if (declarationLine(entrySource) > 0) return { specifier, path: entry };
+      const reExport = /export\s*\{[^}]*\brunAuditor\b[^}]*\}\s*from\s*"([^"]+)"/.exec(
+        entrySource,
+      )?.[1];
+      if (reExport === undefined) return { specifier, path: entry };
+      // TypeScript sources are imported with a `.js` specifier under NodeNext; measure the `.ts`.
+      const hopped = resolve(dirname(entry), reExport.replace(/\.js$/, ".ts"));
+      return existsSync(hopped)
+        ? { specifier: `${specifier} → ${reExport}`, path: hopped }
+        : { specifier, path: entry };
     };
 
     /**
