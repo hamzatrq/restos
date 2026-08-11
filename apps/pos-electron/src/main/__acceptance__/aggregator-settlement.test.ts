@@ -576,6 +576,21 @@ describe("§G 01-F17 — an unreadable order costs nothing", () => {
 //   H-NC   **NEGATIVE CONTROL** — the binding renamed throughout and the    **0**
 //          whole "do not write the token" comment deleted
 //
+// ⚠ **"0 survivors" ABOVE WAS TRUE OF THAT MATRIX AND NOT OF THIS SECTION.** An adversarial
+// re-run the same day found THREE, all of them fully green — 723/723, `tsc` 0, `biome` 0 — and
+// all three exploited the same gap: `expect(block).toContain(`${bound}.`)` is a SUBSTRING test,
+// so a call that is present and never made satisfies it. The last assertion in §H3 was added for
+// them and carries the measurements; a matrix is a claim about the mutants it ran, never about
+// the ones nobody wrote.
+//
+//   H-M8   **the call behind this app's own env opt-in, shipped OFF**       **1 — §H3** (was 0)
+//   H-M9   the call behind a `const … = false` flag                         **1 — §H3** (was 0)
+//   H-M10  the call made with an id that is not the branch's `order_id`     **1 — §H3** (was 0)
+//   H-M11  **A BEHAVIOUR-PRESERVING REFACTOR** — the call moved one hop     **1 — §H3**
+//          into a local helper the branch calls. It reddens, and that is
+//          the documented cost of a shape pin, not a defect to fix by
+//          weakening §H3: nothing else in 723 tests sees this seam.
+//
 // And the INSTRUMENT was mutated separately, because §H0 is a guard on a guard:
 //
 //   S-M1   the stripper EMPTIES the file                                    10 — all of §H0, §H1-3
@@ -827,5 +842,41 @@ describe("§H 02-F30 — the shipped app reaches the emitter", () => {
     const bound = /const\s+(\w+)\s*=\s*createAggregatorSettlement\(/.exec(strict)?.[1];
     expect(bound, "nothing binds the result of createAggregatorSettlement").toBeTruthy();
     expect(block).toContain(`${bound as string}.`);
+
+    /**
+     * ⚠ **AND THE CALL IS A STATEMENT, NOT A SUBSTRING.** The `toContain` above is satisfied by
+     * the token appearing ANYWHERE in the branch, and an adversarial round on 2026-08-11 took
+     * three mutants **fully green** through it — `pnpm -C apps/pos-electron test` 723/723,
+     * `tsc --noEmit` exit 0 and `biome check` exit 0 for each, against a product that settles no
+     * aggregator order at all:
+     *
+     *   `if (process.env.RESTOS_AGGREGATOR_SETTLEMENT === "1") <bound>.confirmed(order_id);`
+     *   `if (AGGREGATOR_SETTLEMENT_ENABLED) <bound>.confirmed(order_id);`  (the const is `false`)
+     *   `<bound>.confirmed(confirm.data.payload.shift_id as string);`
+     *
+     * The first is the one to fear. It is this app's OWN opt-in idiom — `RESTOS_PRINT_TO_FILE`,
+     * `RESTOS_DEV_MENU`, eight more — so it reads as caution rather than as a hole, it survives
+     * review, and it ships every foodpanda order at `pay_total: 0` by default: `02-F30`'s defect
+     * restored behind a flag nobody sets. AGENTS.md's instance 13 is the same shape one level up
+     * (a correct subsystem the product has no configuration to enter).
+     *
+     * So the call is pinned as its own statement, on THIS branch's narrowed `order_id`, with no
+     * condition on the line — the same standing `01-F32` receivable that `lines.confirmed` and
+     * `kot.confirmed` above it already get, and no weaker. `void` is allowed because `confirmed()`
+     * returns `void` and a session may say so. This is a SHAPE pin and it is deliberate, exactly
+     * as this section's header says: splitting the call across lines reddens it, and there is
+     * nothing else in 723 tests that can see this seam at all.
+     */
+    const callLine = block.split("\n").find((l) => l.includes(`${bound as string}.confirmed(`));
+    expect(
+      callLine,
+      `the order.confirmed branch never calls ${bound as string}.confirmed( — 02-F30's receivable`,
+    ).toBeDefined();
+    expect(
+      callLine,
+      `${bound as string}.confirmed is CONDITIONAL here, or carries an id that is not this ` +
+        "branch's order_id. 01-F32's receivable hangs off the confirm itself or it is not a " +
+        "receivable — a flag that ships OFF settles nothing and passes every other assertion.",
+    ).toMatch(new RegExp(`^\\s*(?:void\\s+)?${bound as string}\\.confirmed\\(order_id\\);\\s*$`));
   });
 });
