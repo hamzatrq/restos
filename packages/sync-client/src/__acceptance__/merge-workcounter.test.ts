@@ -176,6 +176,42 @@ describe("registry growth must fail this suite before it can silently no-op (fix
     "order.line_added",
     "order.line_price_overridden",
     "order.line_state_changed",
+    // ── AMENDED August 2026 (02-F4 / 02-F9 / 06-F20 — the C10 + C20 registry growth) ─────
+    // `order.parked` / `order.unparked` (`02-F4`) and `order.rejected` (`02-F9`, whose reason list
+    // `06-F20` owns) gained payload schemas, which is what `01-F4` was blocking: all three were
+    // `01 §4` vocabulary and therefore UNEMITTABLE, so a cashier could neither park an order nor
+    // reject a cloud one. These three lines are the "spec-PR + oracle-pin event" the assertion
+    // below demands, and without them the compile-level pin reds — the design working, exactly as
+    // it did for `kot.print_failed`, the approval family and the escalatable writes.
+    //
+    // `order.unparked` is kept beside its pair rather than at its own alphabetical slot (which
+    // would be after `order.table_assigned`): the two halves of one toggle are one decision, and
+    // the assertion below sorts both sides anyway.
+    //
+    // Pinned HERE and not in `PINNED_NOT_FOLDED` for that set's own stated reason: it asserts
+    // `01-F52`'s "not an input to ANY fold", and no FR says that of these three. All three are
+    // ORDER-keyed, so `26 §3`'s sidecar answers `order:<order_id>` for them and the order-keyed
+    // engine in `merge.ts` is where they arrive.
+    //
+    // ⚠ **Their disposition in the engine is projection-inert, and that is a stated DEBT rather
+    // than a settled rule.** `26 §7` makes a merge rule an oracle-pinned DECISION, not an
+    // implementer's, and the session that landed the schemas deliberately did not guess one. What
+    // is owed, named so it is not discovered in the field:
+    //   · `order.rejected` — a rejected order goes on appearing in every till's `open_orders`
+    //     forever. Genuinely undecided by any FR rather than merely unbuilt: `06-F20`'s own
+    //     consumer is the storefront status page, a CLOUD read model on the other plane, and
+    //     `01 §4`'s canonical states have no `rejected` (its exit states are `voided / cancelled`).
+    //   · `order.parked` / `order.unparked` — a parked order is indistinguishable from an active
+    //     one, so `02-F10`'s recall cannot filter on it. **`02-F4`'s stated requirement is already
+    //     met without any new projection**: "visible to every terminal in the branch" holds because
+    //     `open_orders` is folded from the branch stream and the order has been in it since its
+    //     `order.created`. Projection-inert is therefore CORRECT for `02-F4` as written, and owed
+    //     only for the parked FLAG a later `02-F10` surface will want.
+    //     `order-park-reject-fold.test.ts` asserts that visibility half by EXECUTION, because a
+    //     comment claiming "the projection is unchanged" is not an assertion that it is.
+    "order.parked",
+    "order.rejected",
+    "order.unparked",
     "order.settlement_closed",
     "order.table_assigned",
     "payment.recorded",
