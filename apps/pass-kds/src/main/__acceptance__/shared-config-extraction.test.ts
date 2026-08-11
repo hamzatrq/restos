@@ -197,10 +197,21 @@ type Edge = { file: string; specifier: string; from: string; to: string };
 /**
  * Every import in `apps/*` that resolves into a DIFFERENT app.
  *
- * Only relative specifiers can express this today (no app publishes a package name), so the walk
- * resolves `../../../pos-electron/src/main/aging` against the importing file and asks which
- * `apps/<name>` the result lands in. Resolving rather than pattern-matching is what makes the
- * assertion survive an implementer who reaches the same file by a different number of `../`.
+ * The walk resolves `../../../pos-electron/src/main/aging` against the importing file and asks
+ * which `apps/<name>` the result lands in. Resolving rather than pattern-matching is what makes
+ * the assertion survive an implementer who reaches the same file by a different number of `../`.
+ *
+ * ⚠ **KNOWN LIMIT, corrected from a false claim.** This comment used to read *"only relative
+ * specifiers can express this today (no app publishes a package name)"*. **Both apps publish
+ * one** — `@restos/pos-electron` and `@restos/pass-kds` — so the parenthesis was wrong, and the
+ * `continue` below is blind to `import … from "@restos/pos-electron/…"`, which is what a
+ * developer who reached for `pnpm add` would write. Measured 2026-08-11: that import in a
+ * shipped `apps/pass-kds` file leaves this suite 29/29 GREEN. It is a LATENT hole rather than a
+ * live one — neither app declares an `exports` map and `main` points at an unbuilt `out/`, so
+ * the specifier does not resolve at runtime today (verified: vitest answers `Cannot find
+ * package`) — but it becomes live the day any app gains one, and the fix is not free: a
+ * package-name walk has to know every app's own name to avoid flagging self-imports. Named
+ * rather than quietly closed, because a rail's blind spot belongs in the rail.
  */
 const appToAppEdges = (opts: { tests: boolean }): Edge[] => {
   const edges: Edge[] = [];
@@ -427,11 +438,21 @@ describe("18 §2 — apps never import other apps (the three edges, and the one 
 
   describe("§C 03-F14 is ONE org policy — every surface reads the same table", () => {
     it("05-F1/03-F14: both apps import resolveAging from the same package", () => {
+      // ⚠ **SHIPPED FILES ONLY, and a MUTANT put that filter here rather than a reading.** This
+      // walk originally included `__acceptance__` and `*.test.ts`, and eleven suites in
+      // `apps/pos-electron` import `resolveAging` to build a gateway fixture. So the counter's
+      // PRODUCTION call site could be deleted outright — the shared table replaced by a
+      // hand-typed literal in `main/index.ts` — and this assertion went on passing, satisfied
+      // entirely by test imports. Measured: with `resolveAging` removed from the counter's
+      // production graph the whole suite stayed 29/29 GREEN, and only a pre-existing
+      // `orders-aging.test.ts` assertion caught it. A test import is not a surface a cook looks
+      // at; §C's own sentence is about SURFACES disagreeing, so only shipped code can answer it.
       const home = mustHome("resolveAging", "03-F14 aging");
       const sources = new Map<string, Set<string>>();
       for (const app of [POS, PASS]) {
         const found = new Set<string>();
         for (const file of tsFilesUnder(join(APPS_ROOT, app, "src"))) {
+          if (/\.test\.tsx?$/.test(file) || file.split(sep).includes("__acceptance__")) continue;
           const code = stripComments(read(file));
           for (const m of code.matchAll(
             /import\s*(?:type\s+)?\{([^}]*)\}\s*from\s*["']([^"']+)["']/g,
@@ -454,10 +475,12 @@ describe("18 §2 — apps never import other apps (the three edges, and the one 
       for (const [app, found] of sources) {
         expect(
           [...found],
-          `apps/${app} reaches resolveAging through ${found.size} distinct specifier root(s): ` +
-            `${[...found].join(", ")}. 05-F1 alarms the manager off "the red aging threshold ` +
-            `(03-F14)" and 03-F14 is one org policy — a counter reading neutral while the pass ` +
-            "reads red is three surfaces disagreeing about whether the food is late.",
+          `apps/${app}'s SHIPPED code reaches resolveAging through ${found.size} distinct ` +
+            `specifier root(s): ${[...found].join(", ") || "(none at all)"}. 05-F1 alarms the ` +
+            `manager off "the red aging threshold (03-F14)" and 03-F14 is one org policy — a ` +
+            "counter reading neutral while the pass reads red is three surfaces disagreeing " +
+            "about whether the food is late. ZERO roots is the same defect as two: an app that " +
+            "stopped importing the shared table decides 03-F14 somewhere else.",
         ).toEqual([home.pkgName]);
       }
     });
@@ -481,8 +504,16 @@ describe("18 §2 — apps never import other apps (the three edges, and the one 
         tsFilesUnder(join(app.dir, "src"))
           .filter((file) => !/\.test\.tsx?$/.test(file))
           .filter((file) => !rel(file).includes("/src/layout-gate/"))
+          // ⚠ BOTH KEY ORDERS, and a mutant put the second half here. The first draft matched
+          // `amberAt` then `redAt` only, so the identical literal written `{ redAt: 20,
+          // amberAt: 10 }` — no less plausible, and what an implementer replacing the shared
+          // table would half the time type — walked straight past it. Measured: with the
+          // counter's call site deleted in favour of that reversed literal the whole suite
+          // stayed 29/29 green.
           .filter((file) =>
-            /amberAt\s*:\s*\d+\s*,\s*redAt\s*:\s*\d+/.test(stripComments(read(file))),
+            /(amberAt\s*:\s*\d+\s*,\s*redAt\s*:\s*\d+)|(redAt\s*:\s*\d+\s*,\s*amberAt\s*:\s*\d+)/.test(
+              stripComments(read(file)),
+            ),
           )
           .map((file) => rel(file)),
       );
