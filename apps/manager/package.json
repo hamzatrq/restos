@@ -8,7 +8,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "bundle:check": "expo export --platform android --output-dir .expo-bundle-check",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "test": "echo 'no tests yet — acceptance tests arrive with first FRs (24 §3)'",
     "build": "echo 'no build yet — EAS Build lands with the first shipped slice'"
   },

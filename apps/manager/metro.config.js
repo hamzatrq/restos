@@ -31,4 +31,30 @@ config.resolver.nodeModulesPaths = [
 // Reason (2) above.
 config.resolver.unstable_enablePackageExports = true;
 
+// 3. **The workspace packages import each other with `.js` extensions that name `.ts` files.**
+//    `packages/sync-client/src/fold-engine.ts` says `from "./folds/customer-file.js"` and the
+//    file on disk is `customer-file.ts`. That is correct TypeScript — it is the extension the
+//    emitted JS *would* have, and it is what `moduleResolution: "Bundler"` and every other
+//    consumer in this repo already expect. Metro does not perform that mapping and fails with
+//    "Unable to resolve module ./folds/customer-file.js".
+//
+//    Resolved here rather than by rewriting the packages: those imports are correct, they are
+//    on PROTECTED paths (`packages/sync-client`, `packages/domain`), and changing 40-odd import
+//    specifiers across the kernel to accommodate one app's bundler would be exactly the
+//    "improve adjacent code" drive-by that `24 §3b` forbids.
+//
+//    Original specifier FIRST, `.ts` only as a fallback — so a real `.js` file always wins and
+//    this can never shadow one.
+const withTsFallback = (context, moduleName, platform) => {
+  try {
+    return context.resolveRequest(context, moduleName, platform);
+  } catch (error) {
+    if (moduleName.startsWith(".") && moduleName.endsWith(".js")) {
+      return context.resolveRequest(context, `${moduleName.slice(0, -3)}.ts`, platform);
+    }
+    throw error;
+  }
+};
+config.resolver.resolveRequest = withTsFallback;
+
 module.exports = config;
