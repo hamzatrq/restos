@@ -159,7 +159,13 @@ import {
 
 const PKG_DIR = resolve(import.meta.dirname, "..", "..");
 const REPO_ROOT = resolve(PKG_DIR, "..", "..");
-const AUDITOR_SOURCE = join(REPO_ROOT, "services", "sync-gateway", "src", "auditor.ts");
+// Re-pointed by DEC-ARCH-001's implementing session, and ONLY re-pointed: `auditor.ts` moved to
+// `packages/auditor` behind an unchanged gateway barrel, so §H's assertion is the same assertion
+// about the same file. A path is not an import — the mirror of this repo's "a mention is not an
+// import" — which is why the ruling's "exactly three files import the auditor module" is true and
+// still leaves this constant pointing at nothing. Left alone it fails with ENOENT instead of its
+// own message, which would replace a deliberate tripwire with a broken read.
+const AUDITOR_SOURCE = join(REPO_ROOT, "packages", "auditor", "src", "auditor.ts");
 
 /** Fast enough to observe several passes; slow enough that a pass is never re-entered. */
 const TEST_INTERVAL_MS = 1_000;

@@ -2,6 +2,11 @@
 // Owning spec: specs/01-kernel-sync.md §3/§8; task contract:
 // plans/wave-0/kernel-tasks.md T-01-07. Wire messages come from
 // @restos/sync-protocol and validation from @restos/domain — never redeclared.
+// The Auditor moved to `@restos/auditor` when `services/jobs` became its second consumer
+// (DEC-ARCH-001, RULED). This barrel keeps re-exporting it UNCHANGED: `__acceptance__/
+// auditor-builders.ts` — the oracle-pinned surface — reads it from here, so ten suites did not
+// have to move with the file. Re-pointing them at the package instead would leave every one of
+// them green while narrowing this service's public surface, which is a different change.
 export {
   type AuditorCheck,
   type AuditorFinding,
@@ -9,7 +14,7 @@ export {
   type ReadModelInput,
   type RunAuditorArgs,
   runAuditor,
-} from "./auditor.js";
+} from "@restos/auditor";
 export {
   DEVICE_TOKEN_TTL_MS,
   type DeviceTokenClaims,

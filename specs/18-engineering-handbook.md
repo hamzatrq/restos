@@ -51,6 +51,9 @@ restos/
     sync-client/       # Device sync engine: storage adapter, outbox, LAN mesh, hub
                        # election, folds, reactive queries; + /react hooks entry
     sync-protocol/     # Wire types shared by sync-client and sync-gateway
+    auditor/           # 20 §4.2's Auditor: the READ-ONLY refold of one org's
+                       # ledger, shared by services/jobs (the nightly host) and
+                       # services/sync-gateway (DEC-ARCH-001)
     escpos/            # ESC/POS encoder + transport interfaces (§11)
     ui/                # RN component kit + design tokens (web consumes tokens only)
     config/            # tsconfig base, Biome config, env validation factory

@@ -1,6 +1,7 @@
 // T-01-11 Auditor v1 (owning spec 20 §4.2; DEC-TEST-003 accepted + the chain
 // leg ruled IN, plans/wave-0/t-01-11-rulings.md; oracle-pinned surface in
-// __acceptance__/auditor-builders.ts): a READ-ONLY nightly cloud batch job over
+// services/sync-gateway/src/__acceptance__/auditor-builders.ts, which reaches
+// this module through that service's barrel): a READ-ONLY nightly cloud job over
 // ONE org's kernel tables — it writes nothing, ever (01-F1 posture across all
 // six tables; only SELECT statements exist in this file). Five legs:
 //   lamport_gap    — per (org, device) slot coverage under the ratified
@@ -48,7 +49,17 @@ import {
   type OpenOrderRow,
 } from "@restos/sync-client/fold-engine";
 import { sql } from "drizzle-orm";
-import type { GatewayDb } from "./gateway.js";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+
+/**
+ * The kernel database handle this job reads through — declared HERE, not imported from a service
+ * (`DEC-ARCH-001`). It is structurally the gateway's `GatewayDb` and `services/jobs`' own handle,
+ * because all three are the same Drizzle-over-`postgres-js` instance over the same `kernel.*`
+ * tables; the point of declaring it locally is `18 §2`'s direction, which a
+ * `packages → services` type import would invert outright while still compiling, linking and
+ * running.
+ */
+export type AuditorDb = PostgresJsDatabase<Record<string, unknown>>;
 
 export type AuditorCheck =
   | "lamport_gap"
@@ -83,7 +94,7 @@ export type ReadModelInput = {
 };
 
 export type RunAuditorArgs = {
-  db: GatewayDb;
+  db: AuditorDb;
   org_id: string;
   /**
    * @unreached-owed The scheduled host (`services/jobs`) runs five legs and NOT this one, because
@@ -121,17 +132,20 @@ type LineCell = { anomalies: Record<string, string> };
  * org"). Branches and devices are discovered from the data; `read_model` is the
  * optional diff-leg snapshot. ok ⇔ findings empty, always.
  *
- * **IT IS SCHEDULED NOW (August 2026): `services/jobs` runs it per org on a BullMQ repeatable.**
+ * **IT IS SCHEDULED (August 2026): `services/jobs` runs it per org on a BullMQ repeatable.**
  * The debt marker that stood here said `services/jobs` was a one-file stub and nothing schedules
  * it — true from Wave 0 until then, and `20 §4.2` puts this in Wave 0 *"with the kernel, not
  * later"*, so it was overdue rather than deferred. `services/jobs/src/index.ts` is the caller and
  * `services/jobs/src/__acceptance__/auditor-host.test.ts` reddens if it stops being one.
  *
- * ⚠ **That worker imports this module ACROSS A SERVICE BOUNDARY, which `18 §2` forbids, and the
- * ruling is owed.** The correct end state is this file living in a package (its substance already
- * does — `@restos/domain` + `@restos/sync-client/fold-engine`); until then this package exports
- * exactly `./auditor` and `./database-url`, so the coupling is two modules wide and reversible.
- * `services/jobs/src/index.ts`'s header carries the full argument and the two rejected alternatives.
+ * **IT LIVES IN A PACKAGE (`DEC-ARCH-001`, RULED).** It was written inside `services/sync-gateway`
+ * and moved here unchanged the moment it acquired its second consumer — `18 §2`'s own rule for that
+ * event (*"extracted from `sync-client`'s outbox core when the second consumer is built"*), and the
+ * only home from which BOTH the scheduled host and the gateway may import it under that section's
+ * dependency-direction MUST. Its substance was always package-shaped: `@restos/domain` plus
+ * `@restos/sync-client/fold-engine`, and nothing gateway-specific but the db handle's type, now
+ * declared above. `services/sync-gateway/src/index.ts` re-exports it unchanged, which is why the ten
+ * suites that reach it through that barrel did not move with it.
  */
 export const runAuditor = async (args: RunAuditorArgs): Promise<AuditorReport> => {
   const { db, org_id } = args;

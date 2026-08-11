@@ -24,16 +24,20 @@
   pass, clean orgs included**, carrying `runAuditor`'s own findings array), `auditor_failed`.
   Findings log at `error`; a clean pass logs below it. A host that shouts every night is as silent
   as one that never shouts.
-- ⚠ **It imports `runAuditor` from `services/sync-gateway`, which `18 §2`'s dependency direction
-  MUST forbids (`services → packages` only).** Named, not hidden: the full argument and the two
-  rejected alternatives are in `src/index.ts`'s header. The correct end state is `auditor.ts` living
-  in a package, and it is OWED — a PROTECTED-path restructure needing its own spec PR and senior
-  review, not a drive-by here. The gateway now publishes an `exports` map (`./auditor`,
-  `./database-url`), so the coupling is enumerated and `seams:check` can see it at all — that rail
-  resolves `@restos/*` **only** through an `exports` field.
-- ⚠ **`pnpm -C services/jobs test` is 18/19 on a correct tree, and the one red is a CONFLICT
+- **It imports `runAuditor` from `@restos/auditor` and `redactedDsn` from `@restos/config` — both
+  PACKAGES, which is the only direction `18 §2` allows.** For the window between the Auditor getting
+  a host and `DEC-ARCH-001` being ruled it read both out of `services/sync-gateway` through that
+  service's two-entry `exports` map, which `18 §2`'s dependency-direction MUST forbids
+  (`services → packages` only) — named in code rather than hidden. **The ruling landed the move**
+  (`packages/auditor`; the gateway's `exports` field is deleted and it publishes nothing again), and
+  the edge is asserted gone by `src/__acceptance__/auditor-package-move.test.ts` §C, which also
+  bans the `packages → services` inversion the naive move creates.
+- ⚠ **`pnpm -C services/jobs test` is 42/43 on a correct tree, and the one red is a CONFLICT
   BETWEEN THE ORACLE AND THE RAIL — read this before "fixing" either.** `§H` asserts
-  `services/sync-gateway/src/auditor.ts` contains no `@unreached-owed` **anywhere in the file**.
+  `packages/auditor/src/auditor.ts` contains no `@unreached-owed` **anywhere in the file** (it said
+  `services/sync-gateway/src/auditor.ts` until `DEC-ARCH-001` moved the file; the constant was
+  re-pointed and nothing else about `§H` changed — left alone it would have failed with ENOENT
+  instead of its own message, replacing a deliberate tripwire with a broken read).
   Landing the caller made `runAuditor` a shipping-constructed factory, which made its optional
   `read_model` member a Rule B candidate for the first time — and `20 §4.2`'s read-model diff leg
   has no cloud projection to feed it, so the rail requires a debt marker *in that same file*.

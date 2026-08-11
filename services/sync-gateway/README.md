@@ -29,9 +29,12 @@ Four responsibilities, one process:
 3. **The quarantine-notice outbox** (`kernel.quarantine_notices`) — a durable
    at-least-once channel that tells a device "your event N was quarantined,
    reason R," delivered live on push and redelivered on the device's next hello.
-4. **The Auditor** (`auditor.ts`) — a READ-ONLY nightly job that re-derives
+4. **The Auditor** (`@restos/auditor`) — a READ-ONLY nightly job that re-derives
    everything from `kernel.events` with the real fold engine and reports any
-   divergence. It writes nothing, ever, and survives any poisoned input.
+   divergence. It writes nothing, ever, and survives any poisoned input. It was
+   written here and moved to a package when `services/jobs` became its second
+   consumer (`DEC-ARCH-001`); `src/index.ts` re-exports it unchanged, which is
+   the surface this package's ten auditor suites are pinned to.
 
 Everything the wire understands comes from `@restos/sync-protocol`; every
 envelope validation comes from `@restos/domain`; the merge/refold engine is
@@ -100,7 +103,7 @@ two cloud stamps merged back into the envelope only at serve time.
 | `gateway.ts` | The session state machine + merge pipeline. The bulk of the package. |
 | `auth.ts` | `issueDeviceToken` / `verifyDeviceToken` — jose HS256, signature + claim-shape only. |
 | `registry.ts` | `registerDevice` / `revokeDevice` / `readRegistryRow` — the `device_registry` seams. |
-| `auditor.ts` | `runAuditor` — the five READ-ONLY correctness legs. |
+| *(`@restos/auditor`)* | `runAuditor` — the five READ-ONLY correctness legs. Not a file in this package any more (`DEC-ARCH-001`); `index.ts` re-exports it. |
 | `quarantine-query.ts` | `listQuarantine` — a read-only projection for the fleet-health dashboard (doc 15 READ seam only). |
 | `errors.ts` | Typed error taxonomy + the closed `QuarantineReason` union. |
 | `catalog.ts` | `publishCatalog` / `catalogPage` / `catalogVersion` — the published catalog artifact (`01-F52`..`01-F56`), and `01-F60`'s completeness check at the writer. |
@@ -219,7 +222,7 @@ belong to the doc 14/15 emitters). `registerDevice` rejects an unknown
 the first revoke stamps. `readRegistryRow` is the auth-check read used at hello,
 at every per-operation revocation re-check, and at the relayed-origin boundary.
 
-### `auditor.ts` — the nightly correctness net
+### `@restos/auditor` — the nightly correctness net
 
 `runAuditor({ db, org_id, read_model? })` is a **READ-ONLY** batch over one org's
 kernel tables — only `SELECT`s exist in the file; it returns `{ ok, findings }`

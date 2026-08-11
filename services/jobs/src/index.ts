@@ -42,26 +42,20 @@
  * its own word — *logged* — but two-sided: findings at `error`, clean passes below it, because a
  * host that shouts every night is as silent as one that never shouts.
  *
- * **3. ⚠ THIS IMPORTS `runAuditor` ACROSS A SERVICE BOUNDARY, WHICH `18 §2` FORBIDS. IT IS NAMED
- * HERE BECAUSE IT NEEDS A SENIOR RULING, NOT BECAUSE IT IS FINE.** `18 §2`: *"**Dependency
- * direction (MUST):** `apps → packages`, `services → packages`, `packages → packages` … Cross-module
- * calls go through tRPC/events, **never through direct imports across service boundaries**."*
- * `services → services` is on neither list. The three ways out, and why this one:
- *   - **(A) taken here — declared subpath imports.** `services/sync-gateway` now publishes an
- *     `exports` map holding exactly `./auditor` and `./database-url` — the whole package was
- *     previously importable and is now two modules wide — so the coupling is enumerated, visible to
- *     `seams:check` (which resolves `@restos/*` ONLY through an `exports` field, so without this the
- *     seam would be invisible to the rail and `runAuditor` would still read as unreached), and
- *     reversible by deleting two lines when (B) lands.
- *   - **(B) the CORRECT end state, and OWED: move `auditor.ts` into a package.** Its substance is
- *     already there — `@restos/domain` and `@restos/sync-client/fold-engine` — and only the 519-line
- *     orchestration sits in the gateway. It is a PROTECTED-path restructure touching fifteen files
- *     plus the purity harness, and it extends `18 §2`'s enumerated `packages/` tree, so it needs a
- *     spec PR and senior review (`20 §4.4`) rather than a drive-by inside this task (`24 §3b`).
- *   - **(C) an `/internal/auditor/run` route on the gateway — rejected as unbuildable here.** The
- *     Auditor is a whole-ledger refold, not a request; and the acceptance suite hands this worker a
- *     `DATABASE_URL` and starts no gateway, so a host that reached the ledger only over HTTP could
- *     not satisfy `§F` (an unreadable *database* must be loud and non-fatal) at all.
+ * **3. The Auditor is imported from `@restos/auditor` — a PACKAGE, which is the only direction
+ * `18 §2` allows.** *"**Dependency direction (MUST):** `apps → packages`, `services → packages`,
+ * `packages → packages` … Cross-module calls go through tRPC/events, never through direct imports
+ * across service boundaries."* `services → services` is on neither list, and this file broke that
+ * MUST for the window between the Auditor acquiring a host and `DEC-ARCH-001` being ruled: it read
+ * `runAuditor` out of `services/sync-gateway` through a two-entry `exports` map, with the violation
+ * named here rather than hidden. **`DEC-ARCH-001` (RULED, founder, August 2026) ended it with the
+ * move: `auditor.ts` now lives in `packages/auditor`, which both services may import**, and the
+ * gateway's `exports` map is deleted — that service publishes nothing again, like every other one.
+ * `redactedDsn` travelled to `@restos/config` on the same ruling, for the reason below. The ruling
+ * also **rejects** an `/internal/auditor/run` route on the gateway, so nothing here asks for one:
+ * `18 §5` reserves plain REST for third-party webhooks, an unbounded synchronous refold has no
+ * business inside the process every till holds a socket to, and a verifier sharing the gateway's
+ * pool and `DATABASE_URL` would be auditing from inside the fault it exists to catch.
  *
  * ── ONE INTERPRETATION, AND THE SIMPLER ALTERNATIVE NAMED (`24 §3b`) ─────────────────────────
  *
@@ -82,13 +76,14 @@
  * owed rather than assumed.
  */
 import { pathToFileURL } from "node:url";
-import { defineEnv } from "@restos/config";
-// See decision 3 above. `./database-url` is imported rather than copied for the same reason
-// `revoke-device.ts` reads its eviction bound instead of writing "30 s": a second local redaction
-// helper is a second interpretation of which part of a DSN may reach a log store (`18 §5`), and
-// `03-F40`'s two sensor bit layouts is this corpus's own record of what that costs.
-import { runAuditor } from "@restos/sync-gateway/auditor";
-import { redactedDsn } from "@restos/sync-gateway/database-url";
+import { runAuditor } from "@restos/auditor";
+// `redactedDsn` is imported rather than copied for the same reason `revoke-device.ts` reads its
+// eviction bound instead of writing "30 s": a second local redaction helper is a second
+// interpretation of which part of a DSN may reach a log store (`18 §5`), and `03-F40`'s two sensor
+// bit layouts is this corpus's own record of what that costs. `DEC-ARCH-001` moved it here from the
+// gateway when this file became its second consumer; `DATABASE_URL_DEFAULT` stayed behind, because
+// that default is a fact about the gateway's boot and not one to hand every service (see below).
+import { defineEnv, redactedDsn } from "@restos/config";
 import { Queue, Worker } from "bullmq";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";

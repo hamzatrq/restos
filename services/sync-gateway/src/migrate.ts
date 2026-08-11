@@ -25,12 +25,12 @@
 // the schema state on its fourth boot line, so an unmigrated database is a sentence a human reads
 // while bringing the stack up rather than a 500 somewhere else later (`00 §5.7`).
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { defineEnv } from "@restos/config";
+import { defineEnv, redactedDsn } from "@restos/config";
 import { sql } from "drizzle-orm";
 import { readMigrationFiles } from "drizzle-orm/migrator";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
-import { DATABASE_URL_DEFAULT, redactedDsn } from "./database-url.js";
+import { DATABASE_URL_DEFAULT } from "./database-url.js";
 
 const MIGRATIONS_FOLDER = fileURLToPath(new URL("../drizzle", import.meta.url));
 
