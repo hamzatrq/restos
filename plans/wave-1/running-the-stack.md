@@ -248,6 +248,24 @@ pnpm -C apps/backoffice dev                  # http://localhost:3000
 
 **Healthy:** `▲ Next.js 16.3.0 (webpack)` … `✓ Ready in <1s`.
 
+⚠ **OPEN IT AS `http://localhost:3000`, NEVER AS `http://127.0.0.1:3000` — the two are not
+interchangeable here and the wrong one hangs SILENTLY.** Measured August 2026 by A/B with a warm
+dev server, one variable changed: at `localhost` the app signs in normally; at `127.0.0.1` it
+renders `Loading…` **for ever** (90 s and counting), with no console error, no failed request, and
+**no `/api/trpc/…` line in the dev server's own log** — the `session.whoami` the `AuthGate` blocks
+on never leaves the browser. The only diagnostic anywhere in the system is one line in the
+`next dev` output, and it names a *different* URL so it reads as noise:
+
+```
+⚠ Blocked cross-origin request to Next.js dev resource /_next/hmr from "127.0.0.1".
+   … add it to "allowedDevOrigins" in next.config.js and restart the dev server
+```
+
+**What is proven is the A/B and the symptom; that Next's cross-origin dev-resource block is the
+mechanism is the best available reading and is not proven here.** Either way the fix that was
+measured is to type `localhost`. `RESTOS_API_URL=http://127.0.0.1:3001` above is unaffected —
+that is a server-to-server URL and never an origin a browser sees.
+
 ✅ **The enabled set is declared ONCE now** — on the API, at step 5a. `catalog.enabled` (August
 2026) serves it, and the back office draws `14-F29`'s grid from that answer with **no fallback**:
 if the query fails the screen says so and draws no editor rather than guessing. `lib/env.ts` and
@@ -542,7 +560,79 @@ export (Rule A), and there was no options-bag member to find unsupplied (Rule B)
 
 ---
 
-## 8. Tearing down
+## 8. The nightly owner summary (`14-F31`) — reaching it, and what it needs
+
+Added August 2026 by the first run of this screen against a live stack. **The summary needs no
+menu and no till catalog**; it needs `kernel.events` to hold a business day. Its chain is the
+mirror image of the catalog's — the catalog goes *API → gateway → device*, the summary comes
+*device → gateway → API → back office*, and the gateway serves rows without interpreting them:
+
+```
+apps/pos-electron  ──push──▶  kernel.events  ──GET /internal/ledger/window──▶  services/api
+                                                            (the fold lives here)  │
+                                                                                   ▼
+                                                        apps/backoffice  ·  Summary tab
+```
+
+**Processes required: Postgres, the gateway, `services/api`, `apps/backoffice`** — steps 2 to 5.
+The till (step 6) is needed only to *produce* the day.
+
+### 8a. Put a business day in the ledger
+
+There is no seeding command and none should be invented: the only shipping producer of these
+events is a till appending and pushing them. Run §6c, then work the counter — unlock as **Hina**
+(only a manager may open the day, `02-F22`), open the day with a float, ring lines on more than
+one channel, settle, and close the shift. Each append leaves on the same socket the catalog
+arrives on.
+
+Confirm the events landed before opening a browser, because *"the screen is empty"* and *"the
+push never happened"* look identical on the screen:
+
+```sh
+docker exec restos-pg psql -U postgres -d restos \
+  -c "select envelope->>'type' as type, count(*) from kernel.events group by 1 order by 1;"
+```
+
+### 8b. Read it
+
+Sign in at `http://localhost:3000` (**not** `127.0.0.1` — see 5c) and press **Summary**, the third
+tab. Check it over HTTP first if you want the numbers without the browser — note the superjson
+envelope, and that `input` is a *query* parameter here:
+
+```sh
+curl -s "http://127.0.0.1:3001/trpc/summary.nightly?input=%7B%22json%22%3A%7B%7D%7D" \
+  -H "Authorization: Bearer $OWNER_TOKEN"
+```
+
+`{"json":{"business_date":…}}` for a specific day (`12-F13`). Absent means the business day
+containing the server's clock.
+
+**The day boundary is visible on the wire and worth checking once**: the API asks the gateway for
+`from_ms`/`to_ms` exactly one `01-F46` business day apart — 05:00 Asia/Karachi to 05:00 the next
+morning — and the window is on `branch_created_at` **inside the envelope**, never on arrival time,
+so a branch that syncs at 03:00 still banks its evening to the right night.
+
+| you see | it means |
+|---|---|
+| `Rs 0 · 0 orders` and *"Events read for this business day: 0"* | the window is genuinely empty. Either nothing was pushed, or you are looking at the wrong business day — before 05:00 Asia/Karachi "today" is still yesterday's day |
+| the whole screen replaced by a refusal sentence | `12-F2` — the server's own `report.sales_view` refusal, printed. A subject with branch-only reach must name their own `branch_id`. **Read off the code, not measured**: this run had only the one `BOOTSTRAP_OWNER_*` subject, whose reach is always the whole org, so no scope narrower than "org" was exercised end to end |
+| `no ledger reader is configured on this host` | the API was started without `SYNC_GATEWAY_URL`, which it refuses at boot — so in practice this means a host that constructed `createApiServer` directly |
+| *"Last synced N minutes ago"* in an amber band | `12-F8`, and it is a statement about the ORG's freshest arrival, not about the day on screen. Both numbers behind it are the server's; the browser's clock is not read |
+
+### 8c. What this screen does NOT show, measured rather than assumed
+
+The August 2026 run found four things the server computes and ships that **no shipping code
+renders**: `cash[].no_sale_count` (`02-F21`'s theft vector), `cash[].paid_out_paisa` (`02-F26`),
+the whole `days` block (opening float, the manager's count at day close, the deposit) and `scope`.
+They are the wave's named defect one layer up — the numbers exist, cross the wire, and stop.
+`pnpm seams:check` cannot see any of them, because an object field is neither a value export
+(Rule A) nor an optional options-bag member (Rule B). Do not read their absence from the screen as
+"the day had none": ring a no-sale drawer open and it is counted in Postgres, in the fold, and
+nowhere a human looks.
+
+---
+
+## 9. Tearing down
 
 ```sh
 docker rm -f restos-pg
