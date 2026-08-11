@@ -87,39 +87,72 @@
  *     boundary question as OPEN and explicitly not closed by this ruling.
  *   - **`/internal/auditor/run`.** Rejected by the ruling; asserting for or against it would be
  *     inventing policy (commandment 2).
- *   - **`auditor-host.test.ts` §H.** That assertion is another suite's, it is a known tripwire on
- *     this baseline, and it reads the auditor's source by PATH — see the finding in this task's
- *     report. Re-asserting it here would duplicate an oracle, not strengthen one.
+ *   - **`auditor-host.test.ts` §H.** Another suite's assertion, and a known tripwire on this
+ *     baseline. Re-asserting it here would duplicate an oracle, not strengthen one. ⚠ **But it is
+ *     a FOURTH file this move must touch, and `DEC-ARCH-001`'s cost estimate does not count it:**
+ *     §H holds `AUDITOR_SOURCE = join(REPO_ROOT, "services", "sync-gateway", "src", "auditor.ts")`
+ *     and `readFile`s it, so after the move it fails with **ENOENT** instead of its own message —
+ *     measured. *"Exactly three files import the auditor module"* is true and is not the same
+ *     claim as *"exactly three files name it"*: a PATH is not an import, the mirror image of this
+ *     repo's own rule that a mention is not an import. The implementing session must re-point that
+ *     constant; this suite must not, because an oracle is read-only to the session it constrains.
  *
  * ═══ MUTATION MATRIX (the round-3 law) — control 24/24 green, 0 survivors ═════════════════════
  *
- * The move was performed in-tree (a plausible implementation), this suite taken green, then broken
- * one branch at a time and reverted. `REAL_EXIT=$?` was written inside each log and read from
- * there; no reported status was trusted. The right-hand column is the number of PRE-EXISTING tests
- * each mutant kills across `services/jobs` + `services/sync-gateway` — it is the finding.
+ * The move was performed in-tree (a plausible implementation: `git mv`, a local db type, the three
+ * specifier swaps, the `redactedDsn` graft, the gateway's `exports` field deleted), this suite
+ * taken green, then broken one branch at a time and reverted. `REAL_EXIT=$?` was written inside
+ * every log and read from there; no reported status was trusted. The two right-hand columns are
+ * the PRE-EXISTING tests each mutant kills — the number that says what this suite adds.
  *
- *   #    mutant (exactly one branch)                                  fails /24   pre-existing
- *   M1   `packages/auditor/package.json` has no `exports` field           2            0
- *   M2   the gateway KEEPS its `src/auditor.ts` (copy, not move)          2            0
- *   M3   `services/jobs` still imports `@restos/sync-gateway/auditor`     4            0
- *   M4   the gateway KEEPS its `exports` field                           1            0
- *   M5   `packages/auditor` imports `GatewayDb` from the gateway          2            0
- *   M6   the moved file's `18 §2` violation note left in place            1            0
- *   M7   `redactedDsn` re-implemented in config (regex, leaks on a        2            0
- *        DSN it cannot parse) instead of moved
- *   M8   `DATABASE_URL_DEFAULT` moved to config too                       2            0
- *   M9   the gateway barrel stops re-exporting `runAuditor`               2           10
- *   M10  `packages/auditor` ships a STUB (`{ ok: true, findings: [] }`)   2            0
- *   M11  `packages/auditor/CLAUDE.md` omitted (`23-F5`)                   1            0
- *   M12  NEGATIVE CONTROL: a real refactor — barrel order changed, the    0            0
- *        db type aliased through a second name, internals renamed,
- *        prose rewritten everywhere
+ *   #     mutant (exactly one branch)                            /24   jobs-host   gateway
+ *   M1    `packages/auditor` has no `exports` field (a `main`      1        0          0
+ *         still resolves the import, so only §A2 fires)
+ *   M2    the gateway KEEPS a copy of `src/auditor.ts`             2        0          0
+ *   M3    `services/jobs` still imports the gateway subpath        5      −1 (!)       0
+ *   M4    the gateway KEEPS its `exports` field                    1        0          0
+ *   M5    `packages/auditor` imports `GatewayDb` from the          1        0          0
+ *         service by relative path (`tsc --noEmit` exit 0)
+ *   M6    the moved file's `18 §2` violation note left in place    1        0          0
+ *   M7    `redactedDsn` RE-IMPLEMENTED in config as a regex        1        0          0
+ *   M8    `DATABASE_URL_DEFAULT` moved to config as well           1        0          0
+ *   M9    barrel re-export dropped AND `auditor-builders.ts`       2        0          0
+ *         re-pointed at `@restos/auditor` (the plausible one)
+ *   M9b   barrel re-export dropped, oracle untouched               2        0      45 (11 files)
+ *   M10   `packages/auditor` ships a STUB                          2        5      25 (10 files)
+ *   M11   `packages/auditor/CLAUDE.md` omitted (`23-F5`)           1        0          0
+ *   M12   NEGATIVE CONTROL: a real refactor — `export *` for       0        0          0
+ *         the name list, db type aliased through a second
+ *         name, internals renamed, barrel order reversed,
+ *         manifest fields reordered, all prose rewritten
  *
- * **M9 and M10 are the two to re-run after any edit here.** M9 is the only mutant a pre-existing
- * suite catches, and it catches it TEN times — which is exactly why §F must exist anyway: an
- * implementer who re-points `auditor-builders.ts` at `@restos/auditor` turns those ten green again
- * and lands something the ruling did not authorise. M10 is the round-3 row: a package, a manifest,
- * a wired seam, a clean rail, and an Auditor that reports a clean ledger for ever.
+ * **M9 vs M9b is the row to read, and it is the reason §F exists.** Dropping the barrel export
+ * ALONE is caught 45 times by suites that already exist — but an implementer who drops it does not
+ * stop there: they re-point `auditor-builders.ts` at `@restos/auditor` to make those 45 go green
+ * again, and then **nothing in the repo objects** (M9: 0 pre-existing kills, `pnpm verify` exit 0)
+ * while the gateway's public surface has silently narrowed and `DEC-ARCH-001`'s "pure move behind
+ * an unchanged public barrel" is not what landed. §F is the only assertion that survives that
+ * repair.
+ *
+ * **M5 is the row to fear.** A `packages → services` relative import compiles, links, runs, and
+ * leaves every suite in this repo green — it inverts `18 §2`'s direction entirely while looking
+ * like a smaller diff than the correct move.
+ *
+ * ⚠ **M10's redundancy is measured, not assumed, and is stated because it is a finding about THIS
+ * suite.** A stub is caught 30 times by pre-existing tests, because the barrel §F pins makes the
+ * gateway's ten auditor suites run against the package. §G is therefore not the only guard on a
+ * stub; what it owns alone is the PRODUCTION SPECIFIER — it is the one place in the repo where
+ * `runAuditor` is called through `@restos/auditor`, the string `services/jobs/src/index.ts`
+ * actually imports, over a real Postgres. Kept for that, and for attribution: a jobs-side failure
+ * names the move.
+ *
+ * ⚠ **TWO ASSERTIONS IN THIS FILE'S FIRST DRAFT FAILED A CORRECT IMPLEMENTATION**, which is as
+ * damaging as a vacuous one, and neither was visible by reading. (1) §B's uniqueness scan counted
+ * a local binding, and this file's own helper bound `const runAuditor = auditor.runAuditor` — so
+ * the suite reported ITSELF as a second declaration. (2) §E's unparseable-DSN fixture,
+ * `not-a-dsn-but-it-has-a:secret-in-it`, is accepted by the WHATWG URL parser, so a correct
+ * `redactedDsn` returned it unchanged and the assertion failed. Both are recorded at their fix
+ * sites. **Running a correct implementation is what found them; reading the file did not.**
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -189,7 +222,20 @@ const exists = (path: string): boolean => {
   }
 };
 
-const read = (path: string): string => readFileSync(path, "utf8");
+/**
+ * A missing file is named rather than left as a bare `ENOENT`. Before this move lands, most of
+ * §A reads files that do not exist yet; `24 §3` asks a suite to arrive red for a reason the
+ * implementing session can act on, and a stack trace ending in `readFileSync` is not one.
+ */
+const read = (path: string): string => {
+  if (!exists(path)) {
+    throw new Error(
+      `${path.slice(REPO_ROOT.length + 1)} does not exist — DEC-ARCH-001 has not landed yet, or ` +
+        "this file is not where the ruling puts it.",
+    );
+  }
+  return readFileSync(path, "utf8");
+};
 
 const readJson = (path: string): Record<string, unknown> =>
   JSON.parse(read(path)) as Record<string, unknown>;
@@ -237,6 +283,12 @@ const packageRootOf = (specifier: string): string => {
  * Does this file DECLARE the symbol — exported or not? The un-exported form is deliberate: a
  * private second copy of `redactedDsn` is the exact failure `DEC-ARCH-001`'s graft exists to stop,
  * and it would not be an export.
+ *
+ * ⚠ It counts a plain binding (`const runAuditor = …`) as a declaration, which is what makes the
+ * un-exported copy visible — and it therefore counts a local ALIAS of the imported symbol too.
+ * This suite's own first draft bound `const runAuditor = auditor.runAuditor` inside a helper and
+ * failed §B against a CORRECT move; the binding below is named `run` for that reason, and a future
+ * editor who renames it back reintroduces the false red rather than a real finding.
  */
 const declaresSymbol = (code: string, name: string): boolean =>
   new RegExp(
@@ -318,9 +370,10 @@ const auditOrg = async (identity: Identity): Promise<Report> => {
   ).toBe("function");
   const client = postgres(databaseUrl(), { max: 1 });
   try {
-    const runAuditor = auditor.runAuditor;
-    if (runAuditor === undefined) throw new Error("unreachable — asserted above");
-    return await runAuditor({ db: drizzle(client), org_id: identity.org_id });
+    // Named `run`, NOT `runAuditor` — see the warning on `declaresSymbol`.
+    const run = auditor.runAuditor;
+    if (run === undefined) throw new Error("unreachable — asserted above");
+    return await run({ db: drizzle(client), org_id: identity.org_id });
   } finally {
     await client.end({ timeout: 5 });
   }
@@ -610,9 +663,19 @@ describe("DEC-ARCH-001: the Auditor lives in packages/auditor, and the services�
       if (redact === undefined) throw new Error("no redactedDsn — the test above owns that");
       // A re-implementation that pattern-matches instead of parsing tends to return its input
       // unchanged when the pattern misses — which is a leak on exactly the input nobody predicted.
-      const garbage = "not-a-dsn-but-it-has-a:secret-in-it";
+      //
+      // ⚠ The fixture must be UNPARSEABLE, and that is narrower than "not a DSN". This suite's
+      // first draft used `not-a-dsn-but-it-has-a:secret-in-it`, which the WHATWG parser accepts
+      // (scheme `not-a-dsn-but-it-has-a:`, path `secret-in-it`) — it has no password, so a correct
+      // implementation returns it unchanged and the assertion failed a correct move. Spaces are
+      // what make a string unparseable as a URL.
+      const garbage = "host=db user=restos password=hunter2 sslmode=require";
       const out = redact(garbage);
-      expect(out).not.toContain("secret-in-it");
+      expect(
+        out,
+        "an input it could not parse was echoed back verbatim — 18 §5's one forbidden field " +
+          "reaches the log store on exactly the DSN shape nobody predicted",
+      ).not.toContain("hunter2");
       // A boot line is not the place to throw: services/jobs prints this while REPORTING a fault.
       expect(() => redact("")).not.toThrow();
     });
