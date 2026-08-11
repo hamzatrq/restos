@@ -33,3 +33,7 @@ out/
 # them in the tree, where they red `pnpm verify` on generated files. Ignored for
 # the same reason its sibling above is.
 .oracle-layout/
+
+# apps/manager — `pnpm -C apps/manager bundle:check` output (Metro resolution proof, 05-F29)
+.expo-bundle-check/
+.expo/
