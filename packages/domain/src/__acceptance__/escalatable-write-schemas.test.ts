@@ -200,10 +200,20 @@ describe("§A 01-F4/02-F20 — the four escalatable writes parse rather than thr
   });
 
   it("an unrelated catalog type with no schema still throws — this file did not open the gate", () => {
-    // `01 §4` carries `order.parked` and `order.rejected` too, and `apps/pos-electron`'s guide
-    // records both as blocked on exactly this. If registering four types quietly registered
-    // everything, that would be indistinguishable here from the change actually made.
-    expect(() => parseEvent(envelope("order.parked", { order_id: "order-1" }))).toThrow(
+    // If registering four types quietly registered everything, that would be indistinguishable
+    // here from the change actually made.
+    //
+    // ── AMENDED August 2026 (C10/C20 landed `order.parked`) ──────────────────────────────────
+    // ⚠ Read the reason, because narrowing a tripwire is what weakening one looks like from the
+    // diff alone. This assertion named `order.parked`, which `01 §4` carried with no schema — and
+    // the C10/C20 track has since given `order.parked`, `order.unparked` and `order.rejected`
+    // payload schemas under `02-F4`/`02-F9`/`06-F20`. The witness therefore had to move to a type
+    // that is still unregistered, or this test would assert the OPPOSITE of the tree's state and
+    // block the session that landed them (a test that stays red under a correct implementation is
+    // as damaging as a vacuous one). NOTHING about what this test claims has changed: the claim is
+    // "registering N types did not register the family", and `order.merged` witnesses it exactly as
+    // `order.parked` did. `order.merged` is `02-F5`'s and is not any current track's FR.
+    expect(() => parseEvent(envelope("order.merged", { order_id: "order-1" }))).toThrow(
       UnknownEventTypeError,
     );
   });
@@ -394,12 +404,23 @@ describe("§F 00 §6 — required fields are law, declared extras are not invent
 
   /**
    * ANTI-SCOPE. `02-F20` names four acts and `05-F19` names the fifth approvable one, which
-   * already had a schema. Nothing else in `01 §4` gained one here — `order.rejected` (`C20`),
-   * `order.parked`/`order.unparked` (`C10`) and `payment.split_recorded` are all recorded as
-   * blocked on exactly this and all three are somebody else's FR.
+   * already had a schema. Nothing else in `01 §4` gained one here.
+   *
+   * ── AMENDED August 2026 (C10/C20 landed), same reason as §A's witness ────────────────────────
+   * ⚠ This list read `["order.rejected", "order.unparked", "payment.split_recorded"]`, and it was
+   * RIGHT when written: all three were recorded as blocked on exactly this defect and all three
+   * were somebody else's FR. The C10/C20 track has since landed the first two under `02-F4` /
+   * `02-F9` / `06-F20`, which is this tripwire **working** — a later session was told, at the point
+   * of its change, that these neighbours were the ones it must not sweep in, and it landed them
+   * with their own FRs, their own oracle (`order-reject-park-schemas.test.ts`) and their own
+   * `26 §7` fold pin instead. They come out of the list because the list's job is to name types
+   * that are still unregistered; the two remaining ones do that job unchanged.
+   *
+   * `payment.split_recorded` (`01 §4`, `02-F13`'s split settlement) and `order.cancelled`
+   * (`06-F19`/`06-F27`) are both still schema-less and neither is any current track's FR.
    */
   it("the neighbours a session would be tempted to sweep in are still unregistered", () => {
-    for (const type of ["order.rejected", "order.unparked", "payment.split_recorded"]) {
+    for (const type of ["payment.split_recorded", "order.cancelled"]) {
       expect(() => parseEvent(envelope(type, {}))).toThrow(UnknownEventTypeError);
     }
   });
