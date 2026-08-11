@@ -132,11 +132,23 @@ describe("§C 02-F27 — `Save caller` reaches the trusted side", () => {
   it("Counter.tsx calls the bridge's `recordCustomer`, and normalizes nothing", () => {
     const counter = src("../../renderer/Counter.tsx");
     expect(counter).toMatch(/window\.restos\.recordCustomer\?\.\(/);
-    // The DIALLED digits and a STATED absence of a name — `registry.ts` refuses `""` because
-    // `null` already says "no name stated", and `27-F6` is why no name is typed at all.
-    expect(counter).toMatch(/recordCustomer\?\.\(\{\s*dialled,\s*name:\s*null\s*\}\)/);
-    // And the renderer must NOT normalize: `01-F23`'s key is the writer's, and a second writer of
-    // it on the untrusted end of `18 §9`'s bridge is how one customer becomes two identities.
+    // The renderer must NOT normalize: `01-F23`'s key is the writer's, and a second writer of it
+    // on the untrusted end of `18 §9`'s bridge is how one customer becomes two identities.
     expect(counter).not.toMatch(/phone_e164:\s*[`"']\+/);
+    // ⚠ **A THIRD ASSERTION STOOD HERE UNTIL THE ADVERSARY SESSION'S NEGATIVE CONTROL REDDENED
+    // ON IT** (August 2026). It read
+    // `expect(counter).toMatch(/recordCustomer\?\.\(\{\s*dialled,\s*name:\s*null\s*\}\)/)` and
+    // matched the SHORTHAND PROPERTY in the source, so renaming the renderer's state variable —
+    // `dialled` → `keyedDigits`, emitting the identical object — failed this file while all 790
+    // other tests stayed green. That is `24 §3`'s second corollary exactly: a test that reddens
+    // under a correct implementation is as damaging as a vacuous one, because the next session
+    // reads a red and looks for a defect that is not there.
+    //
+    // It was REMOVED rather than loosened, on the evidence: `renderer/phone-entry-save.dom.test
+    // .tsx` asserts `toMatchObject({ dialled: DIALLED, name: null })` on what actually crosses the
+    // bridge, and every mutant this line killed (the call site deleted; the renderer normalizing;
+    // `name: ""` for `name: null`) is killed by that behavioural assertion too — measured, all
+    // three. It had no unique true kill and one unique false one. What remains above is the only
+    // claim a source read can make that a DOM render cannot: the absence of a normalizer.
   });
 });
