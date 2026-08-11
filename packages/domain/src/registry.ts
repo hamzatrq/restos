@@ -163,6 +163,26 @@ const PhoneE164 = z
       "customer and is refused here rather than normalized in a fold",
   );
 
+/**
+ * **Is this string the FORM `01-F23` keys a customer by?** — the schema above, asked as a
+ * question instead of enforced as a refusal.
+ *
+ * It exists so the rule has exactly ONE home while normalization stays where the comment on
+ * `customer.created` puts it: *"Normalization belongs at the WRITER, upstream of `parseEvent`."*
+ * A writer must decide, BEFORE it appends, whether the digits an operator typed resolve to a key
+ * at all — `02-F27`'s lookup answers `phone_e164: null` for a half-typed number and appends
+ * nothing, so it cannot learn the answer by being refused. Without this export the writer would
+ * carry its own copy of the pattern, which is the second rule this schema's own comment names as
+ * the defect: two rules make one number two identities.
+ *
+ * A PREDICATE and not the schema, deliberately. What a writer needs is a yes/no about a
+ * candidate key; handing out `.parse` would put a second refusal point beside `parseEvent`'s,
+ * with its own message and its own failure mode. **It normalizes nothing** — the country default
+ * that turns `03001234567` into `+923001234567` is policy no FR or `00 §7` layer states, and
+ * putting an unstated default in the kernel would make every plane inherit one guess.
+ */
+export const isPhoneE164 = (value: unknown): value is string => PhoneE164.safeParse(value).success;
+
 // Payloads are loose objects: required fields are law; extra fields pass through
 // (additive evolution, 00 §6) and are preserved for consumers.
 const payloadSchemas = {

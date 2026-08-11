@@ -113,14 +113,36 @@ describe("18 §6 / 18 §9 — the renderer's whole surface", () => {
     // no mutation — it APPENDS, which is why `01-F1`'s channel-name tripwire in
     // `unbound-settlement.dom.test.tsx` had to be satisfied by naming it honestly rather than by
     // loosening the regex.
+    //
+    // TEN since `02-F27`'s phone quick-entry, and both widenings are acknowledged on the same
+    // terms as the four above them.
+    //
+    // `lookupCustomer` is a READ and cannot arrive through the other three: `openOrders` and
+    // `kitchenQueue` are order-scoped folds, `menu` is reference data (`01-F21`) and `cashState`
+    // is the shift projection, so the `customer_file` fold had no channel at all — which is
+    // precisely why `device-store.ts`'s comment on `customers()` said "the seam STOPS HERE".
+    // Still a CLOSED vocabulary: it takes ONE value and answers one fixed question about it,
+    // exactly as `menu` takes a channel. No table, no filter.
+    //
+    // `recordCustomer` exists because the event needs a field the renderer must not supply —
+    // `addLine`'s argument with `01-F23`'s IDENTITY in place of a price. `registry.ts` puts
+    // normalization at the writer because two normalizers make one customer two rows, and `18 §9`
+    // makes main the writer; routing this through the generic `append` would have put the
+    // identity key itself on the untrusted end of the bridge. It is also ONE call for `02-F27`'s
+    // TWO event types, because that FR names them as one operator act and a screen that could
+    // append the create and lose the address would leave a delivery order with nowhere to send
+    // the food. Still a CLOSED vocabulary: it names a number, a name and an address text, and it
+    // APPENDS — no table, no filter, no mutation.
     expect(Object.keys(createGateway(deps())).sort()).toEqual([
       "addLine",
       "append",
       "cashState",
       "deviceState",
       "kitchenQueue",
+      "lookupCustomer",
       "menu",
       "openOrders",
+      "recordCustomer",
       "toggleAvailability",
     ]);
   });

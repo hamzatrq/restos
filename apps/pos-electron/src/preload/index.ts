@@ -34,6 +34,12 @@ const bridge: RestosBridge = {
   // and `alarms` record above: this bridge is the one main actually ships. It carries no
   // `supersedes` link; main reads `01-F57`'s heads off the fold at append time.
   toggleAvailability: (req) => ipcRenderer.invoke(CHANNELS.toggleAvailability, req),
+  // `02-F27`/`02-F28` — the caller's file. Optional on the contract, always served here, for the
+  // reason `cashState` and `alarms` record above: this bridge is the one main actually ships.
+  // The DIALLED digits cross, never `01-F23`'s key: main normalizes, because a renderer that did
+  // would be a second writer of the key and two rules make one customer two identities.
+  lookupCustomer: (dialled) => ipcRenderer.invoke(CHANNELS.lookupCustomer, dialled),
+  recordCustomer: (req) => ipcRenderer.invoke(CHANNELS.recordCustomer, req),
   // `02-F20`'s local manager-PIN path. Optional on the contract, always served here, for the
   // reason `cashState` and `alarms` record above: this bridge is the one main actually ships.
   // The offer is display data read off the matrix; the approval is the credential call.

@@ -9,6 +9,7 @@ import {
   type AppendResult,
   type CashState,
   CashStateSchema,
+  type CustomerLookup,
   type DeviceState,
   DeviceStateSchema,
   type KitchenTicket,
@@ -17,10 +18,13 @@ import {
   type MenuItem,
   type OpenOrder,
   OpenOrderSchema,
+  type RecordCustomerRequest,
+  RecordCustomerRequestSchema,
   type Session,
   type ToggleAvailabilityRequest,
   ToggleAvailabilityRequestSchema,
 } from "../shared/ipc";
+import { normalizeDialledPhone } from "./customer-phone";
 import type { PanelFit } from "./window-options";
 
 /**
@@ -44,6 +48,10 @@ export type Gateway = {
   addLine: (req: unknown) => AppendResult;
   /** `02-F7` — the 86, with `01-F57`'s supersedes link built here from the fold's own heads. */
   toggleAvailability: (req: unknown) => AppendResult;
+  /** `02-F27` — the caller's file, keyed by `01-F23`'s normalized number. A READ; appends nothing. */
+  lookupCustomer: (dialled: unknown) => CustomerLookup;
+  /** `02-F27` — file an unknown caller. One act, one or two events, one normalization rule. */
+  recordCustomer: (req: unknown) => AppendResult;
 };
 
 /**
@@ -244,6 +252,14 @@ const catalogRefusalWords = (reason: string): string =>
   CATALOG_REFUSAL_WORDS[reason] ?? `this till refused the menu it was sent (${reason})`;
 
 type LineCell = { item_id: string; qty: number; unit_price_paisa: number; states: string[] };
+
+/**
+ * One saved address as the `customer_file` fold projects it into `addresses_json` (`02-F27`'s
+ * *"saved addresses"*, `06-F9`'s capture, `09-F10`'s rider). Declared here for the same reason
+ * `LineCell` above is: the store hands this side canonical JSON, and naming the shape at the
+ * parse is what stops an `any` walking into the IPC payload.
+ */
+type SavedAddress = { address_id: string; address_text: string };
 
 const linesFrom = (jsonLines: string, catalog: CatalogResolver): OpenOrder["lines"] =>
   Object.entries(JSON.parse(jsonLines) as Record<string, LineCell>).map(([line_id, cell]) => ({
@@ -700,6 +716,126 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
       },
       refs: [],
     });
+    return { id: envelope.id };
+  },
+
+  /**
+   * `02-F27`'s lookup — *"customer file lookup by normalized phone → name, saved addresses"* —
+   * and the first thing in this product to reach the `customer_file` fold.
+   *
+   * That fold, its convergence rules and its store table all shipped in August 2026 and
+   * `device-store.ts`'s own comment on `customers()` said what was left: *"the seam STOPS HERE …
+   * no app calls this method and no shipping code emits either `customer.*` type"*. This is the
+   * call, and `recordCustomer` below is the emitter.
+   *
+   * ── It APPENDS NOTHING, and that is a rule rather than an implementation detail ─────────────
+   *
+   * `02-F27` puts creation AFTER the lookup, as the operator's own act (*"unknown number → inline
+   * customer creation"*). A lookup that upserted would file every wrong number, every hang-up and
+   * every half-typed digit string as a permanent identity `01-F1` forbids correcting in place.
+   *
+   * ── A number that is not yet a number is a STATE ────────────────────────────────────────────
+   *
+   * `phone_e164: null` for anything `normalizeDialledPhone` cannot key. The operator is mid-call
+   * and still typing, so this is the field's NORMAL condition — it must be a value the screen can
+   * render, never an exception it has to catch (`01-F17`, `27-F29`).
+   */
+  lookupCustomer: (dialled: unknown): CustomerLookup => {
+    const phone_e164 = normalizeDialledPhone(dialled);
+    if (phone_e164 === null) return { phone_e164: null, known: null };
+    // The fold's own projection, read fresh. `01-F23` keys the identity BY this number, so the
+    // find is on a payload VALUE and reads no ordering metadata (`01-F34`).
+    const row = deps.store.customers().find((r) => r.phone_e164 === phone_e164);
+    if (row === undefined) return { phone_e164, known: null };
+    return {
+      phone_e164,
+      known: {
+        // `null` here is TWO facts the fold deliberately does not separate for this screen:
+        // no name was ever stated (`06-F11`), or two devices stated different ones and
+        // `01-F31` refuses to pick a winner. Both render as "no name", which is honest; the
+        // resolver `DEC-CUST-001` will eventually name is the surface that tells them apart,
+        // and inventing one here would be implementing against a `proposed` decision.
+        name: row.name,
+        // Sorted by `address_id` by the fold, and passed through in that order — a re-sort here
+        // would be the projection's own ordering decided twice (`26 §8`).
+        addresses: JSON.parse(row.addresses_json) as SavedAddress[],
+      },
+    };
+  },
+
+  /**
+   * `02-F27` — *"unknown number → inline customer creation (`customer.created`,
+   * `customer.address_added`)"*. ONE operator act, one or two events, and the only production
+   * emitter of either type in this product.
+   *
+   * ── `01-F23`'s key is derived HERE, never accepted from the renderer ────────────────────────
+   *
+   * `registry.ts`: *"Normalization belongs at the WRITER, upstream of `parseEvent`."* The request
+   * carries the digits she pressed; `normalizeDialledPhone` is the one rule that turns them into
+   * an identity, and it is the SAME rule `lookupCustomer` applies directly above. That sharing is
+   * the whole point — two normalizers that are each self-consistent and disagree with each other
+   * make `02-F28`'s repeat customer invisible to the screen built to find her, and every unit test
+   * of either half passes.
+   *
+   * ── A refusal here refuses NOTHING else (`01-F17`) ─────────────────────────────────────────
+   *
+   * An unusable number throws rather than inventing a key by padding, truncating or writing the
+   * raw digits — a `customer.created` under a key no lookup will ever produce is permanent
+   * (`01-F1`). It is not an `01-F17` block: `registry.ts` says so in terms (*"a refused customer
+   * record does not refuse a sale: `08-F2` has aggregator orders reach settlement while writing no
+   * customer file at all"*), and the order, its lines and its confirm are untouched by this call.
+   *
+   * ── Two events, one key ────────────────────────────────────────────────────────────────────
+   *
+   * The address carries the SAME `phone_e164` as the create rather than a handle to it (`26 §4`'s
+   * late-resolving-entity trap; `registry.ts` declares the field for exactly this reason), and its
+   * `address_id` is a MINTED business key (`26 §8`) so a re-emitted address is one entry and not
+   * two. Written after the create so a partial failure leaves the identity rather than an orphan
+   * address — though neither can be rolled back, which is why the key is validated before either.
+   */
+  recordCustomer: (req: unknown): AppendResult => {
+    const parsed: RecordCustomerRequest = RecordCustomerRequestSchema.parse(req);
+    const phone_e164 = normalizeDialledPhone(parsed.dialled);
+    if (phone_e164 === null) {
+      throw new Error(
+        `recordCustomer: ${JSON.stringify(parsed.dialled)} is not a phone number this device ` +
+          "can key (01-F23) — recording it would file a customer under a number no lookup will " +
+          "ever produce, permanently (01-F1). NOT an 01-F17 block: the order is unaffected",
+      );
+    }
+    const identity = deps.store.identity;
+    const envelope = deps.store.append({
+      id: newId(),
+      org_id: identity.org_id,
+      branch_id: identity.branch_id,
+      device_id: identity.device_id,
+      // The fourth append site, and it takes the same read as the other three: `02-F41` makes
+      // attribution whoever's PIN is in, read at APPEND rather than cached.
+      actor_user_id: deps.session()?.user_id ?? null,
+      device_created_at: wallClock.now(),
+      type: "customer.created",
+      schema_version: 1,
+      // `name` is required-and-nullable on the payload and required-and-nullable on the request,
+      // so a stated absence (`06-F11`) travels as itself and is never coerced into `""`.
+      payload: { phone_e164, name: parsed.name },
+      refs: [],
+    });
+    if (parsed.address_text !== undefined) {
+      deps.store.append({
+        id: newId(),
+        org_id: identity.org_id,
+        branch_id: identity.branch_id,
+        device_id: identity.device_id,
+        actor_user_id: deps.session()?.user_id ?? null,
+        device_created_at: wallClock.now(),
+        type: "customer.address_added",
+        schema_version: 1,
+        payload: { phone_e164, address_id: newId(), address_text: parsed.address_text },
+        refs: [],
+      });
+    }
+    // The CREATE's envelope id. One act has one result, and the create is the event that brings
+    // `01-F23`'s identity into existence — the address is a fact about an identity that now exists.
     return { id: envelope.id };
   },
 });

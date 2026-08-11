@@ -253,6 +253,8 @@ const rig = (opts: { signedInAs?: string | null; pinOk?: boolean } = {}): Rig =>
       },
       addLine: () => ({ id: "evt-line" }),
       toggleAvailability: () => ({ id: "evt-toggle" }),
+      // `02-F27`/`02-F47` — the fourth member of the trusted write surface (August 2026).
+      recordCustomer: () => ({ id: "evt-customer" }),
     },
     store,
     session,

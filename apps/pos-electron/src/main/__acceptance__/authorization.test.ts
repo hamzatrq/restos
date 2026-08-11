@@ -85,6 +85,8 @@ const rig = (opts: {
         }),
         // `02-F7`/`02-F46` — the third guarded write channel (August 2026).
         toggleAvailability: vi.fn(() => ({ id: "evt-3" })),
+        // `02-F27`/`02-F47` — the fourth (August 2026).
+        recordCustomer: vi.fn(() => ({ id: "evt-4" })),
       },
       store,
       session: () => (assignments === null ? null : { user_id, display_name: "Stub" }),
@@ -652,6 +654,7 @@ describe("§J 05-F19 — the threshold cannot be omitted", () => {
         append: () => ({ id: "x" }),
         addLine: () => ({ id: "y" }),
         toggleAvailability: () => ({ id: "z" }),
+        recordCustomer: () => ({ id: "w" }),
       },
       store,
       session: () => null,

@@ -1225,6 +1225,38 @@ app.whenReady().then(async () => {
     notifyChanged();
     return result;
   });
+  /**
+   * `02-F27`/`02-F28` — the caller's file.
+   *
+   * `gateway`, not `reads`: this is an unscoped READ like `openOrders` and `menu` beside it, and
+   * `authorizeReads` narrows exactly one seam because exactly one FR asks for a narrowing
+   * (`02-F23`'s "cashiers see only their own shifts"). No FR scopes the customer file below the
+   * org, and `01-F24` already scopes it to the org absolutely — which the device store enforces by
+   * holding one org's events and nothing else. **Named rather than assumed**: if a later FR gives
+   * customer data a per-role reach, this is the line that has to change, and it must change here
+   * rather than in the renderer (Commandment 8).
+   *
+   * No `touch()` and no `notifyChanged()`. `01-F26`'s idle timer is fed by the two APPEND paths
+   * because those are the device's real activity signal, and this appends nothing — a lookup that
+   * reset the lock clock would let a screen left mid-number hold a session open indefinitely.
+   */
+  ipcMain.handle(CHANNELS.lookupCustomer, (_event, dialled: unknown) =>
+    gateway.lookupCustomer(dialled),
+  );
+  /**
+   * `02-F27`'s inline creation. `writes`, not `gateway`, for `addLine`'s and
+   * `toggleAvailability`'s reason above: this is a renderer-originated append and Commandment 8
+   * puts the matrix on the trusted side (`02-F47` is the row that lets it answer at all).
+   *
+   * `notifyChanged()` because the fold moved and the phone surface is reading it — the caller she
+   * just filed becomes a KNOWN caller under her hand rather than at the next poll.
+   */
+  ipcMain.handle(CHANNELS.recordCustomer, (_event, req: unknown) => {
+    touch();
+    const result = writes.recordCustomer(req);
+    notifyChanged();
+    return result;
+  });
   ipcMain.handle(CHANNELS.append, (_event, req: unknown) => {
     touch();
     const result = writes.append(req);

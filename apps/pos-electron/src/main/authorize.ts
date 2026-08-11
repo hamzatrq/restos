@@ -118,6 +118,13 @@ export const WRITE_ACTIONS: Readonly<Record<string, PermissionAction>> = {
   // toggle could not be built, not merely why it was not. See `02-F46` for why the cashier cell
   // is `allow` and why this is neither `order.create` nor `catalog.edit_menu_prices`.
   "availability.changed": "availability.toggle",
+  // `02-F27` → `02-F47`'s action, and **both types map to the ONE action** because `02-F27` names
+  // them in one clause as one operator act. **Appendix A has no customer row**, so before that FR
+  // these two hit the fail-closed default below and inline creation was DENIED for every role
+  // including owner — which is why `02-F27`'s creation clause could not be built, not merely why
+  // it was not. Third instance of the shape `02-F46` and `14-F30` each record.
+  "customer.created": "customer.record",
+  "customer.address_added": "customer.record",
 };
 
 /** The one event type whose verdict needs an amount, so it never reaches `WRITE_ACTIONS`. */
@@ -168,11 +175,13 @@ export type AuthorizedWrites = {
   addLine: (req: unknown) => AppendResult;
   /** `02-F7`/`02-F46` — the 86, guarded like every other renderer-originated append. */
   toggleAvailability: (req: unknown) => AppendResult;
+  /** `02-F27`/`02-F47` — filing the caller, guarded like every other renderer-originated append. */
+  recordCustomer: (req: unknown) => AppendResult;
 };
 
 export type AuthorizedWritesDeps = {
   /** The unguarded writes this wraps. Narrowed by name so nothing else can slip past. */
-  writes: Pick<Gateway, "append" | "addLine" | "toggleAvailability">;
+  writes: Pick<Gateway, "append" | "addLine" | "toggleAvailability" | "recordCustomer">;
   /**
    * `01-F26`/`01-F28` — the assignments come from the SYNCED staff registry on this device, and
    * `store.identity` is where the org and branch come from. Neither is anything the renderer
@@ -382,6 +391,24 @@ export const authorizeWrites = (deps: AuthorizedWritesDeps): AuthorizedWrites =>
     toggleAvailability: (req: unknown): AppendResult => {
       guard("availability.changed", {});
       return deps.writes.toggleAvailability(req);
+    },
+    /**
+     * `02-F27`/`02-F47` — the caller's file. The event types are fixed by the channel
+     * (`gateway.recordCustomer` always appends `customer.created`, and `customer.address_added`
+     * beside it), so the action is known before the request is read, exactly as for the two above.
+     *
+     * **BOTH types are guarded, not just the create.** They share one action (`02-F47`), so the
+     * two `guard` calls ask one question twice — which is deliberate: if a later FR ever splits
+     * the action, this reads as two separate refusals rather than one that silently covered both.
+     * The address is guarded whether or not this request carries one, because what is authorized
+     * is the ACT `02-F27` names, and a caller who supplies no address has not performed a lesser
+     * one. Guarding only the half that happens to be present would make the verdict depend on the
+     * payload, which is how a narrower cell gets routed around by omitting a field.
+     */
+    recordCustomer: (req: unknown): AppendResult => {
+      guard("customer.created", {});
+      guard("customer.address_added", {});
+      return deps.writes.recordCustomer(req);
     },
   };
 };

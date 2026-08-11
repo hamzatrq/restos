@@ -139,6 +139,12 @@ export const PERMISSION_ACTIONS = [
   // a toggle request and `authorize.ts`'s fail-closed default denied every one of them —
   // `02-F7`'s control could not be built. Same shape as `device.manage` directly above.
   "availability.toggle",
+  // ── The caller's file (`02-F47`, which decides it alone). ───────────────────────────────
+  // Appendix A has no customer row either, so before `02-F47` the matrix could not answer a
+  // `customer.created` / `customer.address_added` request and `authorize.ts`'s fail-closed
+  // default denied both for every role INCLUDING owner — `02-F27`'s inline creation could not
+  // be built. Third instance of `device.manage`'s and `availability.toggle`'s shape.
+  "customer.record",
   "history.edit_delete",
   "approval.grant",
   "report.sales_view",
@@ -188,6 +194,27 @@ const VERDICTS: Readonly<Record<VerdictAction, Readonly<Record<Role, AuthOutcome
    * human at a till saying the karahi is finished.
    */
   "availability.toggle": {
+    cashier: "allow",
+    branch_manager: "allow",
+    storekeeper: "deny",
+    owner: "allow",
+  },
+  /**
+   * `02-F47` — recording the caller (`customer.created` **and** `customer.address_added`, one
+   * act). **No Appendix A row**; this cell is the FR's, and it copies `order.create`'s row
+   * directly above rather than inventing a shape.
+   *
+   * **The `cashier: "allow"` cell is the one that matters**, on `availability.toggle`'s argument
+   * with a stopwatch attached: `02-F27` puts the operator on the phone with the caller and
+   * `02-F28` measures 30 seconds FROM NUMBER ENTRY, so `escalate` here would put writing down a
+   * number behind a manager PIN inside a 30-second budget, in the `27-F11e` branch least likely
+   * to have a manager on the floor.
+   *
+   * `storekeeper: "deny"` follows `order.create`: Appendix A's storekeeper column is stock-only
+   * and this is a counter act. Note what a `deny` here does NOT do — `01-F17` and `08-F2` keep
+   * the sale: a refused customer record costs a name and an address, never an order.
+   */
+  "customer.record": {
     cashier: "allow",
     branch_manager: "allow",
     storekeeper: "deny",

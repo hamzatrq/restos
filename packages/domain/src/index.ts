@@ -85,6 +85,9 @@ export {
   type CatalogPriceChangeT,
   eventRegistry,
   isAuditEvent,
+  // 01-F23 / 02-F27 — is this string the E.164 form the customer file is keyed by? The writer
+  // asks before it appends, so `02-F28`'s lookup can answer "not a number yet" without a throw.
+  isPhoneE164,
   type KnownEventType,
   ORDER_CHANNELS,
   // 06-F20 — the closed rejection-reason list `02-F9`'s Reject control chooses from.

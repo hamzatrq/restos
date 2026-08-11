@@ -162,7 +162,10 @@ const settlementRefused = (fact: AlreadySettled): SettlementRefusedError => {
  * required today and which is on a PROTECTED path. Reported, not fixed here — `check-seams.mjs`
  * is a CI rail with its own blast radius and `24 §3b` forbids the drive-by.
  */
-export type RendererWrites = Pick<Gateway, "append" | "addLine" | "toggleAvailability">;
+export type RendererWrites = Pick<
+  Gateway,
+  "append" | "addLine" | "toggleAvailability" | "recordCustomer"
+>;
 
 export type SettlementGuardDeps = {
   /** The unguarded writes this wraps. Narrowed by name so nothing else can slip past. */
@@ -208,6 +211,10 @@ export const refuseDoubleSettlement = (deps: SettlementGuardDeps): RendererWrite
   // decision here, not something a spread carries through unexamined.
   addLine: (req: unknown): AppendResult => deps.writes.addLine(req),
   toggleAvailability: (req: unknown): AppendResult => deps.writes.toggleAvailability(req),
+  // `02-F27`. Untouched, and the decision this line records is that a customer record is not a
+  // tender: `DEC-MONEY-009` is about `payment.recorded` against an order already covered, and this
+  // event carries no money and names no order. Written out rather than spread, per the note above.
+  recordCustomer: (req: unknown): AppendResult => deps.writes.recordCustomer(req),
 });
 
 /**
