@@ -66,9 +66,9 @@
 // be handed a colour is not a closed vocabulary (commandment 6, `27-F12`).
 
 import { readFileSync } from "node:fs";
+import { resolveAging } from "@restos/device-config";
 import type { DeviceStore } from "@restos/sync-client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resolveAging } from "../../../../pass-kds/src/main/aging";
 import { createGateway, type GatewayDeps } from "../gateway";
 
 const JSON_LINES = JSON.stringify({

@@ -26,10 +26,10 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { resolveAging } from "@restos/device-config";
 import { PERMISSION_ACTIONS } from "@restos/domain";
 import { type DeviceStore, openStore } from "@restos/sync-client";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveAging } from "../../../../pass-kds/src/main/aging";
 import { authorizeWrites, WRITE_ACTIONS } from "../authorize";
 import { createGateway, type Gateway, type GatewayDeps } from "../gateway";
 

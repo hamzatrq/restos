@@ -2,22 +2,29 @@ import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+/**
+ * The four `00 §7` resolvers this host shares with `apps/pass-kds` — `03-F14`/`03-F47`'s threshold
+ * table, the device's three ids, and the density of its glass. They were app-local until each
+ * acquired a second consumer; `18 §2` makes *"Apps NEVER import ... other apps"* a MUST and
+ * `DEC-ARCH-001` rules EXTRACT at that moment, so they live in a package and this import is an
+ * ordinary `apps → packages` edge. See `packages/device-config/CLAUDE.md`.
+ */
+import {
+  AGING_THRESHOLDS_ENV,
+  DEV_IDENTITY,
+  describeAging,
+  describeDeviceIdentity,
+  describePanelDensity,
+  measurePhysicalWidthMm,
+  type PanelDensity,
+  resolveAging,
+  resolveDeviceIdentity,
+  resolvePanelDensity,
+} from "@restos/device-config";
 import { businessDate, hashPin } from "@restos/domain";
 import { createSpooler, printerCapability } from "@restos/escpos";
 import { createPinAuditSink, createPinSession, openStore, wallClock } from "@restos/sync-client";
 import { app, BrowserWindow, dialog, ipcMain, screen } from "electron";
-/**
- * `03-F14`/`03-F47`'s threshold table, imported ACROSS THE APP BOUNDARY — see `GatewayDeps.aging`
- * for the argument. The short version: `03-F14` is ONE org policy read by three surfaces, that
- * module holds a pinned reading the FRs do not state, and `apps/pass-kds` already imports two pure
- * `00 §7` resolvers out of this very directory for the same reason and records the shared-module
- * refactor as owed. This joins that debt rather than opening a second one.
- */
-import {
-  AGING_THRESHOLDS_ENV,
-  describeAging,
-  resolveAging,
-} from "../../../pass-kds/src/main/aging";
 import { AppendRequestSchema, CHANNELS, type EscalationResult, type Session } from "../shared/ipc";
 import { createAggregatorSettlement } from "./aggregator-settlement";
 import { recordApprovals } from "./approval-record";
@@ -35,7 +42,6 @@ import {
   sellableMenu,
   stationResolver,
 } from "./catalog";
-import { DEV_IDENTITY, describeDeviceIdentity, resolveDeviceIdentity } from "./device-identity";
 import { printerTransport } from "./file-printer";
 import { createGateway, createVerifiedAppend } from "./gateway";
 import {
@@ -46,12 +52,6 @@ import {
 } from "./hardware-tier";
 import { openJobStore } from "./job-store";
 import { createLineAdvance } from "./line-advance";
-import {
-  describePanelDensity,
-  measurePhysicalWidthMm,
-  type PanelDensity,
-  resolvePanelDensity,
-} from "./panel-density";
 import {
   createCashPrinter,
   createKotPrinter,

@@ -854,20 +854,25 @@ forty-minute one. The chain is `main/gateway.ts` `openOrders()` → `OpenOrder.a
    the renderer no channel to `branchTimeStatus()` — so a renderer that subtracted `Date.now()`
    would be reading exactly the banned quantity on the untrusted side of the plane. It is display
    arithmetic in the host, never a fold reading a clock (`01-F34`).
-2. **The threshold table is `apps/pass-kds/src/main/aging.ts`, imported ACROSS THE APP BOUNDARY —
-   and this is a NEW REVERSE EDGE, so the two apps now depend on each other's `src`.** That app
-   already imports `device-identity.ts` and `panel-density.ts` out of this directory and records the
-   shared-module refactor as **OWED**; this joins that debt rather than opening a second kind. The
-   argument for reuse over a copy is not taste: `03-F14` describes ONE org policy, `05-F1` alarms the
-   manager off *"the red aging threshold (03-F14)"*, and a counter reading neutral while the pass
+2. **The threshold table is `@restos/device-config`'s, and it USED to be an app→app import.** ⚠ This
+   entry read *"`apps/pass-kds/src/main/aging.ts`, imported ACROSS THE APP BOUNDARY — and this is a
+   NEW REVERSE EDGE, so the two apps now depend on each other's `src`"*, which was true until August
+   2026 and is not now. `18 §2` states the dependency direction as a MUST (*"Apps NEVER import ...
+   other apps"*) and `DEC-ARCH-001` rules EXTRACT at the moment a module acquires a second consumer,
+   so `aging.ts` moved out of `apps/pass-kds` and `device-identity.ts`/`panel-density.ts` moved out
+   of this app; all three are `packages/device-config` and **the cycle is gone**. The argument for
+   reuse over a copy is unchanged and is not taste: `03-F14` describes ONE org policy, `05-F1` alarms
+   the manager off *"the red aging threshold (03-F14)"*, and a counter reading neutral while the pass
    reads red and the console alarms is three surfaces disagreeing about whether the food is late. A
    copy would also duplicate a **judgement call the FRs do not state** — that module's pinned reading
    for takeaway, pickup and an absent type — which is the worst thing to hold in two places
-   (`03-F40`'s two sensor bit layouts is the corpus's own instance). ⚠ **The approved plan chose the
-   opposite (move the file into this app) and the acceptance suite forecloses it**: `orders-aging.
-   test.ts` imports `resolveAging` from `../../../../pass-kds/src/main/aging`, so the file's location
-   is oracle-pinned and moving it would edit an oracle. Recorded because the next session to tidy the
-   cross-app edges will find one plan saying move and one suite saying do not.
+   (`03-F40`'s two sensor bit layouts is the corpus's own instance). *The recorded conflict is
+   resolved rather than deleted, because how it resolved is the transferable part:* the approved plan
+   said move the file INTO this app, `orders-aging.test.ts` pinned it in the other one, and the
+   answer was neither — a later suite (`apps/pass-kds/src/main/__acceptance__/shared-config-
+   extraction.test.ts`) asserted the property both were arguing about (**one declaration, reached by
+   both apps, in neither**) and the import specifier in that oracle changed while not one of its
+   assertions did.
 3. **THE AGE TICK IS IN `index.ts`, UNCONDITIONAL, AND MOVING IT INTO `sync.ts` WOULD BE A
    COMMANDMENT-4 VIOLATION.** `03-F25` says *timers*, and the gateway recomputing correctly on every
    call is only half of one — the renderer re-reads when main pushes `changed`, and every other push

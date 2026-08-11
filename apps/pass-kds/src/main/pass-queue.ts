@@ -1,6 +1,6 @@
+import type { AgingPolicy } from "@restos/device-config";
 import { ORDER_LINE_STATES, type OrderLineState, TERMINAL_LINE_STATES } from "@restos/domain";
 import type { DeviceStore, OpenOrderRow } from "@restos/sync-client";
-import type { AgingPolicy } from "./aging";
 
 /**
  * # `03-F13` — THE BRANCH ORDER QUEUE, AND THE ONE PROPERTY THAT IS A LAW

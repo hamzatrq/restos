@@ -25,10 +25,10 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { resolveAging } from "@restos/device-config";
 import { LEGAL_NEXT } from "@restos/domain";
 import { type DeviceStore, openStore } from "@restos/sync-client";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveAging } from "../aging";
 import { passQueue } from "../pass-queue";
 import {
   createReadyMark,

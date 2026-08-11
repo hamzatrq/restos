@@ -22,13 +22,13 @@
 // `orders-seam.test.ts` and `line-advance-seam.test.ts` beside it.
 
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
 import {
   DEV_IDENTITY,
   describeDeviceIdentity,
   IDENTITY_ENV,
   resolveDeviceIdentity,
-} from "../device-identity";
+} from "@restos/device-config";
+import { describe, expect, it } from "vitest";
 
 const SRC = new URL("../", import.meta.url).pathname;
 const mainSrc = readFileSync(`${SRC}index.ts`, "utf8");

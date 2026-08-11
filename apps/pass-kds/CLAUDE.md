@@ -274,18 +274,25 @@ page 2 looks like a bug to a helpful session and it is not.
   permanently and a residue of platform-dependent metrics survives there. An icon component, not
   a bigger font, is the fix if it ever matters.
 
-## ⚠ TWO MODULES AND THE PROBE ARE IMPORTED ACROSS THE APP BOUNDARY
+## ONE MODULE — THE PROBE — IS STILL IMPORTED ACROSS THE APP BOUNDARY
 
-`device-identity.ts`, `panel-density.ts` and `layout-gate/probe.ts` come from
-`apps/pos-electron/src/`. All three are pure, and copying them would give the repo **two
-interpretations** of one rule — what `RESTOS_PANEL_PPI` means, whether a padded `RESTOS_DEVICE_ID`
-refuses, and *"is this control on the screen"*. `turbo.json` cuts a package cycle to avoid exactly
-this, and `03-F40`'s two incompatible sensor bit layouts is the corpus's own instance of the cost.
+⚠ This section said **TWO MODULES AND THE PROBE** and was correct until August 2026. The two
+modules are `@restos/device-config` now, along with this app's own `aging.ts`, which the counter
+had been reaching across for — so the debt this section recorded as **OWED** is paid on the shipped
+side and `apps/pos-electron` and `apps/pass-kds` are no longer a cycle. `18 §2` states the
+dependency direction as a MUST (*"Apps NEVER import ... other apps"*) and `DEC-ARCH-001` rules
+EXTRACT at the moment a module acquires its second consumer; the argument against copying is
+unchanged and is why they moved rather than multiplied — two interpretations of what
+`RESTOS_PANEL_PPI` means, of whether a padded `RESTOS_DEVICE_ID` refuses, or of when food is late
+diverge silently (`03-F40`'s two incompatible sensor bit layouts is the corpus's own instance).
 
-**What it costs, stated:** this app's build depends on files in a package it does not declare a
-dependency on. The honest fix is shared modules and it is a cross-app refactor with
-`apps/pos-electron`'s suites and its gate in the blast radius — scheduled consolidation, not a
-drive-by (`24 §3b`). **OWED.**
+**What is left is `layout-gate/main.ts` → `apps/pos-electron/src/layout-gate/probe`**, and it is
+named rather than hidden: `shared-config-extraction.test.ts` allowlists that one edge **by name
+with its reason**, as a subset test so removing it later does not red. It is the same debt in kind
+— *"is this control on the screen"* must have one interpretation — but it is CI rail rather than
+shipped app code and it is serialised with `Function.prototype.toString()` to run inside the page,
+so it cannot become an ordinary package import without redesigning how the probe is delivered.
+**Still OWED.**
 
 ## ⚠ `18 §3` LISTS THIS APP AS EXPO AND IT IS ELECTRON
 

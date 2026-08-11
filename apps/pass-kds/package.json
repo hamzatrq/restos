@@ -13,6 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@restos/device-config": "workspace:*",
     "@restos/domain": "workspace:*",
     "@restos/sync-client": "workspace:*",
     "@restos/ui": "workspace:*",
