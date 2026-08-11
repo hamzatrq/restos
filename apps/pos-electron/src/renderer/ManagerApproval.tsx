@@ -228,7 +228,32 @@ const REFUSAL_WORDS: Readonly<Record<EscalationRefusal, string>> = {
   self_approval: "You cannot approve your own request.",
   not_permitted: "That manager cannot approve this.",
   not_escalatable: "This cannot be approved here.",
+  // `approval.denied.reason` is required, and the pad keeps `Deny` unavailable until one is
+  // chosen — so this reaches an operator only if main and this screen ever disagree about that
+  // precondition. It says what to do rather than that something went wrong.
+  no_reason: "Choose why before denying.",
 };
+
+/**
+ * `05-F6`'s denial reason, as a PICK-LIST rather than a typed word.
+ *
+ * `27-F6`: of 27 field subjects, 24 could not type a single word, so no operational role is
+ * required to type non-numeric text to complete a critical-path task — and `packages/ui` ships no
+ * text-entry component at all, deliberately. A pick-list is therefore the only instrument
+ * available, and `CashSurfaces.tsx`'s `PAID_OUT_REASONS` is the same problem solved the same way
+ * one surface over.
+ *
+ * **NO FR NAMES THIS VOCABULARY.** `05-F7` requires `approval.denied` to carry a reason, `05 §4`
+ * has the POS read it back (*"the paid-out stays pending at the POS with the denial reason"*), and
+ * neither says what the words are. These three are the smallest honest set for the cases doc 05's
+ * own flows describe — a figure that is wrong, an act that should not happen, and everything else
+ * — and they are an **OPEN QUESTION owed to a spec change, not a decision taken here**
+ * (commandment 2, exactly as `PAID_OUT_REASONS` records for itself).
+ *
+ * They are deliberately act-agnostic: one pad answers a paid-out, a void, a comp and a price
+ * override, so a vocabulary naming receipts or kitchen tickets would be wrong on three of the four.
+ */
+const DENIAL_REASONS = ["Wrong amount", "Not needed", "Other"] as const;
 
 export type ManagerApprovalProps = {
   /**
@@ -244,6 +269,13 @@ export type ManagerApprovalProps = {
   /** The last server answer, or `null` before one. */
   refusal: EscalationRefusal | null;
   onSubmit: (approver_user_id: string, pin: string) => void;
+  /**
+   * `05-F6` — *"one-tap approve/**deny**"*. The other answer, on the same credential.
+   *
+   * REQUIRED rather than optional: a pad that could be mounted without it would be `05-F6` half
+   * built with nothing to say so, which is `seams:check` Rule B's blind spot expressed as a prop.
+   */
+  onDeny: (approver_user_id: string, pin: string, reason: string) => void;
   onCancel: () => void;
 };
 
@@ -253,10 +285,12 @@ export const ManagerApproval = ({
   requesterId,
   refusal,
   onSubmit,
+  onDeny,
   onCancel,
 }: ManagerApprovalProps) => {
   const [chosen, setChosen] = useState<Session | null>(null);
   const [pin, setPin] = useState("");
+  const [denialReason, setDenialReason] = useState<string | null>(null);
   const color = useColor();
 
   /**
@@ -364,6 +398,53 @@ export const ManagerApproval = ({
               ledger untouched — and stacking them read as two primary acts under the name, which
               is weight the identity should be carrying. `27-F9` is unaffected: both are still a
               column away from `Clear`, which is the mis-tap this rule is about. */}
+          {/*
+            `05-F6`'s SECOND answer, and it is a WRITE: `approval.denied` is a record, never the
+            absence of one, because under `01-F1` a decision that left no row cannot later be told
+            apart from a request nobody ever saw.
+
+            **The reason is a PRECONDITION of the act and is composed to look like one**, on
+            `CashSurfaces.tsx`'s paid-out pattern exactly (`27-F58` — order encodes the sequence,
+            containment encodes the grouping): the reason sits ABOVE the row that ends the
+            approval, which is the order the manager must perform them in, and `Deny` keeps
+            `27-F4`'s disabled-in-place position naming what it is waiting for.
+
+            It is not the blue primary, for the reason `Approve` is not: `27-F14` allocates blue to
+            a control the operator may press, and colouring one answer on a pad whose twin colours
+            neither would teach a habit the unlock pad contradicts (`27-F4`).
+          */}
+          <Readout caption="DENY BECAUSE">
+            <div style={{ display: "flex", gap: space["space-2"], flexWrap: "wrap" }}>
+              {DENIAL_REASONS.map((r) => (
+                <Tile
+                  key={r}
+                  posture="counter"
+                  label={r}
+                  onPress={() => setDenialReason(r)}
+                  selected={denialReason === r}
+                  // `27-F12` — `selected` is an accent rule and a rule is colour, so the state is
+                  // said in a word as well. Neither half is sufficient alone.
+                  {...(denialReason === r ? { children: <span>chosen</span> } : {})}
+                />
+              ))}
+            </div>
+          </Readout>
+          {/*
+            THE THREE WAYS THIS APPROVAL ENDS, in one row. Two leave the ledger untouched and one
+            writes to it permanently, so the grouping is "how this ends" rather than "what is
+            safe" — and `Deny`'s protection is its PRECONDITION, not its distance: it is
+            unavailable until a reason is chosen, exactly as `Paid out` is unavailable until a
+            reason and a receipt exist, so a mis-tap on it cannot reach the ledger without a
+            deliberate prior act. `27-F9` is unaffected either way — all three are a column away
+            from `Clear`, which is the mis-tap that rule is about.
+
+            **`Deny` had its own row and the layout gate took it away, measured not argued.** With
+            it below this row the identity column laid out **569 dp of content in a 567 dp box on
+            `tablet-10.1` under `03-F5`'s band** — 2 dp clipped, on the surface whose recorded
+            defect (this file's "fifth defect") is controls off the bottom of exactly that panel.
+            The pad is 536 dp and the identity column must stay under it; one row is what there
+            was room for.
+          */}
           <div style={{ display: "flex", gap: space["space-2"], flexWrap: "wrap" }}>
             <Tile
               posture="counter"
@@ -375,6 +456,22 @@ export const ManagerApproval = ({
             />
             {/* `01-F17` — backing out costs nothing. `27-F9` puts it a column away from the pad. */}
             <Tile posture="counter" label="Cancel" onPress={onCancel} />
+            <Tile
+              posture="counter"
+              label="Deny"
+              onPress={
+                denialReason === null
+                  ? undefined
+                  : () => {
+                      const entered = pin;
+                      setPin("");
+                      setDenialReason(null);
+                      onDeny(chosen.user_id, entered, denialReason);
+                    }
+              }
+              unavailable={denialReason === null}
+              {...(denialReason === null ? { unavailableReason: "needs a reason" } : {})}
+            />
           </div>
           {refusal === null ? null : (
             <p style={{ ...PROMPT, color: color["fgColor-status-fault"] }}>

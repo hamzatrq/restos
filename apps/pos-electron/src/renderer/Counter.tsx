@@ -213,6 +213,23 @@ const ORDER_CHANNELS_AT_COUNTER: readonly { id: string; label: string }[] = [
  */
 const GRID_PREVIEW_CHANNEL = "counter";
 
+/**
+ * `02-F30`/`02-F42` — the one channel whose orders are **aggregator-collected**, and therefore the
+ * one the Pay surface offers no tender for.
+ *
+ * `01-F32` scopes its receivable to *"aggregator-collected orders"* and `02-F42` closed `channel`
+ * to five values of which `foodpanda` is the only aggregator, so this literal is the whole of that
+ * clause as this product can express it. It is a SEPARATE constant from
+ * `ORDER_CHANNELS_AT_COUNTER`'s row above on purpose: that list answers *"what may a cashier
+ * originate?"* and this answers *"what may she settle?"*, and the two questions have different
+ * answers for exactly this value — which is `02-F30` itself.
+ *
+ * The DECISION is main's (`main/aggregator-settlement.ts` writes the receivable); this decides only
+ * what the cashier is TOLD, and a screen that used a different rule would offer a `TAKE CASH` for
+ * money nobody will ever hand over.
+ */
+const AGGREGATOR_CHANNEL = "foodpanda";
+
 export const Counter = () => {
   const [device, setDevice] = useState<DeviceState | null>(null);
   const [orders, setOrders] = useState<readonly OpenOrder[]>([]);
@@ -480,6 +497,33 @@ export const Counter = () => {
   };
 
   /**
+   * `05-F6`'s other half — *"one-tap approve/**deny**"*, and a denial is a RECORD rather than the
+   * absence of one (`packages/domain`'s `approval.denied`, `05 §4`).
+   *
+   * The same shape as `approve` above and the same three decisions in main; the reason is the
+   * extra argument because `approval.denied.reason` is required and `05 §4` reads it back at the
+   * counter. On success the pad closes exactly as a grant closes it: the act did not happen, and
+   * `01-F17` means the cashier's counter is untouched underneath either way.
+   */
+  const deny = (approver_user_id: string, pin: string, reason: string) => {
+    const req = pending?.req;
+    if (req === undefined) return;
+    const call = window.restos.denyEscalation?.(req, approver_user_id, pin, reason);
+    if (call === undefined) return;
+    void call
+      .then((result) => {
+        if (result.ok) {
+          setPending(null);
+          setApprovalRefusal(null);
+          return;
+        }
+        setApprovalRefusal(result.refused);
+      })
+      .catch(() => {})
+      .then(reload);
+  };
+
+  /**
    * `C4` — start an order. One append, and every field it carries is a decision made HERE and
    * never inferred later (`02-F1`).
    *
@@ -656,6 +700,45 @@ export const Counter = () => {
       // device honestly reporting that there is nothing to settle — a fact worth composing.
       <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
         No order to settle — start one on Order.
+      </p>
+    ) : current.channel === AGGREGATOR_CHANNEL ? (
+      /*
+        `02-F30` — **THERE IS NO SETTLEMENT STEP, AND THE SURFACE SAYS SO.**
+
+        The FR's words are *"no settlement step (aggregator-collected; economics handled by doc
+        08)"*, and `08-F5` gives the operator-facing consequence: *"no cash expected at branch when
+        foodpanda's rider delivers"*. Main closes the money side by itself at the confirm
+        (`main/aggregator-settlement.ts`, `08-F17`/`01-F32`), so there is nothing for a cashier to
+        do here and nothing she may be asked to do.
+
+        **A sentence rather than a greyed `TAKE CASH`**, on this surface's own precedent one branch
+        down: `27-F5` bans context-dependent and invisible controls, and an inert primary control is
+        that FR's own failure mode. It also costs the highest-consequence position on the panel to
+        say nothing.
+
+        **This branch is ABOVE `isAlreadySettled` and that placement is the whole assertion.** The
+        `01-F32` receivable makes `paid_paisa >= total_paisa` true, so without it the
+        `DEC-MONEY-009` branch fires and tells the cashier *"Rs 570 **taken on this bill**"* — at a
+        counter where nothing was taken and nothing ever will be. That is a false statement about
+        money under `00 §5.7`, and it is the one a do-nothing implementation ships.
+
+        **It is keyed on the CHANNEL, not on the money**, for the same reason: `02-F30` says "no
+        settlement step" about the channel, unconditionally. An aggregator order whose receivable
+        has not landed yet — the entry is mid-flight, this device is catching up — must still offer
+        no tender, or a cashier takes cash for a foodpanda order into `02-F23`'s Cash bucket and it
+        goes missing at close. An order with no channel at all is NOT this branch: `01-F54`/`01-F17`
+        make an unstated value degrade to the ordinary path, never to a till that cannot take money.
+
+        **`27-F12` — a WORD and a NUMBER.** `Foodpanda` is the word (`02-F30`'s own vocabulary, and
+        the reason this bill is closed), the bill is the number, and nothing here is carried by
+        colour: the muted foreground is the one the two sibling branches use.
+
+        **The number is the BILL and not what has been paid**, because this sentence is about what
+        the aggregator collects rather than about what has reached the ledger — and on an order the
+        receivable has not yet closed, `paid_paisa` is 0 and would state the opposite of the fact.
+      */
+      <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
+        {`Foodpanda collects this order — ${formatPaisa(paisa(current.total_paisa))}. No payment is taken at this counter.`}
       </p>
     ) : isAlreadySettled(current) ? (
       /*
@@ -873,6 +956,8 @@ export const Counter = () => {
           requesterId={device.user?.user_id ?? ""}
           refusal={approvalRefusal}
           onSubmit={approve}
+          // `05-F6` — the pad answers both ways, and only one of them lets the write through.
+          onDeny={deny}
           onCancel={() => {
             setPending(null);
             setApprovalRefusal(null);

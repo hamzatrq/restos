@@ -141,8 +141,27 @@ describe("registry growth must fail this suite before it can silently no-op (fix
     "cash.deposit_recorded",
     "cash.drawer_opened",
     "cash.paid_out",
+    // ── AMENDED August 2026 (02-F20 / 05-F29 phase 0) ────────────────────────────────────
+    // `02-F20`'s four escalatable writes gained payload schemas, which is what `01-F4` was
+    // blocking: the types were `01 §4` vocabulary and unemittable, so `05-F19`'s paid-out was
+    // the only act an approval could complete. These four lines are the "spec-PR + oracle-pin
+    // event" the assertion below demands, and without them the compile-level pin reds — which
+    // is the design working, exactly as it did for `kot.print_failed` and the approval family.
+    //
+    // Pinned HERE and not in `PINNED_NOT_FOLDED` for that set's stated reason: it asserts
+    // `01-F52`'s "not an input to ANY fold", and filing money-bearing events there would claim
+    // `01-F30`'s conservation is unfoldable — the inversion this file was rewritten to make
+    // impossible.
+    //
+    // ⚠ **Their disposition in the engine is projection-inert, and that is a stated DEBT rather
+    // than a settled rule** — `01-F30`'s `void_value`, `comp_value` and `discounts` terms still
+    // evaluate to zero. `26 §7` makes the merge rule an oracle-pinned decision (each is money,
+    // each needs its own idempotency key and `01-F31` divergence disposition), so it is owed to
+    // this file's owner and was deliberately not guessed by the session that landed the schemas.
+    "comp.recorded",
     "day.closed",
     "day.opened",
+    "discount.recorded",
     // ── AMENDED August 2026 (K-7) ────────────────────────────────────────────────────────
     // `kot.print_failed` is `03-F5`'s third consequence and entered the registry with it.
     // Pinned HERE and not in `PINNED_NOT_FOLDED` because that set states `01-F52` — "not an
@@ -155,6 +174,7 @@ describe("registry growth must fail this suite before it can silently no-op (fix
     "order.confirmed",
     "order.created",
     "order.line_added",
+    "order.line_price_overridden",
     "order.line_state_changed",
     "order.settlement_closed",
     "order.table_assigned",
@@ -162,6 +182,7 @@ describe("registry growth must fail this suite before it can silently no-op (fix
     "payment.refunded",
     "shift.closed",
     "shift.opened",
+    "void.recorded",
   ] as const;
 
   /**

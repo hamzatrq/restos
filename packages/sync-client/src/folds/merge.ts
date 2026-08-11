@@ -764,6 +764,28 @@ export const createMergeEngine = (): MergeEngine => {
         // phantom row.
         return;
       }
+      case "void.recorded":
+      case "comp.recorded":
+      case "discount.recorded":
+      case "order.line_price_overridden": {
+        // `02-F20`'s four escalatable writes, registered August 2026. Consumed and
+        // **projection-inert**, and unlike the three approval facts above that is a stated DEBT
+        // rather than a settled disposition — `01-F30` conserves
+        // `Σ payments − Σ refunds = billed_total − void_value − comp_value − discounts`, so three
+        // of its four right-hand terms go on evaluating to ZERO until a merge rule exists here.
+        //
+        // It is deliberately not written in the change that gave these types a payload schema.
+        // `26 §7` makes a fold rule an ORACLE-PINNED decision: each of these is money, each needs
+        // its own idempotency key and its own divergence disposition under `01-F31`, and a rule
+        // guessed at this seam would let delivery order decide a money outcome — the exact failure
+        // `26 §2` exists to remove. What `01-F4` was blocking was the EMIT, and that is what the
+        // schemas closed; the fold is a separate, spec-PR-sized piece of work.
+        //
+        // Deliberately NOT in `PARKING_TYPES`, on `kot.print_failed`'s reasoning: this case
+        // touches no entity, so an early straggler costs one counted no-op rather than a phantom
+        // order row.
+        return;
+      }
       case "order.table_assigned": {
         const p = event.payload as TableAssignedP;
         const e = entity(p.order_id);

@@ -558,12 +558,20 @@ export type EscalationOffer = {
  * - `not_escalatable` — the underlying write was never an `escalate` in the first place. A
  *   manager PIN does not launder a `deny`, and it does not manufacture an approver for an act
  *   that needed none.
+ * - `no_reason` — a DENIAL with no stated reason (August 2026, with `05-F6`'s deny half).
+ *   `approval.denied.reason` is `z.string().min(1)` in `packages/domain` and `05 §4` reads it back
+ *   at the counter (*"the paid-out stays pending at the POS with the denial reason"*), so a denial
+ *   that states none is not expressible. Refused rather than defaulted: a sentence supplied by
+ *   this app would be words no FR gives (commandment 2). It cannot arise from the shipped pad,
+ *   which requires a reason before the control is live — it is the trusted side enforcing a
+ *   precondition the UI also enforces, per `18 §9`, never instead of it.
  */
 export const ESCALATION_REFUSALS = [
   "bad_pin",
   "self_approval",
   "not_permitted",
   "not_escalatable",
+  "no_reason",
 ] as const;
 export type EscalationRefusal = (typeof ESCALATION_REFUSALS)[number];
 
@@ -665,6 +673,19 @@ export const CHANNELS = {
    * never the digits that proved it.
    */
   escalate: "restos:escalate",
+  /**
+   * `05-F6`'s other half — *"one-tap approve/**deny**"* — and it is a WRITE, not the absence of
+   * one: `registry.ts` makes `approval.denied` a record, because under `01-F1` a decision that
+   * left no row cannot later be told apart from a request nobody ever saw.
+   *
+   * A channel of its own rather than a flag on `escalate`, for the reason `toggleAvailability`
+   * records above: the two acts carry different arguments (a denial states a reason and appends no
+   * escalated write) and a boolean deciding which of two ledger effects a credential produces is
+   * the kind of parameter that gets passed wrong once. It takes the same credential and the same
+   * `01-F61` durable counter — `authorize.ts` decides both from ONE reading of `02-F20`'s four
+   * refusals, so a denial can never pass a gate a grant would not.
+   */
+  denyEscalation: "restos:deny-escalation",
   /**
    * `01-F28` — the PIN is verified ON DEVICE, in main, and the renderer is told yes or no.
    *
@@ -788,6 +809,19 @@ export type RestosBridge = {
     req: AppendRequest,
     approver_user_id: string,
     pin: string,
+  ) => Promise<EscalationResult>;
+  /**
+   * `05-F6`'s deny half. Same credential, same order of arguments, plus the stated reason
+   * `approval.denied` requires — see `CHANNELS.denyEscalation`. OPTIONAL for the reason the two
+   * members above record: three oracle harnesses this session may not edit close with
+   * `satisfies RestosBridge` and all three predate this channel. The shipped preload serves it and
+   * `__acceptance__/approval-record.test.ts` §A fails if it stops.
+   */
+  denyEscalation?: (
+    req: AppendRequest,
+    approver_user_id: string,
+    pin: string,
+    reason: string,
   ) => Promise<EscalationResult>;
   /**
    * `C1`/`01-F28` — hand main **an identity and** the typed digits, and be told whether the

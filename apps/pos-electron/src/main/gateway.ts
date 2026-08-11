@@ -633,3 +633,72 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
     return { id: envelope.id };
   },
 });
+
+/**
+ * An append whose actor is **STATED** rather than read from the live session.
+ *
+ * `05-F29` (a) — *"only (a) puts the verified credential and the ledger write in the same
+ * process"* — and its prerequisite clause names this seam by name: *"an append accepting an
+ * explicitly verified actor rather than the session's"*.
+ *
+ * ── Why the three appends above cannot serve `approval.granted` ──────────────────────────────
+ *
+ * They stamp `actor_user_id: deps.session()?.user_id ?? null` unconditionally, which is exactly
+ * right for `02-F41`: attribution is whoever's PIN is in. But `registry.ts` requires the envelope
+ * of a grant to name the **APPROVER** — *"a grant whose envelope named the cashier would be the
+ * local path's defect committed on the remote one: the session moved, one identity where there
+ * must be two"* — and `verifyApprover` deliberately does NOT move the session, because moving it
+ * would sign the cashier out and re-attribute her next twenty orders to whoever authorised one
+ * paid-out, permanently (`02-F41` + `01-F1`). So the till could verify a manager and had no way to
+ * write down that she was the one who decided.
+ *
+ * ── The three alternatives, refused ──────────────────────────────────────────────────────────
+ *
+ * 1. **Move the PIN session for the duration.** The defect above with a shorter window: every
+ *    concurrent append in the process — `kot.printed`, a line-advance edge, another tab's
+ *    line-add — is attributed to the manager for the width of an `await`.
+ * 2. **An optional `actor_user_id` on `AppendRequest`.** That field crosses the IPC bridge, so a
+ *    compromised renderer could name its own actor. `18 §9` makes main the trusted side precisely
+ *    so this cannot be expressed, which is why the actor is a SEPARATE POSITIONAL ARGUMENT here
+ *    and `AppendRequestSchema` must never gain the field.
+ * 3. **A `Gateway` member.** `gateway.test.ts` frames that type as *"the renderer's whole
+ *    surface"* and pins its member count. An append that names an arbitrary actor has no business
+ *    on the renderer's surface at all, so this is declared BESIDE it and reaches no IPC channel.
+ *
+ * ── What it does not do ──────────────────────────────────────────────────────────────────────
+ *
+ * It takes no `session` dep, so it cannot read, move or refresh one — the property is structural
+ * rather than a promise. And it never coerces an unusable actor: `actor_user_id` is written
+ * verbatim, so an empty string is refused by `envelope.ts`'s `z.string().min(1).nullable()` one
+ * layer down and nothing partial is left behind (`01-F1`). Writing `actor || null` here would
+ * append an UNATTRIBUTED event claiming an approval, which is worse than the throw.
+ */
+export type VerifiedAppend = (actor_user_id: string, req: unknown) => AppendResult;
+
+export type VerifiedAppendDeps = {
+  /** The store alone. No session, and that absence is the safety property — see above. */
+  store: Pick<DeviceStore, "identity" | "append">;
+};
+
+export const createVerifiedAppend =
+  (deps: VerifiedAppendDeps): VerifiedAppend =>
+  (actor_user_id: string, req: unknown): AppendResult => {
+    // The SAME schema and the SAME envelope construction as `append` above, so the fields
+    // `01-F43` stamps at append cannot be lost by a second, hand-written envelope beside it —
+    // `02-F45`'s "two sources for one fact", arrived at through duplication.
+    const parsed: AppendRequest = AppendRequestSchema.parse(req);
+    const identity = deps.store.identity;
+    const envelope = deps.store.append({
+      id: newId(),
+      org_id: identity.org_id,
+      branch_id: identity.branch_id,
+      device_id: identity.device_id,
+      actor_user_id,
+      device_created_at: wallClock.now(),
+      type: parsed.type,
+      schema_version: 1,
+      payload: parsed.payload,
+      refs: parsed.refs,
+    });
+    return { id: envelope.id };
+  };

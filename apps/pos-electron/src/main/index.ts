@@ -6,7 +6,9 @@ import { businessDate, hashPin } from "@restos/domain";
 import { createSpooler, printerCapability } from "@restos/escpos";
 import { createPinAuditSink, createPinSession, openStore, wallClock } from "@restos/sync-client";
 import { app, BrowserWindow, dialog, ipcMain, screen } from "electron";
-import { AppendRequestSchema, CHANNELS, type Session } from "../shared/ipc";
+import { AppendRequestSchema, CHANNELS, type EscalationResult, type Session } from "../shared/ipc";
+import { createAggregatorSettlement } from "./aggregator-settlement";
+import { recordApprovals } from "./approval-record";
 import {
   authorizeEscalation,
   authorizeReads,
@@ -23,7 +25,7 @@ import {
 } from "./catalog";
 import { DEV_IDENTITY, describeDeviceIdentity, resolveDeviceIdentity } from "./device-identity";
 import { printerTransport } from "./file-printer";
-import { createGateway } from "./gateway";
+import { createGateway, createVerifiedAppend } from "./gateway";
 import {
   describeHardwareTier,
   HARDWARE_TIER_ENV,
@@ -787,6 +789,30 @@ app.whenReady().then(async () => {
   });
 
   /**
+   * **`05-F6` — *"every decision is fully logged"*, which until August 2026 it was not.**
+   *
+   * The escalation above appends the escalated write with the approver in its payload and nothing
+   * else, so a GRANT left only its consequence and a DENIAL left nothing at all — and `05-F28`'s
+   * approval queue had no producer anywhere in the product. This decorates it: the request is
+   * announced when the pad is raised, and the decision is recorded when it resolves.
+   *
+   * **`appendAs` is the whole design in one argument.** `createVerifiedAppend` names the actor
+   * explicitly, where all three of `gateway.append`'s sites read the live session — which is right
+   * for `02-F41` (the cashier's act stays hers) and wrong for a grant, whose envelope must name
+   * the MANAGER (`registry.ts`, `05-F29`). Wiring this to anything session-reading is the defect
+   * the whole task exists to prevent, and it is invisible to every behavioural test in this repo:
+   * the payload would still carry both identities and only the envelope would be wrong.
+   */
+  const approvalRecord = recordApprovals({
+    escalation,
+    // The REQUESTER, the same getter the escalation and `gateway.append` read. The approver is
+    // never a session here — she is an argument the escalation has just verified.
+    session,
+    store,
+    appendAs: createVerifiedAppend({ store }),
+  });
+
+  /**
    * `03-F4`/`03-F5` — the durable print spooler and the thing that feeds it.
    *
    * **This is K-7's whole point, and it is four lines.** `packages/escpos` shipped the encoder,
@@ -842,6 +868,30 @@ app.whenReady().then(async () => {
   const lines = createLineAdvance({
     store,
     tier: () => hardwareTier().tier,
+    append: (type, payload) => {
+      gateway.append({ type, payload, refs: [] });
+      notifyChanged();
+    },
+  });
+  /**
+   * `02-F30`/`08-F17` — **the producer for `01-F32`'s aggregator receivable**, which this product
+   * did not have.
+   *
+   * `Counter.tsx` could tag an order `foodpanda` and nothing ever settled it, so real food left the
+   * kitchen against `pay_total: 0` permanently (`01-F1`) and `02-F24`'s day summary printed a
+   * **Rs 0 Foodpanda row** while the aggregator owed the restaurant money. That is the wave's named
+   * defect in the shape `seams:check` is blind to: a missing PRODUCER for an event type is neither
+   * an unreached export nor an unsupplied optional, exactly as `audit.print_acknowledged` was.
+   * `__acceptance__/aggregator-settlement.test.ts` §H is this one's hand-written assertion.
+   *
+   * `gateway`, not `writes`: `02-F30`'s content is that there is **no settlement step**, so there
+   * is no human act for commandment 8 to authorize — and gating the aggregator's bookkeeping on
+   * the confirming cashier's `payment.settle` cell would leave the receivable unwritten with
+   * nothing on screen to say so. `aggregator-settlement.ts`'s `append` dep carries the full
+   * argument and its limits.
+   */
+  const aggregator = createAggregatorSettlement({
+    store,
     append: (type, payload) => {
       gateway.append({ type, payload, refs: [] });
       notifyChanged();
@@ -1116,6 +1166,27 @@ app.whenReady().then(async () => {
         // print's own advance reads the state this one writes.
         lines.confirmed(order_id);
         kot.confirmed(order_id);
+        // `02-F30`/`08-F8`/`08-F17` — **THE AGGREGATOR SEAM.** *"manual quick-entry orders are
+        // confirmed by the act of entry"*, and an aggregator order *"settles at creation/entry"*
+        // with `01-F32`'s receivable — so the confirm IS the entry act and this is where the money
+        // side closes without a cashier. AFTER the kitchen handoff, deliberately: `01-F17` and
+        // `02-F30`'s *"behave identically downstream: KOT print…"* both put the food first, and
+        // nothing about the money may sit between a confirm and its ticket.
+        //
+        // The channel test, the bill, the `02-F37` shift resolution and `01-F31`'s no-double-record
+        // guard all live inside the emitter's own method, where a suite can drive the real branch —
+        // never here, where a test could only hand-copy them (`K-3`'s dead-oracle defect, which
+        // this file has already paid for once).
+        //
+        // ⚠ **DO NOT WRITE THE BINDING NAME FOLLOWED BY A DOT ANYWHERE IN THIS COMMENT.** The only
+        // guard on this seam is a SOURCE READ — `main/index.ts` builds an Electron app at module
+        // scope and no suite in this package can import it — and it searches this block for
+        // `<binding>.`. The first draft of this comment wrote the call's own name in prose, and the
+        // mutant that DELETES the line below was measured **surviving at 678/678**: the assertion
+        // matched the sentence instead. Same shape as `hardware-tier.ts`'s header quoting a literal
+        // `seams:check` marker, with the sign flipped — there prose reddened a rail, here it
+        // silenced one. Write the meaning, never the token.
+        aggregator.confirmed(order_id);
       }
     }
     // S-7 — THE SAME HANDOFF FOR THE TWO CASH DOCUMENTS, and it hangs off the same completed
@@ -1170,14 +1241,22 @@ app.whenReady().then(async () => {
   });
 
   /**
-   * `02-F20` — "would a manager credential close this?", answered off the matrix for DISPLAY.
+   * `02-F20` — "would a manager credential close this?", answered off the matrix for DISPLAY —
+   * **and, since August 2026, `05-F28`'s missing producer.**
    *
-   * A read, and it authorizes nothing: the write it describes is still refused by `writes.append`
-   * above, and `escalate` below re-decides everything from scratch. A renderer that ignored this
-   * answer, or forged one, would gain nothing at all — which is the property that lets it exist
-   * without breaking Commandment 8.
+   * ⚠ **This handler used to say "nothing is appended" and that is no longer true.** Raising the
+   * pad now announces `approval.requested` (`05-F7`), because `05 §4` has the manager's queue show
+   * a PENDING item and `05-F6`'s decision must reference a request that already exists — nothing
+   * anywhere in the product emitted one, under any of `05-F28`'s three resolutions.
+   *
+   * What is unchanged is the authorization story, and it is the reason this may append at all: the
+   * verdict is still the matrix's, the escalated write is still refused by `writes.append` above,
+   * and `escalate` below re-decides everything from scratch. A renderer that ignored or forged
+   * this answer still gains nothing (Commandment 8). What it CAN now do is announce a request the
+   * matrix agrees is escalatable — `01-F36` scopes the duplicate case (one act, one request, until
+   * it resolves), and an act the matrix does not escalate announces nothing at all.
    */
-  ipcMain.handle(CHANNELS.escalationFor, (_event, req: unknown) => escalation.offer(req));
+  ipcMain.handle(CHANNELS.escalationFor, (_event, req: unknown) => approvalRecord.raise(req));
   /**
    * `02-F20`'s local path. The SECOND channel that carries a credential, and the last: it takes
    * `unlock`'s (`user_id`, `pin`) pair in that order because it is the same credential and the
@@ -1197,10 +1276,39 @@ app.whenReady().then(async () => {
       if (typeof approver_user_id !== "string" || typeof pin !== "string") {
         return { ok: false, refused: "bad_pin" };
       }
-      const result = await escalation.approve(req, approver_user_id, pin);
+      // `approvalRecord`, never `escalation`: the approval is the same act it always was, and the
+      // grant that records WHO decided it rides on this call and on nothing else.
+      const result = await approvalRecord.approve(req, approver_user_id, pin);
       // The refused case moves nothing, but the screen re-reads either way: a refusal it did not
       // see would leave the pad over a counter whose folds may have moved underneath it.
       if (result.ok) touch();
+      notifyChanged();
+      return result;
+    },
+  );
+
+  /**
+   * `05-F6`'s other half, on the same credential and the same `01-F61` counter.
+   *
+   * The reason is the fourth argument because `approval.denied.reason` is required and `05 §4`
+   * reads it back at the counter. `touch()` is NOT called on a denial: the requester's act did not
+   * happen, so there is nothing of hers to refresh `01-F26`'s idle timer against — the manager's
+   * PIN is not the cashier working, which is the same reasoning the grant applies to the approver.
+   */
+  ipcMain.handle(
+    CHANNELS.denyEscalation,
+    async (
+      _event,
+      req: unknown,
+      approver_user_id: unknown,
+      pin: unknown,
+      reason: unknown,
+    ): Promise<EscalationResult> => {
+      if (typeof approver_user_id !== "string" || typeof pin !== "string") {
+        return { ok: false, refused: "bad_pin" };
+      }
+      if (typeof reason !== "string") return { ok: false, refused: "no_reason" };
+      const result = await approvalRecord.deny(req, approver_user_id, pin, reason);
       notifyChanged();
       return result;
     },

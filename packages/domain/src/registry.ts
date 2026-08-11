@@ -362,6 +362,96 @@ const payloadSchemas = {
     day_id: z.string().min(1),
   }),
   /**
+   * ── `02-F20`'s FOUR ESCALATABLE WRITES ───────────────────────────────────────────────────────
+   *
+   * *"Manager escalation required for: void after KOT, comp, discount above org threshold, price
+   * override (`order.line_price_overridden`, extension §5) … the recorded event carries actor +
+   * approver either way."* All four have been `01 §4` catalog vocabulary since July 2026 and none
+   * had a payload schema here, so `01-F4` — *"producing an unknown/invalid event type is a
+   * build-time and runtime error"* — made them **unemittable rather than merely unbuilt**, and
+   * `05-F19`'s paid-out was the only act an approval could complete. `26 §` names the consequence
+   * for the money: *"three of the four RHS terms of `01-F30` therefore evaluate to zero today."*
+   *
+   * **The APPROVER is a payload field and the ACTOR is not (`02-F20` + `02-F41` + `02-F45`).**
+   * The envelope carries exactly one identity slot and `02-F45` forbids duplicating the actor into
+   * the payload — so the cashier is `actor_user_id` on the envelope, stamped at append from the
+   * live session, and the manager is the field below. Two identities, two homes, neither absorbing
+   * the other. This is the shape `approval.granted`'s note fifty lines down describes from the
+   * other end.
+   *
+   * **`approver_user_id` is REQUIRED and NULLABLE, and the nullability is not a hedge.**
+   * `permissions.ts` ships `branch_manager: "allow"` for `order.void_after_kot`,
+   * `order.comp_item`, `order.discount_above_threshold` and `order.price_override`, so a manager
+   * performs all four **unsupervised** — there is no second identity to record and no escalation
+   * happened. A non-nullable field would make her own void throw inside `store.append`, i.e.
+   * `01-F4` refusing an act the matrix permits outright. `null` therefore means *"no approval was
+   * involved"* and absence means *"a writer forgot"*; an `.optional()` field cannot tell those
+   * apart, which is the `payment.recorded.shift_id` / `prev_shift_id` reasoning one family over.
+   *
+   * **The money is a MAGNITUDE.** `01-F30` SUBTRACTS all three terms, so a negative void would ADD
+   * to the bill through a minus sign, permanently, in a ledger `01-F1` forbids correcting in
+   * place. `cash.paid_out` above records the identical rule in its own words.
+   *
+   * **`reason` is required on all four**, and the binding constraint is mechanical rather than
+   * stylistic: `approval.requested.reason` below is `z.string().min(1)` and its only honest source
+   * is the act being approved, so an act carrying no reason makes a legal request unconstructible
+   * unless something INVENTS words for it (commandment 2). `05-F5` also requires the interrupt
+   * card to show a *"stated reason"* before a manager decides, and doc 04's void flow ("waiter
+   * requests void **with reason**") and `01-F29`'s `reason` on refunds are the same requirement on
+   * neighbouring surfaces.
+   *
+   * **What is deliberately NOT declared.** A payload `line_id` on the three `*.recorded` acts:
+   * `05-F5` says "order/line refs" and `00 §6` puts soft references on the ENVELOPE's `refs[]`, so
+   * a payload line key would be a second place to say what an act touches and two can disagree.
+   * `campaign_id` on `discount.recorded`: `17-F17` calls it *"additive under the same schema
+   * version"*, `looseObject` already carries it, and declaring it now would be doc 17's work.
+   * A `before_unit_price_paisa` on the override: `01-F53` snapshots the price into
+   * `order.line_added` per line, so the previous number already has exactly one home (`14-F3`'s
+   * before/after pair exists for the opposite reason — a catalog cell has no event to read its
+   * previous value from, and a line does).
+   *
+   * **OWED, and named rather than left to look intentional:** `packages/sync-client`'s merge
+   * engine consumes all four as **projection-inert**, so `01-F30`'s `void_value`, `comp_value` and
+   * `discounts` terms still evaluate to zero. Declaring their fold rule is a `26 §7` decision
+   * (an oracle-pinned merge rule), not an implementer's, and it is not what `01-F4` was blocking.
+   */
+  "void.recorded": z.looseObject({
+    // `01-F30` conserves per ORDER, and `26 §3`'s projection-key sidecar answers
+    // `order:<payload.order_id>` for every order-keyed event — an act with no order key reaches
+    // no projection at all and can be conserved against nothing.
+    order_id: z.string().min(1),
+    amount_paisa: z.number().int().nonnegative(),
+    reason: z.string().min(1),
+    approver_user_id: z.union([z.string().min(1), z.null()]),
+  }),
+  "comp.recorded": z.looseObject({
+    order_id: z.string().min(1),
+    amount_paisa: z.number().int().nonnegative(),
+    reason: z.string().min(1),
+    approver_user_id: z.union([z.string().min(1), z.null()]),
+  }),
+  "discount.recorded": z.looseObject({
+    order_id: z.string().min(1),
+    amount_paisa: z.number().int().nonnegative(),
+    reason: z.string().min(1),
+    approver_user_id: z.union([z.string().min(1), z.null()]),
+  }),
+  /**
+   * The override names ONE line and the price it becomes. Unlike a void it is definitionally
+   * per-line: `01-F53` snapshots `unit_price_paisa` into `order.line_added` per line, and an
+   * override with no line key names no number it could be replacing.
+   *
+   * Zero is accepted deliberately — `01-F60`'s explicit zero is what makes "free" distinguishable
+   * from "forgotten", and a line given away is a real act the ledger must be able to hold.
+   */
+  "order.line_price_overridden": z.looseObject({
+    order_id: z.string().min(1),
+    line_id: z.string().min(1),
+    unit_price_paisa: z.number().int().nonnegative(),
+    reason: z.string().min(1),
+    approver_user_id: z.union([z.string().min(1), z.null()]),
+  }),
+  /**
    * `05-F7`'s event extension, transcribed. The `01 §4` catalog has carried
    * `approval.requested / granted / denied` since its July 2026 absorption of the module
    * extensions; only the payload schemas were missing, so `01-F4` made every one of them an

@@ -40,6 +40,10 @@ const bridge: RestosBridge = {
   escalationFor: (req) => ipcRenderer.invoke(CHANNELS.escalationFor, req),
   escalate: (req, approver_user_id, pin) =>
     ipcRenderer.invoke(CHANNELS.escalate, req, approver_user_id, pin),
+  // `05-F6`'s deny half — a decision is a RECORD either way, so the pad has two ways to answer
+  // and only one of them lets the escalated write through.
+  denyEscalation: (req, approver_user_id, pin, reason) =>
+    ipcRenderer.invoke(CHANNELS.denyEscalation, req, approver_user_id, pin, reason),
   // `01-F28` — an identity and the digits go one way and a yes/no comes back. Verification is
   // main's. `01-F61`: the identity is what the failure counter is keyed on, so it travels with
   // the attempt rather than being inferred from the PIN at the far end.
