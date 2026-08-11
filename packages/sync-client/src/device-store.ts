@@ -199,9 +199,21 @@ export type DeviceStore = {
    * `customer_file` rows (`02-F27`/`02-F28`): the customer file `01-F23` keys by normalized
    * E.164 phone — the name, the saved addresses, and `01-F31`'s retained divergence.
    *
-   * This is the READ `02-F28`'s *"≤30 s from number entry"* is measured from. A fold that
-   * converged perfectly and was reachable from no store method would be this wave's recurring
-   * defect exactly: a correct subsystem with no seam to the product.
+   * This is the READ `02-F28`'s *"≤30 s from number entry"* is measured from, and it exists
+   * because a fold that converged perfectly and was reachable from no store method would be this
+   * wave's recurring defect exactly. Mutation-measured rather than assumed: deleting the
+   * `foldCustomerFile` call in `applyFold` reddens 3 of `customer-file-store.test.ts`'s 4 tests,
+   * and deleting the `recomputeFolds` replay reddens the fourth.
+   *
+   * ⚠ **AND THE SEAM STOPS HERE, WHICH IS THE HONEST STATE RATHER THAN A CLOSED LOOP.** As of
+   * August 2026 **no app calls this method and no shipping code emits either `customer.*` type** —
+   * `02-F27`'s phone-entry screen is unbuilt, so the file is written by nobody and read by nobody
+   * outside the acceptance suites. `pnpm seams:check` cannot see that: a method on a returned
+   * object is not a value export (Rule A) and not an optional member of an options bag (Rule B),
+   * and the fold's three exports ARE reached — by this file. So the rail is clean and the loop is
+   * still open, which is precisely the pair this wave has recorded fourteen times. The debt is
+   * `02-F27`'s screen, and it is not marked `@unreached-owed` because a marker on a reached export
+   * FAILS the check; this comment is where the grep should land instead.
    */
   customers(): CustomerRow[];
   refold(): void;
