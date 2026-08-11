@@ -24,6 +24,13 @@
  * column names as owed. Run **by hand** against the very database that held a doubled payment it
  * returned `ok: true`. So this suite's subject is not the Auditor — it is the **HOST**.
  *
+ * ⚠ **The paragraph above is the state at AUTHORING TIME and is deliberately not rewritten** — it
+ * is the provenance record `24 §3` asks for, and the whole file is an argument against a state it
+ * would be pointless to describe in the past tense. What has since changed, dated so a reader can
+ * tell: the host **landed** (`services/jobs/src/index.ts` is a BullMQ worker, not `export {}`), and
+ * the marker on `runAuditor`'s own declaration is **gone**. One marker remains in `auditor.ts`, on
+ * the `read_model` property, and Rule B **requires** it — see §H, which used to forbid it.
+ *
  * ═══ AIMED AT THE CASE THAT MATTERS, NOT AT THE MECHANISM (the round-3 law) ═══════════════════
  *
  * A host that runs *something* on a timer and prints *something* is trivially built and worthless.
@@ -103,6 +110,11 @@
  * the real Postgres), taken green, then broken one branch at a time. `REAL_EXIT` was read from a
  * marker written inside each log, never from a reported status.
  *
+ * ⚠ **The `/19` denominator below is the count as AUTHORED. §H was rewritten on 2026-08-11 and is
+ * two tests rather than one, so the control is now 20/20; its own matrix (11 mutants, 0 survivors,
+ * plus three `seams:check` exit codes) lives at §H, beside the assertions it measures.** Nothing
+ * else in this table moved — the rewrite touched §H only.
+ *
  *   #     mutant (exactly one branch)                                             tests failed /19
  *   M1    `scripts.start` deleted — the state this service is in today            all (hook refuses)
  *   M2    **`runAuditor` never called; a fabricated clean report per org**        **5**
@@ -120,7 +132,7 @@
  *   M13b  **records labelled right, findings computed for another org**           **1 — §B**
  *   M14   clean orgs produce no record                                            all (hook refuses)
  *   M16   a one-shot host wearing a schedule (exits after its third pass)         1 — §D3
- *   M17   the `@unreached-owed` marker left in place                              1 — §H
+ *   M17   ~~the `@unreached-owed` marker left in place~~ **RETIRED 2026-08-11**   see §H
  *   M15   **NEGATIVE CONTROL: a real refactor — same states, same levels,         **0**
  *         same writes, restructured emit path and different prose everywhere**
  *
@@ -140,7 +152,9 @@
  */
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BROKEN_DATABASE_URL_ENV, REDIS_URL_ENV } from "./global-setup.js";
 import {
@@ -158,14 +172,7 @@ import {
 } from "./helpers.js";
 
 const PKG_DIR = resolve(import.meta.dirname, "..", "..");
-const REPO_ROOT = resolve(PKG_DIR, "..", "..");
-// Re-pointed by DEC-ARCH-001's implementing session, and ONLY re-pointed: `auditor.ts` moved to
-// `packages/auditor` behind an unchanged gateway barrel, so §H's assertion is the same assertion
-// about the same file. A path is not an import — the mirror of this repo's "a mention is not an
-// import" — which is why the ruling's "exactly three files import the auditor module" is true and
-// still leaves this constant pointing at nothing. Left alone it fails with ENOENT instead of its
-// own message, which would replace a deliberate tripwire with a broken read.
-const AUDITOR_SOURCE = join(REPO_ROOT, "packages", "auditor", "src", "auditor.ts");
+const HOST_ENTRY = join(PKG_DIR, "src", "index.ts");
 
 /** Fast enough to observe several passes; slow enough that a pass is never re-entered. */
 const TEST_INTERVAL_MS = 1_000;
@@ -710,14 +717,247 @@ describe("services/jobs hosts the Auditor as a running process (20 §4.2)", () =
 
   // ══ §H the debt register self-corrects ═════════════════════════════════════════════════════
 
+  /**
+   * ## ⚠ THIS SECTION ASSERTED A PROPERTY NO IMPLEMENTATION COULD SATISFY. MEASURED THREE WAYS.
+   *
+   * It used to read the whole of `auditor.ts` and refuse **any** `@unreached-owed` anywhere in the
+   * file. Landing this host made `runAuditor`'s optional `read_model` a **Rule B candidate for the
+   * first time** — Rule B only considers optional members of factories that shipping code already
+   * calls, so with no caller there was no candidate and no marker was required. The moment there
+   * was a caller, `pnpm seams:check` began *demanding* a marker on the one seam this host
+   * deliberately does not supply, and §H began *forbidding* it:
+   *
+   *   marker present …………………………………… 18/19 here (§H red), `seams:check` CLEAN
+   *   marker absent ………………………………………  19/19 here,        `seams:check` **exit 1**
+   *   marker absent AND the port stubbed …  19/19 here,        `seams:check` CLEAN
+   *
+   * The third row is the dangerous one: a **fully green repo** with `20 §4.2`'s headline leg dead.
+   * A guard that can only be satisfied by disabling the thing it guards is worse than no guard, and
+   * AGENTS.md rates a test that reddens a CORRECT implementation as damaging as a vacuous one.
+   *
+   * ## WHY SCOPING, AND NOT `expect(seams:check).toExitZero()`
+   *
+   * Shelling out to the rail was the other candidate and is rejected on three grounds, in order of
+   * weight. (1) **Attribution.** The rail is repo-wide; an owed marker in `packages/ui` would turn
+   * `services/jobs` red for a reason no message here could name, and this suite already pays for
+   * hook-level failures reporting nineteen tests as *skipped* with no assertion attached. (2) **It
+   * is already run.** `pnpm seams:check` is the fifth step of `pnpm verify`; restating a CI rail
+   * inside a package suite buys nothing and costs a whole-repo walk per test run. (3) **It answers
+   * a different question.** The rail's verdict is *"the register is consistent"*; the fact §H owns
+   * is narrower and is about THIS host — *"the marker that said nothing runs the Auditor is gone,
+   * because this worker is now its caller"*.
+   *
+   * So §H reads **exactly the window the rail reads**, which is what makes the two incapable of
+   * disagreeing: `check-seams.mjs`'s `markerAbove` collects the contiguous comment run directly
+   * above a declaration, and its `fileMarker` treats a marker in the file header (before the first
+   * top-level `import`/`export`) as covering the whole file. A marker anywhere else — such as the
+   * JSDoc on the `read_model` property inside `RunAuditorArgs` — belongs to that declaration and
+   * not to `runAuditor`, in the rail's reading and now in this one.
+   *
+   * ## SURVIVING THE MOVE
+   *
+   * `auditor.ts`'s own header records that `18 §2` forbids the cross-service import this worker
+   * makes, and that the correct end state is the module living in a package. When it moves, a
+   * hardcoded `services/sync-gateway/src/auditor.ts` would either fail to read (a red for the wrong
+   * reason) or — worse, if some file is left behind at that path — keep passing while measuring a
+   * corpse. So the path is **resolved from the host's own import specifier**: whatever
+   * `services/jobs/src/index.ts` imports `runAuditor` from is the module §H reads, and §H1 proves
+   * the file it landed on really declares it.
+   *
+   * ## MUTATION MATRIX FOR THIS SECTION (2026-08-11) — control 20/20, 0 survivors
+   *
+   * Run from a scratchpad copy of `services/jobs` whose `@restos/sync-gateway` resolves to a
+   * scratchpad copy of the gateway, so `auditor.ts` was mutable without the worktree being touched.
+   *
+   *   #     mutant (exactly one branch)                                        tests failed /20
+   *   J-M1  the marker put BACK on `runAuditor`'s own doc block                **1 — §H2**
+   *   J-M2  the marker in the FILE HEADER instead (the rail's other window)    **1 — §H2**
+   *   J-M3  **THE STATE THE OLD §H COULD NOT PASS** — only `read_model`        **0**
+   *         carries a marker, which is the shipped tree
+   *   J-M4  the `read_model` marker REMOVED                                    0 (see below)
+   *   J-M5  the host stops importing `runAuditor` at all                       6 — §B×3, §C2,
+   *                                                                             §D1, **§H2**
+   *   J-M6  **THE MOVE** — `auditor.ts` at a new subpath, the host imports     **1 — §H2**
+   *         THAT, and the file left behind at the old path is CLEAN
+   *   J-NC  NEGATIVE CONTROL: the doc block rewritten wholesale, no marker     **0**
+   *   I-M1  INSTRUMENT: the comment window always comes back empty             1 — §H1
+   *   I-M2  **INSTRUMENT: the window returns the WHOLE FILE — the OLD §H**     **2 — §H1, §H2**
+   *   I-M3  INSTRUMENT: the header window always comes back empty              1 — §H1
+   *   I-M4  INSTRUMENT: the declaration is never found                         2 — §H1, §H2
+   *
+   * **J-M3, J-M4 and I-M2 are the rows that matter.** J-M3 is the shipped tree and it is now
+   * green here — that is the deadlock gone. I-M2 restores the old whole-file behaviour and is
+   * killed by BOTH assertions, so the rewrite cannot silently revert. J-M4 kills nothing here **on
+   * purpose**, and the rail is what owns it — measured on a source-only copy of the repo, exit code
+   * read from the command itself:
+   *
+   *   `read_model` marker present (shipped) ……… `seams:check` **exit 0**, §H **20/20**
+   *   `read_model` marker removed ……………………… `seams:check` **exit 1** ("runAuditor({ read_model })
+   *                                              — constructed at services/jobs/src/index.ts:152
+   *                                              without it"), §H still green
+   *   marker also on `runAuditor` itself ……………… `seams:check` **exit 1** ("a marker on something
+   *                                              reached fails this check"), §H **red (J-M1)**
+   *
+   * So the oracle and the rail now redden together on the same declaration and are both satisfied
+   * by exactly one state — where before, no state satisfied both.
+   */
   describe("§H the seams rail's owed marker", () => {
-    it("runAuditor no longer carries @unreached-owed — it has a production caller now", async () => {
-      const source = await readFile(AUDITOR_SOURCE, "utf8");
+    /**
+     * The rail's `markerAbove`, transcribed: walk up from the declaration line collecting the
+     * contiguous comment run, stopping at the first blank line or non-comment line, and stopping
+     * ON a `/*` because that opens the block.
+     */
+    const commentRunAbove = (source: string, declLine: number): string => {
+      const lines = source.split("\n");
+      const collected: string[] = [];
+      for (let i = declLine - 2; i >= 0; i--) {
+        const text = lines[i] ?? "";
+        if (/^\s*$/.test(text)) break;
+        if (!/^\s*(\/\/|\/\*|\*|\*\/)/.test(text)) break;
+        collected.unshift(text);
+        if (/^\s*\/\*/.test(text)) break;
+      }
+      return collected.join("\n");
+    };
+
+    /** The rail's `fileMarker` window: everything before the first top-level import/export. */
+    const headerOf = (source: string): string => {
+      const firstCode = source.search(/^[^\S\n]*(import|export)\s/m);
+      return firstCode === -1 ? source : source.slice(0, firstCode);
+    };
+
+    /** 1-based line of `runAuditor`'s declaration, however it is declared. */
+    const declarationLine = (source: string): number => {
+      const lines = source.split("\n");
+      const at = lines.findIndex((l) =>
+        /^\s*export\s+(?:const|(?:async\s+)?function)\s+runAuditor\b/.test(l),
+      );
+      return at + 1;
+    };
+
+    /**
+     * The module the HOST imports `runAuditor` from — never a hardcoded path. Both resolvers are
+     * tried because a moved package may declare a conditional `exports` map that CJS resolution
+     * cannot walk; a silent `undefined` here would make every assertion below vacuous, so the
+     * failure is thrown with the specifier in it.
+     */
+    const auditorSourcePath = async (): Promise<{ specifier: string; path: string }> => {
+      const host = await readFile(HOST_ENTRY, "utf8");
+      const specifier = /import\s*\{[^}]*\brunAuditor\b[^}]*\}\s*from\s*"([^"]+)"/.exec(host)?.[1];
+      if (specifier === undefined) {
+        throw new Error(
+          `${HOST_ENTRY} does not import runAuditor. That is not a §H failure — it is the whole ` +
+            "premise of this suite gone: nothing in this service would be calling the Auditor.",
+        );
+      }
+      const errors: string[] = [];
+      try {
+        return { specifier, path: fileURLToPath(import.meta.resolve(specifier)) };
+      } catch (err) {
+        errors.push(`import.meta.resolve: ${String(err)}`);
+      }
+      try {
+        return { specifier, path: createRequire(import.meta.url).resolve(specifier) };
+      } catch (err) {
+        errors.push(`require.resolve: ${String(err)}`);
+      }
+      throw new Error(`cannot resolve "${specifier}" from ${HOST_ENTRY}\n${errors.join("\n")}`);
+    };
+
+    /**
+     * ⚠ **THE INSTRUMENT, ON SYNTHETIC INPUT.** A window extractor has two silent failure
+     * directions and §H is unfalsifiable in one of them: a window that always comes back EMPTY
+     * passes for ever (ROUND-2 PATTERN 2, "the guard passed by not looking"), and a window that
+     * over-reaches puts the rail and this suite back into the deadlock that produced this rewrite.
+     * These run on strings this file owns, so instrument and subject are independent.
+     */
+    it("H1 the window extractor finds a marker where the rail finds one, and only there", () => {
+      const OWED = "@unreached-owed";
+      const attached = [
+        "import { x } from 'y';",
+        "",
+        "/**",
+        ` * ${OWED} nothing calls this yet, and here is the reason it is owed.`,
+        " */",
+        "export const runAuditor = async () => {};",
+      ].join("\n");
+      expect(commentRunAbove(attached, declarationLine(attached))).toContain(OWED);
+
+      // A marker on a NEIGHBOURING declaration is not this one's. This is the exact shape the old
+      // §H could not express — `read_model`'s marker sits in the JSDoc of a property of the args
+      // type, a different declaration, and the rail attributes it there.
+      const neighbour = [
+        "import { x } from 'y';",
+        "",
+        "export type RunAuditorArgs = {",
+        "  /**",
+        `   * ${OWED} the diff leg has nothing in the cloud to diff against, and that is owed.`,
+        "   */",
+        "  read_model?: ReadModelInput;",
+        "};",
+        "",
+        "/** A read-only audit of one org. */",
+        "export const runAuditor = async () => {};",
+      ].join("\n");
+      expect(commentRunAbove(neighbour, declarationLine(neighbour))).not.toContain(OWED);
+      expect(headerOf(neighbour)).not.toContain(OWED);
+      // …and the whole-file search — the assertion this section used to make — DOES see it. That
+      // difference is the defect, stated as a measurement rather than as prose.
+      expect(neighbour).toContain(OWED);
+
+      // The rail's other window: a header marker covers the whole file, so §H must read it too.
+      const header = [
+        `// ${OWED} this whole module is owed, with a reason long enough to count.`,
+        "",
+        "import { x } from 'y';",
+        "",
+        "export const runAuditor = async () => {};",
+      ].join("\n");
+      expect(headerOf(header)).toContain(OWED);
+
+      // A blank line breaks the run — the rail stops there, so a marker floating above unrelated
+      // prose is NOT attached, and §H must not claim it is.
+      const detached = [
+        "import { x } from 'y';",
+        "",
+        `// ${OWED} an old note left behind, with a reason of respectable length.`,
+        "",
+        "/** The current doc block. */",
+        "export const runAuditor = async () => {};",
+      ].join("\n");
+      expect(commentRunAbove(detached, declarationLine(detached))).not.toContain(OWED);
+
+      // And the extractor is not vacuous: it really returns the attached run.
+      expect(commentRunAbove(attached, declarationLine(attached)).length).toBeGreaterThan(0);
+      // `function` form too, so a refactor of the declaration does not silently empty the window.
+      const asFunction = attached.replace(
+        "export const runAuditor = async () => {};",
+        "export async function runAuditor() {}",
+      );
+      expect(commentRunAbove(asFunction, declarationLine(asFunction))).toContain(OWED);
+    });
+
+    it("H2 runAuditor's own declaration no longer carries @unreached-owed — it has a caller now", async () => {
+      const { specifier, path } = await auditorSourcePath();
+      const source = await readFile(path, "utf8");
+
+      // The tripwire: we landed on the module that really declares it, wherever it now lives.
+      const line = declarationLine(source);
       expect(
-        source,
-        `${AUDITOR_SOURCE} still marks runAuditor as owed. pnpm seams:check FAILS when a marker ` +
-          "sits on something now reached, so leaving it is a red rail, not a tidy-up.",
-      ).not.toContain("@unreached-owed");
+        line,
+        `${path} (resolved from "${specifier}") declares no runAuditor — §H is measuring the ` +
+          "wrong file, and every assertion below would pass vacuously",
+      ).toBeGreaterThan(0);
+
+      const attached = commentRunAbove(source, line);
+      const header = headerOf(source);
+      const why =
+        `${path} marks runAuditor as owed. pnpm seams:check FAILS when a marker sits on ` +
+        "something now reached, so leaving it is a red rail, not a tidy-up. A marker on a " +
+        "DIFFERENT declaration in this file — read_model's, for instance — is deliberately not " +
+        "this assertion's business; Rule B requires that one and §H used to forbid it.";
+      expect(attached, why).not.toContain("@unreached-owed");
+      expect(header, why).not.toContain("@unreached-owed");
     });
   });
 });

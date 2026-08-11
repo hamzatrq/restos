@@ -528,23 +528,297 @@ describe("§G 01-F17 — an unreadable order costs nothing", () => {
 // these read source — the same weak instrument, for the same reason and under the same constraint,
 // as `line-advance-seam.test.ts` §A and `print-ack-audit.test.ts` §A. It pins SHAPE deliberately;
 // there is nothing else that can see a missing call.
+//
+// ── ⚠ THIS SECTION WAS DEFEATED BY A COMMENT, AND THAT IS WHY THE STRIPPER BELOW EXISTS ───────
+//
+// §H used to search the RAW source, prose included. **Measured twice:** delete
+// `aggregator.confirmed(order_id)` from the confirm branch and write
+// `// TODO(02-F30): the aggregator.confirmed(order_id) call belongs here` in its place, and this
+// file was **22/22 GREEN** while the shipped product wrote no receivable for any foodpanda order.
+// The only thing standing between the repo and that hole was a note in `main/index.ts` asking
+// future sessions not to write the token in prose — *"a comment promising a protection that does
+// not exist"*, which AGENTS.md names as strictly worse than no comment, because it retires the
+// assertion someone would otherwise write.
+//
+// The fix is the repo's own standard, stated one rail over: **symbol-precise and comment-blind.**
+// `scripts/check-seams.mjs` opens with *"blank comments, strings and regex literals so the parsers
+// below cannot be fooled by an import written inside a doc comment (this file would trip its own
+// rail)"* — the identical hazard, one tool over, already solved. `blankNonCode` below is that
+// algorithm; it is a copy rather than an import because the rail is a script that `process.exit`s
+// at module scope and cannot be imported at all. A copy is safe HERE in a way a copied *contract*
+// would not be (`K-3`'s dead oracle): if the rail's algorithm changes, this file is unaffected,
+// because what is shared is a technique and not a claim about the product.
+//
+// **Two views, and the difference is load-bearing.** `code` blanks comments and keeps string
+// CONTENT, because the confirm branch is located by a string literal (`"order.confirmed"`).
+// `strict` blanks string content too, and every "the app really calls it" assertion is made
+// against `strict` — otherwise the identical defeat comes back one quote mark over, as
+// `logger.debug("aggregator.confirmed skipped")`. Both preserve every byte position, which is what
+// lets a range located in one be sliced out of the other; §H1 asserts that alignment rather than
+// assuming it.
+//
+// ── MUTATION MATRIX FOR §H0+§H (2026-08-11) — control 29/29, 0 survivors ──────────────────────
+//
+// `main/index.ts` was mutated in a scratchpad COPY of this app, never in the worktree. **Every
+// mutant below killed 0 PRE-EXISTING tests** — measured over the whole package, all 723 of them,
+// not just this file. That number is the finding: nothing else in `apps/pos-electron` can see a
+// missing aggregator seam, which is why §H is the only section that may not be weakened.
+//
+//   #      mutant (exactly one branch of main/index.ts)                     tests failed /29
+//   H-M1   **THE MEASURED DEFEAT** — the call deleted, a comment in its     **1 — §H3**
+//          place (this was 22/22 GREEN against the old §H)
+//   H-M2   the same defeat one quote over — the token in a STRING literal   **1 — §H3**
+//   H-M3   the call simply deleted, no prose at all                         1 — §H3
+//   H-M4   the emitter constructed and never called                         1 — §H3
+//   H-M5   the CONSTRUCTION replaced by a comment naming it                 2 — §H2, §H3
+//   H-M6   PORT SUPPLIED WITH A STUB — `append: () => {}`, store kept       1 — §H2
+//   H-M7   fired from the WRONG branch (`shift.closed`)                     1 — §H3
+//   H-NC   **NEGATIVE CONTROL** — the binding renamed throughout and the    **0**
+//          whole "do not write the token" comment deleted
+//
+// ⚠ **"0 survivors" ABOVE WAS TRUE OF THAT MATRIX AND NOT OF THIS SECTION.** An adversarial
+// re-run the same day found THREE, all of them fully green — 723/723, `tsc` 0, `biome` 0 — and
+// all three exploited the same gap: `expect(block).toContain(`${bound}.`)` is a SUBSTRING test,
+// so a call that is present and never made satisfies it. The last assertion in §H3 was added for
+// them and carries the measurements; a matrix is a claim about the mutants it ran, never about
+// the ones nobody wrote.
+//
+//   H-M8   **the call behind this app's own env opt-in, shipped OFF**       **1 — §H3** (was 0)
+//   H-M9   the call behind a `const … = false` flag                         **1 — §H3** (was 0)
+//   H-M10  the call made with an id that is not the branch's `order_id`     **1 — §H3** (was 0)
+//   H-M11  **A BEHAVIOUR-PRESERVING REFACTOR** — the call moved one hop     **1 — §H3**
+//          into a local helper the branch calls. It reddens, and that is
+//          the documented cost of a shape pin, not a defect to fix by
+//          weakening §H3: nothing else in 723 tests sees this seam.
+//
+// And the INSTRUMENT was mutated separately, because §H0 is a guard on a guard:
+//
+//   S-M1   the stripper EMPTIES the file                                    10 — all of §H0, §H1-3
+//   S-M2   the stripper is a NO-OP (the raw source §H was defeated in)      3 — §H0×2, §H1
+//   S-M3   comments DELETED rather than blanked (positions shift)           4 — §H0×3, §H1
+//   S-M4   a stripper blind to strings                                      2 — §H0×2
+//   S-M5   **the strict view silently degraded to the lenient one**         **1 — §H1**
+//
+// ⚠ **S-M5 is the row worth reading, because it SURVIVED the first version of this fix.** §H0
+// exercises `blankNonCode` directly, so it stayed green while the CALL SITE passed the wrong flag —
+// a suite that blesses an instrument is not a suite that blesses its use, which is this repo's own
+// "a store was passed / the store durably works" lesson one layer up. §H1's last two expectations
+// were added for it and kill it.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
-describe("§H 02-F30 — the shipped app reaches the emitter", () => {
-  const mainSrc = readFileSync(new URL("../index.ts", import.meta.url).pathname, "utf8");
+/**
+ * Blank comments (and optionally string CONTENT) with spaces, preserving every newline and every
+ * byte position. Regex literals are blanked whole: one can hold a lone quote (`/["']/`) that would
+ * otherwise open a string and swallow the rest of the file.
+ *
+ * Adapted from `scripts/check-seams.mjs`'s `blankNonCode`, which is proven on this exact file —
+ * `pnpm seams:check` roots its walk at every app's own `src`, this one included.
+ */
+const blankNonCode = (src: string, blankStrings = false): string => {
+  const out = src.split("");
+  const blank = (i: number): void => {
+    if (src[i] !== "\n") out[i] = " ";
+  };
+  let i = 0;
+  let prevSignificant = "";
+  while (i < src.length) {
+    const c = src[i];
+    if (c === "/" && src[i + 1] === "/") {
+      while (i < src.length && src[i] !== "\n") blank(i++);
+      continue;
+    }
+    if (c === "/" && src[i + 1] === "*") {
+      blank(i++);
+      blank(i++);
+      while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) blank(i++);
+      blank(i++);
+      blank(i++);
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      const quote = c;
+      i++; // the opening quote stays, so `from "x"` is still a delimited literal
+      while (i < src.length && src[i] !== quote) {
+        if (src[i] === "\\") {
+          if (blankStrings) blank(i);
+          i++;
+          if (i < src.length) {
+            if (blankStrings) blank(i);
+            i++;
+          }
+          continue;
+        }
+        // `${…}` inside a template literal is CODE. Blanking it would hide a call made only in an
+        // interpolation, which is the direction that loses a seam.
+        if (quote === "`" && src[i] === "$" && src[i + 1] === "{") {
+          i += 2;
+          let braces = 1;
+          while (i < src.length && braces > 0) {
+            if (src[i] === "{") braces++;
+            else if (src[i] === "}") braces--;
+            i++;
+          }
+          continue;
+        }
+        if (blankStrings) blank(i);
+        i++;
+      }
+      i++;
+      prevSignificant = quote;
+      continue;
+    }
+    if (c === "/" && /[=(,:[!&|?{};+\-*%~^<>]|^$/.test(prevSignificant)) {
+      blank(i++);
+      let inClass = false;
+      while (i < src.length) {
+        const d = src[i];
+        if (d === "\\") {
+          blank(i++);
+          if (i < src.length) blank(i++);
+          continue;
+        }
+        if (d === "[") inClass = true;
+        else if (d === "]") inClass = false;
+        else if (d === "/" && !inClass) break;
+        else if (d === "\n") break;
+        blank(i++);
+      }
+      blank(i++);
+      prevSignificant = "/";
+      continue;
+    }
+    if (c !== undefined && !/\s/.test(c)) prevSignificant = c;
+    i++;
+  }
+  return out.join("");
+};
 
-  it("is actually reading the file it guards", () => {
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// §H0 — THE INSTRUMENT ITSELF, on synthetic input.
+//
+// A stripper is a guard on a guard, and it has exactly two ways to fail, in opposite directions.
+// **Emptying the file** makes every §H assertion below unfalsifiable — that is ROUND-2 PATTERN 2
+// ("the guard passed by not looking") relocated one level down, and it is why the task that
+// commissioned this fix asked for a tripwire in the same breath as the stripper. **Eating code**
+// is the other half and is worse than useless: it reddens a correct `main/index.ts` and blocks the
+// implementer, which AGENTS.md rates as damaging as a vacuous test.
+//
+// These run on strings this file owns, so they say something about the instrument no assertion
+// over `main/index.ts` can: that instrument and subject are independent.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+describe("§H0 the comment stripper is aimed at the defeat, and does not eat code", () => {
+  it("blanks the exact defeat this section was measured losing to — in both comment forms", () => {
+    const line = "        // TODO(02-F30): the aggregator.confirmed(order_id) call belongs here\n";
+    const block = "        /* the aggregator.confirmed(order_id) call belongs here */\n";
+    for (const prose of [line, block]) {
+      const view = blankNonCode(`const x = 1;\n${prose}const y = 2;\n`);
+      expect(view).not.toContain("aggregator.confirmed");
+      // and the code either side of the prose is untouched
+      expect(view).toContain("const x = 1;");
+      expect(view).toContain("const y = 2;");
+    }
+  });
+
+  it("does NOT blank the call itself — the mutant where the stripper eats the code it guards", () => {
+    const view = blankNonCode("      aggregator.confirmed(order_id);\n");
+    expect(view).toContain("aggregator.confirmed(order_id);");
+  });
+
+  it("preserves every byte position, so a range found in one view slices the other", () => {
+    const src = 'const a = "x"; // note\n/* two\n   lines */\nconst b = 2;\n';
+    for (const view of [blankNonCode(src), blankNonCode(src, true)]) {
+      expect(view).toHaveLength(src.length);
+      expect(view.split("\n")).toHaveLength(src.split("\n").length);
+    }
+    // A stripper that DELETED comments instead of blanking them would shift every later index and
+    // silently mis-slice the confirm block. This is the assertion that forbids it.
+    expect(blankNonCode(src).indexOf("const b = 2;")).toBe(src.indexOf("const b = 2;"));
+  });
+
+  it("a source with no comments comes back byte-identical — the no-op case is a no-op", () => {
+    const src = "const a = 1;\nfoo(a);\n";
+    expect(blankNonCode(src)).toBe(src);
+  });
+
+  it("`//` inside a STRING is not a comment, and a regex holding a quote does not swallow the file", () => {
+    const url = blankNonCode('const u = "https://example.test/a"; const c = 2;\n');
+    expect(url).toContain("const c = 2;");
+    const re = blankNonCode("const r = /[\"']/; const d = 3;\n");
+    expect(re).toContain("const d = 3;");
+  });
+
+  it("the strict view blanks string CONTENT and keeps the code around it", () => {
+    // The one-quote-over rerun of the same defeat: a token parked in a string literal.
+    const src = 'log("aggregator.confirmed skipped"); foo();\n';
+    expect(blankNonCode(src, true)).not.toContain("aggregator.confirmed");
+    expect(blankNonCode(src, true)).toContain("foo();");
+    // …and the lenient view keeps it, which is exactly why §H3 locates by string and asserts by
+    // strict rather than doing both in one view.
+    expect(blankNonCode(src)).toContain("aggregator.confirmed");
+  });
+
+  it("a template interpolation is CODE and survives even the strict view", () => {
+    // Blanking a template's interpolation would hide a call made only there, and that is the
+    // direction in which a seam is LOST rather than merely mis-reported.
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the placeholder IS the fixture here.
+    const src = "const s = `a ${emitter.confirmed(id)} b`;\n";
+    expect(blankNonCode(src, true)).toContain("emitter.confirmed(id)");
+  });
+});
+
+describe("§H 02-F30 — the shipped app reaches the emitter", () => {
+  const MAIN = new URL("../index.ts", import.meta.url).pathname;
+  const raw = readFileSync(MAIN, "utf8");
+  /** Comments blanked; string CONTENT kept, because the confirm branch is found by a string. */
+  const code = blankNonCode(raw);
+  /** Comments AND string content blanked. Every "it really calls it" assertion is made here. */
+  const strict = blankNonCode(raw, true);
+
+  it("is actually reading the file it guards, and really stripped it", () => {
     // ROUND-2 PATTERN 2, "the guard passed by not looking": a scanner over an empty string reports
-    // clean. Anchored on lines that have nothing to do with this work.
-    expect(mainSrc).toContain("app.whenReady()");
-    expect(mainSrc).toContain("createKotPrinter({");
-    expect(mainSrc.length).toBeGreaterThan(20_000);
+    // clean. Anchored on lines that have nothing to do with this work — and asserted against the
+    // STRIPPED view, so a stripper that empties the file fails here rather than passing everything.
+    expect(strict, MAIN).toContain("app.whenReady()");
+    expect(strict).toContain("createKotPrinter({");
+    expect(raw.length).toBeGreaterThan(20_000);
+    // Positions align across the three views, which is what makes the cross-view slicing in §H3
+    // legitimate rather than lucky.
+    expect(code).toHaveLength(raw.length);
+    expect(strict).toHaveLength(raw.length);
+    // And the stripper is not a no-op on this file: `main/index.ts` is prose-heavy, and a stripper
+    // that quietly returned its input would restore the exact hole §H was defeated by.
+    const blanked = [...raw].filter((ch, at) => ch !== code[at]).length;
+    expect(blanked, "the comment stripper removed nothing from main/index.ts").toBeGreaterThan(
+      1_000,
+    );
+    /**
+     * ⚠ **AND THE TWO VIEWS REALLY ARE THE TWO VIEWS — measured, because §H0 could not see this.**
+     * §H0 exercises `blankNonCode` directly, so it stays green when the helper is perfect and the
+     * CALL SITE above passes the wrong flag. Dropping the `true` from `strict` was mutated and
+     * **survived the whole suite** against a correct `main/index.ts`, re-opening the string-literal
+     * rerun of the defeat (H-M2) with nothing to say so. That is this repo's own lesson one layer
+     * up: a suite that blesses an instrument is not a suite that blesses its use.
+     *
+     * `"order.confirmed"` occurs exactly once in `main/index.ts` and only ever inside a string, so
+     * it is present in the lenient view and absent from the strict one — in either direction this
+     * fails loudly rather than degrading.
+     */
+    expect(code, "`code` is not the LENIENT view — §H3's anchor lives in a string").toContain(
+      '"order.confirmed"',
+    );
+    expect(strict, "`strict` is not the STRICT view — string content survived it").not.toContain(
+      "order.confirmed",
+    );
   });
 
   it("constructs the emitter with the real store and an append that reaches the ledger", () => {
-    const call = mainSrc.slice(mainSrc.indexOf("createAggregatorSettlement({"));
-    expect(call).not.toBe("");
-    const args = call.slice(0, call.indexOf("\n  });"));
+    const at = strict.indexOf("createAggregatorSettlement({");
+    // Explicit, because `slice(-1)` on a miss yields the file's last character and NOT "" — the
+    // old `expect(call).not.toBe("")` passed against a host with no construction at all, and the
+    // failure surfaced two assertions later wearing the wrong name.
+    expect(at, `no createAggregatorSettlement({ … }) construction in ${MAIN}`).toBeGreaterThan(-1);
+    const args = strict.slice(at, strict.indexOf("\n  });", at));
     expect(args).toMatch(/\bstore[,:]/);
     // The "port supplied with a STUB" case AGENTS.md measures as invisible to every rail in this
     // repo: `append: () => {}` satisfies a required member and ships no money anywhere.
@@ -552,15 +826,57 @@ describe("§H 02-F30 — the shipped app reaches the emitter", () => {
   });
 
   it("fires it from the order.confirmed append, beside the kitchen handoff", () => {
-    const handler = mainSrc.slice(mainSrc.indexOf('confirm.data.type === "order.confirmed"'));
-    const block = handler.slice(0, handler.indexOf("\n    }\n"));
+    // Located in the lenient view: the anchor IS a string literal, and `strict` has blanked it.
+    const at = code.indexOf('confirm.data.type === "order.confirmed"');
+    expect(at, `no order.confirmed append branch in ${MAIN}`).toBeGreaterThan(-1);
+    const end = code.indexOf("\n    }\n", at);
+    expect(end, "the order.confirmed branch never closes").toBeGreaterThan(at);
+    // The SAME byte range out of the strict view — so nothing below can be satisfied by prose or
+    // by a string literal. §H0 pins the position-preservation this line rests on.
+    const block = strict.slice(at, end);
     // The neighbours, so this cannot pass by measuring the wrong block.
     expect(block).toContain("lines.confirmed(order_id)");
     expect(block).toContain("kot.confirmed(order_id)");
     // **The binding is READ, not assumed** — the host may name it anything; what is asserted is
     // that whatever `createAggregatorSettlement` returned is reached from the confirm branch.
-    const bound = mainSrc.match(/const\s+(\w+)\s*=\s*createAggregatorSettlement\(/)?.[1];
-    expect(bound).toBeTruthy();
+    const bound = /const\s+(\w+)\s*=\s*createAggregatorSettlement\(/.exec(strict)?.[1];
+    expect(bound, "nothing binds the result of createAggregatorSettlement").toBeTruthy();
     expect(block).toContain(`${bound as string}.`);
+
+    /**
+     * ⚠ **AND THE CALL IS A STATEMENT, NOT A SUBSTRING.** The `toContain` above is satisfied by
+     * the token appearing ANYWHERE in the branch, and an adversarial round on 2026-08-11 took
+     * three mutants **fully green** through it — `pnpm -C apps/pos-electron test` 723/723,
+     * `tsc --noEmit` exit 0 and `biome check` exit 0 for each, against a product that settles no
+     * aggregator order at all:
+     *
+     *   `if (process.env.RESTOS_AGGREGATOR_SETTLEMENT === "1") <bound>.confirmed(order_id);`
+     *   `if (AGGREGATOR_SETTLEMENT_ENABLED) <bound>.confirmed(order_id);`  (the const is `false`)
+     *   `<bound>.confirmed(confirm.data.payload.shift_id as string);`
+     *
+     * The first is the one to fear. It is this app's OWN opt-in idiom — `RESTOS_PRINT_TO_FILE`,
+     * `RESTOS_DEV_MENU`, eight more — so it reads as caution rather than as a hole, it survives
+     * review, and it ships every foodpanda order at `pay_total: 0` by default: `02-F30`'s defect
+     * restored behind a flag nobody sets. AGENTS.md's instance 13 is the same shape one level up
+     * (a correct subsystem the product has no configuration to enter).
+     *
+     * So the call is pinned as its own statement, on THIS branch's narrowed `order_id`, with no
+     * condition on the line — the same standing `01-F32` receivable that `lines.confirmed` and
+     * `kot.confirmed` above it already get, and no weaker. `void` is allowed because `confirmed()`
+     * returns `void` and a session may say so. This is a SHAPE pin and it is deliberate, exactly
+     * as this section's header says: splitting the call across lines reddens it, and there is
+     * nothing else in 723 tests that can see this seam at all.
+     */
+    const callLine = block.split("\n").find((l) => l.includes(`${bound as string}.confirmed(`));
+    expect(
+      callLine,
+      `the order.confirmed branch never calls ${bound as string}.confirmed( — 02-F30's receivable`,
+    ).toBeDefined();
+    expect(
+      callLine,
+      `${bound as string}.confirmed is CONDITIONAL here, or carries an id that is not this ` +
+        "branch's order_id. 01-F32's receivable hangs off the confirm itself or it is not a " +
+        "receivable — a flag that ships OFF settles nothing and passes every other assertion.",
+    ).toMatch(new RegExp(`^\\s*(?:void\\s+)?${bound as string}\\.confirmed\\(order_id\\);\\s*$`));
   });
 });
