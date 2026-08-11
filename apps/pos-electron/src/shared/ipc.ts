@@ -553,6 +553,64 @@ export const ToggleAvailabilityRequestSchema = z.object({
 });
 export type ToggleAvailabilityRequest = z.infer<typeof ToggleAvailabilityRequestSchema>;
 
+/**
+ * `02-F27` — file the caller. **It carries the DIALLED digits, not `01-F23`'s key**, and that is
+ * this shape's whole design exactly as `AddLineRequest` carries no money and
+ * `ToggleAvailabilityRequest` carries no supersedes link.
+ *
+ * `registry.ts` puts normalization *"at the WRITER, upstream of `parseEvent`"* and gives the
+ * reason: two normalizers key one number two ways, and one customer becomes two identities in a
+ * ledger `01-F1` forbids correcting in place. `18 §9` makes main the trusted side, so a renderer
+ * that normalized would be a SECOND writer of that key — sitting on the untrusted end of the
+ * bridge, where a stale or compromised build reaches it. So the renderer says WHICH number was
+ * dialled and main decides which identity that is.
+ *
+ * `name` is **required and nullable**, mirroring `customer.created`'s payload for the reason
+ * `registry.ts` states there: `null` is a stated fact (`06-F11` creates a customer on first sight
+ * from a checkout that captured only a number) and `undefined` is a writer who forgot. `""` is
+ * refused because `null` already says *"no name stated"*.
+ *
+ * `address_text` is optional because `02-F27`'s two events are one act with an optional half — a
+ * caller may be filed before she has said where she is. **Nothing in this app supplies it today**
+ * and that is a named gap, not an oversight: `06-F9` calls the address free text, `packages/ui`
+ * ships no text-entry component, and commandment 6 forbids a raw `<input>` in app code.
+ */
+export const RecordCustomerRequestSchema = z.object({
+  /** The digits as pressed. Unvalidated shape on purpose — main decides if it is a number. */
+  dialled: z.string(),
+  name: z.union([z.string().min(1), z.null()]),
+  address_text: z.string().min(1).optional(),
+});
+export type RecordCustomerRequest = z.infer<typeof RecordCustomerRequestSchema>;
+
+/**
+ * `02-F27`'s lookup answer — *"customer file lookup by normalized phone → name, saved
+ * addresses"*.
+ *
+ * `phone_e164` is `01-F23`'s key **as the trusted side resolved it**: the screen shows WHICH
+ * identity it is about to touch, and `null` says the digits so far are not a phone number at all.
+ * That is a STATE and never an error — `02-F27` puts the operator mid-call with a caller waiting,
+ * so a half-typed number is the normal condition of this field and must be a value the screen can
+ * render (`01-F17`: nothing about the customer file blocks the sale).
+ *
+ * `known: null` is `02-F27`'s *"unknown number"* — a number that resolves fine and has no file
+ * yet, which is the branch that leads to inline creation.
+ *
+ * **`02-F27`'s ORDER HISTORY and "repeat last order" are deliberately absent.** They are
+ * unbuildable today: `order.created`'s payload declares `order_id`, `channel`, `order_type?` and
+ * `table_id?` and nothing else, and `01 §4`'s order family has no `order.customer_linked` — so no
+ * event in the corpus can say which customer an order is for. `02-F10` (*"open orders searchable
+ * by … customer phone"*) and `02-F14` (*"khata requires a linked customer"*) are the FRs that
+ * would authorise the field; adding it is a `packages/domain` change and a protected-path review.
+ */
+export type CustomerLookup = {
+  readonly phone_e164: string | null;
+  readonly known: {
+    readonly name: string | null;
+    readonly addresses: readonly { readonly address_id: string; readonly address_text: string }[];
+  } | null;
+};
+
 export const AppendResultSchema = z.object({ id: z.string() });
 export type AppendResult = z.infer<typeof AppendResultSchema>;
 
@@ -686,6 +744,36 @@ export const CHANNELS = {
    * so the vocabulary was already there. **The regex was not weakened.**
    */
   toggleAvailability: "restos:toggle-availability",
+  /**
+   * `02-F27`/`02-F28` — the caller's file, by the number she is calling from. A READ: nothing is
+   * appended and nothing is authorized on this channel.
+   *
+   * **A channel of its own rather than a field on any existing read**, on `staff`'s argument: this
+   * is a different FACT with a different rhythm. `deviceState` and `openOrders` are re-read on
+   * every `changed` push, and a lookup answers a question about ONE number that only exists while
+   * an operator is typing it — `02-F28` measures thirty seconds from that keystroke, so it must be
+   * askable per keystroke and must ride nothing that fans out to the whole shell.
+   *
+   * It takes an ARGUMENT, which `menu` above already establishes is still a closed vocabulary: it
+   * names no table, accepts no filter, and answers one fixed question about the value it is given.
+   */
+  lookupCustomer: "restos:lookup-customer",
+  /**
+   * `02-F27` — *"unknown number → inline customer creation (`customer.created`,
+   * `customer.address_added`)"*, as ONE act.
+   *
+   * **A write channel of its own rather than an `append` payload**, for `addLine`'s and
+   * `toggleAvailability`'s reason exactly: the events need a field the renderer must not supply.
+   * Here it is `01-F23`'s KEY — `registry.ts` puts normalization at the writer because two
+   * normalizers make one customer two identities, permanently (`01-F1`) — so a generic `append`
+   * would put the identity itself on the untrusted side of the bridge. Exactly `addLine`'s
+   * argument with an identity in place of a price.
+   *
+   * It is also why the two events are one call: `02-F27` names them in one clause, and a screen
+   * that could append the create and lose the address would leave a delivery order with a customer
+   * and nowhere to send the food (`09-F10` reads that text off the assigned order).
+   */
+  recordCustomer: "restos:record-customer",
   /**
    * `02-F20` — "would a manager credential close this?", asked of the matrix and answered for
    * display only. A READ: nothing is appended and nothing is authorized on this channel.
@@ -821,6 +909,24 @@ export type RestosBridge = {
    * is the assertion that stands in for the type until those harnesses catch up.
    */
   toggleAvailability?: (req: ToggleAvailabilityRequest) => Promise<AppendResult>;
+  /**
+   * `02-F27`/`02-F28` — the caller's file, and the act that files an unknown one. **Both are
+   * OPTIONAL for the reason `cashState`, `alarms` and `toggleAvailability` above record**: three
+   * oracle suites this session may not edit stub the bridge and close it with
+   * `satisfies RestosBridge`, and all three predate these channels.
+   *
+   * The cost is the same shape and is named rather than accepted quietly: a host that does not
+   * serve them shows a phone surface that takes the number and never answers, and a Save control
+   * that does nothing — which is strictly `01-F17`/`01-F54`'s degrade (the order is still created
+   * on the `phone` channel, lined and confirmed; the loss is a name). The shipped preload serves
+   * both (`preload/index.ts`), and `main/__acceptance__/phone-entry-seam.test.ts` is the assertion
+   * that stands in for the type until those harnesses catch up.
+   *
+   * `lookupCustomer` takes the DIALLED string — see `CustomerLookup` and
+   * `RecordCustomerRequestSchema` for why the renderer never normalizes.
+   */
+  lookupCustomer?: (dialled: string) => Promise<CustomerLookup>;
+  recordCustomer?: (req: RecordCustomerRequest) => Promise<AppendResult>;
   /**
    * `02-F20`'s local path, and both members are **OPTIONAL for the reason `cashState` and
    * `alarms` above record**: `unlock-gate.dom.test.tsx` closes its harness with

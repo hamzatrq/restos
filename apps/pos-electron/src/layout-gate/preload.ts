@@ -512,6 +512,36 @@ const bridge: RestosBridge = {
   // `measureSurface` walks `button`s, and a tile with no handler is still a button, but a
   // fixture that omitted this would be measuring a surface the app cannot actually drive.
   toggleAvailability: () => Promise.resolve({ id: "evt-gate-86" }),
+  /**
+   * **`02-F27` — A KNOWN CALLER, WITH A REAL ADDRESS, RAISED FOR EVERY LOOKUP.**
+   *
+   * The fixture is the coverage boundary, and this is the LARGER of the two states the caller
+   * strip has: an unknown number renders one short line and a tile, a known one renders a name
+   * plus every saved address. `escalationFor: () => null` is what happens when a fixture serves
+   * the smaller state — `ManagerApproval` laid out 1162 px in a 632 px box for weeks and every
+   * gate was green, because the surface never rendered.
+   *
+   * The address is long on purpose and faithful rather than convenient: `06-F9` calls it free
+   * text, a Pakistani delivery address is a house, a street, a block and a city, and this strip
+   * shares a row with a readout, ten digit tiles and a Clear key. A fixture with `"Lahore"` in it
+   * would measure a strip no phone order has ever produced.
+   *
+   * It answers for ANY number, including one digit, so the state is reachable from the first
+   * keystroke the gate presses — the real seam answers `known: null` until eleven digits resolve,
+   * and driving eleven taps per panel to reach the bigger box would make the sweep's own
+   * measurement depend on a normalization rule that is not what this rail is about.
+   */
+  lookupCustomer: () =>
+    Promise.resolve({
+      phone_e164: "+923001234567",
+      known: {
+        name: "Fatima Bibi",
+        addresses: [
+          { address_id: "addr-1", address_text: "House 12, Street 4, Gulberg III, Lahore" },
+        ],
+      },
+    }),
+  recordCustomer: () => Promise.resolve({ id: "evt-gate-customer" }),
   escalationFor: (req) =>
     Promise.resolve(
       (req as { type?: string }).type === "cash.paid_out"

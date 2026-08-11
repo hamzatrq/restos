@@ -989,6 +989,28 @@ const run = async (): Promise<number> => {
    * whether or not one tile is greyed — a tripwire that fires on its own label. It searches the
    * work area only, and for `01-F58`'s disputed string as well, which no tab can ever render.
    */
+  /**
+   * **`24-F14` — is `02-F27`'s caller strip actually answering?**
+   *
+   * The same argument as `soldOutReasonPresent` below, aimed at the state that can clip: the
+   * digit row alone is eleven fixed tiles, but the CUSTOMER CARD is variable-height free text
+   * (`06-F9`) sitting in the same row, and it is the part that grows. A strip that rendered the
+   * pad and never the answer would measure a surface no repeat customer has ever seen.
+   *
+   * Both ends are asked, in the work area only: `CALLER` is the strip's own caption (so the
+   * check fails if `Counter.tsx` stops drawing the readout) and the name is the fixture's (so it
+   * fails if `preload.ts` stops serving the lookup, or the renderer stops reading it).
+   */
+  const callerStripPresent = (): Promise<boolean> =>
+    window.webContents.executeJavaScript(
+      `(() => {
+         const main = document.querySelector('main');
+         if (main === null) return false;
+         const text = main.textContent || '';
+         return /CALLER/.test(text) && /Fatima Bibi/.test(text);
+       })()`,
+    );
+
   const soldOutReasonPresent = (): Promise<boolean> =>
     window.webContents.executeJavaScript(
       `(() => {
@@ -1527,6 +1549,58 @@ const run = async (): Promise<number> => {
     };
 
     await sweep("alarm");
+
+    // -------------------------------------------------------------------------------------
+    // `02-F27`/`02-F28` — THE CALLER STRIP, reached the way an operator reaches it.
+    //
+    // It is raised by tapping `Phone` on the channel row, so it exists in no state `sweep`
+    // above can produce: every tab surface is measured with no channel latched, and this row
+    // adds a readout, ten digit tiles, a Clear key and a customer card to the Order tab's work
+    // area — the tightest vertical budget on the screen, under `03-F5`'s band. Measuring the
+    // Order tab without it measures a counter that has never taken a phone call.
+    //
+    // Driven through the real controls (a channel tap, then a digit) rather than by poking
+    // state, on the escalation block's own reasoning below: a fixture that mounted its own copy
+    // of the surface would prove the copy fits.
+    // -------------------------------------------------------------------------------------
+    const orderTab = shell.tabs.findIndex((t) => t.label.startsWith("Order"));
+    if (orderTab === -1) {
+      failures.push({
+        surface: on("caller"),
+        state: "alarm",
+        detail:
+          "EMPTY MATCH — no Order tab in the rail, so 02-F27's caller strip was never reached " +
+          "and the phone surface went unmeasured on this panel (24-F14).",
+      });
+    } else {
+      await click(orderTab);
+      await new Promise((r) => setTimeout(r, 350));
+      const dialled = [await press("Phone"), await press("3")];
+      await new Promise((r) => setTimeout(r, 400));
+      // `24-F14` — the taps must have LANDED and the strip must have ANSWERED. It asks the DOM
+      // rather than the fixture, so it fails whether `preload.ts` stopped serving the lookup,
+      // `Counter.tsx` stopped rendering the card, or the channel row lost its Phone tile. The
+      // name is the fixture's; `CALLER` is the strip's own caption, so both ends are checked.
+      const strip = await callerStripPresent();
+      if (dialled.some((t) => !t) || !strip) {
+        failures.push({
+          surface: on("caller"),
+          state: "alarm",
+          detail:
+            `EMPTY MATCH — the phone sequence did not produce a caller strip (taps ${dialled.join(",")}, ` +
+            "card " +
+            `${strip}), so 02-F27's number entry and customer card went unmeasured and this ` +
+            "sweep proves nothing about them (24-F14).",
+        });
+      } else {
+        judge(on("caller"), "alarm", await measure());
+        await shoot(window, `${panel.label}--alarm--caller`);
+      }
+      // Back to a walk-in, so the escalation block below and the `quiet` sweep start from the
+      // state every other surface is measured in. `Counter` clears the number with the channel.
+      await press("Counter");
+      await new Promise((r) => setTimeout(r, 300));
+    }
 
     // -------------------------------------------------------------------------------------
     // `02-F20` — THE ESCALATION PAD, reached the way a cashier reaches it.

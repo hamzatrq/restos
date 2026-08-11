@@ -88,7 +88,7 @@ type Till = {
   /** Append straight into the ledger — what a device with no guard does. */
   raw: (device_id: string, type: string, payload: Record<string, unknown>) => void;
   /** The shipped guard, wrapping a minimal gateway that appends for `TILL_2`. */
-  guarded: Pick<Gateway, "append" | "addLine" | "toggleAvailability">;
+  guarded: Pick<Gateway, "append" | "addLine" | "toggleAvailability" | "recordCustomer">;
   /** Every request the guard let through to the ledger. */
   landed: { type: string; payload: Record<string, unknown> }[];
   /** `02-F23`'s system-expected cash for the open shift, in paisa — THE MONEY. */
@@ -169,7 +169,7 @@ const till = (): Till => {
   });
 
   const landed: { type: string; payload: Record<string, unknown> }[] = [];
-  const appends: Pick<Gateway, "append" | "addLine" | "toggleAvailability"> = {
+  const appends: Pick<Gateway, "append" | "addLine" | "toggleAvailability" | "recordCustomer"> = {
     append: (req: unknown): AppendResult => {
       const r = req as { type: string; payload: Record<string, unknown> };
       landed.push(r);
@@ -178,6 +178,9 @@ const till = (): Till => {
     },
     addLine: () => ({ id: "unused" }),
     toggleAvailability: () => ({ id: "unused" }),
+    // `02-F27`/`02-F47` — the fourth member of the trusted write surface (August 2026). Not a
+    // tender, so `DEC-MONEY-009` passes it straight through; stubbed here like the two above.
+    recordCustomer: () => ({ id: "unused" }),
   };
 
   return {
@@ -321,6 +324,7 @@ describe("§C 01-F17/00 §5.1 — the decision touches nothing but this device's
         append: () => ({ id: "x" }),
         addLine: () => ({ id: "x" }),
         toggleAvailability: () => ({ id: "x" }),
+        recordCustomer: () => ({ id: "x" }),
       },
       store: watched,
     });

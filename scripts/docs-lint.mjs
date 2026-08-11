@@ -167,6 +167,11 @@ if (agents.split("\n").length > 120)
       // `availability.changed` the event, `order.create` versus `order.created` — so by this
       // block's own test neither can ever become an emission.
       "availability.toggle",
+      // `02-F47`'s action, and it passes this block's own test the same way: `customer.record` is
+      // the infinitive of an act, while every event in that family is `00 §6`'s `noun.verb_past`
+      // — `customer.created` and `customer.address_added`, both already in the `01 §4` catalog.
+      // So this name can never become an emission and listing it costs the rule nothing.
+      "customer.record",
       "order.create",
       "shift.open_close",
       "cash.count",

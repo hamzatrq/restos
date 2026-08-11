@@ -4,6 +4,7 @@ import {
   Cart,
   formatPaisa,
   ItemGrid,
+  Readout,
   space,
   type Tab,
   TenderPanel,
@@ -17,6 +18,7 @@ import type {
   Alarm,
   AppendRequest,
   CashState,
+  CustomerLookup,
   DeviceState,
   EscalationOffer,
   EscalationRefusal,
@@ -230,6 +232,84 @@ const GRID_PREVIEW_CHANNEL = "counter";
  */
 const AGGREGATOR_CHANNEL = "foodpanda";
 
+/**
+ * `02-F27`/`02-F28` — the channel whose flow **begins with a number**, and the only one that
+ * raises the caller strip below. A separate constant from `ORDER_CHANNELS_AT_COUNTER` for
+ * `AGGREGATOR_CHANNEL`'s reason directly above: that list answers *"what may a cashier
+ * originate?"* and this answers *"which one starts with a phone call?"*.
+ */
+const PHONE_CHANNEL = "phone";
+
+/**
+ * `02-F27`'s number pad — ten digits, in the order a keypad has them.
+ *
+ * ⚠ **IT IS NOT `NumericKeypad`, AND THAT IS THE POINT RATHER THAN A STYLE CHOICE.** That
+ * component's own header warns *"THIS IS A MONEY KEYPAD. DO NOT USE IT FOR A PIN"* and gives the
+ * leading zero as the first reason; a Pakistani phone number is the SECOND instance of the same
+ * trap and nothing in the product said so. `acceptKeystroke` opens
+ * `current === "0" ? key : current + key`, which is exactly right for money (`07` is not a rupee
+ * amount anyone types) and makes `03001234567` — the form `registry.ts` names as what an operator
+ * actually types, and the prefix of every mobile number in this country — **impossible to enter**.
+ * Typing `0` then `3` yields `3`, and `3001234567` is a DIFFERENT `01-F23` identity: it misses the
+ * repeat customer `02-F28` exists to find, and files a second permanent row for one human in a
+ * ledger `01-F1` forbids correcting in place. Its second default, `maxDigits = 7`, truncates the
+ * same number at seven.
+ *
+ * So this composes from `Tile` instead, which is what that header prescribes for a PIN pad and
+ * for the same reason — same `27-F8` target, none of the money semantics.
+ *
+ * `Clear` and not a backspace, copying `App.tsx`'s PIN pad exactly: `27-F4` is positional memory,
+ * and two pads on one device that disagree about which cell corrects an entry teach two habits.
+ */
+const PHONE_DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"] as const;
+
+/**
+ * **SIX COLUMNS, AND THE NUMBER IS A MEASUREMENT — not a preference and not a copy.**
+ *
+ * `27-F8` puts numeric entry at **126 dp = 20 mm of glass**, and `27-F68` (b) forbids shrinking
+ * the millimetres to make a layout fit: *"the minimum IS the millimetre"*. `pnpm layout:check`
+ * enforces it per panel from each panel's own declared geometry, and the first draft of this pad
+ * used `posture="counter"` (76 dp = 12.1 mm) — **110 fatal verdicts, ten keys on every one of the
+ * eleven panels.** The rail was right: a mis-keyed digit here does not cost a rupee, it files a
+ * SECOND permanent identity for one human (`01-F23`, `01-F1`), which is `27-F8`'s "standing,
+ * high-consequence entry" exactly.
+ *
+ * At 20 mm the arithmetic decides the shape. The binding panel is `tablet-10.1` — 1366×768 on
+ * 10.1″ glass, 155 PPI, so one key is **122 px** and the work area under `03-F5`'s band is
+ * **567 px** (measured: the Cash tab holds 570 px there and is the repo's one known-red verdict).
+ * A 3×4 telephone pad is 522 px tall and would leave 45 px for the order-type row, the channel
+ * row, the readout and the customer card — so it fits only by taking the whole work area, which
+ * moves both learned rows and hides the cart. **6×2 is 260 px**, and the surface keeps every
+ * control exactly where it already was (`27-F4`).
+ *
+ * ⚠ **THE COST IS REAL AND IS A FINDING FOR THE DESIGN OWNER, NOT A SETTLED CALL:** every
+ * telephone on earth is 3×4, so a 6×2 pad spends universal muscle memory that this one control
+ * could otherwise have had for free. No FR fixes a column count — `27-F8` fixes millimetres,
+ * `27-F2` fixes *flat and paged*, `27-F4` fixes *does not move* — and this arrangement satisfies
+ * all three. The alternative that keeps 3×4 needs the caller surface to own the whole work area
+ * (`paySurface`'s shape), which is a `27-F4` breaking change on two rows and a `screen-map §3.1`
+ * question about the cart. Recorded rather than decided by this session (`24 §3b`).
+ */
+const CALLER_PAD: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(6, min-content)",
+  alignContent: "center",
+};
+
+/**
+ * The dialled number as the operator reads it back.
+ *
+ * `text-numeric-primary` because `27-F25` makes numbers the operational payload and the largest
+ * element in their region, and on this strip the number IS the payload — `21 §5` puts the operator
+ * at plausibly non-reading, so the digits are the one thing here she can certainly use.
+ */
+const CALLER_NUMBER: React.CSSProperties = {
+  fontFamily: typography["text-numeric-primary"].fontFamily,
+  fontSize: typography["text-numeric-primary"].fontSize,
+  fontWeight: typography["text-numeric-primary"].fontWeight,
+  fontVariantNumeric: "tabular-nums",
+};
+
 export const Counter = () => {
   const [device, setDevice] = useState<DeviceState | null>(null);
   const [orders, setOrders] = useState<readonly OpenOrder[]>([]);
@@ -309,6 +389,25 @@ export const Counter = () => {
    * inferred later), which is why `menuChannel` below reads the order first.
    */
   const [pendingChannel, setPendingChannel] = useState<string | null>(null);
+  /**
+   * `02-F27` — *"operator types the caller's number"*, exactly as pressed. **The raw digits**, not
+   * `01-F23`'s key: `registry.ts` puts normalization at the WRITER and `18 §9` makes main the
+   * trusted side, so a renderer that normalized would be a second writer of the identity key —
+   * two rules, and one customer becomes two rows. This state's only job is to carry what she
+   * pressed to the seam without editing it (see `PHONE_DIGITS` for what "without editing it"
+   * cost the one keypad this product already owned).
+   */
+  const [dialled, setDialled] = useState("");
+  /**
+   * The customer file's last answer, or `null` for *"nothing has been asked yet, or the ask
+   * failed"*. Renderer state and not a fold read: this is the reply to ONE question about ONE
+   * number, and it exists only while she is on the call.
+   *
+   * `null` on a failed lookup is `00 §5.7`'s honesty rule rather than a convenience — a stale
+   * answer left on screen would name a customer the file was never asked about. `01-F17` is the
+   * other half: none of this gates the order (see the effect below).
+   */
+  const [caller, setCaller] = useState<CustomerLookup | null>(null);
   /**
    * `02-F1` / `01 §4` / `02-F11` — **WHICH open order this till is working on.**
    *
@@ -401,6 +500,55 @@ export const Counter = () => {
     return window.restos.onChanged(() => void reload());
   }, [reload]);
 
+  /**
+   * `02-F27`'s lookup — *"customer file lookup by normalized phone"* — asked **per keystroke**.
+   *
+   * `02-F28` is a stopwatch: *"a repeat customer's order entered and confirmed in ≤ 30 s FROM
+   * NUMBER ENTRY"*. Waiting for a Search tap would spend the budget the FR exists to protect, and
+   * `27-F6` would have added a control where a keystroke already says everything. The digits she
+   * has pressed so far are the whole question, so every keystroke is a new one.
+   *
+   * ── `01-F17`: NOTHING HERE GATES THE ORDER ──────────────────────────────────────────────────
+   *
+   * The order-type row is rendered from `pendingChannel` and nothing else, so a lookup that is
+   * slow, unreachable, rejecting or never settling changes exactly one thing on this screen: what
+   * the caller strip says. *"A sale is never blocked — not by inventory math, sync, or approval
+   * timeouts"*, and a lookup is none of those three, which is precisely why it is the one an
+   * implementation forgets. `01-F54` is the same disposition one layer down: the loss is a WORD.
+   *
+   * ── Why the channel condition, and why `live` ──────────────────────────────────────────────
+   *
+   * The channel condition is `21 §5`'s: a customer lookup performed for a walk-in sale is work
+   * with no task behind it, and `01-F24` makes customer data the kind of thing not to read for no
+   * reason. `live` is the out-of-order guard — answers to `0300` and `03001` race, and without it
+   * the shorter one can land last and show the operator a file for a number she has moved past.
+   *
+   * Optional-chained for the reason `RestosBridge.lookupCustomer` records: a host that does not
+   * serve the channel leaves the strip saying nothing, and the phone order still rings.
+   */
+  useEffect(() => {
+    if (pendingChannel !== PHONE_CHANNEL) return;
+    if (dialled === "") {
+      setCaller(null);
+      return;
+    }
+    const answer = window.restos.lookupCustomer?.(dialled);
+    if (answer === undefined) return;
+    let live = true;
+    void answer
+      .then((a) => {
+        if (live) setCaller(a);
+      })
+      .catch(() => {
+        // `00 §5.7` — a surface that cannot answer says so, and says it by showing nothing rather
+        // than by keeping the last caller's name on the glass.
+        if (live) setCaller(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [pendingChannel, dialled]);
+
   // `01-F17` — a sale is never blocked. A shell that has not loaded its device state yet is
   // the one case where there is genuinely nothing to draw, so it says so in a word rather
   // than rendering an empty counter that looks like a working one with no orders.
@@ -436,6 +584,20 @@ export const Counter = () => {
    */
   const write = (op: Promise<unknown>) => {
     void op.catch(() => {}).then(reload);
+  };
+
+  /**
+   * Put the caller strip back to nothing — both facts together, because they are one fact in two
+   * pieces and clearing the number while keeping the answer would render a file for digits that
+   * are no longer on the screen (`00 §5.7`).
+   *
+   * Called from the two places the call ENDS: the order is started (`startOrder`), or a different
+   * channel is latched (the channel row). Not from the lookup effect: a reset that lived there
+   * would fight the keystrokes it is supposed to follow.
+   */
+  const clearCaller = () => {
+    setDialled("");
+    setCaller(null);
   };
 
   /**
@@ -562,6 +724,39 @@ export const Counter = () => {
     // from no default again rather than inheriting this one's, which is the same ruling applied
     // to the second order of the shift as to the first.
     setPendingChannel(null);
+    // And the caller goes with it, for the same reason: this call is over. Leaving her number
+    // latched would carry one caller's identity into the next order on the row that starts it.
+    clearCaller();
+  };
+
+  /**
+   * `02-F27` — *"unknown number → inline customer creation"*, as one tap.
+   *
+   * **No name and no address cross this call, and that is `27-F6` rather than a shortcut.** *"No
+   * operational role is ever required to type non-numeric text to complete a CRITICAL-PATH task …
+   * of 27 field subjects, 24 could not type a single word."* That FR blesses `02-F27`'s customer
+   * name as an **optional** escape hatch, and optional is the whole of it: this control files the
+   * caller with `name: null` — `06-F11`'s *"created on first sight from a checkout that captured
+   * only a number"*, which `registry.ts` declares the payload nullable to express — so an operator
+   * who cannot type still completes the flow.
+   *
+   * **OWED, and named rather than left to look intentional:** the typed name and `06-F9`'s
+   * free-text address have no surface here at all, so a delivery order taken from a new caller
+   * still has nowhere to send the food. The blocker is not this screen — `packages/ui` ships no
+   * text-entry component at all, and `21-F2` bans raw interactive primitives in app code
+   * (`closed-vocabulary.test.ts` is the guard, and it correctly refuses the shortcut) — so the
+   * escape hatch `27-F6` permits cannot be built until `packages/ui` gains that component, which
+   * `21-F5` makes a design-owner review rather than this session's call.
+   * `gateway.recordCustomer` already carries both fields.
+   *
+   * `01-F1` is why this is an explicit act and not something the screen does on her behalf: a
+   * created identity is permanent, and an automatic file-on-resolve would record every wrong
+   * number and every hang-up for ever — the same argument `gateway.lookupCustomer` makes for
+   * appending nothing at all.
+   */
+  const recordCaller = () => {
+    const op = window.restos.recordCustomer?.({ dialled, name: null });
+    if (op !== undefined) write(op);
   };
 
   /**
@@ -690,6 +885,133 @@ export const Counter = () => {
       }}
     >
       {children}
+    </div>
+  );
+
+  /**
+   * `C18` — **THE CALLER SURFACE** (`02-F27`, `02-F28`, `restaurant-os.md` §8 item 7).
+   *
+   * ── WHERE IT GOES, AND THE PLACEMENT IS A MEASUREMENT ──────────────────────────────────────
+   *
+   * It occupies the **item grid's own box**, under the order-type and channel rows, while the
+   * phone channel is latched. Both learned rows keep their exact positions and the cart keeps
+   * its column, so `27-F4` is untouched: nothing is added above anything, nothing moves.
+   *
+   * **It replaces the grid rather than sitting beside it, and that was forced by the gate rather
+   * than chosen.** The first draft put this in a fourth row and `pnpm layout:check` measured the
+   * result on `tablet-10.1` (1366×768 on 10.1″ glass): **772 px of content in a 567 px work
+   * area**, the grid box squeezed to 0 px, and **fifteen controls off the bottom of the screen**
+   * — five menu tiles and the whole pager. `27-F8`'s 20 mm keys are not negotiable (`27-F68` (b):
+   * *"the minimum IS the millimetre"*), so the room has to come from somewhere, and the only
+   * honest place is the surface the operator is not using: she cannot ring a line onto an order
+   * that does not exist yet, and `02-F27`'s flow puts the number BEFORE the order.
+   *
+   * **The cost, named rather than left to be discovered:** if an order is already open and she
+   * latches Phone for the NEXT one, the grid is hidden until she starts it or picks another
+   * channel. The cart — her working memory (`screen-map §3.1`) — stays visible throughout, which
+   * is the part that would actually hurt to lose.
+   *
+   * ── WHY IT IS RAISED BY THE PHONE CHANNEL AND BY NOTHING ELSE ───────────────────────────────
+   *
+   * An INTERPRETATION, stated rather than silent. `27-F5` bans context-dependent controls and can
+   * be read as pushing the other way — an always-present caller field is arguably the less
+   * conditional design. It is refused because this surface is eleven 20 mm keys and a customer
+   * card, and a permanent one would take the item grid's room on every walk-in sale (~75% of
+   * orders). `21 §5` calls a control with no task behind it feature tourism in terms. **The
+   * simpler alternative is one condition's change**, and `phone-entry.dom.test.tsx` §A is
+   * deliberately written so either design passes: it asserts the LOOKUP does not fire for a
+   * counter order, never that the field is absent.
+   *
+   * **The order-type row is NOT gated on any of this** — see the lookup effect. `01-F17`: a
+   * caller the file cannot answer about still gets her food.
+   */
+  const callerSurface = (
+    /*
+      **NO `flexWrap`, AND THAT IS THE SECOND THING THE GATE DECIDED HERE.** With it, the card
+      column wrapped BELOW the pad on `tablet-10.1` and `netbook-1024` — 708 px of content in a
+      567 px box, 141 px clipped away. Without it the card shrinks instead (`minWidth: 0`, its
+      text rewraps) and the surface's height is the pad's, which fits every shipping panel with
+      room to spare. Wrapping trades width for height, and height is the scarce axis here.
+    */
+    <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+      {/*
+        THE PAD, AND ITS SHAPE IS A MEASUREMENT RATHER THAN A TASTE — see `CALLER_PAD`.
+
+        `flexShrink: 0` is load-bearing rather than tidy: a flex row that ran out of width would
+        otherwise take it from these keys, and `27-F68` (b) forbids shrinking `27-F8`'s 20 mm to
+        make a layout fit. The card gives up width; the target never does.
+      */}
+      <div style={{ ...CALLER_PAD, flexShrink: 0 }}>
+        {PHONE_DIGITS.map((d) => (
+          <Tile
+            key={d}
+            posture="keypad"
+            label={d}
+            // The whole of the entry rule: what she pressed, appended. No leading-zero
+            // suppression and no digit cap — see `PHONE_DIGITS` for what both cost.
+            onPress={() => setDialled((current) => current + d)}
+          />
+        ))}
+        {/*
+          `App.tsx`'s PIN pad has `Clear` and no backspace, and this copies it rather than
+          improving on it: `27-F4` is positional memory, and a device whose pads correct an entry
+          differently teaches two habits. The number alone is cleared, never the channel — she is
+          still on the same call.
+        */}
+        <Tile posture="keypad" label="Clear" onPress={() => setDialled("")} />
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0, flex: 1 }}>
+        {/*
+          `Readout` rather than a loose label beside a loose number: it is the same
+          caption-above-fact idiom the unlock screen uses for `PIN`, and `27-F57`'s mapping step —
+          pairing a number to the thing it quantifies — is where comprehension collapses. `27-F29`
+          blocks impossible values AT ENTRY and the only way an operator can act on that is to SEE
+          what she entered, digit for digit.
+        */}
+        <Readout caption="CALLER">
+          <p style={{ ...CALLER_NUMBER, color: color["fgColor-default"] }}>
+            {dialled === "" ? "—" : dialled}
+          </p>
+        </Readout>
+        {caller === null || caller.phone_e164 === null ? (
+          <p style={{ ...STATE_LINE, color: color["fgColor-muted"], marginLeft: 0 }}>
+            Key the caller's number — it finds her file
+          </p>
+        ) : caller.known === null ? (
+          <>
+            {/*
+              `02-F27`'s *"unknown number"* — a STATE with its own branch, not an error and not an
+              empty answer. The number is named back in `01-F23`'s form so she can see WHICH
+              identity the tile beside it would create.
+            */}
+            <p style={{ ...STATE_LINE, color: color["fgColor-muted"], marginLeft: 0 }}>
+              New caller — {caller.phone_e164}
+            </p>
+            <Tile posture="counter" label="Save caller" onPress={recordCaller} />
+          </>
+        ) : (
+          /*
+            `02-F27`: *"→ name, saved addresses"*. BOTH, because a rider cannot deliver to a name
+            and `09-F10` reads this very text off the assigned order — a surface that rendered the
+            name alone would look complete and leave the food with nowhere to go. A file with no
+            stated name renders as that, rather than as blank: `null` is `06-F11`'s first sight or
+            `01-F31`'s contested name, and both are facts.
+          */
+          <Readout caption="ON FILE">
+            <p style={{ ...STATE_LINE, color: color["fgColor-default"], marginLeft: 0 }}>
+              {caller.known.name ?? "No name on file"}
+            </p>
+            {caller.known.addresses.map((a) => (
+              <p
+                key={a.address_id}
+                style={{ ...STATE_LINE, color: color["fgColor-muted"], marginLeft: 0 }}
+              >
+                {a.address_text}
+              </p>
+            ))}
+          </Readout>
+        )}
+      </div>
     </div>
   );
 
@@ -1242,7 +1564,13 @@ export const Counter = () => {
                   posture="counter"
                   label={c.label}
                   selected={pendingChannel === c.id}
-                  onPress={() => setPendingChannel(c.id)}
+                  onPress={() => {
+                    setPendingChannel(c.id);
+                    // Latching a different channel ends the call: this order is not a phone order
+                    // any more, so the caller it was for is not a fact about it (`02-F1` — the
+                    // channel is set at creation, and so is who it is for).
+                    if (c.id !== PHONE_CHANNEL) clearCaller();
+                  }}
                 />
               ))}
               {/*
@@ -1280,7 +1608,14 @@ export const Counter = () => {
               a grid costed for the wrong surface puts tiles off-page where no pager can reach
               them — on a counter, an item that cannot be sold.
             */}
-              {gridMm === null ? null : (
+              {/*
+                `02-F27` — the caller surface takes this box while the phone channel is latched.
+                See `callerSurface` for the measurement that put it HERE rather than in a row of
+                its own, and for what that costs.
+              */}
+              {pendingChannel === PHONE_CHANNEL ? (
+                callerSurface
+              ) : gridMm === null ? null : (
                 <ItemGrid
                   items={
                     /*

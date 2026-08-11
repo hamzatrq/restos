@@ -418,6 +418,8 @@ describe("§H commandment 8 — the toggle is GATED (the M7 survivor)", () => {
           calls.push(req);
           return { id: "c" };
         },
+        // `02-F27`/`02-F47` — the fourth member of the trusted write surface (August 2026).
+        recordCustomer: () => ({ id: "d" }),
       },
       store: storeFor(role),
       session,

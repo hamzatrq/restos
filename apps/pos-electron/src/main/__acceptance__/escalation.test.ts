@@ -114,6 +114,8 @@ const rig = (opts: { signedInAs?: string | null; pinOk?: boolean } = {}): Rig =>
         },
         addLine: () => ({ id: "evt-2" }),
         toggleAvailability: () => ({ id: "evt-3" }),
+        // `02-F27`/`02-F47` — the fourth member of the trusted write surface (August 2026).
+        recordCustomer: () => ({ id: "evt-4" }),
       },
       store,
       session: () =>
@@ -375,6 +377,8 @@ describe("§E 18 §5 — the ordinary write path is unchanged", () => {
           },
           addLine: () => ({ id: "evt-2" }),
           toggleAvailability: () => ({ id: "evt-3" }),
+          // `02-F27`/`02-F47` — the fourth member of the trusted write surface (August 2026).
+          recordCustomer: () => ({ id: "evt-4" }),
         },
         store,
         session: () => ({ user_id, display_name: user_id }),
