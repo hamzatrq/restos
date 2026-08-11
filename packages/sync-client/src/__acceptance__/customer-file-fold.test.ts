@@ -9,6 +9,12 @@
 // `emptyCustomerFile` / `foldCustomerFile` / `projectCustomerFile`, and `packages/domain`'s
 // registry has no `customer.*` key, so `store.ingest` would refuse these envelopes too.
 //
+// ⚠ AMENDED 2026-08-11 BY THE MUTATION PASS, and the provenance matters because the line above
+// says "authored from spec text only". §4's LAST test was added by the adversarial session, which
+// HAD read the implementation — it is the one assertion in this file whose author saw the code.
+// It was written for a mutant that survived all 628 tests; the block comment on it carries the
+// measurement. Everything else in this file predates any implementation.
+//
 // ⚠ THE ONE MUTANT THIS FILE EXISTS FOR, stated so it cannot be lost. A fold that resolves two
 // divergent names with `[...names].sort()[0]` is CONVERGENT, relabel-invariant and
 // clock-free — it passes every net in the invariance suite and every plain-convergence test
@@ -312,6 +318,52 @@ describe("§4 06-F9/01-F19 — saved addresses union, and an address never disap
     expect(addressesOf(row(customerFile().projectAll(alfa.envelopes), PHONE_A))).toEqual([
       ADDRESS_1,
     ]);
+  });
+
+  /**
+   * ⚠ ADDED BY THE MUTATION PASS (2026-08-11) — the only assertion in this package that fails
+   * the mutant it was written for, and the only one whose author had read the implementation.
+   *
+   * MEASURED: a fold that buckets addresses by `address_text` instead of by the minted
+   * `address_id` — retaining every id, so `01-F19` is untouched, and set-determined, so all
+   * three `01-F34` nets and every shuffle stay green — passed **628 of 628** tests in this
+   * package. The two `§4` fixtures above cannot see it, because their ids happen to sort in the
+   * same order as their texts. This one cannot be fooled that way: `adr-0001` and `adr-0003`
+   * share a text that sorts BEFORE `adr-0002`'s, so id-order is `[1, 2, 3]` and text-order is
+   * `[1, 3, 2]`. The dangerous cousin — sorting by text with NO tiebreak — was already caught,
+   * by `§5`'s shuffle, because a tie on text falls back to delivery order; what nothing caught
+   * was the version that is convergent and merely keyed on the wrong field.
+   *
+   * WHAT THIS PINS, precisely. No FR orders a customer's saved addresses, and this does not
+   * invent one (commandment 2). What it pins is the fold's OWN DECLARED merge key — the rule
+   * `01-F34` requires a fold to declare, written at the head of `./customer-file-builders.ts`
+   * as *"keyed by the payload's minted `address_id`, projected sorted by that key"*, and chosen
+   * on `26 §8`'s ratified ground that a business key is minted rather than read off an
+   * envelope. A declared rule that no assertion holds to is the drift this repo keeps
+   * recording; this is the assertion.
+   */
+  it("01-F34/26 §8: the address list is keyed and ordered by the MINTED address_id, not by its text", () => {
+    const compareText = (x: { address_text: string }, y: { address_text: string }): number => {
+      if (x.address_text < y.address_text) return -1;
+      if (x.address_text > y.address_text) return 1;
+      return 0;
+    };
+    const inIdOrder = [ADDRESS_1, ADDRESS_2, ADDRESS_1_DUP_TEXT];
+    // Anti-vacuity, in `§0b`'s habit: on a fixture whose two candidate orders agree, the
+    // assertion below holds for a fold keyed on either field and therefore asserts nothing.
+    expect(
+      [...inIdOrder].sort(compareText).map((a) => a.address_id),
+      "the fixture must distinguish id-order from text-order or this test is vacuous",
+    ).not.toEqual(inIdOrder.map((a) => a.address_id));
+
+    const { alfa, bravo } = twoDevices();
+    alfa.emit(addressAdded(PHONE_A, ADDRESS_1));
+    bravo.emit(addressAdded(PHONE_A, ADDRESS_2));
+    bravo.emit(addressAdded(PHONE_A, ADDRESS_1_DUP_TEXT));
+
+    const r = row(customerFile().projectAll([...alfa.envelopes, ...bravo.envelopes]), PHONE_A);
+
+    expect(addressesOf(r)).toEqual(inIdOrder);
   });
 });
 
