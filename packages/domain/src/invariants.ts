@@ -56,8 +56,23 @@ export type SettledConservationArgs = {
 /**
  * The settled conservation equation (01-F30 as amended July 2026: Σ tendering
  * payments − Σ refunds = billed − voids − comps − discounts once settled;
- * void/comp/discount VALUE terms are 0 at v1 — those event types carry no
- * payload schema, 26 §7). Returns the residual `billed − (tendered − refunded)`:
+ * void/comp/discount VALUE terms are 0 at v1 — ⚠ CORRECTED August 2026: the
+ * reason stated here was "those event types carry no payload schema", and that
+ * stopped being true in the round that landed `void.recorded` /
+ * `comp.recorded` / `discount.recorded` in `registry.ts`. The terms are zero
+ * because **no fold projects them** — `sync-client/src/folds/merge.ts` is
+ * deliberately projection-inert for all three, since `26 §7` makes each one's
+ * merge rule an oracle-pinned decision (each is money, each needs its own
+ * idempotency key and an `01-F31` divergence disposition) and the landing
+ * session declined to guess it. A comment asserting a limitation that no longer
+ * holds is what retires the assertion the next reader would write.
+ * ⚠ CONSEQUENCE, NAMED: until that fold lands, a legitimately comped order
+ * reads as a conservation SHORTFALL. Rs 1,000 billed, Rs 450 comped, Rs 550
+ * tendered gives a residual of +45000 — and `comp.recorded` exits no line, so
+ * `billed_paisa` does not fall to meet it. Not live (no production emitter, and
+ * `runAuditor`'s conservation leg has no scheduled reader of this residual),
+ * which is why this is a named debt rather than an arithmetic change here.
+ * 26 §7). Returns the residual `billed − (tendered − refunded)`:
  *   > 0  — SHORTFALL: a violation once settled (01-F32 "No order reaches
  *          settled state with conservation violated") — the Auditor flags it;
  *   = 0  — conserved;

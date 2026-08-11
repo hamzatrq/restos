@@ -566,6 +566,35 @@ const payloadSchemas = {
     unit_price_paisa: z.number().int().nonnegative(),
     reason: z.string().min(1),
     approver_user_id: z.union([z.string().min(1), z.null()]),
+    /**
+     * **`26 §7` — THE CARRIED CAUSAL LINK, and it is REQUIRED because `01-F1` closes this door
+     * permanently (added August 2026, adversarial review of the round that landed this schema).**
+     *
+     * This payload is a **register keyed on `line_id`** — the comment above says so in its own
+     * words, *"the price it becomes"* — and a register is the one shape that cannot converge from
+     * its members alone. Two overrides on one line (a manager discounts to Rs 400, the customer
+     * negotiates again, a second override sets Rs 380 — `role-task-inventories.md` costs `C26` at
+     * 0–5 per shift, so this is ordinary rather than exotic) leave a fold with two candidates and
+     * no way to choose. Every tiebreak available to it is banned: `01-F34` forbids reading
+     * ordering metadata, and `26 §7` bans `min(envelope.id)` **by name** because UUIDv7 makes an
+     * id comparison wall-clock in disguise.
+     *
+     * `26 §7` prescribes the remedy for this exact row — *"a **carried causal link**
+     * (`prev_shift_id`, `supersedes[]`)"* — and says of the sibling case that `supersedes[]` on
+     * `order.table_assigned` *"is the only thing that makes the table anchor converge at all"*.
+     * `order.parked` / `order.unparked` in this same file carry it for the same reason.
+     *
+     * **Why REQUIRED and why NOW.** `01-F1` makes the ledger append-only, so a required field
+     * added after the first event is written makes that event **unparseable for ever** — this
+     * file's own `order.parked` note states the asymmetry: *"A field omitted and later needed
+     * cannot be added as required at all… and adding it `.optional()` then confuses 'a root
+     * override' with 'a writer forgot'."* Measured at the moment of writing: **no production code
+     * constructs this payload** (the `order.line_price_overridden` hits in `apps/` are a label
+     * map, a permission-action map and a fold case), so the window is open and closes at the first
+     * emit. An empty array is a root override; today every value is `[]`, and that cost is
+     * accepted for exactly the reason the park pair accepts it.
+     */
+    supersedes: z.array(z.string().min(1)),
   }),
   /**
    * `05-F7`'s event extension, transcribed. The `01 §4` catalog has carried

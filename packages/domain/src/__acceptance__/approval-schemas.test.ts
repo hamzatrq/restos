@@ -80,6 +80,10 @@ const OVERRIDDEN = {
   unit_price_paisa: 32_000,
   reason: "the owner priced this plate for the staff meal",
   approver_user_id: "user-hina",
+  // `26 §7`'s carried causal link, REQUIRED on this payload since August 2026 (see the schema's
+  // own note in `registry.ts`). `[]` is a root override. Fixture-only: §D asserts that all four
+  // types PARSE and that the approver key is DECLARED, and neither claim moved.
+  supersedes: [] as readonly string[],
 };
 
 /** Whatever `parseEvent` threw, or `undefined` if it did not throw. */

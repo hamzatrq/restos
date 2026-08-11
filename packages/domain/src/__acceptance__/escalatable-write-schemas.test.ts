@@ -137,6 +137,13 @@ const OVERRIDE = {
   unit_price_paisa: 32_000,
   reason: "price agreed with the owner for the wedding party",
   approver_user_id: MANAGER,
+  /**
+   * `26 §7`'s carried causal link, REQUIRED on this payload since August 2026 — see the schema's
+   * own note. Empty here because this fixture is a ROOT override, which is the ordinary case; §F
+   * is where a second override on one line carries the first. Added to the fixture rather than to
+   * an assertion: nothing §A–§E claims changed, and each of them constructs from this constant.
+   */
+  supersedes: [] as readonly string[],
 };
 
 /** The three money-carrying `*.recorded` acts — everything §C and §D say holds for all three. */
