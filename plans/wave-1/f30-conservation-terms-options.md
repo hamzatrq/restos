@@ -105,6 +105,18 @@ Auditor**. Re-measured here — every occurrence of `settlement_closed` outside 
 fixture (`auditor-builders.ts:215`, `services/jobs/.../helpers.ts:177`); `apps/pos-electron/src/main/
 printing.ts:850` says in its own words that nothing emits it.
 
+⚠ **THE THIRD OF THOSE THREE HAS SINCE CLOSED, and this paragraph carried it forward without
+re-measuring** (found by the implementing session, 2026-08-11). `services/jobs` **schedules the
+Auditor**: `runAuditor` is imported from `@restos/auditor` at `services/jobs/src/index.ts:79` and
+called at `:147`, on a BullMQ repeatable (`QUEUE_NAME = "auditor"`, `SCHEDULER_ID =
+"auditor-nightly"`), which is `AGENTS.md`'s instance (14) closed. Two of the three sub-claims above
+were re-measured and the third was quoted from `DEC-MONEY-009` — which is this repo's named disease
+(*a derived document mistaken for the source*) inside a paper whose own opening promises every
+number is a fresh measurement. **It does not change the refusal**: (a), (b), the `order.settled`
+gate above and §3 all stand independently, and the check still cannot fire for want of the closing
+act. What it changes is the SIZE of O2 — one of its three prerequisites is already paid, leaving
+the `01-F33` closing-act emitter and the `EXCESS_TENDER_IS_EXCEPTION` decision.
+
 Adding `void_value` to that equation would be this wave's named recurring defect **committed on
 purpose**: a correct subsystem with no seam to the product. It would also be invisible to
 `seams:check`, which cannot see a missing producer for an event type.
@@ -141,11 +153,24 @@ scheduled Auditor, an `EXCESS_TENDER_IS_EXCEPTION` decision), so the equation ru
 terms to a check that can be observed to change. *This is the ordering `DEC-MONEY-009` itself
 implies* and it makes O1 verifiable rather than theoretical.
 
-**O3 — Do nothing, and correct the expired comment.** The terms stay zero; the residual's doc
-comment is rewritten to say *why* they are zero **now** (no key; conservation unreachable; §3
-unresolved) instead of the lapsed *"those event types carry no payload schema"*. Cheapest, honest,
-and leaves the debt visible. **Do this one regardless of which of O1/O2 is chosen**, because the
-comment is wrong today either way.
+**O3 — Do nothing, and correct the expired comment. ✅ DONE (2026-08-11, implementing session).**
+The terms stay absent — deliberately not defaulted to zero behind an optional parameter, which
+would be a term with no producer. `settledConservationResidualPaisa`'s doc comment now says what
+was false and since when, and gives the four live reasons (no key; `26 §7` rules it a closure
+mechanism; §3's double-count; the equation cannot fire) instead of the lapsed *"those event types
+carry no payload schema"*. **Comment-only; no signature, no behaviour, no test changed** —
+`packages/domain` is a PROTECTED path (commandment 10) and this wants senior review on that basis.
+
+**O3b — the same expired premise is in the SPEC and is still owed.**
+`specs/26-merge-semantics.md:113` asserts *"`table.state_changed`, `availability.changed`,
+`order.merged`, `shift.*`, `cash.*`, `void/comp/discount.recorded` and `payment.split_recorded` have
+**no payload schema at all** — three of the four RHS terms of `01-F30` therefore evaluate to zero
+today"*. The four escalatable types have carried schemas since August 2026, so the sentence's
+premise is retired even though its conclusion holds for the reasons above. **Named rather than
+edited**: doc 26 is a live-design document and that sentence is an argument for a ratified matrix,
+so restating its premise is the owning doc's ruling to make, not a drive-by (commandment 2). The
+other named types should be re-measured in the same pass rather than assumed — this session checked
+only the four.
 
 **O4 — Guess a fold (rejected).** Sum the members and move on. Rejected on `26 §2`'s own grounds: a
 rule guessed at this seam lets delivery order decide a money outcome, and `DEC-MONEY-009` is a
@@ -164,3 +189,33 @@ overruled rule.
 The one change that is safe and owed in any branch of the decision is **O3**: correct the expired
 premise in `packages/domain/src/invariants.ts`. It is a protected path, so it is named here rather
 than done unilaterally.
+
+---
+
+## 6. The implementing session's verdict (2026-08-11)
+
+**The refusal is CONFIRMED, re-derived rather than accepted.** Every load-bearing claim above was
+re-measured against the tree at `d61513e`, not read off this paper:
+
+| claim | how it was checked | result |
+|---|---|---|
+| the residual has no slot for the terms | read `invariants.ts:45-75` | confirmed — three fields, none of them a term |
+| its only production caller is the Auditor | symbol grep, tests excluded | confirmed — `packages/auditor/src/auditor.ts:365` |
+| only two schemas carry an attempt key | `grep -an attempt_id registry.ts` | confirmed — `payment.recorded:374`, `payment.refunded:402/407` |
+| the four types carry schemas and NO key | read `registry.ts:534-569` | confirmed — `order_id`, `amount_paisa`, `reason`, `approver_user_id` |
+| `26 §7` maps `01-F30` to a closure mechanism | read `specs/26-merge-semantics.md:106` | confirmed |
+| the four are projection-inert in the fold | read `merge.ts:773-793` | confirmed, with the same argument stated at the case arm |
+| `order.settlement_closed` has no emitter | grep across `apps/ services/ packages/` | confirmed — every non-comment hit is a test fixture |
+| nothing schedules the Auditor | grep `runAuditor`, tests excluded | **FALSE — see §2(c)'s correction. `services/jobs` runs it.** |
+
+**What was DONE:** O3 only. No fold rule, no schema change, no signature change, no invariance
+suite — a law-1 bijective-relabel/clock-injection test asserts a property *of a rule*, and asserting
+one against a guessed rule is how `catalog-pricing.test.ts:394` ended up defending an overruled rule
+for three weeks.
+
+**One thing this paper does not say and should:** the corpus is not merely silent on the key, it is
+silent in a way that has a cheaper answer than O1 assumes. `01-F31`'s key is *"UI-minted"* and the
+four escalatable acts are all UI-originated through `02-F20`'s approval path, so the key would be
+minted where the existing one already is. That lowers O1's cost; it does not make it an
+implementer's call, because `DEC-MONEY-008` had to ratify the *uniqueness scope* of the key that
+already exists, and a second key minted without that ruling is the same failure a second time.

@@ -55,9 +55,8 @@ export type SettledConservationArgs = {
 
 /**
  * The settled conservation equation (01-F30 as amended July 2026: Σ tendering
- * payments − Σ refunds = billed − voids − comps − discounts once settled;
- * void/comp/discount VALUE terms are 0 at v1 — those event types carry no
- * payload schema, 26 §7). Returns the residual `billed − (tendered − refunded)`:
+ * payments − Σ refunds = billed − voids − comps − discounts once settled).
+ * Returns the residual `billed − (tendered − refunded)`:
  *   > 0  — SHORTFALL: a violation once settled (01-F32 "No order reaches
  *          settled state with conservation violated") — the Auditor flags it;
  *   = 0  — conserved;
@@ -67,6 +66,49 @@ export type SettledConservationArgs = {
  * legitimately exceed `tendered` (unprovable refunds merge before their parent,
  * 01-F17/DEC-SYNC-007), so the interior subtraction must be allowed to go
  * negative.
+ *
+ * ## ⚠ THERE IS NO PARAMETER FOR `void_value`, `comp_value` OR `discounts`, AND
+ * ## THE REASON THIS COMMENT USED TO GIVE HAS EXPIRED
+ *
+ * It read *"void/comp/discount VALUE terms are 0 at v1 — those event types
+ * carry no payload schema, 26 §7"*. That was true when it was written and is
+ * FALSE as of August 2026: `registry.ts` now carries `void.recorded`,
+ * `comp.recorded`, `discount.recorded` and `order.line_price_overridden`, each
+ * with an `order_id` and an `amount_paisa` (`specs/26-merge-semantics.md:113`
+ * still asserts the retired premise and is owed a correction). The conclusion
+ * survives; its reason does not, and a comment resting on an expired premise is
+ * how the next reader concludes the question is settled.
+ *
+ * The three terms stay absent — NOT defaulted to zero behind an optional
+ * parameter, which would be a term with no producer — for four reasons that are
+ * live today. They are recorded here rather than in a commit message because
+ * this is the file a session reaches for when it decides to "just add them".
+ * The worked argument and the options are `plans/wave-1/f30-conservation-terms-
+ * options.md`; the decision is a founder's.
+ *
+ *  1. **No idempotency key exists on any of the four types, and `01-F31`'s
+ *     mechanism IS a key** (*"folds dedupe by attempt key … a fold never picks
+ *     a winner"*). Exactly two schemas in the repo carry one — `payment.recorded`
+ *     and `payment.refunded` — and `02-F36`, the only FR naming a key beside a
+ *     void, names the linked REFUND's. Σ-over-members and Σ-over-event-ids both
+ *     make a double-tapped "void Rs 500" subtract Rs 1,000, which is the failure
+ *     `01-F31` exists to prevent. Minting a key is a payload change to four
+ *     `01 §4` types: a spec PR (commandments 2 and 9), not an implementer's call.
+ *  2. **`26 §7` already rules this is not a fold problem** — its *"looks like
+ *     ordering, actually needs"* table maps `01-F30` to a **closure** mechanism
+ *     (the Auditor over the merged log), and conservation is absent from its
+ *     four-entry ordering list. `packages/sync-client`'s merge engine keeps the
+ *     four types projection-inert on that reading and says so at its case arm.
+ *  3. **`billed_paisa` already excludes exited lines** (see its doc above), so an
+ *     order-level `void.recorded` beside line exits would subtract the same money
+ *     TWICE — permanently, converged, and silently under `01-F1`. Which of the two
+ *     representations is authoritative is answered by no FR.
+ *  4. **The equation does not run for these orders yet.** Its only production
+ *     caller gates on `order.settled === 1`, and `order.settlement_closed` has
+ *     ZERO production emitters (`DEC-MONEY-009`; re-measured 2026-08-11 — every
+ *     occurrence outside a comment is a test fixture). Adding a term here would
+ *     be a correct subsystem with no seam to the product, and `seams:check` is
+ *     blind to a missing producer for an event type.
  */
 export const settledConservationResidualPaisa = (args: SettledConservationArgs): number => {
   const billed = asPaisaInt(args.billed_paisa, "billed_paisa");
