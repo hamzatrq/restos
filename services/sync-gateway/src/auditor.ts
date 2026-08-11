@@ -85,6 +85,18 @@ export type ReadModelInput = {
 export type RunAuditorArgs = {
   db: GatewayDb;
   org_id: string;
+  /**
+   * @unreached-owed The scheduled host (`services/jobs`) runs five legs and NOT this one, because
+   * there is nothing in the cloud to diff against. `20 §4.2`'s headline sentence — *"diff against
+   * the incrementally-maintained read models and last-reported device states"* — presumes a cloud
+   * projection that is maintained incrementally, and this service maintains none: `01-F7`'s row
+   * shapes are projected device-side by `@restos/sync-client`, and the gateway projects only the
+   * catalog. Supplying a snapshot this process refolded itself would diff a refold against a refold
+   * and always pass, which is worse than not running the leg. Owed with the cloud read model
+   * (`20 §4.2`, doc 15's device pipeline for the "last-reported device states" half); until then the
+   * defect classes it would catch are the ones `runAuditor` cannot see at all. This marker became
+   * visible only when the caller landed: with no shipping constructor, Rule B had no candidate here.
+   */
   read_model?: ReadModelInput;
 };
 
@@ -108,10 +120,19 @@ type LineCell = { anomalies: Record<string, string> };
  * READ-ONLY audit of one org's kernel tables (20 §4.2 "nightly cloud job per
  * org"). Branches and devices are discovered from the data; `read_model` is the
  * optional diff-leg snapshot. ok ⇔ findings empty, always.
+ *
+ * **IT IS SCHEDULED NOW (August 2026): `services/jobs` runs it per org on a BullMQ repeatable.**
+ * The debt marker that stood here said `services/jobs` was a one-file stub and nothing schedules
+ * it — true from Wave 0 until then, and `20 §4.2` puts this in Wave 0 *"with the kernel, not
+ * later"*, so it was overdue rather than deferred. `services/jobs/src/index.ts` is the caller and
+ * `services/jobs/src/__acceptance__/auditor-host.test.ts` reddens if it stops being one.
+ *
+ * ⚠ **That worker imports this module ACROSS A SERVICE BOUNDARY, which `18 §2` forbids, and the
+ * ruling is owed.** The correct end state is this file living in a package (its substance already
+ * does — `@restos/domain` + `@restos/sync-client/fold-engine`); until then this package exports
+ * exactly `./auditor` and `./database-url`, so the coupling is two modules wide and reversible.
+ * `services/jobs/src/index.ts`'s header carries the full argument and the two rejected alternatives.
  */
-// @unreached-owed `20 §4.2` calls this a "nightly cloud job per org" and `services/jobs` is a
-// one-file stub, so nothing schedules it — the Auditor runs only when a suite calls it. It is a
-// read-only job with no route, which is why it never reads as broken.
 export const runAuditor = async (args: RunAuditorArgs): Promise<AuditorReport> => {
   const { db, org_id } = args;
   const findings: AuditorFinding[] = [];
