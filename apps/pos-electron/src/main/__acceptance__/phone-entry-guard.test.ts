@@ -45,9 +45,12 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+// Re-pointed at the merge of `w2/phone-entry` and `w2/consolidation`: `aging.ts` moved into
+// `@restos/device-config` to close `18 §2`'s three app→app imports and the pos↔pass cycle. A
+// SEMANTIC merge conflict — both branches merged clean and only `tsc` saw it.
+import { resolveAging } from "@restos/device-config";
 import { type DeviceStore, openStore } from "@restos/sync-client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resolveAging } from "../../../../pass-kds/src/main/aging";
 import {
   type AuthorizedWrites,
   authorizeWrites,

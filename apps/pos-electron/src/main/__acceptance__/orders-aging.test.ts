@@ -42,7 +42,7 @@
 //
 // ## §D SETTLES THE OTHER DESIGN QUESTION — the threshold table
 //
-// `apps/pass-kds/src/main/aging.ts` already holds `03-F14`/`03-F47`'s table, its `03 §7` layer-2
+// `@restos/device-config`'s `aging.ts` (moved there from `apps/pass-kds` to close `18 §2`) holds `03-F14`/`03-F47`'s table, its `03 §7` layer-2
 // env parser, and the PINNED reading for the two order types the FRs never give defaults for.
 // §D does not care which file the counter's copy lives in; it cares that the two surfaces answer
 // the SAME question the same way, because `03-F14` describes ONE org policy and `05-F1` alarms
