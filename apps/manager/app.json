@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "RestOS Manager",
+    "slug": "restos-manager",
+    "version": "0.0.0",
+    "orientation": "portrait",
+    "platforms": ["android", "ios"],
+    "newArchEnabled": true,
+    "android": {
+      "package": "com.restos.manager"
+    },
+    "ios": {
+      "bundleIdentifier": "com.restos.manager",
+      "supportsTablet": false
+    }
+  }
+}

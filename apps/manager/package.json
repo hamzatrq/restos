@@ -2,9 +2,26 @@
   "name": "@restos/manager",
   "private": true,
   "version": "0.0.0",
-  "type": "module",
+  "main": "src/index.ts",
   "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "bundle:check": "expo export --platform android --output-dir .expo-bundle-check",
+    "typecheck": "tsc --noEmit",
     "test": "echo 'no tests yet — acceptance tests arrive with first FRs (24 §3)'",
-    "build": "echo 'no build yet — scaffold stub'"
+    "build": "echo 'no build yet — EAS Build lands with the first shipped slice'"
+  },
+  "dependencies": {
+    "@restos/domain": "workspace:*",
+    "@restos/sync-client": "workspace:*",
+    "@restos/ui": "workspace:*",
+    "expo": "54.0.36",
+    "react": "19.2.8",
+    "react-native": "0.81.5"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.17",
+    "typescript": "7.0.2"
   }
 }

@@ -1,6 +1,23 @@
 {
   "extends": "./packages/config/tsconfig.base.json",
   "include": ["apps/*/src", "services/*/src", "packages/*/src", "scripts"],
+  // `apps/manager` is React Native and CANNOT share this program (measured 2026-08-11).
+  //
+  // RN ships its own ambient `setTimeout`, typed to return `number` the way a browser does.
+  // `@types/node` types the same global as returning a `Timeout` OBJECT. One `tsc` program
+  // holds one global scope, so pulling RN in here re-typed `setTimeout` for EVERY file and
+  // broke two files that had nothing to do with the manager app:
+  //   services/api/src/server.ts(337,9): Property 'unref' does not exist on type 'number'.
+  //   services/sync-gateway/src/server.ts(61,9): same.
+  // Both call `.unref()` on a timer handle, which is correct Node and correct here.
+  //
+  // The failure is worth understanding rather than routing around, because it is the general
+  // shape: this repo typechecks every workspace in ONE program, and that is sound only while
+  // every workspace targets the same global environment. `apps/manager` is the first that
+  // does not. It gets its own tsconfig, and `pnpm typecheck` runs BOTH — dropping the second
+  // half would silently stop typechecking the app, which is the "correct subsystem with no
+  // seam" defect wearing a build-config costume.
+  "exclude": ["apps/manager"],
   "compilerOptions": {
     "types": ["node"],
     "jsx": "react-jsx"
