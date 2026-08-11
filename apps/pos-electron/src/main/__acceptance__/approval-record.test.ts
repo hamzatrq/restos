@@ -132,6 +132,7 @@ import { parseEvent } from "@restos/domain";
 import type { BlockedCursor, DeviceStore } from "@restos/sync-client";
 import { openStore } from "@restos/sync-client";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { resolveAging } from "../../../../pass-kds/src/main/aging";
 import type { AppendRequest, AppendResult, Session } from "../../shared/ipc";
 import { recordApprovals } from "../approval-record";
 import {
@@ -394,6 +395,10 @@ describe("§B 02-F41/05-F29 — `createVerifiedAppend` stamps the actor it is gi
       catalogRefusal: () => null,
       businessDay: () => "2026-08-11",
       panelPpi: () => 100.5,
+      // `03-F14`/`03-F47` — REQUIRED on `GatewayDeps` since `03-F25` put aging timers on the
+      // counter. The SHIPPED resolver rather than a convenient constant, so a fixture that is not
+      // about the thresholds still gets the product's own answers.
+      aging: resolveAging(undefined).thresholdsFor,
       panelFit: () => null,
     } as GatewayDeps);
 
@@ -529,6 +534,10 @@ describe("§C 02-F20/02-F41 — one approval, two differently-attributed envelop
       catalogRefusal: () => null,
       businessDay: () => "2026-08-11",
       panelPpi: () => 100.5,
+      // `03-F14`/`03-F47` — REQUIRED on `GatewayDeps` since `03-F25` put aging timers on the
+      // counter. The SHIPPED resolver rather than a convenient constant, so a fixture that is not
+      // about the thresholds still gets the product's own answers.
+      aging: resolveAging(undefined).thresholdsFor,
       panelFit: () => null,
     } as GatewayDeps);
     // The staff registry the matrix reads its roles from — the same shape `01-F26` syncs.

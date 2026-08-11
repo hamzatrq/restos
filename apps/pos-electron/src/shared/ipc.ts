@@ -287,6 +287,42 @@ export const OpenOrderSchema = z.object({
   confirmed_at: z.number().int().nullable().optional(),
   /** `01-F33` — 0/1, matching the fold's column. A settled order is recall-only (`02-F10`). */
   settled: z.number().int().optional(),
+  /**
+   * `03-F25`'s aging timer for THIS order — whole minutes since the confirm anchor, plus
+   * `03-F14`'s two threshold minutes for this order's TYPE.
+   *
+   * > 03-F25 timers from `order.confirmed` on every queue surface (pass, KDS, **POS T1 panel**,
+   * > manager console).
+   *
+   * **Computed in MAIN, never in the renderer, and that is a standing-law question rather than a
+   * taste one.** An age is `now − confirmed_at`; `confirmed_at` is branch-consensus time stamped
+   * at append (`01-F43`), so `now` must be branch time too — `wallClock.now() +
+   * branchTimeStatus().offset_ms` — and `18 §9` gives the renderer no channel to
+   * `branchTimeStatus()`. A renderer subtracting `Date.now()` would be reading the RAW device
+   * clock on the untrusted side of the plane boundary, which is the quantity `01-F45` demotes to
+   * a forensic hint. `01-F43` permits the difference by name: *"All durations — kitchen age, ETA,
+   * service intervals (doc 03) — are differences evaluated in branch time, so a uniform offset
+   * cancels."*
+   *
+   * **`null` means this order has no confirm anchor**, which is `02-F9`'s entire inbox and is a
+   * resting state rather than an edge. It is deliberately not `{ minutes: 0 }`: `03-F14`'s timer
+   * basis is `order.confirmed`, and a zero on a clock is the number `00 §5.7` forbids.
+   * `.optional()` for the same reason the four fields above it are — the fixture factories in
+   * `counter.dom.test.tsx` and `unbound-settlement.dom.test.tsx` are oracles this session may not
+   * edit — and `undefined` degrades identically: the order is findable, un-aged (`01-F54`).
+   *
+   * The wire carries the THRESHOLDS, never a level and never a colour. `packages/ui`'s standing
+   * rule is that `AgeBadge` takes *"minutes and thresholds, never a colour"* (`03-F47`, `27-F12`,
+   * commandment 6), so the plane boundary must not be where that is quietly resolved.
+   */
+  aging: z
+    .object({
+      minutes: z.number().int().nonnegative(),
+      amberAt: z.number().int().positive(),
+      redAt: z.number().int().positive(),
+    })
+    .nullable()
+    .optional(),
 });
 export type OpenOrder = z.infer<typeof OpenOrderSchema>;
 

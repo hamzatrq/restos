@@ -6,6 +6,18 @@ import { businessDate, hashPin } from "@restos/domain";
 import { createSpooler, printerCapability } from "@restos/escpos";
 import { createPinAuditSink, createPinSession, openStore, wallClock } from "@restos/sync-client";
 import { app, BrowserWindow, dialog, ipcMain, screen } from "electron";
+/**
+ * `03-F14`/`03-F47`'s threshold table, imported ACROSS THE APP BOUNDARY — see `GatewayDeps.aging`
+ * for the argument. The short version: `03-F14` is ONE org policy read by three surfaces, that
+ * module holds a pinned reading the FRs do not state, and `apps/pass-kds` already imports two pure
+ * `00 §7` resolvers out of this very directory for the same reason and records the shared-module
+ * refactor as owed. This joins that debt rather than opening a second one.
+ */
+import {
+  AGING_THRESHOLDS_ENV,
+  describeAging,
+  resolveAging,
+} from "../../../pass-kds/src/main/aging";
 import { AppendRequestSchema, CHANNELS, type EscalationResult, type Session } from "../shared/ipc";
 import { createAggregatorSettlement } from "./aggregator-settlement";
 import { recordApprovals } from "./approval-record";
@@ -174,6 +186,18 @@ const IDLE_LOCK_MS = 10 * 60_000;
  * keeping online guessing at ~13 bits hopeless against the five-minute cooldown.
  */
 const MAX_FAILED_ATTEMPTS = 5;
+
+/**
+ * `03-F25` — how often the counter re-reads its own aging timers. See the interval itself for why
+ * it is unconditional and why it may never move into `sync.ts`.
+ *
+ * One second, matching `apps/pass-kds`. It is not a resolution choice — the badge is whole minutes
+ * — it is a *rounding-boundary* choice: any period P means an order's badge can be up to P late
+ * turning amber, and `03-F14`'s thresholds are the one thing on this surface an operator acts on.
+ * A cheaper 5–10 s would be imperceptible and is the simpler alternative if the tick ever shows up
+ * as re-render cost on a real till; it is one constant.
+ */
+const AGE_TICK_MS = 1_000;
 
 /**
  * The kitchen printer this device believes it has (`03 §7` layer 3).
@@ -530,6 +554,17 @@ app.whenReady().then(async () => {
   });
   app.on("will-quit", () => uplink.stop());
 
+  /**
+   * `03-F14` / `03-F47` / `03 §7` layer 2 — the aging thresholds, per order type.
+   *
+   * Read ONCE per process, like `stationRouting` above and for the same reason: only the
+   * environment can change it, and a till whose thresholds moved mid-service would colour two
+   * orders of the same age differently. A malformed entry is refused and NOT applied — the FR's
+   * own defaults stand and the boot line says which entry was unreadable, because `01-F17` and
+   * commandment 4 mean a typo in a threshold may never take a timer off a counter.
+   */
+  const aging = resolveAging(process.env[AGING_THRESHOLDS_ENV]);
+
   const gateway = createGateway({
     store,
     // T-C6 — all three read the device catalog the uplink fills, and all three live in
@@ -607,6 +642,20 @@ app.whenReady().then(async () => {
      * the refusal it replaced.
      */
     panelFit: () => resolvePanelFit(panelFacts()),
+    /**
+     * **`03-F25` — THE SEAM, and `03-F14`'s numbers are the org's, not this file's.**
+     *
+     * > 03-F25 timers from `order.confirmed` on every queue surface (pass, KDS, **POS T1 panel**,
+     * > manager console). No learning required; this alone is the Wave 1 deliverable.
+     *
+     * Resolved from `00 §7` layer 2 above and passed as the resolver ITSELF. A literal pair here
+     * — `() => ({ amberAt: 10, redAt: 20 })` — would compile, typecheck, keep `seams:check` clean
+     * (Rule B asks whether a member was supplied, never whether what was supplied is real) and
+     * silently delete an org's configuration for the counter while the pass screen kept it. That
+     * is `AGENTS.md`'s "a port supplied with a STUB", and `__acceptance__/orders-aging.test.ts`
+     * §E is the hand-written assertion that separates this line from that one.
+     */
+    aging: aging.thresholdsFor,
   });
 
   /**
@@ -644,6 +693,15 @@ app.whenReady().then(async () => {
    * says whether anything confirmed they have somewhere to appear.
    */
   console.log(describeStationRouting(stationRouting()));
+
+  /**
+   * `00 §5.7` a fourth time, on a value with exactly the same property as the three above it: a
+   * wrong aging threshold is **invisible from the screen**. Every ticket still shows a number and
+   * a colour, and nothing looks broken — the order simply goes amber at the wrong minute, which is
+   * `03-F47`'s *"colour that lies about how late the food is"*. So the line names all four rows and
+   * a REFUSED configuration says which entry it could not read, at length.
+   */
+  console.log(describeAging(aging));
 
   /**
    * **Say what the grid will actually show, at boot.** Without this the till renders item names
@@ -1006,6 +1064,31 @@ app.whenReady().then(async () => {
     });
   }, PUMP_INTERVAL_MS);
   app.on("will-quit", () => clearInterval(pumping));
+
+  /**
+   * **`03-F25` SAYS *TIMERS*, AND AN AGE THAT IS NEVER RECOMPUTED IS A CLOCK THAT STOPPED.**
+   *
+   * `gateway.openOrders()` reads branch time on every call, so the number is correct whenever the
+   * renderer asks — but the renderer only asks when main pushes `changed`, and every existing push
+   * is a LEDGER event. Without this an order would sit at `9 min` until the next append: exactly
+   * the failure `apps/pass-kds`'s uplink names in its own words when it decided to tick.
+   *
+   * **⚠ IT IS DELIBERATELY NOT IN `sync.ts`, AND MOVING IT THERE WOULD BE A COMMANDMENT-4
+   * VIOLATION.** That module's 1 Hz loop is the obvious home and it is the wrong one twice over:
+   * it returns early unless the fold cursor MOVED (`if (now === lastSeen) return;`), and
+   * `createUplink` returns `offline()` with **no interval at all** when `RESTOS_CLOUD_URL` /
+   * `RESTOS_DEVICE_TOKEN` are absent. So an offline-first T1 till — the configuration `03-F25`
+   * names, selling its own orders locally — would have aging timers that never advance, and
+   * `00 §5.1` says no in-branch feature may require WAN. This interval is therefore
+   * unconditional, outside the uplink, and cleared on `will-quit` with its siblings.
+   *
+   * One second matches `apps/pass-kds` (`03-N4`'s *"< 1 s"* neighbourhood) so the two surfaces
+   * roll a minute together. It carries no data — the renderer re-reads, which is the shipped
+   * pull-plus-data-free-push shape — and when the cloud IS configured and a fold moves in the same
+   * second, `notifyChanged()` simply fires twice into idempotent reads.
+   */
+  const agingTick = setInterval(notifyChanged, AGE_TICK_MS);
+  app.on("will-quit", () => clearInterval(agingTick));
 
   // One channel, one gateway method, no dispatcher. A generic handler that switched on a
   // channel name would reintroduce exactly the free-form surface `18 §9` bans.

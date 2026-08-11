@@ -162,6 +162,30 @@ export type GatewayDeps = {
    * another display changes this answer while the process runs.
    */
   panelFit: () => PanelFit | null;
+  /**
+   * `03-F14` / `03-F47` / `00 §7` layer 2 — the two threshold minutes for one order's TYPE.
+   *
+   * > 03-F47 … Thresholds stay org-configurable per order type (defaults: dine-in 10/20,
+   * > delivery 15/25).
+   *
+   * This is `AgingPolicy.thresholdsFor` from `apps/pass-kds/src/main/aging.ts`, imported **across
+   * the app boundary on purpose**. `03-F14` describes ONE org policy and `05-F1` alarms the
+   * manager off *"the red aging threshold (03-F14)"*, so a counter reading neutral while the pass
+   * reads red and the console alarms is not a cosmetic divergence — it is three surfaces
+   * disagreeing about whether the food is late. A copy would also duplicate a **judgement call**
+   * the FRs do not state (that module's pinned reading for takeaway, pickup and an absent type),
+   * which is the one thing worst suited to living in two places. `apps/pass-kds` already imports
+   * two pure `00 §7` resolvers out of this directory for exactly this reason and records the
+   * shared-module refactor as OWED; this joins that debt rather than creating a second kind.
+   *
+   * **REQUIRED, on `catalogRefusal`'s and `panelFit`'s precedent in this same type:** an optional
+   * member of an options bag that no call site passes is `seams:check` Rule B's shape and half
+   * this wave's named defect by count, so a host that forgets this is a typecheck error rather
+   * than a till silently ageing every order against a constant. What that still cannot see is a
+   * host supplying a LITERAL pair — a stub is a supply — which is why
+   * `__acceptance__/orders-aging.test.ts` §E reads the shipped call site.
+   */
+  aging: (order_type: string | null) => { amberAt: number; redAt: number };
 };
 
 /**
@@ -340,8 +364,23 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
     );
   },
 
-  openOrders: () =>
-    deps.store.openOrders().map((row) =>
+  openOrders: () => {
+    /**
+     * `03-F25`'s clock, read **once per call and never at construction** — this is a timer, and a
+     * `now` captured when the gateway was built renders a perfect first frame and then freezes
+     * for the rest of the shift.
+     *
+     * Branch time on both ends (`01-F43`/`01-F45`), exactly as `kitchenQueue()` below already
+     * does one projection over: `confirmed_at` is the confirm anchor's `branch_created_at`,
+     * stamped at APPEND by the confirming device, and this is that same basis plus the measured
+     * offset — so the offset cancels in the difference and `DEC-TIME-001` (a)'s *"durations need
+     * a consistent clock, not a correct one"* is what makes it legal. Reading `wallClock.now()`
+     * alone would be the raw device clock, which is the value `01-F45` bans from a timing read
+     * model. This is display arithmetic in the host app, never a fold reading a clock — that
+     * would be `01-F34`.
+     */
+    const now = wallClock.now() + deps.store.branchTimeStatus().offset_ms;
+    return deps.store.openOrders().map((row) =>
       checked(
         OpenOrderSchema,
         {
@@ -372,10 +411,41 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
           order_type: row.order_type,
           confirmed_at: row.confirmed_at,
           settled: row.settled,
+          /*
+            `03-F25` — the aging timer, derived HERE because both of its inputs live on this side
+            of the plane (`shared/ipc.ts`'s `aging` field says why at length).
+
+            `typeof … === "number"` and not a truthiness test: `03-F14`'s basis is
+            `order.confirmed`, so an order with no confirm anchor has **no age**, and the two
+            answers an `??` reaches for are both lies — `?? 0` renders a fifty-six-year age and
+            `?? now` renders `0 min` on an order that arrived forty minutes ago (`00 §5.7`). It
+            also catches a row from a fold that predates the column, where the key is absent
+            rather than null (`01-F54` — degrade, never drop: the order stays findable).
+
+            The threshold table is consulted per ROW and with THAT row's own type, because
+            `03-F47` puts X and Y per order type and one counter list holds mixed types all day.
+            It is not consulted at all for an order with no age: thresholds without minutes are a
+            status with no state for `27-F12` to render.
+
+            Floored at 0 for `pass-queue.ts`'s stated reason — a `branch_provisional` clock
+            (`01-F44`, offset 0) can legitimately sit behind a delivered confirm anchor, and a
+            negative age teaches an operator to distrust the row. Floored to whole MINUTES rather
+            than rounded, because 59 seconds is not a minute and rounding would tip a ticket into
+            amber before the org's configured minute — `03-F47`'s *"colour that lies about how
+            late the food is"* wearing the other sign.
+          */
+          aging:
+            typeof row.confirmed_at === "number"
+              ? {
+                  minutes: Math.max(0, Math.floor((now - row.confirmed_at) / 60_000)),
+                  ...deps.aging(row.order_type),
+                }
+              : null,
         },
         `open order ${row.order_id}`,
       ),
-    ),
+    );
+  },
 
   kitchenQueue: () => {
     // The queue projection is 6 pinned keys and carries NO line detail, so the ticket body

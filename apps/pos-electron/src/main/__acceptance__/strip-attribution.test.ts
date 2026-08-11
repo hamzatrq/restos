@@ -40,6 +40,7 @@
 import { readFileSync } from "node:fs";
 import type { DeviceStore } from "@restos/sync-client";
 import { describe, expect, it, vi } from "vitest";
+import { resolveAging } from "../../../../pass-kds/src/main/aging";
 import { createGateway, type GatewayDeps } from "../gateway";
 
 const AYESHA = { user_id: "user-ayesha", display_name: "Ayesha" } as const;
@@ -96,6 +97,10 @@ const harness = (start: { user_id: string; display_name: string } | null = null)
     panelPpi: () => 100.5,
     // `27-F11c` — required, so a host that forgets the panel-fit notice is a typecheck
     // error rather than a silent no-op. `null` = this fixture's glass clears the floor.
+    // `03-F14`/`03-F47` — REQUIRED on `GatewayDeps` since `03-F25` put aging timers on the
+    // counter. The SHIPPED resolver rather than a convenient constant, so a fixture that is not
+    // about the thresholds still gets the product's own answers.
+    aging: resolveAging(undefined).thresholdsFor,
     panelFit: () => null,
   };
   return {

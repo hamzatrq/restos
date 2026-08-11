@@ -210,6 +210,30 @@ const SECOND_ORDER: OpenOrder = {
   channel: "counter",
   order_type: "takeaway",
   confirmed_at: 1_754_000_500_000,
+  /**
+   * **`03-F25`'S AGING BADGE, AND THIS FIXTURE IS THE ONLY THING THAT PUTS IT IN FRONT OF THE
+   * GATE.** *"The fixture is the real coverage boundary, not the assertions"* — measured twice in
+   * this app already (the alarm-band defects and `ManagerApproval`'s dead controls were both
+   * invisible until the fixture produced the state). The counter's row now carries a SIXTH element
+   * beside the reference, the qualifiers, the money and — in the inbox — an Accept tile, and eight
+   * of this app's nine recorded layout defects were a control pushed out of a box that was costed
+   * before something else was added to it. With no aged order here, `layout:check` measures the
+   * row WITHOUT the badge and reports green for a screen that clips it.
+   *
+   * **Past its own red threshold, and three digits wide, on purpose.** `27-F15`'s fault fill is
+   * the widest state the badge renders, and `1 min` and `144 min` are different widths — an order
+   * left open across a service is ordinary rather than exotic (`03-F17` only takes it off the
+   * queue when every line reaches a terminal service state, and nothing at this tier emits one
+   * until settlement). A two-digit fixture would measure the easy case.
+   *
+   * `A-014` deliberately keeps NO age — it carries no `confirmed_at`, so it is the control for the
+   * absent-badge state and the reason `Open orders` draws no `oldest first` note.
+   *
+   * One badge state is enough for a LAYOUT gate: amber and red differ only in fill colour and
+   * `borderRadius`, so their box metrics are identical. Colour-state coverage belongs to
+   * `packages/ui`'s dom suite and `AgeBadge.stories.tsx`.
+   */
+  aging: { minutes: 144, amberAt: 10, redAt: 20 },
   total_paisa: 96_000,
   paid_paisa: 0,
   lines: [

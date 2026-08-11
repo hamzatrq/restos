@@ -69,6 +69,24 @@ const toRow = (o: OpenOrder): OrderRow => ({
   orderType: o.order_type ?? null,
   totalPaisa: paisa(o.total_paisa),
   lineCount: o.lines.length,
+  /*
+    `03-F25` — the age main computed, carried across unchanged.
+
+    **Nothing is decided here and that is deliberate.** The minutes are branch-consensus arithmetic
+    (`01-F43`) and the thresholds are `00 §7` layer-2 policy per order type (`03-F14`/`03-F47`);
+    both live on the trusted side, and a renderer that recomputed either would be reading the raw
+    device clock (`01-F45`) or re-floor an org running 8/16. This is a RESHAPE, and a reshape
+    between two correct halves is where this wave's most expensive defect lived — `sync-client`'s
+    `catalog-fetch` `toEntry` dropped `prices` and `station` while the gateway served them and the
+    store read them, failing 0 of 579 tests.
+
+    `?? null` because `01-F54` separates "did not say" from "said, and there is no age", and both
+    render the same honest way: the order is findable, without a timer. **The inbox carries no age
+    as a consequence of the DATA, not of a second code path** — `isCloudInbox` requires
+    `confirmed_at === null`, and `03-F14`'s basis is `order.confirmed`, so main hands those rows a
+    null and there is no branch here to get wrong.
+  */
+  age: o.aging ?? null,
 });
 
 /**

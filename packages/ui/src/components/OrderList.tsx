@@ -1,6 +1,7 @@
 import type { Paisa } from "@restos/domain";
 import { useColor } from "../theme";
 import { DP_PER_INCH, mmFromDp, space, targetFor, targetMm, typography } from "../tokens/index";
+import { AgeBadge } from "./AgeBadge";
 import { MoneyValue } from "./MoneyValue";
 import { Tile } from "./Tile";
 
@@ -52,6 +53,39 @@ export type OrderRow = {
   /** Branded integer paisa (`00 §6`). The fold's own derivation; never summed by a caller. */
   totalPaisa: Paisa;
   lineCount: number;
+  /**
+   * `03-F25` — how old this order is, in whole minutes since `order.confirmed`, with the two
+   * threshold minutes `03-F14` makes org-configurable **per order type**.
+   *
+   * > 03-F25 **Stage 1 — aging timers, day one:** timers from `order.confirmed` on every queue
+   * > surface (pass, KDS, **POS T1 panel**, manager console).
+   *
+   * **Both thresholds travel WITH the minutes, in one object.** `03-F14` puts X and Y per order
+   * type and one counter list holds mixed types all day, so a row is judged against *its own*
+   * pair and never against a constant this component picked: the dangerous implementation here is
+   * not "no badge", it is `amberAt={10} redAt={20}` on every row, which tells a cashier a
+   * 22-minute delivery is overdue when the org's policy gives it three minutes more. A shape that
+   * could express "minutes without thresholds" is a shape in which a default is reachable, and
+   * `03-F14` makes a default a *wrong* number rather than a missing one.
+   *
+   * **`null` is a first-class value and is not `{ minutes: 0 }`.** `03-F14`'s timer basis is
+   * `order.confirmed`, so an order with no confirm anchor has no age at all — `02-F9`'s whole
+   * inbox, by definition — and `00 §5.7` forbids the device presenting a number it does not have.
+   * `0 min` beside an order that arrived forty minutes ago is the render an `??` reaches for and
+   * it is a lie.
+   *
+   * **Optional, and the cost is stated:** `order-list.dom.test.tsx` builds `OrderRow` fixtures by
+   * hand, so a required key would be a compile error in an acceptance oracle rather than a
+   * feature. The price is that an absent value renders as "no age" and looks healthy, which is
+   * this wave's named defect in miniature — so the seam is held by hand in
+   * `apps/pos-electron/src/main/__acceptance__/orders-aging.test.ts` and
+   * `apps/pos-electron/src/renderer/orders-aging.dom.test.tsx`.
+   *
+   * Never a colour and never a level: `AgeBadge` takes **minutes and thresholds** (`03-F47`,
+   * `27-F12`), and this package's standing rule is that a component which can be configured into
+   * violating a law is not a closed vocabulary.
+   */
+  age?: { minutes: number; amberAt: number; redAt: number } | null | undefined;
 };
 
 export type OrderListProps = {
@@ -239,6 +273,19 @@ export const OrderList = ({
               >
                 {o.reference}
               </span>
+              {/*
+                `03-F25`'s timer, in `27-F58`'s reading order — **identifier → timing → items** —
+                which is also where `TicketCard` puts it on the pass, so an operator who reads both
+                surfaces learns one position (`27-F4`).
+
+                Rendered only when the caller supplied an age. A row with none draws NOTHING here
+                rather than a zero (`03-F14`'s basis, `00 §5.7`), and the badge's own flex
+                `min-width: auto` keeps it at its content size while the qualifier span beside it —
+                which already carries `minWidth: 0` — absorbs the loss on a narrow panel.
+              */}
+              {o.age === null || o.age === undefined ? null : (
+                <AgeBadge minutes={o.age.minutes} amberAt={o.age.amberAt} redAt={o.age.redAt} />
+              )}
               <span
                 style={{
                   fontFamily: label.fontFamily,

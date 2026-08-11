@@ -836,6 +836,69 @@ new is needed from the kernel, and what is missing is the surface and `03-F24`'s
 ownership. Until it exists, configuring a station to `screen` on a real branch means its tickets go
 nowhere — which is why the boot line says so at length and why `03-F51`'s refusal exists.
 
+## ✅ `03-F25`'s AGING TIMERS ARE ON THE POS T1 PANEL (August 2026)
+
+`03-F25` names **four** queue surfaces — *"pass, KDS, POS T1 panel, manager console"* — and the
+counter was the one with no timer at all: `AgeBadge` and `ageLevel` appeared nowhere in this app and
+`OrderRow` carried no age field. On a T1 branch (`02-F40`'s *most deployments*) the Orders tab is the
+only queue surface in the building, so a cashier could not tell a two-minute order from a
+forty-minute one. The chain is `main/gateway.ts` `openOrders()` → `OpenOrder.aging` →
+`OrdersSurface.toRow` → `OrderList` → `packages/ui`'s existing `AgeBadge`.
+
+**Three decisions, each of which could have been made silently and must not be re-made silently.**
+
+1. **`now` is BRANCH time, read in MAIN.** `wallClock.now() + branchTimeStatus().offset_ms`, the same
+   expression `kitchenQueue()` two projections down already uses. `01-F43` permits the difference by
+   name (*"All durations — kitchen age … are differences evaluated in branch time, so a uniform
+   offset cancels"*); `01-F45` bans the raw device clock from a timing read model, and `18 §9` gives
+   the renderer no channel to `branchTimeStatus()` — so a renderer that subtracted `Date.now()`
+   would be reading exactly the banned quantity on the untrusted side of the plane. It is display
+   arithmetic in the host, never a fold reading a clock (`01-F34`).
+2. **The threshold table is `apps/pass-kds/src/main/aging.ts`, imported ACROSS THE APP BOUNDARY —
+   and this is a NEW REVERSE EDGE, so the two apps now depend on each other's `src`.** That app
+   already imports `device-identity.ts` and `panel-density.ts` out of this directory and records the
+   shared-module refactor as **OWED**; this joins that debt rather than opening a second kind. The
+   argument for reuse over a copy is not taste: `03-F14` describes ONE org policy, `05-F1` alarms the
+   manager off *"the red aging threshold (03-F14)"*, and a counter reading neutral while the pass
+   reads red and the console alarms is three surfaces disagreeing about whether the food is late. A
+   copy would also duplicate a **judgement call the FRs do not state** — that module's pinned reading
+   for takeaway, pickup and an absent type — which is the worst thing to hold in two places
+   (`03-F40`'s two sensor bit layouts is the corpus's own instance). ⚠ **The approved plan chose the
+   opposite (move the file into this app) and the acceptance suite forecloses it**: `orders-aging.
+   test.ts` imports `resolveAging` from `../../../../pass-kds/src/main/aging`, so the file's location
+   is oracle-pinned and moving it would edit an oracle. Recorded because the next session to tidy the
+   cross-app edges will find one plan saying move and one suite saying do not.
+3. **THE AGE TICK IS IN `index.ts`, UNCONDITIONAL, AND MOVING IT INTO `sync.ts` WOULD BE A
+   COMMANDMENT-4 VIOLATION.** `03-F25` says *timers*, and the gateway recomputing correctly on every
+   call is only half of one — the renderer re-reads when main pushes `changed`, and every other push
+   is a LEDGER event, so without a clock an order sits at `9 min` until the next append. `sync.ts`'s
+   1 Hz loop is the obvious home and is wrong twice: it returns early unless the fold cursor moved
+   (`if (now === lastSeen) return;`), and `createUplink` returns `offline()` with **no interval at
+   all** when `RESTOS_CLOUD_URL`/`RESTOS_DEVICE_TOKEN` are absent — so the offline-first T1 till this
+   FR is aimed at would have timers that never advance (`00 §5.1`, `01-F17`). `AGE_TICK_MS` is 1 s,
+   matching `apps/pass-kds`; 5–10 s is imperceptible on a whole-minute display and is the named
+   cheaper alternative if the re-render ever costs anything on real hardware.
+
+**`RESTOS_AGING_THRESHOLDS` is now read by this app too** (`03 §7` layer 2, e.g.
+`dine_in=8/16,delivery=12/30`), and `describeAging` is a fifth boot line for the same `00 §5.7`
+reason as the four above it: a wrong threshold is **invisible from the screen** — every row still
+shows a number and a colour, it just goes amber at the wrong minute.
+
+**The layout gate is the only rail that can see this, and the fixture is what puts it in range.**
+`layout-gate/preload.ts`'s `SECOND_ORDER` carries `aging: { minutes: 144, amberAt: 10, redAt: 20 }`
+— past its own red threshold and three digits wide, because `27-F15`'s fault fill is the widest
+state and `1 min` and `144 min` are different widths. Measured under xvfb across all 11 panels:
+**176 surfaces, 3813 controls, ZERO new violations**; the verdict list is **byte-identical** to the
+same run with the fixture's aging block removed, and the one failure is the pre-existing
+`tablet-10.1 tab:Cash` (570 dp in 567). **That identity is only evidence because the gate was shown
+to be sensitive to this element**: padding the badge until the row cannot fit turns the gate **RED
+with 18 extra verdicts, all `tab:Orders1`, every one naming the aged row by its own text**
+(`OVERFLOW x: div "A-015144mincounter · takeaway · 1 item…"` on all 11 panels) — while all 744
+pos-electron and 303 ui tests stay green, because happy-dom lays nothing out.
+
+**Owed, named:** `AGENTS.md` should carry the age tick's placement and its reason, because the next
+tidy-up that folds it into `sync.ts` will be green.
+
 ## What is deliberately not real yet
 
 - ~~**`27-F26`'S TYPEFACE IS NAMED BUT NOT DELIVERED**~~ **— CLOSED (August 2026).**

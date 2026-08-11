@@ -29,6 +29,7 @@ import { join } from "node:path";
 import { PERMISSION_ACTIONS } from "@restos/domain";
 import { type DeviceStore, openStore } from "@restos/sync-client";
 import { afterEach, describe, expect, it } from "vitest";
+import { resolveAging } from "../../../../pass-kds/src/main/aging";
 import { authorizeWrites, WRITE_ACTIONS } from "../authorize";
 import { createGateway, type Gateway, type GatewayDeps } from "../gateway";
 
@@ -74,6 +75,10 @@ const harness = (over: Partial<GatewayDeps> = {}): { store: DeviceStore; gateway
     catalogRefusal: () => null,
     businessDay: () => "2026-08-10",
     panelPpi: () => 100.5,
+    // `03-F14`/`03-F47` — REQUIRED on `GatewayDeps` since `03-F25` put aging timers on the
+    // counter. The SHIPPED resolver rather than a convenient constant, so a fixture that is not
+    // about the thresholds still gets the product's own answers.
+    aging: resolveAging(undefined).thresholdsFor,
     panelFit: () => null,
     ...over,
   });
