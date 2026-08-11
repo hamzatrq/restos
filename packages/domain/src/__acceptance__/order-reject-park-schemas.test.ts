@@ -463,6 +463,37 @@ describe("§E 00 §6 — required fields are law, declared extras are not invent
     // object here would make doc 06's eventual free-text note, or a park label, a BREAKING change
     // rather than an additive one.
     expect(parses(type, { ...p, note: "customer called to ask" }).type).toBe(type);
+
+    /*
+     * ⚠ ADDED August 2026 BY MUTATION, and the line above is why. Swapping all three schemas from
+     * `z.looseObject` to `z.object` — the one-word mutant a helpful session writes without thinking
+     * about it — killed **0 of this file's 48 tests** (and 0 of `domain`'s other 400), because the
+     * comment above is WRONG about what zod 4 does: `z.object` does not REFUSE an undeclared key,
+     * it **strips** it (measured: `z.object({a}).parse({a,note})` → `{a}`). So `parses()`
+     * still returns, `.type` is still right, and the assertion above passes over a payload that has
+     * silently lost the field it was written to prove survives. It was the section's own stated
+     * claim, unaimed at the case that matters — the round-3 law's shape exactly.
+     *
+     * The strip is silent in the worst direction, which is why this is worth an assertion rather
+     * than a comment. `parseEnvelope` types `payload` as `z.unknown()`, so `envelope.payload` keeps
+     * the extra key and `device-store.ts`'s `insertEvent.run(…, JSON.stringify(envelope))` writes it
+     * DURABLY to the ledger — while `parsed.payload`, the value every fold and every reader gets, no
+     * longer has it. Ledger and projection would disagree about the same event, permanently and with
+     * nothing raised (`01-F1`), and two tills on either side of such a change would fold the same
+     * event set differently the moment any fold read the field (`01-F34`). That is
+     * `catalog-fetch.ts`'s `toEntry` defect — a reshape that drops fields the wire carried — in the
+     * kernel rather than in a client.
+     *
+     * ⚠ The same assertion one file over is vacuous for the same reason and is NOT this track's to
+     * fix: `escalatable-write-schemas.test.ts:398` reads
+     * `expect(parses(type, { ...p, campaign_id: "campaign-eid" }).type).toBe(type)` and pins nothing
+     * about `17-F17`'s "additive under the same schema version". Reported, not touched.
+     */
+    expect(
+      (parses(type, { ...p, note: "customer called to ask" }).payload as Record<string, unknown>)
+        .note,
+      `${type}: the additive field was STRIPPED — z.object silently drops it where z.looseObject keeps it`,
+    ).toBe("customer called to ask");
   });
 
   /**
