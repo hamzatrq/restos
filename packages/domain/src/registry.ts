@@ -144,6 +144,25 @@ export const CatalogPriceChange = z.strictObject({
 });
 export type CatalogPriceChangeT = z.infer<typeof CatalogPriceChange>;
 
+/**
+ * `01-F23`'s customer key: *"one customer identity per org, keyed by normalized phone number
+ * (E.164)"*. Declared once, here, and used by both `customer.*` payloads — a second copy is a
+ * second normalization rule, and two rules make one number two identities.
+ *
+ * The pattern is E.164 itself: a leading `+`, a country code that cannot start with 0, and at most
+ * 15 digits in total. Spaces, hyphens and the local dialling form are all REFUSED — see the note
+ * on `customer.created` for why refusing at the schema is the whole point rather than an
+ * inconvenience.
+ */
+const PhoneE164 = z
+  .string()
+  .regex(
+    /^\+[1-9]\d{1,14}$/,
+    "phone_e164 must be normalized E.164 (01-F23) — a leading +, no spaces or hyphens, " +
+      "at most 15 digits; the local dialling form (03001234567) is a SECOND identity for one " +
+      "customer and is refused here rather than normalized in a fold",
+  );
+
 // Payloads are loose objects: required fields are law; extra fields pass through
 // (additive evolution, 00 §6) and are preserved for consumers.
 const payloadSchemas = {
@@ -633,6 +652,81 @@ const payloadSchemas = {
     approver_user_id: z.string().min(1),
     requester_user_id: z.string().min(1),
     reason: z.string().min(1),
+  }),
+  /**
+   * ── THE CUSTOMER FILE (`02-F27`'s inline creation) ───────────────────────────────────────────
+   *
+   * *"unknown number → inline customer creation (`customer.created`, `customer.address_added`)"*.
+   * Both types have been `01 §4` catalog vocabulary since the July 2026 absorption and neither had
+   * a payload schema here, so `01-F4` made them **unemittable rather than merely unbuilt** — the
+   * phone half of `restaurant-os.md §8`'s item 7 could not start, because `02-F28`'s *"≤30 s from
+   * NUMBER ENTRY"* needs a lookup and a lookup needs something the ledger can write.
+   *
+   * **`phone_e164` is the projection key on BOTH events, and it is carried, never resolved.**
+   * `01-F23` keys the identity *by the normalized phone number (E.164)*; no `customer_id` exists
+   * anywhere in the corpus. So the address event carries the phone DIRECTLY rather than a handle to
+   * its create — `26 §4`'s late-resolving-entity trap names resolving a key through a parent as the
+   * defect and a one-field schema addition as the fix, and `01-F29` already applied exactly that to
+   * `payment.refunded.order_id`.
+   *
+   * **E.164 IS VALIDATED HERE, AND THAT IS THE LOAD-BEARING DECISION.** The local dialling form a
+   * Pakistani operator actually types (`03001234567`) is REFUSED. If both forms parsed, one
+   * customer would become TWO identities in an append-only ledger `01-F1` forbids correcting in
+   * place, `01-F23`'s *"one customer identity per org"* would be false, and `02-F28`'s lookup would
+   * miss the repeat customer it exists to find. The alternative — accept anything and normalize
+   * inside the fold — is refused because a normalizer in a fold is a POLICY in a fold: two devices
+   * on two library versions key one number two ways and project different customer files from an
+   * identical event set, the `01-F34` break standing law 1 exists to prevent. Normalization belongs
+   * at the WRITER, upstream of `parseEvent`.
+   *
+   * **This is not an `01-F17` block.** A refused customer record does not refuse a sale: `08-F2`
+   * has aggregator orders reach settlement while writing no customer file at all.
+   *
+   * **`name` is REQUIRED AND NULLABLE**, on the standing rule `payment.recorded.shift_id` and
+   * `void.recorded.approver_user_id` already follow: `null` is a stated fact — `06-F11` creates a
+   * customer *on first sight* from a checkout that captured only a number — and `undefined` is a
+   * writer who forgot. An `.optional()` field cannot tell them apart afterwards. `""` is refused
+   * for the same reason: `null` already says *"no name stated"*, so an empty string would be a
+   * SECOND encoding of one fact. The name is free Unicode text (`00 §5.6`, `27-F6`): an
+   * ASCII-only rule here would make half this country's customers unrecordable.
+   *
+   * **`address_id` is a MINTED BUSINESS KEY, not the add event's envelope id** — `26 §8`'s
+   * ratified ground that *"one intent may legitimately exist under two envelope ids"*, which would
+   * fragment a re-emitted address into two rows in a customer's saved list. `01-F31` mints
+   * `settlement_attempt_id` at the UI for the identical reason.
+   *
+   * **What is deliberately NOT declared.** `06-F9`'s area/locality picker and optional map pin:
+   * they are doc 06's fields (Wave 2) and ride the `looseObject` additively, exactly as
+   * `discount.recorded` declines to declare doc 17's `campaign_id`. No `org_id` on either payload:
+   * `01-F24` scopes customer data to the org absolutely and the ENVELOPE already carries `org_id`,
+   * so a payload copy would be a second source for one fact — `02-F45`'s argument about the actor,
+   * one field over. Both types are BRANCH-scoped under `01-F62` (the emitter is a POS device on a
+   * branch floor, and the org-scoped set is fixed at five types that exclude them).
+   *
+   * **`customer.merged` and `customer.phone_verified` are NOT registered here, and that is a
+   * decision rather than an omission.** `01-F23`'s *"merging two identities is an event"* is
+   * precisely the act `DEC-CUST-001` governs, and that decision is **`proposed`, not accepted**;
+   * giving it a schema would make emittable an event whose fold rule the corpus has not decided
+   * (commandment 2). `customer.opted_in / opted_out` belong to `07-F18`'s canonical consent family.
+   *
+   * **PII, and a dependency rather than a design.** These payloads carry a phone number, a name and
+   * a street address. `DEC-DATA-001` (crypto-shredding) is `proposed` and doc 22 owns erasure;
+   * nothing here designs, implies or forecloses an erasure mechanism.
+   */
+  "customer.created": z.looseObject({
+    phone_e164: PhoneE164,
+    name: z.union([z.string().min(1), z.null()]),
+  }),
+  "customer.address_added": z.looseObject({
+    // 26 §4 / 01-F29: the projection key travels ON the event. An address whose key had to be
+    // resolved through its create could not be folded until the create arrived — and 01-F10's
+    // parking is for facts waiting on a key that may yet come, not for a key the payload already
+    // knows. A delivery address that vanishes because two events crossed is a real delivery a
+    // rider cannot make (09-F10 reads this very text off the assigned order).
+    phone_e164: PhoneE164,
+    address_id: z.string().min(1),
+    // 06-F9's "free-text address". Unicode, min 1 — a rider cannot deliver to an empty string.
+    address_text: z.string().min(1),
   }),
 } as const;
 

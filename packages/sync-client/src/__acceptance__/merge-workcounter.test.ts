@@ -159,6 +159,21 @@ describe("registry growth must fail this suite before it can silently no-op (fix
     // each needs its own idempotency key and `01-F31` divergence disposition), so it is owed to
     // this file's owner and was deliberately not guessed by the session that landed the schemas.
     "comp.recorded",
+    // ── AMENDED August 2026 (02-F27 / 01-F23, the customer file) ─────────────────────────
+    // `customer.created` and `customer.address_added` are `01 §4` catalog vocabulary that had
+    // no payload schema, which is what `01-F4` was blocking: `02-F27`'s inline customer
+    // creation was UNEMITTABLE, so the phone half of `restaurant-os.md §8`'s item 7 could not
+    // start. These two lines are the "spec-PR + oracle-pin event" the assertion below demands;
+    // without them the compile-level pin reds, which is the design working.
+    //
+    // Pinned HERE and not in `PINNED_NOT_FOLDED` for the reason the seven service-surface
+    // types are: that set states `01-F52`'s "not an input to ANY fold", and these two ARE
+    // folded — by `folds/customer-file.ts` (the `customer_file` fold), which
+    // `OTHER_FOLD_TYPES` routes them to. This engine's `26 §3` sidecar answers the EMPTY key
+    // list for them because they carry neither an order key nor an item key — the key is the
+    // normalized phone (`01-F23`) — not because nothing reads them.
+    "customer.address_added",
+    "customer.created",
     "day.closed",
     "day.opened",
     "discount.recorded",
