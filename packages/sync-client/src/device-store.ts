@@ -33,6 +33,13 @@ import {
 import Database from "better-sqlite3";
 import { CATALOG_SCHEMA, type CatalogStore, createCatalogStore } from "./catalog.js";
 import {
+  type CustomerFileState,
+  type CustomerRow,
+  emptyCustomerFile,
+  foldCustomerFile,
+  projectCustomerFile,
+} from "./folds/customer-file.js";
+import {
   type AvailabilityRow,
   createMergeEngine,
   type DropPlan,
@@ -188,6 +195,15 @@ export type DeviceStore = {
   unboundSettlements(): UnboundRow[];
   /** `02-F43`: the drawer opens and paid-outs that named no shift — counted, never dropped. */
   unboundDrawer(): UnboundDrawerRow;
+  /**
+   * `customer_file` rows (`02-F27`/`02-F28`): the customer file `01-F23` keys by normalized
+   * E.164 phone — the name, the saved addresses, and `01-F31`'s retained divergence.
+   *
+   * This is the READ `02-F28`'s *"≤30 s from number entry"* is measured from. A fold that
+   * converged perfectly and was reachable from no store method would be this wave's recurring
+   * defect exactly: a correct subsystem with no seam to the product.
+   */
+  customers(): CustomerRow[];
   refold(): void;
   /** Fold work counters (T-01-15 contract; events_folded is the real quantity). */
   foldStats(): FoldStats;
@@ -639,6 +655,11 @@ export const openStore = (options: {
   // that silently goes stale (the reason the cloud-order mirror column was cut in review).
   let shiftCash: ShiftCashState = emptyShiftCash();
 
+  // The `customer_file` accumulator (02-F27/02-F28). In memory and projected on read for the
+  // same reasons as `shiftCash` above: nothing queries the customer file through SQL, and the
+  // reopen self-heal rebuilds it by the same replay that rebuilds every other fold table.
+  let customerFile: CustomerFileState = emptyCustomerFile();
+
   const readAllParsed = (): ParsedEvent[] =>
     // Audit events are fold-inert (01-F5/01-F6): they carry no order/line/money
     // state, so they never enter the fold feed.
@@ -696,7 +717,11 @@ export const openStore = (options: {
     const events = readAllParsed();
     engine.rebuild(events);
     shiftCash = emptyShiftCash();
-    for (const event of events) shiftCash = foldShiftCash(shiftCash, event.envelope);
+    customerFile = emptyCustomerFile();
+    for (const event of events) {
+      shiftCash = foldShiftCash(shiftCash, event.envelope);
+      customerFile = foldCustomerFile(customerFile, event.envelope);
+    }
     writeFullTables(engine.snapshot());
   };
 
@@ -787,6 +812,10 @@ export const openStore = (options: {
     // between, which is why it never throws: a bucket it cannot represent contributes zero
     // and raises `money_overflow` — the bucket refuses, the till does not (01-F17).
     shiftCash = foldShiftCash(shiftCash, parsed.envelope);
+    // The `customer_file` fold (02-F27/02-F28). Same position and same obligation: it runs
+    // INSIDE ingest with no try/catch between, so it never throws — an unknown type changes
+    // nothing and a customer event can never wedge the ingest of a real, rung-up sale (01-F17).
+    customerFile = foldCustomerFile(customerFile, parsed.envelope);
   };
 
   // Lamport assignment and the durable insert are one transaction (01-F3): a
@@ -1185,6 +1214,10 @@ export const openStore = (options: {
 
     unboundDrawer() {
       return projectShiftCash(shiftCash).unbound_drawer;
+    },
+
+    customers() {
+      return projectCustomerFile(customerFile).customers;
     },
 
     refold() {

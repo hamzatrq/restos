@@ -444,6 +444,12 @@ const OTHER_FOLD_TYPES = {
   "cash.drawer_opened": "02-F21",
   "cash.paid_out": "02-F26",
   "cash.deposit_recorded": "02-F24",
+  // `folds/customer-file.ts` (the `customer_file` fold) consumes both. Their key is `01-F23`'s
+  // normalized phone — neither an order key nor an item key — so this engine's sidecar answers
+  // the empty list for them, and for the same reason as the seven above it: the type IS folded,
+  // by a fold whose projections this engine does not own.
+  "customer.created": "01-F23",
+  "customer.address_added": "02-F27",
 } as const satisfies Partial<Record<KnownEventType, string>>;
 type OtherFoldEventType = keyof typeof OTHER_FOLD_TYPES;
 const isOtherFold = (t: string): t is OtherFoldEventType => t in OTHER_FOLD_TYPES;
