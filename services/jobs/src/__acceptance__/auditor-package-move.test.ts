@@ -146,6 +146,33 @@
  * actually imports, over a real Postgres. Kept for that, and for attribution: a jobs-side failure
  * names the move.
  *
+ * ═══ ADDENDUM — THE ADVERSARIAL ROUND AGAINST THE LANDED IMPLEMENTATION (`2275d30`) ═══════════
+ *
+ * A separate mutation-testing session re-ran the matrix against what actually shipped, with a
+ * different mutant set aimed at the implementer's choices rather than at the author's. **The suite
+ * held on every row but one, and the negative control cost 0 kills.** The numbers that matter:
+ *
+ *   #    mutant                                                    /24   jobs-host   gateway
+ *   S1   THE SEAM: the production call `runAuditor({db, org_id})`     0        +5          —
+ *        deleted from services/jobs/src/index.ts, import kept
+ *   S2   the same, import deleted too (what a session writes)         1        +5          —
+ *   D1   THE DEFECT VERBATIM: the whole pre-move tree restored       22         0          —
+ *        from HEAD~1 + pnpm install (the two survivors are §C5
+ *        and §E5, both TRUE before the move — correct, not a hole)
+ *   W1   the pre-move note carried across the `git mv` with          0         0          —
+ *        "ACROSS A SERVICE BOUNDARY" reworded PLURAL   ← SURVIVOR
+ *   P2   packages/auditor's manifest drops @restos/sync-client        1         0          —
+ *   N1   NEGATIVE CONTROL: redactedDsn reimplemented equivalently     0         0          0
+ *        (`new URL` + try/catch), both barrels re-worded, manifest
+ *        keys reordered, two internal symbols renamed
+ *
+ * **`S1` is the row to read: this suite asserts the IMPORT and never the CALL.** Deleting the one
+ * production call site leaves all 24 assertions green — what stops the package being decorative is
+ * `auditor-host.test.ts`, which spawns the worker and reads its log, and it kills 5. That is a
+ * correct division of labour (this suite owns the boundary, that one owns the host) and it is
+ * written down here because a reader who takes THIS file as the move's whole protection would be
+ * wrong. `W1` is closed below by the second §D assertion; its `0/0` is the number that bought it.
+ *
  * ⚠ **TWO ASSERTIONS IN THIS FILE'S FIRST DRAFT FAILED A CORRECT IMPLEMENTATION**, which is as
  * damaging as a vacuous one, and neither was visible by reading. (1) §B's uniqueness scan counted
  * a local binding, and this file's own helper bound `const runAuditor = auditor.runAuditor` — so
@@ -611,6 +638,66 @@ describe("DEC-ARCH-001: the Auditor lives in packages/auditor, and the services�
             "state that is false is worse than no comment — it retires the correction the next " +
             "reader would otherwise make. Describe the MOVE (cite DEC-ARCH-001) instead.",
         ).not.toContain("across a service boundary");
+      }
+    });
+
+    /**
+     * ⚠ **ADDED BY THE MUTATION-TESTING SESSION FOR `DEC-ARCH-001`, NOT BY THIS SUITE'S AUTHOR.**
+     * The assertion above was the only guard on §D and it is a single literal phrase, so the
+     * mutant `W1` **survived it with 0 kills across all 24 assertions**: both files were given the
+     * pre-move note back with `ACROSS A SERVICE BOUNDARY` reworded to `ACROSS SERVICE BOUNDARIES`
+     * — plural — plus the whole `(A)/(B)/(C)` option block, and the suite stayed green while the
+     * two files told their reader that the `18 §2` breach is live, that option (A) is *"taken
+     * here"*, and that the ruling is *"owed"*. Every one of those is false; `§C` proves it is.
+     *
+     * ⚠ **THE OBVIOUS FIX IS NOT AVAILABLE AND A FUTURE SESSION MUST NOT REACH FOR IT.** Widening
+     * the phrase above to a singular/plural family (`/across (a )?service boundar(y|ies)/`) makes
+     * this suite **RED AGAINST THE CORRECT IMPLEMENTATION** — measured, not reasoned:
+     * `services/jobs/src/index.ts:48` contains *"never through direct imports across service
+     * boundaries"*, which is `18 §2`'s **own quoted MUST** and is exactly the sentence that
+     * justifies the move. The plural form lives in the QUOTE; the singular form lives only in the
+     * CLAIM. That is why the author picked the narrow phrase, and a test that stays red under a
+     * correct implementation is as damaging as a vacuous one (`24 §3`, the round-3 law).
+     *
+     * So this bans the *other* half of the stale note — the part that says the decision has not
+     * been taken — where no `18 §2` quotation can collide with it. It is still a PHRASE guard and
+     * therefore still incomplete: prose cannot be pinned exhaustively, and the machine-checkable
+     * half of "is the breach live" is `§C`, which owns it. This closes the realistic mutant (the
+     * pre-move text carried across a `git mv`, which is what `M6`/`W1` both are), not the class.
+     */
+    it("nor that DEC-ARCH-001 is still an open question — the ruling landed (W1)", () => {
+      /** Each entry: a claim that was TRUE before this commit and is false after it. */
+      const staleClaims: { pattern: RegExp; why: string }[] = [
+        {
+          pattern: /ruling is owed/i,
+          why: "DEC-ARCH-001 IS the ruling and it is RULED — nothing about this move is owed",
+        },
+        {
+          pattern: /needs a senior ruling/i,
+          why: "the senior ruling was made (DEC-ARCH-001, founder, August 2026)",
+        },
+        {
+          pattern: /\(A\)\s*taken here/i,
+          why:
+            "option (A) — the gateway's two-entry `exports` map — is UNDONE: §C asserts that " +
+            "manifest has no `exports` field at all",
+        },
+        {
+          pattern: /\(B\)[^\n]*\bowed\b/i,
+          why: "option (B) is what LANDED; a file calling it owed describes the state before this commit",
+        },
+      ];
+      for (const file of [join(AUDITOR_PKG_DIR, "src", "auditor.ts"), JOBS_ENTRY]) {
+        if (!exists(file)) continue; // §B/§A own "it is missing"; this test owns its CONTENT.
+        const text = read(file);
+        for (const { pattern, why } of staleClaims) {
+          expect(
+            pattern.test(text),
+            `${file.slice(REPO_ROOT.length + 1)} matches ${String(pattern)} — ${why}. A comment ` +
+              "asserting a state that is false is worse than no comment: it retires the correction " +
+              "the next reader would otherwise make. Describe what DEC-ARCH-001 DID.",
+          ).toBe(false);
+        }
       }
     });
   });
