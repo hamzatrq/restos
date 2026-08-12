@@ -26,6 +26,7 @@
 import { color, space, typography } from "@restos/ui/tokens";
 import { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { managerHomeNow } from "./home";
 import {
   foldEngineLoads,
   type ProbeResult,
@@ -74,6 +75,30 @@ const Row = ({ result }: { result: ProbeResult }) => (
   </View>
 );
 
+/**
+ * `05-F22`/`05-F23` — **the console's own honesty line, and the only thing this app is entitled to
+ * say about alarms today.**
+ *
+ * `home.ts` computes it; this reads it. Both states are rendered by the same row, so the day a
+ * branch stream lands the sentence changes and this file does not.
+ *
+ * ⚠ **The alarm CARDS are owed and are deliberately not drawn here.** `05-F1`'s "order, channel,
+ * table, age" and `05-F3`'s printer are all on the `Alarm` rows `alarms.ts` returns, and there is
+ * no `21-F2`-compliant way to lay them out: `packages/ui` ships no RN components (`18 §2` specifies
+ * an RN kit; the repo built all 18 against React DOM), and this file's raw-primitive breach is
+ * confined to diagnostics for the reason its header gives. Drawing them anyway would also be
+ * unreachable code today — `managerHomeNow()` cannot return `known: true` while no plane carries a
+ * queue — which is precisely AGENTS.md's second recurring defect written on purpose.
+ */
+const branchHonesty = (): ProbeResult => {
+  const home = managerHomeNow();
+  return {
+    label: "05-F22/05-F23 — branch reachability and the alarm gap",
+    detail: home.honesty,
+    verdict: home.reachable ? "ok" : "blocked",
+  };
+};
+
 export const App = () => {
   const [pin, setPin] = useState<ProbeResult>(PENDING);
 
@@ -88,6 +113,7 @@ export const App = () => {
       <Text style={styles.caveat}>
         Not the console. No branch data: sync-client cannot open a store on this platform.
       </Text>
+      <Row result={branchHonesty()} />
       <Row result={pin} />
       <Row result={foldEngineLoads()} />
       <Row result={tokensLoad()} />
