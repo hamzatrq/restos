@@ -31,7 +31,16 @@ const T0 = 1752800000000;
 // because `03-F5` requires the acknowledgment of an exhausted-retry KOT print alert to be
 // "logged (`audit.*`)" and none of the original five fits. Widening this list is therefore a
 // re-transcription of the amended FR, not a weakening — the assertion below still demands
-// SET EQUALITY, so a registry carrying five, or seven, still reddens.
+// SET EQUALITY, so a registry carrying five, or eight, still reddens.
+//
+// AMENDED AGAIN (August 2026) from six to SEVEN: `audit.alarm_acknowledged`, for `05-F2`'s
+// manager alarm ack, declared by `05-F30`. The sixth subtype does NOT cover it — it is
+// `03-F5`'s till band, whose subject is a print job, so a LATE-ORDER alarm ack recorded under
+// it would assert permanently (`01-F1`) that a print was acknowledged when nothing printed.
+// ⚠ This edit is a RE-TRANSCRIPTION OF AN AMENDED FR by the session that amended it, made the
+// same day the ruling landed. AGENTS.md records the failure it exists to prevent: a green test
+// went on defending an overruled rule for ~3 weeks and would have failed the correct
+// implementation. It is the reason this list is a transcription rather than a derivation.
 const AUDIT_TYPES = [
   "audit.login",
   "audit.drawer_opened",
@@ -39,6 +48,7 @@ const AUDIT_TYPES = [
   "audit.threshold_override",
   "audit.settings_changed",
   "audit.print_acknowledged",
+  "audit.alarm_acknowledged",
 ] as const;
 
 /** Cycle through the subtypes so a fixture chain exercises more than one of them.
@@ -129,7 +139,7 @@ const tamperPrev = (env: EventEnvelopeT, value: string | null): EventEnvelopeT =
 });
 
 describe("audit event catalog (01-F5)", () => {
-  it("01-F5: isAuditEvent recognises exactly the six audit.* subtypes, nothing else", () => {
+  it("01-F5: isAuditEvent recognises exactly the seven audit.* subtypes, nothing else", () => {
     for (const type of AUDIT_TYPES) expect(isAuditEvent(type), `${type} is audit`).toBe(true);
     expect([...AUDIT_EVENT_TYPES].sort()).toEqual([...AUDIT_TYPES].sort());
     for (const type of ["order.created", "payment.recorded", "audit", "audit.", "login"]) {
