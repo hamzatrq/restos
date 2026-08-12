@@ -220,15 +220,31 @@ export const TicketCard = ({
             marginTop: "auto",
             display: "flex",
             alignItems: "stretch",
-            justifyContent: "space-between",
-            gap: space["space-3"],
+            /*
+              **The gap is ONE WHOLE TARGET, and both the rule and the number were found by
+              looking.**
+
+              `space-between` was the first attempt and the screenshot rejected it: a card is as
+              wide as the panel divides to, so on a one-column panel DONE and HAND OVER sat at
+              opposite ends of 480 mm of glass — a control a cook walks to. `27-F9` asks for
+              separation, not for a walk, and `27-F4`'s positional memory is better served by a
+              distance that does not change with the column count.
+
+              96 dp is `27-F8`'s kitchen target — 15.24 mm, the size the FR says a wet finger
+              needs — so one target of CLEAR space between two targets is the only unit the corpus
+              offers for *"not adjacent"*, and it is the same unit both controls are sized in.
+              The confirm `03-F52` requires is the other half of the protection; neither is
+              claimed to be sufficient alone.
+            */
+            gap: targetFor("kitchen"),
           }}
         >
           {onBump === null ? (
-            // A spacer, so the handover keeps its END of the card when the bump is retired.
-            // `27-F4` is about position surviving a state change: a control that slides to the
-            // left the moment a ticket goes fully ready is a control in two places.
-            <span aria-hidden="true" />
+            // A spacer the exact width of the control it stands in for, so the handover does not
+            // move when the bump is retired. `27-F4` is about position surviving a state change,
+            // and a fully-ready ticket retires DONE — so without this the handover would sit in
+            // one place on a mixed card and another on a finished one, in the same glance.
+            <span aria-hidden="true" style={{ width: targetFor("kitchen") }} />
           ) : (
             <button
               type="button"
@@ -238,8 +254,8 @@ export const TicketCard = ({
                 // the surface where the 21.34% wet-hand error was measured and it is read at
                 // 1–2 m.
                 minHeight: targetFor("kitchen"),
-                minWidth: targetFor("kitchen"),
-                paddingInline: space["space-4"],
+                // FIXED rather than a minimum, so the spacer above can stand in for it exactly.
+                width: targetFor("kitchen"),
                 fontFamily: label.fontFamily,
                 fontSize: label.fontSize,
                 fontWeight: 700,

@@ -1,4 +1,12 @@
-import { space, TicketCard, Tile, typography, useColor, usePhysicalSize } from "@restos/ui";
+import {
+  space,
+  TicketCard,
+  Tile,
+  targetFor,
+  typography,
+  useColor,
+  usePhysicalSize,
+} from "@restos/ui";
 import { useEffect, useState } from "react";
 import type { PassTicketWire } from "../shared/ipc";
 import { ticketColumns, ticketsPerPage } from "../shared/ticket-capacity";
@@ -339,13 +347,22 @@ const HandOverConfirm = ({
         style={{
           display: "flex",
           alignItems: "stretch",
-          justifyContent: "space-between",
-          alignSelf: "stretch",
-          gap: space["space-3"],
+          /*
+            **One whole target of clear space, and the rule was found by looking.**
+
+            `space-between` was the first attempt and the screenshot rejected it: on the 32" TV it
+            put NOT YET and HANDED TO at the extreme edges of 700 mm of glass, a control a cook
+            walks to. `27-F9` wants the destructive target away from the safe one; the panel's
+            width is not the unit of that. 96 dp is `27-F8`'s kitchen target — the size the FR
+            says a wet finger needs — so one target of clear space is the corpus's own unit for
+            *"not adjacent"*, and it is the same gap `TicketCard` puts between DONE and HAND OVER.
+          */
+          gap: targetFor("kitchen"),
         }}
       >
-        {/* `27-F3`'s pairing argument, and `27-F9`'s separation: the way OUT is on the left,
-            where the pager's back control already is, and the committing act is at the far end. */}
+        {/* `27-F4` — the terminal act is on the RIGHT, where HAND OVER sits on the card, and the
+            way out is on the LEFT, where DONE sits. One habit for the whole surface: the thing
+            you cannot take back is always the right-hand target. */}
         <Tile posture="kitchen" label="NOT YET" onPress={onCancel} />
         <Tile posture="kitchen" label={`HANDED TO ${ticket.reference}`} onPress={onConfirm} />
       </div>
