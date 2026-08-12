@@ -99,9 +99,11 @@ export const splitPaisa = (total: Paisa, n: number): Paisa[] => {
  * off by one). bps has no upper cap (markups above 100% are legal). A result past
  * Number.MAX_SAFE_INTEGER throws — the sumPaisa overflow idiom, never a drifted double.
  *
- * @unreached-owed Nothing in Wave 1 applies a RATE. Tax (`specs/16`), aggregator commission
- * (`specs/08`) and percentage discounts are the callers; the till currently sells at the priced
- * line and settles it. Law 3 routes every future rate through here.
+ * The seams-register debt marker that stood here — "Nothing in Wave 1 applies a RATE" — is deleted
+ * because one does: `apps/pos-electron/src/main/catalog.ts` applies `FOODPANDA_MARKUP_BPS` to a
+ * `counter` price. Tax (`specs/16`) and percentage discounts are still owed callers, but a marker
+ * on a symbol shipping code REACHES fails `pnpm seams:check` outright, so it cannot stay to
+ * describe the callers that have not landed.
  */
 export const applyRateBps = (amount: Paisa, bps: number): Paisa => {
   const a = asPaisaInt(amount, "applyRateBps amount"); // brands are compile-time only (18 §4)

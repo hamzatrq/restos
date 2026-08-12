@@ -31,8 +31,14 @@ import type { DeviceState } from "../shared/ipc";
  */
 
 export type Uplink = {
-  /** Three separate facts (`00 §5.7`), never one dot. LAN and hub arrive with the mesh. */
-  reachability: () => Pick<DeviceState, "lan" | "hub" | "cloud">;
+  /**
+   * `00 §5.7` wants three separate facts and never one dot — and this file reports exactly the ONE
+   * it knows. `lan` and `hub` were hardcoded `"down"` here beside `cloud`, which was true only for
+   * as long as the branch mesh was hosted by nothing; they are `main/mesh.ts`'s facts now and
+   * `main/index.ts` composes the three. A constant that has stopped being true is the version of
+   * "a constant is not a report" that nobody re-reads.
+   */
+  reachability: () => Pick<DeviceState, "cloud">;
   blockedCursor: () => BlockedCursor | null;
   /** Catalog health (`01-F56`): a refused update is observable rather than silently stuck. */
   catalogRefusal: () => { reason: string; have_version: number } | null;
@@ -45,7 +51,7 @@ export type Uplink = {
  * missing a component.
  */
 const offline = (): Uplink => ({
-  reachability: () => ({ lan: "down", hub: "down", cloud: "down" }),
+  reachability: () => ({ cloud: "down" }),
   blockedCursor: () => null,
   catalogRefusal: () => null,
   stop: () => {},
@@ -113,14 +119,7 @@ export const createUplink = (opts: {
   }, 1000);
 
   return {
-    reachability: () => ({
-      // LAN and hub are the MESH's facts and the mesh is not wired yet. Reporting them as
-      // `down` is true — this device has contacted no hub — and it is what `00 §5.7` asks for:
-      // three facts, each honest, never collapsed into one.
-      lan: "down",
-      hub: "down",
-      cloud: session.status().connected ? "ok" : "down",
-    }),
+    reachability: () => ({ cloud: session.status().connected ? "ok" : "down" }),
     blockedCursor: () => session.status().blocked,
     catalogRefusal: () => session.status().catalog_refusal,
     stop: () => {
