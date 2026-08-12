@@ -226,22 +226,46 @@ export type ReadyMarkDeps = {
    */
   readonly policy: () => ReadySignalPolicy;
   /**
-   * The append.
+   * `01-F26`'s PIN session, as a GETTER — whoever's PIN is in, or `null` (`03-F53`).
+   *
+   * **REQUIRED, not optional**, and the reason is `AGENTS.md`'s Rule-B class: an optional `actor`
+   * defaulting to `null` is the unsupplied-seam defect by construction, and the thing it would
+   * silently drop here is attribution on a state claim `01-F1` makes permanent.
+   *
+   * **A getter, matching `policy` above**, for the reason `apps/pos-electron` replaced its own
+   * captured `session` for: `02-F41` is read AT THE ACT, never captured, and a value taken at
+   * construction freezes attribution at boot — on a pass that is a shift change, after which every
+   * ticket the next cook hands over goes into the ledger under the first cook's name.
+   */
+  readonly actor: () => string | null;
+  /**
+   * The append, **carrying the actor the emitter resolved**.
    *
    * ⚠ **There is no `authorizeWrites` to route this through, and that is a measured fact rather
    * than an omission.** `PERMISSION_ACTIONS` has no line-state member and `apps/pos-electron`'s
    * `WRITE_ACTIONS` fails closed, so the matrix would DENY a ready-mark today. `03-F24` puts the
    * authorization on a **layer-2 role assignment** instead — see `ready-signal.ts` for the whole
-   * argument, for why inventing a `PermissionAction` here would be a commandment-2 violation on a
-   * SACRED path, and for the gap that leaves (`03-F16`'s *"with actor"* is half met: this app has
-   * no `01-F26` PIN session, so `actor_user_id` is `null` on every edge it writes).
+   * argument, and for why inventing a `PermissionAction` here would be a commandment-2 violation
+   * on a SACRED path. `03-F53` closes the other half: identification supplies the ATTRIBUTION and
+   * grants no authority, so the two are separate and both are now real.
+   *
+   * `actor_user_id` is `string` and not `string | null`, which makes an unattributed edge
+   * **unrepresentable** on this path rather than merely discouraged. It is `02-F45`'s rule applied
+   * to a credential: ONE read of the session decides both whether the act happens and whose name
+   * is on the envelope, so the two cannot disagree and there is no window in which the session
+   * moves between the check and the write.
    */
-  readonly append: (type: string, payload: LineStateChangedPayload) => void;
+  readonly append: (type: string, payload: LineStateChangedPayload, actor_user_id: string) => void;
 };
 
 export type ReadyMarkResult =
   /** `03-F24` — this surface is read-only for states at this branch. Nothing was appended. */
   | { readonly ok: false; readonly reason: "not_the_owner"; readonly owner: string }
+  /**
+   * `03-F53` — *"with no session there is no edge"*. Nothing was appended and nothing is owed to
+   * the ledger; the screen raises `01-F61`'s two steps and the cook presses again.
+   */
+  | { readonly ok: false; readonly reason: "no_session" }
   /** The order is not on this device, or every selected line was already done or contested. */
   | { readonly ok: false; readonly reason: "nothing_to_mark" }
   | { readonly ok: true; readonly events: number; readonly lines: number };
@@ -258,11 +282,26 @@ export const createReadyMark = (deps: ReadyMarkDeps): ReadyMark => ({
     // appended would make the assignment decorative.
     const policy = deps.policy();
     if (!policy.maySignal) return { ok: false, reason: "not_the_owner", owner: policy.owner };
+    /**
+     * `03-F53` — **the refusal belongs to the emitter that builds the edge, not to the host that
+     * wires it**, so this is ONE read of the session and it decides both whether the act happens
+     * and whose name is on it. A gate in `main/index.ts` would be a gate no suite can drive
+     * (`line-advance.ts`'s recorded lesson) and two reads of one fact (`02-F45`).
+     *
+     * It is read AFTER the assignment on purpose: a surface that does not own the ready signal
+     * draws no DONE control at all (`03-F24`, `27-F5`), so demanding a PIN there would be asking
+     * a cook to identify for an act this screen can never perform.
+     */
+    const actor = deps.actor();
+    if (actor === null) return { ok: false, reason: "no_session" };
     const order = deps.store.openOrders().find((row) => row.order_id === order_id);
     if (order === undefined) return { ok: false, reason: "nothing_to_mark" };
     const events = readyEdgesFor(order, line_ids);
     if (events.length === 0) return { ok: false, reason: "nothing_to_mark" };
-    for (const payload of events) deps.append(LINE_STATE_CHANGED, payload);
+    // The SAME `actor` on every event of the walk: a bump from `confirmed` takes two edges and
+    // both are one act by one person, so attributing only the first would leave half a bump
+    // belonging to nobody, permanently (`01-F1`).
+    for (const payload of events) deps.append(LINE_STATE_CHANGED, payload, actor);
     const lines = new Set(events.flatMap((e) => e.line_ids)).size;
     return { ok: true, events: events.length, lines };
   },

@@ -93,8 +93,16 @@ const PANELS = [
   { label: "probe-phone", width: 1280, height: 720, diagonalIn: 6.5, ships: false },
 ] as const;
 
-/** `03-F24` and `00 §5.7` — every state the fixture can produce, each swept on every panel. */
-const STATES = ["owner", "readonly", "empty"] as const;
+/**
+ * `03-F24`, `03-F53` and `00 §5.7` — every state the fixture can produce, each swept on every
+ * panel.
+ *
+ * The last two are `03-F53`'s and they are STATES rather than a flag because each renders a
+ * different surface: `empty-roster` is a device whose registry never synced (*"a device whose
+ * registry is empty says so rather than drawing an empty grid"*), and `locked-out` is the LONG
+ * refusal message — the one whose wrapping can push a control off a 10.1" panel.
+ */
+const STATES = ["owner", "readonly", "empty", "empty-roster", "locked-out"] as const;
 
 const SHOT_DIR = process.env["RESTOS_LAYOUT_SHOTS"];
 
@@ -108,6 +116,13 @@ const SHOT_DIR = process.env["RESTOS_LAYOUT_SHOTS"];
  */
 const KITCHEN_MM = 15.24;
 const KITCHEN_MM_TOLERANCE = 0.5;
+
+/**
+ * `27-F8`'s **keypad** row — 126 dp = 20 mm, *"standing, high-consequence numeric entry"*. It is
+ * the posture `01-F61`'s PIN pad takes, matching the counter's, so the one act performed on two
+ * devices is the same size on both (`27-F4`).
+ */
+const KEYPAD_MM = 20;
 
 const failures: string[] = [];
 const fail = (line: string): void => {
@@ -191,6 +206,12 @@ const run = async (): Promise<void> => {
   let emptySurfaces = 0;
   let pagersDrawn = 0;
   let targetsMeasured = 0;
+  // `03-F53`'s door, counted per step, because each is a separate arrangement and a fixture that
+  // stopped producing one would retire it from the sweep in silence (`24-F14`).
+  let doorIdentifySurfaces = 0;
+  let doorPinSurfaces = 0;
+  let doorRefusalSurfaces = 0;
+  let doorEmptyRosterSurfaces = 0;
   // `24-F14` — a font verdict is not a surface, so deleting the probe would change no surface
   // count and no control count while the gate quietly stopped asking (see the counter's gate).
   let fontSurfacesMeasured = 0;
@@ -210,6 +231,124 @@ const run = async (): Promise<void> => {
    * under a cover, which is a `COVERED` verdict and a wet hand's dead target), so the `27-F8`
    * millimetre row above must have taken its measurement first.
    */
+  /** Press the first button whose trimmed text is exactly `label`. False when there is none. */
+  const press = async (label: string): Promise<boolean> =>
+    await window.webContents.executeJavaScript(
+      `(() => {
+        const el = [...document.querySelectorAll("button")].find(
+          (b) => (b.textContent ?? "").trim() === ${JSON.stringify(label)},
+        );
+        if (!el) return false;
+        el.click();
+        return true;
+      })()`,
+    );
+
+  const settle = async (): Promise<void> => {
+    await new Promise((r) => setTimeout(r, 150));
+  };
+
+  const report = async (): Promise<SurfaceReport> =>
+    await window.webContents.executeJavaScript(`(${measureSurface.toString()})()`);
+
+  /**
+   * # `03-F53`'s DOOR, DRIVEN AND MEASURED — the fixture lesson applied before the defect
+   *
+   * `pass-unlock.dom.test.tsx` says it out loud: happy-dom performs no layout, so every assertion
+   * it makes about the door is *"the tile is in the document"* and none is *"the tile is on the
+   * screen"*. A PIN pad that renders below the viewport on the 10.1" panel passes every row it has
+   * — and it would be a cook who cannot sign in, on a device whose whole queue is otherwise fine.
+   *
+   * So the sweep PRESSES DONE, measures the identification grid, taps a tile, measures the pad,
+   * submits, measures the refusal, and puts the door away again. Each step is counted; each count
+   * has a `24-F14` presence check below, because a fixture line reverted must take the surface out
+   * of coverage LOUDLY rather than quietly.
+   */
+  const measureDoor = async (panel: (typeof PANELS)[number], state: string): Promise<void> => {
+    if (!(await press("DONE"))) {
+      fail(`${panel.label} ${state}: EMPTY MATCH — no DONE control to raise 03-F53's door with`);
+      return;
+    }
+    await settle();
+
+    const identify = `${panel.label} ${state} door-identify`;
+    judge(identify, await report(), panel.ships);
+    await shoot(window, `${panel.label}--${state}--door-identify`);
+    if (state === "empty-roster") doorEmptyRosterSurfaces += 1;
+    else doorIdentifySurfaces += 1;
+
+    // `01-F61` step two, reached the way a cook reaches it. The empty-roster state has no tile by
+    // construction and stops here — which is the whole of what that state is for.
+    const tile: string | null = await window.webContents.executeJavaScript(
+      `(() => {
+        const el = [...document.querySelectorAll("button")].find((b) =>
+          (b.getAttribute("aria-label") ?? "").startsWith("Sajid Mehmood"),
+        );
+        if (!el) return null;
+        el.click();
+        return el.getAttribute("aria-label");
+      })()`,
+    );
+    if (tile === null) {
+      if (state !== "empty-roster") {
+        fail(`${panel.label} ${state}: EMPTY MATCH — 01-F61's grid drew no identification tile`);
+      }
+      await press("Cancel");
+      await settle();
+      return;
+    }
+    await settle();
+    const pad = `${panel.label} ${state} door-pin`;
+    judge(pad, await report(), panel.ships);
+    await shoot(window, `${panel.label}--${state}--door-pin`);
+    doorPinSurfaces += 1;
+
+    /**
+     * `27-F8` on the PAD, in millimetres of glass. The same argument as the DONE row above and a
+     * separate measurement: this is the `keypad` posture (`27-F8`'s 20 mm numeric-entry row), it is
+     * the densest grid this app draws, and a pinned pixel answer would be right on one panel only.
+     */
+    const keyMm: number | null = await window.webContents.executeJavaScript(
+      `(() => {
+        const el = [...document.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === "7");
+        if (!el) return null;
+        const h = el.getBoundingClientRect().height;
+        const diag = Number(new URLSearchParams(window.location.search).get("diagonalIn"));
+        const px = Math.hypot(window.innerWidth * window.devicePixelRatio, window.innerHeight * window.devicePixelRatio);
+        return (h * window.devicePixelRatio / (px / diag)) * 25.4;
+      })()`,
+    );
+    if (keyMm === null) {
+      fail(`${pad}: EMPTY MATCH — no PIN key found to measure 27-F8 against`);
+    } else {
+      process.stdout.write(`  [${panel.label}] 126 dp PIN key = ${keyMm.toFixed(2)} mm of glass\n`);
+      if (keyMm < KEYPAD_MM - KITCHEN_MM_TOLERANCE && panel.ships) {
+        fail(
+          `${pad}: 27-F8 IS BROKEN ON THE GLASS — a PIN key measures ${keyMm.toFixed(2)} mm and ` +
+            `the keypad row's floor is ${KEYPAD_MM} mm.`,
+        );
+      }
+    }
+
+    // `03-F53` — *"A refusal says WHICH refusal"*, and the refusal is a rendered paragraph with a
+    // layout. Two digits and submit: the fixture refuses whatever is keyed.
+    await press("4");
+    await press("8");
+    await press("Unlock");
+    await settle();
+    const refused = `${panel.label} ${state} door-refused`;
+    judge(refused, await report(), panel.ships);
+    await shoot(window, `${panel.label}--${state}--door-refused`);
+    doorRefusalSurfaces += 1;
+
+    // `01-F17` — the way out, driven rather than assumed: if this stops working a mis-pressed DONE
+    // hides the kitchen's work for good, and the next measurement would be of the wrong surface.
+    if (!(await press("Cancel"))) {
+      fail(`${refused}: 01-F17 BROKEN — the door has no way out, so the queue cannot be got back`);
+    }
+    await settle();
+  };
+
   const measureConfirm = async (panel: (typeof PANELS)[number], surface: string): Promise<void> => {
     const opened: boolean = await window.webContents.executeJavaScript(
       `(() => {
@@ -432,7 +571,12 @@ const run = async (): Promise<void> => {
         }
       }
 
+      // `03-F53` — the door, on every state that HAS an act to raise it with. `readonly` owns no
+      // signal so it draws no control (and must not), and `empty` has no ticket to press.
+      if (state !== "readonly" && state !== "empty") await measureDoor(panel, state);
+
       // LAST in the state, because opening it retires every card control — see `measureConfirm`.
+      // It runs after the door, which puts itself away with `Cancel`.
       if (state === "owner") await measureConfirm(panel, surface);
     }
 
@@ -465,6 +609,22 @@ const run = async (): Promise<void> => {
   }
   if (pagersDrawn === 0) fail("EMPTY MATCH — 03-F46's pager was never drawn on any panel");
   if (targetsMeasured === 0) fail("EMPTY MATCH — 27-F8's kitchen target was never measured");
+  /**
+   * `24-F14` on `03-F53`, asserted PER STEP. One count would go on passing while a fixture line
+   * silently retired a step — which is the exact shape of `escalationFor: () => null` and of the
+   * twelve-tickets/no-pager round, and both cost this repo weeks of blind coverage.
+   */
+  if (doorIdentifySurfaces < PANELS.length) {
+    fail(
+      `EMPTY MATCH — 01-F61's identification grid was measured on ${doorIdentifySurfaces} of ` +
+        `${PANELS.length} panels`,
+    );
+  }
+  if (doorPinSurfaces === 0) fail("EMPTY MATCH — 01-F61's PIN pad was never measured");
+  if (doorRefusalSurfaces === 0) fail("EMPTY MATCH — 03-F53's refusal was never measured");
+  if (doorEmptyRosterSurfaces === 0) {
+    fail("EMPTY MATCH — 00 §5.7's empty-registry message was never rendered");
+  }
   if (fontSurfacesMeasured < PANELS.length * STATES.length) {
     fail(
       `EMPTY MATCH — 27-F26's typeface was interrogated on only ${fontSurfacesMeasured} of ` +
@@ -475,7 +635,9 @@ const run = async (): Promise<void> => {
   process.stdout.write(
     `\npass layout: ${surfaces} surfaces, ${controls} controls, ${bumpControls} bump controls, ` +
       `${handoverControls} handover controls, ${confirmSurfaces} confirms opened, ` +
-      `${pagersDrawn} paged surfaces, ${targetsMeasured} 27-F8 targets measured\n`,
+      `${pagersDrawn} paged surfaces, ${targetsMeasured} 27-F8 targets measured, ` +
+      `${doorIdentifySurfaces} identification grids, ${doorPinSurfaces} PIN pads, ` +
+      `${doorRefusalSurfaces} refusals, ${doorEmptyRosterSurfaces} empty rosters\n`,
   );
 
   if (failures.length > 0) {

@@ -80,8 +80,14 @@
 //         : LineStateChangedPayload | null      // ONE payload — one hop, `ready → served`
 //       type ServeMarkDeps = { store: Pick<DeviceStore, "openOrders">;
 //                              policy: () => ServeSignalPolicy;
-//                              append: (type, payload) => void }
+//                              actor: () => string | null;                    ← 03-F53, August 2026
+//                              append: (type, payload, actor_user_id) => void }
 //       createServeMark(deps): { handOver: (order_id: string) => ServeMarkResult }
+//
+//     ⚠ AMENDED, August 2026 — `03-F53` gives the pass an `01-F26` PIN session, so the deps carry
+//     the session as a getter and the append carries the actor it resolved. This suite is unchanged
+//     in what it claims: every row here supplies a signed-in cook, because the refusal when nobody
+//     is signed in is `pass-identity.test.ts` §E's and never this file's.
 //
 //     `handOver` takes **no `line_ids`**: `03-F52` makes the act order-level only (*"One press
 //     marks every remaining `ready` line at once"*), unlike `03-F16`'s per-line ready-mark.
@@ -239,6 +245,10 @@ const handOverOn = (store: DeviceStore, owner = "pass") => {
   const serve = createServeMark({
     store,
     policy: () => owned(owner),
+    // `03-F53` — REQUIRED now that the pass runs a PIN session. A signed-in cook is the
+    // precondition for every act in this file; the refusal when nobody is signed in belongs
+    // to `pass-identity.test.ts` §E, so a constant here keeps the two suites separate.
+    actor: () => "0199bbbb-0000-7000-8000-00000000c001",
     append: (type, payload) => {
       emitted.push(payload);
       append(store, type, payload);
@@ -253,6 +263,10 @@ const doneOn = (store: DeviceStore) => {
   const mark = createReadyMark({
     store,
     policy: () => resolveReadySignal("pass"),
+    // `03-F53` — REQUIRED now that the pass runs a PIN session. A signed-in cook is the
+    // precondition for every act in this file; the refusal when nobody is signed in belongs
+    // to `pass-identity.test.ts` §E, so a constant here keeps the two suites separate.
+    actor: () => "0199bbbb-0000-7000-8000-00000000c001",
     append: (type, payload) => {
       emitted.push(payload);
       append(store, type, payload);
@@ -578,6 +592,10 @@ describe("§D 03-F52 — a surface without the assignment appends nothing", () =
     const serve = createServeMark({
       store,
       policy: () => owned(owner),
+      // `03-F53` — REQUIRED now that the pass runs a PIN session. A signed-in cook is the
+      // precondition for every act in this file; the refusal when nobody is signed in belongs
+      // to `pass-identity.test.ts` §E, so a constant here keeps the two suites separate.
+      actor: () => "0199bbbb-0000-7000-8000-00000000c001",
       append: (type, payload) => append(store, type, payload),
     });
     expect(serve.handOver(ORDER).ok).toBe(false);

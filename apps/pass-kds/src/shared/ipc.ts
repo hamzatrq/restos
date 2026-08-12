@@ -64,6 +64,38 @@ export const PanelNoticeSchema = z.object({
 });
 
 /**
+ * `01-F61`'s identification tile, and the WHOLE of what a roster row is on this side of the plane.
+ *
+ * `01-F28` puts PIN verification in MAIN, so the untrusted end has no use for a credential and is
+ * given none — a hash here would be a secret shipped across a bridge for no purpose. There is no
+ * role either: `03-F53` rules that *"signing in at the pass grants no authority; it supplies
+ * attribution"*, so a role on this wire would be a claim the renderer could not act on and a
+ * reviewer could mistake for one it could.
+ */
+export const PassRosterMemberSchema = z.object({
+  user_id: z.string(),
+  /** `01-F54` — main degrades to the identifier rather than sending a blank tile. */
+  display_name: z.string(),
+});
+export type PassRosterMemberWire = z.infer<typeof PassRosterMemberSchema>;
+
+/**
+ * `03-F53` — *"A refusal says WHICH refusal."* The reason crosses the plane here (and does not on
+ * the counter), because being locked out must be distinguishable on the glass from a PIN that was
+ * simply wrong: *"a cook who cannot tell those apart re-keys instead of fetching a colleague, and
+ * that is the one behaviour that turns a five-minute cooldown into a stopped pass."*
+ *
+ * `reason` is `z.string()` and not an enum on purpose: `pin-session.ts` owns that closed set
+ * (`UnlockRefusal`) and a second copy of it here is a second declaration that can fall out of step
+ * — the shape `01-F60`'s enabled-set drift already cost this product once.
+ */
+export const PassUnlockResultSchema = z.union([
+  z.object({ ok: z.literal(true), user_id: z.string() }),
+  z.object({ ok: z.literal(false), reason: z.string() }),
+]);
+export type PassUnlockResultWire = z.infer<typeof PassUnlockResultSchema>;
+
+/**
  * Everything the shell needs that is not the queue.
  *
  * `panelPpi` is `27-F68`'s density and it crosses the plane because `PanelRoot` is in the
@@ -73,7 +105,11 @@ export const PanelNoticeSchema = z.object({
  */
 export const PassStateSchema = z.object({
   deviceLabel: z.string(),
-  /** `02-F19` — attribution is never anonymous. See `PASS_ACTOR` in `main/index.ts`. */
+  /**
+   * `01-F27` — the DEVICE's own name, and it never becomes a person. `02-F19` says attribution is
+   * never anonymous and `01-F27` forbids a device identity standing in for a user identity, so
+   * the two axes are two fields. See `PASS_ACTOR` in `main/index.ts`.
+   */
   actor: z.string(),
   businessDay: z.string(),
   lan: FactSchema,
@@ -89,6 +125,18 @@ export const PassStateSchema = z.object({
   mayHandOver: z.boolean(),
   /** `03-F52`'s owner, so a screen without the assignment can say WHOSE the act is. */
   serveSignalOwner: z.string(),
+  /**
+   * `03-F53`/`01-F26` — whoever's PIN is in, or `null` for nobody. **The SESSION, not the device.**
+   *
+   * It rides `passState` rather than a channel of its own, which is the opposite of the choice
+   * `apps/pos-electron` made for its roster, and the difference is argued rather than copied: the
+   * session is decided in MAIN (idle auto-lock fires with no tap and no unlock call in sight), and
+   * `main/uplink.ts` already pushes `changed` every second so `03-F14`'s colours move. So a lock
+   * main decides reaches the glass on the read the screen is already making. The ROSTER keeps its
+   * own channel for the counter's reason unchanged: it is reference data (`01-F21`), it changes
+   * when somebody is hired, and it has no business on the hottest read on the device.
+   */
+  user: PassRosterMemberSchema.nullable(),
 });
 export type PassStateWire = z.infer<typeof PassStateSchema>;
 
@@ -103,7 +151,8 @@ export const MarkReadyResultSchema = z.union([
   z.object({ ok: z.literal(true), events: z.number().int(), lines: z.number().int() }),
   z.object({
     ok: z.literal(false),
-    reason: z.enum(["not_the_owner", "nothing_to_mark"]),
+    /** `03-F53` — `no_session`: nobody is signed in, so there is no edge and the door goes up. */
+    reason: z.enum(["not_the_owner", "no_session", "nothing_to_mark"]),
     owner: z.string().optional(),
   }),
 ]);
@@ -121,7 +170,8 @@ export const HandOverResultSchema = z.union([
   z.object({ ok: z.literal(true), lines: z.number().int() }),
   z.object({
     ok: z.literal(false),
-    reason: z.enum(["not_the_owner", "nothing_to_hand_over"]),
+    /** `03-F53` — `no_session` on the TERMINAL act most of all: no session, no edge, no bypass. */
+    reason: z.enum(["not_the_owner", "no_session", "nothing_to_hand_over"]),
     owner: z.string().optional(),
   }),
 ]);
@@ -130,6 +180,10 @@ export type HandOverResult = z.infer<typeof HandOverResultSchema>;
 export const CHANNELS = {
   passState: "restos:pass-state",
   queue: "restos:pass-queue",
+  /** `01-F61` — the identification grid's rows. Reference data (`01-F21`), read once. */
+  roster: "restos:pass-roster",
+  /** `01-F26`/`01-F28` — the identity and the digits go to main; a yes/no comes back. */
+  unlock: "restos:pass-unlock",
   markReady: "restos:pass-mark-ready",
   handOver: "restos:pass-hand-over",
   /** Push: main tells the renderer the folds moved. Carries no data — the renderer re-reads. */
@@ -145,6 +199,13 @@ export const CHANNELS = {
 export type PassBridge = {
   passState: () => Promise<PassStateWire>;
   queue: () => Promise<PassTicketWire[]>;
+  /** `01-F61` — the tiles of the identification step, in MAIN's order and never re-sorted. */
+  roster: () => Promise<PassRosterMemberWire[]>;
+  /**
+   * `01-F26`/`01-F28` — POSITIONAL and in this order, matching `createPinSession.unlock(user_id,
+   * pin)` and the counter's own bridge. Swapping them is a lookup miss and an `unknown_user`.
+   */
+  unlock: (user_id: string, pin: string) => Promise<PassUnlockResultWire>;
   markReady: (req: MarkReadyRequest) => Promise<MarkReadyResult>;
   /** `03-F52` — the second, explicit act. Separate from `markReady` because the FR is that. */
   handOver: (req: HandOverRequest) => Promise<HandOverResult>;

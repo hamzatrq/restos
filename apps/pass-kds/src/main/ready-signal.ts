@@ -44,11 +44,16 @@
  *
  * **What is genuinely owed and is named rather than left to look intentional:** the matrix
  * cannot presently express *"this person may not mark ready"*. The assignment is per-DEVICE-role,
- * not per-user — a pass screen where the assignment is `pass` will accept a bump from whoever is
- * standing in front of it. `01-F26`'s PIN session is not wired on this app at all (see
- * `main/index.ts`), so `actor_user_id` is `null` on every edge it writes, and `03-F16`'s *"with
- * actor"* is therefore **HALF MET**: the event carries the device, the branch and the time, and
- * not the person. That is the single largest gap in this app and it is the first thing to close.
+ * not per-user — a pass screen where the assignment is `pass` will accept a bump from **any**
+ * member of the branch roster who signs in.
+ *
+ * **That is now a deliberate reading rather than a gap** (`03-F53`, August 2026): *"Signing in at
+ * the pass grants no authority; it supplies attribution … `packages/domain`'s action set carries
+ * no line-state member, so routing a bump through `can()` would deny every bump at every branch.
+ * Any member of the branch roster may therefore identify at the pass, and the session is read for
+ * `actor_user_id` and for nothing else."* So `03-F16`'s *"with actor"* is **MET** — the envelope
+ * carries the device, the branch, the branch-consensus time **and** the person — while a per-user
+ * permission on this act remains a spec question nobody has asked, not a hole in this file.
  */
 
 /**

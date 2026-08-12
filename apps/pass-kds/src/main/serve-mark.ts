@@ -52,12 +52,13 @@ import type { LineEdgeContext, LineStateChangedPayload } from "./ready-mark";
  * the control `00 §7` names."* So the assignment below IS the authorization: it is re-read on
  * every call, it is enforced here in MAIN, and the renderer is told rather than asked.
  *
- * **The gap this leaves is `03-F52`'s own OWED item (1) and is named rather than papered over:**
- * `01-F26`'s PIN session does not run on this app, so `actor_user_id` is `null` on every edge it
- * writes — an unattributable terminal claim that food reached a customer. It does not block the
- * FR, because a queue that never drains makes `03-F17` unsatisfiable and the envelope still
- * carries the device, the branch and the branch-consensus time; it is the first thing to close and
- * the boot line says so.
+ * **`03-F52`'s OWED item (1) IS CLOSED (August 2026, `03-F53`), and this is the half that changed
+ * here.** The assignment above is still the whole of the authorization — identification *"grants
+ * no authority; it supplies attribution"* — but the act now carries the person who performed it.
+ * That matters more on this edge than on any other in the app: `served` is TERMINAL (`01-F35`) and
+ * `01-F1` makes it permanent, so what this emitted before was an unattributable permanent claim
+ * that food reached a customer. `deps.actor` is read here, once, and with nobody signed in there
+ * is no edge and no bypass — *"what waits is the RECORD"*, never the food.
  */
 
 /**
@@ -165,20 +166,38 @@ export type ServeMarkDeps = {
    */
   readonly policy: () => ServeSignalPolicy;
   /**
-   * The append.
+   * `01-F26`'s PIN session, as a GETTER — whoever's PIN is in, or `null` (`03-F53`).
+   *
+   * Required and a getter for `ready-mark.ts`'s two reasons, which are the same reasons: an
+   * optional actor is `AGENTS.md`'s Rule-B unsupplied seam by construction, and a value captured
+   * at construction freezes attribution at boot. The second bites hardest here — a shift change
+   * would attribute every later handover to whoever signed in first, terminally and permanently.
+   */
+  readonly actor: () => string | null;
+  /**
+   * The append, **carrying the actor the emitter resolved**.
    *
    * ⚠ **There is no `authorizeWrites` to route this through**, and it is the same measured fact
    * `ready-mark.ts` records: `PERMISSION_ACTIONS` has no line-state member and the counter's
    * `WRITE_ACTIONS` fails closed, so the matrix would DENY a handover today. `03-F52` rejected a
    * new action outright — see this module's header — and puts the authorization on the assignment
-   * above.
+   * above. `03-F53` supplies the attribution, which is a different question and now answered.
+   *
+   * `actor_user_id` is `string` and not `string | null`: on the one edge in this product that
+   * cannot be walked back, an unattributed envelope is made unrepresentable rather than merely
+   * discouraged.
    */
-  readonly append: (type: string, payload: LineStateChangedPayload) => void;
+  readonly append: (type: string, payload: LineStateChangedPayload, actor_user_id: string) => void;
 };
 
 export type ServeMarkResult =
   /** `03-F52` — *"Surfaces without the assignment are read-only for `served`."* Nothing appended. */
   | { readonly ok: false; readonly reason: "not_the_owner"; readonly owner: string }
+  /**
+   * `03-F53` — *"with no session there is no edge"*, and on a TERMINAL claim most of all. Nothing
+   * was appended; the screen raises `01-F61`'s two steps.
+   */
+  | { readonly ok: false; readonly reason: "no_session" }
   /**
    * The order is not on this device, its type is not one `01 §4` sends to `served`, or every line
    * is contested, still cooking, or already handed over. **One reason for three cases on purpose:
@@ -202,11 +221,18 @@ export const createServeMark = (deps: ServeMarkDeps): ServeMark => ({
     if (policy.owner !== HANDOVER_SURFACE) {
       return { ok: false, reason: "not_the_owner", owner: policy.owner };
     }
+    /**
+     * `03-F53` — ONE read of the session, inside the emitter, deciding both whether the act
+     * happens and whose name is on it. After the assignment for `ready-mark.ts`'s reason: a
+     * surface that does not own the serve signal draws no HAND OVER control at all.
+     */
+    const actor = deps.actor();
+    if (actor === null) return { ok: false, reason: "no_session" };
     const order = deps.store.openOrders().find((row) => row.order_id === order_id);
     if (order === undefined) return { ok: false, reason: "nothing_to_hand_over" };
     const payload = serveEdgesFor(order);
     if (payload === null) return { ok: false, reason: "nothing_to_hand_over" };
-    deps.append(LINE_STATE_CHANGED, payload);
+    deps.append(LINE_STATE_CHANGED, payload, actor);
     return { ok: true, lines: payload.line_ids.length };
   },
 });

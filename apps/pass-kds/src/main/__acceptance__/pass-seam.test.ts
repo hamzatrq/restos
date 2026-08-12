@@ -49,12 +49,61 @@ describe("§A 03-F16 — the host CONSTRUCTS the producer and the IPC channel RE
     expect(MAIN).toContain("MarkReadyRequestSchema.parse(req)");
   });
 
-  it("the append writes a REAL envelope, with actor_user_id NULL and named as owed", () => {
-    // `03-F16` says "with actor" and this app has no PIN session. `null` is the honest value; a
-    // device id in an actor field would be a lie in a column `01-F1` will not let anyone correct.
-    // Pinned here so a future session cannot quietly fill it with something plausible.
+  it("the append writes a REAL envelope, and it is ATTRIBUTED", () => {
+    // ⚠ RETIRED AND REPLACED, August 2026 — this row asserted `actor_user_id: null` and said so
+    // deliberately: *"Pinned here so a future session cannot quietly fill it with something
+    // plausible."* `03-F53` is that ruling arriving — the pass runs `01-F26`'s PIN session and
+    // every edge it writes carries the signed-in user — so the pin is SUPERSEDED, not weakened.
+    //
+    // It is retired in the same change that lands the FR, which is `AGENTS.md`'s `01-F60` worked
+    // example applied on purpose: a green test defending an overruled rule *"would have failed
+    // the correct implementation"*, and last time nobody carried the ruling back into the suite
+    // for ~3 weeks. The assertion's PURPOSE — the host writes a REAL envelope and the actor field
+    // is not left to a future session's judgement — is unchanged and now bites harder.
+    //
+    // The replacement lives in `pass-identity-seam.test.ts` §B (the host hands the emitter's
+    // resolved actor to the append) and in `pass-identity.test.ts` §E (the ledger is read back).
     expect(MAIN).toContain("store.append({");
-    expect(MAIN).toContain("actor_user_id: null");
+    expect(
+      MAIN.includes("actor_user_id: null"),
+      "03-F53: the pass writes an unattributable edge — and since 03-F52 the handover is a " +
+        "TERMINAL claim that food reached a customer, which 01-F1 makes permanent",
+    ).toBe(false);
+    expect(MAIN).toContain("actor_user_id");
+  });
+});
+
+describe("§A2 the app can START — `screen` is not touched before `app.whenReady()`", () => {
+  it("00 §5.7 — the boot reaches `whenReady` BEFORE it reads the display", () => {
+    // ⚠ ADDED August 2026 AFTER LAUNCHING THE APP AND WATCHING IT DIE, which is the only
+    // instrument that could have found it. At the time this row was written `main/index.ts` read
+    // `screen.getPrimaryDisplay()` **158 lines before** its `await app.whenReady()`, and Electron
+    // throws `The 'screen' module can't be used before the app 'ready' event` — so `boot()`
+    // rejected on every launch, no window was ever created, and the process sat there.
+    //
+    // Every gate was green while that was true: 134 tests passed, `layout:check` passed (it has
+    // its OWN entry point, `src/layout-gate/main.ts`, which correctly does everything inside
+    // `app.whenReady().then(...)`), and `seams:check` cannot express "the binary starts".
+    // `apps/pos-electron` carries the warning in terms — *"Lazy, because `screen` throws before
+    // `app.whenReady()`"* — and boots inside `app.whenReady().then(...)`; this app was written
+    // from the same shapes and inherited the reads without the guard.
+    //
+    // `services/sync-gateway/__acceptance__/startable.test.ts` is the precedent for holding
+    // "it starts" as an assertion. That one SPAWNS the declared script; this one cannot, because
+    // an Electron launch needs a downloaded runtime, an X server and a native addon built for the
+    // Electron ABI — none of which a package suite may require. So it is a source-order read, and
+    // that is stated plainly: it can be satisfied by a call that is present and wrong, and what it
+    // CAN do is fail when the order is the one that crashed.
+    const ready = MAIN.indexOf("app.whenReady()");
+    const display = MAIN.search(/\bscreen\.\w/);
+    expect(ready, "main never awaits app.whenReady()").toBeGreaterThan(-1);
+    if (display === -1) return; // a host that stopped reading `screen` at all is fine.
+    expect(
+      display,
+      "main/index.ts reads `screen` before `app.whenReady()`: Electron throws there, boot() " +
+        "rejects, and no window is ever created — every suite stays green because no suite " +
+        "launches the app",
+    ).toBeGreaterThan(ready);
   });
 });
 
@@ -134,7 +183,13 @@ describe("§D commandment 5 — this is an OPERATIONAL screen and the plane is n
     // (`18 §9` — the renderer's reachable surface is auditable by reading one file) is unchanged
     // and only the expected set moved. `handover-seam.test.ts` §C holds the same set from the
     // other side, deliberately: a rule two files assert is a rule neither can quietly drop.
-    expect(new Set(members)).toEqual(new Set(["passState", "queue", "markReady", "handOver"]));
+    // ⚠ WIDENED AGAIN, August 2026 — `03-F53` adds `roster` and `unlock`, and the note above
+    // applies unchanged: the PURPOSE is that this renderer's reachable surface stays auditable
+    // from one file, and only the expected set moved. `pass-identity-seam.test.ts` §C holds the
+    // same set from the other side.
+    expect(new Set(members)).toEqual(
+      new Set(["passState", "queue", "markReady", "handOver", "roster", "unlock"]),
+    );
   });
 });
 
