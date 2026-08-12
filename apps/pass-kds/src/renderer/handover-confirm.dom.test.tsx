@@ -223,13 +223,71 @@ describe("§B 03-F52 — the confirm names the order reference", () => {
     // and so the card's own reference — which was always on the screen — cannot satisfy it.
     mount();
     const before = new Set(leavesNaming(DINE_IN_REF));
-    const otherBefore = leavesNaming(DELIVERY_REF).length;
+    const otherBefore = new Set(leavesNaming(DELIVERY_REF));
     openConfirm();
     const added = leavesNaming(DINE_IN_REF).filter((el) => !before.has(el));
     expect(added.length).toBeGreaterThan(0);
     // The confirm is about the ticket that was pressed. A confirm that named the wrong order would
     // make the pass person call the wrong number aloud, which is worse than naming none.
-    expect(leavesNaming(DELIVERY_REF).length).toBe(otherBefore);
+    //
+    // ⚠ CORRECTED BY MUTATION (August 2026). This read `expect(leavesNaming(DELIVERY_REF).length)
+    // .toBe(otherBefore)` on a COUNT, and a count of the other ticket's leaves is a claim about
+    // the ticket GRID and not about the confirm: an implementation that renders the confirm in
+    // PLACE of the cards — *the very arrangement this row's own comment says it holds for* —
+    // takes that count from 1 to 0 and fails, while naming nothing wrong. Measured: it was the
+    // only red in 115, and the round-3 law rates a test that blocks a correct implementation with
+    // a vacuous one. The property is unchanged and is now stated as what it always meant — the
+    // press ADDS no leaf carrying the other ticket's reference — so a confirm that names the
+    // wrong order still fails and an arrangement choice no longer does.
+    const otherAdded = leavesNaming(DELIVERY_REF).filter((el) => !otherBefore.has(el));
+    expect(otherAdded).toHaveLength(0);
+  });
+
+  it("…and it commits the ticket it NAMED, on a screen holding more than one", () => {
+    // ⚠ ADDED BY MUTATION (August 2026), and the fixture is the whole finding.
+    //
+    // `TICKETS` above holds exactly ONE handed-over-able ticket, so *"the ticket you pressed"* and
+    // *"the first ticket"* are the same object and no row in this file could tell them apart:
+    // `onHandOver(tickets[0].order_id)` in place of `onHandOver(confirming.order_id)` passed all
+    // 115 tests and the layout gate (which opens the confirm but never commits it). That is the
+    // round-3 shape exactly — the mechanism built correctly and never aimed at the case that
+    // matters — and `03-F52` names the harm in terms: *"A confirm that named the wrong order would
+    // make the pass person call the wrong number aloud, which is worse than naming none."*
+    //
+    // So: two eligible tickets, press the SECOND, and assert both halves of the pairing — the
+    // reference the confirm shows, and the order id the commit carries.
+    const SECOND = "0199bbbb-0000-7000-8000-0000000012cd";
+    const SECOND_REF = SECOND.slice(0, 8);
+    if (SECOND_REF === DINE_IN_REF) throw new Error("fixture: the two references must differ");
+    const PAIR = [ticket({ order_id: DINE_IN_ORDER }), ticket({ order_id: SECOND })];
+    /** Press the SECOND card's trigger and return the controls that appeared because of it. */
+    const openSecond = () => {
+      const before = new Set(buttons());
+      const triggers = named(HANDOVER);
+      expect(triggers).toHaveLength(2);
+      fireEvent.click(triggers[1] as HTMLButtonElement);
+      return buttons().filter((b) => !before.has(b));
+    };
+
+    const first = mount({ tickets: PAIR });
+    const appeared = openSecond();
+    // The confirm names the SECOND ticket — the one whose control was pressed.
+    expect(leavesNaming(SECOND_REF).length).toBeGreaterThan(0);
+    expect(first.onHandOver).not.toHaveBeenCalled();
+    const count = appeared.length;
+    cleanup();
+
+    // …and the commit carries the SECOND ticket's ORDER ID. Driven the same index-free way §B
+    // uses — each control from a fresh render — so no label, position or component name is pinned.
+    const committed: string[][] = [];
+    for (let i = 0; i < count; i += 1) {
+      const run = mount({ tickets: PAIR });
+      const controls = openSecond();
+      fireEvent.click(controls[i] as HTMLButtonElement);
+      for (const call of run.onHandOver.mock.calls) committed.push(call as string[]);
+      cleanup();
+    }
+    expect(committed).toEqual([[SECOND]]);
   });
 
   it("EXACTLY ONE of the confirm's controls hands over, and at least one does not", () => {

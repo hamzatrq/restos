@@ -175,6 +175,28 @@ describe("§B 03-F52 — one declaration, no per-app fallback", () => {
     const printEvent = lineAdvance.slice(lineAdvance.indexOf("printEvent: (type, payload)"));
     expect(printEvent.slice(0, printEvent.indexOf("\n    },"))).toContain("autoAdvancesLines");
   });
+
+  it("…and the HOST feeds that trigger the SHARED assignment, not a value of its own", () => {
+    // ⚠ ADDED BY MUTATION (August 2026), and the mutant is the FR's own named failure.
+    //
+    // `serveOwner: () => "settlement"` in `apps/pos-electron/src/main/index.ts` — the counter's
+    // trigger hardcoded, ignoring `serveSignal()` entirely — passed **930 of 930** tests across
+    // both apps, `pnpm typecheck` exit 0 and `pnpm seams:check` CLEAN. Nothing is unreached
+    // (`resolveServeSignal` and `describeServeSignal` are still called for the boot line) and no
+    // optional seam is unsupplied, so Rule A and Rule B are both structurally blind to it, and
+    // the rows above measured the MODULE's gate while the HOST quietly stopped feeding it.
+    //
+    // What that mutant ships: a branch that sets `RESTOS_SERVE_SIGNAL_OWNER=pass` on both hosts
+    // gets a pass screen that hands over AND a till that still auto-serves at settlement — two
+    // producers for the one act `03-F52` made single, on the terminal state `01-F35` will not let
+    // anyone take back. That is precisely *"two surfaces each carrying their own default … come to
+    // disagree about who owns handover with every gate green"*.
+    //
+    // It is a SOURCE read and worth what one is worth (`AGENTS.md` M10: it can be satisfied by a
+    // call that is present and wrong). What it can do is fail when the wiring is absent or
+    // constant, which is the shape measured above.
+    expect(COUNTER_MAIN).toMatch(/serveOwner:\s*\(\)\s*=>\s*serveSignal\(\)\.owner/);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -199,6 +221,22 @@ describe("§C 03-F52 — the refusal exists on both sides of the plane", () => {
     expect(IPC).toContain("HandOverRequestSchema");
     expect(IPC).toMatch(/handOver:\s*"restos:/);
     expect(MAIN).toMatch(/mayHandOver:/);
+    // ⚠ ADDED BY MUTATION (August 2026). `mayHandOver:` alone is satisfied by `mayHandOver: true`,
+    // and that mutant survived **115 of 115** tests here, 815 in the counter, `pnpm typecheck`,
+    // `pnpm seams:check` AND `pnpm -C apps/pass-kds layout:check` — the gate substitutes its own
+    // `layout-gate/preload.ts` for this bridge, so `passState()` is the one decision in the
+    // shipped binary that NO gate executes. What it ships is a live HAND OVER control, with the
+    // confirm that says *"This cannot be undone"*, on a branch whose assignment is `counter` or
+    // `settlement`, where main then refuses `not_the_owner` and nothing happens: `27-F5`'s inert
+    // primary control, wearing a promise.
+    //
+    // The one-branch CONTROL is `03-F24`'s identical decision three lines up: `maySignal: true`
+    // is killed by `pass-seam.test.ts` §E (`expect(MAIN).toContain("maySignal: readySignal
+    // .maySignal")`), which is why this is a gap in `03-F52`'s suite and not a property of the app.
+    // Both orders of the comparison are accepted; a *constant* is what this refuses.
+    expect(MAIN).toMatch(
+      /mayHandOver:\s*(serveSignal\.owner === HANDOVER_SURFACE|HANDOVER_SURFACE === serveSignal\.owner)/,
+    );
     // `03-F52` — *"Surfaces without the assignment are read-only for `served`"*, so the screen must
     // be able to say WHOSE it is, exactly as `readySignalOwner` already lets it.
     expect(IPC).toContain("serveSignalOwner");
@@ -208,6 +246,15 @@ describe("§C 03-F52 — the refusal exists on both sides of the plane", () => {
     expect(APP).toContain("mayHandOver");
     expect(APP).toMatch(/onHandOver=\{/);
     expect(APP).toMatch(/\.handOver\(/);
+    // ⚠ ADDED BY MUTATION (August 2026), and this one is a SHAPE pin on purpose — it is the exact
+    // sibling of `pass-seam.test.ts` §E's `onBump={state.maySignal ? onBump : null}`, added
+    // because INVERTING this ternary keeps every string above and passed all 115 tests here.
+    // Unlike `mayHandOver` in main, that mutant does NOT reach production undetected: the layout
+    // gate mounts this real shell and reddens with 23 verdicts (*"the owner state drew NO handover
+    // control"* and *"this surface does not own the serve signal and 1 HAND OVER control(s) are on
+    // the screen"*), which is the behavioural half and the reason this row is allowed to be a
+    // string. A session that rearranges the shell should change this line deliberately.
+    expect(APP).toContain("onHandOver={state.mayHandOver ? onHandOver : null}");
     // `27-F5` — no control at all rather than an inert one, on both axes: the assignment AND the
     // card's own eligibility. The exact expression is the implementer's; that both terms reach the
     // decision is not.
