@@ -16,6 +16,15 @@ channel, its table, its items and a timer — and a cook presses **DONE** and th
 `ready` in the ledger. That is `03-F13`, `03-F14`, `03-F16` and `03-F24`, and none of it had a
 surface before.
 
+And then the ticket **leaves**. `03-F52` (August 2026) added the second act: **HAND OVER**, a
+separate control behind a confirm that names the order reference, which walks the order's `ready`
+lines to `served` and drains it off the pass. Before it, this screen was a **one-way accumulator
+after one service** — `02-F31`'s settlement half was the only producer of `served` in the whole
+product and it was tier-gated to T1, so it refused on exactly the branches that run this app, and
+a fully-bumped ticket never satisfied `03-F17`'s exit condition. **One press of DONE still emits
+`ready` and only `ready`** (`03-F52` rejects a DONE that emits both by name: it would blank the
+screen at the start of the work the screen exists for).
+
 ## Running it
 
 ```
@@ -23,9 +32,10 @@ pnpm -C apps/pos-electron rebuild:native   # ONCE — one physical better-sqlite
 pnpm -C apps/pass-kds start
 ```
 
-Boot prints six lines and every one is a fact whose being wrong is **invisible from the screen**:
-the identity, the panel density, the capacity this glass yields, the aging thresholds, the
-ready-signal owner, and the uplink. That is the test for what belongs in a boot line here.
+Boot prints seven lines and every one is a fact whose being wrong is **invisible from the
+screen**: the identity, the panel density, the capacity this glass yields, the aging thresholds,
+the ready-signal owner, the **serve-signal owner** (`03-F52`) and the uplink. That is the test for
+what belongs in a boot line here.
 
 **Layer-2 / layer-3 keys, all read from the environment** because layer 2 has no transport to a
 device (`01-F62` keeps `config.changed` out of every branch stream):
@@ -33,10 +43,20 @@ device (`01-F62` keeps `config.changed` out of every branch stream):
 | key | FR | default |
 |---|---|---|
 | `RESTOS_READY_SIGNAL_OWNER` | `03-F24` — `pass \| kds \| counter \| waiter` | `pass` |
+| `RESTOS_SERVE_SIGNAL_OWNER` | `03-F52` — `settlement \| pass \| counter \| waiter` (**no `kds`**) | `settlement`, and it is ASSUMED ⚠ |
 | `RESTOS_AGING_THRESHOLDS` | `03-F14` — `dine_in=10/20,delivery=15/25` | the FR's own defaults |
 | `RESTOS_ORG_ID` / `RESTOS_BRANCH_ID` / `RESTOS_DEVICE_ID` | `01-F13` | the counter's DEV SEED ⚠ |
 | `RESTOS_PANEL_PPI` | `00 §7` layer 3, `27-F68` | measured, else assumed |
 | `RESTOS_CLOUD_URL` / `RESTOS_DEVICE_TOKEN` | `01-F47` | offline |
+
+⚠ **`RESTOS_SERVE_SIGNAL_OWNER=pass` must be set on BOTH this device and the till, or this screen
+draws no handover control.** The two keys are different sets and the difference is deliberate:
+`kds` owns a ready-mark (`03-F19`) and is **not** an owner of the serve signal, because a station
+cook hands food to a pass and never to a customer. The declaration is
+`@restos/device-config`'s `serve-signal.ts` and there is deliberately no copy here — `03-F52`:
+*"One declaration, no per-app fallback."* Unset, the assumed owner is `settlement`, which keeps
+`02-F31`'s till behaviour byte-identical and leaves this screen read-only for `served`; the boot
+line says so at length rather than presenting a guess as configuration (`00 §5.7`).
 
 ⚠ **`RESTOS_DEVICE_ID` must be set, and the boot line says so loudly.** Unset, this app takes the
 same seed `device_id` as `apps/pos-electron`, and two devices sharing one id fork one outbox
@@ -106,7 +126,10 @@ per-DEVICE-role, not per-user. A pass screen assigned `pass` accepts a bump from
 standing in front of it. **There is no `01-F26` PIN session on this device at all**, so
 `actor_user_id` is `null` on every edge this app writes and `03-F16`'s *"with actor"* is **HALF
 MET** — the event carries the device, the branch and the time, and not the person. **That is the
-single largest gap in this app.**
+single largest gap in this app**, and `03-F52` sharpened it rather than adding to it: a handover
+is **TERMINAL** under `01-F35`, so the gap is now an unattributable permanent claim that food
+reached a customer. `03-F52`'s OWED item (1) names it as the first thing to close and the boot
+line says it.
 
 ## `27-F28` — capacity is STATED, not mandated, and the screen says what this glass holds
 
@@ -258,7 +281,16 @@ page 2 looks like a bug to a helpful session and it is not.
   other mode of the same app. `stationOf` is in `sync-client` already; what is missing is a
   layer-3 station identity and a mode switch.
 - **`03-F48`'s reprint / reroute from the pass**, and **`03-F17`'s recall strip** (the last 20
-  cleared orders). Both are real FRs and neither is started.
+  cleared orders). Both are real FRs and neither is started. ⚠ **The recall strip got sharper the
+  day `03-F52` landed**: tickets now genuinely leave this screen, and the FR is explicit that a
+  recall restores **VISIBILITY, never STATE** — `served` is terminal and `01-F1` will not let
+  anyone take it back. That asymmetry is why the handover carries a confirm and DONE does not; a
+  session building the strip must not read it as an undo.
+- **`03-F19`'s two-minute un-bump.** Not started, and **unbuildable against the shipped transition
+  table**: `LEGAL_NEXT.ready` has no edge back to `in_prep`. `03-F52` records it as a
+  `packages/domain` question and a `DECISIONS.md` row rather than this app's to fix — recorded
+  here because the handover makes the press that follows a bump irreversible, and a reader is
+  entitled to know the press before it already was.
 - **`03-F15`'s "waiting on naan"** — the counts ship (`2 of 3 ready`), the *sentence* does not.
 - **`27-F19`'s dark KDS opt-in.** `27 §9`'s first open question is a pilot A/B and this ships the
   documented default; the opt-in is one prop and a layer-3 key when the pilot answers.
