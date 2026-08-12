@@ -162,8 +162,12 @@ const ROSTER = [
  * `03-F53` makes the press with no session the thing that raises `01-F61`'s two steps, so a fixture
  * that typed a signed-in user would render the queue and **never the door** — which is precisely
  * the `escalationFor: () => null` failure this file's header is about, arriving on a new surface.
- * `main.ts` presses DONE and measures both steps, and carries a `24-F14` presence check so that
- * flipping this line takes the door out of coverage LOUDLY.
+ * `main.ts` presses DONE and measures both steps, and carries a `24-F14` presence check per step.
+ *
+ * **This is the line the door's whole coverage rests on, and that is a measurement rather than a
+ * claim**: with `user` set to a signed-in member the gate fails with **16 violations**, every one
+ * an `EMPTY MATCH — 01-F61's grid drew no identification tile` naming its panel and state. (The
+ * `markReady` answer below is NOT that line — see the ⚠ there, which is a correction.)
  */
 const passState = (): PassStateWire => ({
   deviceLabel: "Pass",
@@ -204,9 +208,21 @@ const bridge: PassBridge = {
   // leave it unmeasured on every panel.
   roster: () => Promise.resolve(params().get("state") === "empty-roster" ? [] : [...ROSTER]),
   /**
-   * `03-F53` — nobody is signed in, so MAIN refuses and the renderer raises the door. Modelled
-   * honestly rather than always-`ok`: the whole point of this fixture is to produce the state the
-   * door lives in, and an `{ ok: true }` here would mean the gate never sees it.
+   * `03-F53` — nobody is signed in, so main would refuse. Modelled honestly rather than always-`ok`.
+   *
+   * ⚠ **THIS PAIR IS NOT WHAT KEEPS THE DOOR IN COVERAGE, AND THE FIRST DRAFT OF THIS COMMENT SAID
+   * IT WAS — MEASURED, NOT REASONED.** It read *"an `{ ok: true }` here would mean the gate never
+   * sees it"*, and mutating exactly that (both back to `{ ok: true }`, rebuild, re-run) left the
+   * gate **PASSED at exit 0 with all 14 identification grids still measured**. The renderer raises
+   * the door from `user` at the press and never calls main when it already knows nobody is in
+   * (`App.tsx` — one round trip before a wet-handed cook sees the grid is a beat this surface
+   * cannot spend), so these two answers are unreached from this gate. **`user: null` above is the
+   * line the coverage rests on**: mutating THAT hard-fails with 16 `EMPTY MATCH` verdicts by name.
+   *
+   * Recorded rather than quietly fixed because `AGENTS.md` is explicit that a comment promising a
+   * protection which does not exist is worse than no comment: it retires the assertion somebody
+   * would otherwise write. They stay `no_session` because that is what main really answers — a
+   * fixture that lied the other way would be modelling a device this product cannot be in.
    */
   markReady: (): Promise<MarkReadyResult> =>
     Promise.resolve({ ok: false, reason: "no_session" as const }),

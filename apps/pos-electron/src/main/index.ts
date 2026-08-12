@@ -14,7 +14,6 @@ import {
   AGING_THRESHOLDS_ENV,
   DEV_IDENTITY,
   DEV_PIN_ENV,
-  DEV_STAFF,
   describeAging,
   describeDeviceIdentity,
   describePanelDensity,
