@@ -128,6 +128,10 @@ const markOn = (store: DeviceStore, owner?: string) => {
   const mark = createReadyMark({
     store,
     policy: () => resolveReadySignal(owner),
+    // `03-F53` — REQUIRED now that the pass runs a PIN session. A signed-in cook is the
+    // precondition for every act in this file; the refusal when nobody is signed in belongs
+    // to `pass-identity.test.ts` §E, so a constant here keeps the two suites separate.
+    actor: () => "0199bbbb-0000-7000-8000-00000000c001",
     append: (type, payload) => {
       emitted.push(payload);
       append(store, type, payload);
@@ -257,6 +261,10 @@ describe("§B 03-F24 — ready-signal ownership", () => {
     const mark = createReadyMark({
       store,
       policy: () => resolveReadySignal(owner),
+      // `03-F53` — REQUIRED now that the pass runs a PIN session. A signed-in cook is the
+      // precondition for every act in this file; the refusal when nobody is signed in belongs
+      // to `pass-identity.test.ts` §E, so a constant here keeps the two suites separate.
+      actor: () => "0199bbbb-0000-7000-8000-00000000c001",
       append: (type, payload) => append(store, type, payload),
     });
     expect(mark.mark(ORDER, null).ok).toBe(false);

@@ -49,12 +49,27 @@ describe("§A 03-F16 — the host CONSTRUCTS the producer and the IPC channel RE
     expect(MAIN).toContain("MarkReadyRequestSchema.parse(req)");
   });
 
-  it("the append writes a REAL envelope, with actor_user_id NULL and named as owed", () => {
-    // `03-F16` says "with actor" and this app has no PIN session. `null` is the honest value; a
-    // device id in an actor field would be a lie in a column `01-F1` will not let anyone correct.
-    // Pinned here so a future session cannot quietly fill it with something plausible.
+  it("the append writes a REAL envelope, and it is ATTRIBUTED", () => {
+    // ⚠ RETIRED AND REPLACED, August 2026 — this row asserted `actor_user_id: null` and said so
+    // deliberately: *"Pinned here so a future session cannot quietly fill it with something
+    // plausible."* `03-F53` is that ruling arriving — the pass runs `01-F26`'s PIN session and
+    // every edge it writes carries the signed-in user — so the pin is SUPERSEDED, not weakened.
+    //
+    // It is retired in the same change that lands the FR, which is `AGENTS.md`'s `01-F60` worked
+    // example applied on purpose: a green test defending an overruled rule *"would have failed
+    // the correct implementation"*, and last time nobody carried the ruling back into the suite
+    // for ~3 weeks. The assertion's PURPOSE — the host writes a REAL envelope and the actor field
+    // is not left to a future session's judgement — is unchanged and now bites harder.
+    //
+    // The replacement lives in `pass-identity-seam.test.ts` §B (the host hands the emitter's
+    // resolved actor to the append) and in `pass-identity.test.ts` §E (the ledger is read back).
     expect(MAIN).toContain("store.append({");
-    expect(MAIN).toContain("actor_user_id: null");
+    expect(
+      MAIN.includes("actor_user_id: null"),
+      "03-F53: the pass writes an unattributable edge — and since 03-F52 the handover is a " +
+        "TERMINAL claim that food reached a customer, which 01-F1 makes permanent",
+    ).toBe(false);
+    expect(MAIN).toContain("actor_user_id");
   });
 });
 

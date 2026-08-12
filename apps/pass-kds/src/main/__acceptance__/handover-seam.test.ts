@@ -87,10 +87,23 @@ describe("§A 03-F52 — main/index.ts wires the handover", () => {
     // ⚠ The STUB case, which no rail in this repo can express: `append: () => {}` type-checks,
     // satisfies Rule B, and writes nothing. The ledger call has to be named INSIDE the callback.
     expect(args).toContain("store.append(");
-    // `03-F52`'s OWED item (1), pinned so it cannot be quietly filled with something plausible:
-    // *"`01-F26`'s PIN session does not run on the pass, so `actor_user_id` is `null` on every edge
-    // it writes — an unattributable terminal claim that food reached a customer."*
-    expect(args).toContain("actor_user_id: null");
+    // ⚠ RETIRED AND REPLACED, August 2026. This row pinned `actor_user_id: null` as `03-F52`'s
+    // OWED item (1) — *"pinned so it cannot be quietly filled with something plausible"* — and
+    // `03-F53` is the ruling that fills it, deliberately and in the spec: the pass runs `01-F26`'s
+    // PIN session and every edge it writes carries the signed-in user. Retired the same day the
+    // ruling lands, which is `AGENTS.md`'s `01-F60` lesson: a green test defending an overruled
+    // rule fails the correct implementation, and last time nobody noticed for ~3 weeks.
+    //
+    // The assertion's PURPOSE is unchanged and now stricter — the actor field is still not left
+    // to a future session's judgement, it just has to hold a person now. `pass-identity-seam.test
+    // .ts` §B holds the positive half (the emitter's resolved actor is what the append writes) and
+    // `pass-identity.test.ts` §E reads the envelope back out of a real store.
+    expect(
+      args.includes("actor_user_id: null"),
+      "03-F53: a TERMINAL claim that food reached a customer is being written by nobody, and " +
+        "01-F1 makes it permanent",
+    ).toBe(false);
+    expect(args).toContain("actor_user_id");
   });
 
   it("the handOver channel CALLS it — the producer is not merely constructed", () => {
