@@ -414,9 +414,44 @@ const PARKING_TYPES: ReadonlySet<string> = new Set(["order.confirmed", "kot.prin
  * added to this set without one is exactly the silent fall-through `assertNever` prevents,
  * wearing a different hat.
  */
-const NON_FOLD_TYPES = { "catalog.changed": "01-F52" } as const satisfies Partial<
-  Record<KnownEventType, string>
->;
+const NON_FOLD_TYPES = {
+  "catalog.changed": "01-F52",
+  /**
+   * `03-F53` (August 2026) — `03-F11`'s printer transition, which got a payload schema and a till
+   * producer and therefore entered this registry for the first time.
+   *
+   * It lands HERE rather than in the switch beside `kot.print_failed`, and the reason is
+   * structural rather than editorial: `kot.print_failed` carries an `order_id`, so the sidecar can
+   * honestly answer with an order key and the switch can then say "consumed, projects nothing".
+   * **This event names no order and no item** — its whole payload is a printer and a status — so
+   * there is no key to answer with, and `keysFor`'s `payload.order_id` fallback would mint
+   * `order:undefined` and hand a phantom row to the engine.
+   *
+   * ⚠ **The CLAIM, stated at its real strength, because this set's own doc warns that membership
+   * is a claim and not a way to silence the compiler.** `03-F53` names its consumers: *"`05-F3`'s
+   * alarm list and doc 15's fleet health"*. Neither is a fold — the alarm list is doc 05's derived
+   * VIEW (`apps/manager/src/alarms.ts`, which declares no fold and keys no entity, under `18 §6`'s
+   * *"app-specific derived VIEWS but not new folds"*), and fleet health is a cloud read model
+   * (`01-F7`). So no fold in this package reads it, which is the same claim the `kot.print_failed`
+   * arm already makes in the switch below. That is WEAKER than `catalog.changed`'s, which has
+   * `01-F52` forbidding any fold from reading it for all time; if a fold ever needs this fact, this
+   * row moves and the compiler says so — which is what a row is for.
+   *
+   * ⚠ **THE COMPILER SAYS SO ONLY IF THE ROW IS DELETED, NOT IF IT MOVES TO THE WRONG SET —
+   * measured 2026-08-13 (adversarial mutation).** Deleting this row reddens `pnpm typecheck` at
+   * `assertNever` (`TS2345`, line ~920), which is the pin working. But MOVING it into
+   * `OTHER_FOLD_TYPES` below — whose doc says the two sets *"make different claims and conflating
+   * them would be a lie in the direction that matters"* — passes **all 642 tests in this package
+   * AND the root `pnpm typecheck`, exit 0 on both**. `keysFor` answers `[]` from either branch, so
+   * the two sets are runtime-identical and the only thing distinguishing them is the sentence a
+   * reader believes. `merge-workcounter.test.ts`'s `PINNED_NOT_FOLDED` does not close this: it
+   * cross-checks the TEST's own two lists against `eventRegistry.types()`, never against this
+   * file's classification. So *"no fold may read this"* and *"another fold in this package owns
+   * this"* are, today, interchangeable assertions — which is worth knowing before either is cited
+   * as evidence about a money-bearing type, the exact case that doc warns about.
+   */
+  "printer.status_changed": "03-F53",
+} as const satisfies Partial<Record<KnownEventType, string>>;
 type NonFoldEventType = keyof typeof NON_FOLD_TYPES;
 const isNonFold = (t: string): t is NonFoldEventType => t in NON_FOLD_TYPES;
 

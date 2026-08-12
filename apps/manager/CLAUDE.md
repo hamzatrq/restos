@@ -12,15 +12,29 @@
   not the console.** `pnpm -C apps/manager start` is real. What it renders is `src/probe.ts`'s
   measurements, for the reasons under "still blocked" below.
 - **`05-F1`/`05-F3`/`05-F4`'s alarm DERIVATION landed August 2026 (`src/alarms.ts`), with
-  `05-F22`/`05-F23`'s home model (`src/home.ts`) and 31 acceptance tests.** Both are pure; the
-  bundle went 680 → **682** modules, i.e. exactly the two files, because every kernel import in
-  them is `import type` and is erased. **What is on the screen is one row: the honesty line.** The
-  alarm CARDS are owed — see blocker 2 below — and they would be unreachable code today anyway,
-  because `managerHomeNow()` cannot return `known: true` while no plane carries a branch queue.
-  **`05-F2`'s acknowledgment is not merely unbuilt, it is UNEMITTABLE:** `01-F5` closes the
-  `audit.*` family at six subtypes (`packages/domain/src/registry.ts:797`) and none is an alarm
-  ack, so `01-F4` refuses the emit. That is the same shape `audit.print_acknowledged` was in
-  before it was added for `03-F5` — one FR over, still open, and a protected-path spec PR.
+  `05-F22`/`05-F23`'s home model (`src/home.ts`) and 46 acceptance tests.** Both are pure; the
+  bundle is **682** modules / 2.49 MB of Hermes bytecode — **re-measured 2026-08-12 after
+  `alarms.ts` gained a VALUE import of `@restos/domain` (`ALARM_ACK_KINDS`), and it did not move**,
+  because `probe.ts` already pulls that package. **What is on the screen is one row: the honesty
+  line.** The alarm CARDS are owed — see blocker 2 below — and they would be unreachable code today
+  anyway, because `managerHomeNow()` cannot return `known: true` while no plane carries a branch
+  queue.
+- **`05-F2`'s acknowledgment is EXPRESSIBLE as of August 2026, and this app CONSUMES it.** ⚠ This
+  bullet read *"not merely unbuilt, it is UNEMITTABLE: `01-F5` closes the `audit.*` family at six
+  subtypes and none is an alarm ack, so `01-F4` refuses the emit"* — true when written, and it was
+  the right call not to guess. `05-F30` ruled the **seventh** subtype, `audit.alarm_acknowledged`,
+  and `packages/domain` now carries its schema, so **the alarms this app raises are no longer
+  permanent**: an ack in the stream clears its alarm, matched on `05-F30`'s three facts
+  (`alarm_kind`, `order_id`, `printer_name`) and never on a composed alarm id.
+  **The PRODUCER is owed and is the storage port below, not a missing screen.** `05-F29` requires
+  the manager DEVICE to append it (`01-F62` names `audit.*` as its worked example of a
+  branch-scoped type, so no server may mint one), and `openStore` still binds `better-sqlite3`.
+  So the seam exists and the writer does not — which is the honest asymmetry, not a stub.
+- **`05-F3`'s second trigger is HALF built.** `printer.status_changed` gained a payload (`03-F53`)
+  and a real producer on the till, and it was driven end to end on 2026-08-12: two orders sent to a
+  dead printer produced **two `kot.print_failed` and exactly ONE `printer.status_changed(offline)`**
+  in a real device ledger. What the console does with it is a **founder call** `05-F30` records and
+  `alarms.ts` deliberately does not guess — that alarm has no order to name and only one exit.
 
 ## ⚠ Do not build the console yet, and do not build it against a stub
 

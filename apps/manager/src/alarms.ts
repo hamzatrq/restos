@@ -26,15 +26,25 @@
  * devices / summary / ops — **no live order or queue read model on either plane**. `home.ts`
  * is where that fact is stated to the screen rather than papered over; see its header.
  *
- * **`05-F2`'s acknowledgment is UNEMITTABLE and therefore unbuilt here.** `01-F5` closes the
- * `audit.*` family at six subtypes (`registry.ts:797`) and none of them is an alarm ack, so
- * `01-F4` refuses the emit. There is no `acknowledged` input below **on purpose**: a seam whose
- * producer cannot exist is this wave's named defect, and inventing a seventh subtype is a
- * `packages/domain` change (protected path) plus a spec PR to docs 01 and 05.
+ * **`05-F2`'s acknowledgment IS NOW EXPRESSIBLE, and this file honours it — but nothing on this
+ * device can WRITE one.** The paragraph here used to read *"UNEMITTABLE and therefore unbuilt"*:
+ * `01-F5` closed the `audit.*` family at six subtypes and none was an alarm ack, so `01-F4`
+ * refused the emit and **every alarm this view raises was permanent**. `05-F30` landed the seventh
+ * (`audit.alarm_acknowledged`) and `packages/domain` carries its schema, so the act is possible and
+ * the CONSUMER is built below.
  *
- * **`05-F3`'s other trigger is unemittable too.** `printer.status_changed` has no payload schema
- * in `packages/domain` and occurs in no production file anywhere in `apps/`, `services/` or
- * `packages/` (symbol-precise `grep -a`, 2026-08-12). Only the `kot.print_failed` half is built.
+ * The PRODUCER is owed and is named rather than stubbed. `05-F29` requires the ack to be appended
+ * by the manager DEVICE — `01-F62` makes `audit.*` its own worked example of a branch-scoped type,
+ * so no server may mint one — and this platform still cannot open a store (see the paragraph
+ * above, and `apps/manager/CLAUDE.md`'s measured port surface). That asymmetry is deliberate: an
+ * ack this view honours is worth having the moment any device can write one, and the schema is
+ * what makes writing one possible at all. It is the opposite of a subsystem with no seam — the
+ * seam exists and the till already writes through one exactly like it.
+ *
+ * **`05-F3`'s other trigger is now HALF built.** `printer.status_changed` has a payload schema
+ * (`03-F53`) and a real producer on the till (`apps/pos-electron/src/main/printing.ts`), so the
+ * fact reaches the branch stream. What this view does with it is a **founder call** and is
+ * deliberately nothing — see the note on `05-F3` below the pinned interpretations.
  *
  * ## Three readings this file PINS. Each is a choice, not a transcription.
  *
@@ -49,9 +59,27 @@
  *    on one order stay two alarms.
  * 3. **`05-F3`'s "the same persistence rules" means the whole of `05-F2`**, including its
  *    ready/served exit — a print alarm clears when its order goes ready. The alternative reading
- *    (a printer fact has no ready analogue, so only an ack clears it) is defensible and would make
- *    every print alarm PERMANENT today, because the ack is unemittable. One `continue` implements
- *    the pinned reading; overruling it is a one-line change.
+ *    (a printer fact has no ready analogue, so only an ack clears it) is defensible and would have
+ *    made every print alarm PERMANENT while the ack was unemittable. That argument has now been
+ *    paid off by `05-F30` rather than by this line, so the reading rests on `05-F3`'s own words
+ *    alone; one `continue` implements it and overruling it is a one-line change.
+ * 4. **An ack is PERMANENT for the alarm it names** (`01-F1`), so a repeat of the same failure
+ *    does not re-raise it. `05-F4` collapses repeated crossings *"into the existing alarm"* and
+ *    interpretation 2 already collapses repeated `kot.print_failed` on one (order, printer) into
+ *    ONE alarm — so a second failure IS that alarm, and that alarm has been acknowledged. The
+ *    alternative (a fresh failure after an ack re-raises) is defensible — the kitchen still has no
+ *    ticket — and is refused because the ack is permanent while the failure repeats on every retry
+ *    exhaustion, which is `05-F4`'s siren wall reached one indirection later.
+ *
+ * ## `05-F3`'s printer-offline alarm: the guess this file does NOT make
+ *
+ * `printer.status_changed(offline)` now reaches this device as a real fact, and **nothing below
+ * raises an alarm from it.** `05-F30` records why it is a founder call: that alarm has no order,
+ * so `05-F1`'s shape (order, channel, table, age) cannot carry it, and `05-F2` enumerates exits of
+ * which ready/served cannot apply to a printer — leaving it exactly one. Attaching the fact to
+ * whichever order happens to be open is the shape an implementer reaches for when the type turns
+ * up in the same `facts` array as `kot.print_failed`, and it would name the wrong order for ever.
+ * So `05-F3` stays HALF BUILT, deliberately, and the absence is asserted rather than assumed.
  *
  * ## The order an order LEAVES on, and the one case the corpus does not decide
  *
@@ -64,9 +92,12 @@
  * corpus — **a founder call, reported rather than hidden.** This file takes `apps/pass-kds`'
  * shipped reading of the same projection for the same kind of surface (`pass-queue.ts:246`: *"An
  * order with NO lines is dropped too: there is nothing to cook"*), because the product having one
- * reading of *"there is nothing to cook"* matters more than which reading, and because the
- * alternative is an alarm about food nobody is cooking **that no manager can clear** while the ack
- * is unemittable. If it is overruled, the change is `>= && lines_total > 0` on one line.
+ * reading of *"there is nothing to cook"* matters more than which reading. ⚠ **Its second reason
+ * has EXPIRED and is struck rather than deleted**: it read *"the alternative is an alarm about food
+ * nobody is cooking that no manager can clear while the ack is unemittable"*, and `05-F30` has
+ * since made the ack expressible, so a manager could now clear it. The reading stands on the first
+ * reason alone and is weaker than it was. If it is overruled, the change is
+ * `>= && lines_total > 0` on one line.
  *
  * ## `01-F34` — what this view is NOT allowed to read
  *
@@ -79,12 +110,24 @@
  */
 
 import type { AgingPolicy } from "@restos/device-config/aging";
+// A VALUE import, and safe on this platform: `probe.ts` already value-imports `@restos/domain`
+// (`verifyPin`, `PIN_ARGON2ID_PARAMS`) and the Hermes bundle carries it. Contrast the type-only
+// import below, which must STAY type-only.
+import { ALARM_ACK_KINDS, type AlarmAckKind } from "@restos/domain";
 // TYPE-only, and it must stay type-only: the pure `fold-engine` subpath is the one door that does
 // not pull `device-store.ts` and with it `better-sqlite3` (see `apps/manager/CLAUDE.md`).
 import type { KitchenQueueRow, OpenOrderRow } from "@restos/sync-client/fold-engine";
 
-/** `05-F1`'s aging alarm and `05-F3`'s printer alarm — two remedies, two walks, two kinds. */
-export type AlarmKind = "late_order" | "print_failed";
+/**
+ * `05-F1`'s aging alarm and `05-F3`'s printer alarm — two remedies, two walks, two kinds.
+ *
+ * **The kernel's set, not a local copy.** `05-F30` makes `alarm_kind` a CLOSED payload field on
+ * `audit.alarm_acknowledged`, so an ack this view suppresses against is matched on the ledger's own
+ * vocabulary; two readings of one closed set is `03-F40`'s named defect, and here it would produce
+ * an ack that parses at the kernel and clears nothing on the screen. Widening the set is a founder
+ * call recorded at `ALARM_ACK_KINDS`, and this alias means it cannot be widened in only one place.
+ */
+export type AlarmKind = AlarmAckKind;
 
 /** One row of `05 §5`'s active alarm list. */
 export type Alarm = {
@@ -155,6 +198,111 @@ export type AlarmInput = {
 /** See `Alarm.reference`. The same eight characters the counter and the pass already print. */
 const referenceOf = (order_id: string): string => order_id.slice(0, 8);
 
+/** `05-F30`'s subtype — `01-F5`'s seventh, and the only thing that clears a row of this list. */
+const ALARM_ACK = "audit.alarm_acknowledged";
+
+/**
+ * The suppression key: `05-F30`'s three FACTS, never a composed alarm id.
+ *
+ * `05-F30` rules this and gives the reason — the view's `Alarm.id` is a FORMAT, and matching on it
+ * would mean that changing the format silently resurrects every acknowledged alarm in history,
+ * which `01-F1` offers no way to correct. These three fields are the ledger's own vocabulary.
+ *
+ * The separator is a NUL written as an ESCAPE, for the reason stated on the collapse key below: a
+ * literal NUL makes this file BINARY to `grep`, and a symbol-precise grep is this repo's closing
+ * evidence for its own recurring defect. It cannot occur in a kind, an order id or a printer name,
+ * so no triple can collide with another — and `late_order`'s empty printer component cannot
+ * collide with a `print_failed` one because the kind leads.
+ */
+const ackKey = (kind: AlarmKind, order_id: string, printer_name: string | null): string =>
+  `${kind}\u0000${order_id}\u0000${printer_name ?? ""}`;
+
+/**
+ * ⚠ **A TYPE NARROW, never a coercion, and the difference is a live alarm.**
+ *
+ * The adapter that will one day supply these has already validated each envelope through
+ * `parseEvent` (`01-F4`), so a malformed ack cannot reach here — but this view narrows `unknown`
+ * payloads itself by design (see `BranchFact`), and the failure mode of a loose narrow is an alarm
+ * dismissed by an envelope that never acknowledged anything, which `05-F2` forbids in terms
+ * (*"never auto-dismissed silently"*). A `String(...)` in place of these guards is indistinguishable
+ * on an ABSENT field — it produces a key nothing matches either way — and silently dismisses a real
+ * alarm the moment a field merely STRINGIFIES to a valid one.
+ */
+const isAlarmKind = (value: unknown): value is AlarmKind =>
+  typeof value === "string" && (ALARM_ACK_KINDS as readonly string[]).includes(value);
+
+/** One ack, reduced to the key it clears — or `null` if it identifies no alarm at all. */
+const ackKeyOf = (payload: Readonly<Record<string, unknown>>): string | null => {
+  const { alarm_kind, order_id, printer_name } = payload;
+  if (!isAlarmKind(alarm_kind)) return null;
+  if (typeof order_id !== "string" || order_id === "") return null;
+  // `05-F4` puts two failed printers on one order in TWO alarms, because `03-F5` says the manager
+  // has to know which one to walk to. An ack naming neither would clear both or neither, so a
+  // `print_failed` ack without its printer identifies nothing and clears nothing.
+  //
+  // ⚠ **MEASURED 2026-08-13 (adversarial mutation): THE EXPLICIT-`null` CASE IS UNASSERTED HERE.**
+  // A mutant that keeps this string narrow exactly as written — so test 11a's poisoned
+  // `{ toString }` printer is still refused — and additionally treats `printer_name: null` /
+  // absent as "clears every printer on this order" (returning `ackKey(kind, order_id, null)` and
+  // consulting that key beside the per-printer one) passes **all 46 tests in this package**. That
+  // is the precise defect `05-F30` forbids in terms: one ack clearing BOTH alarms, permanently
+  // (`01-F1`), leaving a second printer down with nobody told. It is refused today by exactly one
+  // line — the `: null` below — and by `packages/domain`'s discriminated union (`alarm-ack-schema`
+  // test 8), which is a DIFFERENT PACKAGE. This file's own header states it narrows `unknown`
+  // itself rather than trusting the adapter, so the domain schema is not this view's guard.
+  // The missing fixture is one line: a `print_failed` ack with `printer_name: null` on an order
+  // carrying two `kot.print_failed` facts must leave BOTH alarms standing.
+  if (alarm_kind === "print_failed") {
+    return typeof printer_name === "string" && printer_name !== ""
+      ? ackKey(alarm_kind, order_id, printer_name)
+      : null;
+  }
+  return ackKey(alarm_kind, order_id, null);
+};
+
+/**
+ * **Every ack in the stream, collected BEFORE any alarm is judged — and the pass is the law.**
+ *
+ * A single forward walk that tested each `kot.print_failed` against the acks seen so far would be
+ * an ordering dependence: the same two envelopes delivered the other way round on the other device
+ * give two different consoles, which is exactly the `01-F34` break standing law 1 calls *"the law
+ * most often broken by accident"*. A set has no order, so an ack before its failure and an ack
+ * after it are the same answer, and no envelope id reaches a decision.
+ */
+const acknowledgedKeys = (facts: readonly BranchFact[]): ReadonlySet<string> => {
+  const acked = new Set<string>();
+  for (const fact of facts) {
+    // EXACTLY this subtype. `type.startsWith("audit.")` would let the TILL's
+    // `audit.print_acknowledged` clear a manager's alarm — a cashier at the counter dismissing an
+    // S1 band would answer the FR (`05-F3`) that exists so the trouble reaches the manager *even
+    // off the floor*. `05-F30` says the two acks do not join, and this is where that holds.
+    //
+    // ⚠ **MEASURED 2026-08-12: NO TEST IN THIS PACKAGE CATCHES A PREFIX MATCH.** Replacing this
+    // line with `startsWith("audit.")` passes all 46 tests, including the one titled *"does not
+    // clear on the till's audit.print_acknowledged"* — because that fixture's payload has no
+    // `alarm_kind`, so `ackKeyOf` refuses it on the FIELD narrow and the type check is never the
+    // reason. The discriminating case is a NON-ack audit subtype that happens to carry `05-F30`'s
+    // field names, and it was run out-of-tree: correct implementation keeps the alarm, prefix
+    // mutant clears it. This line is load-bearing and the assertion that claims to own it is not —
+    // recorded here rather than fixed, because that suite is another session's oracle.
+    //
+    // ⚠ **CONFIRMED INDEPENDENTLY 2026-08-13, and the risk is narrower than the note above reads.**
+    // The discriminating fixture was reproduced: an `audit.drawer_opened` envelope carrying
+    // `05-F30`'s four field names — correct implementation keeps the alarm, `startsWith` mutant
+    // clears it. But **no shipped producer can emit such a payload today.** The till's own
+    // `audit.print_acknowledged` is `{ alarm_id, order_id, printer_name }` (`printing.ts:577`,
+    // `:862`) and carries NO `alarm_kind`, and the other five subtypes carry `prev_audit_hash`
+    // alone — which is exactly why test 10's fixture cannot discriminate and why the prefix mutant
+    // is inert against the current ledger. So this is a **forward** guard, not a live hole: it
+    // costs nothing and it starts mattering the first time any `audit.*` subtype gains an
+    // `alarm_kind` field. Stated at that strength so nobody reads "load-bearing" as "exploitable".
+    if (fact.type !== ALARM_ACK) continue;
+    const key = ackKeyOf(fact.payload);
+    if (key !== null) acked.add(key);
+  }
+  return acked;
+};
+
 /** `05-F1`'s table, out of the fold's canonical sorted-JSON head set (`pass-queue.ts:193`). */
 const tablesOf = (order: OpenOrderRow): readonly string[] => {
   const parsed: unknown = JSON.parse(order.table_ids_json);
@@ -206,11 +354,22 @@ export const alarmsFrom = (input: AlarmInput): readonly Alarm[] => {
     });
   }
 
+  // `05-F2`'s SECOND EXIT, collected before anything is judged (see `acknowledgedKeys`). It is a
+  // FOLD and not a consumption: the set is rebuilt on every derivation, so an acknowledged alarm
+  // stays cleared as its order ages on (`05-F4` re-derives the row with an updated age at every
+  // render, and an ack that expired would rebuild the siren wall out of the fix for one).
+  const acked = acknowledgedKeys(input.facts);
+
   const alarms: Alarm[] = [];
   for (const [order_id, context] of active) {
     // `05-F1` fires on RED and only on red. `27-F14` allocates amber to *"ticket approaching due"*
     // and red to *"ticket overdue"*; an alarm at amber would spend red's slot on amber's claimant.
     if (context.minutes < context.redAt) continue;
+    // `05-F2`: "until the order goes ready/served OR the manager acknowledges". Keyed per kind, so
+    // acknowledging "this order is late" cannot silently dismiss "the kitchen never got the
+    // ticket" on the same order — two alarms with two different remedies, and `05-F2` forbids the
+    // silent one in terms.
+    if (acked.has(ackKey("late_order", order_id, null))) continue;
     alarms.push(alarmOf("late_order", order_id, context, null));
   }
 
@@ -234,6 +393,10 @@ export const alarmsFrom = (input: AlarmInput): readonly Alarm[] => {
     const key = `${order_id}\u0000${printer_name}`;
     if (raised.has(key)) continue;
     raised.add(key);
+    // `05-F2`'s second exit, per printer. `05-F4` puts two failed printers on one order in TWO
+    // alarms because `03-F5` says the manager has to know which one to walk to — so an ack naming
+    // one leaves the other standing, and the second printer is still down with nobody told.
+    if (acked.has(ackKey("print_failed", order_id, printer_name))) continue;
     alarms.push(alarmOf("print_failed", order_id, context, printer_name));
   }
   return alarms;

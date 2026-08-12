@@ -320,9 +320,16 @@ describe("§E 01-F5/Commandment 2 — the subtype exists and the chain is store-
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  it("is one of the six declared audit subtypes — no event type is invented here", () => {
+  // ⚠ RE-TRANSCRIBED August 2026, from SIX to SEVEN. `01-F5` gained `audit.alarm_acknowledged`
+  // for `05-F2`'s manager alarm ack (`05-F30`); this file's subject, `audit.print_acknowledged`,
+  // is unchanged and is still `03-F5`'s till band. The count is a transcription of the FR, so it
+  // moves when the FR moves — AGENTS.md: "when a ruling lands, grep the suites that encode the
+  // old rule the same day", because a green test defending an overruled rule fails the CORRECT
+  // implementation. The `toContain` above is the assertion about this file's own subject and is
+  // untouched.
+  it("is one of the seven declared audit subtypes — no event type is invented here", () => {
     expect(AUDIT_EVENT_TYPES).toContain(ACK);
-    expect(AUDIT_EVENT_TYPES, "01-F5 says SIX").toHaveLength(6);
+    expect(AUDIT_EVENT_TYPES, "01-F5 says SEVEN").toHaveLength(7);
   });
 
   it("a real device store accepts the emitted payload and stamps the chain link", () => {
