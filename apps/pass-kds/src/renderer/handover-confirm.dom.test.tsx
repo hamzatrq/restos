@@ -62,10 +62,14 @@ class StubResizeObserver {
 }
 
 const DINE_IN_ORDER = "0199cccc-0000-7000-8000-00000000abcd";
-const DELIVERY_ORDER = "0199cccc-0000-7000-8000-00000000ef01";
+const DELIVERY_ORDER = "0199eeee-0000-7000-8000-00000000ef01";
 /** `pass-queue.ts`'s `referenceOf` — the first eight characters of the order id. */
 const DINE_IN_REF = DINE_IN_ORDER.slice(0, 8);
 const DELIVERY_REF = DELIVERY_ORDER.slice(0, 8);
+// ⚠ The two ids MUST differ in their first eight characters, or `referenceOf` gives them the same
+// reference and *"names this ticket's and not the other one's"* can never fail. Found by running
+// the suite against a plausible implementation, which is the only thing that finds it.
+if (DINE_IN_REF === DELIVERY_REF) throw new Error("fixture: the two references must differ");
 
 const ticket = (over: Partial<PassTicketWire> & { order_id: string }): PassTicketWire => ({
   reference: over.order_id.slice(0, 8),

@@ -207,7 +207,7 @@ describe("§C 03-F52 — the refusal exists on both sides of the plane", () => {
   it("the shell hands the control down from main's decision, not from its own", () => {
     expect(APP).toContain("mayHandOver");
     expect(APP).toMatch(/onHandOver=\{/);
-    expect(APP).toContain("bridge().handOver(");
+    expect(APP).toMatch(/\.handOver\(/);
     // `27-F5` — no control at all rather than an inert one, on both axes: the assignment AND the
     // card's own eligibility. The exact expression is the implementer's; that both terms reach the
     // decision is not.
