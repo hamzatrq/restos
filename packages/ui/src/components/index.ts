@@ -17,5 +17,6 @@ export { StatusStrip } from "./StatusStrip";
 export { Surface, type SurfaceProps } from "./Surface";
 export { type Tab, TabRail } from "./TabRail";
 export { TenderPanel, type TenderPanelProps } from "./TenderPanel";
+export { TextEntry, type TextEntryProps } from "./TextEntry";
 export { TicketCard } from "./TicketCard";
 export { Tile } from "./Tile";

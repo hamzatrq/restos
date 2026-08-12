@@ -8,6 +8,7 @@ import {
   space,
   type Tab,
   TenderPanel,
+  TextEntry,
   Tile,
   typography,
   useColor,
@@ -409,6 +410,50 @@ export const Counter = () => {
    */
   const [caller, setCaller] = useState<CustomerLookup | null>(null);
   /**
+   * `02-F27`'s *"inline customer creation"* — the name and `06-F9`'s free-text address, as typed.
+   *
+   * **Raw, and never trimmed here.** The edit belongs at the ONE place the request is built
+   * (`recordCaller`), because a field that rewrote its own value as she typed would eat the space
+   * between `Block` and `C` the moment she pressed it. `00 §5.6` forbids rewriting user content at
+   * all; the leading/trailing trim at the seam is the operator's slip, not her address.
+   *
+   * Renderer state and not a fold read, for `dialled`'s reason directly above: nothing is appended
+   * until she taps `Save caller`, so these exist only while she is on the call.
+   */
+  const [callerName, setCallerName] = useState("");
+  const [callerAddress, setCallerAddress] = useState("");
+  /**
+   * `00 §5.7` — **the caller was NOT filed, said out loud.**
+   *
+   * `true` from the moment a `recordCustomer` is refused until the next attempt or the end of the
+   * call. It is a STATE and not an event, which is the whole of why it takes `CatalogHealth`'s
+   * shape rather than `AlarmBand`'s: what is true after the refusal is *this caller is not on
+   * file*, and it stays true until she is filed or the call ends. An acknowledgement control would
+   * take a still-true condition off the screen, which `00 §5.7` forbids in terms.
+   *
+   * `01-F17` is the other half and it is structural here: this flag reaches nothing but a
+   * sentence. The order-type row reads `pendingChannel` alone, so a refused customer record
+   * cannot gate the sale — `02-F47` says so outright (*"a denied verdict here costs a name and an
+   * address and nothing else"*).
+   */
+  const [callerRefused, setCallerRefused] = useState(false);
+  /**
+   * **The lookup's re-ask counter, and it exists because a SUCCESS was as silent as a failure.**
+   *
+   * The effect below keys on `[pendingChannel, dialled, callerRevision]`. Without the third the
+   * strip goes on saying *"New caller"* about a customer it has just created — main pushes
+   * `notifyChanged()` after the record (`main/index.ts`, asserted by
+   * `__acceptance__/phone-entry-host.test.ts` §B) and `reload` re-reads the device state, the
+   * orders and the menu, but the caller lookup is not one of those three reads. So the wire was
+   * there and the consumer was not listening, and the operator taps `Save` again: a second
+   * permanent row for one human, which `01-F1` forbids correcting in place.
+   *
+   * Bumped on the record's own resolution rather than on every `onChanged` push. `01-F24` makes
+   * customer data the kind of thing not to read for no reason, and every line-add in the branch
+   * moves the folds — this asks again exactly when the answer can have changed.
+   */
+  const [callerRevision, setCallerRevision] = useState(0);
+  /**
    * `02-F1` / `01 §4` / `02-F11` — **WHICH open order this till is working on.**
    *
    * ⚠ **This was `orders[0]`, and it was the contributing defect behind `DEC-MONEY-009`.** Two
@@ -526,6 +571,15 @@ export const Counter = () => {
    * Optional-chained for the reason `RestosBridge.lookupCustomer` records: a host that does not
    * serve the channel leaves the strip saying nothing, and the phone order still rings.
    */
+  // `callerRevision` is a RE-ASK signal rather than a value this effect reads, which is the
+  // standard React idiom for *the answer changed underneath the same question*. It is what makes
+  // a successful `Save caller` visible: main pushes after a record and `reload` re-reads the
+  // device state, the orders and the menu — none of which is the customer lookup — so without it
+  // the strip goes on offering to file a customer it has just filed and the operator taps again,
+  // a second permanent row for one human (`01-F1`). The alternative the lint rule would accept is
+  // a SECOND caller of `lookupCustomer` inside `recordCaller`, which puts the `live` out-of-order
+  // guard on one path and not the other.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a re-ask signal — see just above.
   useEffect(() => {
     if (pendingChannel !== PHONE_CHANNEL) return;
     if (dialled === "") {
@@ -547,7 +601,10 @@ export const Counter = () => {
     return () => {
       live = false;
     };
-  }, [pendingChannel, dialled]);
+    // `callerRevision` is a real dependency and not a lint appeasement — see its declaration.
+    // A record that succeeded changed the answer to this exact question, and nothing else in the
+    // renderer re-asks it.
+  }, [pendingChannel, dialled, callerRevision]);
 
   // `01-F17` — a sale is never blocked. A shell that has not loaded its device state yet is
   // the one case where there is genuinely nothing to draw, so it says so in a word rather
@@ -598,6 +655,15 @@ export const Counter = () => {
   const clearCaller = () => {
     setDialled("");
     setCaller(null);
+    // **The two capture fields go with the number, and this is the highest-consequence line on
+    // the strip.** A stale number renders as digits that are visibly not the ones she just
+    // pressed; a stale ADDRESS renders as a plausible address for the wrong customer, and
+    // `09-F10` reads that text off the assigned order — a real rider at a real door. `01-F1`
+    // makes the row permanent once `Save caller` files it.
+    setCallerName("");
+    setCallerAddress("");
+    // And the refusal is a fact about a call that is now over (`00 §5.7`).
+    setCallerRefused(false);
   };
 
   /**
@@ -730,24 +796,55 @@ export const Counter = () => {
   };
 
   /**
-   * `02-F27` — *"unknown number → inline customer creation"*, as one tap.
+   * A typed field as the SEAM wants it — the operator's slip trimmed off, and nothing else.
    *
-   * **No name and no address cross this call, and that is `27-F6` rather than a shortcut.** *"No
-   * operational role is ever required to type non-numeric text to complete a CRITICAL-PATH task …
-   * of 27 field subjects, 24 could not type a single word."* That FR blesses `02-F27`'s customer
-   * name as an **optional** escape hatch, and optional is the whole of it: this control files the
-   * caller with `name: null` — `06-F11`'s *"created on first sight from a checkout that captured
-   * only a number"*, which `registry.ts` declares the payload nullable to express — so an operator
-   * who cannot type still completes the flow.
+   * `RecordCustomerRequestSchema` declares both fields `z.string().min(1)`, and `.min(1)` counts a
+   * space: `"   "` is a valid request and a permanent row for a human whose name nobody knows
+   * (`01-F1`), or an address `09-F10` sends a rider to. The schema cannot express this and the
+   * surface has to.
    *
-   * **OWED, and named rather than left to look intentional:** the typed name and `06-F9`'s
-   * free-text address have no surface here at all, so a delivery order taken from a new caller
-   * still has nowhere to send the food. The blocker is not this screen — `packages/ui` ships no
-   * text-entry component at all, and `21-F2` bans raw interactive primitives in app code
-   * (`closed-vocabulary.test.ts` is the guard, and it correctly refuses the shortcut) — so the
-   * escape hatch `27-F6` permits cannot be built until `packages/ui` gains that component, which
-   * `21-F5` makes a design-owner review rather than this session's call.
-   * `gateway.recordCustomer` already carries both fields.
+   * **Ends only.** `00 §5.6` — *"user content is never transliterated"* — and an implementation
+   * that collapsed interior whitespace would rewrite `Flat 4,  Street 12` while passing every
+   * blank-field test. Leading and trailing space is the slip; the spacing inside is the address.
+   */
+  const stated = (text: string): string | null => (text.trim() === "" ? null : text.trim());
+
+  /**
+   * `02-F27` — *"unknown number → inline customer creation (`customer.created`,
+   * `customer.address_added`)"*, as ONE tap.
+   *
+   * ── THIS IS `customer.address_added`'s ONLY PRODUCER IN THE PRODUCT ─────────────────────────
+   *
+   * The type had a payload schema, a `WRITE_ACTIONS` row, an authorization guard, a fold, a store
+   * table and a seam test — and until this line **no shipping code ever sent an `address_text`**.
+   * `gateway.recordCustomer` writes the second event iff the request carries one, so the whole
+   * chain was reachable from tests and from nothing else: `AGENTS.md`'s named defect in the exact
+   * shape its CI rail says it cannot see (*"a key in an object literal is not an export"*).
+   *
+   * ── `27-F6` — BOTH FIELDS ARE OPTIONAL AND THE CONTROL NEVER WAITS FOR THEM ─────────────────
+   *
+   * *"No operational role is ever required to type non-numeric text to complete a CRITICAL-PATH
+   * task … of 27 field subjects, 24 could not type a single word."* That FR blesses `02-F27`'s
+   * customer name as an **optional escape hatch**, and optional is the whole of it: with both
+   * fields untouched this files the caller with `name: null` exactly as it did before — `06-F11`'s
+   * *"created on first sight from a checkout that captured only a number"*. `Save caller` is never
+   * disabled and never appears late; a literacy requirement inside `02-F28`'s 30-second budget, in
+   * the branch `27-F11e` says has no manager, is the failure this FR exists to prevent.
+   *
+   * ── `null` vs ABSENT, and the two are different on purpose ──────────────────────────────────
+   *
+   * `name` is required-and-nullable (`registry.ts`: *"`null` is a stated fact and `undefined` is a
+   * writer who forgot"*), so an untyped name travels as `null`. `address_text` is OPTIONAL and is
+   * OMITTED rather than sent empty — `z.string().min(1).optional()` refuses `""` at the seam, and
+   * a Zod refusal there loses the whole record, the name with it.
+   *
+   * ── The refusal (`00 §5.7`) ─────────────────────────────────────────────────────────────────
+   *
+   * Deliberately NOT the shared `write` helper, whose `catch(() => {})` is what made a refused
+   * record indistinguishable from a successful one. Main can refuse this for three stated reasons
+   * — the matrix (`02-F47` gives a storekeeper `—`), `01-F23`'s key rule, or a store error — and
+   * before this the operator saw nothing at all. `reload()` still runs either way, so the screen
+   * re-reads what is actually true rather than holding an optimistic guess.
    *
    * `01-F1` is why this is an explicit act and not something the screen does on her behalf: a
    * created identity is permanent, and an automatic file-on-resolve would record every wrong
@@ -755,8 +852,28 @@ export const Counter = () => {
    * appending nothing at all.
    */
   const recordCaller = () => {
-    const op = window.restos.recordCustomer?.({ dialled, name: null });
-    if (op !== undefined) write(op);
+    const address_text = stated(callerAddress);
+    const op = window.restos.recordCustomer?.({
+      // The RAW digits (see `dialled`) — `01-F23`'s key is derived at the writer, never here.
+      dialled,
+      name: stated(callerName),
+      // Spread, so an absent address is an ABSENT KEY and never `undefined` on the wire.
+      ...(address_text === null ? {} : { address_text }),
+    });
+    if (op === undefined) return;
+    // Cleared at the ATTEMPT and not only at the answer: `27-F5` keeps the control persistent, so
+    // a retry that failed again must read as a fresh refusal rather than as the previous one still
+    // standing — and a stale "not filed" over a record that has since succeeded is `00 §5.7`
+    // inverted.
+    setCallerRefused(false);
+    void op
+      .then(() => {
+        // The lookup is asked again from here — see `callerRevision`. Until this existed the
+        // strip went on offering to file a customer it had just filed (`01-F1`).
+        setCallerRevision((n) => n + 1);
+      })
+      .catch(() => setCallerRefused(true))
+      .then(reload);
   };
 
   /**
@@ -925,6 +1042,17 @@ export const Counter = () => {
    * **The order-type row is NOT gated on any of this** — see the lookup effect. `01-F17`: a
    * caller the file cannot answer about still gets her food.
    */
+  /**
+   * `02-F27`'s *"unknown number"* — a resolvable number with no file behind it, which is the ONE
+   * branch inline customer creation lives in.
+   *
+   * Hoisted out of the card's own branch below because the capture group it gates now sits in the
+   * other column (see the group's own note for the measurement that put it there). The three
+   * states are the card's: nothing asked yet, unknown, on file — and this names the middle one
+   * once so the two columns cannot disagree about which one the strip is in.
+   */
+  const unknownCaller = caller !== null && caller.phone_e164 !== null && caller.known === null;
+
   const callerSurface = (
     /*
       **NO `flexWrap`, AND THAT IS THE SECOND THING THE GATE DECIDED HERE.** With it, the card
@@ -941,24 +1069,90 @@ export const Counter = () => {
         otherwise take it from these keys, and `27-F68` (b) forbids shrinking `27-F8`'s 20 mm to
         make a layout fit. The card gives up width; the target never does.
       */}
-      <div style={{ ...CALLER_PAD, flexShrink: 0 }}>
-        {PHONE_DIGITS.map((d) => (
-          <Tile
-            key={d}
-            posture="keypad"
-            label={d}
-            // The whole of the entry rule: what she pressed, appended. No leading-zero
-            // suppression and no digit cap — see `PHONE_DIGITS` for what both cost.
-            onPress={() => setDialled((current) => current + d)}
-          />
-        ))}
-        {/*
-          `App.tsx`'s PIN pad has `Clear` and no backspace, and this copies it rather than
-          improving on it: `27-F4` is positional memory, and a device whose pads correct an entry
-          differently teaches two habits. The number alone is cleared, never the channel — she is
-          still on the same call.
-        */}
-        <Tile posture="keypad" label="Clear" onPress={() => setDialled("")} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
+        <div style={CALLER_PAD}>
+          {PHONE_DIGITS.map((d) => (
+            <Tile
+              key={d}
+              posture="keypad"
+              label={d}
+              // The whole of the entry rule: what she pressed, appended. No leading-zero
+              // suppression and no digit cap — see `PHONE_DIGITS` for what both cost.
+              onPress={() => setDialled((current) => current + d)}
+            />
+          ))}
+          {/*
+            `App.tsx`'s PIN pad has `Clear` and no backspace, and this copies it rather than
+            improving on it: `27-F4` is positional memory, and a device whose pads correct an entry
+            differently teaches two habits. The number alone is cleared, never the channel — she is
+            still on the same call.
+          */}
+          <Tile posture="keypad" label="Clear" onPress={() => setDialled("")} />
+        </div>
+        {unknownCaller ? (
+          /*
+            `02-F27`'s *"inline customer creation"* — the capture group that gives
+            `customer.address_added` its first production producer, and `06-F9`'s free-text
+            address with it.
+
+            ── **IT IS UNDER THE PAD BECAUSE THAT IS WHERE THE WIDTH IS, AND THE FIRST DRAFT PUT
+               IT IN THE CARD COLUMN AND `pnpm layout:check` REFUSED IT.** ─────────────────────
+
+            Measured, not argued: stacked in the card column the surface held **644 px of content
+            in `tablet-10.1`'s 567 px work area**, and `Save caller` was **UNREACHABLE** — 71 px
+            below the viewport with a centre that does not hit-test — on `tablet-10.1` AND
+            `netbook-1024`. The card column is only ~137 px wide on that panel (the pad takes 756
+            of ~1040), so putting two free-text fields in it is asking the narrowest column on the
+            screen to carry the widest content; side-by-side there would have been ~65 px each.
+
+            The room was already on the glass and empty: the pad is 6 × 2 keys, so the space
+            **beneath** it is the pad's full width, and nothing was in it. The row costs the
+            surface one field's height instead of three controls' — measured back down to
+            **548 px** on the same panel.
+
+            ── The group stays together, which is the part not to lose ─────────────────────────
+
+            `27-F57`'s mapping step — pairing a thing to what it names — is where comprehension
+            collapses, so the two fields and the act they feed sit in one row rather than the
+            fields here and the control over there. Order is name, address, then the save:
+            `02-F27`'s own order, and a control above the fields it acts on reads as acting on
+            nothing.
+
+            `alignItems: "flex-end"` because a `Readout` is a caption ABOVE its payload and a
+            `Tile` is not — bottom-aligning puts the tile's face level with the two inputs rather
+            than level with their captions.
+
+            The address gets twice the name's share (`flex: 2` against `flex: 1`): `06-F9` calls it
+            free text and a Pakistani address is a house, a street, a block and a city, where a
+            name is two words. `minWidth: 0` on both is what lets them give up width to the pad
+            rather than pushing the pad out of the row (`27-F68` (b) — the 20 mm target never
+            shrinks).
+
+            `posture="counter"` and not `keypad`: `27-F8` puts 20 mm on *"standing,
+            high-consequence NUMERIC entry"*, which is the pad above. These are the OPTIONAL half
+            of the act (`27-F6`), and spending 20 mm of the tightest vertical budget on the screen
+            on them is what pushed the pad off the glass in the first draft.
+          */
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <TextEntry
+                posture="counter"
+                caption="CALLER NAME"
+                value={callerName}
+                onChange={setCallerName}
+              />
+            </div>
+            <div style={{ flex: 2, minWidth: 0 }}>
+              <TextEntry
+                posture="counter"
+                caption="ADDRESS"
+                value={callerAddress}
+                onChange={setCallerAddress}
+              />
+            </div>
+            <Tile posture="counter" label="Save caller" onPress={recordCaller} />
+          </div>
+        ) : null}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0, flex: 1 }}>
         {/*
@@ -987,7 +1181,52 @@ export const Counter = () => {
             <p style={{ ...STATE_LINE, color: color["fgColor-muted"], marginLeft: 0 }}>
               New caller — {caller.phone_e164}
             </p>
-            <Tile posture="counter" label="Save caller" onPress={recordCaller} />
+            {callerRefused ? (
+              /*
+                `00 §5.7` — **THE TILL REPORTS WHAT IS TRUE**, and before this line a refused
+                `Save caller` looked exactly like a successful one.
+
+                ── WHY IT IS A WORD HERE AND NOT `03-F5`'s BAND ────────────────────────────────
+
+                A refusal is a **STATE**: what is true afterwards is *this caller is not on file*,
+                and it stays true until she is filed or the call ends. That is `CatalogHealth`'s
+                shape and not `AlarmBand`'s, on that component's own structural argument — the
+                band clears on an attributed acknowledgement, which is right for an EVENT that
+                already happened and wrong for a condition that is still happening.
+
+                Three FRs make the band positively FORBIDDEN rather than merely unnecessary:
+                `27-F14` allocates red to a CLOSED list (*"ticket overdue, print failure, cash
+                variance past threshold, void & refund actions, revoked device"*) and adds that
+                *"adding a colour requires an amendment here, not a local decision"*; `21 §5`
+                closes its interrupt-priority law with *"no module invents its own alarm behavior —
+                new signal types are assigned a severity here"*, which makes assigning one a spec
+                change (commandment 2); and `27-F11g` makes that band the ONLY signal that food is
+                not being cooked, so a second claimant is how it stops being the loudest thing on
+                the glass.
+
+                So: a WORD, in the position the strip already owns. `role="status"` and not
+                `role="alert"` — the same choice `CatalogHealth`, `PanelHealth`, `ConnectionFacts`
+                and `AgeBadge` all made for `27-F11d`'s stated reason (*"the work underneath a
+                cashier's hands stays usable"*). No acknowledgement control, because acknowledging
+                a condition that is still true hides it. No colour: `27-F16`'s argument is that
+                colour on a number means *this number is abnormal*, and the three status hues are
+                spent — the word and its position carry this (`27-F12`'s non-colour channels), so
+                it is `fgColor-default` against the muted lines around it and legible in greyscale
+                (`27-F13`).
+
+                **The remedy on offer is `Save caller` itself**, unchanged and one column to the
+                left — `27-F5`'s persistent target. It changes the fact; an `I SAW THIS` would only
+                change the report of it. It is reported HERE, on the card, because the card is
+                where this caller's state is already read: *"New caller — +92…"* directly above says
+                she is not on file, and *"Not filed"* says the attempt to change that did not take.
+              */
+              <p
+                role="status"
+                style={{ ...STATE_LINE, color: color["fgColor-default"], marginLeft: 0 }}
+              >
+                Not filed — this caller is not on file. Tap Save caller to try again.
+              </p>
+            ) : null}
           </>
         ) : (
           /*

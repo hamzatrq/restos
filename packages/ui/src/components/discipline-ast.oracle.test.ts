@@ -390,6 +390,26 @@ describe("the guard suite actually covers the package", () => {
         // pin exists to force.
         "components/TenderPanel.tsx",
         "components/TenderPanel.stories.tsx",
+        /**
+         * ADDED with `02-F27`'s caller capture (August 2026), and the acknowledgement this pin
+         * forces is the whole reason the component took three weeks to arrive: **this package
+         * shipped no text-entry control at all**, so `customer.address_added` had a payload
+         * schema, a permission action, a fold and a store table — and no production producer
+         * anywhere in the product. `21-F2` bans a raw `<input>` in app code, correctly, so the
+         * missing thing was here.
+         *
+         * Three of the guards below bear on it directly and each one is a live temptation rather
+         * than a formality. `touchCheck` (`27-F8`): a field is a control a finger lands on before
+         * anything is typed into it, so its height is `targetFor(posture)` and never the literal
+         * that would "look right". `rawValueCheck`: an input is the element every framework
+         * example paints with a hex. And the one no scanner can see, so it is stated here — a
+         * field must apply **no script filter**: `03-F8` refuses non-Latin user content on PAPER
+         * and `packages/escpos` ships `isPrintableLatin` for an implementer to reach for, while
+         * `00 §5.6` says user content *"is never transliterated or rejected for its script"*.
+         * Filtering here would make the customer unrecordable rather than the ticket unprintable.
+         */
+        "components/TextEntry.stories.tsx",
+        "components/TextEntry.tsx",
         "components/Surface.tsx",
         "components/TabRail.stories.tsx",
         "components/TabRail.tsx",
