@@ -102,7 +102,12 @@ const UNKNOWN = { phone_e164: "+923001234567", known: null };
 let appended: AppendRequest[];
 let recorded: Record<string, unknown>[];
 
-const mount = () => {
+/**
+ * `keyable: false` is `02-F27`'s OTHER unresolved branch — a number `01-F23` cannot key at all,
+ * which the strip already renders as *"Key the caller's number"*. Added by the mutation pass;
+ * every existing call leaves it defaulted and behaves exactly as before.
+ */
+const mount = (opts: { keyable?: boolean } = {}) => {
   appended = [];
   recorded = [];
   const bridge = {
@@ -120,7 +125,7 @@ const mount = () => {
     // branch this file is about.
     lookupCustomer: vi.fn(async (dialled: unknown) => ({
       ...UNKNOWN,
-      phone_e164: `+92${String(dialled).slice(1)}`,
+      phone_e164: opts.keyable === false ? null : `+92${String(dialled).slice(1)}`,
     })),
     recordCustomer: vi.fn(async (req: Record<string, unknown>) => {
       recorded.push(req);
@@ -314,6 +319,34 @@ describe("§B 27-F6/21 §5 — the capture is an escape hatch, never a gate", ()
     expect(control.hasAttribute("disabled")).toBe(false);
   });
 
+  it("offers no capture at all for a number `01-F23` cannot key", async () => {
+    /**
+     * ⚠ **ADDED BY THE MUTATION PASS — the branch was pinned at one end and open at the other.**
+     * `02-F27`'s creation clause is *"unknown number → inline customer creation"*, and *unknown*
+     * has two halves: a number that KEYS and has no file, and a number that does not key at all.
+     * Rendering the capture for a known caller is caught (three tests in
+     * `caller-refusal.dom.test.tsx` §C fail); dropping the `phone_e164 !== null` half passed
+     * **846/846** when measured 2026-08-12.
+     *
+     * The consequence is not cosmetic and it undoes the other half of this wave's work: the card
+     * says *"Key the caller's number"* while a `Save caller` sits under the pad, and
+     * `gateway.recordCustomer` throws on a key no lookup will ever produce (`01-F1` — *"a key no
+     * lookup will ever produce is permanent"*, asserted in
+     * `main/__acceptance__/customer-address-producer.test.ts` §C). The refusal line lives inside
+     * the resolvable branch, so that tap would be refused **silently** — the exact defect
+     * `caller-refusal.dom.test.tsx` exists to end, reachable through a branch nothing pinned.
+     */
+    mount({ keyable: false });
+    render(<Counter />);
+    await screen.findByRole("button", { name: /^Phone$/i });
+    tap(/^Phone$/i);
+    await waitFor(() => enterNumber(DIALLED));
+    await screen.findByText(/Key the caller's number/i);
+
+    expect(screen.queryByRole("button", { name: /^Save caller$/i })).toBeNull();
+    expect(screen.queryAllByRole("textbox")).toHaveLength(0);
+  });
+
   it("starts the order with both fields untouched", async () => {
     // `01-F17`, restated for this surface: the customer file never gates the sale. The oracle
     // asserts this for the number; this asserts it for the two new fields, which are the two
@@ -357,6 +390,26 @@ describe("§C 01-F1/06-F9 — whitespace is not a name and not an address", () =
     type(addressField(), "  \t ");
     await save();
     expect(recorded[0]).not.toHaveProperty("address_text");
+  });
+
+  it("trims the ends of a NAME too, not only of an address", async () => {
+    /**
+     * ⚠ **ADDED BY THE MUTATION PASS — this section pinned the trim for the address and left the
+     * name asserted only in its all-blank form.** Measured 2026-08-12: sending the name
+     * un-trimmed while leaving `stated()` on the address (`name: callerName.trim() === "" ? null
+     * : callerName`) passed **846/846**, because `"   "` still resolves to `null` and every other
+     * fixture types a name with no space at its ends.
+     *
+     * It is the same `01-F1` weight the section header already states: `customer.created` cannot
+     * be corrected in place, so `"  Hina Raza  "` is a permanent row, and `07`'s templates and
+     * `12`'s summaries all read that string back with the operator's slip inside it.
+     */
+    mount();
+    render(<Counter />);
+    await reachUnknownCaller();
+    type(nameField(), "  Hina Raza  ");
+    await save();
+    expect(recorded[0]?.name).toBe("Hina Raza");
   });
 
   it("does NOT trim the middle of a real address", async () => {

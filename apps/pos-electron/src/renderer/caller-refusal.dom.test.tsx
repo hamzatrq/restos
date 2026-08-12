@@ -108,6 +108,8 @@ const DEVICE: DeviceState = {
 const MENU: MenuItem[] = [{ id: "item-karahi", label: "Karahi" }];
 const DIALLED = "03001234567";
 const E164 = "+923001234567";
+/** `26 §8`'s business key, minted by the WRITER — the renderer never sees or supplies one. */
+const FILED_ADDRESS_ID = "addr-filed-1";
 
 /** What `main` actually throws when the matrix says no — `authorize.ts` refuses, `ipcMain` */
 /** serializes the error to its message, and the renderer receives a rejected promise. */
@@ -129,7 +131,16 @@ const mount = (opts: { record?: "accept" | "refuse"; alarms?: readonly Alarm[] }
    * whose lookup answered `known: null` for ever could not tell a surface that reports success
    * from one that reports nothing, because both would keep saying "New caller".
    */
-  let filed: { name: string | null; addresses: never[] } | null = null;
+  /**
+   * ⚠ `addresses` was `never[]` — always empty — until the mutation pass, and that is what made
+   * §C's re-read claim unfalsifiable. The trusted side MINTS the `address_id` (`26 §8`), so a
+   * saved address is a fact the renderer cannot invent; serving one is what lets a test tell a
+   * surface that re-read the fold from one that echoed its own optimistic guess.
+   */
+  let filed: {
+    name: string | null;
+    addresses: { address_id: string; address_text: string }[];
+  } | null = null;
   const bridge = {
     deviceState: vi.fn(async () => DEVICE),
     openOrders: vi.fn(async (): Promise<OpenOrder[]> => []),
@@ -146,7 +157,15 @@ const mount = (opts: { record?: "accept" | "refuse"; alarms?: readonly Alarm[] }
     recordCustomer: vi.fn(async (req: Record<string, unknown>) => {
       recorded.push(req);
       if (opts.record === "refuse") throw REFUSAL;
-      filed = { name: (req.name as string | null) ?? null, addresses: [] };
+      filed = {
+        name: (req.name as string | null) ?? null,
+        // What `gateway.recordCustomer` does with an address-carrying request: the text as sent,
+        // under an id only the writer can mint. `02-F27`'s *"→ name, saved addresses"*.
+        addresses:
+          typeof req.address_text === "string"
+            ? [{ address_id: FILED_ADDRESS_ID, address_text: req.address_text }]
+            : [],
+      };
       // Exactly what `main/index.ts` does after a successful record, and the reason
       // `phone-entry-host.test.ts` §B gives for it: *"the fold moved and the caller strip is
       // reading it."* Firing it here means an implementation may re-ask on this push OR on the
@@ -279,6 +298,37 @@ describe("§A 00 §5.7/02-F27 — the till reports that the caller was NOT filed
 
     tap(/^Save caller$/i);
     await waitFor(() => expect(recorded).toHaveLength(2));
+  });
+
+  it("does not carry the refusal into the NEXT call", async () => {
+    /**
+     * ⚠ **ADDED BY THE MUTATION PASS — the refusal had no exit.** Every test in this file lives
+     * inside one call, so deleting `setCallerRefused(false)` from `clearCaller` passed
+     * **846/846** when measured 2026-08-12. `caller-details.dom.test.tsx` §E covers exactly this
+     * hazard for the two capture FIELDS and cites `09-F10` for why a stale address is worse than
+     * a stale number; the refusal flag arrived on the same strip, with the same two exits, and
+     * was left out.
+     *
+     * What the operator would read: a caller she has not attempted to file, under a line saying
+     * she failed to file her. That is `00 §5.7` inverted — the till reporting something that is
+     * not true — and this file's own §C is the reason it matters, because the announcement is the
+     * only signal separating a refusal from a success.
+     *
+     * Anchored on `announced()` and not on the sentence, for the reason recorded in §A: a
+     * `queryByText` pin here has already reddened a correct implementation once. The claim is
+     * that the strip goes back to ANNOUNCING WHAT IT ANNOUNCED before the tap — which is true
+     * whatever words the refusal is eventually written in.
+     */
+    mount({ record: "refuse" });
+    render(<Counter />);
+    await reachUnknownCaller();
+    const beforeAnyAttempt = announced();
+    await saveAndAwaitAnnouncement();
+
+    // `Counter.tsx`'s second exit: *"latching a different channel ends the call."*
+    tap(/^Counter$/i);
+    await reachUnknownCaller();
+    expect(announced()).toBe(beforeAnyAttempt);
   });
 
   it("does not block the sale (01-F17)", async () => {
@@ -419,9 +469,48 @@ describe("§C 00 §5.7/01-F1 — a filed caller is reported as filed", () => {
     await saveCaller();
 
     // The strip's KNOWN branch already renders `caller.known.name`; what is new is that it is
-    // reached at all after a record. This also proves the surface re-READ the trusted side rather
-    // than echoing its own optimistic guess — the harness only answers `known` after the write.
+    // reached at all after a record.
+    //
+    // ⚠ **THIS COMMENT CLAIMED ONE MORE THING THAN THE ASSERTION CARRIED, AND THE MUTATION PASS
+    // DISPROVED IT (2026-08-12).** It read *"This also proves the surface re-READ the trusted side
+    // rather than echoing its own optimistic guess — the harness only answers `known` after the
+    // write."* It does not: the name the strip would echo IS the name she typed, so an
+    // implementation replacing the re-ask with `setCaller({ ...c, known: { name, addresses: [] }})`
+    // passed **846/846**. The claim is true of the test BELOW, which asks for a fact the renderer
+    // cannot invent. Kept and corrected in place rather than deleted — a comment promising a
+    // protection that does not exist retires the assertion someone would otherwise write.
     await waitFor(() => expect(screen.getByText(/Hina Raza/)).toBeTruthy());
+  });
+
+  it("shows the SAVED ADDRESS, which only the trusted side can have minted (26 §8)", async () => {
+    /**
+     * The re-read claim, made falsifiable. `02-F27`'s known branch is *"→ name, saved addresses"*,
+     * and an `address_id` is minted by the WRITER (`26 §8`; asserted against a real store in
+     * `main/__acceptance__/customer-address-producer.test.ts` §A) — so a surface answering from
+     * its own optimistic guess has `addresses: []` and can never render this row, however
+     * confidently it reports the name.
+     *
+     * `00 §5.7` is the FR: the till reports what is TRUE, which is what the fold holds, not what
+     * the screen hoped for. `01-F1` is the cost of getting it wrong in the other direction — a
+     * strip that says *filed* about a write that did not land invites the second tap this section
+     * exists to prevent.
+     */
+    mount({ record: "accept" });
+    render(<Counter />);
+    await reachUnknownCaller();
+
+    const addressBox = screen.queryAllByRole("textbox", { name: /address/i })[0];
+    if (addressBox === undefined) {
+      throw new Error(
+        "02-F27 red-awaiting-implementation: no address field on the caller strip — see " +
+          "caller-details.dom.test.tsx, which owns that claim.",
+      );
+    }
+    const ADDRESS = "House 12, Block C, Gulberg III, Lahore";
+    fireEvent.change(addressBox, { target: { value: ADDRESS } });
+    await saveCaller();
+
+    await waitFor(() => expect(screen.getByText(ADDRESS)).toBeTruthy());
   });
 
   it("reads DIFFERENTLY after a refusal than after a success", async () => {

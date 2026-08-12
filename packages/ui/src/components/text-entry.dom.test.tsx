@@ -61,7 +61,7 @@
 //       duplicates `NumericKeypad`'s job besides).
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { ReactElement } from "react";
+import { type ReactElement, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as ui from "../index";
 import { ThemeProvider } from "../theme";
@@ -158,6 +158,33 @@ describe("§A 02-F27 — the field carries a value in, and carries a value back 
     fireEvent.change(box(), { target: { value: "typed but not accepted" } });
     rerender(entry({ ...NAME_FIELD, value: "", onChange }));
     expect((box() as HTMLInputElement).value).toBe("");
+  });
+
+  it("reports what she typed KEYSTROKE BY KEYSTROKE, editing none of it", () => {
+    /**
+     * ⚠ **ADDED BY THE MUTATION PASS — every other assertion in this file sets the whole value in
+     * ONE `fireEvent.change`, and a mutant that survives that is not hypothetical.** Measured
+     * 2026-08-12: `onChange(e.target.value.trim())` — "tidy it up at the field", the shape an
+     * implementer reaches for when `stated()` is trimming one line away — passed **318/318 here
+     * and 846/846 in `apps/pos-electron`**. It is not cosmetic: the field is CONTROLLED, so the
+     * trimmed string is what comes back as `value`, the space is erased before the next key
+     * arrives, and a two-word name becomes untypable. The probe prints `'HinaRaza'`.
+     *
+     * `00 §5.6` is the FR — user content is never rewritten — and `27-F6` is what makes it bite,
+     * because this field IS the escape hatch and an escape hatch that cannot spell a name is not
+     * one. So the value is built one character at a time, from what the control currently holds,
+     * which is what a browser actually delivers.
+     */
+    const Harness = () => {
+      const [held, setHeld] = useState("");
+      return entry({ ...NAME_FIELD, value: held, onChange: setHeld });
+    };
+    render(<Harness />);
+    for (const ch of "Hina Raza") {
+      const el = box() as HTMLInputElement;
+      fireEvent.change(el, { target: { value: el.value + ch } });
+    }
+    expect((box() as HTMLInputElement).value).toBe("Hina Raza");
   });
 });
 
@@ -267,6 +294,26 @@ describe("§D 27-F5/27-F43 — the caption names the field and stays on the glas
     // whatever it is implemented as.
     const { container } = render(entry({ ...NAME_FIELD, value: "Hina Raza" }));
     expect(container.textContent).toContain("CALLER NAME");
+  });
+
+  it("renders the caption it was GIVEN, not one of its own", () => {
+    /**
+     * ⚠ **ADDED BY THE MUTATION PASS, and it is `K-4`'s recorded defect in the one prop §C did
+     * not vary.** §C varies `posture` and compares the two answers, precisely so a component that
+     * accepts a prop and sizes itself from a literal cannot pass — and then every caption
+     * assertion above renders the SAME caption, `"CALLER NAME"`, three times. Measured 2026-08-12:
+     * hardcoding `<Readout caption="CALLER NAME">` while leaving `aria-label={caption}` alone
+     * passed **318/318 here and 846/846 in `apps/pos-electron`**, because the accessible name
+     * still varied — so `getByRole("textbox", { name: /address/i })` kept finding the right box
+     * while the glass showed `CALLER NAME` over both fields.
+     *
+     * `21 §5` is why the visible half is the half that matters — *"visual position is the real
+     * interface"*, and this population reads position, not prose — and `27-F5` requires the target
+     * to be *labelled*, which two identically-labelled fields are not.
+     */
+    const { container } = render(entry({ ...NAME_FIELD, caption: "ADDRESS" }));
+    expect(container.textContent).toContain("ADDRESS");
+    expect(container.textContent).not.toContain("CALLER NAME");
   });
 });
 
