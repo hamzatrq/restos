@@ -252,7 +252,18 @@ describe("registry growth must fail this suite before it can silently no-op (fix
    * side. A type in NEITHER list still fails to compile, which was the whole point; a type in
    * BOTH now fails too, which the old shape could not even ask.
    */
-  const PINNED_NOT_FOLDED = ["catalog.changed"] as const;
+  // `printer.status_changed` (`03-F53`, August 2026) is the SECOND member, and it is here rather
+  // than in `PINNED_FOLD_CONSUMED` for a structural reason, not a judgement call: it names no order
+  // and no item, so `26 §3`'s sidecar has no key to answer with and the order-keyed engine is not
+  // where it arrives. `merge.ts`' `NON_FOLD_TYPES` row states the claim at its real strength — no
+  // fold in this package reads it, which is weaker than `catalog.changed`'s `01-F52` prohibition,
+  // and the row moves the day one does.
+  //
+  // ⚠ This pin RED-AT-COMPILED the moment the type entered the registry, which is the design
+  // working — and the session that landed the schemas is not the one that wrote this list. `03-F11`
+  // declared the type in July and it sat schema-less for a month, so `05-F3`'s second alarm trigger
+  // did not exist; giving it a payload is what made it fold-registry vocabulary at all.
+  const PINNED_NOT_FOLDED = ["catalog.changed", "printer.status_changed"] as const;
 
   type PinnedType = (typeof PINNED_FOLD_CONSUMED)[number] | (typeof PINNED_NOT_FOLDED)[number];
   // COMPILE-LEVEL PIN (F5): if the registry grows, this assignment stops

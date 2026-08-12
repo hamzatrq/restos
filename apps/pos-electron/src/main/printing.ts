@@ -4,6 +4,7 @@ import {
   type OrderChannel,
   PAYMENT_METHODS,
   type PaymentMethod,
+  type PrinterStatus,
   totalPaisaOrNull,
 } from "@restos/domain";
 import {
@@ -228,6 +229,31 @@ const isReceiptJob = (job_id: string): boolean => job_id.startsWith(RECEIPT_JOB_
 const PRINT_ACK = "audit.print_acknowledged";
 
 /**
+ * **`03-F11`/`03-F53` — the printer transition, and until August 2026 nothing produced it.**
+ *
+ * `03-F11` declared the type in July and `01 §4` absorbed it; no payload schema was ever written,
+ * so `01-F4` made emitting it a runtime error and **`05-F3`'s second alarm trigger has never
+ * existed**. A symbol-precise `grep -a` across `apps/`, `services/` and `packages/` found the type
+ * in comments and specs only. `03-F53` gives it a payload; this constant is its first producer.
+ *
+ * ── What this device can OBSERVE, which is what decides the design ───────────────────────────
+ *
+ * A till has no link monitor: the transport is exercised only by jobs. So the evidence of
+ * *offline* is a job reaching `03-F4`'s terminal `failed` — the whole retry budget spent — and the
+ * evidence of *online* is a job reaching `printed`. **The simpler alternative, emitting per failed
+ * transmit ATTEMPT, is refused**: it would append up to three events per job, permanently
+ * (`01-F1`), for one printer going down, and `03-F4` spends a budget precisely because a single
+ * failed attempt is not yet evidence of anything.
+ *
+ * `stalled` is DELIBERATELY not a transition (`03-F53`, `03-F41`): the printer ANSWERED the
+ * `DLE EOT 4` query, which is how the stall was diagnosed at all — it is reachable, it is holding
+ * the bytes, and the remedy is a roll rather than a cable. Emitting `offline` for paper-out would
+ * fire on the most ordinary event in a kitchen and send a manager to check the wrong thing. It
+ * costs nothing here because this file already inspects only `printed` and `failed`.
+ */
+const PRINTER_STATUS = "printer.status_changed";
+
+/**
  * `03-F5`'s alert has to name the DOCUMENT as well as the printer and the subject — "KOT #142 did
  * not print" is unactionable if what failed was the shift-close slip a cashier is waiting to sign.
  */
@@ -290,6 +316,24 @@ export const createKotPrinter = ({
    */
   const raised = new Map<string, { alarm: Alarm; order_id: string }>();
   let pumping = false;
+  /**
+   * `03-F53`: **the prior state is assumed `online`.** A device that boots with no prior state has
+   * two honest options — assume online (a dead printer announces itself on the first attempt; a
+   * healthy one stays silent) or treat the first observation as a transition (which appends one
+   * `online` per launch, reporting no change to anyone, into a ledger `01-F1` never thins out).
+   * The FR takes the first, because the alarm this feeds is about the printer being DOWN.
+   *
+   * ONE boolean, not a map, because this device has exactly ONE transport: all three printers are
+   * constructed with the same `kotCapability()` in `main/index.ts`, and `03-F2`'s per-station
+   * routing table is doc-14 work that does not exist. `03-F11`'s *"per registered printer"* is one
+   * printer here, and a `Map` keyed by a name that can only take one value would imply otherwise.
+   *
+   * In MEMORY and not in the spool, deliberately: the state is a claim about the link right now,
+   * and a relaunch has observed nothing. `03-F53`'s assumed-online rule is exactly what a fresh
+   * process should believe, so persisting this would only let a stale belief suppress the first
+   * real report after a restart.
+   */
+  let printer_online = true;
 
   /**
    * `01-F17` — a failed ledger write must not cost the band. `03-F5`'s three consequences are
@@ -436,9 +480,39 @@ export const createKotPrinter = ({
     queueMicrotask(() => void pump());
   };
 
+  /**
+   * `03-F11`'s transition, decided from the only two job outcomes this device can observe.
+   *
+   * The guards are what make it a TRANSITION rather than a report: a second dead job on an
+   * already-offline printer says nothing new, and `05-F4`'s siren wall has a ledger form — an
+   * unbounded permanent event stream under `01-F1`. `stalled` never reaches here.
+   */
+  const observePrinter = (state: string): void => {
+    const status: PrinterStatus | null =
+      state === "printed" && !printer_online
+        ? "online"
+        : state === "failed" && printer_online
+          ? "offline"
+          : null;
+    if (status === null) return;
+    printer_online = status === "online";
+    emit(PRINTER_STATUS, { printer_name, status });
+  };
+
   const reconcile = (before: ReadonlyMap<string, string>): void => {
     for (const job of spooler.jobs()) {
       if (before.get(job.job_id) === job.state) continue;
+      // `03-F11`'s printer fact comes FIRST and is deliberately ABOVE the deny-list below.
+      //
+      // The deny-list exists because `kot.printed` / `kot.print_failed` are facts about a KOT, and
+      // writing one about a shift slip's id would be a permanent lie. `printer.status_changed`
+      // names NO document and NO order — its whole payload is the printer and its status — so that
+      // reason does not reach it, while the fact it reports does: the transport is shared by all
+      // four document types (`03-F42` makes a document the unit, not the queue), so a cash slip
+      // that exhausts its retry budget is the same evidence about the same cable as a KOT that
+      // does. Filtering it to KOTs would make whether the manager hears about a dead printer
+      // depend on which document happened to be printing when it died.
+      observePrinter(job.state);
       // S-7 — THE ONE LINE THAT KEEPS THIS FILE'S PRINTERS APART, and it is not tidiness.
       //
       // `03-F42` makes a DOCUMENT the unit, not the queue, so all four types share this device's

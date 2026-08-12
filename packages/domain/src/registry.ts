@@ -90,6 +90,22 @@ export const ORDER_REJECTION_REASONS = [
 export type OrderRejectionReason = (typeof ORDER_REJECTION_REASONS)[number];
 
 /**
+ * `03-F53` — the CLOSED two-member set `printer.status_changed` reports, declared once here for
+ * `18 §4`'s reason (a domain vocabulary is declared in `domain`, and the producer imports it
+ * rather than typing the words a second time).
+ *
+ * `03-F11`'s own words are *"emitted on online/offline transitions per registered printer"*, so
+ * the enumeration is transcription rather than design. It is CLOSED because `05-F3` matches on the
+ * literal `offline` and `01-F1` admits a typo permanently — and, more sharply, because the
+ * vocabulary sitting one import away in `packages/escpos` is the SPOOLER's five job states.
+ * `stalled` is one of them and `03-F53` refuses it here at the schema: a printer holding a job for
+ * a missing roll ANSWERED the `DLE EOT 4` query (`03-F41`), so it is reachable, and calling that
+ * offline would send a manager to check a cable on the most ordinary event in a kitchen.
+ */
+export const PRINTER_STATUSES = ["online", "offline"] as const;
+export type PrinterStatus = (typeof PRINTER_STATUSES)[number];
+
+/**
  * `02-F23`'s "system-expected cash (by method)" — EXHAUSTIVE over the closed tender set, with
  * explicit zeros. Derived from `PAYMENT_METHODS` rather than transcribed, so a sixth tender
  * cannot be added to the enum and silently skipped here.
@@ -356,6 +372,22 @@ const payloadSchemas = {
   "kot.print_failed": z.looseObject({
     order_id: z.string().min(1),
     printer_name: z.string().min(1),
+  }),
+  /**
+   * **`03-F53` — `03-F11`'s printer transition, and the payload it went a month without.**
+   *
+   * `03-F11` declared the extension in July, `01 §4` absorbed the type, and no schema was ever
+   * written — so `01-F4` made emitting it an `UnknownEventTypeError`, nothing produced it, and
+   * `05-F3`'s SECOND alarm trigger has never existed. It is an ORDINARY kernel event and not an
+   * `audit.*` one: nobody is accountable for a cable, so there is no chain to stamp.
+   *
+   * `printer_name` is `kot.print_failed`'s own field name one line up, deliberately — `05-F3`
+   * raises both onto ONE alarm list, and a second vocabulary for the same noun would make the
+   * console join two spellings of one printer (`03-F40`'s named defect).
+   */
+  "printer.status_changed": z.looseObject({
+    printer_name: z.string().min(1),
+    status: z.enum(PRINTER_STATUSES),
   }),
   "order.line_state_changed": z.looseObject({
     order_id: z.string().min(1),
@@ -781,7 +813,7 @@ const payloadSchemas = {
 
 export type KnownEventType = keyof typeof payloadSchemas;
 
-// Audit family (01-F5; 01 §4 admin-family `audit.*` wildcard). These six concrete
+// Audit family (01-F5; 01 §4 admin-family `audit.*` wildcard). These seven concrete
 // subtypes are ordinary kernel events, hash-chained per device. The chain link lives in
 // the PAYLOAD as `prev_audit_hash: string | null` (store-owned platform law, 01 §7) —
 // NOT the envelope, because `EventEnvelope` is a strict z.object that strips unknown keys
@@ -793,6 +825,77 @@ export type KnownEventType = keyof typeof payloadSchemas;
 const auditPayloadSchema = z.looseObject({
   prev_audit_hash: z.union([z.string().min(1), z.null()]),
 });
+
+/**
+ * `05-F30`'s CLOSED two-member set: the categories of `05 §5`'s active alarm list an ack may name
+ * — `05-F1`'s late order and `05-F3`'s failed print. Declared once here (`18 §4`) because the
+ * DERIVED VIEW that suppresses an acknowledged alarm (`apps/manager/src/alarms.ts`) must narrow
+ * against the same two words the ledger admits; two readings of one closed set is `03-F40`'s
+ * defect, and here it would mean an ack that parses and clears nothing.
+ *
+ * ⚠ **`printer_offline` is DELIBERATELY ABSENT and is a founder call, not an oversight.**
+ * `05-F3` names `printer.status_changed(offline)` as an alarm trigger, so a third kind is
+ * foreseeable — but that alarm has no order to name and no ready/served exit, which neither
+ * `05-F1`'s alarm shape (order, channel, table, age) nor `05-F2`'s persistence rule can express.
+ * `05-F30` closes the set precisely so the ruling has to widen it VISIBLY, here, rather than
+ * arriving as a string nobody enumerated and `01-F1` can never retract.
+ */
+export const ALARM_ACK_KINDS = ["late_order", "print_failed"] as const;
+export type AlarmAckKind = (typeof ALARM_ACK_KINDS)[number];
+
+/**
+ * **`05-F30` — `05-F2`'s acknowledgment, `01-F5`'s SEVENTH subtype (August 2026).**
+ *
+ * Until it existed the act was not merely unbuilt but UNEXPRESSIBLE: `01-F4` refused the emit, so
+ * **every alarm the manager console raises was permanent** — a manager could see it and never
+ * clear it. `apps/manager/src/alarms.ts` had recorded that as unbuildable rather than guess at it.
+ *
+ * **Why not the sixth subtype, stated because it is the obvious reach.**
+ * `audit.print_acknowledged` is `03-F5`'s TILL band: a cashier dismissing an S1 about a print JOB
+ * the spooler minted an id for. This is a MANAGER clearing a row of `05 §5`'s list, whose
+ * commonest member (`05-F1`) involves no printer at all — so recording a late-order ack under it
+ * would state permanently (`01-F1`) that a print was acknowledged when nothing printed, and would
+ * put two incompatible id spaces in one field name. Two acts, two surfaces, two people, two types;
+ * `05-F30` is explicit that NEITHER ack clears the other's alert.
+ *
+ * **The business fields are REQUIRED, which `05 §5` forces rather than taste choosing.** `01-F5`'s
+ * v1 contract is `prev_audit_hash` alone and *"the business fields (who/what) land additively with
+ * the emitting modules"* — this is doc 05 landing them. `05 §5` materializes the alarm list on the
+ * device with *"no console-only source-of-truth entities — everything folds from the ledger, so a
+ * reinstalled phone reconstructs its state completely (01-F6)"*, so an ack that cannot say WHICH
+ * alarm it cleared re-derives to nothing and every acknowledged alarm returns on reinstall.
+ *
+ * **The FACTS, never a composed alarm id.** The alternative — writing the view's own
+ * `kind:order:printer` handle as one string, which is what the sixth subtype does with the
+ * spooler's job id — is refused by `05-F30` because that id is a FORMAT: change it and every
+ * historical ack silently stops matching. These three fields are already the ledger's own
+ * vocabulary (`kot.print_failed` carries `order_id` and `printer_name` under those exact names).
+ *
+ * **A DISCRIMINATED UNION rather than one flat object**, because the cross-field rule is the
+ * sharpest thing here: `05-F4` puts two failed printers on one order in TWO alarms, since `03-F5`
+ * says the manager has to know which one to walk to — so a `print_failed` ack naming no printer
+ * identifies neither, permanently. A flat `printer_name: string | null` accepts exactly that.
+ * The `late_order` arm requires `null` for the mirror reason: `05-F30` says a late-order ack has
+ * no printer, and a name written there would be a permanent claim about a printer nobody touched.
+ *
+ * `prev_audit_hash` comes from `auditPayloadSchema` rather than being retyped — `01-F5` makes the
+ * chain STORE-OWNED (the device stamps it inside the append transaction and a caller-supplied
+ * value is rejected), and both arms must carry one reading of that field. WHO is the envelope's
+ * `actor_user_id`, read at append (`02-F41`); a payload copy would be a second source for one fact
+ * that `01-F1` allows no path to correct.
+ */
+const alarmAckPayloadSchema = z.discriminatedUnion("alarm_kind", [
+  auditPayloadSchema.extend({
+    alarm_kind: z.literal(ALARM_ACK_KINDS[0]),
+    order_id: z.string().min(1),
+    printer_name: z.null(),
+  }),
+  auditPayloadSchema.extend({
+    alarm_kind: z.literal(ALARM_ACK_KINDS[1]),
+    order_id: z.string().min(1),
+    printer_name: z.string().min(1),
+  }),
+]);
 
 const auditPayloadSchemas = {
   "audit.login": auditPayloadSchema,
@@ -808,6 +911,8 @@ const auditPayloadSchemas = {
   // ack was an `01-F4` UnknownEventTypeError at emit and `03-F5` could not be satisfied at
   // all (found by K-7, which held the ack in memory rather than mint a subtype).
   "audit.print_acknowledged": auditPayloadSchema,
+  // 01-F5 (amended August 2026, SEVENTH subtype) / 05-F30. See `alarmAckPayloadSchema`.
+  "audit.alarm_acknowledged": alarmAckPayloadSchema,
 } as const;
 
 /** The closed set of audit.* subtypes (01-F5). Iterable — `[...AUDIT_EVENT_TYPES]`. */
@@ -817,7 +922,7 @@ export type AuditEventType = keyof typeof auditPayloadSchemas;
 
 const AUDIT_TYPE_SET: ReadonlySet<string> = new Set(AUDIT_EVENT_TYPES);
 
-/** True for exactly the six audit.* subtypes (01-F5) — the store stamps the chain for these only. */
+/** True for exactly the seven audit.* subtypes (01-F5) — the store stamps the chain for these only. */
 export const isAuditEvent = (type: string): boolean => AUDIT_TYPE_SET.has(type);
 
 // Combined lookup for parse-time payload validation (01-F4) across both families — the

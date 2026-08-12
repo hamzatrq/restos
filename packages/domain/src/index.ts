@@ -75,6 +75,10 @@ export {
   KOT_TWO_HEAD_TABLE_HEADER,
 } from "./product-constants.js";
 export {
+  // 05-F30 — the closed set of alarm categories `audit.alarm_acknowledged` may name. Exported
+  // because `05 §5`'s derived alarm list must narrow an incoming ack against the SAME two words.
+  ALARM_ACK_KINDS,
+  type AlarmAckKind,
   // 05-F7 — the closed `approval_type` set of the manager console's event extension.
   APPROVAL_TYPES,
   type ApprovalType,
@@ -97,6 +101,9 @@ export {
   PAYMENT_METHODS,
   type ParsedEvent,
   type PaymentMethod,
+  // 03-F53 — the closed status set the till's `printer.status_changed` producer emits.
+  PRINTER_STATUSES,
+  type PrinterStatus,
   parseEvent,
   UnknownEventTypeError,
 } from "./registry.js";
