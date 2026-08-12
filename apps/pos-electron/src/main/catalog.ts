@@ -1,3 +1,4 @@
+import { applyRateBps, paisa } from "@restos/domain";
 import type { CatalogEntry, DeviceStore } from "@restos/sync-client";
 import type { CatalogList, CatalogResolver, PriceResolver } from "./gateway";
 
@@ -83,12 +84,51 @@ const DEV_MENU_ENV = "RESTOS_DEV_MENU";
  * items inherit (`03-F50`), so the seed exercises the inheritance walk rather than stamping a
  * station on every row — which is also how a real menu is built.
  *
- * Prices are attached per item at seed time, keyed to THIS device's branch on the `counter`
- * channel (`01-F60`, `02-F42`), because that is the only pair a counter order can resolve
- * (`Counter.tsx`'s `COUNTER_CHANNEL`). Every item is priced deliberately: an unpriced one is
- * greyed with "no price set" and cannot be sold, and a seed whose point is a working till must
- * not ship a grid half of which refuses.
+ * Prices are attached per item at seed time, keyed to THIS device's branch on **every channel a
+ * cashier may originate on** (`01-F60`, `02-F42`) — see `devPricesFor` directly below for why
+ * that is no longer just `counter`. Every item is priced deliberately: an unpriced one is greyed
+ * with "no price set" and cannot be sold, and a seed whose point is a working till must not ship
+ * a grid half of which refuses.
  */
+/**
+ * **`01-F60` — the seed prices EVERY channel a cashier may originate on, not just `counter`.**
+ *
+ * ⚠ **The comment above used to justify counter-only with *"that is the only pair a counter order
+ * can resolve (`Counter.tsx`'s `COUNTER_CHANNEL`)"*, and that reason EXPIRED.** `02-F42`'s channel
+ * row shipped and `COUNTER_CHANNEL` no longer exists: a cashier can start a `phone` or `foodpanda`
+ * order from the Order tab today. Found by launching the till and ringing one — with the old seed
+ * the moment you pick Phone, `01-F60` correctly greys **every tile** `no price set` and the order
+ * cannot be rung at all. Nothing was broken; the seed simply did not price the columns the product
+ * had grown, so the feature looked shipped and was unusable on the only menu a dev launch has.
+ *
+ * The channels are `Counter.tsx`'s `ORDER_CHANNELS_AT_COUNTER`, transcribed rather than imported —
+ * that list is a RENDERER module and `18 §9` puts no main-process import across that boundary.
+ * A drift here greys a column; `catalog-seam.test.ts` is where that is asserted.
+ *
+ * **The foodpanda markup is ILLUSTRATIVE and says so.** `01-F60`: *"aggregator commission is
+ * 25–35%, so a restaurant prices the same dish differently per channel deliberately — higher on
+ * foodpanda"*. 130% is a plausible midpoint for a seed whose purpose is a working till, and it is
+ * deliberately NOT presented as advice: a real org sets these in the back office. `phone` takes
+ * the house price because it is a channel the restaurant owns and pays no commission on.
+ *
+ * `applyRateBps` rather than `price * 1.3`: `DEC-MONEY-005` bans raw money arithmetic and the
+ * helper accumulates in BigInt with a stated rounding policy, which is the whole point of it.
+ */
+const FOODPANDA_MARKUP_BPS = 13_000;
+
+const devPricesFor = (
+  branch_id: string,
+  price_paisa: number,
+): { branch_id: string; channel: string; price_paisa: number }[] => [
+  { branch_id, channel: "counter", price_paisa },
+  { branch_id, channel: "phone", price_paisa },
+  {
+    branch_id,
+    channel: "foodpanda",
+    price_paisa: applyRateBps(paisa(price_paisa), FOODPANDA_MARKUP_BPS),
+  },
+];
+
 const DEV_CATEGORIES: readonly { id: string; name: string; station: string; sort: number }[] = [
   { id: "cat-karahi", name: "Karahi & Handi", station: "kitchen", sort: 1 },
   { id: "cat-bbq", name: "BBQ", station: "grill", sort: 2 },
@@ -171,7 +211,7 @@ export const devMenuSnapshot = (branch_id: string): CatalogEntry[] => [
     ...(i.kitchen_name === undefined ? {} : { kitchen_name: i.kitchen_name }),
     parent_id: i.parent_id,
     sort: i.sort,
-    prices: [{ branch_id, channel: "counter", price_paisa: i.price_paisa }],
+    prices: devPricesFor(branch_id, i.price_paisa),
   })),
 ];
 
