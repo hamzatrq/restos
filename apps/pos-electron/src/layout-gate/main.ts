@@ -1011,6 +1011,31 @@ const run = async (): Promise<number> => {
        })()`,
     );
 
+  /**
+   * **`24-F14` — is `02-F27`'s UNKNOWN-caller branch actually drawing its capture fields?**
+   *
+   * The same argument as `callerStripPresent` above, aimed at the other branch. This is the state
+   * that gained `CALLER NAME`, `ADDRESS` and `Save caller` when `customer.address_added` got its
+   * first production producer, and two `27-F8` counter targets plus their captions are the tallest
+   * thing this strip has ever put in the Order tab's work area.
+   *
+   * It asks the DOM for a real `textbox` rather than for the captions alone, so it fails whether
+   * `preload.ts` stopped answering `known: null` for a short number, `Counter.tsx` stopped
+   * rendering the fields, or `packages/ui`'s `TextEntry` stopped being an input.
+   */
+  const callerCapturePresent = (): Promise<boolean> =>
+    window.webContents.executeJavaScript(
+      `(() => {
+         const main = document.querySelector('main');
+         if (main === null) return false;
+         const named = (re) => [...main.querySelectorAll('input[type="text"]')]
+           .some((e) => re.test(e.getAttribute('aria-label') || ''));
+         return named(/name/i) && named(/address/i) &&
+           [...main.querySelectorAll('button')]
+             .some((b) => /Save caller/.test(b.getAttribute('aria-label') || b.textContent || ''));
+       })()`,
+    );
+
   const soldOutReasonPresent = (): Promise<boolean> =>
     window.webContents.executeJavaScript(
       `(() => {
@@ -1577,17 +1602,46 @@ const run = async (): Promise<number> => {
       await new Promise((r) => setTimeout(r, 350));
       const dialled = [await press("Phone"), await press("3")];
       await new Promise((r) => setTimeout(r, 400));
+
+      // ---------------------------------------------------------------------------------
+      // `02-F27`'s UNKNOWN branch, at one digit — the taller of the strip's two states since
+      // `customer.address_added` got its producer, and the one that carries every control a
+      // non-repeat caller ever meets: `CALLER NAME`, `ADDRESS` and `Save caller`.
+      //
+      // Measured BEFORE the second digit rather than after, because reaching it afterwards
+      // would need a `Clear` tap and the surface would then be measured in a state no operator
+      // passes through — she keys UP from nothing, and this is the order she does it in.
+      // ---------------------------------------------------------------------------------
+      const capture = await callerCapturePresent();
+      if (dialled.some((t) => !t) || !capture) {
+        failures.push({
+          surface: on("caller-new"),
+          state: "alarm",
+          detail:
+            `EMPTY MATCH — the phone sequence did not produce 02-F27's capture fields (taps ` +
+            `${dialled.join(",")}, fields ${capture}), so CALLER NAME, ADDRESS and Save caller ` +
+            "went unmeasured on this panel and this sweep proves nothing about them (24-F14).",
+        });
+      } else {
+        judge(on("caller-new"), "alarm", await measure());
+        await shoot(window, `${panel.label}--alarm--caller-new`);
+      }
+
+      // The SECOND digit moves the same strip to the KNOWN branch — `02-F27`'s *"→ name, saved
+      // addresses"*, which is a different box in the same row and has its own way to overflow.
+      const second = await press("3");
+      await new Promise((r) => setTimeout(r, 400));
       // `24-F14` — the taps must have LANDED and the strip must have ANSWERED. It asks the DOM
       // rather than the fixture, so it fails whether `preload.ts` stopped serving the lookup,
       // `Counter.tsx` stopped rendering the card, or the channel row lost its Phone tile. The
       // name is the fixture's; `CALLER` is the strip's own caption, so both ends are checked.
       const strip = await callerStripPresent();
-      if (dialled.some((t) => !t) || !strip) {
+      if (dialled.some((t) => !t) || !second || !strip) {
         failures.push({
           surface: on("caller"),
           state: "alarm",
           detail:
-            `EMPTY MATCH — the phone sequence did not produce a caller strip (taps ${dialled.join(",")}, ` +
+            `EMPTY MATCH — the phone sequence did not produce a caller strip (taps ${[...dialled, second].join(",")}, ` +
             "card " +
             `${strip}), so 02-F27's number entry and customer card went unmeasured and this ` +
             "sweep proves nothing about them (24-F14).",

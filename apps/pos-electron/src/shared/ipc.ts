@@ -571,9 +571,18 @@ export type ToggleAvailabilityRequest = z.infer<typeof ToggleAvailabilityRequest
  * refused because `null` already says *"no name stated"*.
  *
  * `address_text` is optional because `02-F27`'s two events are one act with an optional half — a
- * caller may be filed before she has said where she is. **Nothing in this app supplies it today**
- * and that is a named gap, not an oversight: `06-F9` calls the address free text, `packages/ui`
- * ships no text-entry component, and commandment 6 forbids a raw `<input>` in app code.
+ * caller may be filed before she has said where she is.
+ *
+ * ⚠ **THIS CLAUSE READ *"Nothing in this app supplies it today"* UNTIL AUGUST 2026, AND IT WAS
+ * TRUE FOR THE THREE WEEKS IT STOOD.** The named blocker was real — `packages/ui` shipped no
+ * text-entry component and commandment 6 forbids a raw `<input>` in app code — and while it stood,
+ * `customer.address_added` had a payload schema, a `WRITE_ACTIONS` row, an authorization guard, a
+ * fold and a seam test, and **no production producer anywhere in the product**. `packages/ui` now
+ * ships `TextEntry`, and `Counter.tsx`'s `recordCaller` supplies this field from
+ * `02-F27`'s unknown-caller branch. Corrected in place rather than deleted, because the gap is the
+ * reason the field looks over-specified for its one caller, and because the *shape* of that gap —
+ * a type whose only writer is a test — is this wave's named defect and `seams:check` is
+ * structurally blind to it (a key in an object literal is not an export).
  */
 export const RecordCustomerRequestSchema = z.object({
   /** The digits as pressed. Unvalidated shape on purpose — main decides if it is a number. */
