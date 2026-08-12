@@ -21,6 +21,12 @@ export {
   resolveAging,
 } from "./aging.js";
 export {
+  DEV_PIN_ENV,
+  DEV_STAFF,
+  type DevStaffRegistry,
+  seedDevStaff,
+} from "./dev-staff.js";
+export {
   DEV_IDENTITY,
   type DeviceIdentity,
   describeDeviceIdentity,

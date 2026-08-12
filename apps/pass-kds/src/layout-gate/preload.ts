@@ -142,9 +142,35 @@ const tickets = (): PassTicketWire[] => {
   });
 };
 
+/**
+ * `03-F53`'s roster — the tiles of `01-F61`'s identification step.
+ *
+ * **THREE, and the names are long on purpose.** `PersonTile` is content-sized and a fixture of
+ * three-letter names would never show the row its own worst case; two-word Pakistani names at
+ * `text-numeric-hero` are what the panel actually has to hold. The order is neither alphabetical
+ * nor by id, matching the renderer oracle's fixture, so a re-sort anywhere is visible.
+ */
+const ROSTER = [
+  { user_id: "0199bbbb-0000-7000-8000-00000000c001", display_name: "Sajid Mehmood" },
+  { user_id: "0199bbbb-0000-7000-8000-00000000a001", display_name: "Zubair Ali" },
+  { user_id: "0199bbbb-0000-7000-8000-00000000c002", display_name: "Imran Bakhsh" },
+] as const;
+
+/**
+ * **NOBODY IS SIGNED IN, and that is the state that has a DOOR in it.**
+ *
+ * `03-F53` makes the press with no session the thing that raises `01-F61`'s two steps, so a fixture
+ * that typed a signed-in user would render the queue and **never the door** — which is precisely
+ * the `escalationFor: () => null` failure this file's header is about, arriving on a new surface.
+ * `main.ts` presses DONE and measures both steps, and carries a `24-F14` presence check so that
+ * flipping this line takes the door out of coverage LOUDLY.
+ */
 const passState = (): PassStateWire => ({
   deviceLabel: "Pass",
-  actor: "Pass — nobody signed in",
+  // The shipped `PASS_ACTOR` verbatim — a fixture that typed its own word here would measure a
+  // string this product never renders, which is one keystroke from a strip nobody has looked at.
+  actor: "Nobody signed in",
+  user: null,
   businessDay: "2026-08-10",
   lan: "down",
   hub: "down",
@@ -172,8 +198,30 @@ const passState = (): PassStateWire => ({
 const bridge: PassBridge = {
   passState: () => Promise.resolve(passState()),
   queue: () => Promise.resolve(tickets()),
-  markReady: (): Promise<MarkReadyResult> => Promise.resolve({ ok: true, events: 1, lines: 1 }),
-  handOver: (): Promise<HandOverResult> => Promise.resolve({ ok: true, lines: 1 }),
+  // `03-F53` — an EMPTY roster is a scripted state too (`?state=empty-roster`), because
+  // *"a device whose registry is empty says so rather than drawing an empty grid"* is a rendered
+  // message with a layout of its own, and a fixture that only ever returned three names would
+  // leave it unmeasured on every panel.
+  roster: () => Promise.resolve(params().get("state") === "empty-roster" ? [] : [...ROSTER]),
+  /**
+   * `03-F53` — nobody is signed in, so MAIN refuses and the renderer raises the door. Modelled
+   * honestly rather than always-`ok`: the whole point of this fixture is to produce the state the
+   * door lives in, and an `{ ok: true }` here would mean the gate never sees it.
+   */
+  markReady: (): Promise<MarkReadyResult> =>
+    Promise.resolve({ ok: false, reason: "no_session" as const }),
+  handOver: (): Promise<HandOverResult> =>
+    Promise.resolve({ ok: false, reason: "no_session" as const }),
+  /**
+   * Both refusals are scripted, on the same axis, because `03-F53` requires them to be
+   * DISTINGUISHABLE on the glass — and the lockout message is the long one, so it is the one whose
+   * wrapping can push a control off a 10.1" panel.
+   */
+  unlock: () =>
+    Promise.resolve({
+      ok: false as const,
+      reason: params().get("state") === "locked-out" ? "locked_out" : "bad_pin",
+    }),
   onChanged: () => () => {},
 };
 

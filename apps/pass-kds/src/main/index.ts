@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   AGING_THRESHOLDS_ENV,
   DEV_IDENTITY,
+  DEV_PIN_ENV,
   describeAging,
   describeDeviceIdentity,
   describePanelDensity,
@@ -14,9 +15,10 @@ import {
   resolvePanelDensity,
   resolveServeSignal,
   SERVE_SIGNAL_OWNER_ENV,
+  seedDevStaff,
 } from "@restos/device-config";
 import { businessDate } from "@restos/domain";
-import { openStore, wallClock } from "@restos/sync-client";
+import { createPinAuditSink, openStore, wallClock } from "@restos/sync-client";
 import { app, BrowserWindow, ipcMain, screen } from "electron";
 import {
   CHANNELS,
@@ -24,10 +26,13 @@ import {
   type HandOverResult,
   MarkReadyRequestSchema,
   type MarkReadyResult,
+  type PassRosterMemberWire,
   type PassStateWire,
   PassTicketSchema,
+  type PassUnlockResultWire,
 } from "../shared/ipc";
 import { describeCapacity } from "../shared/ticket-capacity";
+import { createPassIdentity } from "./pass-identity";
 import { passQueue } from "./pass-queue";
 import { createReadyMark } from "./ready-mark";
 import { describeReadySignal, READY_SIGNAL_OWNER_ENV, resolveReadySignal } from "./ready-signal";
@@ -56,20 +61,24 @@ import { passWindowOptions } from "./window-options";
  * about whether the food is late (`05-F1` alarms the manager off `03-F14`'s red threshold, so
  * that one is three surfaces disagreeing, not two).
  *
- * ## `02-F19` AND THE THING THIS APP DOES NOT HAVE
+ * ## `02-F19` / `03-F53` — WHO IS AT THE PASS, AND WHERE THE GATE IS
  *
- * **There is no `01-F26` PIN session here.** `03-F16` says a ready-mark carries *"actor"*, and the
- * envelope's `actor_user_id` will be `null` on every edge this app writes, because nothing
- * identifies the person standing at the pass. That is the single largest gap in this app and it is
- * named in `ready-signal.ts`, in `CLAUDE.md` and on the boot line rather than left to be
- * discovered from a ledger six weeks later.
+ * **`01-F26`'s PIN session runs here** (`main/pass-identity.ts`), and every state edge this app
+ * writes carries the signed-in user. That closes `03-F52`'s OWED (1): the handover is TERMINAL
+ * (`01-F35`) and `01-F1` makes it permanent, so what this app emitted before was an unattributable
+ * permanent claim that food reached a customer.
  *
- * It is not closed here because closing it properly is the counter's whole `S-0b`/`S-0c` ladder —
- * a roster, `createPinSession`, `01-F61`'s durable per-(device,user) lockout, an unlock surface —
- * and a cook wearing gloves keying a PIN before every bump is a design question (`27-F5`,
- * `27-F9`), not an implementation one. **The event is still attributed to the DEVICE and the
- * BRANCH**, which is more than a paper kitchen records, and `01-F1` means nothing has to be
- * unwound when identity lands.
+ * **The gate is on the ACT and never on the QUEUE, and that is where this device parts company
+ * with the till.** `02-F18`'s *"a locked device shows only the unlock screen"* is doc 02's rule for
+ * the device that holds the drawer. This surface shows no money (`03-F32`) and no ETA (`03 §3`),
+ * and its whole purpose is to be READ — so gating it would turn a roster this device has not yet
+ * synced into a kitchen that cannot see its own tickets (`01-F17`, commandment 4). A press with
+ * nobody signed in raises `01-F61`'s two steps; the queue stays on the glass throughout.
+ *
+ * **The refusal is the EMITTER's, not this host's.** `ready-mark.ts` and `serve-mark.ts` each read
+ * the session once and that one read decides both whether the act happens and whose name is on the
+ * envelope. A gate here would be a gate no suite can drive (nothing in this file is importable —
+ * it pulls `electron` at module scope) and two reads of one fact (`02-F45`).
  */
 
 const require_ = createRequire(import.meta.url);
@@ -92,14 +101,51 @@ const electronAddonPath = (): string =>
   );
 
 /**
- * `02-F19` — attribution is never anonymous, and this is the honest stand-in until a PIN session
- * exists here. It names the SURFACE rather than a person, exactly as `01-F27` has the counter's
- * locked strip name the device rather than a stand-in human: a plausible name would be a lie a
- * cook could read as somebody's shift.
+ * `02-F19` / `01-F27` — what the strip says while nobody is signed in.
+ *
+ * It is a STATEMENT and never a name: a device identity may not stand in for a user identity, so a
+ * plausible human word here would be a lie a cook could read as somebody's shift, and `StatusStrip`
+ * already renders the device beside it (`deviceLabel`). WHO is signed in is `PassStateWire.user`,
+ * fed by the PIN session (`03-F53`); this is the honest fallback when that is `null`, and it is
+ * decided here rather than in the renderer because `00 §5.7`'s claims are main's to make.
+ *
+ * ⚠ It was `"Pass — nobody signed in"` until `03-F53` and the strip then read *"Pass — nobody
+ * signed in · Pass"*, which is the device named twice. Found by LOOKING at a screenshot; no suite
+ * could have, because a renderer test can only ask whether a string is in the document.
  */
-const PASS_ACTOR = "Pass — nobody signed in";
+const PASS_ACTOR = "Nobody signed in";
+
+/**
+ * `01-F26` — idle auto-lock is a **device-layer setting** (`00 §7` layer 3), and that config plane
+ * does not exist yet, so this is a pinned interpretation and marked as one rather than left to
+ * read as a spec fact. Ten minutes, matching `apps/pos-electron`: two devices in one branch
+ * disagreeing about how long a session lives is a difference an operator would meet as a bug.
+ *
+ * `03-F53` fixes no timeout VALUE and fixes what FEEDS it: every edge this app writes, and no read.
+ */
+const IDLE_LOCK_MS = 10 * 60_000;
+
+/**
+ * `01-F61` — *"N consecutive failures tolerated; the (N+1)th attempt is refused"*. The FR fixes the
+ * scope, the persistence and the cooldown and names no N, so this is pinned too. Five, matching the
+ * counter, for the counter's stated reason: room for ordinary typing on a surface used all service
+ * — with gloves and wet hands here — while keeping online guessing at ~13 bits hopeless against
+ * the five-minute cooldown.
+ */
+const MAX_FAILED_ATTEMPTS = 5;
 
 const boot = async (): Promise<void> => {
+  /**
+   * ⚠ **FIRST, and this was a real defect rather than a tidy-up.** Electron's `screen` module
+   * throws *"The 'screen' module can't be used before the app 'ready' event"*, and this file read
+   * the primary display 158 lines above its `await app.whenReady()` — so `boot()` rejected on every
+   * launch and **no window was ever created**. Every gate was green while that was true: the suites
+   * do not launch Electron, `layout:check` has its own entry point which already did this
+   * correctly, and `seams:check` cannot express *"the binary starts"*. Found by launching it.
+   * `__acceptance__/pass-seam.test.ts` §A2 is the source-order assertion that holds it.
+   */
+  await app.whenReady();
+
   const env = process.env;
   const identity = resolveDeviceIdentity(env);
   const aging = resolveAging(env[AGING_THRESHOLDS_ENV]);
@@ -123,6 +169,49 @@ const boot = async (): Promise<void> => {
     path: join(app.getPath("userData"), "device.db"),
     identity,
     nativeBinding: electronAddonPath(),
+  });
+
+  /**
+   * `03-F53` OWED (3) — **nothing populates `store.staff` on any device**: `01-F47`'s admission
+   * admits *devices, not people*, and the staff transport (`01-F21`/`01-F28`) is owed. So this app
+   * seeds the roster the counter seeds, out of `@restos/device-config` — **one declaration read by
+   * both apps** (`DEC-ARCH-001`), because two rosters is a till and a pass screen that disagree
+   * about who is on shift in a ledger `01-F1` cannot correct.
+   *
+   * Before the window, so the first paint of the identification grid already has a roster to draw:
+   * a grid that fills in a moment later would move tiles under a finger (`27-F4`). Unset
+   * `RESTOS_DEV_PIN` ⇒ nothing is seeded, and the door SAYS the registry is empty rather than
+   * drawing an empty grid (`00 §5.7`, `03-F53`).
+   */
+  await seedDevStaff({
+    registry: store.staff,
+    branch_id: store.identity.branch_id,
+    pin: env[DEV_PIN_ENV],
+  });
+
+  /**
+   * `01-F26`'s PIN session — **the verifier, not a comparison.** `createPassIdentity` hands
+   * `createPinSession` the synced registry (`01-F28`), the device's own id (`01-F27`'s other axis)
+   * and the DURABLE per-(device, user) counter (`01-F61`); everything about the argument lives in
+   * `pass-identity.ts` because nothing declared in this file is reachable from a suite.
+   *
+   * ONE session, and the counter's second one is not a pattern to copy here: `02-F20`'s approval
+   * needs an actor and an approver in the same instant, this surface has one act-class and no
+   * approval, and a second session would manufacture the *"acting for"* concept `02-F41` refused.
+   */
+  const pins = createPassIdentity({
+    store,
+    idle_lock_ms: IDLE_LOCK_MS,
+    max_failed_attempts: MAX_FAILED_ATTEMPTS,
+    now: () => wallClock.now(),
+    /**
+     * `01-F5`'s `audit.login`, on a store-owned chain. **A real sink and never an empty one** —
+     * that is instance 4 of `AGENTS.md`'s recurring defect by name: the sink was wired and tested
+     * in `sync-client` while the counter's host passed an empty function for a day, during which an
+     * unlock, a wrong PIN and a lockout left no trail at all. `seams:check` cannot see a port
+     * supplied with a stub, so `pass-identity-seam.test.ts` §A carries the hand-written assertion.
+     */
+    audit: createPinAuditSink({ store, now: () => wallClock.now() }),
   });
 
   const display = screen.getPrimaryDisplay();
@@ -164,20 +253,25 @@ const boot = async (): Promise<void> => {
    * `03-F16`'s producer, wired here. **This is the seam** — the thing `AGENTS.md`'s recurring
    * defect is about — and `__acceptance__/pass-seam.test.ts` is the hand-written assertion that
    * it exists, because no rail in this repo can express *"the host calls the emitter"*.
+   *
+   * `actor` is the SESSION as a getter (`03-F53`, `02-F41`): read at the act, never captured, so a
+   * shift change moves attribution with it. The append writes back the actor the **emitter**
+   * resolved and never re-reads the session — one read of one fact decides both whether the act
+   * happens and whose name is on it (`02-F45`), so the two cannot disagree.
    */
   const readyMark = createReadyMark({
     store,
     policy: () => readySignal,
-    append: (type, payload) => {
+    actor: () => pins.currentUser(),
+    append: (type, payload, actor_user_id) => {
       store.append({
         id: crypto.randomUUID(),
         org_id: identity.org_id,
         branch_id: identity.branch_id,
         device_id: identity.device_id,
-        // `03-F16` says "with actor" and this app has no PIN session — see the module header.
-        // `null` is the honest value; a device id in an actor field would be a lie in a column
-        // `01-F1` will not let anyone correct.
-        actor_user_id: null,
+        // `03-F16`'s *"with actor"*, met: whoever's PIN is in (`02-F41`). Typed non-nullable at
+        // the emitter, so an unattributed edge is unrepresentable on this path.
+        actor_user_id,
         device_created_at: wallClock.now(),
         type,
         schema_version: 1,
@@ -200,17 +294,17 @@ const boot = async (): Promise<void> => {
   const serveMark = createServeMark({
     store,
     policy: () => serveSignal,
-    append: (type, payload) => {
+    actor: () => pins.currentUser(),
+    append: (type, payload, actor_user_id) => {
       store.append({
         id: crypto.randomUUID(),
         org_id: identity.org_id,
         branch_id: identity.branch_id,
         device_id: identity.device_id,
-        // `03-F52`'s OWED item (1), and it is sharper here than on the ready-mark: this is a
-        // TERMINAL claim that food reached a customer, and it is unattributable. `null` is the
-        // honest value; a device id in an actor field would be a lie `01-F1` will not let anyone
-        // correct. Named on the boot line rather than left to be found in a ledger.
-        actor_user_id: null,
+        // `03-F52`'s OWED item (1), CLOSED by `03-F53`. It matters more here than on the
+        // ready-mark: `served` is TERMINAL (`01-F35`) and `01-F1` makes it permanent, so this
+        // edge is a claim that food reached a customer — and it now names who says so.
+        actor_user_id,
         device_created_at: wallClock.now(),
         type,
         schema_version: 1,
@@ -248,6 +342,24 @@ const boot = async (): Promise<void> => {
     // disagree with the act `serve-mark.ts` performs.
     mayHandOver: serveSignal.owner === HANDOVER_SURFACE,
     serveSignalOwner: serveSignal.owner,
+    /**
+     * `03-F53` — WHO is signed in, decided here and never in the renderer. `01-F26`'s idle
+     * auto-lock fires with no tap and no unlock call in sight, so a renderer holding its own
+     * boolean would stay signed in all night and `02-F41` would go on naming whoever walked away;
+     * this rides the one-second `changed` push the surface already makes.
+     *
+     * The label degrades to the identifier when the roster row carries no `display_name` or has
+     * gone (`01-F42` removes it) — `01-F54`, and the alternative is a strip reporting an empty name
+     * over a ledger that is attributing correctly.
+     */
+    user: (() => {
+      const user_id = pins.currentUser();
+      if (user_id === null) return null;
+      return {
+        user_id,
+        display_name: store.staff.lookup(user_id)?.display_name ?? user_id,
+      };
+    })(),
   });
 
   ipcMain.handle(CHANNELS.passState, () => passState());
@@ -270,9 +382,46 @@ const boot = async (): Promise<void> => {
       now: () => wallClock.now() + store.branchTimeStatus().offset_ms,
     }).map((t) => PassTicketSchema.parse(t)),
   );
+  /**
+   * `01-F61`'s identification grid, and it is a READ — so it feeds no idle timer and costs nobody
+   * an attempt (`03-F53`: *"Selecting a person is not submitting an attempt"*, and
+   * *"identification is charged on the act and never on the look"*). The same is true of
+   * `passState` and `queue` above: `main/uplink.ts` pushes `changed` every second so the age
+   * colours move, and if a read counted as activity the idle lock on this app would be unreachable
+   * by construction.
+   */
+  ipcMain.handle(CHANNELS.roster, (): PassRosterMemberWire[] => pins.roster());
+  /**
+   * `01-F26`/`01-F28` — the identity and the digits arrive, verification happens HERE against the
+   * synced Argon2id hashes, and a yes/no goes back. Nothing is appended from this handler: `01-F5`
+   * makes `audit.login`'s chain store-owned and the sink writes it, and a PIN that reached an event
+   * would be a credential `01-F1` has no path to remove.
+   *
+   * ⚠ Both arguments are checked before either reaches a verifier. `shared/ipc.ts` calls the
+   * renderer *"the untrusted end of this bridge even though we ship it"*, and a non-string reaching
+   * `verifyPin` throws inside the handler — which `invoke` turns into a rejected promise on a
+   * surface whose whole job is to not be stuck (`01-F17`). A frame that carries anything else names
+   * nobody in the registry, which is exactly `unknown_user`, so it is refused in that vocabulary
+   * rather than in an invented one (commandment 2).
+   */
+  ipcMain.handle(CHANNELS.unlock, async (_event, user_id: unknown, pin: unknown) => {
+    if (typeof user_id !== "string" || typeof pin !== "string") {
+      return { ok: false, reason: "unknown_user" } satisfies PassUnlockResultWire;
+    }
+    const result = await pins.unlock(user_id, pin);
+    // The session moved (or did not) — the strip and the door both read it off `passState`.
+    notifyChanged();
+    return result satisfies PassUnlockResultWire;
+  });
   ipcMain.handle(CHANNELS.markReady, (_event, req: unknown): MarkReadyResult => {
     const parsed = MarkReadyRequestSchema.parse(req);
-    return readyMark.mark(parsed.order_id, parsed.line_ids);
+    const result = readyMark.mark(parsed.order_id, parsed.line_ids);
+    // `03-F53` — *"Acting is activity; looking is not."* A cook bumping every two minutes must not
+    // be signed out mid-service, so the WRITE paths feed `01-F26`'s idle timer and the reads do
+    // not. Only a successful act counts: a refusal wrote no edge, and `no_session` has no session
+    // to refresh in the first place.
+    if (result.ok) pins.touch();
+    return result;
   });
   // `03-F52` — the second act, on its own channel. Parsed at the plane boundary (`18 §9`) and
   // never trusted: the renderer sends an order id and MAIN decides whether this surface owns the
@@ -280,10 +429,11 @@ const boot = async (): Promise<void> => {
   // `served`.
   ipcMain.handle(CHANNELS.handOver, (_event, req: unknown): HandOverResult => {
     const parsed = HandOverRequestSchema.parse(req);
-    return serveMark.handOver(parsed.order_id);
+    const result = serveMark.handOver(parsed.order_id);
+    // Activity, for the same reason and on the same terms as the ready-mark above.
+    if (result.ok) pins.touch();
+    return result;
   });
-
-  await app.whenReady();
 
   /**
    * `00 §5.7` — the boot line, and every clause of it is a fact whose being wrong is invisible
@@ -315,10 +465,21 @@ const boot = async (): Promise<void> => {
         : `  uplink: cloud ${env["RESTOS_CLOUD_URL"]} — and note it is the ONLY path: the LAN ` +
           "mesh 01-F15 specifies for this traffic is hosted by nothing, so a WAN outage stops " +
           "this screen learning about new orders while the counter goes on selling (01-F17).",
-      "  identity: NO PIN SESSION on this device — 03-F16's ready-mark AND 03-F52's handover are " +
-        "attributed to the device and the branch, and actor_user_id is null on every edge this " +
-        "app writes. 03-F52's OWED (1): the handover is TERMINAL (01-F35), so that is an " +
-        "unattributable permanent claim that food reached a customer. First thing to close.",
+      /**
+       * `03-F53` — what an operator cannot see from the glass: whether anyone CAN sign in. A
+       * device whose registry never synced draws a door with nothing on it, and the door says so
+       * (`00 §5.7`), but the boot line is where the person who set the machine up is looking.
+       */
+      store.staff.list().length === 0
+        ? "  identity: 01-F26's PIN session runs here (03-F53), and THE STAFF REGISTRY IS EMPTY — " +
+          `nobody can sign in, so no ready-mark and no handover can be written. Set ${DEV_PIN_ENV}` +
+          "=<digits> to seed the dev roster; nothing populates a real one yet (01-F47 admits " +
+          "devices, not people)."
+        : `  identity: 01-F26's PIN session runs here (03-F53) — ${store.staff.list().length} ` +
+          "member(s) on the identification grid, verified on-device against synced Argon2id " +
+          "hashes (01-F28), with 01-F61's durable per-(device,user) lockout. Every ready-mark and " +
+          "every handover carries the signed-in user (02-F41). The QUEUE is never gated: the gate " +
+          "is on the act.",
     ]
       .filter((line) => line !== "")
       .join("\n") + "\n",

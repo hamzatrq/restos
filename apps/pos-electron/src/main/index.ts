@@ -3,15 +3,18 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 /**
- * The four `00 §7` resolvers this host shares with `apps/pass-kds` — `03-F14`/`03-F47`'s threshold
- * table, the device's three ids, and the density of its glass. They were app-local until each
- * acquired a second consumer; `18 §2` makes *"Apps NEVER import ... other apps"* a MUST and
- * `DEC-ARCH-001` rules EXTRACT at that moment, so they live in a package and this import is an
- * ordinary `apps → packages` edge. See `packages/device-config/CLAUDE.md`.
+ * The `00 §7` configuration this host shares with `apps/pass-kds` — `03-F14`/`03-F47`'s threshold
+ * table, `03-F52`'s serve-signal assignment, the device's three ids, the density of its glass, and
+ * (since `03-F53`) the DEV STAFF ROSTER. Each was app-local until it acquired a second consumer;
+ * `18 §2` makes *"Apps NEVER import ... other apps"* a MUST and `DEC-ARCH-001` rules EXTRACT at
+ * that moment, so they live in a package and this import is an ordinary `apps → packages` edge.
+ * See `packages/device-config/CLAUDE.md`.
  */
 import {
   AGING_THRESHOLDS_ENV,
   DEV_IDENTITY,
+  DEV_PIN_ENV,
+  DEV_STAFF,
   describeAging,
   describeDeviceIdentity,
   describePanelDensity,
@@ -24,8 +27,9 @@ import {
   resolveServeSignal,
   SERVE_SIGNAL_OWNER_ENV,
   type ServeSignalPolicy,
+  seedDevStaff,
 } from "@restos/device-config";
-import { businessDate, hashPin } from "@restos/domain";
+import { businessDate } from "@restos/domain";
 import { createSpooler, printerCapability } from "@restos/escpos";
 import { createPinAuditSink, createPinSession, openStore, wallClock } from "@restos/sync-client";
 import { app, BrowserWindow, dialog, ipcMain, screen } from "electron";
@@ -110,71 +114,20 @@ const electronAddonPath = (): string =>
   );
 
 /**
- * **A DEV SEED ROSTER, exactly like `DEV_IDENTITY` (`main/device-identity.ts`) — and unlike its
- * verifies for real.**
+ * **THE DEV SEED ROSTER MOVED TO `@restos/device-config` (August 2026, `03-F53`).**
  *
- * What was here was a four-digit dev constant and a string comparison against it, which
- * `01-F61` has since made unsurvivable in principle: a device-wide constant identifies
- * **nobody**, so the per-(device, user) lockout cannot be keyed at all. Verification now runs
- * through
- * `createPinSession` against Argon2id hashes in `store.staff` (`01-F28`), and this exists only
- * because **nothing populates that registry yet** — `01-F47`'s admission admits *devices, not
- * people*, and the staff transport is owed. Without a seed the grid is empty and no one can
- * unlock, which would make `pnpm start` unusable and leave the whole `02-F41` attribution path
- * unexercised.
+ * `DEV_STAFF` and `seedDevStaff` were declared here — the whole argument for them, the roles mix
+ * and the `RESTOS_DEV_PIN` route are now in `packages/device-config/src/dev-staff.ts` and are
+ * unchanged. They moved because `03-F53` gives `apps/pass-kds` the same `01-F26` PIN session, so
+ * the roster acquired its **second consumer**: `18 §2` forbids `apps → apps` outright and
+ * `DEC-ARCH-001` rules EXTRACT at that moment rather than copy. The FR names what a copy would
+ * cost — *"one declaration read by both apps … never a second copy"* — because two rosters is a
+ * till and a pass screen that disagree about who is on shift, in a ledger `01-F1` cannot correct.
  *
- * **The PIN is NOT in this file, and that is deliberate rather than an omission.** It comes
- * from `RESTOS_DEV_PIN`, the same environment-configured route `RESTOS_CLOUD_URL` and
- * `RESTOS_DEVICE_TOKEN` already take below and for the same "admission has not landed" reason.
- * A hardcoded PIN here would be the device-wide constant `01-F61` refuses, wearing a different
- * name. Unset ⇒ **nothing is seeded**, and an empty grid on a locked till is the honest state
- * of a device no roster has reached (`00 §5.7`) — which is also what production looks like
- * until the transport lands.
- *
- *     RESTOS_DEV_PIN=<digits> pnpm start
- *
- * Every seeded member shares that one PIN, which is not a shortcut: `01-F61` names two staff
- * sharing a 4-digit PIN as the ordinary case that a bare pad cannot tell apart, so the seed
- * puts the till in exactly that state and the identification step is what resolves it.
- *
- * **Delete this the moment the staff transport lands**, and let the roster sync.
+ * Nothing about this till's behaviour changed: same three members, same roles, same one-PIN seed,
+ * same `RESTOS_DEV_PIN` (now named by the package as `DEV_PIN_ENV`, so the variable is spelled
+ * once in the repo rather than once per app).
  */
-/**
- * **The ROLES are part of the seed now, and the mix is deliberate.** `01-F26` makes a role a
- * per-(user, location) assignment and `main/authorize.ts` reads exactly this registry to answer
- * Commandment 8 — so a roster of three cashiers would make `02-F22`'s day open unreachable on
- * a dev launch ("day open/close and float entry require manager/owner permission — a cashier
- * session cannot execute them"), and the guard would look like a bug rather than the FR. Two
- * cashiers and one branch manager put both sides of that guard on the same till: sign in as
- * Ayesha and the day cannot be opened; sign in as Hina and it can.
- */
-const DEV_STAFF = [
-  { user_id: "00000000-0000-7000-8000-000000000004", display_name: "Ayesha", role: "cashier" },
-  { user_id: "00000000-0000-7000-8000-000000000005", display_name: "Bilal", role: "cashier" },
-  {
-    user_id: "00000000-0000-7000-8000-000000000006",
-    display_name: "Hina",
-    role: "branch_manager",
-  },
-] as const;
-
-const seedDevStaff = async (store: ReturnType<typeof openStore>): Promise<void> => {
-  const pin = process.env["RESTOS_DEV_PIN"];
-  if (pin === undefined || pin === "") return;
-  // `01-F28`'s credential, produced by the same `domain` function the cloud writer will use —
-  // the PIN itself is hashed here and never stored, never logged, never appended (`01-F1`).
-  const pin_hash = await hashPin(pin);
-  store.staff.apply({
-    kind: "snapshot",
-    version: store.staff.version() + 1,
-    members: DEV_STAFF.map(({ user_id, display_name, role }) => ({
-      user_id,
-      display_name,
-      pin_hash,
-      assignments: [{ role, branch_id: store.identity.branch_id }],
-    })),
-  });
-};
 
 /**
  * `01-F26` — idle auto-lock is a **device-layer setting** (`00 §7` layer 3), and that config
@@ -486,7 +439,11 @@ app.whenReady().then(async () => {
 
   // Before the window, so the first paint of the identification grid already has a roster to
   // draw: a grid that fills in a moment later would move tiles under a finger (`27-F4`).
-  await seedDevStaff(store);
+  await seedDevStaff({
+    registry: store.staff,
+    branch_id: store.identity.branch_id,
+    pin: process.env[DEV_PIN_ENV],
+  });
   /**
    * T-C6 — and for the same reason and on the same schedule as the roster above: the catalog
    * TRANSPORT is real and wired (`createUplink` below), but the back office that publishes a

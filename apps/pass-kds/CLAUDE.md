@@ -121,15 +121,47 @@ layer 2"*, `03 §7` lists it under Layer 2 beside the aging thresholds, and `rea
 enforces it **in main** with the renderer's claim never trusted — which is commandment 8's actual
 property discharged through the control the owning FR names.
 
-**What that leaves owed, named rather than left to look intentional:** the assignment is
-per-DEVICE-role, not per-user. A pass screen assigned `pass` accepts a bump from whoever is
-standing in front of it. **There is no `01-F26` PIN session on this device at all**, so
-`actor_user_id` is `null` on every edge this app writes and `03-F16`'s *"with actor"* is **HALF
-MET** — the event carries the device, the branch and the time, and not the person. **That is the
-single largest gap in this app**, and `03-F52` sharpened it rather than adding to it: a handover
-is **TERMINAL** under `01-F35`, so the gap is now an unattributable permanent claim that food
-reached a customer. `03-F52`'s OWED item (1) names it as the first thing to close and the boot
-line says it.
+**What that leaves is a deliberate reading rather than a gap** (`03-F53`, August 2026): the
+assignment is per-DEVICE-role, not per-user, so a pass screen assigned `pass` accepts a bump from
+**any member of the branch roster who signs in** — *"signing in at the pass grants no authority;
+it supplies attribution"*.
+
+## `03-F53` — `01-F26`'s PIN SESSION RUNS HERE, AND THE GATE IS ON THE ACT
+
+**`main/pass-identity.ts`** builds one `createPinSession` over `store.staff` (`01-F28`) and
+`store.pinAttempts` (`01-F61`'s DURABLE per-(device, user) counter), and both emitters read it as a
+getter: with no session there is **no edge**, and every edge carries the signed-in user. That closes
+`03-F52`'s OWED (1) — the handover is TERMINAL (`01-F35`) and `01-F1` makes it permanent, so what
+this app wrote before was an unattributable permanent claim that food reached a customer.
+
+Four things about it are load-bearing and each is a `03-F53` clause:
+
+- **The QUEUE is never gated.** `02-F18`'s *"a locked device shows only the unlock screen"* is doc
+  02's rule for the device that holds the drawer. This one shows no money (`03-F32`) and no ETA
+  (`03 §3`) and exists to be READ, so the door (`renderer/UnlockDoor.tsx`) is raised by a PRESS, it
+  replaces the work surface only while it is up, and `Cancel` puts it away with no credential.
+  Transplanting the counter's gate here would make an unsynced roster into a kitchen that cannot see
+  its own tickets — `01-F17`'s stopped till on the surface where commandment 4 binds hardest.
+- **The refusal is the EMITTER's.** `ready-mark.ts` and `serve-mark.ts` each read the session once,
+  and that one read decides both whether the act happens and whose name is on it. A gate in
+  `main/index.ts` would be a gate no suite can drive and two reads of one fact (`02-F45`); the
+  `append` takes `actor_user_id: string`, so an unattributed edge is **unrepresentable**.
+- **ONE session.** The counter builds a SECOND `createPinSession` because `02-F20` needs an actor
+  and an approver in the same instant. The pass has one act-class and no approval, so a second here
+  would manufacture the *"acting for"* concept `02-F41` refused. **A change of cook is a lock and an
+  unlock.**
+- **Acting is activity; looking is not.** The two write channels `touch()`; `passState`, `queue` and
+  `roster` do not — `uplink.ts` pushes `changed` every second, so a read that counted as activity
+  would make idle auto-lock unreachable by construction.
+
+**Owed, named rather than left to look intentional** (`03-F53`'s own list): an explicit
+end-of-session control — idle expiry is the only exit today, and a pass is handed between people far
+more often than a till is; and `01-F61`'s `grid_ordinal`, so the grid is ordered by `user_id` and an
+ordinary Tuesday hire still shifts every tile after it. The DEV SEED is
+`@restos/device-config`'s — **one declaration read by both apps** (`DEC-ARCH-001`), because nothing
+populates the staff registry on any device yet (`01-F47` admits *devices, not people*). Unset
+`RESTOS_DEV_PIN` ⇒ nothing is seeded, and the door SAYS the registry is empty rather than drawing
+an empty grid (`00 §5.7`).
 
 ## `27-F28` — capacity is STATED, not mandated, and the screen says what this glass holds
 

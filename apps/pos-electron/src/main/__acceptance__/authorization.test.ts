@@ -195,7 +195,21 @@ describe("§A 18 §5 / 18 §9 — the shipped app REACHES the matrix", () => {
     // Not cosmetic: `seedDevStaff` assigned every seeded member `cashier`, and the guard makes a
     // cashier unable to open the day. A roster with no manager would leave `pnpm start` with a
     // day that can never be opened, which reads as a bug in the guard rather than the FR.
-    expect(mainSrc).toContain('role: "branch_manager"');
+    //
+    // ⚠ RE-POINTED, August 2026 — the ASSERTION is unchanged and only its target moved. `03-F53`
+    // gives `apps/pass-kds` the same `01-F26` PIN session, so the roster acquired a second consumer
+    // and `DEC-ARCH-001` moved `DEV_STAFF`/`seedDevStaff` into `@restos/device-config` (`18 §2`
+    // forbids `apps → apps`, and two rosters is a till and a pass screen disagreeing about who is
+    // on shift). This row read `mainSrc` and went RED against the correct implementation the
+    // moment the declaration left this file — which is `AGENTS.md`'s `01-F60` worked example with
+    // the sign flipped, so it is carried back the same day rather than in three weeks.
+    const devStaffSrc = readFileSync(
+      new URL("../../../../../packages/device-config/src/dev-staff.ts", import.meta.url),
+      "utf8",
+    );
+    expect(devStaffSrc).toContain('role: "branch_manager"');
+    // …and this host still SEEDS it, or the roster is a declaration nothing reaches.
+    expect(mainSrc).toContain("seedDevStaff({");
   });
 });
 
