@@ -50,6 +50,8 @@ export const PassTicketSchema = z.object({
   linesDone: z.number().int().nonnegative(),
   linesTotal: z.number().int().nonnegative(),
   bumpable: z.boolean(),
+  /** `03-F52` — would a handover press on THIS ticket do anything? Decided in main, never here. */
+  handoverable: z.boolean(),
 });
 export type PassTicketWire = z.infer<typeof PassTicketSchema>;
 
@@ -83,6 +85,10 @@ export const PassStateSchema = z.object({
   maySignal: z.boolean(),
   /** The owner the layer-2 assignment names, so the screen can say WHY it is read-only. */
   readySignalOwner: z.string(),
+  /** `03-F52` — may this surface hand over, or is it read-only for `served`? Decided in main. */
+  mayHandOver: z.boolean(),
+  /** `03-F52`'s owner, so a screen without the assignment can say WHOSE the act is. */
+  serveSignalOwner: z.string(),
 });
 export type PassStateWire = z.infer<typeof PassStateSchema>;
 
@@ -103,10 +109,29 @@ export const MarkReadyResultSchema = z.union([
 ]);
 export type MarkReadyResult = z.infer<typeof MarkReadyResultSchema>;
 
+/**
+ * `03-F52` — the handover. **Order-level and nothing else on the wire**: the FR makes one press
+ * mark every remaining `ready` line at once, so there is no `line_ids` here to be wrong about, and
+ * which lines move is `serve-mark.ts`'s decision from the projection main just read.
+ */
+export const HandOverRequestSchema = z.object({ order_id: z.string().min(1) });
+export type HandOverRequest = z.infer<typeof HandOverRequestSchema>;
+
+export const HandOverResultSchema = z.union([
+  z.object({ ok: z.literal(true), lines: z.number().int() }),
+  z.object({
+    ok: z.literal(false),
+    reason: z.enum(["not_the_owner", "nothing_to_hand_over"]),
+    owner: z.string().optional(),
+  }),
+]);
+export type HandOverResult = z.infer<typeof HandOverResultSchema>;
+
 export const CHANNELS = {
   passState: "restos:pass-state",
   queue: "restos:pass-queue",
   markReady: "restos:pass-mark-ready",
+  handOver: "restos:pass-hand-over",
   /** Push: main tells the renderer the folds moved. Carries no data — the renderer re-reads. */
   changed: "restos:changed",
 } as const;
@@ -121,5 +146,7 @@ export type PassBridge = {
   passState: () => Promise<PassStateWire>;
   queue: () => Promise<PassTicketWire[]>;
   markReady: (req: MarkReadyRequest) => Promise<MarkReadyResult>;
+  /** `03-F52` — the second, explicit act. Separate from `markReady` because the FR is that. */
+  handOver: (req: HandOverRequest) => Promise<HandOverResult>;
   onChanged: (fn: () => void) => () => void;
 };

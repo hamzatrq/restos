@@ -1481,8 +1481,30 @@ device's configuration (`01-F34`).
 
 `main/line-advance.ts` gains `settled(order_id)`, wired in `main/index.ts` off the SAME
 `payment.recorded` narrowing that already drives `receipts.settled`. Three gates, all inside the
-module where a suite drives the real branch: **tier** (`autoAdvancesLines`, as `printEvent` does),
-**delivery**, and **completion**.
+module where a suite drives the real branch: **the serve-signal assignment**, **delivery**, and
+**completion**.
+
+⚠ **THE FIRST GATE WAS `autoAdvancesLines(tier())` UNTIL `03-F52` (August 2026), AND THIS LINE
+SAID SO.** *"The tier stops being an input."* The till now emits on settlement because the
+branch's serve-signal owner is `settlement` — `deps.serveOwner()`, out of
+`@restos/device-config`'s **one** declaration, which `apps/pass-kds` reads for its own handover
+control — and not because a label reads `T1`. That is `DEC-HW-003`'s checkable test (*"no code
+may branch on the tier to decide whether a piece of hardware EXISTS"*) applied to the last
+producer in the product that failed it. **Behaviour on a branch that has configured nothing is
+unchanged**, because the assumed owner is `settlement`, argued in `serve-signal.ts` rather than
+defaulted. **`printEvent` keeps its tier gate**: `kot.printed → in_prep` is `02-F31`'s OTHER half,
+`03-F52` says nothing about it, and moving it too would auto-advance the lines a `03-F51`
+screen-only station's bump owns. `__acceptance__/serve-signal-settlement.test.ts` §C is the
+assertion that the move was a move; §A is the one that would fail an implementation keeping the
+tier as an extra `&&` — the change a careful session makes when it does not want to break
+anything, and it fails there and nowhere else.
+
+**A green test defended the overruled rule and was retired in the same change**, which is the
+discipline `AGENTS.md` extracts from `catalog-pricing.test.ts:394`: `line-advance.test.ts` §G's
+*"a T2 or T3 device does NOT auto-advance on settlement"* and `line-advance-seam.test.ts` §D's
+`rig("T2","dine_in") → 0` both encoded the tier gate, both were green, and both would have failed
+the correct implementation. Neither was deleted — each carries the old assertion, the reason it
+went, and a pointer to where the property it protected is now pinned.
 
 **The delivery exclusion is an ALLOWLIST and that is the load-bearing choice.** `01 §4` is canonical
 — *"`served` (dine-in/takeaway/pickup) **or** `picked_up → delivered` (delivery, **rider-driven

@@ -46,6 +46,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ServeSignalOwner } from "@restos/device-config";
 import { LEGAL_NEXT } from "@restos/domain";
 import { type DeviceStore, openStore } from "@restos/sync-client";
 import { afterEach, describe, expect, it } from "vitest";
@@ -264,6 +265,12 @@ type Appended = { type: string; payload: LineStateChangedPayload };
 const rig = (
   opts: {
     tier?: "T1" | "T2" | "T3";
+    /**
+     * `03-F52`'s layer-2 assignment — the settlement half's trigger since August 2026, where it
+     * used to be the tier. Defaulted to `settlement` so every row that is not ABOUT the trigger
+     * keeps driving the behaviour `02-F31` always had.
+     */
+    serveOwner?: ServeSignalOwner;
     idPrefix?: string;
     clock?: number;
     /** `01 §4`'s service-mode axis — the one input the delivery exclusion reads. */
@@ -308,6 +315,7 @@ const rig = (
   const lines = createLineAdvance({
     store,
     tier: () => opts.tier ?? "T1",
+    serveOwner: () => opts.serveOwner ?? "settlement",
     append: (type, payload) => {
       appended.push({ type, payload });
       put(type, payload as unknown as Record<string, unknown>);
@@ -521,6 +529,7 @@ describe("§E DEC-HW-002/01 §4 — `served` has a legal predecessor at T1, and 
         ],
       } as never,
       tier: () => "T1",
+      serveOwner: () => "settlement",
       append: (type, payload) => appended.push({ type, payload }),
     });
     expect(Object.keys(lines).sort()).toEqual(["confirmed", "printEvent", "settled"]);
@@ -558,6 +567,7 @@ describe("§F 02-F31/01 §4 — delivery lines are NEVER advanced by settlement"
         ],
       } as never,
       tier: () => "T1",
+      serveOwner: () => "settlement",
       append: (type: string, payload: LineStateChangedPayload) => appended.push({ type, payload }),
     });
     lines.settled(ORDER_ID);
@@ -605,9 +615,9 @@ describe("§F 02-F31/01 §4 — delivery lines are NEVER advanced by settlement"
 // §G — THE OTHER TWO GATES.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
-describe("§G 02-F31 — the tier gate, and what counts as settlement completing", () => {
-  /** Two lines at Rs 450 = 90_000 paisa billed. Only tier and tender vary. */
-  const drive = (opts: { tier?: "T1" | "T2" | "T3"; pay_total: number }) => {
+describe("§G 02-F31/03-F52 — the settlement gate, and what counts as settlement completing", () => {
+  /** Two lines at Rs 450 = 90_000 paisa billed. Only the assignment and the tender vary. */
+  const drive = (opts: { serveOwner?: ServeSignalOwner; pay_total: number }) => {
     const appended: Appended[] = [];
     const lines = createLineAdvance({
       store: {
@@ -619,18 +629,34 @@ describe("§G 02-F31 — the tier gate, and what counts as settlement completing
           },
         ],
       } as never,
-      tier: () => opts.tier ?? "T1",
+      // The tier is HELD CONSTANT here now, and that is the assertion below's whole content: it
+      // is no longer an input to this trigger and a rig that varied it would be measuring nothing.
+      tier: () => "T1",
+      serveOwner: () => opts.serveOwner ?? "settlement",
       append: (type: string, payload: LineStateChangedPayload) => appended.push({ type, payload }),
     });
     lines.settled(ORDER_ID);
     return appended;
   };
 
-  it("02-F31 — a T2 or T3 device does NOT auto-advance on settlement", () => {
-    // `03-F24` gives the ready signal to a pass screen on T2/T3, and the line's service state with
-    // it. The CONTROL is the full-tender T1 row below: exactly one input differs.
-    expect(drive({ tier: "T2", pay_total: 90_000 })).toHaveLength(0);
-    expect(drive({ tier: "T3", pay_total: 90_000 })).toHaveLength(0);
+  it("03-F52 — a device whose serve-signal owner is elsewhere does NOT auto-advance", () => {
+    // ⚠ RETIRED AND REPLACED, August 2026. This row read `drive({ tier: "T2" })` and
+    // `drive({ tier: "T3" })` and its title was *"a T2 or T3 device does NOT auto-advance on
+    // settlement"* — the TIER gate, which `03-F52` overturns in terms: *"The tier stops being an
+    // input."* It was a GREEN test defending a rule the corpus had ruled against, which is exactly
+    // the `catalog-pricing.test.ts:394` shape `AGENTS.md` keeps as a worked example, and it would
+    // have failed the correct implementation.
+    //
+    // The harm it was pinning is unchanged and is now pinned on the fact rather than the proxy:
+    // where another surface owns the handover (`03-F24`/`03-F52`), a till that auto-served would
+    // race the human about to act, and `served` is terminal (`01-F35`). The CONTROL is the
+    // full-tender `settlement` row below: exactly one input differs.
+    //
+    // The behavioural half of the ruling — a **T2** branch owned by `settlement` DOES advance,
+    // which this rig can no longer even express — is `serve-signal-settlement.test.ts` §A.
+    expect(drive({ serveOwner: "pass", pay_total: 90_000 })).toHaveLength(0);
+    expect(drive({ serveOwner: "counter", pay_total: 90_000 })).toHaveLength(0);
+    expect(drive({ serveOwner: "waiter", pay_total: 90_000 })).toHaveLength(0);
   });
 
   it("02-F13 — a PARTIAL tender advances nothing; the full one advances both lines", () => {
@@ -651,6 +677,7 @@ describe("§G 02-F31 — the tier gate, and what counts as settlement completing
     const lines = createLineAdvance({
       store: { openOrders: () => [] } as never,
       tier: () => "T1",
+      serveOwner: () => "settlement",
       append: () => {},
     });
     expect(() => lines.settled("0199ffff-0000-7000-8000-00000000dead")).not.toThrow();

@@ -1,4 +1,12 @@
-import { space, TicketCard, Tile, typography, useColor, usePhysicalSize } from "@restos/ui";
+import {
+  space,
+  TicketCard,
+  Tile,
+  targetFor,
+  typography,
+  useColor,
+  usePhysicalSize,
+} from "@restos/ui";
 import { useEffect, useState } from "react";
 import type { PassTicketWire } from "../shared/ipc";
 import { ticketColumns, ticketsPerPage } from "../shared/ticket-capacity";
@@ -49,15 +57,36 @@ export type PassSurfaceProps = {
   tickets: readonly PassTicketWire[];
   /** `03-F24` — `null` where this surface does not own the ready signal (read-only for states). */
   onBump: ((order_id: string) => void) | null;
+  /** `03-F52` — `null` where this surface does not own the serve signal (read-only for `served`). */
+  onHandOver: ((order_id: string) => void) | null;
   /** The owner the layer-2 assignment names, so a read-only screen can say WHY. */
   readySignalOwner: string;
 };
 
-export const PassSurface = ({ tickets, onBump, readySignalOwner }: PassSurfaceProps) => {
+export const PassSurface = ({
+  tickets,
+  onBump,
+  onHandOver,
+  readySignalOwner,
+}: PassSurfaceProps) => {
   const color = useColor();
   const [box, size] = usePhysicalSize();
   const [page, setPage] = useState(0);
   const label = typography["text-label"];
+  /**
+   * `03-F52` — the order the operator has pressed HAND OVER on, and has not yet answered for.
+   *
+   * > The handover press carries a confirm naming the order reference; the ready-mark does not.
+   * > … at counter service the pass person calls the number aloud, so reading the reference off
+   * > the confirm IS the call. **Naming the reference is required** — a bare *"Are you sure?"* is
+   * > the tap people learn to dismiss.
+   *
+   * It holds the whole TICKET rather than an id, because the confirm has to name the reference and
+   * a ticket that leaves the queue while the confirm is up must take its own confirm with it (see
+   * the `confirming` resolution below).
+   */
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const confirming = tickets.find((t) => t.order_id === confirmingId) ?? null;
 
   // `27-F11c` — capacity is a physical question and `size` is `null` until the box is measured.
   // `27-F2` — page capacity comes from the surface's usable AREA, so both axes are read. One
@@ -140,6 +169,9 @@ export const PassSurface = ({ tickets, onBump, readySignalOwner }: PassSurfacePr
           gridAutoFlow: "row",
           gap: space["space-3"],
           alignContent: "start",
+          // `03-F52`'s confirm is positioned against this box and not the viewport, so it covers
+          // the tickets and leaves the pager reachable. See `HandOverConfirm` below.
+          position: "relative",
         }}
       >
         {shown.length === 0 ? (
@@ -164,9 +196,35 @@ export const PassSurface = ({ tickets, onBump, readySignalOwner }: PassSurfacePr
               // `03-F24` — no control at all where this surface does not own the signal, and none
               // on a ticket with nothing left to advance. `27-F5`: an inert primary target is a
               // context-dependent control wearing a different name.
-              onBump={onBump === null || !t.bumpable ? null : () => onBump(t.order_id)}
+              //
+              // Every control on every card is retired while a confirm is up: the confirm covers
+              // this box, and a control under a cover is one `layout:check` reports COVERED and a
+              // wet hand cannot reach anyway.
+              onBump={
+                onBump === null || !t.bumpable || confirming !== null
+                  ? null
+                  : () => onBump(t.order_id)
+              }
+              // `03-F52` — the same two axes, and `handoverable` is decided in MAIN by the very
+              // function that will build the edges (`serveEdgesFor`), so the control the cook sees
+              // and the act main performs cannot disagree.
+              onHandOver={
+                onHandOver === null || !t.handoverable || confirming !== null
+                  ? null
+                  : () => setConfirmingId(t.order_id)
+              }
             />
           ))
+        )}
+        {confirming === null || onHandOver === null ? null : (
+          <HandOverConfirm
+            ticket={confirming}
+            onConfirm={() => {
+              setConfirmingId(null);
+              onHandOver(confirming.order_id);
+            }}
+            onCancel={() => setConfirmingId(null)}
+          />
         )}
       </div>
 
@@ -207,6 +265,107 @@ export const PassSurface = ({ tickets, onBump, readySignalOwner }: PassSurfacePr
           </span>
         </div>
       ) : null}
+    </div>
+  );
+};
+
+/**
+ * # `03-F52` — THE CONFIRM, AND WHY IT IS NOT FRICTION
+ *
+ * > **The handover press carries a confirm naming the order reference; the ready-mark does not.**
+ * > This is the one control in the kitchen whose mis-tap cannot be taken back — `served` is
+ * > terminal, and `03-F17`'s recall strip restores VISIBILITY, never STATE. The confirm is not
+ * > friction bolted on for safety: at counter service the pass person calls the number aloud, so
+ * > **reading the reference off the confirm IS the call**. **Naming the reference is required** —
+ * > a bare *"Are you sure?"* is the tap people learn to dismiss.
+ *
+ * Three properties, each of which is a decision:
+ *
+ *  - **The reference is the payload and the largest thing here** (`27-F25` — numbers are the
+ *    operational payload and the largest element in their region). It is what the pass person
+ *    reads aloud, so it is set at the same hero step `TicketCard` gives it, not at label size
+ *    inside a sentence.
+ *  - **Exactly one control commits and one backs out.** `01-F17`'s spirit and `27-F5`: `served`
+ *    cannot be walked back, so a confirm a wet hand cannot escape is a worse control than no
+ *    confirm at all — on the surface where `27-F9`'s 21.34% wet-hand error was measured. They are
+ *    at opposite ends of the row for `27-F9`'s reason, exactly as DONE and HAND OVER are on the
+ *    card.
+ *  - **It covers the tickets and not the pager.** It is positioned against the grid box, so the
+ *    cards' own controls (which are retired while it is up) cannot be reached under it and
+ *    `03-F46`'s paging is untouched. `00 §5.7` — the queue behind stays visible, so the cook can
+ *    still see how much work is waiting while answering.
+ */
+const HandOverConfirm = ({
+  ticket,
+  onConfirm,
+  onCancel,
+}: {
+  ticket: PassTicketWire;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) => {
+  const color = useColor();
+  const hero = typography["text-numeric-hero"];
+  const body = typography["text-body"];
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: space["space-3"],
+        padding: space["space-4"],
+        // Opaque: a translucent cover would leave the ticket grid legible under the one number
+        // the pass person is about to read aloud, which is how the wrong number gets called.
+        background: color["bgColor-surface"],
+      }}
+    >
+      <span
+        style={{
+          fontFamily: hero.fontFamily,
+          fontSize: hero.fontSize,
+          fontWeight: hero.fontWeight,
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        HAND OVER {ticket.reference}
+      </span>
+      <span
+        style={{
+          fontFamily: body.fontFamily,
+          fontSize: body.fontSize,
+          color: color["fgColor-muted"],
+          textAlign: "center",
+        }}
+      >
+        Call {ticket.reference} and give the food to the customer. This cannot be undone.
+      </span>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "stretch",
+          /*
+            **One whole target of clear space, and the rule was found by looking.**
+
+            `space-between` was the first attempt and the screenshot rejected it: on the 32" TV it
+            put NOT YET and HANDED TO at the extreme edges of 700 mm of glass, a control a cook
+            walks to. `27-F9` wants the destructive target away from the safe one; the panel's
+            width is not the unit of that. 96 dp is `27-F8`'s kitchen target — the size the FR
+            says a wet finger needs — so one target of clear space is the corpus's own unit for
+            *"not adjacent"*, and it is the same gap `TicketCard` puts between DONE and HAND OVER.
+          */
+          gap: targetFor("kitchen"),
+        }}
+      >
+        {/* `27-F4` — the terminal act is on the RIGHT, where HAND OVER sits on the card, and the
+            way out is on the LEFT, where DONE sits. One habit for the whole surface: the thing
+            you cannot take back is always the right-hand target. */}
+        <Tile posture="kitchen" label="NOT YET" onPress={onCancel} />
+        <Tile posture="kitchen" label={`HANDED TO ${ticket.reference}`} onPress={onConfirm} />
+      </div>
     </div>
   );
 };

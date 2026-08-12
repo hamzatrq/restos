@@ -1,6 +1,7 @@
 import type { AgingPolicy } from "@restos/device-config";
 import { ORDER_LINE_STATES, type OrderLineState, TERMINAL_LINE_STATES } from "@restos/domain";
 import type { DeviceStore, OpenOrderRow } from "@restos/sync-client";
+import { serveEdgesFor } from "./serve-mark";
 
 /**
  * # `03-F13` — THE BRANCH ORDER QUEUE, AND THE ONE PROPERTY THAT IS A LAW
@@ -53,20 +54,22 @@ import type { DeviceStore, OpenOrderRow } from "@restos/sync-client";
  * `["served", "delivered", "voided", "cancelled"]` and `picked_up` is deliberately NOT terminal
  * there (delivery walks `picked_up → delivered`), so the FR's own word has to be added back.
  *
- * ## ⚠ NOTHING AT T2 EMITS `served`, SO A FULLY-READY ORDER DOES NOT LEAVE. NAMED, NOT HIDDEN.
+ * ## ✅ A FULLY-READY ORDER NOW LEAVES — `03-F52` (August 2026), and the block that stood here
  *
- * Measured 2026-08-10. `02-F31`'s settlement half is the only producer of `served` in the whole
- * product (`apps/pos-electron/src/main/line-advance.ts`) and it is **tier-gated to T1** — a
- * branch with a pass screen is T2 by `02-F31`'s own detection rule, so `LineAdvance.settled`
- * refuses. `02-F33`'s counter ready-marking and doc 04's waiter-on-pickup are both unbuilt. So on
- * the branch this app is FOR, a ticket every line of which this screen has marked `ready` stays
- * in the queue until the order is voided.
+ * This paragraph read *"⚠ NOTHING AT T2 EMITS `served`, SO A FULLY-READY ORDER DOES NOT LEAVE"*,
+ * and it was right for as long as it stood: `02-F31`'s settlement half was the only producer in
+ * the product and it was **tier-gated to T1**, so a branch with a pass screen — T2 by `02-F31`'s
+ * own detection rule — had none at all. It is kept rather than deleted because the reason it was
+ * a warning and not a bug is the whole of `03-F52`: *"a pass screen that accumulates for ever
+ * after one service is not a degraded surface, it is an unusable one."*
  *
- * **That is not fixed here and must not be**: marking a line `served` from the pass is a claim
- * that food was handed to a customer, it is TERMINAL under `01-F35`, and `01-F1` will not let
- * anyone take it back. The screen therefore says what is true (`00 §5.7`) — a fully-ready ticket
- * renders with its bump control retired and an assembly count of `n of n` — and the gap is
- * carried as an owed item rather than papered over with an invented act.
+ * `03-F52` closed it with a **second, explicit control** and not by widening anything. `serve-
+ * mark.ts` is the producer, `handoverable` below is the card's half of it, and this filter needed
+ * **no change at all** — `KITCHEN_DONE` already contains `served`, so the queue drained the day
+ * the event arrived. The old warning's own reasoning still binds and is now enforced one file
+ * over: marking a line `served` is a claim that food reached a customer, it is TERMINAL under
+ * `01-F35`, `01-F1` will not let anyone take it back, and the press therefore carries a confirm
+ * naming the order reference while DONE does not.
  */
 
 /**
@@ -136,6 +139,19 @@ export type PassTicket = {
    * fully-ready ticket render without a dead button (`27-F5`: no inert primary controls).
    */
   readonly bumpable: boolean;
+  /**
+   * `03-F52` — would a HANDOVER press on this ticket actually do something right now?
+   *
+   * The exact sibling of `bumpable`, computed on the trusted side for the same recorded reason:
+   * the control the operator sees and the act main will perform cannot disagree, and a renderer
+   * that decided this would be a client role claim (commandment 8). `27-F5` is what it buys — no
+   * inert primary control on a delivery ticket, or on one with nothing ready yet.
+   *
+   * It is answered by `serveEdgesFor` itself rather than by a predicate beside it, so the question
+   * the card asks and the act `serve-mark.ts` performs are literally the same branch. A second
+   * derivation is how a screen comes to offer a press that refuses.
+   */
+  readonly handoverable: boolean;
 };
 
 /**
@@ -265,6 +281,12 @@ export const passQueue = (deps: PassQueueDeps): readonly PassTicket[] => {
       linesDone: lines.filter((l) => l.done).length,
       linesTotal: lines.length,
       bumpable: bumpableLines(lines),
+      handoverable:
+        serveEdgesFor({
+          order_id: row.order_id,
+          order_type: order.order_type,
+          json_lines: order.json_lines,
+        }) !== null,
     });
   }
   return tickets.sort(byConfirmTime);

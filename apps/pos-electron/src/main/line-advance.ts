@@ -47,6 +47,7 @@
  * `shift-cash-invariance.test.ts` established, because "we did not intend to" is not evidence.
  */
 
+import type { ServeSignalOwner } from "@restos/device-config";
 import { applyLineState, type OrderLineState } from "@restos/domain";
 import { billedEffectiveFromJsonLines, type DeviceStore } from "@restos/sync-client";
 import { autoAdvancesLines, type HardwareTier } from "./hardware-tier";
@@ -262,6 +263,26 @@ export type LineAdvanceDeps = {
    */
   readonly tier: () => HardwareTier;
   /**
+   * `03-F52`'s layer-2 assignment — **who marks `served` at this branch** — as a GETTER, and the
+   * SAME declaration `apps/pass-kds` reads (`@restos/device-config`, never a copy here).
+   *
+   * > 03-F52 **The tier stops being an input.** `02-F31`'s auto-advance ships unchanged in
+   * > behaviour and changes its trigger: the till emits on settlement because the branch's
+   * > serve-signal owner is `settlement`, not because a label reads `T1`. That is `DEC-HW-003`'s
+   * > checkable test — *"no code may branch on the tier to decide whether a piece of hardware
+   * > EXISTS"* — applied to the one producer that still failed it.
+   *
+   * A getter for `tier`'s reason, one field up: the assignment will one day arrive over a config
+   * plane, and a value captured at construction would freeze this device on whatever was set at
+   * boot.
+   *
+   * ⚠ **It replaces the tier gate on `settled` and NOTHING else.** `printEvent`'s
+   * `kot.printed → in_prep` half is `02-F31`'s other rule, `03-F52` says nothing about it, and
+   * moving it too would auto-advance the lines a `03-F51` screen-only station's bump owns
+   * (`03-F19`).
+   */
+  readonly serveOwner: () => ServeSignalOwner;
+  /**
    * The append. **This is the RAW gateway and not `authorizeWrites`, and that is deliberate.**
    *
    * `WRITE_ACTIONS` in `authorize.ts` maps event types to matrix actions and fails closed, and
@@ -330,7 +351,8 @@ export type LineAdvance = {
    */
   readonly printEvent: (type: string, payload: unknown) => void;
   /**
-   * `02-F31` — *"settlement → lines `served` — **dine-in/takeaway/pickup only**"*, on T1 only.
+   * `02-F31` — *"settlement → lines `served` — **dine-in/takeaway/pickup only**"*, where
+   * `03-F52`'s serve-signal owner is `settlement`.
    *
    * **This half was BLOCKED IN THE KERNEL until August 2026 and is now open by ruling**, not by a
    * session's judgement: `01 §4`'s chain reached `served` only from `ready` while `02-F31`'s next
@@ -344,9 +366,20 @@ export type LineAdvance = {
    * discriminating branch to hand-copy here: `index.ts` already narrows `payment.recorded` once for
    * the receipt, and both consumers hang off that single narrowing.
    *
-   * **Tier-gated, exactly as `printEvent` is.** `02-F31`'s auto-advance is defined by *"where no
-   * device exists to signal them"*; on T2/T3 a pass screen owns the ready signal (`03-F24`) and the
-   * line's own service state with it, and auto-advancing would race a human who is about to act.
+   * **⚠ ASSIGNMENT-gated, and this line USED to read *"tier-gated, exactly as `printEvent` is"*.**
+   * `03-F52` overturned it: *"The tier stops being an input."* The rule it replaces was right
+   * about the harm — on T2/T3 a pass screen owns the line's service state and auto-advancing
+   * would race the human about to act — and wrong about the question, because a tier label is a
+   * proxy for *"is there a device that signals handover"* and `DEC-HW-003` forbids branching on
+   * the proxy (*"no code may branch on the tier to decide whether a piece of hardware EXISTS"*).
+   * `03-F52` names the fact directly: this till emits because the branch's serve-signal owner is
+   * `settlement`. Behaviour at a branch that has configured nothing is unchanged, because the
+   * assignment's assumed value is `settlement` — see `@restos/device-config`'s `serve-signal.ts`,
+   * where that choice is argued rather than defaulted.
+   *
+   * The half `03-F52` did NOT move is `printEvent`'s: `kot.printed → in_prep` is still tier-gated
+   * and `__acceptance__/serve-signal-settlement.test.ts` §C is the assertion that this was a move
+   * and not a deletion.
    *
    * **What it does NOT do, measured rather than assumed:**
    *
@@ -398,9 +431,11 @@ export const createLineAdvance = (deps: LineAdvanceDeps): LineAdvance => {
       if (typeof order_id === "string") advance(order_id, IN_PREP);
     },
     settled: (order_id) => {
-      // `02-F31` — the tier gate, read INSIDE the method for `printEvent`'s reason: a host cannot
-      // forget it and no suite can assert against a copy of it.
-      if (!autoAdvancesLines(deps.tier())) return;
+      // `03-F52` — the trigger is the ASSIGNMENT and no longer the tier. Read INSIDE the method
+      // for `printEvent`'s reason: a host cannot forget it and no suite can assert against a copy
+      // of it. `settlement` is `03-F52`'s own word for *"no device signals handover"*, so this is
+      // `02-F31` unchanged in behaviour and changed in what asks the question.
+      if (deps.serveOwner() !== "settlement") return;
       const order = deps.store.openOrders().find((row) => row.order_id === order_id);
       // `01-F17` — this hangs off a `payment.recorded` that has already landed; an order this
       // device cannot read must never cost the customer the settlement they just made.

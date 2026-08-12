@@ -7,16 +7,21 @@ import {
   describeAging,
   describeDeviceIdentity,
   describePanelDensity,
+  describeServeSignal,
   measurePhysicalWidthMm,
   resolveAging,
   resolveDeviceIdentity,
   resolvePanelDensity,
+  resolveServeSignal,
+  SERVE_SIGNAL_OWNER_ENV,
 } from "@restos/device-config";
 import { businessDate } from "@restos/domain";
 import { openStore, wallClock } from "@restos/sync-client";
 import { app, BrowserWindow, ipcMain, screen } from "electron";
 import {
   CHANNELS,
+  HandOverRequestSchema,
+  type HandOverResult,
   MarkReadyRequestSchema,
   type MarkReadyResult,
   type PassStateWire,
@@ -26,6 +31,7 @@ import { describeCapacity } from "../shared/ticket-capacity";
 import { passQueue } from "./pass-queue";
 import { createReadyMark } from "./ready-mark";
 import { describeReadySignal, READY_SIGNAL_OWNER_ENV, resolveReadySignal } from "./ready-signal";
+import { createServeMark, HANDOVER_SURFACE } from "./serve-mark";
 import { createPassUplink } from "./uplink";
 import { passWindowOptions } from "./window-options";
 
@@ -98,6 +104,20 @@ const boot = async (): Promise<void> => {
   const identity = resolveDeviceIdentity(env);
   const aging = resolveAging(env[AGING_THRESHOLDS_ENV]);
   const readySignal = resolveReadySignal(env[READY_SIGNAL_OWNER_ENV]);
+  /**
+   * `03-F52`'s layer-2 assignment — **the same declaration `apps/pos-electron` reads**, out of
+   * `@restos/device-config` rather than out of a copy here. Two surfaces each carrying their own
+   * default is how a pass screen and a till come to disagree about who owns handover with every
+   * gate green, which is the failure `01-F60`'s enabled-set drift already cost this product once.
+   *
+   * `roster: null` is every host today and is passed explicitly rather than defaulted: `01-F62`
+   * keeps `device.registered` out of every branch stream, so `02-F31`'s detection rule cannot run
+   * on a device. The boot line reports the assumption rather than dressing it as configuration.
+   */
+  const serveSignal = resolveServeSignal({
+    roster: null,
+    configured: env[SERVE_SIGNAL_OWNER_ENV],
+  });
 
   const store = openStore({
     path: join(app.getPath("userData"), "device.db"),
@@ -168,6 +188,39 @@ const boot = async (): Promise<void> => {
     },
   });
 
+  /**
+   * `03-F52`'s producer, wired here — **and this is the seam the FR was written to close.**
+   *
+   * `order.line_state_changed → served` had exactly one producer in the product and it was
+   * tier-gated away from every branch with a pass screen, so a fully-bumped ticket never satisfied
+   * `03-F17` and this queue was a one-way accumulator. `seams:check` cannot see that shape (a key
+   * in an object literal is neither an export nor an optional seam) and neither can a suite that
+   * builds its own wiring, so `__acceptance__/handover-seam.test.ts` is the hand-written half.
+   */
+  const serveMark = createServeMark({
+    store,
+    policy: () => serveSignal,
+    append: (type, payload) => {
+      store.append({
+        id: crypto.randomUUID(),
+        org_id: identity.org_id,
+        branch_id: identity.branch_id,
+        device_id: identity.device_id,
+        // `03-F52`'s OWED item (1), and it is sharper here than on the ready-mark: this is a
+        // TERMINAL claim that food reached a customer, and it is unattributable. `null` is the
+        // honest value; a device id in an actor field would be a lie `01-F1` will not let anyone
+        // correct. Named on the boot line rather than left to be found in a ledger.
+        actor_user_id: null,
+        device_created_at: wallClock.now(),
+        type,
+        schema_version: 1,
+        payload,
+        refs: [],
+      });
+      notifyChanged();
+    },
+  });
+
   const passState = (): PassStateWire => ({
     deviceLabel: "Pass",
     actor: PASS_ACTOR,
@@ -190,6 +243,11 @@ const boot = async (): Promise<void> => {
         : null,
     maySignal: readySignal.maySignal,
     readySignalOwner: readySignal.owner,
+    // `03-F52` — decided HERE and never in the renderer, exactly as `maySignal` is. A renderer
+    // that computed this would be a client role claim (commandment 8), and it would be able to
+    // disagree with the act `serve-mark.ts` performs.
+    mayHandOver: serveSignal.owner === HANDOVER_SURFACE,
+    serveSignalOwner: serveSignal.owner,
   });
 
   ipcMain.handle(CHANNELS.passState, () => passState());
@@ -216,6 +274,14 @@ const boot = async (): Promise<void> => {
     const parsed = MarkReadyRequestSchema.parse(req);
     return readyMark.mark(parsed.order_id, parsed.line_ids);
   });
+  // `03-F52` — the second act, on its own channel. Parsed at the plane boundary (`18 §9`) and
+  // never trusted: the renderer sends an order id and MAIN decides whether this surface owns the
+  // handover, which lines are eligible, and whether the order type is one `01 §4` sends to
+  // `served`.
+  ipcMain.handle(CHANNELS.handOver, (_event, req: unknown): HandOverResult => {
+    const parsed = HandOverRequestSchema.parse(req);
+    return serveMark.handOver(parsed.order_id);
+  });
 
   await app.whenReady();
 
@@ -239,6 +305,7 @@ const boot = async (): Promise<void> => {
       `  ${describeCapacity(glassHeightMm)}`,
       `  ${describeAging(aging)}`,
       `  ${describeReadySignal(readySignal)}`,
+      `  ${describeServeSignal(serveSignal)}`,
       env["RESTOS_CLOUD_URL"] === undefined
         ? "  uplink: OFFLINE (RESTOS_CLOUD_URL unset). This screen will show an EMPTY queue " +
           "forever: the counter's orders reach it over the cloud gateway and nothing else. " +
@@ -248,8 +315,10 @@ const boot = async (): Promise<void> => {
         : `  uplink: cloud ${env["RESTOS_CLOUD_URL"]} — and note it is the ONLY path: the LAN ` +
           "mesh 01-F15 specifies for this traffic is hosted by nothing, so a WAN outage stops " +
           "this screen learning about new orders while the counter goes on selling (01-F17).",
-      "  identity: NO PIN SESSION on this device — 03-F16's ready-mark is attributed to the " +
-        "device and the branch, and actor_user_id is null on every edge it writes. Owed.",
+      "  identity: NO PIN SESSION on this device — 03-F16's ready-mark AND 03-F52's handover are " +
+        "attributed to the device and the branch, and actor_user_id is null on every edge this " +
+        "app writes. 03-F52's OWED (1): the handover is TERMINAL (01-F35), so that is an " +
+        "unattributable permanent claim that food reached a customer. First thing to close.",
     ]
       .filter((line) => line !== "")
       .join("\n") + "\n",

@@ -39,3 +39,12 @@ export {
   REFERENCE_COUNTER_DIAGONAL_IN,
   resolvePanelDensity,
 } from "./panel-density.js";
+export {
+  describeServeSignal,
+  resolveServeSignal,
+  SERVE_SIGNAL_OWNER_ENV,
+  SERVE_SIGNAL_OWNERS,
+  type ServeSignalOwner,
+  type ServeSignalPolicy,
+  type ServeSignalSource,
+} from "./serve-signal.js";
