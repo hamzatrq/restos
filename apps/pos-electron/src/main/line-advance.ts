@@ -223,12 +223,22 @@ const SETTLEMENT_SERVES: ReadonlySet<string> = new Set(["dine_in", "takeaway", "
  * 1. **Is this order's type one `01 §4` sends to `served`?** See `SETTLEMENT_SERVES`.
  *
  * 2. **Has settlement actually COMPLETED?** `02-F31` says *"settlement → lines `served`"* and does
- *    not define the moment. `01-F33`'s closing act `order.settlement_closed` would define it and
- *    **has no production emitter anywhere**, so `OpenOrderRow.settled` is `0` on every order this
- *    device has ever held — waiting for it would advance nothing, ever, which is this wave's named
- *    defect built deliberately. So the trigger is the same observable fact `printing.ts` already
- *    uses at the *same call site* for `02-F15`'s receipt: the order is **tendered for in full**,
+ *    not define the moment. `01-F33`'s closing act `order.settlement_closed` would define it, and
+ *    when this was written it had **no production emitter anywhere** — so `OpenOrderRow.settled`
+ *    was `0` on every order any device had ever held and waiting for it would have advanced
+ *    nothing, ever. So the trigger is the same observable fact `printing.ts` already uses at the
+ *    *same call site* for `02-F15`'s receipt: the order is **tendered for in full**,
  *    `pay_total >= billed_effective`, both off the fold's own keyed sums.
+ *
+ *    ⚠ **`01-F63` (August 2026) gave the act an emitter — `main/settlement-closer.ts`, driven from
+ *    the third arm of that same call site — so the first half of the paragraph above is now
+ *    history rather than a live constraint, and it is corrected in place rather than deleted
+ *    because a reader who finds `settled` populated should be able to find out why this module
+ *    still does not read it.** Nothing here changes: the closing act is emitted from the SAME
+ *    reading this predicate makes, so switching to `settled` would swap one form of one fact for
+ *    another and would introduce an ORDER dependency between two consequences of one append that
+ *    are deliberately independent (`index.ts` runs this one first). `01-F63`'s own words are that
+ *    it joins the existing definition rather than replacing it.
  *
  *    **Reusing that reading rather than inventing a second one is the point.** Both hang off one
  *    `payment.recorded` in `index.ts`; two different definitions of "settled" firing from one event

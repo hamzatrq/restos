@@ -847,13 +847,22 @@ type PayMember = { amount_paisa: number; method: string; purpose: string };
  * is the only design that costs a cashier nothing at the moment she is handing over change.
  *
  * **What "settlement completes" MEANS here, stated because `01-F33` does not settle it for us.**
- * `order.settlement_closed` is the cashier-emitted closing act and **nothing in this product emits
- * it** — measured: the type has a schema in `packages/domain`, a fold arm in `merge.ts`, and zero
- * production emitters, so `OpenOrderRow.settled` is `0` for every order this device has ever held.
- * Waiting for it would mean no receipt ever prints. So the trigger is the observable fact `02-F15`
- * describes: the order has been TENDERED FOR IN FULL — `pay_total >= billed_effective`, both off
- * the fold's own keyed sums, with at least one agreed tender. When `01-F33`'s act gains an emitter
- * this should move to it, and that is a better trigger rather than a different one.
+ * `order.settlement_closed` is the cashier-emitted closing act, and when this was written **nothing
+ * in this product emitted it** — the type had a schema in `packages/domain`, a fold arm in
+ * `merge.ts` and zero production emitters, so `OpenOrderRow.settled` was `0` for every order any
+ * device had ever held and waiting for it would have meant no receipt ever printed. So the trigger
+ * is the observable fact `02-F15` describes: the order has been TENDERED FOR IN FULL —
+ * `pay_total >= billed_effective`, both off the fold's own keyed sums, with at least one agreed
+ * tender.
+ *
+ * ⚠ **THE ACT NOW HAS AN EMITTER AND THIS DID NOT MOVE TO IT** (`01-F63`, August 2026 —
+ * `main/settlement-closer.ts`, driven from the third arm of this same call site in `index.ts`).
+ * The sentence above ended *"when `01-F33`'s act gains an emitter this should move to it"*, and
+ * that is now the wrong instruction rather than an owed one: `01-F63` emits the act **from this
+ * very reading**, so a receipt gated on `settled` would be gated on a consequence of the fact it
+ * already has, and it would make one order-of-execution detail inside one IPC handler decide
+ * whether a customer gets paper. Corrected in place rather than deleted, because the reader who
+ * finds `settled` populated is exactly the reader who would otherwise make that change.
  */
 export const createReceiptPrinter = ({
   spooler,

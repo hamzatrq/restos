@@ -591,9 +591,20 @@ describe("§G — main/index.ts puts the guard between the renderer and the ledg
 
   it("hands the RESULT to authorizeWrites, so commandment 8 still runs first", () => {
     // The dangerous wiring is `authorizeWrites({ writes: gateway, … })` beside a guard nobody
-    // reaches — the wave's defect exactly. `writes:` must name the guarded object.
-    expect(mainSrc).toMatch(/authorizeWrites\(\{\s*writes:\s*settlementGuarded,/);
+    // reaches — the wave's defect exactly. `writes:` must name a GUARDED object, and the chain
+    // from the authorized surface down to the raw gateway must pass through this guard.
+    //
+    // ⚠ **THIS ASSERTION WAS `writes:\s*settlementGuarded` AND WAS CORRECTED IN AUGUST 2026, NOT
+    // WEAKENED.** `02-F48` added a second wrapper (`main/zero-tender-guard.ts`) between the matrix
+    // and this guard, so the chain is now **matrix → amount → duplicate → ledger** and the object
+    // `authorizeWrites` is handed is the zero-tender guard, which is handed THIS one. Pinning only
+    // the outermost name would have gone green on a chain that dropped this guard entirely, so the
+    // whole chain is pinned instead — every link, in order — which is strictly stronger than what
+    // stood here. The negative control is unchanged and still the point.
+    expect(mainSrc).toMatch(/authorizeWrites\(\{\s*writes:\s*tenderGuarded,/);
+    expect(mainSrc).toMatch(/refuseZeroTender\(\{\s*writes:\s*settlementGuarded\s*\}\)/);
     expect(mainSrc).not.toMatch(/authorizeWrites\(\{\s*writes:\s*gateway,/);
+    expect(mainSrc).not.toMatch(/refuseZeroTender\(\{\s*writes:\s*gateway\s*\}\)/);
   });
 
   it("is what the renderer's append channel reaches", () => {

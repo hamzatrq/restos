@@ -62,6 +62,7 @@ import {
   createReceiptPrinter,
   PUMP_INTERVAL_MS,
 } from "./printing";
+import { createSettlementCloser } from "./settlement-closer";
 import { refuseDoubleSettlement } from "./settlement-guard";
 import {
   describeStationRouting,
@@ -71,6 +72,7 @@ import {
 } from "./station-routing";
 import { createUplink } from "./sync";
 import { counterWindowOptions, describePanelFit, resolvePanelFit } from "./window-options";
+import { refuseZeroTender } from "./zero-tender-guard";
 
 /**
  * The main process: the only thing in this app that touches SQLite, and the only thing that
@@ -805,8 +807,30 @@ app.whenReady().then(async () => {
    */
   const settlementGuarded = refuseDoubleSettlement({ writes: gateway, store });
 
+  /**
+   * `02-F48` — **THE SEAM FOR THE Rs 0 TENDER REFUSAL, and its position is the decision.**
+   *
+   * The chain a renderer write now travels is **matrix → amount → duplicate → ledger**.
+   *
+   * - **Inside `authorizeWrites`**, for `refuseDoubleSettlement`'s reason directly above:
+   *   commandment 8 first, so a session with no `payment.settle` permission is told it may not
+   *   settle rather than being told her entry was empty.
+   * - **Outside `refuseDoubleSettlement`**, and that ordering is the substantive choice. This
+   *   guard consults NOTHING — one look at the payload it was handed — while the duplicate check
+   *   reads the fold, so the cheapest and most local refusal answers first. A request carrying no
+   *   money is not a tender at all, so asking "is this a duplicate tender?" of it answers the
+   *   wrong question, and on a bill that happens to be covered it would tell the cashier about the
+   *   BILL when the fact she needs is about what she just did (`00 §5.7`).
+   *
+   * **It is handed nothing but the writes it wraps** (`02-F48`: *"consulting no shift, no day, no
+   * session scope, no peer, no clock and no network"*), which is the one structural difference
+   * from the guard above and is asserted rather than trusted —
+   * `__acceptance__/zero-tender.test.ts` §D drives it through a dependency Proxy.
+   */
+  const tenderGuarded = refuseZeroTender({ writes: settlementGuarded });
+
   const writes = authorizeWrites({
-    writes: settlementGuarded,
+    writes: tenderGuarded,
     store,
     session,
     paidOutApprovalThresholdPaisa: PAID_OUT_APPROVAL_THRESHOLD_PAISA,
@@ -993,6 +1017,28 @@ app.whenReady().then(async () => {
       notifyChanged();
     },
   });
+  /**
+   * `01-F63` — **the producer for `01-F33`'s closing act**, which this product did not have.
+   *
+   * `order.settlement_closed` has had a payload schema in `packages/domain`, a fold arm and a
+   * ratified merge rule in `merge.ts` since the kernel landed, and **zero production emitters** —
+   * so `OpenOrderRow.settled` was `0` on every order any device has ever held and `01-F30`'s
+   * conservation equation, which only runs once settled, had never executed on a real order. That
+   * is the same blind spot `order.line_state_changed` and `audit.print_acknowledged` fell through:
+   * a key in an object literal is not an export, so `seams:check` cannot see it, and
+   * `__acceptance__/settlement-closer-seam.test.ts` is this one's hand-written assertion.
+   *
+   * `gateway`, not `writes`: `WRITE_ACTIONS` fails closed and carries no row for this type, so the
+   * authorized surface would DENY it — and a matrix row invented for it would be the speculative
+   * widening `24-F23` forbids. The closing act is a CONSEQUENCE of an act the matrix has already
+   * authorized (the `payment.recorded` that completed the cover, gated on `payment.settle`), not a
+   * second human act for commandment 8 to judge; the reasoning and its limits are on
+   * `SettlementCloserDeps.writes`, where a test can read them beside the code they govern.
+   *
+   * No `notifyChanged()` inside this one, unlike the two above: it is called from INSIDE the append
+   * handler, which already notifies once after every branch — and the handler is the only caller.
+   */
+  const closer = createSettlementCloser({ store, writes: gateway });
   const kot = createKotPrinter({
     spooler,
     store,
@@ -1378,6 +1424,22 @@ app.whenReady().then(async () => {
         // only hand-copy it. That is `K-3`'s dead-oracle defect, and this file has already paid
         // for it once (mutant M10 of the producer round was killed by a source string alone).
         lines.settled(order_id);
+        // `01-F63` — **THE CLOSING-ACT SEAM**, and it is the same trigger as the two calls above
+        // for the reason `01-F63` gives by name: *"one definition of settlement completes, not
+        // four"*. `02-F45` refuses a second source for one fact, and this product already had
+        // three call sites asking whether the bill is tendered for in full; the act joins them
+        // here rather than inventing a fourth, so a `02-F13` split closes ONCE.
+        //
+        // LAST in the branch, deliberately. The paper (`02-F15`) and the food (`02-F31`) come
+        // first — `01-F17` puts the customer ahead of the bookkeeping — and this is the only one
+        // of the three whose own append changes the row the other two read. Ordering it after
+        // them means nothing they do can be altered by whether the act fired.
+        //
+        // The edge test, the at-most-once check and the whole attested payload live inside the
+        // emitter's own method, where a suite drives the real branch — never here, where a test
+        // could only hand-copy them (`K-3`'s dead-oracle defect, which this file has paid for
+        // once already).
+        closer.settled(order_id);
       }
     }
     // NOTIFY FROM INSIDE THE HANDLER. This was `ipcMain.on(CHANNELS.append, notifyChanged)`,

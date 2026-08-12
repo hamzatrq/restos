@@ -103,12 +103,30 @@ export type SettledConservationArgs = {
  *     order-level `void.recorded` beside line exits would subtract the same money
  *     TWICE — permanently, converged, and silently under `01-F1`. Which of the two
  *     representations is authoritative is answered by no FR.
- *  4. **The equation does not run for these orders yet.** Its only production
- *     caller gates on `order.settled === 1`, and `order.settlement_closed` has
- *     ZERO production emitters (`DEC-MONEY-009`; re-measured 2026-08-11 — every
- *     occurrence outside a comment is a test fixture). Adding a term here would
- *     be a correct subsystem with no seam to the product, and `seams:check` is
- *     blind to a missing producer for an event type.
+ *  4. ~~**The equation does not run for these orders yet.**~~ **CLOSED by `01-F63`
+ *     (August 2026).** This read *"`order.settlement_closed` has ZERO production
+ *     emitters, so adding a term here would be a correct subsystem with no seam
+ *     to the product"*, and it was true when written. `apps/pos-electron/src/main/
+ *     settlement-closer.ts` is now that emitter — the till appends the act on the
+ *     edge into tendered-for-in-full — so `order.settled` reaches `1` on a real
+ *     order and this equation executes for the first time. **It is the ONE blocker
+ *     that has moved; 1–3 above are untouched and each is independently fatal.**
+ *  5. **All four escalatable types have ZERO PRODUCTION EMITTERS** (`DEC-MONEY-010`,
+ *     measured 2026-08-12). `void.recorded`, `comp.recorded`, `discount.recorded`
+ *     and `order.line_price_overridden` each carry a schema, an authorization row
+ *     and a fold arm, and nothing in `apps/` or `services/` constructs one —
+ *     `02-F20`'s void/comp/price-override surfaces do not exist. So a term added
+ *     today would be summed from an empty set for a second, independent reason.
+ *     `__acceptance__/conservation-terms-gate.test.ts` §B is the hand-written
+ *     tripwire for it, because `seams:check` is blind to a missing producer for an
+ *     event type.
+ *
+ *  **`DEC-MONEY-010` (August 2026) converts all of this into a GATE rather than a
+ *  deferral:** a term enters this signature when, and only when, its type has (i) a
+ *  production emitter, (ii) an `01-F31`-class idempotency key and (iii) a `26 §7`
+ *  merge rule — and until then it is ABSENT, **never defaulted to zero behind an
+ *  optional parameter**, because an optional zero term is a term with no producer
+ *  wearing a signature that says it has one.
  */
 export const settledConservationResidualPaisa = (args: SettledConservationArgs): number => {
   const billed = asPaisaInt(args.billed_paisa, "billed_paisa");

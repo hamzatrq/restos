@@ -94,11 +94,31 @@ const CHANGE_SIZE: Record<SurfaceMode, "display" | "hero"> = {
   wide: "display",
 };
 
+/**
+ * `02-F48` — the two ways a press can be worth nothing, as the WORD half of `27-F12`'s pair.
+ *
+ * Two captions and not one, because the two facts are different and a message that covered both
+ * would have to be false about one of them (`00 §5.7`): `entered` is an empty pad against a real
+ * bill, `due` is a real entry against an order with nothing billable. `27-F23`/`21 §5` — the same
+ * short, unpunctuated, all-caps register every other caption on this surface uses, for an operator
+ * population this product does not assume can read a sentence under time pressure.
+ */
+const REASON: Record<"entered" | "due", string> = {
+  entered: "NOTHING ENTERED",
+  due: "NOTHING DUE",
+};
+
 export const TenderPanel = ({ dueP, takenP = paisa(0), onTender }: TenderPanelProps) => {
   const color = useColor();
   const label = typography["text-label"];
   const [entry, setEntry] = useState("");
   const [method, setMethod] = useState<PaymentMethod>("cash");
+  /**
+   * `02-F48` — the last press asked to tender NOTHING, and this is the only thing that changes
+   * about the control. See the button and the readout below; `nothing` is the reason, so a
+   * message can never contradict the branch that produced it.
+   */
+  const [nothing, setNothing] = useState<"entered" | "due" | null>(null);
   const mode = useSurfaceMode();
 
   // `01-F17` — the entry is RUPEES because that is what a cashier types (`27-F23`: no decimals
@@ -112,6 +132,19 @@ export const TenderPanel = ({ dueP, takenP = paisa(0), onTender }: TenderPanelPr
   // by construction — `Paisa` has no sign, so the direction is carried by which word is shown.
   const changeP = coversBill ? subPaisa(enteredP, remainingP) : paisa(0);
   const shortP = coversBill ? paisa(0) : subPaisa(remainingP, enteredP);
+  /**
+   * `02-F48` — **the amount this control is about to record**, named once because the ruling is
+   * about that number and not about the pad.
+   *
+   * Two arms reach zero and they are genuinely different facts, which is why `nothing` carries
+   * which one it was. **Nothing entered:** the pad is empty against a real bill, `coversBill` is
+   * false and the tender is `enteredP` = 0 — the accidental tap. **Nothing due:** the order has no
+   * billable lines, so `remainingP` is 0, `0 >= 0` makes `coversBill` true and the tender is the
+   * REMAINDER, also 0 — the same permanent row down the opposite arm, reachable with digits on the
+   * pad. A single "the entry is empty" message would be a false statement in that second case
+   * (`00 §5.7`), and it is the one a first draft ships.
+   */
+  const tenderP = coversBill ? remainingP : enteredP;
 
   return (
     /**
@@ -284,17 +317,60 @@ export const TenderPanel = ({ dueP, takenP = paisa(0), onTender }: TenderPanelPr
         `CashSurfaces.tsx`'s `Variance` renders `OVER`/`SHORT` with no caption at all, and
         `me-tab.dom.test.tsx` asserts it.
       */}
-        <Readout caption={coversBill ? "CHANGE" : "REMAINING"}>
-          <MoneyValue paisa={coversBill ? changeP : shortP} size={CHANGE_SIZE[mode]} />
+        {/*
+          `02-F48` — **THE REASON, IN THE SLOT THAT IS ALREADY THERE.**
+
+          The FR says the surface owes the cashier the reason *"in `27-F12`'s shape — a word and a
+          number — where she is already looking"*, and this readout sits directly above the control
+          she just pressed. It is the SAME element in all three states: nothing is added, nothing is
+          removed, and **no control moves** (`27-F4`) — which is the constraint that ruled out a
+          sentence inserted above `TAKE`, since inserting one pushes the primary action down by its
+          own height at the exact moment the cashier is reaching for it.
+
+          It is also a duplicate removed rather than a line added: with an empty pad the caption
+          read `REMAINING` over the same figure `DUE` was already showing one readout up — one fact,
+          two sources, which is the `02-F45` shape. The resting state is untouched, though: this
+          swaps in only after a press that tendered nothing, never before one.
+        */}
+        <Readout
+          caption={nothing === null ? (coversBill ? "CHANGE" : "REMAINING") : REASON[nothing]}
+        >
+          <MoneyValue
+            paisa={nothing === null ? (coversBill ? changeP : shortP) : paisa(0)}
+            size={CHANGE_SIZE[mode]}
+          />
         </Readout>
 
         <button
           type="button"
           onClick={() => {
-            // 01-F17 — a sale is never blocked. A PARTIAL tender is recorded as itself and the
-            // remainder stays owed (02-F13's split is this, repeated), so the one thing this
-            // button never does is refuse.
-            onTender({ amountP: coversBill ? remainingP : enteredP, method });
+            // `01-F17` — a sale is never blocked. A PARTIAL tender is recorded as itself and the
+            // remainder stays owed (`02-F13`'s split is this, repeated), so a short entry still
+            // settles for what it is: this button refuses no SALE.
+            //
+            // `02-F48` — **and a tender of NOTHING is not one.** `01-F60` already reads `01-F17`
+            // this way in the corpus's own words (*"forbids blocking a sale, not an item"*): a
+            // Rs 0 `payment.recorded` moves no money, discharges no part of the bill and changes
+            // no total, so there is no sale here to block. Without this the accidental tap wrote a
+            // PERMANENT phantom settlement into `02-F23`'s reconciliation (`01-F1`).
+            //
+            // **`27-F5` is honoured by construction and this is where to check it:** the control
+            // is not disabled, not greyed, not moved and not hidden — an inert primary control is
+            // that FR's own failure mode, and `DEC-MONEY-009` already refused the greyed-button
+            // shape on this exact surface. It is pressable in every state; what changes is that a
+            // press worth nothing produces a REASON instead of an event, and never a modal
+            // (`02-F37`: nothing goes between the cashier and the customer).
+            //
+            // **This is not the enforcement.** `main/zero-tender-guard.ts` refuses the same payload
+            // on the trusted side of the bridge, because `18 §9` makes the renderer untrusted even
+            // though we ship it; this is the half that tells the operator why. The two read one
+            // number and cannot disagree.
+            if (tenderP === 0) {
+              setNothing(coversBill ? "due" : "entered");
+              return;
+            }
+            setNothing(null);
+            onTender({ amountP: tenderP, method });
             setEntry("");
           }}
           /**
@@ -353,7 +429,21 @@ export const TenderPanel = ({ dueP, takenP = paisa(0), onTender }: TenderPanelPr
         and a post-hoc warning asks the operator to notice, re-read and compare — three
         literacy-dependent acts, under the most time pressure, with a customer waiting.
       */}
-      <NumericKeypad value={entry} onChange={setEntry} max={9_999_999} maxDigits={7} />
+      {/*
+        `02-F48` — a keystroke clears the reason, because the reason is about the entry as it was
+        when the control was pressed. Leaving `NOTHING ENTERED` standing over a pad the cashier has
+        started typing into would be a false statement one keystroke old (`00 §5.7`), and the
+        readout has to be back to `CHANGE`/`REMAINING` before she presses again.
+      */}
+      <NumericKeypad
+        value={entry}
+        onChange={(next) => {
+          setNothing(null);
+          setEntry(next);
+        }}
+        max={9_999_999}
+        maxDigits={7}
+      />
     </section>
   );
 };
