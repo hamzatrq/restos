@@ -512,6 +512,18 @@ export const createKotPrinter = ({
       // that exhausts its retry budget is the same evidence about the same cable as a KOT that
       // does. Filtering it to KOTs would make whether the manager hears about a dead printer
       // depend on which document happened to be printing when it died.
+      //
+      // ⚠ **THIS PLACEMENT IS A REAL BEHAVIOURAL CHOICE AND NOTHING ASSERTS IT — measured
+      // 2026-08-13 (adversarial mutation), with the discriminating case run rather than argued.**
+      // Moving this one line below the two `continue`s passes **all 866 tests** in this package,
+      // because `printer-status-producer.test.ts`'s rig enqueues KOTs only. Driven directly at the
+      // shared spooler with a `cash::`-prefixed job on a dead link (`03-F42`: one queue, four
+      // document types), the two arrangements differ completely: **as shipped, one
+      // `printer.status_changed(offline)`; one line lower, ZERO events and no band** — a till whose
+      // printer died while a shift-close slip was in flight never tells the manager, which is the
+      // outcome the paragraph above rejects in terms. The missing fixture is a rig that enqueues
+      // `cash::…` on the shared spooler, exhausts `MAX_TRANSMIT_ATTEMPTS`, and expects exactly one
+      // status event: it fits in ~20 lines and needs no cash printer.
       observePrinter(job.state);
       // S-7 — THE ONE LINE THAT KEEPS THIS FILE'S PRINTERS APART, and it is not tidiness.
       //

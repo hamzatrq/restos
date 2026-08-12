@@ -239,6 +239,19 @@ const ackKeyOf = (payload: Readonly<Record<string, unknown>>): string | null => 
   // `05-F4` puts two failed printers on one order in TWO alarms, because `03-F5` says the manager
   // has to know which one to walk to. An ack naming neither would clear both or neither, so a
   // `print_failed` ack without its printer identifies nothing and clears nothing.
+  //
+  // ⚠ **MEASURED 2026-08-13 (adversarial mutation): THE EXPLICIT-`null` CASE IS UNASSERTED HERE.**
+  // A mutant that keeps this string narrow exactly as written — so test 11a's poisoned
+  // `{ toString }` printer is still refused — and additionally treats `printer_name: null` /
+  // absent as "clears every printer on this order" (returning `ackKey(kind, order_id, null)` and
+  // consulting that key beside the per-printer one) passes **all 46 tests in this package**. That
+  // is the precise defect `05-F30` forbids in terms: one ack clearing BOTH alarms, permanently
+  // (`01-F1`), leaving a second printer down with nobody told. It is refused today by exactly one
+  // line — the `: null` below — and by `packages/domain`'s discriminated union (`alarm-ack-schema`
+  // test 8), which is a DIFFERENT PACKAGE. This file's own header states it narrows `unknown`
+  // itself rather than trusting the adapter, so the domain schema is not this view's guard.
+  // The missing fixture is one line: a `print_failed` ack with `printer_name: null` on an order
+  // carrying two `kot.print_failed` facts must leave BOTH alarms standing.
   if (alarm_kind === "print_failed") {
     return typeof printer_name === "string" && printer_name !== ""
       ? ackKey(alarm_kind, order_id, printer_name)
@@ -272,6 +285,17 @@ const acknowledgedKeys = (facts: readonly BranchFact[]): ReadonlySet<string> => 
     // field names, and it was run out-of-tree: correct implementation keeps the alarm, prefix
     // mutant clears it. This line is load-bearing and the assertion that claims to own it is not —
     // recorded here rather than fixed, because that suite is another session's oracle.
+    //
+    // ⚠ **CONFIRMED INDEPENDENTLY 2026-08-13, and the risk is narrower than the note above reads.**
+    // The discriminating fixture was reproduced: an `audit.drawer_opened` envelope carrying
+    // `05-F30`'s four field names — correct implementation keeps the alarm, `startsWith` mutant
+    // clears it. But **no shipped producer can emit such a payload today.** The till's own
+    // `audit.print_acknowledged` is `{ alarm_id, order_id, printer_name }` (`printing.ts:577`,
+    // `:862`) and carries NO `alarm_kind`, and the other five subtypes carry `prev_audit_hash`
+    // alone — which is exactly why test 10's fixture cannot discriminate and why the prefix mutant
+    // is inert against the current ledger. So this is a **forward** guard, not a live hole: it
+    // costs nothing and it starts mattering the first time any `audit.*` subtype gains an
+    // `alarm_kind` field. Stated at that strength so nobody reads "load-bearing" as "exploitable".
     if (fact.type !== ALARM_ACK) continue;
     const key = ackKeyOf(fact.payload);
     if (key !== null) acked.add(key);

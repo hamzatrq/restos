@@ -436,6 +436,19 @@ const NON_FOLD_TYPES = {
    * arm already makes in the switch below. That is WEAKER than `catalog.changed`'s, which has
    * `01-F52` forbidding any fold from reading it for all time; if a fold ever needs this fact, this
    * row moves and the compiler says so — which is what a row is for.
+   *
+   * ⚠ **THE COMPILER SAYS SO ONLY IF THE ROW IS DELETED, NOT IF IT MOVES TO THE WRONG SET —
+   * measured 2026-08-13 (adversarial mutation).** Deleting this row reddens `pnpm typecheck` at
+   * `assertNever` (`TS2345`, line ~920), which is the pin working. But MOVING it into
+   * `OTHER_FOLD_TYPES` below — whose doc says the two sets *"make different claims and conflating
+   * them would be a lie in the direction that matters"* — passes **all 642 tests in this package
+   * AND the root `pnpm typecheck`, exit 0 on both**. `keysFor` answers `[]` from either branch, so
+   * the two sets are runtime-identical and the only thing distinguishing them is the sentence a
+   * reader believes. `merge-workcounter.test.ts`'s `PINNED_NOT_FOLDED` does not close this: it
+   * cross-checks the TEST's own two lists against `eventRegistry.types()`, never against this
+   * file's classification. So *"no fold may read this"* and *"another fold in this package owns
+   * this"* are, today, interchangeable assertions — which is worth knowing before either is cited
+   * as evidence about a money-bearing type, the exact case that doc warns about.
    */
   "printer.status_changed": "03-F53",
 } as const satisfies Partial<Record<KnownEventType, string>>;

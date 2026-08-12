@@ -839,6 +839,22 @@ const auditPayloadSchema = z.looseObject({
  * `05-F1`'s alarm shape (order, channel, table, age) nor `05-F2`'s persistence rule can express.
  * `05-F30` closes the set precisely so the ruling has to widen it VISIBLY, here, rather than
  * arriving as a string nobody enumerated and `01-F1` can never retract.
+ *
+ * ⚠ **AND THE ASSERTION THAT IS SUPPOSED TO ENFORCE THAT ONLY HALF WORKS — MEASURED 2026-08-13
+ * (adversarial mutation).** `alarm-ack-schema` test 7 sweeps `alarm_kind` values including
+ * `"printer_offline"` and demands each be refused, but it builds every case from `lateOrderAck()`,
+ * whose `printer_name` is **`null`**. So a third arm is caught only if its printer rule also
+ * rejects `null`:
+ *   · third arm copied from the `late_order` arm (`printer_name: z.null()`) → test 7 REDDENS.
+ *   · third arm requiring a printer (`printer_name: z.string().min(1)`) → **all 496 tests pass**,
+ *     and `parseEvent` then accepts `alarm_kind: "printer_offline"` into an append-only ledger.
+ *     Demonstrated, not inferred: the accepting envelope was parsed and its payload asserted.
+ * The second shape is the LIKELIER one, because `05-F3`'s printer-offline alarm is about a printer
+ * and `03-F5` says the manager must know which one to walk to — so the widening `05-F30` names as
+ * a founder call is exactly the widening this suite cannot see. It is the round-3 law's own
+ * worked example (`F60`'s "refused for the right reason") one FR later: `expectRefused` proves the
+ * refusal was not `UnknownEventTypeError`, and nothing proves WHICH FIELD did the refusing.
+ * The missing fixture is one line: sweep the same kinds against `printFailedAck()` too.
  */
 export const ALARM_ACK_KINDS = ["late_order", "print_failed"] as const;
 export type AlarmAckKind = (typeof ALARM_ACK_KINDS)[number];
@@ -894,6 +910,16 @@ const alarmAckPayloadSchema = z.discriminatedUnion("alarm_kind", [
     // because `01-F1` makes the permissive direction irreversible — a printer name written onto an
     // alarm with no printer is a permanent claim about hardware nobody touched, while loosening
     // later costs one line and invalidates no history.
+    //
+    // ⚠ **RE-MEASURED 2026-08-13 (adversarial mutation) AND IT IS WORSE THAN THE NOTE ABOVE
+    // SAYS: the whole line can be DELETED.** Not merely loosened to `string | null` — removed
+    // outright. Both arms are `looseObject`s (deliberately, test 11), so with this key gone a
+    // `late_order` ack carrying `printer_name: "TH230"` parses, and so does one carrying no
+    // `printer_name` at all; all **496** tests in this package stay green either way. So the
+    // `late_order` arm's printer rule is not weakly asserted, it is UNASSERTED, and `05-F30`'s
+    // *"`null` on a `late_order` ack"* rests on this one token. The missing fixture is one line:
+    // a `late_order` ack with `printer_name: "TH230"` must be REFUSED (via `expectRefused`, so it
+    // cannot pass by way of `UnknownEventTypeError`).
     printer_name: z.null(),
   }),
   auditPayloadSchema.extend({

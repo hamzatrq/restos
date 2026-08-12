@@ -1014,6 +1014,18 @@ app.whenReady().then(async () => {
     // 03-F5's `kot.print_failed` and 02-F31's `kot.printed`, through the gateway so the envelope
     // is stamped exactly like every other append (02-F41's read-at-append attribution included).
     // The push is what makes the band appear without the renderer polling.
+    //
+    // ⚠ **THIS CALLBACK ALSO CARRIES `03-F53`'s `printer.status_changed`, AND NO SUITE WATCHES IT
+    // ARRIVE — measured 2026-08-13 (adversarial mutation).** Dropping that one type here
+    // (`if (type === "printer.status_changed") return;`) leaves **all 866 tests green**: the
+    // producer suite constructs its own `createKotPrinter` with its own `append`, so it proves the
+    // event is COMPUTED and never that the product's ledger receives it. This is AGENTS.md's named
+    // blind spot verbatim — *"a port supplied with a stub … Rule B asks whether an optional member
+    // is supplied, never whether what was supplied is real"* — and `seams:check` is clean either
+    // way. The only evidence that the chain closes is a MANUAL run (a real till, a dead printer,
+    // two orders, one `printer.status_changed` row in `device.db`), which is a measurement and not
+    // an assertion. `station-routing-seam.test.ts` §E is the shape that would fix it: read this
+    // construction as source and assert the type is not filtered out of it.
     append: (type, payload) => {
       gateway.append({ type, payload, refs: [] });
       // `02-F31` — **THE SEAM.** *"line statuses auto-advance where no device exists to signal
