@@ -288,7 +288,11 @@ importers:
 
   packages/config: {}
 
-  packages/device-config: {}
+  packages/device-config:
+    dependencies:
+      '@restos/domain':
+        specifier: workspace:*
+        version: link:../domain
 
   packages/domain:
     dependencies:

@@ -1,5 +1,11 @@
 import { contextBridge } from "electron";
-import type { MarkReadyResult, PassBridge, PassStateWire, PassTicketWire } from "../shared/ipc";
+import type {
+  HandOverResult,
+  MarkReadyResult,
+  PassBridge,
+  PassStateWire,
+  PassTicketWire,
+} from "../shared/ipc";
 
 /**
  * # THE GATE'S FIXTURE — and the fixture IS the coverage boundary
@@ -75,9 +81,34 @@ const tickets = (): PassTicketWire[] => {
   return Array.from({ length: 20 }, (_unused, i) => {
     const order_type = TYPES[i % TYPES.length] ?? "dine_in";
     const delivery = order_type === "delivery";
-    const lineCount = (i % 4) + 1;
-    const done = i % 3;
+    /**
+     * ⚠ **The line-count and ready-count cycles are offset by ONE, and the offset is load-bearing.**
+     *
+     * They ran `i % 4` and `i % 3`, which made ticket 0 a **single `in_prep` line** — bumpable and
+     * with nothing ready. On the three panels that hold ONE ticket (`tablet-10.1`,
+     * `netbook-1024`, `probe-phone`) page 1 is ticket 0 and nothing else, so `03-F52`'s handover
+     * control was never drawn there at all and its confirm was never opened. **The gate said so
+     * by name** on the first run after the checks landed — three EMPTY MATCHes and a
+     * *"confirm was opened on 4 of 7 panels"* — which is the `24-F14` tripwire doing exactly the
+     * job the twelve-tickets/no-pager round bought it for.
+     *
+     * The offset rotates the same multiset of shapes rather than adding one, so the sweep still
+     * spans 1..4-line cards and the same two non-bumpable rows; it just puts the **mixed** ticket
+     * first. Mixed is also the card that matters most here: it is the only arrangement where
+     * `27-F9`'s hard rule bites, because it is the only one that draws DONE and HAND OVER at once.
+     */
+    const lineCount = ((i + 1) % 4) + 1;
+    const done = (i + 1) % 3;
     const bumpable = i !== 4 && i !== 9;
+    const lines = Array.from({ length: lineCount }, (_u, j) => ({
+      line_id: `line-${i}-${j}`,
+      // A long name on purpose: `03-F38`'s `kitchen_name` is the fix for these and a fixture of
+      // short names would never show the card its own worst case.
+      name: j === 0 ? "Chicken Karahi (Full) — extra spicy" : `Roghni Naan ${j}`,
+      quantity: j + 1,
+      state: j < done ? "ready" : bumpable ? "in_prep" : "ready",
+      done: j < done,
+    }));
     return {
       order_id: `order-${String(i).padStart(4, "0")}`,
       reference: `A-${String(140 + i).padStart(4, "0")}`,
@@ -92,18 +123,21 @@ const tickets = (): PassTicketWire[] => {
       minutes: i * 3,
       amberAt: delivery ? 15 : 10,
       redAt: delivery ? 25 : 20,
-      lines: Array.from({ length: lineCount }, (_u, j) => ({
-        line_id: `line-${i}-${j}`,
-        // A long name on purpose: `03-F38`'s `kitchen_name` is the fix for these and a fixture of
-        // short names would never show the card its own worst case.
-        name: j === 0 ? "Chicken Karahi (Full) — extra spicy" : `Roghni Naan ${j}`,
-        quantity: j + 1,
-        state: j < done ? "ready" : bumpable ? "in_prep" : "ready",
-        done: j < done,
-      })),
+      lines,
       linesDone: Math.min(done, lineCount),
       linesTotal: lineCount,
       bumpable,
+      /**
+       * `03-F52` — DERIVED from this ticket's own lines rather than typed, and it is TRUE on a
+       * mixed ticket and not only on a finished one.
+       *
+       * `serve-mark.ts` answers exactly this question in main (`serveEdgesFor(...) !== null`) and
+       * a fixture that typed an answer of its own could draw a control the emitter would refuse —
+       * the disagreement `pass-queue.ts` computes `handoverable` on the trusted side to prevent.
+       * So it is the same two terms: a line already `ready`, and an `order_type` on `01 §4`'s
+       * allowlist.
+       */
+      handoverable: order_type !== "delivery" && lines.some((l) => l.state === "ready"),
     };
   });
 };
@@ -128,12 +162,18 @@ const passState = (): PassStateWire => ({
   },
   maySignal: maySignal(),
   readySignalOwner: maySignal() ? "pass" : "counter",
+  // `03-F52` — swept on the same axis as `03-F24`'s, so the read-only state covers BOTH refusals.
+  // A fixture that left this `true` in the read-only state would take half the assignment out of
+  // coverage, which is the `escalationFor: () => null` failure this file's header is about.
+  mayHandOver: maySignal(),
+  serveSignalOwner: maySignal() ? "pass" : "settlement",
 });
 
 const bridge: PassBridge = {
   passState: () => Promise.resolve(passState()),
   queue: () => Promise.resolve(tickets()),
   markReady: (): Promise<MarkReadyResult> => Promise.resolve({ ok: true, events: 1, lines: 1 }),
+  handOver: (): Promise<HandOverResult> => Promise.resolve({ ok: true, lines: 1 }),
   onChanged: () => () => {},
 };
 

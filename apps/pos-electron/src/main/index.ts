@@ -15,11 +15,15 @@ import {
   describeAging,
   describeDeviceIdentity,
   describePanelDensity,
+  describeServeSignal,
   measurePhysicalWidthMm,
   type PanelDensity,
   resolveAging,
   resolveDeviceIdentity,
   resolvePanelDensity,
+  resolveServeSignal,
+  SERVE_SIGNAL_OWNER_ENV,
+  type ServeSignalPolicy,
 } from "@restos/device-config";
 import { businessDate, hashPin } from "@restos/domain";
 import { createSpooler, printerCapability } from "@restos/escpos";
@@ -299,6 +303,28 @@ const hardwareTier = (): ResolvedHardwareTier => {
     configured: process.env[HARDWARE_TIER_ENV],
   });
   return hardwareTierCache;
+};
+
+/**
+ * `03-F52` / `00 §7` layer 2 — **who marks `served` at this branch**, resolved once per process.
+ *
+ * Cached for `hardwareTier`'s reasons directly above: it is read on every settlement, the answer
+ * cannot change without a restart (the roster is unreachable, so only the environment decides it),
+ * and a till that changed its mind mid-service would start or stop marking lines handed-over
+ * halfway through a shift.
+ *
+ * The declaration is `@restos/device-config`'s and not this app's, because `apps/pass-kds` reads
+ * the SAME value: `03-F52` — *"One declaration, no per-app fallback … Two surfaces each carrying
+ * their own default is how a pass screen and a till come to disagree about who owns handover with
+ * every gate green."*
+ */
+let serveSignalCache: ServeSignalPolicy | null = null;
+const serveSignal = (): ServeSignalPolicy => {
+  serveSignalCache ??= resolveServeSignal({
+    roster: null,
+    configured: process.env[SERVE_SIGNAL_OWNER_ENV],
+  });
+  return serveSignalCache;
 };
 
 /**
@@ -677,6 +703,15 @@ app.whenReady().then(async () => {
   console.log(describeHardwareTier(hardwareTier()));
 
   /**
+   * `00 §5.7` a second time on the same page, and this value replaced the tier as the input to
+   * `02-F31`'s settlement half (`03-F52`). It has the same property that put the line above it
+   * here: a till that assumed it owns the handover marks every settled order `served` — terminally
+   * (`01-F35`), permanently (`01-F1`) — and looks exactly like a till that was TOLD to. The
+   * `assumed` case says so at length and names the correction on both devices.
+   */
+  console.log(describeServeSignal(serveSignal()));
+
+  /**
    * `27-F11c` / `00 §5.7` — and the same argument one line down from the density it depends on.
    * The window's floor is millimetres now and it CLAMPS instead of refusing, so a till on glass
    * too small for its own layout starts and runs; this line, and `CatalogHealth`'s neighbour on
@@ -926,6 +961,9 @@ app.whenReady().then(async () => {
   const lines = createLineAdvance({
     store,
     tier: () => hardwareTier().tier,
+    // `03-F52` — the settlement half's trigger. `printEvent` still reads `tier` above; only this
+    // one moved, and the assignment comes out of the shared declaration both apps read.
+    serveOwner: () => serveSignal().owner,
     append: (type, payload) => {
       gateway.append({ type, payload, refs: [] });
       notifyChanged();

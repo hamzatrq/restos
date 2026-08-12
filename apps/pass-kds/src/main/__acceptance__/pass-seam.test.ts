@@ -128,7 +128,13 @@ describe("§D commandment 5 — this is an OPERATIONAL screen and the plane is n
     expect(PRELOAD).toContain("contextBridge.exposeInMainWorld");
     expect(PRELOAD).not.toMatch(/invoke:\s*\(channel/);
     const members = [...PRELOAD.matchAll(/ipcRenderer\.invoke\(CHANNELS\.(\w+)/g)].map((m) => m[1]);
-    expect(new Set(members)).toEqual(new Set(["passState", "queue", "markReady"]));
+    // ⚠ RETIRED AND REPLACED, August 2026 — this read `["passState", "queue", "markReady"]` and
+    // `03-F52` adds a FOURTH member: the handover is *"a second, explicit control, separate from
+    // DONE"*, so it is a second bridge member and not a flag on the first. The assertion's PURPOSE
+    // (`18 §9` — the renderer's reachable surface is auditable by reading one file) is unchanged
+    // and only the expected set moved. `handover-seam.test.ts` §C holds the same set from the
+    // other side, deliberately: a rule two files assert is a rule neither can quietly drop.
+    expect(new Set(members)).toEqual(new Set(["passState", "queue", "markReady", "handOver"]));
   });
 });
 
@@ -140,7 +146,17 @@ describe("§E 03-F24 — the READ-ONLY refusal exists on both sides of the plane
     expect(MAIN).toContain("maySignal: readySignal.maySignal");
     expect(APP).toContain("onBump={state.maySignal ? onBump : null}");
     // `27-F5` — no control at all rather than an inert one.
-    expect(SURFACE).toContain("onBump === null || !t.bumpable ? null :");
+    //
+    // ⚠ WIDENED, August 2026. This pinned the exact expression `onBump === null || !t.bumpable ?
+    // null :`, and `03-F52` added a THIRD term to it: a card's controls are also retired while
+    // the handover confirm is up, because that confirm covers the ticket grid and a control under
+    // a cover is a dead target (`layout:check` calls it COVERED). The assertion's PURPOSE — the
+    // renderer renders no control rather than an inert one, on main's decision and not its own —
+    // is unchanged, so the two terms it was written for are still each asserted, by name, and a
+    // third term cannot silently retire either of them.
+    expect(SURFACE).toContain("onBump === null");
+    expect(SURFACE).toContain("!t.bumpable");
+    expect(SURFACE).toMatch(/onBump=\{[^}]*\?\s*null/);
   });
 });
 

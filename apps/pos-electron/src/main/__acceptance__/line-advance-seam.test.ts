@@ -19,6 +19,7 @@
 // owed the same independent oracle pass.
 
 import { readFileSync } from "node:fs";
+import type { ServeSignalOwner } from "@restos/device-config";
 import { describe, expect, it } from "vitest";
 import { createLineAdvance, type LineStateChangedPayload } from "../line-advance";
 
@@ -120,6 +121,11 @@ describe("§B 02-F31 — the KOT callback's contract, driven", () => {
     const lines = createLineAdvance({
       store: { openOrders: () => [orderAt("confirmed")] } as never,
       tier: () => tier,
+      // `03-F52` moved the SETTLEMENT half's trigger onto the assignment and left this half alone,
+      // so `printEvent` reads `tier` and never this. Supplied because the dep is required and held
+      // constant because it is not an input here — `serve-signal-settlement.test.ts` §C is the
+      // assertion that it stays that way.
+      serveOwner: () => "settlement",
       append: (type, payload) => appended.push({ type, payload }),
     });
     return { appended, lines };
@@ -205,6 +211,7 @@ describe("§D 02-F31/DEC-HW-002 — the settlement trigger is PRESENT, reachable
     const lines = createLineAdvance({
       store: { openOrders: () => [] } as never,
       tier: () => "T1",
+      serveOwner: () => "settlement",
       append: () => {},
     });
     expect(Object.keys(lines).sort()).toEqual(["confirmed", "printEvent", "settled"]);
@@ -216,27 +223,35 @@ describe("§D 02-F31/DEC-HW-002 — the settlement trigger is PRESENT, reachable
     // because the seam suite asserted against a hand-copy of the host's branch (`K-3`'s
     // dead-oracle defect). The source read above proves the host CALLS the emitter; this proves
     // the emitter it calls is not inert — which is the half a wired-and-inert trigger would pass.
-    const rig = (tier: "T1" | "T2", order_type: string) => {
+    const rig = (owner: ServeSignalOwner, order_type: string) => {
       const appended: { type: string; payload: LineStateChangedPayload }[] = [];
       const lines = createLineAdvance({
         store: {
           openOrders: () => [{ ...orderAt("in_prep"), order_type, pay_total: 45_000 }],
         } as never,
-        tier: () => tier,
+        tier: () => "T1",
+        serveOwner: () => owner,
         append: (type, payload) => appended.push({ type, payload }),
       });
       lines.settled(ORDER_ID);
       return appended;
     };
     // It fires, and it fires with the state `02-F31` names.
-    const served = rig("T1", "dine_in");
+    const served = rig("settlement", "dine_in");
     expect(served).toHaveLength(1);
     expect(served[0]?.payload.state).toBe("served");
-    // The tier gate is read INSIDE `settled`, not around it at the call site — same property §B
-    // pins for `printEvent`, and the same reason: a gate in the host is a gate no test can drive.
-    expect(rig("T2", "dine_in")).toHaveLength(0);
+    // ⚠ RETIRED AND REPLACED, August 2026. This row read `expect(rig("T2", "dine_in"))
+    // .toHaveLength(0)` and its `rig` took a TIER — it asserted that the settlement half is
+    // tier-gated, which `03-F52` overturns in terms: *"The tier stops being an input."* Kept as a
+    // gate rather than deleted, because the PROPERTY it pinned is still the one that matters —
+    // the refusal is read INSIDE `settled` and not around it at the call site (§B pins the same
+    // for `printEvent`, and the reason is that a gate in the host is a gate no test can drive).
+    // Only the question changed: `03-F52`'s assignment, not the tier. The behavioural half of the
+    // ruling — a T2 branch owned by `settlement` DOES advance — lives in
+    // `serve-signal-settlement.test.ts` §A, which is where the new rule's controls are.
+    expect(rig("pass", "dine_in")).toHaveLength(0);
     // `01 §4`'s delivery rule, on an order identical in every other respect.
-    expect(rig("T1", "delivery")).toHaveLength(0);
+    expect(rig("settlement", "delivery")).toHaveLength(0);
   });
 
   it("the module records WHY, so the next reader does not rediscover it as a bug", () => {

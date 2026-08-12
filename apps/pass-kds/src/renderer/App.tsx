@@ -70,6 +70,22 @@ export const App = () => {
     [reload],
   );
 
+  const handOver = useCallback(
+    (order_id: string) => {
+      // `03-F52` — the SECOND act, and a separate call rather than a flag on `markReady`, because
+      // the separation is the FR: *"One press of DONE emits `ready` and only `ready`."*
+      //
+      // The confirm has already been answered on the glass (`PassSurface`); this is the commit.
+      // MAIN still decides everything that matters — whether this surface owns the assignment,
+      // whether the order type is one `01 §4` sends to `served`, and which lines are `ready` — so
+      // a renderer that forged this call gains nothing it could not reach by pressing the button.
+      void bridge()
+        .handOver({ order_id })
+        .then(() => reload());
+    },
+    [reload],
+  );
+
   // The first frame before the bridge answers. `usePhysicalSize`'s own note applies: rendering
   // nothing until measured would blank the surface, but rendering a SHELL with no density would
   // draw every target at the wrong physical size for a frame — so the shell waits for the one
@@ -78,7 +94,7 @@ export const App = () => {
 
   return (
     <PanelRoot panelPpi={state.panelPpi}>
-      <Shell state={state} tickets={tickets} onBump={bump} />
+      <Shell state={state} tickets={tickets} onBump={bump} onHandOver={handOver} />
     </PanelRoot>
   );
 };
@@ -87,10 +103,12 @@ const Shell = ({
   state,
   tickets,
   onBump,
+  onHandOver,
 }: {
   state: PassStateWire;
   tickets: readonly PassTicketWire[];
   onBump: (order_id: string) => void;
+  onHandOver: (order_id: string) => void;
 }) => {
   const color = useColor();
   return (
@@ -134,6 +152,11 @@ const Shell = ({
           <PassSurface
             tickets={tickets}
             onBump={state.maySignal ? onBump : null}
+            // `03-F52` — the assignment is main's decision and the screen is TOLD. A renderer that
+            // computed this would be a client role claim (commandment 8), and `27-F5` is why it is
+            // `null` and not a disabled control: a surface without the assignment renders no
+            // handover at all, exactly as `03-F24` already has it render no bump.
+            onHandOver={state.mayHandOver ? onHandOver : null}
             readySignalOwner={state.readySignalOwner}
           />
         </WorkSurface>

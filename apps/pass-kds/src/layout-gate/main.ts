@@ -185,6 +185,8 @@ const run = async (): Promise<void> => {
   let surfaces = 0;
   let controls = 0;
   let bumpControls = 0;
+  let handoverControls = 0;
+  let confirmSurfaces = 0;
   let readOnlySurfaces = 0;
   let emptySurfaces = 0;
   let pagersDrawn = 0;
@@ -192,6 +194,61 @@ const run = async (): Promise<void> => {
   // `24-F14` — a font verdict is not a surface, so deleting the probe would change no surface
   // count and no control count while the gate quietly stopped asking (see the counter's gate).
   let fontSurfacesMeasured = 0;
+
+  /**
+   * # `03-F52`'s CONFIRM, OPENED AND MEASURED — and this is the fixture lesson applied in advance
+   *
+   * `handover-confirm.dom.test.tsx` says it out loud: happy-dom performs no layout, so every
+   * assertion it makes about the confirm is *"it is in the document"* and none is *"it is on the
+   * screen"*. That file's own closing paragraph names the risk — a confirm that renders below the
+   * viewport on the 10.1" panel would pass every row it has — and points here, because **the
+   * gate's FIXTURE is its real coverage boundary**: `ManagerApproval`'s dead controls sat
+   * unmeasured for weeks behind an `escalationFor: () => null` that meant the panel never rendered.
+   *
+   * So the sweep PRESSES the control and measures what appears, on every panel. It runs last in
+   * the state because opening the confirm retires every card control (they would otherwise sit
+   * under a cover, which is a `COVERED` verdict and a wet hand's dead target), so the `27-F8`
+   * millimetre row above must have taken its measurement first.
+   */
+  const measureConfirm = async (panel: (typeof PANELS)[number], surface: string): Promise<void> => {
+    const opened: boolean = await window.webContents.executeJavaScript(
+      `(() => {
+        const el = [...document.querySelectorAll("button")].find(
+          (b) => (b.textContent ?? "").trim() === "HAND OVER",
+        );
+        if (!el) return false;
+        el.click();
+        return true;
+      })()`,
+    );
+    if (!opened) {
+      fail(`${surface}: EMPTY MATCH — no HAND OVER control to open 03-F52's confirm with`);
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 150));
+    const report: SurfaceReport = await window.webContents.executeJavaScript(
+      `(${measureSurface.toString()})()`,
+    );
+    const confirmSurface = `${panel.label} handover-confirm`;
+    judge(confirmSurface, report, panel.ships);
+    await shoot(window, `${panel.label}--handover-confirm`);
+    confirmSurfaces += 1;
+    /**
+     * `03-F52` — *"Naming the reference is required"*, and *"EXACTLY ONE of the confirm's controls
+     * hands over, and at least one does not"*. The dom suite drives that behaviourally; what is
+     * asserted HERE is that the thing it drove is really drawn on this glass, because a confirm
+     * whose committing control renders off a 10.1" panel is a terminal act a cook cannot complete
+     * and a queue that never drains.
+     */
+    const committing = report.controls.filter((c) => c.label.includes("HANDED TO"));
+    const backing = report.controls.filter((c) => c.label.includes("NOT YET"));
+    if (committing.length !== 1 || backing.length !== 1) {
+      fail(
+        `${confirmSurface}: 03-F52 BROKEN — the confirm drew ${committing.length} committing and ` +
+          `${backing.length} backing-out control(s); exactly one of each is the FR.`,
+      );
+    }
+  };
 
   for (const panel of PANELS) {
     window.setContentSize(panel.width, panel.height);
@@ -290,6 +347,8 @@ const run = async (): Promise<void> => {
        * `TicketCard` renders no control at all rather than a disabled one (`27-F5`). A gate that
        * only ever measured the owner state would bless a screen that ignores the assignment.
        */
+      const handovers = report.controls.filter((c) => c.label.includes("HAND OVER"));
+
       if (state === "readonly") {
         readOnlySurfaces += 1;
         if (bumps.length > 0) {
@@ -298,10 +357,27 @@ const run = async (): Promise<void> => {
               `${bumps.length} DONE control(s) are on the screen`,
           );
         }
+        /**
+         * `03-F52` — *"Surfaces without the assignment are read-only for `served`."* The same
+         * refusal as the row above and a SEPARATE one: two assignments, two owners, and a screen
+         * that respected one and not the other would pass this sweep without this check.
+         */
+        if (handovers.length > 0) {
+          fail(
+            `${surface}: 03-F52 BROKEN — this surface does not own the serve signal and ` +
+              `${handovers.length} HAND OVER control(s) are on the screen`,
+          );
+        }
       }
       if (state === "empty") emptySurfaces += 1;
       if (state === "owner") {
         bumpControls += bumps.length;
+        handoverControls += handovers.length;
+        // `24-F14` — a fixture that stopped producing a handed-over-able ticket would retire
+        // `03-F52` from the sweep silently, exactly as twelve tickets silently retired the pager.
+        if (handovers.length === 0) {
+          fail(`${surface}: EMPTY MATCH — the owner state drew NO handover control`);
+        }
         // `24-F14` — the fixture producing no bumpable ticket would retire `03-F16` from the
         // sweep silently, which is exactly what `escalationFor: () => null` did to
         // `ManagerApproval` for weeks in the other app.
@@ -355,6 +431,9 @@ const run = async (): Promise<void> => {
           }
         }
       }
+
+      // LAST in the state, because opening it retires every card control — see `measureConfirm`.
+      if (state === "owner") await measureConfirm(panel, surface);
     }
 
     /**
@@ -377,6 +456,13 @@ const run = async (): Promise<void> => {
   if (readOnlySurfaces === 0) fail("EMPTY MATCH — 03-F24's read-only state was never rendered");
   if (emptySurfaces === 0) fail("EMPTY MATCH — the empty queue was never rendered");
   if (bumpControls === 0) fail("EMPTY MATCH — 03-F16's bump control was never measured");
+  if (handoverControls === 0) fail("EMPTY MATCH — 03-F52's handover control was never measured");
+  if (confirmSurfaces < PANELS.length) {
+    fail(
+      `EMPTY MATCH — 03-F52's confirm was opened on ${confirmSurfaces} of ${PANELS.length} ` +
+        "panels. A confirm nothing opens is a confirm nothing measures (24-F14).",
+    );
+  }
   if (pagersDrawn === 0) fail("EMPTY MATCH — 03-F46's pager was never drawn on any panel");
   if (targetsMeasured === 0) fail("EMPTY MATCH — 27-F8's kitchen target was never measured");
   if (fontSurfacesMeasured < PANELS.length * STATES.length) {
@@ -388,6 +474,7 @@ const run = async (): Promise<void> => {
 
   process.stdout.write(
     `\npass layout: ${surfaces} surfaces, ${controls} controls, ${bumpControls} bump controls, ` +
+      `${handoverControls} handover controls, ${confirmSurfaces} confirms opened, ` +
       `${pagersDrawn} paged surfaces, ${targetsMeasured} 27-F8 targets measured\n`,
   );
 
