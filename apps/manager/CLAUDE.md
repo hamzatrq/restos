@@ -11,6 +11,16 @@
 - **This app is a running Expo project with ONE screen, and that screen is a FEASIBILITY PROBE,
   not the console.** `pnpm -C apps/manager start` is real. What it renders is `src/probe.ts`'s
   measurements, for the reasons under "still blocked" below.
+- **`05-F1`/`05-F3`/`05-F4`'s alarm DERIVATION landed August 2026 (`src/alarms.ts`), with
+  `05-F22`/`05-F23`'s home model (`src/home.ts`) and 31 acceptance tests.** Both are pure; the
+  bundle went 680 → **682** modules, i.e. exactly the two files, because every kernel import in
+  them is `import type` and is erased. **What is on the screen is one row: the honesty line.** The
+  alarm CARDS are owed — see blocker 2 below — and they would be unreachable code today anyway,
+  because `managerHomeNow()` cannot return `known: true` while no plane carries a branch queue.
+  **`05-F2`'s acknowledgment is not merely unbuilt, it is UNEMITTABLE:** `01-F5` closes the
+  `audit.*` family at six subtypes (`packages/domain/src/registry.ts:797`) and none is an alarm
+  ack, so `01-F4` refuses the emit. That is the same shape `audit.print_acknowledged` was in
+  before it was added for `03-F5` — one FR over, still open, and a protected-path spec PR.
 
 ## ⚠ Do not build the console yet, and do not build it against a stub
 

@@ -225,7 +225,13 @@ export const alarmsFrom = (input: AlarmInput): readonly Alarm[] => {
     // device yet — the transient shape `01-F10` parks. A card with no channel, no table and no age
     // is not something `03-F5` asks anyone to act on, and the alarm appears when the confirm does.
     if (context === undefined) continue;
-    const key = `${order_id} ${printer_name}`;
+    // The separator is written as an ESCAPE and not as a raw byte. A literal NUL in a source
+    // file makes it BINARY to `grep`, and a symbol-precise grep is this repo's closing evidence
+    // for its own recurring defect (AGENTS.md: *"use `grep -a` … treat a `Binary file …` line as
+    // a hit you have not yet read"*). Found by a mutant that reported PATTERN ABSENT against a
+    // line that was plainly present. NUL is the separator because it cannot occur in either
+    // component, so no (order, printer) pair can collide with another.
+    const key = `${order_id}\u0000${printer_name}`;
     if (raised.has(key)) continue;
     raised.add(key);
     alarms.push(alarmOf("print_failed", order_id, context, printer_name));
