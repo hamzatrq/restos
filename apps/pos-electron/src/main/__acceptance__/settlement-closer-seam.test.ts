@@ -260,3 +260,181 @@ describe("§D — the composed chain refuses exactly two things and lands the re
     );
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// §E — `settlement_attempt_ids` IS "THE KEYS THE COVER WAS MADE OF".
+//
+// ⚠ **THIS SECTION EXISTS BECAUSE OF A MEASURED SURVIVOR, and it is disclosed rather than quietly
+// added.** The implementation's mutation matrix ran a mutant (`M14`) that replaced the filter
+//
+//     members.length === 1 && members[0]?.purpose !== REPAYMENT      →      members.length >= 1
+//
+// and it **SURVIVED at 65/65** — no fixture anywhere carried a khata repayment or a divergent
+// attempt against an order that then closed, so both halves of that filter were unasserted. The
+// round-3 law's own conclusion applies: reading the suite would not have found this, and a
+// surviving mutant on a MONEY attestation is not something to report and move past.
+//
+// **Why the filter is right and the mutant is wrong**, so this is a defect closed rather than an
+// implementation pinned to itself: `tendered_paisa` is the fold's `pay_total`, which excludes
+// `repays_receivable` (`DEC-MONEY-007`) and contributes ZERO for a divergent key (`01-F31`'s
+// contested head). Naming such a key here would attest keys that the attested TOTAL does not
+// contain — an act whose two halves disagree, permanently, under `01-F1`. `printing.ts` walks the
+// same map under the same two rules for `02-F15`'s receipt, which is the precedent.
+//
+// Implementer-authored, like the rest of this file, and owed the same independent oracle pass.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+describe("§E 01-F63 — the attested keys are the keys that made the cover", () => {
+  const PEER = "00000000-0000-7000-8000-000000000004";
+
+  /** A store with a Rs 2,240 bill, and both `append` (this till) and `ingest` (a peer). */
+  const twoOrigins = () => {
+    const dir = mkdtempSync(join(tmpdir(), "restos-closer-keys-"));
+    dirs.push(dir);
+    const store = openStore({
+      path: join(dir, "device.db"),
+      identity: { org_id: ORG, branch_id: BRANCH, device_id: TILL },
+    });
+    let n = 0;
+    let peerLamport = 0;
+    const raw = (device_id: string, type: string, payload: Record<string, unknown>): void => {
+      n += 1;
+      const id = `0199cccc-0000-7000-8000-${String(n).padStart(12, "0")}`;
+      const at = 1_754_300_000_000 + n;
+      if (device_id === TILL) {
+        store.append({
+          id,
+          org_id: ORG,
+          branch_id: BRANCH,
+          device_id,
+          actor_user_id: "user-ayesha",
+          device_created_at: at,
+          type,
+          schema_version: 1,
+          payload,
+          refs: [],
+        });
+        return;
+      }
+      peerLamport += 1;
+      store.ingest({
+        id,
+        org_id: ORG,
+        branch_id: BRANCH,
+        device_id,
+        actor_user_id: "user-bilal",
+        lamport_seq: peerLamport,
+        device_created_at: at,
+        branch_created_at: at,
+        time_basis: "branch",
+        server_received_at: null,
+        type,
+        schema_version: 1,
+        payload,
+        refs: [],
+      });
+    };
+    raw(TILL, "order.created", { order_id: ORDER_ID, channel: "counter", order_type: "takeaway" });
+    raw(TILL, "order.line_added", {
+      order_id: ORDER_ID,
+      line_id: LINE_A,
+      item_id: "i-karahi",
+      qty: 1,
+      unit_price_paisa: BILL_PAISA,
+    });
+    return { store, raw };
+  };
+
+  const closerOver = (store: DeviceStore) => {
+    const emitted: Record<string, unknown>[] = [];
+    return {
+      emitted,
+      closer: createSettlementCloser({
+        store,
+        writes: {
+          append: (req: unknown): AppendResult => {
+            emitted.push((req as { payload: Record<string, unknown> }).payload);
+            return { id: "closed" };
+          },
+        },
+      }),
+    };
+  };
+
+  const COVER = "0199aaaa-0000-7000-8000-00000000c0a1";
+  const REPAY = "0199aaaa-0000-7000-8000-00000000c0a2";
+  const SPLIT = "0199aaaa-0000-7000-8000-00000000c0a3";
+
+  it("DEC-MONEY-007 — a khata REPAYMENT's key is not one of them", () => {
+    // The repayment is a genuine `payment.recorded` against the same order, with its own
+    // `01-F31` key, and `pay_total` deliberately excludes its amount. So the act attests
+    // Rs 2,240 tendered — and naming the repayment's key beside that figure would say the cover
+    // was made of a payment that contributed nothing to it.
+    const { store, raw } = twoOrigins();
+    raw(TILL, "payment.recorded", {
+      order_id: ORDER_ID,
+      amount_paisa: BILL_PAISA,
+      method: "cash",
+      settlement_attempt_id: COVER,
+      purpose: "settles_order",
+      shift_id: null,
+    });
+    raw(TILL, "payment.recorded", {
+      order_id: ORDER_ID,
+      amount_paisa: 185_000,
+      method: "khata_credit",
+      settlement_attempt_id: REPAY,
+      purpose: "repays_receivable",
+      shift_id: null,
+    });
+    const { closer, emitted } = closerOver(store);
+    closer.settled(ORDER_ID);
+
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]?.tendered_paisa, "the fixture is not exercising the repayment path").toBe(
+      BILL_PAISA,
+    );
+    expect(emitted[0]?.settlement_attempt_ids).toEqual([COVER]);
+  });
+
+  it("01-F31 — a DIVERGENT attempt's key is not one of them either", () => {
+    // Two devices, one key, different payloads: `01-F31`'s contested head. It contributes ZERO to
+    // `pay_total`, is rendered and never picked — so the cover here is the Rs 2,240 tender alone,
+    // and the disputed key must not appear beside a total it is excluded from.
+    const { store, raw } = twoOrigins();
+    raw(TILL, "payment.recorded", {
+      order_id: ORDER_ID,
+      amount_paisa: BILL_PAISA,
+      method: "cash",
+      settlement_attempt_id: COVER,
+      purpose: "settles_order",
+      shift_id: null,
+    });
+    raw(TILL, "payment.recorded", {
+      order_id: ORDER_ID,
+      amount_paisa: 50_000,
+      method: "cash",
+      settlement_attempt_id: SPLIT,
+      purpose: "settles_order",
+      shift_id: null,
+    });
+    raw(PEER, "payment.recorded", {
+      order_id: ORDER_ID,
+      amount_paisa: 70_000,
+      method: "cash",
+      settlement_attempt_id: SPLIT,
+      purpose: "settles_order",
+      shift_id: null,
+    });
+    const row = store.openOrders().find((o) => o.order_id === ORDER_ID);
+    expect(JSON.parse(row?.exceptions_json ?? "[]"), "the fixture produced no dispute").toContain(
+      "attempt_divergence",
+    );
+    expect(row?.pay_total, "a disputed key contributed to the total").toBe(BILL_PAISA);
+
+    const { closer, emitted } = closerOver(store);
+    closer.settled(ORDER_ID);
+
+    expect(emitted[0]?.settlement_attempt_ids).toEqual([COVER]);
+  });
+});

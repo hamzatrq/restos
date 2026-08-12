@@ -1296,6 +1296,23 @@ one fact (the envelope carries `actor_user_id`).
 close `DEC-MONEY-009`'s **partition** residual (two unconverged tills now both accept *and* both
 close), and it does not decide `EXCESS_TENDER_IS_EXCEPTION`.
 
+### Driven on real glass, 2026-08-12 — and the run is the evidence, not the suite
+
+A real Electron till under `xvfb`, driven by CDP mouse events at each control's own rect centre
+(`.click()` does not work; the pads need hit testing). Read back out of `device.db` afterwards.
+
+| act | on the screen | in the ledger |
+|---|---|---|
+| `TAKE CASH` on an **empty pad**, Rs 1,450 due | `NOTHING ENTERED` / `Rs 0`; the button **enabled**, at a **byte-identical rect**, no dialog | **no `payment.recorded` at all** — `02-F48` |
+| keys `1450`, `TAKE CASH` | `Already settled — Rs 1,450 taken on this bill.` | `payment.recorded` 145000 **and one `order.settlement_closed`** `{billed_paisa: 145000, tendered_paisa: 145000, refunded_paisa: 0, settlement_attempt_ids: [<the covering key>]}`, actor on the ENVELOPE and **nowhere in the payload**; `orders.settled` **0 → 1** |
+| two more lines land on that closed order, then two more tenders (Rs 500 + Rs 980) | the surface takes both | `exceptions_json` = `["uncovered_addition"]`, `pay_total` 293000 — **and still exactly ONE `order.settlement_closed`** |
+
+That third row is `01-F33`'s *"a late line-add raises `uncovered_addition` rather than reopening"*
+executing on a device for the first time, and it reached it by accident: the driver pressed a
+**greyed** order-type tile (`unavailable` with no channel latched), so the second order's lines went
+onto the first order. It is the sharpest at-most-once case there is — an order that was closed,
+went uncovered, and was covered again — and the emitter did not close it twice.
+
 ## ✅ TWO CASHIERS SETTLED ONE BILL AND THE CASH DOUBLED — `DEC-MONEY-009` (August 2026)
 
 **Measured 2026-08-10 in the first two-till run this product has ever had.** Both cashiers keyed
