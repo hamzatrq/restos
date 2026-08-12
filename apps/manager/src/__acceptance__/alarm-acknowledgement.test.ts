@@ -326,6 +326,12 @@ describe("negative controls — what does NOT clear a manager's alarm", () => {
   //     cannot reach here — but `alarms.ts` narrows `unknown` payloads itself, deliberately, and
   //     the failure mode of a loose narrow is an alarm dismissed by an envelope that never
   //     acknowledged anything, which `05-F2` forbids in terms.
+  //
+  //     ⚠ THE ABSENT-FIELD CASES BELOW DO NOT BITE, AND THE MEASUREMENT IS WHY TEST 11a EXISTS.
+  //     A mutant replacing the narrow with `String(alarm_kind)` / `String(order_id)` SURVIVED all
+  //     of them: a payload with `alarm_kind` missing produces the key `undefined\0…`, which
+  //     matches no alarm, so "narrowed" and "stringified" are indistinguishable on absent fields.
+  //     Kept as a regression guard, honestly labelled — the discriminating case is 11a.
   it("ignores an ack whose payload does not identify an alarm (05-F2, 01-F4)", () => {
     for (const payload of [
       { prev_audit_hash: null },
@@ -338,6 +344,58 @@ describe("negative controls — what does NOT clear a manager's alarm", () => {
         kinds(alarmsFrom(input({ facts: [fact("audit.alarm_acknowledged", payload)] }))),
         JSON.stringify(payload),
       ).toEqual([`late_order:${ORDER_A}:-`]);
+    }
+  });
+
+  // 11a. THE CASE THAT DISCRIMINATES, and it exists because test 11's did not. A field that is not
+  //      a string but STRINGIFIES to a valid one collides with the real alarm's key, so a
+  //      `String(...)` coercion in place of a type narrow silently dismisses a live alarm.
+  //      `01-F5`'s whole argument for putting the ack in the hash-chained family is that a quiet
+  //      dismissal must be detectable; an alarm cleared by an envelope that never named it is that
+  //      dismissal one layer earlier, where no chain can see it.
+  //      WRONG IMPLEMENTATION CAUGHT: `acked.add(key(String(alarm_kind), String(order_id), …))` —
+  //      measured to survive every fixture in test 11 and to fail this one.
+  //
+  //      ⚠ THE FIELDS ARE POISONED ONE AT A TIME, and that is a measurement rather than a style.
+  //      A single fixture coercing BOTH fields let a mutant that narrows `order_id` correctly and
+  //      only weakens `alarm_kind` SURVIVE — the surviving narrow caught the fixture on the other
+  //      field, and the weakened one was never reached. One poisoned field per case, or a suite
+  //      proves only that SOME guard exists.
+  it("ignores an ack whose fields merely STRINGIFY to an alarm (05-F2, 01-F5)", () => {
+    const cases: Record<string, unknown>[] = [
+      // alarm_kind poisoned, order_id genuine.
+      {
+        prev_audit_hash: null,
+        alarm_kind: { toString: () => "late_order" },
+        order_id: ORDER_A,
+        printer_name: null,
+      },
+      // order_id poisoned, alarm_kind genuine.
+      {
+        prev_audit_hash: null,
+        alarm_kind: "late_order",
+        order_id: { toString: () => ORDER_A },
+        printer_name: null,
+      },
+      // printer_name poisoned on a print_failed ack, the other two genuine.
+      {
+        prev_audit_hash: null,
+        alarm_kind: "print_failed",
+        order_id: ORDER_A,
+        printer_name: { toString: () => PRINTER_1 },
+      },
+    ];
+    for (const payload of cases) {
+      expect(
+        kinds(
+          alarmsFrom(
+            input({
+              facts: [printFailed(ORDER_A, PRINTER_1), fact("audit.alarm_acknowledged", payload)],
+            }),
+          ),
+        ),
+        JSON.stringify(Object.keys(payload)),
+      ).toEqual([`late_order:${ORDER_A}:-`, `print_failed:${ORDER_A}:${PRINTER_1}`]);
     }
   });
 
