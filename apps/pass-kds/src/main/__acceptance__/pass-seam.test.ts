@@ -94,8 +94,26 @@ describe("§A2 the app can START — `screen` is not touched before `app.whenRea
     // Electron ABI — none of which a package suite may require. So it is a source-order read, and
     // that is stated plainly: it can be satisfied by a call that is present and wrong, and what it
     // CAN do is fail when the order is the one that crashed.
-    const ready = MAIN.indexOf("app.whenReady()");
-    const display = MAIN.search(/\bscreen\.\w/);
+    // ⚠ **COMMENT-BLIND, and it was not until the merge that proved it had to be (August 2026).**
+    // Both parallel tracks that touched `main/index.ts` fixed this defect, and each left a comment
+    // ABOVE the `whenReady()` call explaining it — necessarily naming `screen.getPrimaryDisplay()`
+    // to do so. A raw search then finds the EXPLANATION before the guard and fails a file that is
+    // correct: measured at the merge, `screen` at char 6975 (a comment) against `whenReady` at
+    // 7890 (the call). That is `seams:check` Rule A's own rule one tool over — *a mention is not a
+    // use* — and this repo has now paid for it three separate times in one week, twice in greps
+    // and once here.
+    //
+    // Stripping is deliberately crude and that is safe in ONE direction: it can only ever REMOVE
+    // text, so a real `screen.` call can never be hidden by it, and the worst case is that this
+    // assertion becomes harder to satisfy rather than easier. The tripwire below is what stops it
+    // becoming vacuous by stripping everything.
+    const code = MAIN.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+    expect(
+      code,
+      "the comment stripper emptied the file — every assertion below would pass vacuously",
+    ).toContain("app.whenReady()");
+    const ready = code.indexOf("app.whenReady()");
+    const display = code.search(/\bscreen\.\w/);
     expect(ready, "main never awaits app.whenReady()").toBeGreaterThan(-1);
     if (display === -1) return; // a host that stopped reading `screen` at all is fine.
     expect(
