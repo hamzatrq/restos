@@ -92,7 +92,12 @@ describe("§A 01-F15 — the uplink drains the outbox on its own", () => {
       token: undefined,
       onChanged: () => {},
     });
-    expect(uplink.reachability()).toEqual({ lan: "down", hub: "down", cloud: "down" });
+    // ⚠ This read `{ lan: "down", hub: "down", cloud: "down" }` until August 2026, when the branch
+    // LAN mesh acquired a host (`main/mesh.ts`, `01-F12`/`01-F13`/`01-F15`). `lan` and `hub` are the
+    // MESH's facts and were hardcoded here only for as long as nothing knew them; `main/index.ts`
+    // composes the three now. The assertion is unchanged in what it OWNS — an uplink with no
+    // gateway reports the cloud down and acquires no timer.
+    expect(uplink.reachability()).toEqual({ cloud: "down" });
     expect(() => uplink.stop()).not.toThrow();
   });
 });

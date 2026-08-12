@@ -29,6 +29,15 @@ import { type RawData, WebSocket, WebSocketServer } from "ws";
 const DEFAULT_RECONNECT_MS = 1_000;
 /** LAN dial-retry cadence — fast enough to reconnect to a respawned hub promptly (X10). */
 const LAN_DIAL_RETRY_MS = 250;
+/**
+ * Every interface, because `01-F12` places discovery ON THE LAN and a branch's devices are separate
+ * machines. Not exported, and deliberately not shared with `@restos/device-config`'s
+ * `DEFAULT_LAN_LISTEN_HOST`: this package is the kernel and must not depend on the app-host
+ * configuration layer. The two shipped hosts always pass `listen_host` explicitly (it comes out of
+ * `resolveLanMesh`), so this value is the answer for a caller that supplies nothing — today only
+ * the T-01-06 spike — and never the one a till runs on.
+ */
+const DEFAULT_LISTEN_HOST = "0.0.0.0";
 
 /** ws delivers a received frame as Buffer | ArrayBuffer | Buffer[]; normalize to text. */
 const rawToText = (raw: RawData): string =>
@@ -53,17 +62,34 @@ const toBytes = (raw: RawData): Uint8Array =>
 // WebSocket is used bidirectionally: the dialer and the acceptor both talk over it.
 type LanFrame = { t: "announce"; peer: PeerInfo } | { t: "wire"; message: ProtocolMessage };
 
-// @unreached-owed With `mesh-session.ts` and `electHub`: the LAN leg has no host. The CLOUD
-// transport below IS reached (`main/sync.ts`), which is why this is a per-symbol marker and not a
-// file-level one — the two halves of this file are in genuinely different states.
 export const createWsLanTransport = (config: {
   self: PeerInfo;
   listen_port: number;
+  /**
+   * The interface to bind the listen socket to. Defaults to every interface (`0.0.0.0`) because
+   * `01-F12` places discovery **on the LAN**.
+   *
+   * ⚠ **PROTECTED PATH CHANGE, August 2026 (`20 §4.4` — senior review).** This argument did not
+   * exist and the bind was the literal `"127.0.0.1"`, which made the whole LAN leg unreachable from
+   * any other machine: measured with a control, a `127.0.0.1` listener refuses a connection to its
+   * own host's LAN IPv4 with `ECONNREFUSED` while the identical listener on `0.0.0.0` accepts it.
+   * Nothing caught it because the only construction of this transport was a spike that runs every
+   * "device" as a child process of one box, where loopback is indistinguishable from a LAN. A
+   * branch's counter and its pass screen are always two machines, so `01-F13`'s star could not
+   * form.
+   *
+   * The change is additive: every existing call site keeps working, and the DEFAULT is the LAN
+   * rather than loopback on purpose — a default of `127.0.0.1` would silently reproduce the defect
+   * in the next host that forgets the argument, and the failure mode is a mesh that starts, reports
+   * itself listening, and is never reached.
+   */
+  listen_host?: string;
   peers: { device_id: string; host: string; port: number }[];
   clock: Clock;
   on_listening?: (port: number) => void;
 }): MeshTransport => {
   const { self, listen_port, peers, clock } = config;
+  const listenHost = config.listen_host ?? DEFAULT_LISTEN_HOST;
 
   let handlers: TransportHandlers | null = null;
   let running = false;
@@ -155,7 +181,7 @@ export const createWsLanTransport = (config: {
       handlers = h;
       // Node's net server sets SO_REUSEADDR by default, so the freed port rebinds
       // promptly after a SIGKILL+respawn (X10) — the listen socket the contract needs.
-      const wss = new WebSocketServer({ port: listen_port, host: "127.0.0.1" });
+      const wss = new WebSocketServer({ port: listen_port, host: listenHost });
       server = wss;
       wss.on("connection", (ws: WebSocket) => {
         ws.send(announceFrame); // announce to the dialer, then talk bidirectionally

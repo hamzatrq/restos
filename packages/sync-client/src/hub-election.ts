@@ -10,8 +10,6 @@ import type { PeerInfo } from "@restos/sync-protocol";
 const rankOf = (device_class: DeviceClass): number =>
   (HUB_ELIGIBLE_CLASSES as readonly DeviceClass[]).indexOf(device_class);
 
-// @unreached-owed With `mesh-session.ts`: the election is re-run on every peer-set change, and no
-// host constructs a mesh session, so nothing ever presents a peer set. Owed with the branch hub.
 export const electHub = (peers: readonly PeerInfo[]): string | null => {
   let winner: { rank: number; device_id: string } | null = null;
   for (const peer of peers) {

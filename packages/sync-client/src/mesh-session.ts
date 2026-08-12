@@ -14,10 +14,10 @@
 // relay seam after ingesting follower events (the hub is the branch's cloud
 // uplink for WAN-less peers) and (b) forwards each origin's recorded cloud ack
 // over LAN on the heartbeat.
-// @unreached-owed NO HOST RUNS THE LAN MESH YET. `apps/pos-electron`'s own CLAUDE.md says it:
-// "Reachability reports `down` for all three facts, because no mesh or cloud session exists."
-// `01-F12`/`F13`/`F15` are implemented and property-tested here; the caller is owed with the
-// branch-hub work. Covers every export in this file — delete it when a host constructs one.
+// HOSTED since August 2026 (01-F12/F13/F15): `apps/pos-electron/src/main/mesh.ts` runs the branch
+// hub and `apps/pass-kds/src/main/mesh.ts` joins it, both over `createWsLanTransport`. The
+// file-level seams-register debt marker that stood here — "NO HOST RUNS THE LAN MESH YET", the
+// oldest open item in the product — is deleted with that work, which is what the register is for.
 import type { DeviceClass, EventEnvelopeT } from "@restos/domain";
 import type {
   Clock,
@@ -35,6 +35,15 @@ import { electHub } from "./hub-election.js";
 export const HEARTBEAT_INTERVAL_MS = 2_000;
 export const HEARTBEAT_MISSED_LIMIT = 3;
 export const HUB_LOSS_TIMEOUT_MS = HEARTBEAT_INTERVAL_MS * HEARTBEAT_MISSED_LIMIT;
+/**
+ * @unreached-by-design `01-F13`'s *"re-election on hub loss < 10 s"* is an ASSERTION BUDGET, not a
+ * timer. Nothing in this state machine waits 10 s for anything: re-election is the pure `electHub`
+ * re-run on the next peer-set change, and the constants that drive it are the three above. This is
+ * the number a suite holds the machine to (`mesh-scenarios.test.ts` S2, and the wall-clock leg in
+ * `plans/wave-0/fold-scenario-catalog.md`), which is exactly the case a reachability walk cannot
+ * see and `AGENTS.md` records as blind spot (i) — a constant exported so a test COULD assert it.
+ * Here one does, by name.
+ */
 export const REELECTION_BUDGET_MS = 10_000;
 // Fix-round amendment 2 (binding): a computed winner that has not answered our
 // hello with hello_ack within this window is suspected exactly like a lost

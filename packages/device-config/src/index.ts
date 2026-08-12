@@ -28,6 +28,15 @@ export {
   resolveDeviceIdentity,
 } from "./device-identity.js";
 export {
+  DEFAULT_LAN_LISTEN_HOST,
+  describeLanMesh,
+  LAN_MESH_ENV,
+  LAN_PEERS_EXAMPLE,
+  type LanMeshConfig,
+  type LanPeer,
+  resolveLanMesh,
+} from "./lan-mesh.js";
+export {
   type DisplayFacts,
   describePanelDensity,
   measurePhysicalWidthMm,

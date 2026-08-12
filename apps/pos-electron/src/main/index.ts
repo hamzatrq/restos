@@ -14,12 +14,14 @@ import {
   DEV_IDENTITY,
   describeAging,
   describeDeviceIdentity,
+  describeLanMesh,
   describePanelDensity,
   describeServeSignal,
   measurePhysicalWidthMm,
   type PanelDensity,
   resolveAging,
   resolveDeviceIdentity,
+  resolveLanMesh,
   resolvePanelDensity,
   resolveServeSignal,
   SERVE_SIGNAL_OWNER_ENV,
@@ -56,6 +58,7 @@ import {
 } from "./hardware-tier";
 import { openJobStore } from "./job-store";
 import { createLineAdvance } from "./line-advance";
+import { createLanMesh } from "./mesh";
 import {
   createCashPrinter,
   createKotPrinter,
@@ -501,8 +504,38 @@ app.whenReady().then(async () => {
 
   // The renderer re-reads on this; it carries no data (`shared/ipc.ts`). Pushing the rows
   // themselves would make the push a second source of truth for what the folds already hold.
-  const notifyChanged = (): void => {
+  const notifyRenderer = (): void => {
     if (!window.isDestroyed()) window.webContents.send(CHANNELS.changed);
+  };
+
+  /**
+   * **`01-F12`/`01-F13`/`01-F15` — the branch hub, and this till is it.**
+   *
+   * `01-F13` ranks `counter_electron` first among the hub-eligible classes, so a Windows counter
+   * terminal is the branch's preferred hub. Until this line the mesh was built, property-tested and
+   * constructed by nothing outside a gateway spike — `restaurant-os.md` puts it in **Wave 0** and
+   * `mesh-session.ts` carried `@unreached-owed NO HOST RUNS THE LAN MESH YET`, the oldest open item
+   * in the product. The consequence was the product's shape: `apps/pass-kds` learned about new
+   * orders over the WAN only, so an internet outage stopped the kitchen while this till went on
+   * selling — `00 §5.1` and commandment 4 broken in effect.
+   *
+   * Built BEFORE the uplink and unconditionally: nothing about the LAN may be conditional on a WAN
+   * endpoint being configured. See `mesh.ts`.
+   */
+  const lan = resolveLanMesh(process.env);
+  const mesh = createLanMesh({ store, lan, onChanged: notifyRenderer });
+  app.on("will-quit", () => mesh.stop());
+
+  /**
+   * `01-F15`'s fast path, as one funnel. Every append path in this file already calls
+   * `notifyChanged`, so a confirmed order reaches the pass screen at the instant it is durable
+   * rather than on `mesh-session.ts`'s 2 s window re-fan — measured at 1519 ms for one order, which
+   * is outside the FR's "< 1 s p95" on its own. This is the funnel `sync.ts` names as owed for the
+   * cloud half; the LAN half has it.
+   */
+  const notifyChanged = (): void => {
+    mesh.notifyAppended();
+    notifyRenderer();
   };
 
   /**
@@ -621,11 +654,10 @@ app.whenReady().then(async () => {
     // 01-F49 — bound at admission from the branch class, never a UI toggle. Admission has not
     // landed, so this is false and the 27-F67 training inversion is exercised by its story.
     training: false,
-    // 00 §5.7 — three separate facts, each REPORTED rather than asserted. These were two
-    // hardcoded constants until the uplink existed: `cloud: "down"` unconditionally, and a
-    // blocked cursor that was always null, so DEC-SYNC-011 was satisfied at the API and
-    // nowhere a human could see it.
-    reachability: uplink.reachability,
+    // 00 §5.7 — three separate facts, each REPORTED rather than asserted, and each owned by the
+    // thing that knows it. `cloud: "down"` was hardcoded until the uplink existed; `lan` and `hub`
+    // were hardcoded for a year longer, because the mesh that knows them was hosted by nothing.
+    reachability: () => ({ ...mesh.reachability(), ...uplink.reachability() }),
     blockedCursor: uplink.blockedCursor,
     /**
      * **`01-F56` / `DEC-SYNC-011` (a) — THE SEAM, and it is the whole of this task.**
@@ -737,6 +769,15 @@ app.whenReady().then(async () => {
    * a REFUSED configuration says which entry it could not read, at length.
    */
   console.log(describeAging(aging));
+
+  /**
+   * `00 §5.7` a fifth time, and this one is the sharpest of them: **a branch with no LAN mesh looks
+   * exactly like a branch with one and nothing to say.** The pass screen shows an empty queue,
+   * which is also what a quiet kitchen looks like; the till sells all day either way (`01-F17`).
+   * So the line names the port this hub is listening on and every peer it will dial, and says out
+   * loud when there are none.
+   */
+  console.log(describeLanMesh(lan));
 
   /**
    * **Say what the grid will actually show, at boot.** Without this the till renders item names

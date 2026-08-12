@@ -6,11 +6,13 @@ import {
   DEV_IDENTITY,
   describeAging,
   describeDeviceIdentity,
+  describeLanMesh,
   describePanelDensity,
   describeServeSignal,
   measurePhysicalWidthMm,
   resolveAging,
   resolveDeviceIdentity,
+  resolveLanMesh,
   resolvePanelDensity,
   resolveServeSignal,
   SERVE_SIGNAL_OWNER_ENV,
@@ -28,6 +30,7 @@ import {
   PassTicketSchema,
 } from "../shared/ipc";
 import { describeCapacity } from "../shared/ticket-capacity";
+import { createLanMesh } from "./mesh";
 import { passQueue } from "./pass-queue";
 import { createReadyMark } from "./ready-mark";
 import { describeReadySignal, READY_SIGNAL_OWNER_ENV, resolveReadySignal } from "./ready-signal";
@@ -100,6 +103,24 @@ const electronAddonPath = (): string =>
 const PASS_ACTOR = "Pass — nobody signed in";
 
 const boot = async (): Promise<void> => {
+  /**
+   * ⚠ **FIRST, AND IT WAS NOT — THIS APP COULD NOT START AT ALL UNTIL AUGUST 2026.**
+   *
+   * `screen.getPrimaryDisplay()` below throws *"The 'screen' module can't be used before the app
+   * 'ready' event"*, and this `await` used to sit ~150 lines further down, just above the
+   * `BrowserWindow`. `void boot()` runs at module load, so every launch of this binary died in an
+   * unhandled promise rejection before a store was opened or a window existed: **no queue, no boot
+   * line, no error dialog — an Electron app that exits silently.**
+   *
+   * Nothing could see it. All 136 tests in this app import modules and never the entry point;
+   * `pnpm layout:check` runs `out/main/layout-gate.js`, a DIFFERENT entry that builds its own
+   * window; and `pnpm verify` never launches this app. It is `AGENTS.md`'s second recurring defect
+   * in its purest form — a correct component that is not on the screen — and it was found by
+   * launching the thing, which is the only thing that finds it.
+   *
+   * `app.whenReady()` is idempotent, so the cost of it being first is nothing.
+   */
+  await app.whenReady();
   const env = process.env;
   const identity = resolveDeviceIdentity(env);
   const aging = resolveAging(env[AGING_THRESHOLDS_ENV]);
@@ -149,8 +170,33 @@ const boot = async (): Promise<void> => {
   const glassHeightMm = (display.workAreaSize.height / (density.ppi / display.scaleFactor)) * 25.4;
 
   let window: BrowserWindow | null = null;
-  const notifyChanged = (): void => {
+  const notifyRenderer = (): void => {
     if (window !== null && !window.isDestroyed()) window.webContents.send(CHANNELS.changed);
+  };
+
+  /**
+   * **`01-F12`/`01-F13`/`01-F15` — the branch LAN mesh, and the reason this app's own header used
+   * to name the cloud as the single route by which orders could ever arrive.**
+   *
+   * The counter appends the orders (`03-F13`) and the corpus puts that traffic on the branch LAN,
+   * not the WAN. Until this line the mesh was built, property-tested and constructed by nothing, so
+   * the internet dropping stopped this screen learning about new orders while the till went on
+   * selling — `00 §5.1` and commandment 4 broken in effect. See `mesh.ts`.
+   *
+   * It is built BEFORE the uplink and unconditionally, on purpose: nothing about the LAN may be
+   * conditional on a WAN endpoint being configured, which is the inversion commandment 4 forbids.
+   */
+  const lan = resolveLanMesh(env);
+  const mesh = createLanMesh({ store, lan, onChanged: notifyRenderer });
+
+  /**
+   * `01-F15`'s fast path, as one funnel. Every append path in this file already calls
+   * `notifyChanged`, so the mesh learns about a ready-mark or a handover at the instant it is
+   * durable rather than on `mesh-session.ts`'s 2 s window re-fan (measured: 1519 ms for one event).
+   */
+  const notifyChanged = (): void => {
+    mesh.notifyAppended();
+    notifyRenderer();
   };
 
   const uplink = createPassUplink({
@@ -225,6 +271,9 @@ const boot = async (): Promise<void> => {
     deviceLabel: "Pass",
     actor: PASS_ACTOR,
     businessDay: businessDate(wallClock.now() + store.branchTimeStatus().offset_ms),
+    // `00 §5.7` — three facts, each owned by the thing that knows it. `lan` and `hub` are the
+    // MESH's and were two hardcoded `"down"` literals until it was hosted; `cloud` is the uplink's.
+    ...mesh.reachability(),
     ...uplink.reachability(),
     panelPpi: density.ppi,
     // `00 §5.7` — `panel-density.ts` cannot make its own fallback safe, so the consequence is made
@@ -283,14 +332,14 @@ const boot = async (): Promise<void> => {
     return serveMark.handOver(parsed.order_id);
   });
 
-  await app.whenReady();
+  // (`await app.whenReady()` used to be HERE, and everything above it needed it — see the top.)
 
   /**
    * `00 §5.7` — the boot line, and every clause of it is a fact whose being wrong is invisible
    * from the screen. That is the property that decides what goes in one: an operator cannot see
    * that the ready signal is assigned elsewhere, that the aging thresholds were refused, that this
-   * device shares the counter's seed identity, or that the LAN path the corpus specifies does not
-   * exist. Each of those looks exactly like working.
+   * device shares the counter's seed identity, or that no LAN peer directory was configured so the
+   * branch mesh will never meet. Each of those looks exactly like working.
    */
   process.stdout.write(
     [
@@ -306,15 +355,14 @@ const boot = async (): Promise<void> => {
       `  ${describeAging(aging)}`,
       `  ${describeReadySignal(readySignal)}`,
       `  ${describeServeSignal(serveSignal)}`,
+      `  ${describeLanMesh(lan)}`,
       env["RESTOS_CLOUD_URL"] === undefined
-        ? "  uplink: OFFLINE (RESTOS_CLOUD_URL unset). This screen will show an EMPTY queue " +
-          "forever: the counter's orders reach it over the cloud gateway and nothing else. " +
-          "01-F13/01-F15 put that traffic on the LAN mesh, which is Wave-0 work that is BUILT " +
-          "and hosted by nothing (sync-client/mesh-session.ts) — so today a pass screen needs " +
-          "WAN, which 00 §5.1 says an in-branch feature must not. Named, not worked around."
-        : `  uplink: cloud ${env["RESTOS_CLOUD_URL"]} — and note it is the ONLY path: the LAN ` +
-          "mesh 01-F15 specifies for this traffic is hosted by nothing, so a WAN outage stops " +
-          "this screen learning about new orders while the counter goes on selling (01-F17).",
+        ? "  uplink: cloud OFFLINE (RESTOS_CLOUD_URL unset). 01-F12/01-F13/01-F15 put the " +
+          "counter's orders on the LAN mesh above, so with that configured this screen works " +
+          "with no internet at all (00 §5.1). With BOTH off it shows an empty queue forever."
+        : `  uplink: cloud ${env["RESTOS_CLOUD_URL"]}. Orders reach this screen over the LAN mesh ` +
+          "above when the branch has one, and over the cloud otherwise — a WAN outage no longer " +
+          "stops this screen learning about new orders while the counter goes on selling.",
       "  identity: NO PIN SESSION on this device — 03-F16's ready-mark AND 03-F52's handover are " +
         "attributed to the device and the branch, and actor_user_id is null on every edge this " +
         "app writes. 03-F52's OWED (1): the handover is TERMINAL (01-F35), so that is an " +
@@ -337,6 +385,9 @@ const boot = async (): Promise<void> => {
 
   app.on("window-all-closed", () => {
     uplink.stop();
+    // The mesh holds a LISTENING socket and dial timers; leaving either alive keeps the hub port
+    // bound past shutdown and the next launch cannot rebind it.
+    mesh.stop();
     store.close();
     app.quit();
   });
