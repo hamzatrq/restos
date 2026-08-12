@@ -1222,8 +1222,24 @@ tidy-up that folds it into `sync.ts` will be green.
   PIN. **Genuinely owed:** `02-F20`'s REMOTE path (approval via doc 05), and its void / comp /
   price-override rows, which are mapped ahead of their events — `domain/registry.ts` does not carry
   those yet.
-- **⚠ `TAKE CASH` ON AN EMPTY ENTRY RECORDS A Rs 0 SETTLEMENT — OPEN, found 2026-08-09 while
-  measuring the `shift_id` fix.** `TenderPanel.tsx` computes `enteredP = (Number(entry) || 0) * 100`,
+- **✅ `TAKE CASH` ON AN EMPTY ENTRY RECORDED A Rs 0 SETTLEMENT — CLOSED (August 2026, `02-F48`).**
+  Ruled: **a tender of nothing is not a sale**, on the corpus's own precedent — `01-F60` already
+  reads `01-F17` as forbidding the blocking of a *sale*, not an item, and a Rs 0 `payment.recorded`
+  moves no money, discharges no part of the bill and changes no total. **Refused at ORIGINATION,
+  on the payload alone, never at ingest and never in the schema:** `main/zero-tender-guard.ts`
+  wraps the renderer's write channel (the chain is now **matrix → amount → duplicate → ledger**),
+  and `payment.recorded.amount_paisa` is deliberately NOT tightened to `positive()` because the
+  defect has SHIPPED — a device whose own ledger already holds a Rs 0 payment must go on reopening
+  its store and merging its peers' history (`01-F6`, `01-F37`). **The measured warning below was
+  right and it was about a different precondition:** the six `02-F37` tests gate on an *open
+  shift* and every one types a real amount, so an *amount* guard is orthogonal to all of them —
+  re-measured green. **`27-F5` is honoured by construction: the control is never disabled, greyed,
+  moved or hidden.** `TenderPanel` says why in the readout that was already above it — `NOTHING
+  ENTERED` against a real bill, `NOTHING DUE` on an order with nothing billable, two words because
+  a single one would be false in one of the two arms (`00 §5.7`) — so no control moves (`27-F4`)
+  and the resting state is unchanged. **The original entry is kept below**, because the analysis
+  is what the ruling rests on:
+  `TenderPanel.tsx` computes `enteredP = (Number(entry) || 0) * 100`,
   so an empty pad is `0`; `coversBill = enteredP >= remainingP` is then false against a positive
   bill, and the handler fires `onTender({ amountP: enteredP })` — a **permanent** `payment.recorded`
   worth nothing, on an append-only ledger where `01-F1` forbids removing it. One accidental tap per
@@ -1241,6 +1257,62 @@ tidy-up that folds it into `sync.ts` will be green.
   `27-F5`'s own failure mode, and the `M4` row of the `shift_id` matrix measured that the plausible
   safe repair — gating settlement on a precondition — kills six existing `02-F37` tests that exist
   precisely to stop an `01-F17` violation. A finding for the `02-F13`/`02-F37` owner.
+## ✅ `01-F33`'s CLOSING ACT FINALLY HAS A PRODUCER — `01-F63` (August 2026)
+
+`order.settlement_closed` had a payload schema in `packages/domain`, a fold arm and a **ratified
+merge rule** in `folds/merge.ts` (a monotone OR over a G-Set, with the attested `billed_paisa` as
+`uncovered_addition`'s ceiling) since the kernel landed, and **zero production emitters**. So
+`OpenOrderRow.settled` was `0` on every order this product has ever held, and `01-F30`'s
+conservation equation — which the Auditor gates on `settled === 1` — had **never executed on a real
+order**. That is the wave's named defect in the one shape `seams:check` says out loud it cannot
+see: a **missing PRODUCER for an event type**.
+
+`main/settlement-closer.ts` is that producer. It hangs off the **completed** append of a
+`payment.recorded` in the `CHANNELS.append` handler — the *third* consequence at a call site that
+already had two (`02-F15`'s receipt, `02-F31`'s line advance) — and asks the device's own converged
+fold one question: `pay_total >= billed_effective`, with `billed > 0`. **One definition of
+"settlement completes", not four** (`02-F45`), so a `02-F13` split closes **once**, on the tender
+that covers.
+
+**At most one per order, and the EMITTER is what makes that true.** The fold's monotone OR absorbs
+a re-emission, so `settled` cannot tell you it happened; `01-F1` makes the damage a growing pile of
+permanent rows each attesting a different snapshot for one bill. The check is `row.settled === 1`,
+read off the projection this act is about to change — **not an in-process `Set`, and not "covered
+since I last looked"**, either of which passes every ordinary case and fails the sharp one: an
+order that dips below cover on a refund and comes back on a fresh tender was never *un*-settled
+(`01-F33`: reopening does not exist), and reading the projection is also what makes a PEER's close
+visible.
+
+**The payload is `01-F63`-pinned and the registry schema is deliberately NOT tightened.** Adding
+`billed_paisa: z.number().int().nonnegative().optional()` is retroactive on an append-only log and
+would make the ratified merge rule's `close_snapshot_invalid` arm **unreachable** — that arm exists
+so a bad snapshot folds with an anomaly while *the act still settles*. A schema that rejected the
+snapshot would quarantine the whole act. **No `closed_at` and no actor field:** the first is a
+standing-law-1 break wearing an audit field's clothes, the second is `02-F45`'s second source for
+one fact (the envelope carries `actor_user_id`).
+
+**What it does NOT close.** It does not make `01-F30`'s three missing right-hand terms appear
+(`DEC-MONEY-010` — a comped order still reads as a shortfall of exactly the comp), it does not
+close `DEC-MONEY-009`'s **partition** residual (two unconverged tills now both accept *and* both
+close), and it does not decide `EXCESS_TENDER_IS_EXCEPTION`.
+
+### Driven on real glass, 2026-08-12 — and the run is the evidence, not the suite
+
+A real Electron till under `xvfb`, driven by CDP mouse events at each control's own rect centre
+(`.click()` does not work; the pads need hit testing). Read back out of `device.db` afterwards.
+
+| act | on the screen | in the ledger |
+|---|---|---|
+| `TAKE CASH` on an **empty pad**, Rs 1,450 due | `NOTHING ENTERED` / `Rs 0`; the button **enabled**, at a **byte-identical rect**, no dialog | **no `payment.recorded` at all** — `02-F48` |
+| keys `1450`, `TAKE CASH` | `Already settled — Rs 1,450 taken on this bill.` | `payment.recorded` 145000 **and one `order.settlement_closed`** `{billed_paisa: 145000, tendered_paisa: 145000, refunded_paisa: 0, settlement_attempt_ids: [<the covering key>]}`, actor on the ENVELOPE and **nowhere in the payload**; `orders.settled` **0 → 1** |
+| two more lines land on that closed order, then two more tenders (Rs 500 + Rs 980) | the surface takes both | `exceptions_json` = `["uncovered_addition"]`, `pay_total` 293000 — **and still exactly ONE `order.settlement_closed`** |
+
+That third row is `01-F33`'s *"a late line-add raises `uncovered_addition` rather than reopening"*
+executing on a device for the first time, and it reached it by accident: the driver pressed a
+**greyed** order-type tile (`unavailable` with no channel latched), so the second order's lines went
+onto the first order. It is the sharpest at-most-once case there is — an order that was closed,
+went uncovered, and was covered again — and the emitter did not close it twice.
+
 ## ✅ TWO CASHIERS SETTLED ONE BILL AND THE CASH DOUBLED — `DEC-MONEY-009` (August 2026)
 
 **Measured 2026-08-10 in the first two-till run this product has ever had.** Both cashiers keyed
@@ -1264,19 +1336,29 @@ declines an order it already knows is settled is refusing a **duplicate**, not b
 guard sits INSIDE `authorizeWrites` (matrix → duplicate check → ledger), so a session without
 `payment.settle` is told it may not settle rather than told the bill is already paid.
 
-**It is NOT built on `order.settlement_closed`.** `01-F33`'s closing act has no production emitter
-anywhere, so `OpenOrderRow.settled` is `0` on every order this device has ever held — a guard on
-that column could never fire, which is this wave's named defect built deliberately. Emitting the
-act would be *defining a closing act*, a founder question. What ships is the reading `printing.ts`
-already uses for `02-F15` and `line-advance.ts` for `02-F31`, at the same call site: **tendered for
-in full, `pay_total >= billed_effective`**, both `01-F34`-clean.
+**It is NOT built on `order.settlement_closed`.** When the guard was built, `01-F33`'s closing act
+had no production emitter anywhere, so `OpenOrderRow.settled` was `0` on every order any device had
+ever held — a guard on that column could never fire, which is this wave's named defect built
+deliberately. Emitting the act would have been *defining a closing act*, a founder question. What
+ships is the reading `printing.ts` already uses for `02-F15` and `line-advance.ts` for `02-F31`, at
+the same call site: **tendered for in full, `pay_total >= billed_effective`**, both `01-F34`-clean.
+⚠ **The act now HAS an emitter (`01-F63`, below) and this guard still must not be built on it** —
+the act is emitted from this very reading, and the closer runs *after* the append it hangs off, so
+`settled` is `0` for the window in which a racing duplicate arrives. `pay_total` moves with the
+tender itself and has no such window.
 
 **⚠ THE PARTITION CASE IS STILL OPEN, BY CONSTRUCTION, AND NOTHING HERE MAY BE READ AS A CLOSURE.**
 Two tills partitioned from each other have not converged, so neither can know and both accept — the
 doubling survives exactly where nothing local can see it. `__acceptance__/double-settlement.test.ts`
-§F is a **passing test whose subject is the residual**. Still owed for it and recorded in
-`DEC-MONEY-009`'s own residual column: an emitter for `01-F33`'s closing act, a scheduled Auditor
-(`runAuditor` carries `@unreached-owed`), and a decision on `EXCESS_TENDER_IS_EXCEPTION`.
+§F is a **passing test whose subject is the residual**. `DEC-MONEY-009`'s residual column named
+three things owed for it, and **two of the three have since closed — re-measured 2026-08-12, and
+the column itself has not been edited, so do not read it as a status board**: the emitter for
+`01-F33`'s closing act shipped (`01-F63`, `main/settlement-closer.ts`) and `services/jobs` runs
+`runAuditor` on a BullMQ repeatable (the `@unreached-owed` marker on `runAuditor` is about a
+DIFFERENT leg — the cloud-projection diff — and still stands). What is genuinely left is a decision
+on `EXCESS_TENDER_IS_EXCEPTION`, which is the sign the partition residual actually shows up under
+(two full tenders read as an over-tender, and `product-constants.ts` ships that as not-an-exception
+at v1).
 
 **What the cashier sees, and what it CANNOT say.** The Pay surface reads the same two projected
 numbers the guard reads and says so *before* she reaches for the pad: `Already settled — Rs 2,240
@@ -1517,11 +1599,14 @@ legality rule and could not be: a delivery line at `ready` may legally reach `se
 `LEGAL_NEXT` cannot express it.
 
 **Completion is `pay_total >= billed_effective`** — the same reading `printing.ts` uses at the same
-call site for `02-F15`. `01-F33`'s `order.settlement_closed` has no emitter anywhere, so
-`OpenOrderRow.settled` is `0` on every order and waiting for it would advance nothing; advancing on
-*any* `payment.recorded` would serve the lines at the first `02-F13` partial tender. It also keeps
-the open `TAKE CASH`-on-an-empty-entry defect out of line state (a Rs 0 tender leaves the bill
-uncovered).
+call site for `02-F15`. When this was written `01-F33`'s `order.settlement_closed` had no emitter
+anywhere, so `OpenOrderRow.settled` was `0` on every order and waiting for it would have advanced
+nothing; advancing on *any* `payment.recorded` would serve the lines at the first `02-F13` partial
+tender. It also kept the (then open) `TAKE CASH`-on-an-empty-entry defect out of line state — a
+Rs 0 tender leaves the bill uncovered. ⚠ **`01-F63` gave the act an emitter and this did not move
+to it**, deliberately: the act is emitted from this same reading, from the same call site, so
+gating on `settled` would swap one form of one fact for another and make one order-of-execution
+detail inside one IPC handler decide whether a line is served.
 
 **Two limits are deliberate and must not be "fixed" without a ruling.** `confirmed → served` stays
 **illegal**, so a till whose KOT never printed advances nothing on settlement — `restaurant-os.md:47`

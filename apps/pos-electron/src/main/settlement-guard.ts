@@ -45,12 +45,22 @@
  *
  * ── Why it is NOT built on `order.settlement_closed` ─────────────────────────────────────────
  *
- * `01-F33` makes settlement an ACT and `order.settlement_closed` is that act — but it has **no
- * production emitter anywhere** in this product (`printing.ts` says so in its own comment), so
- * `OpenOrderRow.settled` is `0` on every order this device has ever held. Building the refusal on
- * a column that is constantly zero is the wave's named defect built deliberately: a guard that can
- * never fire, with every gate green. Emitting the act instead would be **defining a closing act**,
- * which `01-F33` makes a founder question and not a session's call.
+ * `01-F33` makes settlement an ACT and `order.settlement_closed` is that act — but when this guard
+ * was built it had **no production emitter anywhere** in this product, so `OpenOrderRow.settled`
+ * was `0` on every order any device had ever held. Building the refusal on a column that is
+ * constantly zero is the wave's named defect built deliberately: a guard that can never fire, with
+ * every gate green. Emitting the act instead would have been **defining a closing act**, which
+ * `01-F33` made a founder question and not a session's call.
+ *
+ * ⚠ **THE ACT NOW HAS AN EMITTER, AND THIS GUARD STILL MUST NOT BE BUILT ON IT** (`01-F63`, August
+ * 2026 — `main/settlement-closer.ts`). The premise above has changed and the conclusion has not,
+ * which is why this is corrected in place rather than deleted. Two reasons, and the second is the
+ * load-bearing one. (1) The act is emitted **from this very reading**, so gating the refusal on
+ * `settled` would gate it on a consequence of the fact it already has. (2) The closer runs AFTER
+ * the append it hangs off, so between a `payment.recorded` landing and its act being written there
+ * is a window in which `settled` is `0` on a fully covered bill — a refusal reading that column
+ * would let a duplicate through in exactly the racing case `DEC-MONEY-009` measured. The
+ * arithmetic reading has no such window: `pay_total` moves with the tender itself.
  *
  * What ships is therefore the same observable fact `printing.ts` uses for `02-F15`'s receipt and
  * `line-advance.ts` uses for `02-F31`'s settlement edge, **at the same call site in `index.ts`**:
@@ -87,9 +97,13 @@ export type AlreadySettled = {
  * **`billed <= 0` is `null`, deliberately, and it is the narrow half of the refusal.** An order
  * with no billable lines has `0 >= 0` and would otherwise read as "already settled" — refusing
  * there would be refusing a sale that has not happened, which is the `01-F17` break this whole
- * design exists to avoid. It also keeps this module clear of the OPEN `TAKE CASH`-on-an-empty-
- * entry defect recorded in this package's guide: a Rs 0 tender against a real bill leaves
- * `pay_total < billed`, so nothing here fires on it and nothing here fixes it either.
+ * design exists to avoid. It also keeps this module clear of the `TAKE CASH`-on-an-empty-entry
+ * defect: a Rs 0 tender against a real bill leaves `pay_total < billed`, so nothing here fires on
+ * it and nothing here fixes it either. **That defect is no longer open** — `02-F48` (August 2026)
+ * rules it and `main/zero-tender-guard.ts` refuses it one wrapper out, on the payload alone. The
+ * sentence stands because the SEPARATION still matters: the two guards refuse different things for
+ * different reasons and must not be merged, and `zero-tender.test.ts` §A asserts their messages
+ * cannot be mistaken for one another.
  */
 export const alreadySettled = (order: {
   readonly order_id: string;
