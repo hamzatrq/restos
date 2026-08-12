@@ -126,8 +126,18 @@ const eventInput = (device_id: string, type: string, payload: Record<string, unk
   refs: [],
 });
 
-/** Ring one order to `confirmed`, with a line, exactly as the counter does. */
-const ringConfirmedOrder = (store: DeviceStore, device_id: string): string => {
+/**
+ * Ring one order to `confirmed`, with a line, exactly as the counter does — INCLUDING the
+ * `01-F15` fast-path call.
+ *
+ * ⚠ The `notifyAppended()` is load-bearing and was missing from the first draft of this file, which
+ * is worth recording: without it the stand-in counter propagates only on its 2 s heartbeat, so §A's
+ * p95 assertion would have measured the FIXTURE's omission and failed a correct pass-screen
+ * implementation. `apps/pos-electron`'s suite is what holds the real counter to making this call;
+ * here it is fixture fidelity, not the thing under test.
+ */
+const ringConfirmedOrder = (hub: Hub, device_id: string): string => {
+  const store = hub.store;
   const order_id = newId();
   store.append(
     eventInput(device_id, "order.created", {
@@ -146,6 +156,7 @@ const ringConfirmedOrder = (store: DeviceStore, device_id: string): string => {
     }),
   );
   store.append(eventInput(device_id, "order.confirmed", { order_id }));
+  hub.session.notifyAppended();
   return order_id;
 };
 
@@ -199,6 +210,27 @@ const meshHostFiles = (): string[] =>
   shippedFilesIn(APP_SRC)
     .filter((f) => /\bcreateMeshSession\s*\(/.test(stripComments(readFileSync(f, "utf8"))))
     .map((f) => rel(f));
+
+/**
+ * CALL SITES of `createLanMesh` in a file — the DECLARATION stripped first.
+ *
+ * ⚠ **THIS SHAPE WAS PUT HERE BY A MUTANT THAT SURVIVED.** The first draft asked whether any file
+ * reachable from `main/index.ts` *was* the host module, and returned true the moment it saw one.
+ * But `index.ts` reaches the host module by IMPORTING it, and an import is not a call — so the
+ * mutant that matters most here (a correct, exported, fully-tested `createLanMesh` that `boot()`
+ * never constructs) left the import in place and passed **17 of 17**. That is this wave's recurring
+ * defect surviving inside the assertion written to catch it, which is the exact failure the round-3
+ * law describes, and only mutation found it.
+ *
+ * It is also `pnpm seams:check`'s own recorded bug, one tool over: Rule B "required the caller to
+ * *import* the name, so the declaring file could never be its own call site". Stripping the
+ * declaration rather than excluding the declaring FILE is what keeps a host that constructs its own
+ * mesh internally green, while still failing a factory nobody calls.
+ */
+const lanMeshCallSites = (src: string): number => {
+  const withoutDeclaration = src.replace(/(?:export\s+)?const\s+createLanMesh\s*=/g, "const _d_ =");
+  return (withoutDeclaration.match(/\bcreateLanMesh\s*\(/g) ?? []).length;
+};
 
 type Fact = "ok" | "degraded" | "down";
 
@@ -353,10 +385,7 @@ describe("§A 03-F13/00 §5.1 — the cook sees the counter's order with the WAN
         "discovery mechanism this configuration uses; if the dial never lands there is no mesh.",
     ).toBeGreaterThan(-1);
 
-    const order_id = ringConfirmedOrder(hub.store, COUNTER_ID);
-    // The counter's own fast path. Nothing on the pass side can compensate for a hub that never
-    // fans; what is under test here is that this screen RECEIVES and PROJECTS.
-    await sleep(0);
+    const order_id = ringConfirmedOrder(hub, COUNTER_ID);
 
     const arrived = await waitFor(
       () => ticketsOn(passStore).some((t) => t.order_id === order_id),
@@ -406,7 +435,7 @@ describe("§A 03-F13/00 §5.1 — the cook sees the counter's order with the WAN
     const SAMPLES = 20;
     const latencies: number[] = [];
     for (let i = 0; i < SAMPLES; i++) {
-      const order_id = ringConfirmedOrder(hub.store, COUNTER_ID);
+      const order_id = ringConfirmedOrder(hub, COUNTER_ID);
       const startedAt = Date.now();
       const seen = await waitFor(
         () => ticketsOn(passStore).some((t) => t.order_id === order_id),
@@ -458,7 +487,7 @@ describe("§A 03-F13/00 §5.1 — the cook sees the counter's order with the WAN
         "discovery ON THE LAN.",
     ).toBeGreaterThan(-1);
 
-    const order_id = ringConfirmedOrder(hub.store, COUNTER_ID);
+    const order_id = ringConfirmedOrder(hub, COUNTER_ID);
     expect(
       await waitFor(
         () => ticketsOn(passStore).some((t) => t.order_id === order_id),
@@ -576,14 +605,15 @@ describe("§C the seam — the pass app itself joins the mesh", () => {
         if (exists(candidate)) reachable.add(rel(candidate));
       }
     }
-    const reaches = [...reachable].some(
-      (f) =>
-        f === host ||
-        /\bcreateLanMesh\s*\(/.test(stripComments(readFileSync(join(REPO_ROOT, f), "utf8"))),
+    const callSites = [...reachable].reduce(
+      (total, f) =>
+        total + lanMeshCallSites(stripComments(readFileSync(join(REPO_ROOT, f), "utf8"))),
+      0,
     );
     expect(
-      reaches,
-      `nothing main/index.ts imports ever calls \`createLanMesh\` (host module: ${host}). ` +
+      callSites > 0,
+      `nothing main/index.ts reaches ever CALLS \`createLanMesh\` (host module: ${host}; ` +
+        `${callSites} call sites found). ` +
         "`grep -arn 'createLanMesh' apps/pass-kds/src` is the closing evidence this asks for.",
     ).toBe(true);
   });
@@ -648,6 +678,28 @@ describe("§D 00 §5.7 — lan and hub are reported, not asserted", () => {
       settled,
       `connected to a counter acting as hub, the strip still reports ` +
         `${JSON.stringify(mesh.reachability())}.`,
+    ).toBeGreaterThan(-1);
+
+    // ⚠ **AN `ok` THAT IS NOT BACKED BY A DELIVERED EVENT IS THE FACT LYING**, and this clause was
+    // added because the suite's own throwaway implementation fell into it. `00 §5.7` asks for facts
+    // that are TRUE, and a device can compute a hub, list it in `peers`, report `hub: "ok"` — and be
+    // receiving nothing at all. MEASURED: a host that passed an EMPTY `token` to `createMeshSession`
+    // reported `{ lan: "ok", hub: "ok" }` while its store held ZERO events, forever, with no error
+    // anywhere. `hello` carries `token: z.string().min(1)` (`packages/sync-protocol/src/messages.ts`),
+    // so an empty one fails `parseMessage` and the transport drops the frame in a bare `catch` — the
+    // device is never admitted, and nothing on the wire, in a log or on the strip says so.
+    //
+    // Tying the fact to a delivered event is the only formulation that catches it, and it invents no
+    // policy: it does not say what a tokenless device SHOULD do (the corpus does not rule on LAN
+    // admission — `mesh-session.ts`'s own hello arm "inspects no token"), only that the strip must
+    // not claim a working hub while no event can cross.
+    const order_id = ringConfirmedOrder(hub, COUNTER_ID);
+    expect(
+      await waitFor(
+        () => ticketsOn(passStore).some((t) => t.order_id === order_id),
+        CONNECT_BUDGET_MS,
+      ),
+      "the strip reported `lan: ok` and `hub: ok` and then no order reached the pass queue.",
     ).toBeGreaterThan(-1);
   });
 });
@@ -786,7 +838,8 @@ describe("§E 00 §7/DEC-ARCH-001 — one declaration of the branch LAN configur
       );
       expect(
         reaches,
-        `apps/${app}'s shipped code never calls resolveLanMesh. An app that resolves the branch's ` +
+        `apps/${app}'s shipped code never calls resolveLanMesh (declared in ${home.pkgName}). An ` +
+          `app that resolves the branch's ` +
           "LAN configuration somewhere else decides it somewhere else, and the two ends of one " +
           "mesh then disagree about the port, the bind address or the peer list with every gate " +
           "green.",
@@ -829,7 +882,10 @@ describe("§E 00 §7/DEC-ARCH-001 — one declaration of the branch LAN configur
       [portKey]: "7311",
       [peersKey]: LAN_PEERS_EXAMPLE,
     });
-    expect(resolved, "the module's own documented example resolved to no mesh at all").not.toBeNull();
+    expect(
+      resolved,
+      "the module's own documented example resolved to no mesh at all",
+    ).not.toBeNull();
     expect(resolved?.listen_port).toBe(7311);
     expect(
       resolved?.peers.length,

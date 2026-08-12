@@ -230,6 +230,27 @@ const meshHostFiles = (): string[] =>
     .filter((f) => /\bcreateMeshSession\s*\(/.test(stripComments(readFileSync(f, "utf8"))))
     .map((f) => rel(f));
 
+/**
+ * CALL SITES of `createLanMesh` in a file — the DECLARATION stripped first.
+ *
+ * ⚠ **THIS SHAPE WAS PUT HERE BY A MUTANT THAT SURVIVED.** The first draft asked whether any file
+ * reachable from `main/index.ts` *was* the host module, and returned true the moment it saw one.
+ * But `index.ts` reaches the host module by IMPORTING it, and an import is not a call — so the
+ * mutant that matters most here (a correct, exported, fully-tested `createLanMesh` that `boot()`
+ * never constructs) left the import in place and passed **17 of 17**. That is this wave's recurring
+ * defect surviving inside the assertion written to catch it, which is the exact failure the round-3
+ * law describes, and only mutation found it.
+ *
+ * It is also `pnpm seams:check`'s own recorded bug, one tool over: Rule B "required the caller to
+ * *import* the name, so the declaring file could never be its own call site". Stripping the
+ * declaration rather than excluding the declaring FILE is what keeps a host that constructs its own
+ * mesh internally green, while still failing a factory nobody calls.
+ */
+const lanMeshCallSites = (src: string): number => {
+  const withoutDeclaration = src.replace(/(?:export\s+)?const\s+createLanMesh\s*=/g, "const _d_ =");
+  return (withoutDeclaration.match(/\bcreateLanMesh\s*\(/g) ?? []).length;
+};
+
 type Fact = "ok" | "degraded" | "down";
 
 type LanMeshConfig = {
@@ -536,10 +557,18 @@ describe("§A 01-F15/00 §5.1 — the order crosses the branch LAN with no WAN a
     cleanups.push(() => mesh.stop());
     const peer = startKitchenPeer("127.0.0.1", port);
 
+    // ⚠ WAIT ON *SEEING THE COUNTER*, NOT ON `hub_id !== null` — the first draft did the latter and
+    // it was RED AGAINST A CORRECT IMPLEMENTATION, which the round-3 law rates exactly as damaging
+    // as a vacuous test. `kitchen` is hub-eligible (`01-F39`), so a cold-started pass device is
+    // `solo` with `hub_id` already set to ITSELF; the predicate was therefore satisfied before the
+    // counter was ever visible, and the assertion below raced the election it was meant to measure.
     expect(
-      await waitFor(() => peer.session.status().hub_id !== null, CONNECT_BUDGET_MS),
-      "no hub was elected at all",
+      await waitFor(() => peer.session.status().peers.length > 0, CONNECT_BUDGET_MS),
+      "the kitchen never even saw the counter, so no election ran",
     ).toBeGreaterThan(-1);
+    // The election is a pure function re-run synchronously on the peer-set change; this settle is
+    // for the hello/hello_ack round trip behind `state`, measured at ~11 ms on loopback.
+    await sleep(500);
     expect(
       peer.session.status().hub_id,
       `the kitchen adopted ${peer.session.status().hub_id} as hub. 01-F13 elects among the ` +
@@ -705,14 +734,15 @@ describe("§C the seam — the counter app itself runs a mesh", () => {
         if (exists(candidate)) reachable.add(rel(candidate));
       }
     }
-    const reachesHost = [...reachable].some((f) => {
-      if (f === host) return true;
-      const src = stripComments(readFileSync(join(REPO_ROOT, f), "utf8"));
-      return /\bcreateLanMesh\s*\(/.test(src);
-    });
+    const callSites = [...reachable].reduce(
+      (total, f) =>
+        total + lanMeshCallSites(stripComments(readFileSync(join(REPO_ROOT, f), "utf8"))),
+      0,
+    );
     expect(
-      reachesHost,
-      `nothing main/index.ts imports ever calls \`createLanMesh\` (host module: ${host}). The ` +
+      callSites > 0,
+      `nothing main/index.ts reaches ever CALLS \`createLanMesh\` (host module: ${host}; ` +
+        `${callSites} call sites found). The ` +
         "mesh would then be a correct, tested subsystem the product never constructs — the " +
         "wave's recurring defect, fourteen recorded instances, every one with green tests. " +
         "`grep -arn 'createLanMesh' apps/pos-electron/src` is the closing evidence this asks for.",
@@ -801,6 +831,31 @@ describe("§D 00 §5.7 — lan and hub are reported, not asserted", () => {
       `with a kitchen device connected and the hub elected, the strip still reports ` +
         `${JSON.stringify(mesh.reachability())}. \`00 §5.7\` wants three facts each of which is ` +
         "TRUE; this device is serving as branch hub to a connected follower.",
+    ).toBeGreaterThan(-1);
+
+    // ⚠ **AN `ok` THAT IS NOT BACKED BY A DELIVERED EVENT IS THE FACT LYING**, and this clause was
+    // added because the suite's own throwaway implementation fell into it. `00 §5.7` asks for facts
+    // that are TRUE, and a device can compute a hub, list it in `peers`, report `hub: "ok"` — and be
+    // receiving nothing at all. MEASURED: a host that passed an EMPTY `token` to `createMeshSession`
+    // reported `{ lan: "ok", hub: "ok" }` while its store held ZERO events, forever, with no error
+    // anywhere. `hello` carries `token: z.string().min(1)` (`packages/sync-protocol/src/messages.ts`),
+    // so an empty one fails `parseMessage` and the transport drops the frame in a bare `catch` — the
+    // device is never admitted, and nothing on the wire, in a log or on the strip says so.
+    //
+    // Tying the fact to a delivered event is the only formulation that catches it, and it invents no
+    // policy: it does not say what a tokenless device SHOULD do (the corpus does not rule on LAN
+    // admission — `mesh-session.ts`'s own hello arm "inspects no token"), only that the strip must
+    // not claim a working hub while no event can cross.
+    const order_id = ringConfirmedOrder(counterStore, COUNTER_ID);
+    mesh.notifyAppended();
+    expect(
+      await waitFor(
+        () => peer.store.kitchenQueue().some((r) => r.order_id === order_id),
+        CONNECT_BUDGET_MS,
+      ),
+      "the strip reported `lan: ok` and `hub: ok` and then no event crossed the mesh. The facts " +
+        "`00 §5.7` asks for are about what this device can actually do, not about what it has " +
+        "computed about its neighbours.",
     ).toBeGreaterThan(-1);
   });
 
