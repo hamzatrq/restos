@@ -103,6 +103,24 @@ const electronAddonPath = (): string =>
 const PASS_ACTOR = "Pass — nobody signed in";
 
 const boot = async (): Promise<void> => {
+  /**
+   * ⚠ **FIRST, AND IT WAS NOT — THIS APP COULD NOT START AT ALL UNTIL AUGUST 2026.**
+   *
+   * `screen.getPrimaryDisplay()` below throws *"The 'screen' module can't be used before the app
+   * 'ready' event"*, and this `await` used to sit ~150 lines further down, just above the
+   * `BrowserWindow`. `void boot()` runs at module load, so every launch of this binary died in an
+   * unhandled promise rejection before a store was opened or a window existed: **no queue, no boot
+   * line, no error dialog — an Electron app that exits silently.**
+   *
+   * Nothing could see it. All 136 tests in this app import modules and never the entry point;
+   * `pnpm layout:check` runs `out/main/layout-gate.js`, a DIFFERENT entry that builds its own
+   * window; and `pnpm verify` never launches this app. It is `AGENTS.md`'s second recurring defect
+   * in its purest form — a correct component that is not on the screen — and it was found by
+   * launching the thing, which is the only thing that finds it.
+   *
+   * `app.whenReady()` is idempotent, so the cost of it being first is nothing.
+   */
+  await app.whenReady();
   const env = process.env;
   const identity = resolveDeviceIdentity(env);
   const aging = resolveAging(env[AGING_THRESHOLDS_ENV]);
@@ -314,7 +332,7 @@ const boot = async (): Promise<void> => {
     return serveMark.handOver(parsed.order_id);
   });
 
-  await app.whenReady();
+  // (`await app.whenReady()` used to be HERE, and everything above it needed it — see the top.)
 
   /**
    * `00 §5.7` — the boot line, and every clause of it is a fact whose being wrong is invisible

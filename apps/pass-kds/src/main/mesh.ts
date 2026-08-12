@@ -1,4 +1,5 @@
 import type { LanMeshConfig } from "@restos/device-config";
+import type { DeviceClass } from "@restos/domain";
 import {
   createMeshSession,
   createWsLanTransport,
@@ -75,6 +76,17 @@ const ARRIVAL_POLL_MS = 250;
  */
 const LAN_HELLO_PLACEHOLDER = "lan-member-unauthenticated";
 
+/**
+ * `01-F39`'s own name for *"pass screen / KDS station, doc 03"*, declared ONCE and read twice below.
+ *
+ * ⚠ **It has to be one declaration, and a mutant is why.** The transport announces this to peers and
+ * the session elects on it. Changing only ONE leaves a screen that announces itself as a kitchen and
+ * elects as a counter: measured, that mutant fails four delivery assertions and **passes the
+ * election assertion**, because the election reads the announce. Two writes of one fact disagreeing
+ * silently is `01-F60`'s enabled-set drift inside a single function.
+ */
+const DEVICE_CLASS: DeviceClass = "kitchen";
+
 const nonEmpty = (raw: string | undefined): string | null => {
   const trimmed = (raw ?? "").trim();
   return trimmed === "" ? null : trimmed;
@@ -114,7 +126,7 @@ export const createLanMesh = (opts: {
   let boundPort: number | null = null;
 
   const transport = createWsLanTransport({
-    self: { device_id: store.identity.device_id, device_class: "kitchen" },
+    self: { device_id: store.identity.device_id, device_class: DEVICE_CLASS },
     // `01-F12` places discovery ON THE LAN, and this screen must be dialable: it is hub-eligible,
     // so on a branch whose till is off it is the one serving.
     listen_host: lan.listen_host,
@@ -130,7 +142,7 @@ export const createLanMesh = (opts: {
     store,
     transport,
     clock: wallClock,
-    device_class: "kitchen",
+    device_class: DEVICE_CLASS,
     token: nonEmpty(process.env["RESTOS_DEVICE_TOKEN"]) ?? LAN_HELLO_PLACEHOLDER,
   });
   session.start();
