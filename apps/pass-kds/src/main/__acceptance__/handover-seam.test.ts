@@ -221,7 +221,15 @@ describe("§C 03-F52 — the refusal exists on both sides of the plane", () => {
     // "a bridge that can be handed an arbitrary channel name is `ipcRenderer` with extra steps."
     expect(PRELOAD).not.toMatch(/invoke:\s*\(channel/);
     const members = [...PRELOAD.matchAll(/ipcRenderer\.invoke\(CHANNELS\.(\w+)/g)].map((m) => m[1]);
-    expect(new Set(members)).toEqual(new Set(["passState", "queue", "markReady", "handOver"]));
+    // ⚠ WIDENED, August 2026 — this set read `{passState, queue, markReady, handOver}` and
+    // `03-F53` adds exactly TWO: `01-F61`'s identification grid needs a roster, and the PIN is
+    // verified in MAIN (`01-F28`). The assertion's PURPOSE — the set of things this renderer can
+    // ask for is auditable by reading one file (`18 §9`) — is unchanged, and the same set is held
+    // from the other side by `pass-identity-seam.test.ts` §C, deliberately: a rule two files
+    // assert is a rule neither can quietly drop.
+    expect(new Set(members)).toEqual(
+      new Set(["passState", "queue", "markReady", "handOver", "roster", "unlock"]),
+    );
   });
 
   it("the wire carries the assignment and the per-card eligibility", () => {

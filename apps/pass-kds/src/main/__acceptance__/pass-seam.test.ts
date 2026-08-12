@@ -73,6 +73,40 @@ describe("§A 03-F16 — the host CONSTRUCTS the producer and the IPC channel RE
   });
 });
 
+describe("§A2 the app can START — `screen` is not touched before `app.whenReady()`", () => {
+  it("00 §5.7 — the boot reaches `whenReady` BEFORE it reads the display", () => {
+    // ⚠ ADDED August 2026 AFTER LAUNCHING THE APP AND WATCHING IT DIE, which is the only
+    // instrument that could have found it. At the time this row was written `main/index.ts` read
+    // `screen.getPrimaryDisplay()` **158 lines before** its `await app.whenReady()`, and Electron
+    // throws `The 'screen' module can't be used before the app 'ready' event` — so `boot()`
+    // rejected on every launch, no window was ever created, and the process sat there.
+    //
+    // Every gate was green while that was true: 134 tests passed, `layout:check` passed (it has
+    // its OWN entry point, `src/layout-gate/main.ts`, which correctly does everything inside
+    // `app.whenReady().then(...)`), and `seams:check` cannot express "the binary starts".
+    // `apps/pos-electron` carries the warning in terms — *"Lazy, because `screen` throws before
+    // `app.whenReady()`"* — and boots inside `app.whenReady().then(...)`; this app was written
+    // from the same shapes and inherited the reads without the guard.
+    //
+    // `services/sync-gateway/__acceptance__/startable.test.ts` is the precedent for holding
+    // "it starts" as an assertion. That one SPAWNS the declared script; this one cannot, because
+    // an Electron launch needs a downloaded runtime, an X server and a native addon built for the
+    // Electron ABI — none of which a package suite may require. So it is a source-order read, and
+    // that is stated plainly: it can be satisfied by a call that is present and wrong, and what it
+    // CAN do is fail when the order is the one that crashed.
+    const ready = MAIN.indexOf("app.whenReady()");
+    const display = MAIN.search(/\bscreen\.\w/);
+    expect(ready, "main never awaits app.whenReady()").toBeGreaterThan(-1);
+    if (display === -1) return; // a host that stopped reading `screen` at all is fine.
+    expect(
+      display,
+      "main/index.ts reads `screen` before `app.whenReady()`: Electron throws there, boot() " +
+        "rejects, and no window is ever created — every suite stays green because no suite " +
+        "launches the app",
+    ).toBeGreaterThan(ready);
+  });
+});
+
 describe("§B 03-F13 — the queue reaches the renderer, on BRANCH time", () => {
   it("main serves the queue from the real store and the real catalog", () => {
     expect(MAIN).toContain("ipcMain.handle(CHANNELS.queue");
@@ -149,7 +183,13 @@ describe("§D commandment 5 — this is an OPERATIONAL screen and the plane is n
     // (`18 §9` — the renderer's reachable surface is auditable by reading one file) is unchanged
     // and only the expected set moved. `handover-seam.test.ts` §C holds the same set from the
     // other side, deliberately: a rule two files assert is a rule neither can quietly drop.
-    expect(new Set(members)).toEqual(new Set(["passState", "queue", "markReady", "handOver"]));
+    // ⚠ WIDENED AGAIN, August 2026 — `03-F53` adds `roster` and `unlock`, and the note above
+    // applies unchanged: the PURPOSE is that this renderer's reachable surface stays auditable
+    // from one file, and only the expected set moved. `pass-identity-seam.test.ts` §C holds the
+    // same set from the other side.
+    expect(new Set(members)).toEqual(
+      new Set(["passState", "queue", "markReady", "handOver", "roster", "unlock"]),
+    );
   });
 });
 

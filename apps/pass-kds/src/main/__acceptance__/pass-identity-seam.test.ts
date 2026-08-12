@@ -37,6 +37,16 @@ const PRELOAD = read("../../preload/index.ts");
 const IPC = read("../../shared/ipc.ts");
 const COUNTER_MAIN = read("../../../../pos-electron/src/main/index.ts");
 
+/**
+ * Source with its comments removed — what the machine runs, not what a reader is told.
+ *
+ * Every prose guard in this file is a grep, and `AGENTS.md`'s standing warning about greps is that
+ * a proxy for the evidence is not the evidence: *"A mention is not an import."* A ban on a symbol
+ * that a doc comment may legitimately NAME has to be a ban on the code.
+ */
+const code = (source: string): string =>
+  source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
 /** The body of one `ipcMain.handle(CHANNELS.x` block, up to the next handler. */
 const handler = (channel: string): string => {
   const from = MAIN.indexOf(`ipcMain.handle(CHANNELS.${channel}`);
@@ -168,10 +178,22 @@ describe("§C 01-F27 — the two identity axes reach the renderer, and the crede
     // The renderer verifies nothing, so a hash on that side is a secret shipped to the untrusted
     // end for no purpose. `pass-identity.test.ts` §B drives the same property behaviourally; this
     // is the structural half, on the projection the host actually serves.
-    expect(IPC).not.toContain("pin_hash");
-    expect(APP).not.toContain("pin_hash");
-    const rosterHandler = handler("roster");
-    expect(rosterHandler).not.toContain("pin_hash");
+    //
+    // ⚠ COMMENTS ARE STRIPPED FIRST, and the reason is a finding against the FIRST DRAFT of this
+    // very row: it read `expect(IPC).not.toContain("pin_hash")` and went RED against a correct
+    // implementation whose schema comment said *"Never a `pin_hash`"*. That is `AGENTS.md`'s own
+    // "a mention is not an import" mistake, committed inside the file that quotes it — and the
+    // round-3 law puts a test that stays red under a correct implementation on exactly the same
+    // footing as a vacuous one. A guard whose evidence is a grep has to match the CODE.
+    for (const [name, source] of [
+      ["shared/ipc.ts", IPC],
+      ["renderer/App.tsx", APP],
+      ["the roster handler", handler("roster")],
+    ] as const) {
+      expect(code(source), `${name} projects a credential to the untrusted end`).not.toContain(
+        "pin_hash",
+      );
+    }
   });
 
   it("the unlock handler validates BOTH arguments before they reach a verifier", () => {

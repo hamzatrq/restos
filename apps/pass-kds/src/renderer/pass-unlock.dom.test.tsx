@@ -258,9 +258,26 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/**
+ * Every word currently on the glass.
+ *
+ * ⚠ **JOINED FROM LEAF ELEMENTS, NEVER FROM `document.body.textContent`, and the difference was
+ * found by MUTATION rather than by reading.** The first draft of this helper read the body's
+ * `textContent`, which concatenates adjacent leaves with no separator — so three staff tiles and a
+ * Cancel control came out as the single token `sajidzubairimrancancel`, and the empty-roster render
+ * produced a bare `cancel` that the populated render therefore did not "contain". The word-diff
+ * below then reported a difference that was an artefact of the tokenizer, and **the mutant that
+ * deletes the empty-roster message survived**. That is the round-3 law's exact shape: the mechanism
+ * was built correctly and was not measuring the thing it was aimed at, and only breaking the
+ * implementation on purpose showed it. Leaves are joined with a space, which is the same idiom
+ * `handover-confirm.dom.test.tsx` uses for the same reason.
+ */
 const words = (): Set<string> =>
   new Set(
-    (document.body.textContent ?? "")
+    [...document.body.querySelectorAll("*")]
+      .filter((el) => el.children.length === 0)
+      .map((el) => el.textContent ?? "")
+      .join(" ")
       .toLowerCase()
       .split(/[^a-z0-9]+/)
       .filter((w) => w.length > 2),
