@@ -9,10 +9,11 @@
     "ios": "expo start --ios",
     "bundle:check": "expo export --platform android --output-dir .expo-bundle-check",
     "typecheck": "tsc --noEmit",
-    "test": "echo 'no tests yet — acceptance tests arrive with first FRs (24 §3)'",
+    "test": "vitest run",
     "build": "echo 'no build yet — EAS Build lands with the first shipped slice'"
   },
   "dependencies": {
+    "@restos/device-config": "workspace:*",
     "@restos/domain": "workspace:*",
     "@restos/sync-client": "workspace:*",
     "@restos/ui": "workspace:*",
@@ -22,6 +23,7 @@
   },
   "devDependencies": {
     "@types/react": "19.2.17",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
   }
 }

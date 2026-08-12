@@ -8,7 +8,8 @@
     "build": "echo 'no build yet — scaffold stub'"
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./aging": "./src/aging.ts"
   },
   "dependencies": {
     "@restos/domain": "workspace:*"
