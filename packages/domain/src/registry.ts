@@ -888,6 +888,12 @@ const alarmAckPayloadSchema = z.discriminatedUnion("alarm_kind", [
   auditPayloadSchema.extend({
     alarm_kind: z.literal(ALARM_ACK_KINDS[0]),
     order_id: z.string().min(1),
+    // ⚠ **REQUIRED-AND-NULL is a READING of `05-F30` and NOTHING ASSERTS IT.** Measured
+    // 2026-08-12: loosening this to `z.union([z.string().min(1), z.null()])` passes all 496 tests
+    // in this package. The FR says *"`null` on a `late_order` ack"* and the strict form is taken
+    // because `01-F1` makes the permissive direction irreversible — a printer name written onto an
+    // alarm with no printer is a permanent claim about hardware nobody touched, while loosening
+    // later costs one line and invalidates no history.
     printer_name: z.null(),
   }),
   auditPayloadSchema.extend({

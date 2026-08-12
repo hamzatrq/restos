@@ -263,6 +263,15 @@ const acknowledgedKeys = (facts: readonly BranchFact[]): ReadonlySet<string> => 
     // `audit.print_acknowledged` clear a manager's alarm — a cashier at the counter dismissing an
     // S1 band would answer the FR (`05-F3`) that exists so the trouble reaches the manager *even
     // off the floor*. `05-F30` says the two acks do not join, and this is where that holds.
+    //
+    // ⚠ **MEASURED 2026-08-12: NO TEST IN THIS PACKAGE CATCHES A PREFIX MATCH.** Replacing this
+    // line with `startsWith("audit.")` passes all 46 tests, including the one titled *"does not
+    // clear on the till's audit.print_acknowledged"* — because that fixture's payload has no
+    // `alarm_kind`, so `ackKeyOf` refuses it on the FIELD narrow and the type check is never the
+    // reason. The discriminating case is a NON-ack audit subtype that happens to carry `05-F30`'s
+    // field names, and it was run out-of-tree: correct implementation keeps the alarm, prefix
+    // mutant clears it. This line is load-bearing and the assertion that claims to own it is not —
+    // recorded here rather than fixed, because that suite is another session's oracle.
     if (fact.type !== ALARM_ACK) continue;
     const key = ackKeyOf(fact.payload);
     if (key !== null) acked.add(key);
