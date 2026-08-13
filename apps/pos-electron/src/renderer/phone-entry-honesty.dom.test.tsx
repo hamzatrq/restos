@@ -118,8 +118,8 @@ const enterNumber = (digits: string) => {
 
 /** Get a real customer file onto the strip, and assert it is there before anything is judged. */
 const raiseKnownCaller = async () => {
-  await screen.findByRole("button", { name: /^Phone$/i });
-  tap(/^Phone$/i);
+  await screen.findByRole("button", { name: /^Call$/i });
+  tap(/^Call$/i);
   await waitFor(() => enterNumber(DIALLED));
   await screen.findByText(new RegExp(NAME, "i"));
 };
@@ -157,7 +157,7 @@ describe("§B 00 §5.7 / 02-F1 — the strip is cleared when the call ENDS (P10,
     tap(/^Delivery$/i);
     await waitFor(() => expect(appended).toHaveLength(1));
 
-    tap(/^Phone$/i);
+    tap(/^Call$/i);
     // The readout is back to its empty mark and no file is named.
     await waitFor(() => expect(screen.queryAllByText(new RegExp(NAME, "i"))).toEqual([]));
     expect(screen.queryAllByText(DIALLED)).toEqual([]);
@@ -170,8 +170,8 @@ describe("§B 00 §5.7 / 02-F1 — the strip is cleared when the call ENDS (P10,
     render(<Counter />);
     await raiseKnownCaller();
 
-    tap(/^Counter$/i);
-    tap(/^Phone$/i);
+    tap(/^In restaurant$/i);
+    tap(/^Call$/i);
 
     await waitFor(() => expect(screen.queryAllByText(new RegExp(NAME, "i"))).toEqual([]));
     expect(screen.queryAllByText(DIALLED)).toEqual([]);

@@ -152,10 +152,14 @@ const tap = (name: RegExp) => fireEvent.click(screen.getByRole("button", { name 
  * SHIPPED channel row rather than a prop, so this file cannot pass against a phone surface that
  * is unreachable from the counter (this wave's second recurring defect: a correct component that
  * is not on the screen).
+ *
+ * The tile reads **Call** since the August 2026 channel ruling and the channel is still `phone`:
+ * the label moved, the id is permanent (`01-F53`/`01-F1`). This helper keeps its name because it
+ * names the CHANNEL, which did not change.
  */
 const choosePhone = async () => {
-  await screen.findByRole("button", { name: /^Phone$/i });
-  tap(/^Phone$/i);
+  await screen.findByRole("button", { name: /^Call$/i });
+  tap(/^Call$/i);
 };
 
 /**
@@ -233,8 +237,8 @@ describe("§A 02-F27 — choosing Phone puts a number-entry surface in front of 
     // PAD is". Typing first removes the second explanation without forbidding either design.
     mount();
     render(<Counter />);
-    await screen.findByRole("button", { name: /^Counter$/i });
-    tap(/^Counter$/i);
+    await screen.findByRole("button", { name: /^In restaurant$/i });
+    tap(/^In restaurant$/i);
     tryEnterNumber(DIALLED);
     tap(/^Takeaway$/i);
 

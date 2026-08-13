@@ -14,6 +14,11 @@
 // `order_type`, and this extends it to `channel` on `01-F60`'s own argument against a
 // house-price fallback. §A is what stops that extension being undone silently — if the founder
 // rules the other way, §A is the test to change, deliberately and by name.
+//
+// ⚠ **A FOUNDER RULING HAS SINCE MOVED THIS FILE'S LABELS AND RETIRED ITS §C** (August 2026):
+// the counter originates on four channels, `counter` is labelled `In restaurant` and `phone` is
+// labelled `Call`. The stored ids are untouched. See §C's own note below and
+// `channel-ruling.dom.test.tsx`, which owns the ruling.
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -119,7 +124,7 @@ describe("§A 02-F1/01-F60 — a type tap alone starts NOTHING", () => {
   it("names the price consequence in WORDS, not by the selected tile's fill alone", async () => {
     mount([]);
     render(<Counter />);
-    await screen.findByRole("button", { name: /^Counter$/i });
+    await screen.findByRole("button", { name: /^In restaurant$/i });
     // `Tile.selected` is explicit that a selection is "never by colour alone, so a caller marking
     // a tile selected still says so in words" (`27-F66`).
     tap(/^Foodpanda$/i);
@@ -134,9 +139,15 @@ describe("§A 02-F1/01-F60 — a type tap alone starts NOTHING", () => {
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 describe("§B 02-F30/02-F28 — the chosen channel reaches order.created", () => {
+  // ⚠ **THE LABELS MOVED AND THE IDS DID NOT** (founder ruling, August 2026): `counter` is
+  // labelled `In restaurant` and `phone` is labelled `Call`. The right-hand column below is
+  // unchanged and permanently so — `01-F53` snapshots it into the event and `01-F1` forbids
+  // rewriting history. `channel-ruling.dom.test.tsx` §C owns that distinction; these rows are
+  // re-pointed at the new words rather than deleted, because what they assert — the chosen
+  // channel travels into `order.created` — is untouched by the ruling.
   it.each([
-    ["Counter", "counter"],
-    ["Phone", "phone"],
+    ["In restaurant", "counter"],
+    ["Call", "phone"],
     ["Foodpanda", "foodpanda"],
   ])("%s → channel %s", async (label, channel) => {
     mount([]);
@@ -154,8 +165,8 @@ describe("§B 02-F30/02-F28 — the chosen channel reaches order.created", () =>
   it("does not carry the choice into the NEXT order (02-F1 — set at creation, each time)", async () => {
     mount([]);
     render(<Counter />);
-    await screen.findByRole("button", { name: /^Phone$/i });
-    tap(/^Phone$/i);
+    await screen.findByRole("button", { name: /^Call$/i });
+    tap(/^Call$/i);
     tap(/^Delivery$/i);
     await waitFor(() => expect(appended).toHaveLength(1));
 
@@ -170,27 +181,21 @@ describe("§B 02-F30/02-F28 — the chosen channel reaches order.created", () =>
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-// §C — the ANTI-SCOPE tripwire on the narrowing. An INTERPRETATION, pinned so it cannot widen
-// or narrow by accident. See `ORDER_CHANNELS_AT_COUNTER` for the FRs behind each exclusion.
+// §C — RETIRED, not amended. ⚠ READ THIS BEFORE RE-ADDING ANYTHING LIKE IT.
+//
+// This section asserted *"exactly three channels are originable at the counter — counter, phone
+// and foodpanda, and NOT storefront or whatsapp"*. It was a correct transcription of an
+// INTERPRETATION (`ORDER_CHANNELS_AT_COUNTER`'s own header called it one and named the simpler
+// alternative), and a **founder ruling in August 2026 answered it the other way**: the channels a
+// cashier may originate on are in-restaurant, foodpanda, WhatsApp and call.
+//
+// It is retired here rather than left green-and-wrong, on AGENTS.md's own worked example: a test
+// that goes on defending an overruled rule *"would have failed the correct implementation"*, and
+// that one took three weeks to surface. The claim it was really protecting — that the set is
+// CLOSED and cannot widen or narrow by accident — is not lost: `channel-ruling.dom.test.tsx` §A
+// owns it, discovers the row from the DOM rather than from a list of labels, and still refuses
+// `storefront` for `02-F9`'s reason (cloud orders are ACCEPTED in the inbox, never keyed in).
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-
-describe("§C 02-F42 — exactly three channels are originable at the counter", () => {
-  it("offers counter, phone and foodpanda — and NOT storefront or whatsapp", async () => {
-    mount([]);
-    render(<Counter />);
-    await screen.findByRole("button", { name: /^Counter$/i });
-
-    for (const label of ["Counter", "Phone", "Foodpanda"]) {
-      expect(screen.getAllByText(label, { exact: true }).length).toBeGreaterThan(0);
-    }
-    // `02-F9` lands cloud orders in the INBOX to be accepted; `08-F8` auto-confirms aggregator
-    // API orders on ingest. A counter-keyed `storefront` order is fabricated provenance in the
-    // channel-economics axis `02-F42` closed the set to protect.
-    for (const label of ["Storefront", "WhatsApp", "Whatsapp"]) {
-      expect(screen.queryAllByText(label, { exact: true })).toEqual([]);
-    }
-  });
-});
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // §D — the grid is greyed against the ORDER's channel, not the device's.
@@ -217,8 +222,8 @@ describe("§D 01-F60 — menu() is asked about the channel that will price the l
   it("asks for the PENDING choice before any order exists", async () => {
     mount([]);
     render(<Counter />);
-    await screen.findByRole("button", { name: /^Phone$/i });
-    tap(/^Phone$/i);
+    await screen.findByRole("button", { name: /^Call$/i });
+    tap(/^Call$/i);
     await waitFor(() => expect(menuChannels).toContain("phone"));
   });
 });

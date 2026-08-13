@@ -1596,7 +1596,11 @@ const run = async (): Promise<number> => {
     } else {
       await click(orderTab);
       await new Promise((r) => setTimeout(r, 350));
-      const dialled = [await press("Phone"), await press("3")];
+      // `Call` and not `Phone` since the August 2026 channel ruling: the tile's LABEL moved and
+      // the channel id `phone` did not (`01-F53`/`01-F1`). `press` matches rendered text, so this
+      // is the label — and the 22 EMPTY MATCHes it raised while it still said `Phone` are how the
+      // rail is supposed to behave: it went unmeasured, LOUDLY, on all eleven panels.
+      const dialled = [await press("Call"), await press("3")];
       await new Promise((r) => setTimeout(r, 400));
 
       // ---------------------------------------------------------------------------------
@@ -1647,8 +1651,10 @@ const run = async (): Promise<number> => {
         await shoot(window, `${panel.label}--alarm--caller`);
       }
       // Back to a walk-in, so the escalation block below and the `quiet` sweep start from the
-      // state every other surface is measured in. `Counter` clears the number with the channel.
-      await press("Counter");
+      // state every other surface is measured in. Latching any other channel clears the number
+      // with the channel; this one is the walk-in, labelled `In restaurant` since the August 2026
+      // ruling and still stored as `counter`.
+      await press("In restaurant");
       await new Promise((r) => setTimeout(r, 300));
     }
 

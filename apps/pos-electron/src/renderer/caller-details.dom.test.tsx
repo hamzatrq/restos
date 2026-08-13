@@ -157,8 +157,8 @@ const enterNumber = (digits: string) => {
  * whether an operator can reach it.
  */
 const reachUnknownCaller = async (digits = DIALLED) => {
-  await screen.findByRole("button", { name: /^Phone$/i });
-  tap(/^Phone$/i);
+  await screen.findByRole("button", { name: /^Call$/i });
+  tap(/^Call$/i);
   await waitFor(() => enterNumber(digits));
   await screen.findByRole("button", { name: /^Save caller$/i });
 };
@@ -338,8 +338,8 @@ describe("§B 27-F6/21 §5 — the capture is an escape hatch, never a gate", ()
      */
     mount({ keyable: false });
     render(<Counter />);
-    await screen.findByRole("button", { name: /^Phone$/i });
-    tap(/^Phone$/i);
+    await screen.findByRole("button", { name: /^Call$/i });
+    tap(/^Call$/i);
     await waitFor(() => enterNumber(DIALLED));
     await screen.findByText(/Key the caller's number/i);
 
@@ -516,7 +516,7 @@ describe("§E 00 §5.7/09-F10 — one caller's address never reaches the next ca
     await fillFirstCaller();
 
     // The second exit `Counter.tsx` names: *"latching a different channel ends the call."*
-    tap(/^Counter$/i);
+    tap(/^In restaurant$/i);
     await reachUnknownCaller(SECOND_DIALLED);
     expect((nameField() as HTMLInputElement).value).toBe("");
     expect((addressField() as HTMLInputElement).value).toBe("");
@@ -528,7 +528,7 @@ describe("§E 00 §5.7/09-F10 — one caller's address never reaches the next ca
     mount();
     render(<Counter />);
     await fillFirstCaller();
-    tap(/^Counter$/i);
+    tap(/^In restaurant$/i);
 
     await reachUnknownCaller(SECOND_DIALLED);
     await save();

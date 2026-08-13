@@ -194,8 +194,8 @@ const enterNumber = (digits: string) => {
 };
 
 const reachUnknownCaller = async () => {
-  await screen.findByRole("button", { name: /^Phone$/i });
-  tap(/^Phone$/i);
+  await screen.findByRole("button", { name: /^Call$/i });
+  tap(/^Call$/i);
   await waitFor(() => enterNumber(DIALLED));
   await screen.findByRole("button", { name: /^Save caller$/i });
 };
@@ -326,7 +326,7 @@ describe("§A 00 §5.7/02-F27 — the till reports that the caller was NOT filed
     await saveAndAwaitAnnouncement();
 
     // `Counter.tsx`'s second exit: *"latching a different channel ends the call."*
-    tap(/^Counter$/i);
+    tap(/^In restaurant$/i);
     await reachUnknownCaller();
     expect(announced()).toBe(beforeAnyAttempt);
   });
