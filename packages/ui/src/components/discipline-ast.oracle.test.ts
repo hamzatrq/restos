@@ -471,6 +471,27 @@ describe("the guard suite actually covers the package", () => {
          */
         "fonts/index.ts",
         "fonts/plex-latin.ts",
+        /**
+         * ADDED with `27 §5`'s icon vocabulary (August 2026) — `27-F30`..`27-F37`, twenty
+         * drawings and the two components that render them.
+         *
+         * The acknowledgement this pin forces is the whole reason the drawings live in source
+         * rather than in a dependency: **`27-F30` measured 42.2% mean comprehension on ISO 7010
+         * among 987 Pakistani clinicians**, so an icon set is not a thing this product may
+         * install. Two of the guards below bear on it directly and both are live temptations
+         * rather than formalities. `rawValueCheck`: an SVG is the element every example on earth
+         * paints with a hex, and `27-F16`'s four-slot colour budget is spent in the one place no
+         * token audit looks if a drawing paints itself — every mark here is `currentColor` and
+         * the surface decides. `touchCheck`/TOKENS.md rule 1: the size is `typography[size]`'s
+         * own line height, never the `width={24}` that is the single most likely line in any
+         * icon component ever written.
+         *
+         * And the one no scanner can see, so it is stated here: **`27-F35`'s ≥85% comprehension
+         * gate has NOT been run.** Until it has, a symbol never travels without its word —
+         * which is why `Icon` is deliberately absent from this package's barrel and `IconLabel`
+         * is the only thing app code can reach.
+         */
+        "icons/index.tsx",
       ].sort(),
     );
   });

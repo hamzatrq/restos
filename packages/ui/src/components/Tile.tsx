@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
+import { IconLabel, type IconName } from "../icons/index";
 import { useColor } from "../theme";
-import { type Posture, space, targetFor, typography } from "../tokens/index";
+import { type Posture, space, type TypeName, targetFor, typography } from "../tokens/index";
 
 /**
  * 27-F8 — touch minimums are POSTURE-typed. There is deliberately no `size` prop: the
@@ -47,6 +48,20 @@ export type TileProps = {
    * it does not replace the readable one.
    */
   selected?: boolean | undefined;
+  /**
+   * `27 §5` — the symbol this tile carries, ACCOMPANYING its word and never replacing it.
+   *
+   * Optional, and it stays optional: `27-F37` caps the vocabulary at ~25 absolutely stable
+   * symbols, so most tiles in this product legitimately have none — a menu item is a recognition
+   * target at a fixed grid position (that FR's own distinction), not a symbol to be learned.
+   * Passing a name here is a claim that this tile is one of the ~25, and `ICON_NAMES` is what
+   * decides whether that claim is true.
+   *
+   * `27-F35`'s comprehension gate has NOT been run, so this can only ever add a channel to a
+   * tile that already reads. The label is still required and still rendered; there is no
+   * arrangement of these props that produces a pictogram on its own.
+   */
+  icon?: IconName | undefined;
 };
 
 export const Tile = ({
@@ -58,6 +73,7 @@ export const Tile = ({
   unavailableReason,
   destructive = false,
   selected = false,
+  icon,
 }: TileProps) => {
   const color = useColor();
   const min = targetFor(posture);
@@ -75,7 +91,8 @@ export const Tile = ({
    * Every other posture keeps `text-label`: a menu tile's payload is a NAME, and `27-F16`'s
    * argument applies to size as well as colour — emphasising the base case emphasises nothing.
    */
-  const t = typography[posture === "keypad" ? "text-numeric-primary" : "text-label"];
+  const typeName: TypeName = posture === "keypad" ? "text-numeric-primary" : "text-label";
+  const t = typography[typeName];
   return (
     <button
       type="button"
@@ -139,7 +156,16 @@ export const Tile = ({
           : "3px solid transparent",
       }}
     >
-      <span>{label}</span>
+      {/*
+        The un-iconed path is byte-for-byte what it always was: every tile in this product that
+        does not name a symbol renders exactly the element it rendered before, so nothing moves
+        on a surface an operator has already learned (`27-F4`).
+      */}
+      {icon === undefined ? (
+        <span>{label}</span>
+      ) : (
+        <IconLabel name={icon} label={label} size={typeName} />
+      )}
       {children}
       {unavailable && unavailableReason ? (
         // The reason is a QUALIFIER on the label, never a competitor to it: pinned to

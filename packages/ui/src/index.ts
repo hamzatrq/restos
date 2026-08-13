@@ -5,6 +5,20 @@ export * from "./components/index";
 // and until August 2026 this repo contained no font file at all. `installFontFaces` is the seam
 // every DOM host calls; the back office inlines `fontFaceCss()` server-side instead.
 export { fontFaceCss, installFontFaces, PRIMARY_FAMILY } from "./fonts/index";
+/**
+ * `27 §5` — the icon vocabulary (`27-F30`..`27-F37`).
+ *
+ * ⚠ **`IconLabel` IS EXPORTED AND `Icon` IS NOT, AND THE ASYMMETRY IS THE POINT.** `27-F35`
+ * gates this vocabulary on a ≥85% comprehension / ≤5% critical-confusion retest with real staff
+ * and **that test has not been run**. Until it has, a pictogram may accompany a word and may
+ * never replace one — so the pairing is reachable from app code and the bare drawing is not.
+ * `ICONS` and `ICON_NAMES` stay internal for the same reason: nothing outside this package needs
+ * to enumerate the set, and an enumeration is how a screen starts rendering symbols on its own.
+ *
+ * When the gate is run and passed, exporting `Icon` is a one-line change with a reason. Until
+ * then it is a one-line hole.
+ */
+export { IconLabel, type IconLabelProps, type IconName } from "./icons/index";
 // 27-F11c — capacity is a PHYSICAL question, so a surface is measured rather than assumed.
 // 27-F68 — and a dp is a PHYSICAL size, so `PanelRoot` is the one place it becomes a pixel.
 // `mmFromCssPx`/`cssPxFromMm` are gone with that ruling: they converted at the CSS reference
