@@ -6,6 +6,40 @@
 - Folds are pure, commutative, idempotent (01-F34) — property tests mandatory (20 §2.3).
 - **IMPLEMENTED (Wave 0).** See `README.md` for the module map (device store, merge fold engine, LAN mesh/hub, cloud session). PROTECTED path — senior review on every change.
 
+## `18 §4`'s storage adapter — TWO engines behind ONE port (August 2026)
+
+**`18 §4` names two engines and one adapter; the implementation named one.** `device-store.ts:33`
+did `import Database from "better-sqlite3"` at module scope, so *importing this package at all* was
+fatal under Hermes and `18 §4`'s RN half was unreachable. The store now binds a TYPE.
+
+| module | what it is |
+|---|---|
+| `storage.ts` | the port: `prepare` / `exec` / `pragma` / `transaction` / `close`, and nothing more |
+| `storage-node.ts` | **the one place `better-sqlite3` is constructed** (asserted, not conventional) |
+| `storage-op-sqlite.ts` | the RN driver — imports NOTHING native, so the whole contract runs in Node |
+| `store.ts` | `openStore`, keeping the `{ path }` arm all 129 existing call sites pass |
+| `rn.ts` | **the only import of `@op-engineering/op-sqlite` in the repo** (`18 §8`) |
+| `transport-rn.ts` | a `CloudTransport` over the platform WebSocket, for a phone |
+
+**Three properties are CORRECTNESS, not style, and a second driver is where they break.**
+(1) everything SYNCHRONOUS — `01-F2`/`00 §5.2` want durability before the UI acks, and op-sqlite
+offers exactly ONE synchronous primitive (`executeSync`), so `BEGIN`/`SAVEPOINT`/`RELEASE`/
+`ROLLBACK TO` and the schema-script splitter are hand-rolled there. (2) `transaction` nests as a
+SAVEPOINT — `26 §6.4`'s per-item page isolation. (3) `get()` returns `undefined`, never `null`.
+
+**⚠ The mutant to re-run after any change here is the SEAM, not the logic.** Measured 2026-08-13:
+deleting `nativeBinding:` from `store.ts` — which puts the Node-ABI addon in front of both Electron
+tills and stops them booting — failed **0 of 694** tests, because the oracle proves the DRIVER
+honours the option and nothing proved the DOOR forwards it. `__acceptance__/open-store-door.test.ts`
+is the hand-written assertion that now kills it (1 of 696). Same shape, one seam out, as the
+`catalog-fetch.ts` finding below.
+
+**⚠ `transport-rn.ts` corrects a hardcoded advertisement, and that line is load-bearing.**
+`cloud-session.ts:224` says `accepts_compression: true` — *"this BUILD can decode compressed
+frames"* — which is false on a phone, because zstd is `node:zlib`. Uncorrected, the gateway grants
+compression and the device connects, hellos, reports `connected: true` and then **silently receives
+nothing for ever**. Reproduced against a real `ws` server before the fix.
+
 ## `catalog-fetch.ts` dropped the price and the station, and 579 green tests could not see it
 
 **Found by RUNNING the four-process stack, not by reading anything** (August 2026 — the runbook is
