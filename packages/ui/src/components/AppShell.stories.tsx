@@ -94,7 +94,13 @@ const CounterScreen = ({ training = false }: { training?: boolean }) => {
           />
           {/* 27-F5 — the cart is ALWAYS here, never collapsed, never a separate screen. It is
               the cashier's working memory on a counter where she is interrupted by design. */}
-          <Cart lines={CART} totalPaisa={paisa(248000)} onRemove={() => {}} />
+          <Cart
+            lines={CART}
+            totalPaisa={paisa(248000)}
+            onRemove={() => {}}
+            page={0}
+            onPageChange={() => {}}
+          />
         </div>
       </AppShell>
     </div>
@@ -160,7 +166,13 @@ export const WithS1Alarm: Story = {
               onPageChange={() => {}}
               onSelect={() => {}}
             />
-            <Cart lines={CART} totalPaisa={paisa(248000)} onRemove={() => {}} />
+            <Cart
+              lines={CART}
+              totalPaisa={paisa(248000)}
+              onRemove={() => {}}
+              page={0}
+              onPageChange={() => {}}
+            />
           </div>
         </AppShell>
       </div>

@@ -1,6 +1,7 @@
 import { newId } from "@restos/domain";
 import type { BlockedCursor, DeviceStore } from "@restos/sync-client";
 import { billedEffectiveFromJsonLines, wallClock } from "@restos/sync-client";
+import { soldOutWord } from "../shared/availability-words";
 import {
   type AddLineRequest,
   AddLineRequestSchema,
@@ -528,31 +529,16 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
       // for as long as `Counter.tsx` could not start any other kind of order.
       const unpriced = deps.priceOf(entry.id, channel) === null;
       /**
-       * `02-F51` — **ONE STATE, ONE WORD, AND THIS IS THE ONLY PLACE THE WORD IS WRITTEN.**
+       * `02-F51` — ⚠ **this read `off ? (contested ? "86 — disputed" : "86") : …` until August
+       * 2026**, while `Counter.tsx`'s Sold-out grid rendered `Sold out` / `Sold out — disputed`
+       * for the SAME fold row. One state, two vocabularies, one device. The word is now composed
+       * by `shared/availability-words.ts`, which both surfaces call — see that file for the
+       * ruling and for why renaming the string here alone would have left the cause in place.
        *
-       * ⚠ This read `off ? (contested ? "86 — disputed" : "86") : …` until August 2026, while
-       * `Counter.tsx`'s Sold-out grid rendered `Sold out` / `Sold out — disputed` for the SAME
-       * fold row — two vocabularies for one state on one device, because the two strings were
-       * written in two layers. `02-F51` rules that *"an operator who learns one surface cannot
-       * read the other"* is worse than a merely bad word, and `00 §5.6` is English-only UI while
-       * `02-F40`'s jargon is American restaurant slang with no standing in Pakistan: two digits
-       * she must be TAUGHT are worse than two words she may already know (`21 §5`).
-       *
-       * **The jargon stays in the corpus and in reasoning about `02-F7`; it never reaches the
-       * glass.** Nothing here touches the EVENT vocabulary — `availability.changed` is unchanged
-       * and `02-F51` decides nothing about it (commandment 2).
-       *
-       * `01-F58`'s contest keeps its own qualifier rather than collapsing into the plain word,
-       * and `01-F60`'s unpriced tile keeps its own separate reason: `01-F59` calls those two
-       * dispositions opposites, and one word for both would be this same defect inverted.
+       * `01-F60`'s unpriced reason stays local and stays separate: `01-F59` calls the two
+       * dispositions opposites and one word for both would be this same defect inverted.
        */
-      const reason = off
-        ? contested
-          ? "Sold out — disputed"
-          : "Sold out"
-        : unpriced
-          ? "no price set"
-          : null;
+      const reason = off ? soldOutWord(contested) : unpriced ? "no price set" : null;
       return {
         id: entry.id,
         label: entry.name,

@@ -341,81 +341,171 @@ export const TenderPanel = ({ dueP, takenP = paisa(0), onTender }: TenderPanelPr
           />
         </Readout>
 
-        <button
-          type="button"
-          onClick={() => {
-            // `01-F17` — a sale is never blocked. A PARTIAL tender is recorded as itself and the
-            // remainder stays owed (`02-F13`'s split is this, repeated), so a short entry still
-            // settles for what it is: this button refuses no SALE.
-            //
-            // `02-F48` — **and a tender of NOTHING is not one.** `01-F60` already reads `01-F17`
-            // this way in the corpus's own words (*"forbids blocking a sale, not an item"*): a
-            // Rs 0 `payment.recorded` moves no money, discharges no part of the bill and changes
-            // no total, so there is no sale here to block. Without this the accidental tap wrote a
-            // PERMANENT phantom settlement into `02-F23`'s reconciliation (`01-F1`).
-            //
-            // **`27-F5` is honoured by construction and this is where to check it:** the control
-            // is not disabled, not greyed, not moved and not hidden — an inert primary control is
-            // that FR's own failure mode, and `DEC-MONEY-009` already refused the greyed-button
-            // shape on this exact surface. It is pressable in every state; what changes is that a
-            // press worth nothing produces a REASON instead of an event, and never a modal
-            // (`02-F37`: nothing goes between the cashier and the customer).
-            //
-            // **This is not the enforcement.** `main/zero-tender-guard.ts` refuses the same payload
-            // on the trusted side of the bridge, because `18 §9` makes the renderer untrusted even
-            // though we ship it; this is the half that tells the operator why. The two read one
-            // number and cannot disagree.
-            if (tenderP === 0) {
-              setNothing(coversBill ? "due" : "entered");
-              return;
-            }
-            setNothing(null);
-            onTender({ amountP: tenderP, method });
-            setEntry("");
-          }}
-          /**
-           * **THE BLUE STAYS, and this is the deliberate decision the design direction asked for
-           * rather than an oversight.**
-           *
-           * `plans/wave-1/design-direction.md` raises it as an open question: *"the primary action
-           * currently ships as a large saturated blue fill. `27-F16` reserves colour for the
-           * abnormal, and a permanent blue on the resting happy path may already violate it."*
-           *
-           * **Read against the FRs, the premise does not hold.** `27-F16` is a rule about MONEY —
-           * *"money is never coloured by default … colouring the commonest number on screen spends
-           * the whole preattentive channel on the base case"* — and this is a control, not a
-           * number. What governs a control is `27-F14`, whose table has four slots and allocates
-           * the fourth **by name**: *"blue accent — interactive / mandatory action — any control
-           * the operator may press."* It is the one slot in the budget that is not a status,
-           * created precisely so pressability can be marked without blunting amber or red.
-           *
-           * The product already spends it far more narrowly than that allocation permits: the
-           * keypad's twelve keys, the five method buttons and every `Tile` on the counter are all
-           * controls the operator may press and none of them is blue. Exactly one control per
-           * surface carries it, which is what makes `27-F5`'s *"persistent, visible, labelled
-           * target"* legible at a glance on a screen where a keypad key is already large.
-           *
-           * **The real observation behind the question was right, and it is fixed elsewhere.** The
-           * blue did out-rank the money. `27-F18` puts colour THIRD, after position and number, so
-           * the answer is to raise the payload — `CHANGE_SIZE` now takes `text-numeric-display` on
-           * the counter as well as on `wide` — rather than to withdraw an allocated accent and
-           * leave the primary act marked by size alone.
-           */
-          style={{
-            minHeight: targetFor("keypad"),
-            fontFamily: label.fontFamily,
-            fontSize: label.fontSize,
-            fontWeight: 700,
-            background: color["bgColor-interactive"],
-            color: color["fgColor-on-interactive"],
-            // 27-F64 — a status fill carries its outline.
-            border: `1px solid ${color["outlineColor-interactive"]}`,
-            borderRadius: space["space-2"],
-            cursor: "pointer",
-          }}
-        >
-          TAKE {METHOD_LABEL[method]}
-        </button>
+        {/*
+          `02-F50` — **THE EXACT AMOUNT IS ONE PRESS, AND IT SHARES A ROW WITH `TAKE <METHOD>`.**
+
+          `21 §4` makes settlement ≤ 4 taps a merge criterion and settling exactly cost SIX: the
+          Pay tab, one press per digit, then `TAKE CASH` — for a number this panel was already
+          holding. `27-F24` exists because ~60% of this population recognise numbers against
+          **9.5% who can do any arithmetic**, and asking her to re-key a figure the machine has
+          is that FR read backwards, on the counter's commonest settlement (~60 acts a shift).
+
+          **Why a ROW and not another entry in the column, which is what a first draft reaches
+          for.** `02-F50` forbids moving or re-ranking `TAKE <METHOD>` and the method row, so the
+          target can only go BELOW the primary control — and a fourth 126 dp block in this column
+          costs ~150 dp of height on a surface that already closes at 543 dp inside `27 §1a`'s
+          10.1″ tablet's 567 dp work area. It would have taken Pay off the smallest glass this
+          product ships to (`DEC-HW-001`), to buy a tap. Sharing the row costs nothing vertical:
+          `MONEY_COLUMN_DP`'s `compact` floor of 480 leaves 236 dp each, well clear of `27-F8`.
+
+          `TAKE <METHOD>` keeps the first position, so nothing is re-ranked (`27-F4`) and a
+          cashier who learned to reach left still lands on it.
+        */}
+        <div style={{ display: "flex", gap: space["space-2"] }}>
+          <button
+            type="button"
+            onClick={() => {
+              // `01-F17` — a sale is never blocked. A PARTIAL tender is recorded as itself and the
+              // remainder stays owed (`02-F13`'s split is this, repeated), so a short entry still
+              // settles for what it is: this button refuses no SALE.
+              //
+              // `02-F48` — **and a tender of NOTHING is not one.** `01-F60` already reads `01-F17`
+              // this way in the corpus's own words (*"forbids blocking a sale, not an item"*): a
+              // Rs 0 `payment.recorded` moves no money, discharges no part of the bill and changes
+              // no total, so there is no sale here to block. Without this the accidental tap wrote a
+              // PERMANENT phantom settlement into `02-F23`'s reconciliation (`01-F1`).
+              //
+              // **`27-F5` is honoured by construction and this is where to check it:** the control
+              // is not disabled, not greyed, not moved and not hidden — an inert primary control is
+              // that FR's own failure mode, and `DEC-MONEY-009` already refused the greyed-button
+              // shape on this exact surface. It is pressable in every state; what changes is that a
+              // press worth nothing produces a REASON instead of an event, and never a modal
+              // (`02-F37`: nothing goes between the cashier and the customer).
+              //
+              // **This is not the enforcement.** `main/zero-tender-guard.ts` refuses the same payload
+              // on the trusted side of the bridge, because `18 §9` makes the renderer untrusted even
+              // though we ship it; this is the half that tells the operator why. The two read one
+              // number and cannot disagree.
+              if (tenderP === 0) {
+                setNothing(coversBill ? "due" : "entered");
+                return;
+              }
+              setNothing(null);
+              onTender({ amountP: tenderP, method });
+              setEntry("");
+            }}
+            /**
+             * **THE BLUE STAYS, and this is the deliberate decision the design direction asked for
+             * rather than an oversight.**
+             *
+             * `plans/wave-1/design-direction.md` raises it as an open question: *"the primary action
+             * currently ships as a large saturated blue fill. `27-F16` reserves colour for the
+             * abnormal, and a permanent blue on the resting happy path may already violate it."*
+             *
+             * **Read against the FRs, the premise does not hold.** `27-F16` is a rule about MONEY —
+             * *"money is never coloured by default … colouring the commonest number on screen spends
+             * the whole preattentive channel on the base case"* — and this is a control, not a
+             * number. What governs a control is `27-F14`, whose table has four slots and allocates
+             * the fourth **by name**: *"blue accent — interactive / mandatory action — any control
+             * the operator may press."* It is the one slot in the budget that is not a status,
+             * created precisely so pressability can be marked without blunting amber or red.
+             *
+             * The product already spends it far more narrowly than that allocation permits: the
+             * keypad's twelve keys, the five method buttons and every `Tile` on the counter are all
+             * controls the operator may press and none of them is blue. Exactly one control per
+             * surface carries it, which is what makes `27-F5`'s *"persistent, visible, labelled
+             * target"* legible at a glance on a screen where a keypad key is already large.
+             *
+             * **The real observation behind the question was right, and it is fixed elsewhere.** The
+             * blue did out-rank the money. `27-F18` puts colour THIRD, after position and number, so
+             * the answer is to raise the payload — `CHANGE_SIZE` now takes `text-numeric-display` on
+             * the counter as well as on `wide` — rather than to withdraw an allocated accent and
+             * leave the primary act marked by size alone.
+             */
+            style={{
+              // Half the row, so the exact target beside it is the same size. `27-F8`'s keypad
+              // target is a HEIGHT floor and both controls keep it; the width each has left on
+              // `compact`'s 480 dp column is 236, which is nearly twice the 126 dp minimum.
+              flex: 1,
+              minHeight: targetFor("keypad"),
+              fontFamily: label.fontFamily,
+              fontSize: label.fontSize,
+              fontWeight: 700,
+              background: color["bgColor-interactive"],
+              color: color["fgColor-on-interactive"],
+              // 27-F64 — a status fill carries its outline.
+              border: `1px solid ${color["outlineColor-interactive"]}`,
+              borderRadius: space["space-2"],
+              cursor: "pointer",
+            }}
+          >
+            TAKE {METHOD_LABEL[method]}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              /*
+                `02-F50` — it tenders the **`02-F13` remainder**, never `dueP`. A bill part-paid
+                by card and finished in cash is the ordinary split, not a mode, and a target
+                wired to the gross total over-records every one of them into a ledger `01-F1`
+                forbids correcting in place — `01-F30`'s conservation would then read the order
+                as overpaid for the rest of time.
+
+                `02-F48` is NOT bypassed, and that is the clause this branch exists for: *"a
+                second route to the primary act must never be a route around the guard."* With
+                nothing remaining this records nothing and states the reason, exactly as the
+                keypad path does — the arm is `due` because the fact is that the order has
+                nothing left to settle, which is what a wrong message here would be false about
+                (`00 §5.7`).
+
+                It does not consult the pad at all. `tenderP` is the pad's number; this control's
+                number is the one on its own face, and the two must not be able to disagree
+                (`27-F24` makes the printed figure the cashier's only check on the machine).
+              */
+              if (remainingP === 0) {
+                setNothing("due");
+                return;
+              }
+              setNothing(null);
+              onTender({ amountP: remainingP, method });
+              setEntry("");
+            }}
+            /**
+             * **NEUTRAL, and that is a decision rather than an omission.**
+             *
+             * The comment on `TAKE <METHOD>` above defends the blue at length and its argument
+             * binds here: `27-F14` allocates the accent to *"any control the operator may
+             * press"*, and the product spends it on **exactly one control per surface** so that
+             * `27-F5`'s *"persistent, visible, labelled target"* is legible at a glance. Two
+             * saturated fills side by side would spend it on two, and blunt both.
+             *
+             * What marks this control instead is the thing `27-F18` ranks ABOVE colour: the
+             * NUMBER. `27-F24` and `21 §5` put ~60% of this population at recognising numerals
+             * against 9.5% who can do arithmetic and a large fraction who read no English at
+             * all, so a tabular `Rs 1,010` at `text-numeric-primary` is the strongest signal
+             * available here — and it is the requirement, not decoration: `02-F50` obliges the
+             * control to **state the amount it will record**, so the cashier reads what she is
+             * about to do instead of pressing a word and trusting it.
+             *
+             * The fill and border are the method row's, which is the other set of secondary
+             * controls on this surface — one visual habit, not two (`27-F4`).
+             */
+            style={{
+              flex: 1,
+              minHeight: targetFor("keypad"),
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: color["bgColor-surface-raised"],
+              border: `1px solid ${color["borderColor-default"]}`,
+              borderRadius: space["space-2"],
+              cursor: "pointer",
+            }}
+          >
+            <MoneyValue paisa={remainingP} size="primary" />
+          </button>
+        </div>
       </div>
 
       {/*

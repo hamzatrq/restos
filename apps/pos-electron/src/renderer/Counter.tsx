@@ -15,6 +15,7 @@ import {
   usePhysicalSize,
 } from "@restos/ui";
 import { useCallback, useEffect, useState } from "react";
+import { soldOutWord } from "../shared/availability-words";
 import type {
   Alarm,
   AppendRequest,
@@ -222,6 +223,21 @@ const ORDER_CHANNELS_AT_COUNTER: readonly { id: string; label: string }[] = [
 const GRID_PREVIEW_CHANNEL = "counter";
 
 /**
+ * The word a cashier reads for a channel — **the tile's own word, never the ledger's id**.
+ *
+ * `02-F51` ruled the general case (*"one state, one word, on every surface of one device"*) and
+ * the argument is the same one row up: the channel row's state line said `This order is
+ * foodpanda` while the tile beside it said `Foodpanda`, so the surface named one thing two ways
+ * for an operator `21 §5` puts at plausibly non-reading.
+ *
+ * An id with no tile falls back to the id itself rather than being hidden: `02-F42`'s closed set
+ * has five members and this row offers three, so an order created elsewhere (`06`, `07`) can
+ * carry a channel this row does not draw, and `00 §5.7` says the device reports what is true.
+ */
+const channelLabel = (channel: string): string =>
+  ORDER_CHANNELS_AT_COUNTER.find((c) => c.id === channel)?.label ?? channel;
+
+/**
  * `02-F30`/`02-F42` — the one channel whose orders are **aggregator-collected**, and therefore the
  * one the Pay surface offers no tender for.
  *
@@ -359,6 +375,13 @@ export const Counter = () => {
   const [roster, setRoster] = useState<readonly RosterMember[]>([]);
   const [page, setPage] = useState(0);
   /**
+   * `27-F2` — the cart's line list pages rather than scrolling, so it has a page, and it is the
+   * cart's own rather than the grid's: they hold different things and are read at different
+   * moments. `Cart` clamps this into range itself, which is why adding a line to a two-page cart
+   * does not need this reset and switching carts does — see the effect keyed on `cartOrderId`.
+   */
+  const [cartPage, setCartPage] = useState(0);
+  /**
    * `03-F46` — the Orders tab's two lists page independently, and the page numbers live HERE
    * rather than inside `OrdersSurface` for the reason `page` above does: a component that held
    * its own page would reset to page 1 on every `changed` push, i.e. every line any terminal
@@ -395,6 +418,27 @@ export const Counter = () => {
    * inferred later), which is why `menuChannel` below reads the order first.
    */
   const [pendingChannel, setPendingChannel] = useState<string | null>(null);
+  /**
+   * `02-F49` (b) — **THE LAST PRESS ON THE TYPE ROW WAS WORTH NOTHING, AND THIS IS THE ONLY
+   * THING THAT CHANGES ABOUT IT.**
+   *
+   * `Tile` keeps its press live even when greyed (`01-F59`, and `8b28a72` removed the `disabled`
+   * attribute for that reason), so the greying alone cannot refuse a tap: `startOrder` returned
+   * silently and **nothing happened at all** — no event, no mark, no reason. That is `27-F5`'s
+   * named failure mode, and `02-F48` ruled the identical shape one surface over: *"a press worth
+   * nothing produces a REASON instead of an event"*, in `27-F12`'s shape, never a modal.
+   *
+   * **Why the reason lives on the ROW and not on the three tiles.** `02-F49` (b) permits either,
+   * and both are correct; this surface already made the choice for its own reasons, recorded at
+   * the state line's render site — *"a reason that is identical for every tile is a property of
+   * the SURFACE"*, and stamping one sentence three times across a row is the miniature of the
+   * 27-tile wall that argument was written about. `Send to kitchen`'s `no order started` stays on
+   * its own tile because it describes exactly one control.
+   *
+   * It is a BOOLEAN and the words are composed at the render site, so the reason cannot drift
+   * from the branch that produced it (`00 §5.7`).
+   */
+  const [typeRefused, setTypeRefused] = useState(false);
   /**
    * `02-F27` — *"operator types the caller's number"*, exactly as pressed. **The raw digits**, not
    * `01-F23`'s key: `registry.ts` puts normalization at the WRITER and `18 §9` makes main the
@@ -770,9 +814,19 @@ export const Counter = () => {
    * would ring at counter prices and look like it worked. The type row is greyed until a channel
    * is latched, and this refusal is the same guard on the trusted-ish side of that greying —
    * `27-F5` keeps the tiles tappable-looking, so the greying alone cannot refuse a tap.
+   *
+   * ⚠ **`02-F49` (b) — THE REFUSAL IS ANSWERED NOW. IT USED TO BE `return;`.** The guard is
+   * unchanged and nothing is relaxed: what changes is that the press produces a REASON instead
+   * of producing nothing, which is `02-F48`'s ruling applied to the surface it was not written
+   * for. Naming the channel is the whole content of the reason, because latching one is the act
+   * that unblocks the tap — see `typeRefused`.
    */
   const startOrder = (order_type: string) => {
-    if (pendingChannel === null) return;
+    if (pendingChannel === null) {
+      setTypeRefused(true);
+      return;
+    }
+    setTypeRefused(false);
     const order_id = newId();
     write(
       window.restos.append({
@@ -791,6 +845,10 @@ export const Counter = () => {
     // anything and neither is this: if the write is refused, `orders` never gains the row, `find`
     // misses and the cart falls back exactly as it did before the tap.
     setCartOrderId(order_id);
+    // `27-F2` — the new cart opens on page 1. `Cart` clamps an out-of-range page, so this is not
+    // a correctness guard; it is the same argument `setPendingChannel(null)` makes two lines
+    // down, that nothing about the last order carries into this one by default.
+    setCartPage(0);
     // `02-F1` — the ledger owns the channel from here. Clearing it means the NEXT order starts
     // from no default again rather than inheriting this one's, which is the same ruling applied
     // to the second order of the shift as to the first.
@@ -1638,17 +1696,21 @@ export const Counter = () => {
                     // unavailable, and one tap here supersedes ALL heads at once, which is what
                     // makes it clearable in a single operator act.
                     //
-                    // ⚠ **`02-F51` — THE WORD IS TAKEN FROM THE JOIN, NOT WRITTEN AGAIN HERE.**
-                    // This surface used to compose its own `Sold out` / `Sold out — disputed`
-                    // from `sold_out`/`contested` while `gateway.menu()` composed `86` /
-                    // `86 — disputed` from the SAME two fold facts — one state, two vocabularies,
-                    // one device, which is the `02-F45` shape (a second source for one fact).
-                    // Fixing only the string would have left the second source in place and the
-                    // two surfaces free to drift again; taking the reason from the join makes
-                    // them one answer by construction. The CONDITION stays `sold_out`, because
-                    // `01-F60`'s unpriced reason must never grey a tile on `02-F7`'s surface.
-                    ...(i.sold_out === true && i.unavailableReason !== undefined
-                      ? { unavailable: true, unavailableReason: i.unavailableReason }
+                    // ⚠ **`02-F51` — THE WORD IS NOT WRITTEN HERE ANY MORE.** This surface
+                    // composed its own `Sold out` / `Sold out — disputed` while `gateway.menu()`
+                    // composed `86` / `86 — disputed` from the SAME two fold facts: one state,
+                    // two vocabularies, one device, which is the `02-F45` shape (a second source
+                    // for one fact). Renaming the string in one layer would have closed the
+                    // defect and left the cause, so both layers now call `soldOutWord`.
+                    //
+                    // The CONDITION stays `sold_out` and stays local: `01-F60`'s unpriced reason
+                    // must never grey a tile on `02-F7`'s surface, and reading the join's
+                    // `unavailableReason` instead would let it.
+                    ...(i.sold_out === true
+                      ? {
+                          unavailable: true,
+                          unavailableReason: soldOutWord(i.contested === true),
+                        }
                       : {}),
                   }))}
                   posture="counter"
@@ -1688,11 +1750,121 @@ export const Counter = () => {
             style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}
           >
             {/*
+              `C18`/`C21` — THE CHANNEL ROW (`02-F1`, `02-F28`, `02-F30`, `restaurant-os.md` §8).
+
+              **`27-F4` (e) BREAKING CHANGE, APPROVED — and the justification is in the FR rather
+              than here, because a commit message is not checkable.** ⚠ *This row shipped BELOW
+              the type row, and the comment that stood here justified that: "Above would read in
+              work order (channel, then type) and would push the three type tiles and `Send to
+              kitchen` down by a row … Keeping a learned control where a finger already goes is
+              the stronger half of `27-F4`; the reading order is the cost, and it is paid by the
+              state line above, which names the sequence in words."*
+
+              **That trade is rejected, and the reason is that the line paying the cost was
+              FALSE.** The state line above read `Choose an order type first` over a control that
+              refuses without a latched channel — `startOrder` is `if (pendingChannel === null)`
+              — so the line a cashier reads first was the one instruction on this surface the
+              code declines to carry out (`02-F49` (a)). `21 §5` and `00 §5.6` put this operator
+              at plausibly non-reading, so prose was never able to pay that cost in the first
+              place: `27-F7` makes a list's visual order its work order and `27-F58` fixes the
+              reading order top-down, so **the row order IS the instruction** and the sequence
+              stops needing a sentence at all.
+
+              The cost is real and named: the three type tiles move down by one row and a
+              dev-pilot acclimation window is owed (`27-F4`'s own requirement).
+
+              **NOT approved and deliberately not attempted: merging type × channel into one
+              combined row.** Which combinations are real is stated in no FR and inventing them
+              is commandment 2; `27-F36` separately makes a 2-D matrix a literacy-dependent
+              encoding. That one is a founder call.
+
+              **A pick-list of tiles, not a dropdown or a typed field** (`27-F6`: 24 of 27 field
+              subjects could not type a word; `27-F2`: flat, not hierarchical). Every channel is
+              visible and labelled at all times, so there is no context-dependent control here
+              (`27-F5`) — a selector that collapsed to the chosen value would be exactly that.
+
+              **The tiles never disappear once an order is open.** ⚠ *They used to grey once one
+              was, and that greying is LIFTED (`DEC-MONEY-009`).* It was the other half of "there
+              is no way to start a second order": `startOrder` refuses without a latched channel
+              (`02-F1` wants both axes at creation), so a greyed channel row made the ungreyed
+              type row below unusable. This row has always meant *the channel the NEXT order will
+              be created on*, and that meaning does not change because one order happens to be
+              open. `02-F1` still fixes a channel at creation and never infers it later.
+            */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {ORDER_CHANNELS_AT_COUNTER.map((c) => (
+                <Tile
+                  key={c.id}
+                  posture="counter"
+                  label={c.label}
+                  selected={pendingChannel === c.id}
+                  /*
+                    `27-F12`/`27-F66` — the chosen tile says so in a WORD as well as in the
+                    accent rule, and `CashSurfaces`' paid-out pick-list is the precedent this
+                    copies verbatim (`{...(reason === r ? { children: <span>chosen</span> } : {})}`).
+
+                    It carried its word in the row's state line until August 2026, and `02-F49`
+                    (c) took that away: the line has to describe the channel the next line-add
+                    will PRICE against, which is the open order's while one is open — so with a
+                    cart on `counter` and `foodpanda` latched the selection had no word at all.
+                    Two surfaces on one device that mark "this one is chosen" two different ways
+                    teach two habits (`27-F4`), so it is the same mark and the same word here.
+                  */
+                  {...(pendingChannel === c.id ? { children: <span>chosen</span> } : {})}
+                  onPress={() => {
+                    setPendingChannel(c.id);
+                    // `02-F49` (b) — a standing refusal is about the press as it was made, and
+                    // this is the act that resolves it. Leaving it up over a row that is now
+                    // live would be a false statement one tap old (`00 §5.7`), exactly as
+                    // `TenderPanel` clears `02-F48`'s reason on the next keystroke.
+                    setTypeRefused(false);
+                    // Latching a different channel ends the call: this order is not a phone order
+                    // any more, so the caller it was for is not a fact about it (`02-F1` — the
+                    // channel is set at creation, and so is who it is for).
+                    if (c.id !== PHONE_CHANNEL) clearCaller();
+                  }}
+                />
+              ))}
+              {/*
+                `02-F49` (c) — **THE CHANNEL NAMED BESIDE THE MONEY IS THE ONE THAT PRICES THE
+                LINE.**
+
+                ⚠ *This read `Selling at ${pendingChannel} prices` whenever anything was latched,
+                and that was a FALSE STATEMENT ABOUT MONEY.* `01-F60` prices a line from the
+                ORDER's channel — which is the question `menuChannel` above already asks and the
+                grid is already greyed against — so with a counter order in the cart and
+                `foodpanda` latched for the next one, the sentence over the cart described a
+                price basis the next line-add would not use. `00 §5.7` makes that a failure
+                whatever the intent, and `01-F53` freezes the axis it is wrong about permanently.
+
+                So the branches are the same three sentences and the ORDER is reversed again: the
+                open order wins, because the open order is what prices the grid. The pending
+                choice keeps its word on its own tile (see `chosen` above), which is where a
+                claim about the NEXT order belongs rather than beside the current one's money.
+
+                **Silence would also be legal here** (`02-F49` (c): *"silence is permitted; a
+                wrong channel is not"*). It is not taken, because `01-F60`'s per-channel pricing
+                is invisible otherwise and this line is the only place the counter says out loud
+                which column the tiles are costed from.
+              */}
+              <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
+                {current !== undefined
+                  ? `This order is ${channelLabel(current.channel ?? GRID_PREVIEW_CHANNEL)} — its prices are fixed`
+                  : pendingChannel !== null
+                    ? `Selling at ${channelLabel(pendingChannel)} prices`
+                    : "Choose a channel first — it sets the price"}
+              </p>
+            </div>
+            {/*
             C4 — the order-type row. It holds this position ALWAYS (`27-F4` positional memory,
             `27-F5` no controls that change with context): when an order is open the three
             choices are greyed in place with the reason, never removed and never replaced by
             something else. A row that vanished once work started would move the grid under a
             cashier mid-order, which is the one thing `27-F4` calls a breaking change.
+
+            ⚠ **It is the SECOND row now, not the first (`27-F4` (e)).** See the channel row above
+            for the approved justification: the till enforces channel-then-type, so channel-then-
+            type is the reading order.
           */}
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               {ORDER_TYPES.map((t) => (
@@ -1724,17 +1896,14 @@ export const Counter = () => {
                 />
               ))}
               {/*
-              C9 — one tap, and it is the whole kitchen handoff (`21 §4`'s 2-tap law counts
-              grid → confirm). Greyed with its reason until there is an order to send, rather
-              than absent, for the same positional reason as the row above.
-            */}
-              <Tile
-                posture="counter"
-                label="Send to kitchen"
-                onPress={current === undefined ? undefined : () => sendToKitchen(current.order_id)}
-                unavailable={current === undefined}
-                {...(current === undefined ? { unavailableReason: "no order started" } : {})}
-              />
+                ⚠ **`C9`'s `Send to kitchen` USED TO SIT HERE, and `27-F4` (f) moved it to the
+                foot of the cart column.** The justification is in that FR: it sat ~2.5 mm from
+                `Delivery`, and since `DEC-MONEY-009` lifted the greying on this row an undershoot
+                **starts a new order and switches the cart** — so the confirm control's neighbour
+                was "abandon this cart", which is `27-F9`'s adjacency rule broken on the counter's
+                highest-frequency row and which no acclimation window trains away. It also acts on
+                the CART rather than on this row. See the cart column below.
+              */}
               {/*
                 THE SURFACE'S STATE, SAID ONCE.
 
@@ -1762,89 +1931,34 @@ export const Counter = () => {
                 moves, which is the half of `27-F4` that actually protects muscle memory.
               */}
               {/*
-                Unchanged wording, deliberately. Each row now states ITS OWN precondition — this
-                line is about the type row, the channel row below has its own — so the sentence a
-                cashier learned for this row still describes this row. Which row is actionable is
-                said by the greying, not by re-writing a line about a different control.
+                ⚠ **`02-F49` (a) DELETED THE SENTENCE THAT USED TO STAND IN THE EMPTY STATE, and
+                it is the whole reason this track exists.** It read `Choose an order type first`
+                — the first line a cashier reads on ~75 orders a shift, over a control that
+                refuses without a latched **channel**, while the row below it said `Choose a
+                channel first — it sets the price`. Two hint lines contradicting each other, and
+                the false one on top. That FR forbids a line naming a precondition the code does
+                not enforce, and rules that *"where position already carries the sequence, no line
+                is required at all"* — the channel row is above now, so nothing is said here.
+
+                What remains is the two things POSITION cannot carry:
+
+                1. `02-F49` (b) — the answer to a press worth nothing, which is `02-F48`'s shape
+                   and appears only after one. See `typeRefused`.
+                2. `DEC-MONEY-009`'s consequence: with an order open these tiles are LIVE and a
+                   tap starts ANOTHER order. `27-F5` requires an action to have a visible,
+                   labelled target, and no arrangement of rows can say that.
               */}
-              {/*
-                ⚠ The second half of this sentence changed with `DEC-MONEY-009`, because the
-                control it describes changed. It read `Order in progress` beside three tiles that
-                were inert, which was true of both. The tiles are live now — a type tap starts
-                ANOTHER order — so a line that only named the current order would leave a cashier
-                with no way to know that, and `27-F5` requires an action to have a visible,
-                labelled target. The first branch is untouched, so the sentence a cashier learned
-                for an empty counter is the one she still reads there.
-              */}
-              <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
-                {current === undefined
-                  ? "Choose an order type first"
-                  : "Order in progress — a type starts another order"}
-              </p>
-            </div>
-            {/*
-              `C18`/`C21` — THE CHANNEL ROW (`02-F1`, `02-F28`, `02-F30`, `restaurant-os.md` §8).
-
-              **`27-F4` BREAKING CHANGE, justified: this row is ADDED BELOW the `C4` row and
-              NOTHING that exists moves.** Above would read in work order (channel, then type)
-              and would push the three type tiles and `Send to kitchen` down by a row — moving
-              the most-used controls on the surface. Keeping a learned control where a finger
-              already goes is the stronger half of `27-F4`; the reading order is the cost, and it
-              is paid by the state line above, which names the sequence in words.
-
-              **A pick-list of tiles, not a dropdown or a typed field** (`27-F6`: 24 of 27 field
-              subjects could not type a word; `27-F2`: flat, not hierarchical). Every channel is
-              visible and labelled at all times, so there is no context-dependent control here
-              (`27-F5`) — a selector that collapsed to the chosen value would be exactly that.
-
-              **The tiles never disappear once an order is open.** ⚠ *They used to grey once one
-              was, and that greying is LIFTED (`DEC-MONEY-009`).* It was the other half of "there
-              is no way to start a second order": `startOrder` refuses without a latched channel
-              (`02-F1` wants both axes at creation), so a greyed channel row made the ungreyed
-              type row above unusable. This row has always meant *the channel the NEXT order will
-              be created on* — its own state declares that in those words — and that meaning does
-              not change because one order happens to be open. `02-F1` still fixes a channel at
-              creation and never infers it later: nothing here touches the open order, and the
-              state line below says which channel that order is on until a new one is latched.
-            */}
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              {ORDER_CHANNELS_AT_COUNTER.map((c) => (
-                <Tile
-                  key={c.id}
-                  posture="counter"
-                  label={c.label}
-                  selected={pendingChannel === c.id}
-                  onPress={() => {
-                    setPendingChannel(c.id);
-                    // Latching a different channel ends the call: this order is not a phone order
-                    // any more, so the caller it was for is not a fact about it (`02-F1` — the
-                    // channel is set at creation, and so is who it is for).
-                    if (c.id !== PHONE_CHANNEL) clearCaller();
-                  }}
-                />
-              ))}
-              {/*
-                `Tile.selected` is explicit that a selection is *"never by colour alone, so a
-                caller marking a tile selected still says so in words"* (`27-F66`). This line is
-                those words, and it names the PRICE consequence rather than the tag — which is
-                what `01-F60` makes the choice actually mean to a cashier.
-
-                ⚠ **The branches are the same three sentences; only their ORDER changed.** A
-                latched channel now wins over an open order, because with the row live the pending
-                choice is the newer fact and it is the one that decides the next `order.created`.
-                With nothing latched an open order still reports its own fixed channel, so the
-                sentence a cashier reads mid-order is unchanged from before this ruling.
-              */}
-              <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
-                {pendingChannel !== null
-                  ? `Selling at ${
-                      ORDER_CHANNELS_AT_COUNTER.find((c) => c.id === pendingChannel)?.label ??
-                      pendingChannel
-                    } prices`
-                  : current !== undefined
-                    ? `This order is ${current.channel ?? "counter"} — its prices are fixed`
-                    : "Choose a channel first — it sets the price"}
-              </p>
+              {typeRefused || current !== undefined ? (
+                <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
+                  {typeRefused
+                    ? // The SAME words the channel row uses for the same act, not a second
+                      // phrasing of it: `02-F51`'s argument is that one state deserves one
+                      // vocabulary, and an operator who learns a sentence on one row should not
+                      // have to learn a synonym of it on the next.
+                      "Choose a channel first"
+                    : "Order in progress — a type starts another order"}
+                </p>
+              ) : null}
             </div>
             {/*
             The measured surface. The grid renders INSIDE this box, so what is measured and what
@@ -1920,20 +2034,63 @@ export const Counter = () => {
           never a separate screen, never collapsed", because it is the operator's working
           memory while she is ringing. Settling moved to the Pay tab; see `paySurface` above
           for the measurement that forced it.
+
+          **THE COLUMN, and it exists because of `27-F4` (f).** The cart and the control that
+          confirms it are one region now: the cart takes the room that is left and `Send to
+          kitchen` takes its own first, which is what `27-F2` means by *"the cart's line list
+          gives up the room, never the control"*. `minHeight: 0` on the column is the line that
+          actually permits that — without it a flex child refuses to shrink below its content and
+          the whole arrangement is decorative.
         */}
-          <Cart
-            lines={(current?.lines ?? []).map((l) => ({
-              id: l.line_id,
-              name: l.name,
-              quantity: l.quantity,
-              modifiers: l.modifiers,
-              removals: l.removals,
-              ...(l.note === null ? {} : { note: l.note }),
-            }))}
-            // The total is the ENGINE's own derivation, carried across the IPC seam as branded
-            // integer paisa and never re-summed here (00 §6, 26 §8).
-            totalPaisa={paisa(current?.total_paisa ?? 0)}
-          />
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              minHeight: 0,
+              gap: 8,
+            }}
+          >
+            <Cart
+              lines={(current?.lines ?? []).map((l) => ({
+                id: l.line_id,
+                name: l.name,
+                quantity: l.quantity,
+                modifiers: l.modifiers,
+                removals: l.removals,
+                ...(l.note === null ? {} : { note: l.note }),
+              }))}
+              // The total is the ENGINE's own derivation, carried across the IPC seam as branded
+              // integer paisa and never re-summed here (00 §6, 26 §8).
+              totalPaisa={paisa(current?.total_paisa ?? 0)}
+              // `27-F2` — the line list pages rather than scrolling, and the page resets with the
+              // cart: a new order starts on page 1, never on whichever page the last one ended on.
+              page={cartPage}
+              onPageChange={setCartPage}
+            />
+            {/*
+              C9 — one tap, and it is the whole kitchen handoff (`21 §4`'s 2-tap law counts
+              grid → confirm). Greyed with its reason until there is an order to send, rather
+              than absent (`27-F5` — disabled IN PLACE, with the reason; this is the control
+              `02-F49` (b) points the type row at).
+
+              **`27-F4` (f) BREAKING CHANGE, APPROVED — the justification is in that FR.** It sat
+              in the type row, ~2.5 mm from `Delivery`, and since `DEC-MONEY-009` lifted the
+              greying on that row an undershoot **starts a new order and switches the cart**,
+              leaving the half-rung order reachable only through a fallback. `27-F9` forbids that
+              adjacency and no acclimation window trains it away. It also acts on the CART rather
+              than on the type row, so `27-F58` puts it where the reading of the cart ends.
+
+              **It is PINNED** — a non-shrinking item at the foot of a column whose flexible
+              member is the cart. A long cart costs lines, never this control (`27-F2`).
+            */}
+            <Tile
+              posture="counter"
+              label="Send to kitchen"
+              onPress={current === undefined ? undefined : () => sendToKitchen(current.order_id)}
+              unavailable={current === undefined}
+              {...(current === undefined ? { unavailableReason: "no order started" } : {})}
+            />
+          </div>
         </div>
       )}
     </AppShell>
