@@ -1894,3 +1894,109 @@ everything. That is AGENTS.md's "you need BOTH properties" split landing on one 
 reported by the notification as **"completed (exit code 0)"** while the `REAL_EXIT=$?` marker
 written inside the log said **127** — the electron binary was not on the path the command used.
 A reported exit code is not evidence; the marker inside the log is.
+
+## ✅ A LINE ADDED AFTER "SEND TO KITCHEN" NEVER REACHED THE KITCHEN — `03-F55` (August 2026)
+
+**The worst defect this app has shipped, and it lost a customer's food silently.** `confirmed()`
+built `job_id = <order_id>::<station>` and skipped a station whose job already existed. `02-F8`
+leaves a post-confirm ADDITION legal, `gateway.addLine` does not refuse a confirmed order, and the
+grid stays live until the order is SETTLED — so *ring → Send to kitchen → the customer asks for one
+more naan → tap the tile → **Send to kitchen*** produced **no ticket, no band, no event and no
+change on the glass.** The naan was on the bill (`01-F53` captured its price) and nobody in the
+kitchen had been told. Nothing in this product revealed it until the customer asked.
+
+**The guard was CORRECT and is not deleted.** `03-F7`/`03-F37` make a reprint a deliberate, logged,
+banded act and `03-F41` spends a paragraph on the duplicate KOT being a real kitchen error. What the
+guard could not do is tell *"same order, same lines, second press"* — which must stay silent — from
+*"same order, NEW lines"*. `03-F55` separates those: each chit records on `03-F4`'s **durable spool
+row** the line ids it committed to paper (`covers`), and a press sends, per station, exactly what is
+not covered. The opening chit's id is unchanged; later ones append their ordinal.
+
+**DRIVEN ON THE REAL TILL, not asserted.** `RESTOS_DEV_MENU=1 RESTOS_DEV_PIN=1234
+RESTOS_KOT_PRINTER=TH230 RESTOS_PRINT_TO_FILE=<dir>` under Xvfb, every press a CDP
+`Input.dispatchMouseEvent` at the control's own rect centre (`.click()` does not work on the pads).
+Ayesha unlocked, Takeaway/Counter, Chicken Karahi + Naan → **Send to kitchen** → two chits. One more
+Naan → **Send** → **one** chit. Two further presses with nothing added → **nothing**. Then the app
+was **killed and relaunched over the same `print-spool.db`**: a press with nothing added stayed
+silent, and a Seekh Kebab + a third Naan produced exactly two more chits. The five rows the running
+till wrote, read back out of its own spool:
+
+```
+…::kitchen      covers=[lineA]  KOT … kitchen 08:13 … 1 Chicken Karahi
+…::tandoor      covers=[lineB]  KOT … tandoor 08:13 … 1 Naan
+…::tandoor::1   covers=[lineC]  [ADDED 1] KOT … tandoor 08:13 … 1 Naan
+…::tandoor::2   covers=[lineE]  [ADDED 2] KOT … tandoor 08:13 … 1 Naan   ← ordinal survived the relaunch
+…::grill        covers=[lineD]  KOT … grill 08:13 … 1 Seekh Kebab        ← a NEW station gets an ORDINARY chit
+```
+
+Four things to read off it. The `kitchen` chit was never re-sent, so the karahi is cooked once. The
+two `tandoor` addenda have **byte-identical bodies** and are told apart only by the ordinal — which
+is `03-F55`'s stated reason for putting a number on paper. The grill, reached for the first time by
+an addition, gets an ordinary KOT and not an addendum (`03-F2` fans out per STATION). And every chit
+carries the same `08:13`: the confirm anchor, unforked by the late addition (`03-F14`).
+
+**The band is ONE band, and the reason first written here was FALSE — corrected 2026-08-13 by
+mutation, not by reading.** It said the naive shape, a `REPRINT` block plus an `ADDED n` block,
+makes a reprinted addendum **print nothing at all**, because `encode()` would answer
+`banner_budget_exceeded` and `03-F34` would refuse the chit. It would not. `encode()`'s budget
+counts **bands, not parts**, and a feed does not close a band — measured directly: one part
+`ok=true`; two parts separated by a feed `ok=true`; two parts with **nothing** between them
+`ok=true`; only two parts separated by **body text** refuses, which is a placement nobody would
+choose. Both naive shapes were built as mutants (two parts in the block, and a separate
+`KOT_ADDED_BAND` spec block) and each passed **357/357 escpos and 966/966 pos-electron**, all 35 new
+assertions included. **The real reason for one part is legibility and nothing tests it:** a `text`
+part emits no separator, so two adjacent parts print `REPRINTADDED 2`, and both suites accept that —
+they ask the band to CONTAIN `REPRINT`, `ADDED` and the ordinal. `27-F35` has never been run on this
+band, so `REPRINT ADDED 2` is a judgement, not a proven requirement. *A comment that names a hazard
+which does not exist is worse than none: it retires the assertion someone would otherwise write, and
+the next session to meet it either believes a refusal it cannot reproduce or "fixes" the shape.*
+
+**⚠ THE OTHER HALF OF THIS DEFECT IS STILL OPEN AND IT IS THE HALF A CASHIER MEETS.** `02-F8`'s
+control reads *Send to kitchen* whether or not anything is owed, so **a cashier who never presses it
+a second time still loses the naan.** `03-F55` closes what happens when she presses; nothing tells
+her she should. That surface is doc 02's and doc 27's, it is named as OWED in the FR, and it is
+where the remaining risk lives.
+
+**Also owed and named in the FR:** `03-F48`'s one-tap reprint must come to mean the last **chit**,
+not the whole order, or a reprint re-cooks everything the addendum exists to avoid re-cooking; a line
+VOIDED after its chit printed (`void.recorded` has no producer); a confirm arriving from a PEER
+device (each device keeps its own spool, and `01-F15`'s mesh only just gained a host); and **K-8 —
+no printer has printed an addendum.** The PDFs above are `simulate()`'s reading of our own bytes and
+`27-F35`'s ≥85% comprehension gate on `ADDED 2` is untouched, exactly as it is for `REPRINT`.
+
+**⚠ WHAT AN INDEPENDENT MUTATION PASS FOUND (25 mutants, 2026-08-13) — five survivors, and none
+of them is a bug you can see by reading.** Every mutant ran BOTH package suites whole; a
+behaviour-preserving control in both packages killed **0**, restoring the defect verbatim from
+`b9554d0` killed **10**, and deleting the guard entirely (the double-cook) killed **11 + 2
+pre-existing**. What lived through all 1,323 tests:
+
+* **Two survivors are the band shapes above** — `REPRINT`/`ADDED` as two parts, and as two spec
+  blocks. Both render. See the correction two paragraphs up.
+* **A third puts `REPRINTADDED 2` on the paper** and passes everything, because both oracles ask the
+  band to CONTAIN each word rather than to read as one. `27-F35`, not a suite, is what owns this.
+* **The legacy-spool branch is asserted by nothing.** Deleting `if (prior.some((job) => job.covers
+  === undefined)) continue;` — the declared interpretation that a row with no coverage HONOURS THE
+  PAPER — kills **zero** tests. The suite defers it on purpose (its own "a spool written by the
+  PREVIOUS version" note), so this is an honest gap rather than a miss, but read what the branch
+  costs: it makes **a `covers` value that fails to persist for any reason indistinguishable from a
+  pre-`03-F55` row**, and the failure it degrades to is *this FR's original defect* — that station,
+  that order, silently loses every later addition, for ever. It is the safe direction (the
+  alternative double-cooks), and it is one `continue` with no assertion under it.
+* **`covers` may over-claim and nothing notices.** Recording the station's WHOLE line set instead of
+  the lines this chit carried is behaviourally identical today (the union is the same) and kills
+  zero tests — but `PrintJob.covers` is documented as *"what this document COMMITTED TO PAPER"*, and
+  `03-F48`'s owed "reprint the last **chit**" is the reader that would consume the lie.
+* **`isChitOf`'s ordinal regex is correct and untested.** Replacing it with a bare
+  `job_id.startsWith(prefix)` kills zero tests. It bites only where one station's name extends
+  another's — `TANDOOR` and `TANDOOR 2` is not an exotic kitchen — and then the second station's
+  additions read as already committed and never print.
+
+**And the durability half rests on ONE assertion.** Dropping `covers` from the `INSERT`, from the
+`SELECT`, or from `commit()`'s `store.put` on the first state transition each fails **exactly one
+test** — *"after a power cut, a line added reaches the kitchen and the old lines do not"*. Three
+independent ways to lose the column, one guard over all of them.
+
+**One trap for whoever runs this next.** `RESTOS_KOT_PRINTER` unset resolves to the BC-58U baseline
+(32 columns), `03-F49` puts the KOT's floor at 42, and `03-F34` then refuses every chit — so the
+drive above shows a `03-F5` band and no documents at all, which looks exactly like this defect
+un-fixed. Set `RESTOS_KOT_PRINTER=TH230`.

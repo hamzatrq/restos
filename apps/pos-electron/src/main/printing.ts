@@ -49,6 +49,10 @@ import type { CatalogResolver } from "./gateway";
  *   * `03-F41` — a stall is not a failure. Nothing here inspects `stalled`, which is how it
  *     stays that way: the printer is holding the bytes, and a band would send a cashier to
  *     reprint a ticket that is about to appear.
+ *   * `03-F55` — a line added AFTER the confirm reaches the kitchen on its own chit, and the
+ *     lines already on paper are never cooked twice. `confirmed()` sends, per station, exactly
+ *     the lines this device has not yet committed to paper for this order; where a station is
+ *     owed nothing, NOTHING is created. See `chitPrefix` and `confirmed` below.
  *
  * **NO PRINTER HAS EVER BEEN ATTACHED (K-8).** `unattachedPrinter` below is this device's real
  * transport today and it reports a failed transmit every time, because that is the truth: no
@@ -187,6 +191,24 @@ const CASH_JOB_PREFIX = "cash::";
 const RECEIPT_JOB_PREFIX = "receipt::";
 const isCashJob = (job_id: string): boolean => job_id.startsWith(CASH_JOB_PREFIX);
 const isReceiptJob = (job_id: string): boolean => job_id.startsWith(RECEIPT_JOB_PREFIX);
+
+/**
+ * `03-F55` — every chit this device has made for one order at one station.
+ *
+ * **The OPENING chit's id is unchanged, `<order_id>::<station>`, and that is the FR's own clause**:
+ * "a spool written before this FR is honoured rather than reprinted on the upgrade". An addendum
+ * appends its ordinal, so the ids at one station read `…::GRILL`, `…::GRILL::1`, `…::GRILL::2`.
+ *
+ * The ordinal suffix is matched as DIGITS rather than by splitting on `::`, so a station whose name
+ * contains the separator cannot be read as another station's addendum. (A station name is `03-F50`'s
+ * catalog value and doc 14's editor for it does not exist yet; this costs a regex and removes the
+ * question.)
+ */
+const chitPrefix = (order_id: string, station: string): string => `${order_id}::${station}`;
+const CHIT_ORDINAL = /^\d+$/;
+const isChitOf = (job_id: string, prefix: string): boolean =>
+  job_id === prefix ||
+  (job_id.startsWith(`${prefix}::`) && CHIT_ORDINAL.test(job_id.slice(prefix.length + 2)));
 
 /**
  * **`03-F5`'s third consequence, and until August 2026 it was the one nothing produced.**
@@ -390,22 +412,32 @@ export const createKotPrinter = ({
     const table = tableOf(order.table_ids_json, order.channel);
     // `03-F2`'s fan-out. `03-F50`: a line whose station resolves nowhere lands on the default
     // station's ticket rather than vanishing — the resolver owns that fallback, not this loop.
-    const byStation = new Map<string, KotData["lines"][number][]>();
-    for (const cell of Object.values(JSON.parse(order.json_lines) as Record<string, LineCell>)) {
+    //
+    // The LINE ID rides beside the rendered line because `03-F55` decides what to print per line
+    // and not per item: "a family that asks for one naan and then, five minutes later, one more
+    // naan" is two lines carrying one item, and coverage keyed by item would send the second naan
+    // to nobody. It is the projection's own key (`gateway.addLine` writes one cell per line).
+    const byStation = new Map<string, { line_id: string; line: KotData["lines"][number] }[]>();
+    for (const [line_id, cell] of Object.entries(
+      JSON.parse(order.json_lines) as Record<string, LineCell>,
+    )) {
       const at = station(cell.item_id);
       const lines = byStation.get(at) ?? [];
       lines.push({
-        quantity: cell.qty,
-        // `01-F54` — the identifier is a poor word and a blank line is a dish nobody cooks.
-        name: catalog(cell.item_id)?.name ?? cell.item_id,
-        // The read models carry no modifier detail yet (`gateway.ts` says the same); empty is
-        // honest, and inventing it here would be fold logic outside the engine (`26 §8`).
-        modifiers: [],
+        line_id,
+        line: {
+          quantity: cell.qty,
+          // `01-F54` — the identifier is a poor word and a blank line is a dish nobody cooks.
+          name: catalog(cell.item_id)?.name ?? cell.item_id,
+          // The read models carry no modifier detail yet (`gateway.ts` says the same); empty is
+          // honest, and inventing it here would be fold logic outside the engine (`26 §8`).
+          modifiers: [],
+        },
       });
       byStation.set(at, lines);
     }
 
-    for (const [at, lines] of byStation) {
+    for (const [at, group] of byStation) {
       // ── `03-F51`'s ROUTING SEAM, and its position in this loop is the whole design ────────────
       //
       // A station configured screen-only makes NO JOB: no bytes, no `spooler.enqueue`, no attempt,
@@ -423,11 +455,58 @@ export const createKotPrinter = ({
       // never rendered cannot be refused for want of columns, and a 58 mm printer at a screen-only
       // station is not a fact about anything (`03-F49`).
       if (!routesToPaper(at)) continue;
-      const job_id = `${order_id}::${at}`;
+
+      // ── `03-F55` — WHAT THIS STATION IS STILL OWED ────────────────────────────────────────────
+      //
       // A duplicate KOT means the dish is cooked twice, and `03-F7`/`03-F37` make a reprint a
       // deliberate, logged, REPRINT-banded act — which a second `order.confirmed` for the same
-      // order is not. Deterministic ids make that check possible at all.
-      if (spooler.job(job_id) !== undefined) continue;
+      // order is not. The guard that fact buys is NOT deleted here; what changes is that it can now
+      // tell "same order, same lines, second press" (silent) from "same order, NEW lines" (must
+      // reach the kitchen). Before `03-F55` it could not, and a naan rung onto a confirmed order
+      // was billed and never cooked, with no ticket, no band and no event.
+      //
+      // "Committed to paper" is A JOB EXISTS, not that the job PRINTED (`03-F55`): a chit whose
+      // retry budget exhausted (`03-F5`) belongs to `03-F6`'s reroute and `03-F48`'s reprint, and
+      // repeating its lines on the next addendum would put one dish on two chits in a kitchen that
+      // has been told to expect exactly one. A document `03-F34` REFUSED is the opposite — no job
+      // was created, so nothing was committed and the next press renders those lines again.
+      const prefix = chitPrefix(order_id, at);
+      // A FILTER over every job and not an ordinal probe (`spooler.job(`${prefix}::1`)`, `::2`, …
+      // until one is missing), which would be O(1) per chit instead of O(all jobs on this device).
+      // The probe is refused because it rests on the ordinals being CONTIGUOUS, and a single gap
+      // would make it re-issue an id `enqueue` then overwrites — losing a chit's coverage row and
+      // its bytes. **The cost is named rather than hidden: `03-F4` has no compaction clause and
+      // this store has no `DELETE`, so `jobs()` grows for the life of the device**, and this walk
+      // runs once per station per press on `01-F17`'s synchronous path. It is the same order as
+      // what already ships — `reconcile` here and in both cash/receipt printers each walk `jobs()`
+      // on every pump — so the thing that would actually need fixing is the unbounded spool
+      // (`22`/`25`'s retention question), not this filter.
+      const prior = spooler.jobs().filter((job) => isChitOf(job.job_id, prefix));
+      // A row written before `03-F55` kept no coverage and there is nothing to reconstruct it
+      // from. DECLARED INTERPRETATION (`24 §3b`): unknown coverage HONOURS THE PAPER — this
+      // station behaves exactly as it did before this FR, which is `03-F55`'s own phrase for the
+      // upgrade ("honoured rather than reprinted on the upgrade"). The named alternative, reading
+      // absent as "covered nothing", re-sends the whole order onto an addendum and cooks it twice
+      // — `03-F41` calls that a real kitchen error, and it would fire on every open order the
+      // moment a till updates. The residual harm is stated rather than hidden: for orders that
+      // were already confirmed when this version was installed, an addition still does not print.
+      if (prior.some((job) => job.covers === undefined)) continue;
+      const committed = new Set(prior.flatMap((job) => job.covers ?? []));
+      const owed = group.filter((entry) => !committed.has(entry.line_id));
+      // `03-F55`: "where a station has nothing uncommitted, NOTHING is created — no bytes, no
+      // spooled job, no attempt, no retry budget, no band, no `kot.print_failed`". That silence is
+      // the correct answer and not a degraded one, and it is decided HERE — before a job exists,
+      // from what the paper already carries — for `03-F51`'s reason one door along: absence is
+      // decided before a job exists, failure after one does. Neither may turn a transport outcome
+      // into silence (`03-F5`).
+      if (owed.length === 0) continue;
+      // The nth chit at this station carries ordinal n: `0` opened it, `n ≥ 1` is the nth addition
+      // (`03-F55`). It counts CHITS AT A STATION and not additions to an order — "a tandoor that
+      // has never seen this ticket is not being handed an addition to anything", so a station
+      // reached for the first time by an addition gets an ordinary KOT.
+      const addendum = prior.length;
+      const job_id = addendum === 0 ? prefix : `${prefix}::${addendum}`;
+      const lines = owed.map((entry) => entry.line);
 
       const result = render(
         spec,
@@ -438,8 +517,15 @@ export const createKotPrinter = ({
           ticket_no: order_id.slice(0, 8),
           table,
           station: at,
+          // `03-F55`: the stamp is the order's CONFIRM ANCHOR, unchanged. `03-F14` makes the timer
+          // basis `order.confirmed` and the fold takes the EARLIEST confirm, so every chit of one
+          // ticket carries one time and `03-F13`'s aging is not forked by a late addition. The
+          // named alternative — stamping the addition's own append — is refused because the read
+          // path carries no per-line stamp, so the only value available here is this device's
+          // clock, which `27-F62` and `01-F34` both forbid.
           branch_created_at: queued.age_basis,
           reprint: false,
+          addendum,
           lines,
         } satisfies KotData,
         capability,
@@ -466,6 +552,10 @@ export const createKotPrinter = ({
         // The FULL id, not the eight-character handle: K-6 carries this through a restart and a
         // truncated reference cannot key `kot.print_failed`'s `order_id`. The band shortens it.
         order_ref: order_id,
+        // `03-F55` — what this chit committed, written down on `03-F4`'s durable row in the same
+        // synchronous call that persists the bytes. Held in memory instead it is defeated by the
+        // relaunch, and the relaunch is precisely when both failures appear.
+        covers: owed.map((entry) => entry.line_id),
       });
     }
 
