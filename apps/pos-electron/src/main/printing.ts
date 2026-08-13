@@ -149,7 +149,25 @@ export type KotPrinter = {
 export const PUMP_INTERVAL_MS = RETRY_WINDOW_MS / MAX_TRANSMIT_ATTEMPTS;
 
 /** One cell of the order projection's `json_lines`, as `gateway.ts` reads it too. */
-type LineCell = { item_id: string; qty: number };
+type LineCell = {
+  item_id: string;
+  qty: number;
+  /** `02-F6`'s notes as the merge fold projects them; absent on a line with none (`26 §7` M2). */
+  notes?: string[];
+};
+
+/**
+ * `03-F56` — `02-F6`'s notes as the ONE row `KotLine.note` is.
+ *
+ * The same join and the same separator as `gateway.ts`'s `noteFrom`, and it is deliberately not
+ * shared with it: that one crosses the IPC seam to a screen, this one goes to paper, and `03-F32`
+ * makes the chit's data contract a DIFFERENT contract from the order projection's on purpose. What
+ * must not diverge is the reading order and the ink, and `03-F55` puts both in `document.ts` where
+ * a single renderer owns them. Reported rather than abstracted: `24 §3b` forbids the drive-by, and
+ * the day a note needs different handling on paper this is the line that moves.
+ */
+const kotNoteOf = (notes: readonly string[] | undefined): string | undefined =>
+  notes === undefined || notes.length === 0 ? undefined : notes.join(" / ");
 
 /**
  * The same cell with `01-F53`'s captured price, which the KOT deliberately never reads (`03-F32`:
@@ -423,6 +441,7 @@ export const createKotPrinter = ({
     )) {
       const at = station(cell.item_id);
       const lines = byStation.get(at) ?? [];
+      const note = kotNoteOf(cell.notes);
       lines.push({
         line_id,
         line: {
@@ -432,6 +451,10 @@ export const createKotPrinter = ({
           // The read models carry no modifier detail yet (`gateway.ts` says the same); empty is
           // honest, and inventing it here would be fold logic outside the engine (`26 §8`).
           modifiers: [],
+          // `02-F6`/`03-F56` — the half of `C7` that actually matters: an item note that reaches
+          // the cart and not the chit is a note the COOK never gets. Spread conditionally because
+          // `KotLine.note` is optional and `03-F56` gives an absent note no row (`00 §5.7`).
+          ...(note === undefined ? {} : { note }),
         },
       });
       byStation.set(at, lines);

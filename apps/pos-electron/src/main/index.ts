@@ -18,13 +18,16 @@ import {
   describeDeviceIdentity,
   describeLanMesh,
   describePanelDensity,
+  describeQuickTags,
   describeServeSignal,
   measurePhysicalWidthMm,
   type PanelDensity,
+  QUICK_TAGS_ENV,
   resolveAging,
   resolveDeviceIdentity,
   resolveLanMesh,
   resolvePanelDensity,
+  resolveQuickTags,
   resolveServeSignal,
   SERVE_SIGNAL_OWNER_ENV,
   type ServeSignalPolicy,
@@ -582,6 +585,16 @@ app.whenReady().then(async () => {
    */
   const aging = resolveAging(process.env[AGING_THRESHOLDS_ENV]);
 
+  /**
+   * `02-F6` / `02-F50` / `02 §7` layer 2 — the kitchen quick-tags `C7` picks from.
+   *
+   * Read ONCE per process, like `stationRouting` and `aging` above and for the same reason: only
+   * the environment can change it (`01-F62` keeps `config.changed` out of every branch stream), and
+   * the channel exists precisely so this does not ride the `changed` push. An empty list is a legal
+   * answer and means the org has configured none — the counter then draws no tag row.
+   */
+  const quickTags = resolveQuickTags(process.env[QUICK_TAGS_ENV]);
+
   const gateway = createGateway({
     store,
     // T-C6 — all three read the device catalog the uplink fills, and all three live in
@@ -727,6 +740,15 @@ app.whenReady().then(async () => {
    * a REFUSED configuration says which entry it could not read, at length.
    */
   console.log(describeAging(aging));
+
+  /**
+   * `00 §5.7` a fifth time on this page, and this value shares the property that put every line
+   * above it here: **an unconfigured quick-tag list is invisible from the screen.** The counter
+   * simply has no tag row, which is indistinguishable from a till whose note surface was never
+   * built — the exact state `02-F50` and `C7` exist to end. So the unset case names the key and
+   * gives a worked example rather than reporting a number nobody can act on.
+   */
+  console.log(describeQuickTags(quickTags));
 
   /**
    * `00 §5.7` a fifth time, and this one is the sharpest of them: **a branch with no LAN mesh looks
@@ -1209,6 +1231,15 @@ app.whenReady().then(async () => {
   // the tail, so a second channel would give the counter two bands competing for one region — and
   // a cashier whose receipt did not print needs the same surface as one whose KOT did not.
   ipcMain.handle(CHANNELS.alarms, () => [...kot.alarms(), ...cash.alarms(), ...receipts.alarms()]);
+  /**
+   * `02-F6`/`02-F50` — the org's kitchen quick-tags, as resolved once at boot.
+   *
+   * A READ that touches no store and authorizes nothing: the tag is display data, and the act it
+   * leads to is an ordinary `order.note_added` through `CHANNELS.append`, where `WRITE_ACTIONS`
+   * gates it under commandment 8. `[...]` because the resolved policy is readonly and the bridge
+   * hands the renderer a plain array.
+   */
+  ipcMain.handle(CHANNELS.quickTags, () => [...quickTags.tags]);
   ipcMain.handle(CHANNELS.acknowledgeAlarm, (_event, alarm_id: unknown) => {
     // Type-checked rather than trusted — the renderer is the untrusted end of this bridge
     // (`shared/ipc.ts`), and a non-string here would throw inside the handler on the one surface

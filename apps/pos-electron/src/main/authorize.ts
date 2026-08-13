@@ -63,6 +63,17 @@ import type { Gateway } from "./gateway";
  *
  * - `order.created` / `order.confirmed` / `order.line_added` → Appendix A's ONE row
  *   *"Create order / print KOT"*. The confirm is the KOT, and a line is part of creating.
+ * - `order.line_removed` / `order.note_added` → the SAME row, and `02-F49` rules it. This is the
+ *   OPPOSITE case to `02-F46`/`02-F47`/`14-F30`, which each minted an action because Appendix A
+ *   had **no row at all** and the fail-closed default therefore denied every attempt: here the row
+ *   exists and is already mapped. Appendix B names the attributed acts as *"order, **line
+ *   add/remove**, discount, void, comp, reprint, drawer open, settlement"* — add and remove in one
+ *   clause, one act — and lists *"item notes"* under **Order capture**. So these two rows are
+ *   transcription, and minting an `order.correct` would be the speculative widening `24-F23`
+ *   forbids (and would have to be `allow` for a cashier anyway, since `02-F8` calls the
+ *   pre-confirm removal a plain event). The POST-confirm act keeps its own, DIFFERENT row —
+ *   `void.recorded → order.void_after_kot`, `escalate` for a cashier — which is what makes
+ *   `02-F8`'s boundary observable in the MATRIX and not only inside `line-removal-guard.ts`.
  * - `day.opened` / `day.closed` / `cash.deposit_recorded` → `02-F22`'s **role guard** and
  *   `02-F24`'s day close. The deposit record is the second half of one act ("manager cash count
  *   **and** deposit record → `day.closed`, `cash.deposit_recorded`"), so it cannot be a lesser
@@ -101,6 +112,9 @@ export const WRITE_ACTIONS: Readonly<Record<string, PermissionAction>> = {
   "order.created": "order.create",
   "order.confirmed": "order.create",
   "order.line_added": "order.create",
+  // `02-F8`/`02-F6` → the SAME Appendix A row the add rides, per `02-F49`. See the table's note.
+  "order.line_removed": "order.create",
+  "order.note_added": "order.create",
   "payment.recorded": "payment.settle",
   "shift.opened": "shift.open_close",
   "shift.closed": "shift.open_close",

@@ -55,6 +55,14 @@ export {
   resolvePanelDensity,
 } from "./panel-density.js";
 export {
+  describeQuickTags,
+  parseQuickTags,
+  QUICK_TAGS_ENV,
+  type QuickTagsPolicy,
+  type QuickTagsSource,
+  resolveQuickTags,
+} from "./quick-tags.js";
+export {
   describeServeSignal,
   resolveServeSignal,
   SERVE_SIGNAL_OWNER_ENV,

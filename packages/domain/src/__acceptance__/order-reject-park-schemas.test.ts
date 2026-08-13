@@ -227,10 +227,21 @@ describe("§A 01-F4 — the three types parse rather than throwing at emit", () 
 
   /**
    * THE ANTI-SWEEP CONTROL. `01 §4` also carries `order.cancelled`, `order.merged`, `order.split`,
-   * `order.note_added`, `order.channel_tagged`, `order.line_removed` and `payment.split_recorded`,
-   * none of which is this track's FR. If registering three types quietly registered everything —
-   * a `Proxy`, a catch-all, a `z.any()` fallback in `ALL_PAYLOAD_SCHEMAS` — that would be
-   * indistinguishable from the change actually made without this test.
+   * `order.channel_tagged` and `payment.split_recorded`, none of which is this track's FR. If
+   * registering three types quietly registered everything — a `Proxy`, a catch-all, a `z.any()`
+   * fallback in `ALL_PAYLOAD_SCHEMAS` — that would be indistinguishable from the change actually
+   * made without this test.
+   *
+   * ⚠ **AMENDED August 2026: `order.note_added` and `order.line_removed` LEFT this list, and a
+   * shrinking anti-sweep control is what a weakened test looks like from the diff alone — so read
+   * the reason.** `02-F8`'s pre-confirm removal and `02-F6`'s item note got payload schemas of
+   * their own (`02-F49`/`02-F50`, `line-correction-schemas.test.ts`), so asserting them still
+   * UNREGISTERED would be asserting the opposite of the corpus. `order.line_removed` was only ever
+   * in the prose above and never in the executable list, which is its own small finding: a name a
+   * reader would have taken for a covered case was covering nothing. The control is not weakened
+   * in substance — the five that remain are the neighbours a session touching the order family is
+   * still most likely to sweep in, and the new file carries its own anti-sweep list over exactly
+   * those five.
    *
    * `order.cancelled` is deliberately in the list even though `06-F20` mentions it in the same
    * breath as `order.rejected` ("If no confirmation arrives within an org-configured window …
@@ -243,7 +254,6 @@ describe("§A 01-F4 — the three types parse rather than throwing at emit", () 
       "order.cancelled",
       "order.merged",
       "order.split",
-      "order.note_added",
       "order.channel_tagged",
       "payment.split_recorded",
     ]) {
