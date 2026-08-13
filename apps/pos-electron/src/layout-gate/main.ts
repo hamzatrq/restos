@@ -262,10 +262,6 @@ const PANELS = [
  * fixture unlocked by calling `window.restos.unlock(...)`, which moves the session without ever
  * rendering step two — so the PIN pad an operator meets 20–60 times a shift had never been laid
  * out in Blink at all. See the lock block in `run()` for what that cost.
-=======
- * The number of surfaces one panel contributes: one lock surface, SIX tabs in two device states,
- * and two escalation steps.
->>>>>>> worktree-agent-a4d261efec1f284be
  *
  * ⚠ **THIS SAID FIVE, AND ITS OWN COMMENT CLAIMED IT COULD NOT ROT WHEN A TAB WAS ADDED.** The
  * claim was *"derived rather than typed so `MIN_SURFACES` below cannot rot when a tab is added —

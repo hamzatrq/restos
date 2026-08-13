@@ -1058,7 +1058,7 @@ app.whenReady().then(async () => {
     // is stamped exactly like every other append (02-F41's read-at-append attribution included).
     // The push is what makes the band appear without the renderer polling.
     //
-    // ⚠ **THIS CALLBACK ALSO CARRIES `03-F53`'s `printer.status_changed`, AND NO SUITE WATCHES IT
+    // ⚠ **THIS CALLBACK ALSO CARRIES `03-F54`'s `printer.status_changed`, AND NO SUITE WATCHES IT
     // ARRIVE — measured 2026-08-13 (adversarial mutation).** Dropping that one type here
     // (`if (type === "printer.status_changed") return;`) leaves **all 866 tests green**: the
     // producer suite constructs its own `createKotPrinter` with its own `append`, so it proves the

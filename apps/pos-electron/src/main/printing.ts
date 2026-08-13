@@ -229,12 +229,12 @@ const isReceiptJob = (job_id: string): boolean => job_id.startsWith(RECEIPT_JOB_
 const PRINT_ACK = "audit.print_acknowledged";
 
 /**
- * **`03-F11`/`03-F53` — the printer transition, and until August 2026 nothing produced it.**
+ * **`03-F11`/`03-F54` — the printer transition, and until August 2026 nothing produced it.**
  *
  * `03-F11` declared the type in July and `01 §4` absorbed it; no payload schema was ever written,
  * so `01-F4` made emitting it a runtime error and **`05-F3`'s second alarm trigger has never
  * existed**. A symbol-precise `grep -a` across `apps/`, `services/` and `packages/` found the type
- * in comments and specs only. `03-F53` gives it a payload; this constant is its first producer.
+ * in comments and specs only. `03-F54` gives it a payload; this constant is its first producer.
  *
  * ── What this device can OBSERVE, which is what decides the design ───────────────────────────
  *
@@ -245,7 +245,7 @@ const PRINT_ACK = "audit.print_acknowledged";
  * (`01-F1`), for one printer going down, and `03-F4` spends a budget precisely because a single
  * failed attempt is not yet evidence of anything.
  *
- * `stalled` is DELIBERATELY not a transition (`03-F53`, `03-F41`): the printer ANSWERED the
+ * `stalled` is DELIBERATELY not a transition (`03-F54`, `03-F41`): the printer ANSWERED the
  * `DLE EOT 4` query, which is how the stall was diagnosed at all — it is reachable, it is holding
  * the bytes, and the remedy is a roll rather than a cable. Emitting `offline` for paper-out would
  * fire on the most ordinary event in a kitchen and send a manager to check the wrong thing. It
@@ -317,7 +317,7 @@ export const createKotPrinter = ({
   const raised = new Map<string, { alarm: Alarm; order_id: string }>();
   let pumping = false;
   /**
-   * `03-F53`: **the prior state is assumed `online`.** A device that boots with no prior state has
+   * `03-F54`: **the prior state is assumed `online`.** A device that boots with no prior state has
    * two honest options — assume online (a dead printer announces itself on the first attempt; a
    * healthy one stays silent) or treat the first observation as a transition (which appends one
    * `online` per launch, reporting no change to anyone, into a ledger `01-F1` never thins out).
@@ -329,7 +329,7 @@ export const createKotPrinter = ({
    * printer here, and a `Map` keyed by a name that can only take one value would imply otherwise.
    *
    * In MEMORY and not in the spool, deliberately: the state is a claim about the link right now,
-   * and a relaunch has observed nothing. `03-F53`'s assumed-online rule is exactly what a fresh
+   * and a relaunch has observed nothing. `03-F54`'s assumed-online rule is exactly what a fresh
    * process should believe, so persisting this would only let a stale belief suppress the first
    * real report after a restart.
    */

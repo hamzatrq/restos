@@ -42,7 +42,7 @@
  * seam exists and the till already writes through one exactly like it.
  *
  * **`05-F3`'s other trigger is now HALF built.** `printer.status_changed` has a payload schema
- * (`03-F53`) and a real producer on the till (`apps/pos-electron/src/main/printing.ts`), so the
+ * (`03-F54`) and a real producer on the till (`apps/pos-electron/src/main/printing.ts`), so the
  * fact reaches the branch stream. What this view does with it is a **founder call** and is
  * deliberately nothing — see the note on `05-F3` below the pinned interpretations.
  *

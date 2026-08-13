@@ -10,7 +10,7 @@
 //
 //   03-F11 "`printer.status_changed` (extension) emitted on online/offline transitions per
 //          registered printer — feeds doc 05 alarms and doc 15 fleet health."
-//   03-F53 (August 2026) its payload — `printer_name` (non-empty) and `status`, a CLOSED
+//   03-F54 (August 2026) its payload — `printer_name` (non-empty) and `status`, a CLOSED
 //          two-member set `online | offline`; "A `stalled` job is NOT an offline transition";
 //          "the prior state is assumed `online`, so a first failure IS a transition and a first
 //          success is NOT"; "emitted by the device that owns the transport … the same host that
@@ -160,12 +160,12 @@ describe("§A the rig actually prints and actually fails", () => {
 // §B — `03-F11`'s transitions, and only its transitions.
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
-describe("§B 03-F11/03-F53 — the till emits printer.status_changed on a transition", () => {
-  // 1. `03-F53`'s "the prior state is assumed `online`, so … a first success is NOT [a
+describe("§B 03-F11/03-F54 — the till emits printer.status_changed on a transition", () => {
+  // 1. `03-F54`'s "the prior state is assumed `online`, so … a first success is NOT [a
   //    transition]". A branch whose printer works must never see this event.
   //    WRONG IMPLEMENTATION CAUGHT: treating the first observation as a transition, which appends
   //    one `online` per launch per printer, permanently, reporting no change to anyone.
-  it("stays SILENT while the printer works (03-F11, 03-F53)", async () => {
+  it("stays SILENT while the printer works (03-F11, 03-F54)", async () => {
     const r = rig();
     r.printer.confirmed(ORDER_1);
     await r.printer.pump();
@@ -174,7 +174,7 @@ describe("§B 03-F11/03-F53 — the till emits printer.status_changed on a trans
     expect(statusEvents(r.appended)).toHaveLength(0);
   });
 
-  // 2. The event `05-F3` is waiting for, with `03-F53`'s payload. `printer_name` is the capability's
+  // 2. The event `05-F3` is waiting for, with `03-F54`'s payload. `printer_name` is the capability's
   //    `model_id` — the same value `kot.print_failed` carries — so the console can raise both onto
   //    one list without joining two spellings of one printer.
   it("emits offline, naming the printer, when the link dies (03-F11, 05-F3)", async () => {
@@ -228,17 +228,17 @@ describe("§B 03-F11/03-F53 — the till emits printer.status_changed on a trans
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
-// §C — `03-F53`'s substance: a stalled printer is not an offline printer.
+// §C — `03-F54`'s substance: a stalled printer is not an offline printer.
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
-describe("§C 03-F53/03-F41 — paper-out is not an offline transition", () => {
+describe("§C 03-F54/03-F41 — paper-out is not an offline transition", () => {
   // 5. THE SHARPEST ASSERTION IN THIS FILE. `03-F41` separates `stalled` from `failed` because the
   //    printer ANSWERED the `DLE EOT 4` query — it is reachable, it is holding the bytes, and the
   //    remedy is a roll rather than a cable. Emitting `offline` here would fire on the most
   //    ordinary event in a kitchen and send a manager to check the wrong thing.
   //    WRONG IMPLEMENTATION CAUGHT: "any non-`printed` job state means offline", or reading the
   //    spooler's job state as a printer state. Both pass every test in §B.
-  it("stays SILENT while the roll is out (03-F41, 03-F53)", async () => {
+  it("stays SILENT while the roll is out (03-F41, 03-F54)", async () => {
     const r = rig();
     r.set("paper_out");
     r.printer.confirmed(ORDER_1);
@@ -249,7 +249,7 @@ describe("§C 03-F53/03-F41 — paper-out is not an offline transition", () => {
   // 6. And a reload is not an `online` transition either, because nothing ever went offline. This
   //    is the mirror of test 5 and catches the half-fix that suppresses the stall on the way down
   //    and announces recovery on the way up.
-  it("stays SILENT when the roll is reloaded (03-F41, 03-F53)", async () => {
+  it("stays SILENT when the roll is reloaded (03-F41, 03-F54)", async () => {
     const r = rig();
     r.set("paper_out");
     r.printer.confirmed(ORDER_1);
@@ -268,7 +268,7 @@ describe("§C 03-F53/03-F41 — paper-out is not an offline transition", () => {
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 describe("§D 01-F4 — every emitted payload parses against the catalog", () => {
-  it("emits payloads parseEvent accepts (01-F4, 03-F53)", async () => {
+  it("emits payloads parseEvent accepts (01-F4, 03-F54)", async () => {
     const r = rig();
     r.set("link_down");
     r.printer.confirmed(ORDER_1);

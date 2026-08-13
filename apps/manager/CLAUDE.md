@@ -30,7 +30,7 @@
   the manager DEVICE to append it (`01-F62` names `audit.*` as its worked example of a
   branch-scoped type, so no server may mint one), and `openStore` still binds `better-sqlite3`.
   So the seam exists and the writer does not — which is the honest asymmetry, not a stub.
-- **`05-F3`'s second trigger is HALF built.** `printer.status_changed` gained a payload (`03-F53`)
+- **`05-F3`'s second trigger is HALF built.** `printer.status_changed` gained a payload (`03-F54`)
   and a real producer on the till, and it was driven end to end on 2026-08-12: two orders sent to a
   dead printer produced **two `kot.print_failed` and exactly ONE `printer.status_changed(offline)`**
   in a real device ledger. What the console does with it is a **founder call** `05-F30` records and
