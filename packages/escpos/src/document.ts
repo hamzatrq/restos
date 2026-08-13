@@ -149,6 +149,22 @@ export type KotLine = {
   readonly name: string;
   /** `27-F59`: "Modifiers are indented under their item and never inlined." */
   readonly modifiers: readonly KotModifier[];
+  /**
+   * `03-F55` — `02-F6`'s item note, *"printed prominently on the KOT"*, and `03-F3`'s *"item
+   * notes visually emphasized"*. Both have been FRs since Wave 0 and this contract declared no
+   * field at all, so the note was **unrenderable rather than merely unrendered**.
+   *
+   * A field of the LINE, never a member of `modifiers`. They arrive from different events
+   * (`order.note_added` vs `02-F3`'s line composition), and `27-F59` gives a *removal* modifier
+   * the item block's one inverted marker — feeding a note in as a modifier would either steal
+   * that marker from a removal (the allergen case the marker exists for) or make a note's
+   * emphasis depend on whether the dish happens to carry a removal, which is one fact printing
+   * two different ways on two tickets.
+   *
+   * Optional because most lines have none and `03-F55` gives an absent note no row. The named
+   * alternative — `note: string | null` — would work identically.
+   */
+  readonly note?: string;
 };
 
 /**
@@ -213,10 +229,17 @@ const REMOVAL_MARKER = "NO";
  * The `kot`'s layout — `27 §2b`'s ticket, one block per group.
  *
  * `27-F58` fixes the reading order and forbids configuring it: **identifier → timing → items →
- * modifiers**, separated by blank lines and never by a rule ("a full-width rule costs a line of
- * paper and reads as a *boundary between documents* to someone who parses shape rather than text").
- * The order is the order of the blocks below, which is why nothing here reads a slot to decide
- * where something goes.
+ * modifiers → notes**, separated by blank lines and never by a rule ("a full-width rule costs a
+ * line of paper and reads as a *boundary between documents* to someone who parses shape rather
+ * than text"). The order is the order of the blocks below, which is why nothing here reads a slot
+ * to decide where something goes.
+ *
+ * ⚠ **This quote said *"identifier → timing → items → modifiers"* — FOUR terms where the FR
+ * writes FIVE — from the day it was written until August 2026.** `receipt-document.ts` quotes the
+ * same sentence with all five, so the corpus was right and one file's copy was short. The dropped
+ * term was `notes`, and `KotLine` had no note field: a truncated quotation is what made a missing
+ * field look deliberate to every reader of this file, including the ones who wrote its tests.
+ * `03-F55` lands the field; the last two terms are read BLOCK-WISE (see `KOT_ITEMS`).
  *
  * `27-F56`'s ladder is spent exactly twice per glance: **2×2** on the order/table identifier and on
  * each item's quantity, **inverted** on the one banner and on one marker per item block. Everything
@@ -320,6 +343,47 @@ const KOT_BLOCK_RENDERERS: Readonly<Record<string, BlockRenderer>> = {
           { kind: "text", value: `${MODIFIER_INDENT}${modifier.name}`, ink: "normal" },
           { kind: "feed", lines: 1 },
         ]),
+        /**
+         * `03-F55` — the note is the LAST row of its own item block, after that item's modifiers,
+         * and it spends NO INK.
+         *
+         * `27-F58` fixes the reading order as *identifier → timing → items → modifiers → notes*
+         * and that sentence is already read BLOCK-WISE for its fourth term: `27-F59` puts
+         * modifiers *"indented under their item"* rather than in a document-terminal section.
+         * Reading the fifth term document-wide — a `KOT_NOTES` block after `KOT_ITEMS`, which is
+         * what five terms and five blocks look like from the outside — would separate a note from
+         * the dish it qualifies, and `27-F57` measures that mapping step as where comprehension
+         * collapses from ~71% decode to ~35% execute.
+         *
+         * NO third inversion and no 2×2. `27-F56` allocates the ladder platform-wide and its July
+         * 2026 ruling closes both scopes (the banner is at most one per document; the item scope
+         * is `27-F59`'s removal marker), while 2×2 belongs to the quantity and the identifier. So
+         * `03-F3`'s *"visually emphasized"* is spent in `27-F58`'s other two channels — vertical
+         * position and grouping whitespace — which is what that FR says they are for. Conditional
+         * inversion (*"invert the note when the block has no removal"*) is refused by name: it
+         * makes one fact print two ways depending on an unrelated property of the same dish.
+         *
+         * `user_text` and never `text`, on the two owner notes' precedent above and for the same
+         * reason: the choice decides which refusal `03-F5`'s band shows. As `text` a non-Latin
+         * note refuses `non_ascii_system_text`, claiming the platform's own English is broken and
+         * making the field unprintable FOR EVER (`00 §5.6` makes English-only permanent for
+         * interface text); as `user_text` it refuses `raster_font_unavailable`, which names the
+         * actual state of the world (`03-F8`). A note an operator picked or typed is DATA. Byte
+         * output for a Latin note is identical either way, which is exactly why nothing but an
+         * explicit choice catches it. It also carries no `ink` field, so the "no ink" rule above
+         * is structural here rather than a value this renderer has to remember not to set.
+         *
+         * The indent is its own `text` part rather than a prefix on the note's value, so the
+         * platform's own two spaces stay platform text and only the operator's words are user
+         * content.
+         */
+        ...(line.note === undefined
+          ? []
+          : ([
+              { kind: "text", value: MODIFIER_INDENT, ink: "normal" },
+              { kind: "user_text", value: line.note },
+              { kind: "feed", lines: 1 },
+            ] as const)),
       ];
     }),
   KOT_FOOT_NOTE: (_data, slot) => [

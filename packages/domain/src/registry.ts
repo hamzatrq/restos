@@ -289,6 +289,93 @@ const payloadSchemas = {
     qty: z.number().int().positive(), // integer units (00 §6)
     unit_price_paisa: z.number().int().nonnegative(), // snapshotted at line-add, never re-derived (01-F18)
   }),
+  /**
+   * `02-F8`'s pre-confirm removal — `C8`, ~10–25× a shift, and the only thing a cashier can do
+   * when a customer says "no Coke". The type has been `01 §4` vocabulary since Wave 0, carrying
+   * the dagger *"removal pre-KOT is a plain event; post-KOT it must be a `void.recorded` with
+   * approver"*, and had no payload schema — so `01-F4` made it **unemittable rather than merely
+   * unbuilt**, and `packages/ui`'s `Cart` shipped an `onRemove` prop with nothing to emit.
+   *
+   * **`{ order_id, line_id }` and nothing else, because `02-F8` calls it a *plain* event** in
+   * contrast with the void it names in the same sentence. Each field the neighbouring
+   * `void.recorded` requires is refused here for its own reason, and all three are product
+   * failures rather than schema opinions:
+   *   · `reason` — `27-F6` bans required non-numeric typing on a critical path, and Appendix B
+   *     puts *"reason + PIN"* on the post-KOT void alone.
+   *   · `approver_user_id` — its presence is precisely what `02-F8` says separates the two paths.
+   *     Requiring one here would delete the distinction the dagger exists to draw.
+   *   · `amount_paisa` — a removal states no money. `01-F53` snapshotted the price into
+   *     `order.line_added`, so a second copy here is a number that can disagree with the line it
+   *     names, permanently (`01-F1`), and `01-F30` has no `removed_value` term to feed.
+   *
+   * **NO `qty`.** No FR describes a partial-quantity decrement, and `AddLineRequestSchema`'s own
+   * comment already records the corpus's reading: *"Positive: removing a line is
+   * `order.line_removed`, not a qty of 0."* Removing two of three is a removal plus a re-add.
+   *
+   * **NO `supersedes`, and the asymmetry with `order.parked` above is deliberate.** A removal is
+   * MONOTONE on its line key — `01 §4` has no `order.line_restored`, and putting the dish back is
+   * a fresh `order.line_added` with a fresh `line_id` (`01-F1`) — so the delivered set converges
+   * as a grow-only tombstone set with no causal link at all, commutative and idempotent, needing
+   * no clock, no sequence and no id comparison (`01-F34`). The park pair needs its link because it
+   * is a REPEATABLE TOGGLE on one key; a removal has no second state to return to.
+   *
+   * **The BOUNDARY is not enforceable here and `02-F49` says why**: `01-F4` validates a payload,
+   * and whether an order is confirmed is a FOLD fact no payload carries. The guard is a
+   * synchronous read of the till's own `openOrders()` in `apps/pos-electron/src/main` — see
+   * `line-removal-guard.ts`. What this schema owns is that the two acts are structurally
+   * different shapes, so neither can be silently routed through the other.
+   */
+  "order.line_removed": z.looseObject({
+    // `02-F9` makes this "the only partial-confirmation mechanism", and a partial confirmation
+    // that cannot name WHICH line is not partial.
+    order_id: z.string().min(1),
+    line_id: z.string().min(1),
+  }),
+  /**
+   * `02-F6`'s item note — `C7`, ~10–40× a shift — *"free text + org-configurable quick-tags
+   * ('less spicy') → `order.note_added`, printed prominently on the KOT"*. `01 §4` vocabulary
+   * since Wave 0 with no payload schema, so `01-F4` made the whole FR unemittable.
+   *
+   * **`line_id` is REQUIRED, and the type name is the trap.** The event is called
+   * `order.note_added`, so `{ order_id, note }` is what the name suggests — but `02-F6` writes
+   * *"**Item** notes"* and `03-F3` *"**item** notes visually emphasized"*, and `03-F55` puts the
+   * note inside its item's block for `27-F57`'s measured reason: separating a note from the dish
+   * it qualifies is the mapping step where comprehension collapses from ~71% decode to ~35%
+   * execute. A note with no line key can only print at the foot of the ticket, qualifying every
+   * dish or none.
+   *
+   * Required rather than `.optional()` because that is the recoverable direction: relaxing to
+   * nullable later refuses nothing already written, while adding a required key later makes every
+   * historical note unparseable (`01-F1`), and `.optional()` permanently confuses "an order-level
+   * note" with "a writer forgot" — the distinction `payment.recorded.shift_id` and
+   * `catalog.changed.price_changes` are both written up in this file to preserve.
+   *
+   * **NO `supersedes`, and this is `01 §4`'s own naming.** The catalog carries `note_added` and
+   * offers no `note_removed` and no `note_changed`. `02-F6`'s quick-tags are a PICK LIST, so two
+   * taps are two facts (`02-F50`); a register would make the second tap erase the first, and
+   * `27-F59`'s words about a missed removal — *"an allergen incident, not a preference miss"* —
+   * apply with full force to a note reading *"no peanuts"*. The fold is a grow-only value set per
+   * line (`packages/sync-client`'s `line-correction-fold.test.ts` M2).
+   *
+   * **NOT capped and NOT truncated.** No FR states a maximum; `03-F49` states minimum COLUMNS
+   * only. A `.max()` would refuse an act on invented policy (commandment 2) and a
+   * `.transform(slice)` is worse: `parseEnvelope` types `payload` as `z.unknown()`, so the FULL
+   * note would be written durably to the ledger while every fold and every reader got the
+   * truncated one — `catalog-fetch.ts`'s dropped-field defect relocated into the kernel.
+   * `02-F50` keeps Wave 1's input a bounded pick list, which makes the long case rare.
+   *
+   * **`00 §5.6` reaches here: a non-Latin note is ACCEPTED.** User content is Unicode and is never
+   * transliterated or rejected for its script. The printer's refusal is `03-F8`'s
+   * (`raster_font_unavailable`) and belongs to `packages/escpos`, not to this schema.
+   */
+  "order.note_added": z.looseObject({
+    order_id: z.string().min(1),
+    line_id: z.string().min(1),
+    // `.min(1)`: there is no `order.note_removed` in `01 §4`, so `""` cannot mean "clear the
+    // note", and `03-F55` gives the note a position in its item block — an empty one prints a
+    // blank emphasised row, which is `00 §5.7`'s zero on a clock.
+    note: z.string().min(1),
+  }),
   // 01-F22 / 01-F57: an operational toggle, never a catalog edit. `supersedes` is the
   // carried causal link — the ONLY thing that makes this converge, exactly as for
   // `order.table_assigned`. "Latest wins" would need a clock or an id comparison, and both

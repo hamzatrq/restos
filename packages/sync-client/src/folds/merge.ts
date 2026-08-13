@@ -155,6 +155,10 @@ type PaymentP = { order_id: string; settlement_attempt_id: string };
 type ClosedP = { order_id: string; billed_paisa?: unknown };
 
 type LineValue = { item_id: string; qty: number; unit_price_paisa: number };
+/** `02-F8`'s removal (`{order_id, line_id}` — the registry's P1, a *plain* event). */
+type LineRemovedP = { order_id: string; line_id: string };
+/** `02-F6`'s item note. `line_id` is required — the note names the dish it qualifies. */
+type NoteAddedP = LineRemovedP & { note: string };
 type Edge = {
   event_id: string;
   to: string;
@@ -178,6 +182,45 @@ type Entity = {
   closes: Map<string, Record<string, unknown>>;
   /** Per-line value MVR: line id → (canonical bytes → {item, qty, price}). */
   lineValues: Map<string, Map<string, LineValue>>;
+  /**
+   * `02-F8`'s pre-confirm removals — a grow-only TOMBSTONE SET of line ids (`26 §7` M1).
+   *
+   * A SET and not a mutation of `lineValues`, and that is the whole convergence argument. The
+   * projection is `project(values, tombstones)`: a pure function of two grow-only sets, so union
+   * is commutative and idempotent and no clock, `lamport_seq`, `global_seq` or envelope-id
+   * comparison is reachable (`01-F34`). Deleting the value at fold time instead — which is what
+   * the retention `droppedLines` filter legitimately does one screen down, for a
+   * session-scoped outer-layer act — makes the outcome depend on ARRIVAL ORDER: the removal only
+   * works when it happens to be folded after its `order.line_added`, and `01-F16` puts
+   * concurrent adds from two terminals in ordinary service.
+   *
+   * REMOVE-WINS. A `line_id` is minted by the till that adds the line, so a removal naming one can
+   * only be issued by a device that has already SEEN the add — the genuinely concurrent add/remove
+   * pair does not arise. What arises constantly is delivery reordering, and remove-wins is the
+   * only rule under which both orders agree.
+   *
+   * Per ENTITY, so keying is `(order, line)` and never `line` alone: nothing makes a `line_id`
+   * globally unique (a per-order counter produces `L1` on every order by construction), and a
+   * globally keyed tombstone set silently empties the neighbouring bill.
+   */
+  lineTombstones: Set<string>;
+  /**
+   * `02-F6`'s item notes — a grow-only VALUE SET per line id, deduplicated by TEXT (`26 §7` M2).
+   *
+   * A set and not a register because `01 §4` carries `note_added` and offers no `note_removed`
+   * and no `note_changed`, and `02-F6`'s quick-tags are a PICK LIST (`02-F50`) — two taps are two
+   * facts. A register would need a tiebreak and every available one is banned (`01-F34`; `26 §7`
+   * bans `min(envelope.id)` by name because UUIDv7 makes an id comparison wall clock in disguise),
+   * and its failure direction is the unsafe one: the second tag silently erasing *"no peanuts"*.
+   *
+   * Keyed by the TEXT rather than by the event id for the reason `createMembers`, `lineValues` and
+   * the availability lattice are all value-keyed: it is what makes redelivery idempotent, and it
+   * is what lets the rendering sort by a set-determined key instead of by an id.
+   *
+   * Held for a line this device has not seen yet (matrix row 61 — *"edges for a not-yet-added line
+   * are held, never parked, never dropped"*). A note whose line arrives later renders on it.
+   */
+  lineNotes: Map<string, Set<string>>;
   /** Per-line edge G-Set: line id → (event id → edge). Held unconditionally. */
   lineEdges: Map<string, Map<string, Edge>>;
   /** UKS: attempt id → (canonical member bytes → member); member = payload minus its key. */
@@ -231,6 +274,19 @@ export type BilledLineCell = {
   unit_price_paisa: number;
   states: string[];
   anomalies?: Record<string, string>;
+  /**
+   * `02-F6`'s item notes on this line, deduplicated and text-sorted (`26 §7` M2).
+   *
+   * An ARRAY and not a joined string: the separator would be a presentation decision taken inside
+   * the kernel, and `03-F55` puts the chit's arrangement in `packages/escpos`. A shape that could
+   * hold only one note would force the merge rule back to a register.
+   *
+   * OPTIONAL, and absent rather than `[]` on a line with nothing to say. A projection is not a
+   * ledger — `01-F1` does not reach it — and the convention is this file's own: `menu()`'s
+   * `sold_out`/`contested` spread conditionally for the same reason, and pinning the empty-case
+   * bytes would churn every existing `json_lines` assertion for a fact that is not there.
+   */
+  notes?: string[];
 };
 
 /** billed_effective of ONE projected cell (01-F30: billed derives from
@@ -711,6 +767,8 @@ export const createMergeEngine = (): MergeEngine => {
       confirms: new Map(),
       closes: new Map(),
       lineValues: new Map(),
+      lineTombstones: new Set(),
+      lineNotes: new Map(),
       lineEdges: new Map(),
       pay: new Map(),
       refund: new Map(),
@@ -891,6 +949,53 @@ export const createMergeEngine = (): MergeEngine => {
           canonicalJson(value),
           value,
         );
+        dirty.add(p.order_id);
+        return;
+      }
+      /**
+       * `02-F8`'s pre-confirm removal. **NOT projection-inert, unlike every registry landing
+       * before it, and the difference is textual rather than aesthetic:** `02-F9` calls this
+       * *"the only partial-confirmation mechanism"*, and a partial confirmation that leaves the
+       * line in the order is not partial — the order confirms whole, the KOT prints the
+       * unavailable dish and the customer is billed for it. `01-F30` conserves
+       * `Σ payments − Σ refunds = billed_total − void_value − comp_value − discounts` and has
+       * **no `removed_value` term**, so a line that stayed in `billed_total` after a removal
+       * would make the identity unsatisfiable without a `void.recorded` — precisely the event
+       * `02-F8` says a pre-confirm removal is NOT. An inert arm here would ship a control that
+       * returns without complaint and changes nothing, which is strictly worse than the unbuilt
+       * state because the cashier believes the Coke came off.
+       *
+       * A grow-only SET insert — commutative, idempotent, and reading nothing outside the
+       * delivered event (`01-F34`). The projection applies it (see `projectEntity`); NOTHING is
+       * deleted here, from the lattice or from the ledger (`02-F5`: *"Nothing is deleted in any
+       * of these — pure event composition"*, `01-F1`).
+       *
+       * **Deliberately NOT in `PARKING_TYPES`.** A removal for a line — or an order — this device
+       * has not seen yet is HELD in the set: the tombstone is a fact about a key, and when the
+       * `order.line_added` arrives the projection already knows the line is gone. Parking it would
+       * move a real operator act into `01-F10`'s delivery-layer holding table, and the straggler
+       * case is the ordinary one on a LAN reorder rather than an exotic one.
+       */
+      case "order.line_removed": {
+        const p = event.payload as LineRemovedP;
+        const e = entity(p.order_id);
+        e.lineTombstones.add(p.line_id);
+        dirty.add(p.order_id);
+        return;
+      }
+      /**
+       * `02-F6`'s item note, `02-F50`'s quick tag. Also NOT projection-inert: the FR requires it
+       * *"printed prominently on the KOT"* and `03 §1` lists `order.note_added` among doc 03's
+       * consumed events, so a note that reaches no projection reaches no ticket — `03-F55` gives
+       * it a slot on the chit that nothing could fill.
+       *
+       * Value-keyed insert into a per-line set, held whether or not the line has arrived (matrix
+       * row 61). Same parking argument as the removal above.
+       */
+      case "order.note_added": {
+        const p = event.payload as NoteAddedP;
+        const e = entity(p.order_id);
+        sub(e.lineNotes, p.line_id, () => new Set<string>()).add(p.note);
         dirty.add(p.order_id);
         return;
       }
@@ -1158,12 +1263,32 @@ export const createMergeEngine = (): MergeEngine => {
     // Lines: value MVR + edge-set workflow projection.
     const cells: Record<
       string,
-      LineValue & { states: string[]; anomalies: Record<string, string> }
+      LineValue & { states: string[]; anomalies: Record<string, string>; notes?: string[] }
     > = {};
     let billedEffective = 0n;
     let linesTotal = 0;
     let linesReady = 0;
     for (const [lineId, values] of e.lineValues) {
+      /**
+       * `02-F8`/`02-F9` — the tombstone set applied, and applied HERE rather than at fold time so
+       * the result is a pure function of two grow-only sets and cannot depend on which of the two
+       * events arrived first (`01-F34`; see `Entity.lineTombstones`).
+       *
+       * `continue` before ANYTHING is computed, which is what makes the three derivations agree.
+       * The cell never enters `json_lines` (so `billedEffectiveFromJsonLines` — what
+       * `main/gateway.ts` feeds `OpenOrder.total_paisa` from — cannot see it), the `billedEffective`
+       * accumulator directly below never adds it (that one is NOT a column: it is the input to
+       * `01-F33`'s `uncovered_addition` ceiling check, so a removal that dropped the cell and kept
+       * the money would read right in the cart and flag an addition nobody made), and `linesTotal`
+       * never counts it (`03-F25`'s queue would otherwise put a phantom dish on the cook's ticket).
+       *
+       * The line's NOTES go with it (M4): they render on the cell, and there is no cell. `03-F55`
+       * puts a note inside its item's block, so an orphan note has nowhere legal to print at all.
+       *
+       * `line_value_conflict` is deliberately not raised for a removed line either — a line that
+       * is gone has no value left to disagree about.
+       */
+      if (e.lineTombstones.has(lineId)) continue;
       let value: LineValue | null = null;
       let valueHash: string | null = null;
       for (const member of values.values()) {
@@ -1176,7 +1301,27 @@ export const createMergeEngine = (): MergeEngine => {
       if (values.size > 1) exceptions.add("line_value_conflict");
       const v = value as LineValue;
       const lp = projectLine(e.lineEdges.get(lineId));
-      cells[lineId] = { ...v, states: lp.states, anomalies: lp.anomalies };
+      /**
+       * `02-F6` M2's rendering — sorted by TEXT, never by the id of the event that added the note
+       * and never by arrival.
+       *
+       * Sorting by envelope id is an id comparison REACHING A PROJECTED VALUE, which is the exact
+       * `01-F34` break and one that survives plain convergence testing: every replica agrees, and
+       * the agreed answer still moves under a bijective relabel because UUIDv7 puts wall clock in
+       * the id prefix. `26 §8` names this as the binding oracle lesson. A text sort is
+       * set-determined, so the projection is invariant under both a relabel and a clock injection.
+       *
+       * `utf16` is safe here for its declared precondition — a Set spread holds distinct members.
+       */
+      const notes = [...(e.lineNotes.get(lineId) ?? [])].sort(utf16);
+      cells[lineId] = {
+        ...v,
+        states: lp.states,
+        anomalies: lp.anomalies,
+        // Spread conditionally: a line with no note carries no key rather than an empty array —
+        // see `BilledLineCell.notes` for why absence is the honest rendering here.
+        ...(notes.length === 0 ? {} : { notes }),
+      };
       // The declared-once billed rule (billedCellPaisa; T-01-11 fix round F4):
       // exited-decided zero, contested per the policy constant.
       billedEffective += billedCellPaisa(cells[lineId] as BilledLineCell);

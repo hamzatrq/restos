@@ -474,6 +474,24 @@ const bridge: RestosBridge = {
   cashState: () => Promise.resolve(CASH_STATE),
   alarms: () => Promise.resolve(alarms),
   /**
+   * **`02-F6`/`02-F50` — `C7`'S QUICK-TAG ROW, WHICH NOTHING WOULD MEASURE WITHOUT THIS LINE.**
+   *
+   * The tag row draws only when the host serves tags, so a fixture answering `[]` would leave
+   * `layout:check` green over a counter that never renders the row at all — this rail's own named
+   * blind spot (*"it only sees the states its fixture produces"*), and the same shape that left
+   * `ManagerApproval` laying out 1162 px in a 632 px box for weeks.
+   *
+   * **FOUR tags and long ones, because `02-F39` is the FR that bites here.** That FR caps the list
+   * *"at one page at the target posture"* and puts the refusal at the back office, which does not
+   * exist — so today the environment key is the writer and nothing bounds it. This row sits in the
+   * cart column below three cart lines and a total, and each tile is a `27-F8` counter target, so
+   * it is exactly the kind of thing that pushes a control off the tightest panels. A fixture of
+   * two short tags would measure the easy case. *"No chillies at all"* is a real instruction a
+   * Pakistani counter gives and is the longest single tile this surface plausibly renders.
+   */
+  quickTags: () =>
+    Promise.resolve(["Less spicy", "No onions", "Extra gravy", "No chillies at all"]),
+  /**
    * `03-F5` — the alert repeats "until acknowledged", so acknowledging it CLEARS it. That is
    * faithful to main, and it is also how the gate reaches the device's second layout state
    * without an env var or a second fixture: it measures every surface with the band up, then

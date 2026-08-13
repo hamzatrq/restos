@@ -734,6 +734,22 @@ export const CHANNELS = {
    * copy would leave the band on every other surface reading the same device.
    */
   acknowledgeAlarm: "restos:acknowledge-alarm",
+  /**
+   * `02-F6`/`02-F50` — the kitchen quick-tag list a cashier picks an item note from. A READ:
+   * nothing is appended and nothing is authorized on this channel; the tap that follows rides
+   * `append` like any other `order.note_added`.
+   *
+   * **A channel of its own rather than a field on `DeviceState`, and the reason is the cost
+   * profile `staff` and `alarms` both record — pointing the other way.** `deviceState` is re-read
+   * on EVERY `changed` push (every line added, every payment, every peer's event), and this is a
+   * `00 §7` layer-2 value that moves when an owner edits a config file: riding the hottest read on
+   * the device would spend an IPC round trip per ledger event on a list with no `changed` push at
+   * all. It is also a different FACT — `DeviceState` is what the shell knows about ITSELF, and
+   * this is what the ORG has decided its kitchen can be told.
+   *
+   * It is read ONCE by the counter and deliberately not inside `reload()`, for that same reason.
+   */
+  quickTags: "restos:quick-tags",
   append: "restos:append",
   addLine: "restos:add-line",
   /**
@@ -905,6 +921,26 @@ export type RestosBridge = {
    */
   alarms?: () => Promise<Alarm[]>;
   acknowledgeAlarm?: (alarm_id: string) => Promise<void>;
+  /**
+   * `02-F6`/`02-F50` — the org's kitchen quick-tags, which in Wave 1 are `C7`'s ONLY input
+   * (`27-F6`: 24 of 27 field subjects could not type a single word, so the non-typing route is
+   * the route).
+   *
+   * **OPTIONAL for the reason `cashState`, `alarms`, `toggleAvailability` and the phone pair above
+   * all record**: several oracle suites this session may not edit stub the bridge and close it
+   * with `satisfies RestosBridge`, and all of them predate this channel, so a REQUIRED member reds
+   * a typecheck and those suites at once for a surface none of them exercises.
+   *
+   * The cost is smaller here than for any of the others and is still named: a host that does not
+   * serve it draws no tag row, so `C7` is **unavailable rather than broken** — nothing about a
+   * note blocks a sale (`01-F17`), and every other counter act is untouched. The shipped preload
+   * DOES serve it (`preload/index.ts`), and `main/__acceptance__/quick-tags-seam.test.ts` is the
+   * assertion that stands in for the type until those harnesses catch up.
+   *
+   * It resolves to `[]` on a till whose org has configured no tags, which is the same rendered
+   * absence — see `packages/device-config`'s `quick-tags.ts` for why no starter list is shipped.
+   */
+  quickTags?: () => Promise<string[]>;
   append: (req: AppendRequest) => Promise<AppendResult>;
   /** `C5`/`01-F60` — main resolves the price; no money crosses this call. */
   addLine: (req: AddLineRequest) => Promise<AppendResult>;

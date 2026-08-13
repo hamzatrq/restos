@@ -81,9 +81,34 @@ export const Cart = ({ lines, totalPaisa, onRemove }: CartProps) => {
                   border: `1px solid ${color["fgColor-status-fault"]}`,
                   borderRadius: space["space-1"],
                   cursor: "pointer",
+                  // The word has to fit beside the mark on the smallest panel this ships to, and
+                  // the label typography is what every other control on this surface uses.
+                  fontFamily: label.fontFamily,
+                  fontSize: label.fontSize,
+                  fontWeight: 600,
+                  whiteSpace: "nowrap",
                 }}
               >
-                ×
+                {/*
+                  `27-F5` requires "a persistent, visible, **labelled** target". The `aria-label`
+                  above is a label to a screen reader and not to a cashier, so it does not
+                  discharge the FR on its own — and this control shipped as a bare `×` until
+                  August 2026, which is a pictogram carrying the meaning alone (`27-F60`, and
+                  `27 §2b` records that no Pakistan-specific pictogram comprehension data exists).
+
+                  The word is `NO` because it is already this platform's word for a removal, in
+                  both places one appears: `QuantityItemLine` renders `✕ NO <name>` two files over,
+                  and `packages/escpos`'s KOT uses `REMOVAL_MARKER = "NO"` with the reason stated.
+                  A cashier and a cook must not learn two words for one act — `03-F40`'s two
+                  sensor bit layouts is this corpus's own worked example of what one fact with two
+                  readings costs. Reading down the row, `NO` + `1 Coke` is the sentence the cook
+                  gets on the chit.
+
+                  `aria-hidden` on the mark for the same reason it is hidden on the removal band:
+                  the accessible name is the `aria-label`, and a glyph read aloud as "multiplication
+                  sign" is noise on top of it.
+                */}
+                <span aria-hidden="true">{"✕"}</span> NO
               </button>
             ) : null}
           </div>

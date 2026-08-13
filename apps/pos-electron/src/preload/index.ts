@@ -28,6 +28,10 @@ const bridge: RestosBridge = {
   // band is the ONLY signal that food is not being cooked.
   alarms: () => ipcRenderer.invoke(CHANNELS.alarms),
   acknowledgeAlarm: (alarm_id) => ipcRenderer.invoke(CHANNELS.acknowledgeAlarm, alarm_id),
+  // `02-F6`/`02-F50` — the org's kitchen quick-tags. Optional on the contract, always served
+  // here, for the reason `cashState` and `alarms` record above: this bridge is the one main
+  // actually ships, and in Wave 1 this list is `C7`'s only input (`27-F6`).
+  quickTags: () => ipcRenderer.invoke(CHANNELS.quickTags),
   append: (req) => ipcRenderer.invoke(CHANNELS.append, req),
   addLine: (req) => ipcRenderer.invoke(CHANNELS.addLine, req),
   // `02-F7` — the 86. Optional on the contract, always served here, for the reason `cashState`

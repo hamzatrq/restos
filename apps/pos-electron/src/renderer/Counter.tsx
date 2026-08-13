@@ -454,6 +454,21 @@ export const Counter = () => {
    */
   const [callerRevision, setCallerRevision] = useState(0);
   /**
+   * `02-F6`/`02-F50` — the org's kitchen quick-tags, and in Wave 1 `C7`'s ONLY input.
+   *
+   * **Read ONCE, in its own effect, and deliberately NOT inside `reload()`.** Measured: putting it
+   * in the counter's reload spends an IPC round trip per ledger event — every line, every payment,
+   * every peer's event — for a `00 §7` layer-2 value that only moves when an owner edits it and
+   * for which there is no `changed` push at all. That is also why `CHANNELS.quickTags` is its own
+   * channel rather than a field on `DeviceState` (`shared/ipc.ts` records the same argument from
+   * the other end).
+   *
+   * `[]` on a host that does not serve the member, which is the same rendered absence as an org
+   * that has configured none: no tag row, and `C7` unavailable rather than broken (`01-F17` —
+   * nothing about a note blocks a sale).
+   */
+  const [quickTags, setQuickTags] = useState<readonly string[]>([]);
+  /**
    * `02-F1` / `01 §4` / `02-F11` — **WHICH open order this till is working on.**
    *
    * ⚠ **This was `orders[0]`, and it was the contributing defect behind `DEC-MONEY-009`.** Two
@@ -507,6 +522,19 @@ export const Counter = () => {
    */
   const current = orders.find((o) => o.order_id === cartOrderId) ?? orders[0];
   const menuChannel = current?.channel ?? pendingChannel ?? GRID_PREVIEW_CHANNEL;
+  /**
+   * `02-F6`'s note target — the LAST line in the cart, which is the last row drawn and therefore
+   * the row the tag tiles sit directly under. See `addNote` for why this line and not a selected
+   * one, and for the alternative that was refused.
+   *
+   * The cart's order is the fold's: `json_lines` is canonical (keys sorted) and a `line_id` is a
+   * UUIDv7 minted at the add, so the last key IS the last dish rung. That is a DISPLAY reading of
+   * an id and not a fold one — no projected value depends on it (`01-F34`), and if it were ever
+   * wrong the consequence is a note on the wrong row of a list the operator is looking at, which
+   * she can see. `undefined` on an empty cart: there is no dish to qualify, and `02-F6` is an
+   * ITEM note.
+   */
+  const lastLine = current?.lines[current.lines.length - 1];
 
   const reload = useCallback(async () => {
     // Three reads, never a join in the renderer: the folds already hold these projections and
@@ -544,6 +572,14 @@ export const Counter = () => {
     // push that carried rows would be a second source of truth for what the folds already own.
     return window.restos.onChanged(() => void reload());
   }, [reload]);
+
+  /**
+   * `02-F6`'s tag list, asked ONCE. An empty dependency list is the whole point — see `quickTags`
+   * above for the measurement. A host that does not serve the member leaves the state at `[]`.
+   */
+  useEffect(() => {
+    void (window.restos.quickTags?.().catch(() => []) ?? Promise.resolve([])).then(setQuickTags);
+  }, []);
 
   /**
    * `02-F27`'s lookup — *"customer file lookup by normalized phone"* — asked **per keystroke**.
@@ -874,6 +910,78 @@ export const Counter = () => {
       })
       .catch(() => setCallerRefused(true))
       .then(reload);
+  };
+
+  /**
+   * `C8` / `02-F8` — take one line off the order, ~10–25× a shift.
+   *
+   * **Over the generic `append`, not a channel of its own.** `addLine`, `toggleAvailability` and
+   * `recordCustomer` each earned a dedicated channel for ONE stated reason: the event needs a
+   * field the renderer must not supply (a price, a `01-F57` supersedes head, a `01-F23` key). A
+   * removal needs none — `{order_id, line_id}` are both facts this screen already holds and the
+   * fold already published, and there is nothing a compromised renderer could gain by naming a
+   * different line than it could by tapping a different row. So it rides `append`, which is where
+   * `main/authorize.ts` gates it (commandment 8) and where `02-F49`'s confirm guard sits.
+   *
+   * **Plain `write` and not `escalatableWrite`.** `02-F8` calls the pre-confirm removal a plain
+   * event and `02-F49` maps it to `order.create`, which has no `escalate` cell — a pad here could
+   * never succeed. The POST-confirm refusal is a different act (`void.recorded`) and `02-F49`
+   * requires the escalation to remain reachable for it; that path is owed with the surface that
+   * offers a void, and until then the refusal reaches the operator as the counter re-reading and
+   * showing the line still there. Named rather than left to look intentional.
+   *
+   * No confirmation step, deliberately: `02-F37` keeps anything from coming between the cashier
+   * and the customer, `27-F10` wants the act complete inside the perceptual threshold, and
+   * `02-F49` rules that the remedy for a mis-tap is re-adding the item — one tap of the surface's
+   * most practised gesture. A modal on a 10–25× act is the friction that teaches an operator to
+   * work around the control.
+   */
+  const removeLine = (line_id: string) => {
+    if (current === undefined) return;
+    write(
+      window.restos.append({
+        type: "order.line_removed",
+        // `02-F8`'s *plain* event: no money and no approver. A screen that sent an `amount_paisa`
+        // would be pricing a correction on the untrusted side of `18 §9`'s bridge; one that sent
+        // an `approver_user_id` would be asserting an approval nobody gave.
+        payload: { order_id: current.order_id, line_id },
+        refs: [],
+      }),
+    );
+  };
+
+  /**
+   * `C7` / `02-F6` / `02-F50` — send the kitchen an instruction about a dish, ~10–40× a shift.
+   *
+   * **TAPPED, never typed.** `27-F6`'s test is *"whether a non-typing operator can complete the
+   * task by another route"* and 24 of 27 field subjects could not type a single word, so the pick
+   * list is the primary surface rather than a fallback. `02-F50` defers `02-F6`'s free-text half
+   * entirely with `03-F8`'s reason: a typed Urdu note makes the encoder refuse the whole ticket,
+   * the sale completes and the food is never cooked.
+   *
+   * **The note lands on the LAST line in the cart, which is the row immediately above this row.**
+   * No FR decides which line a tapped tag qualifies, and the alternative — select a cart line
+   * first — is genuinely defensible; it is refused because it adds a tap to a 10–40× act
+   * (`02-F2`: *"≤ 2 taps from grid to confirm"*) and a selection state to the surface `27-F5` is
+   * strictest about. The last line rung is where the conversation is: a customer says *"less
+   * spicy"* about the dish just named back to her. **Position is what carries it** (`00 §5.6`):
+   * the tag row is drawn under the cart's last item and indented like a modifier, which is the
+   * same visual grammar `QuantityItemLine` already uses for *"this belongs to the dish above"*.
+   *
+   * Tags ACCUMULATE — two taps are two `order.note_added` events and the fold keeps both
+   * (`26 §7` M2). A pick list whose second tap erased the first would silently discard an
+   * instruction, and `27-F59`'s reasoning about removals (*"an allergen incident, not a
+   * preference miss"*) applies with full force to *"no peanuts"*.
+   */
+  const addNote = (line_id: string, note: string) => {
+    if (current === undefined) return;
+    write(
+      window.restos.append({
+        type: "order.note_added",
+        payload: { order_id: current.order_id, line_id, note },
+        refs: [],
+      }),
+    );
   };
 
   /**
@@ -1909,20 +2017,99 @@ export const Counter = () => {
           never a separate screen, never collapsed", because it is the operator's working
           memory while she is ringing. Settling moved to the Pay tab; see `paySurface` above
           for the measurement that forced it.
+
+          ⚠ **THE COLUMN AROUND IT IS NOT DECORATION AND WAS ADDED BY LOOKING.** `C7`'s tag row
+          was first written as a sibling of the cart, which made it a THIRD child of this row —
+          so it rendered in the empty space to the RIGHT of the cart, 260 px from the dish it
+          qualifies, and widened the row enough to clip `netbook-1024` by 5 px. Every one of the
+          981 renderer tests passed: happy-dom performs no layout, so "the tag button is in the
+          document" was all any of them could say. Caught on the gate's first screenshot, which
+          is this repo's ninth layout defect found by looking and its tenth overall.
         */}
-          <Cart
-            lines={(current?.lines ?? []).map((l) => ({
-              id: l.line_id,
-              name: l.name,
-              quantity: l.quantity,
-              modifiers: l.modifiers,
-              removals: l.removals,
-              ...(l.note === null ? {} : { note: l.note }),
-            }))}
-            // The total is the ENGINE's own derivation, carried across the IPC seam as branded
-            // integer paisa and never re-summed here (00 §6, 26 §8).
-            totalPaisa={paisa(current?.total_paisa ?? 0)}
-          />
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: space["space-2"],
+              minHeight: 0,
+            }}
+          >
+            {/*
+              ⚠ **THE `flex: 1` ROW BOX AROUND THE CART IS LOAD-BEARING AND WAS ADDED BY
+              MEASURING.** The cart used to be a direct child of the surface's flex ROW, so it
+              stretched to the full working height; wrapping it in a COLUMN to hang the tag row
+              off made it size to its own content instead, and the whole Order surface became
+              top-anchored. That is not cosmetic — `layout:check`'s composition axis went from 1
+              violation to 14, every one an `ANCHORED y` on the `caller` surfaces where the left
+              column is short and the cart was the only thing holding the vertical axis open
+              (`desktop-24 caller`: 248 px of content with 684 dp of slack under it, 72% of the
+              axis). A row-direction box with the default `alignItems: stretch` gives the cart its
+              height back, and `flex: 1` + `minHeight: 0` is what lets it yield exactly the tag
+              row's height rather than pushing it off the glass.
+            */}
+            <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+              <Cart
+                lines={(current?.lines ?? []).map((l) => ({
+                  id: l.line_id,
+                  name: l.name,
+                  quantity: l.quantity,
+                  modifiers: l.modifiers,
+                  removals: l.removals,
+                  ...(l.note === null ? {} : { note: l.note }),
+                }))}
+                // The total is the ENGINE's own derivation, carried across the IPC seam as
+                // branded integer paisa and never re-summed here (00 §6, 26 §8).
+                totalPaisa={paisa(current?.total_paisa ?? 0)}
+                /*
+                  `C8`/`02-F8` — **this prop is what the whole track turned on.** `Cart` has
+                  declared `onRemove` since it was written and this line never passed it, so the
+                  component rendered no control at all: a prop, a `27-F9` comment about where a
+                  destructive target may sit, styling, and no way for a cashier to reach any of
+                  it. The wave's named recurring defect at its smallest — one argument.
+                */
+                onRemove={removeLine}
+              />
+            </div>
+            {/*
+              `C7`/`02-F6`/`02-F50` — the quick-tag pick list, drawn directly under the cart.
+
+              `27-F5`'s persistence is honoured the way it can be here: the row is present whenever
+              there is a dish to qualify and the org has configured tags, and its ABSENCE is the
+              absence of the whole row rather than a row of inert controls — a tag tile that did
+              nothing would be the "control that appears and disappears" failure wearing the other
+              costume, and `01-F17` means nothing about a note may reach the sale.
+
+              The tag lands on `lastLine` — see `addNote` for why the last line rung and not a
+              selected one. **What makes that readable without a sentence is the FEEDBACK, not a
+              label**: the note appears under its dish in the cart immediately above, in
+              `QuantityItemLine`'s own note row, so the operator sees where it went (`21 §5`:
+              icons + numbers dominant, minimal words; `00 §5.6`: memorized position).
+            */}
+            {lastLine === undefined || quickTags.length === 0 ? null : (
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  // `27-F59`'s indent, the same one `QuantityItemLine` gives a modifier: this row
+                  // belongs to the cart above it and reads as subordinate to it.
+                  paddingLeft: space["space-6"],
+                }}
+              >
+                {quickTags.map((tag) => (
+                  <Tile
+                    key={tag}
+                    // `27-F8`'s standing-counter minimum. NOT `keypad`: that row is
+                    // "high-consequence NUMERIC entry" and spending 20 mm of the tightest
+                    // vertical budget on the screen here is what pushes the pad off the glass.
+                    posture="counter"
+                    label={tag}
+                    onPress={() => addNote(lastLine.line_id, tag)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </AppShell>

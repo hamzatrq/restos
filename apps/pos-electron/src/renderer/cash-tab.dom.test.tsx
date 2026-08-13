@@ -199,6 +199,15 @@ const mountWith = (
     // distinguish a shell read from a Cash-surface read; what it catches is a surface inventing
     // a channel, and every other name still trips it.
     alarms: vi.fn(async () => []),
+    // ── AMENDED August 2026 (C7 — 02-F6/02-F50's quick-tag pick list) ────────────────────
+    // The SAME amendment as `alarms` directly above, for the same reason and with the same
+    // limit: `quickTags` is a member of `RestosBridge` read ONCE by the SHELL's own effect, so
+    // this harness cannot distinguish it from a Cash-surface read and never could. The guard is
+    // not weakened — it asserts "reached for an *unknown* bridge member", and every other name
+    // still trips it. `async () => []` is what a real host with no configured tags serves
+    // (`02-F50`, `packages/device-config`'s `quick-tags.ts`), so the Cash surface below is
+    // measured against a till whose org has configured none.
+    quickTags: vi.fn(async () => []),
     append: vi.fn(async (req: AppendRequest) => {
       appended.push(req);
       const reject = overrides.appendRejects;

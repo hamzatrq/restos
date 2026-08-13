@@ -25,6 +25,7 @@ import {
   ToggleAvailabilityRequestSchema,
 } from "../shared/ipc";
 import { normalizeDialledPhone } from "./customer-phone";
+import { assertRemovableLine } from "./line-removal-guard";
 import type { PanelFit } from "./window-options";
 
 /**
@@ -253,7 +254,39 @@ const CATALOG_REFUSAL_WORDS: Record<string, string> = {
 const catalogRefusalWords = (reason: string): string =>
   CATALOG_REFUSAL_WORDS[reason] ?? `this till refused the menu it was sent (${reason})`;
 
-type LineCell = { item_id: string; qty: number; unit_price_paisa: number; states: string[] };
+type LineCell = {
+  item_id: string;
+  qty: number;
+  unit_price_paisa: number;
+  states: string[];
+  /**
+   * `02-F6`'s item notes, as the merge fold projects them (`26 §7` M2): a text-deduplicated,
+   * text-sorted set. Absent on a line with none — the fold spreads the key conditionally, so
+   * `undefined` and "no notes" are the same fact and neither is an error.
+   */
+  notes?: string[];
+};
+
+/**
+ * `02-F6`'s notes as ONE line of glass and ONE row of paper.
+ *
+ * The fold hands over a SET because the kernel must not take a presentation decision (`03-F55`
+ * puts the chit's arrangement in `packages/escpos`), and `OpenOrder.lines[].note` is one string
+ * because `QuantityItemLine` renders one row per line and `KotLine.note` is one row of its item
+ * block. So the join happens HERE, in the host app, which is where a presentation decision
+ * belongs — not in `merge.ts` and not in the renderer (`18 §9`: the words a screen shows are
+ * assembled on the trusted side).
+ *
+ * `" / "` and not a bullet or a comma: pure ASCII, so the separator itself can never be the thing
+ * that trips `03-F8`'s `raster_font_unavailable` and costs a kitchen its whole ticket — the note's
+ * own content may still do that, which is `02-F50`'s stated residual and the reason Wave 1's input
+ * is a bounded pick list.
+ *
+ * `null` for a line with no notes, because `OpenOrderSchema` declares the field nullable and the
+ * cart's CONTROL is that a line with nothing to say renders no note row at all (`00 §5.7`).
+ */
+const noteFrom = (notes: readonly string[] | undefined): string | null =>
+  notes === undefined || notes.length === 0 ? null : notes.join(" / ");
 
 /**
  * One saved address as the `customer_file` fold projects it into `addresses_json` (`02-F27`'s
@@ -271,12 +304,18 @@ const linesFrom = (jsonLines: string, catalog: CatalogResolver): OpenOrder["line
     // complete the sale and the only thing lost is a word.
     name: catalog(cell.item_id)?.name ?? cell.item_id,
     quantity: cell.qty,
-    // The read models carry no modifier or note detail yet; these arrive with doc 02's
-    // event work. Empty is honest, whereas inventing them here would be a fold reimplemented
-    // outside the engine (26 §8).
+    // The read models carry no MODIFIER detail yet; that arrives with `02-F3`'s line composition.
+    // Empty is honest, whereas inventing them here would be a fold reimplemented outside the
+    // engine (26 §8).
     modifiers: [],
     removals: [],
-    note: null,
+    /**
+     * `02-F6` — **this was a hardcoded `null` until August 2026, and it was the whole gap.**
+     * `OpenOrderSchema.lines[].note` was declared, `Counter.tsx` forwarded it and
+     * `QuantityItemLine` rendered it; one literal here stood between a cashier's tap and the
+     * cook's ticket. The wave's named recurring defect at its smallest.
+     */
+    note: noteFrom(cell.notes),
   }));
 
 /**
@@ -646,6 +685,12 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
     // even though we ship it: a buggy or compromised renderer must not be able to hand the
     // store a shape it did not expect.
     const parsed: AppendRequest = AppendRequestSchema.parse(req);
+    // `02-F49` — `02-F8`'s confirm boundary, BEFORE the envelope is built. One synchronous read of
+    // this device's own projection; no peer, no lock, no clock, no network (`00 §5.1`). It refuses
+    // only a `order.line_removed` against an order this device already holds as confirmed — the
+    // POST-confirm act is a `void.recorded` with an approver and still lands, which is what keeps
+    // the correction path open (`01-F17`). See `line-removal-guard.ts`.
+    assertRemovableLine(parsed, deps.store);
     const identity = deps.store.identity;
     const envelope = deps.store.append({
       id: newId(),
