@@ -101,9 +101,14 @@ const TABS: readonly Tab[] = [
    * **The label is `Sold out` and not `86`.** The jargon is what `02-F40` and the FRs use, but
    * `00 §5.6` is English-only UI and 86 is American restaurant slang with no standing in
    * Pakistan; `21 §5` puts the operator at plausibly non-reading, and two digits she has to be
-   * TAUGHT are worse than two words she may already know. The tile state still reads `86` — that
-   * word is on the tile because `gateway.menu()` writes it, and changing the fold's vocabulary
-   * is not this surface's call.
+   * TAUGHT are worse than two words she may already know.
+   *
+   * ⚠ **This comment used to end *"The tile state still reads `86` … changing the fold's
+   * vocabulary is not this surface's call"* — the argument was made here, shipped here, and
+   * then not carried one layer down, so the tab said `Sold out` and the tiles behind it said
+   * `86`.** `02-F51` (founder ruling, August 2026) settles it: the word is written ONCE, in
+   * `gateway.menu()`'s display join, and every surface on this device reads that one answer.
+   * Nothing about the EVENT vocabulary changed — the jargon stays in the corpus.
    */
   { id: "soldout", label: "Sold out" },
 ];
@@ -1632,12 +1637,18 @@ export const Counter = () => {
                     // disagree and the fold refused to pick a winner (`01-F31`). It resolves to
                     // unavailable, and one tap here supersedes ALL heads at once, which is what
                     // makes it clearable in a single operator act.
-                    ...(i.sold_out === true
-                      ? {
-                          unavailable: true,
-                          unavailableReason:
-                            i.contested === true ? "Sold out — disputed" : "Sold out",
-                        }
+                    //
+                    // ⚠ **`02-F51` — THE WORD IS TAKEN FROM THE JOIN, NOT WRITTEN AGAIN HERE.**
+                    // This surface used to compose its own `Sold out` / `Sold out — disputed`
+                    // from `sold_out`/`contested` while `gateway.menu()` composed `86` /
+                    // `86 — disputed` from the SAME two fold facts — one state, two vocabularies,
+                    // one device, which is the `02-F45` shape (a second source for one fact).
+                    // Fixing only the string would have left the second source in place and the
+                    // two surfaces free to drift again; taking the reason from the join makes
+                    // them one answer by construction. The CONDITION stays `sold_out`, because
+                    // `01-F60`'s unpriced reason must never grey a tile on `02-F7`'s surface.
+                    ...(i.sold_out === true && i.unavailableReason !== undefined
+                      ? { unavailable: true, unavailableReason: i.unavailableReason }
                       : {}),
                   }))}
                   posture="counter"
