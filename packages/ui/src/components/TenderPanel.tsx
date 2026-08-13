@@ -1,5 +1,6 @@
 import { PAYMENT_METHODS, type Paisa, type PaymentMethod, paisa, subPaisa } from "@restos/domain";
 import { useState } from "react";
+import { IconLabel } from "../icons/index";
 import { type SurfaceMode, useSurfaceMode } from "../surface-mode";
 import { useColor } from "../theme";
 import { space, targetFor, typography } from "../tokens/index";
@@ -287,7 +288,28 @@ export const TenderPanel = ({ dueP, takenP = paisa(0), onTender }: TenderPanelPr
                   cursor: "pointer",
                 }}
               >
-                {METHOD_LABEL[m]}
+                {/*
+                  `27-F34` — **this row is the exact case that FR is about.** It validates by
+                  MUTUAL DISTINCTNESS, not individual clarity: *"an icon fails if it draws taps
+                  meant for a co-displayed sibling"*, and here five tenders sit side by side on
+                  the highest-consequence surface on the counter. `27-F31`'s participants are the
+                  people pressing them — locally drawn pictograms scored 20 of 23 against 11 of
+                  23 for imported ones — and `27-F30` is why no set was installed to fill this
+                  row.
+
+                  **The word stays, and it stays because `27-F35`'s gate has not been run.** The
+                  symbol is added beside `CASH`/`CARD`/`RAAST`/`KHATA`/`AGGREGATOR`, never in
+                  place of one. `aggregator_receivable` earns its symbol here even though a
+                  cashier never taps it as a tender: `C33` shows one numeric field per method at
+                  shift close, and a row with no symbol among four that have one is the row she
+                  cannot name.
+
+                  It costs no height. The button is already at `targetFor("counter")` = 76 dp and
+                  the pairing closes at ~41 dp inside 60 dp of content box, so no control on this
+                  surface moves (`27-F4`) and the `MONEY_COLUMN_DP` floor that stops this row
+                  wrapping is untouched — the icon sits above the word, not beside it.
+                */}
+                <IconLabel name={m} label={METHOD_LABEL[m]} size="text-label" />
               </button>
             );
           })}

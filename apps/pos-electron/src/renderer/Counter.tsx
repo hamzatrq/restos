@@ -3,6 +3,7 @@ import {
   AppShell,
   Cart,
   formatPaisa,
+  type IconName,
   ItemGrid,
   Readout,
   space,
@@ -163,7 +164,19 @@ const STATE_LINE: React.CSSProperties = {
 export const isAlreadySettled = (order: Pick<OpenOrder, "total_paisa" | "paid_paisa">): boolean =>
   order.total_paisa > 0 && order.paid_paisa >= order.total_paisa;
 
-const ORDER_TYPES: readonly { id: string; label: string }[] = [
+/**
+ * `27 §5` — **`id` is typed `IconName`, so the compiler asks the question `27-F34` asks.**
+ *
+ * These three tiles are co-displayed and are chosen ~75x a shift by an operator `21 §5` puts at
+ * plausibly non-reading, which is exactly the population `27-F31` measured (locally drawn
+ * pictograms 20 of 23, imported ones 11 of 23). A fourth row added here with an id outside the
+ * vocabulary would be a tile with no symbol standing beside three that have one — the row nobody
+ * can identify — and that is now a type error rather than something to notice on a screenshot.
+ *
+ * The word is unchanged and still rendered: `27-F35`'s comprehension gate has not been run, so
+ * the symbol accompanies `Dine-in`, it does not replace it.
+ */
+const ORDER_TYPES: readonly { id: IconName; label: string }[] = [
   { id: "dine_in", label: "Dine-in" },
   { id: "takeaway", label: "Takeaway" },
   { id: "delivery", label: "Delivery" },
@@ -199,7 +212,7 @@ const ORDER_TYPES: readonly { id: string; label: string }[] = [
  * stated: one extra tap on the counter's second-most-frequent act. **Flagged for founder review
  * as a pinned interpretation, not a transcription** — the ruling was made about `order_type`.
  */
-const ORDER_CHANNELS_AT_COUNTER: readonly { id: string; label: string }[] = [
+const ORDER_CHANNELS_AT_COUNTER: readonly { id: IconName; label: string }[] = [
   { id: "counter", label: "Counter" },
   { id: "phone", label: "Phone" },
   { id: "foodpanda", label: "Foodpanda" },
@@ -1797,6 +1810,7 @@ export const Counter = () => {
                   key={t.id}
                   posture="counter"
                   label={t.label}
+                  icon={t.id}
                   /*
                     `DEC-MONEY-009`'s contributing defect, and this is the half that made the
                     double settlement easy to reach. These three tiles were greyed by
@@ -1910,6 +1924,7 @@ export const Counter = () => {
                   key={c.id}
                   posture="counter"
                   label={c.label}
+                  icon={c.id}
                   selected={pendingChannel === c.id}
                   onPress={() => {
                     setPendingChannel(c.id);

@@ -148,6 +148,36 @@ implementation going red: base64 draws on `[A-Za-z0-9+/]`, so `ss02` occurs by c
 assumed), so the UI's own symbols are OS glyphs permanently and a residue of platform-dependent
 metrics survives there. An icon component, not a bigger font, is the fix if it matters.
 
+**That component now exists — `src/icons/` (`27-F30`..`27-F37`, August 2026) — and it has NOT
+been pointed at those five glyphs yet.** `backspace` and `clear` are drawn and in the vocabulary,
+and `NumericKeypad` still renders `⌫` and the letter `C`, deliberately: that pad is the most
+position-and-content-dependent surface in the product (`27-F4`), swapping a key's content is a
+change an operator has to re-learn, and `27-F35`'s comprehension gate has not been run. It is the
+obvious next wiring and it is a decision, not a chore.
+
+### `src/icons/` — the icon vocabulary (`27 §5`)
+
+Twenty drawings on one 24-unit grid, inline SVG, `currentColor` only, sized from a type token.
+**Read the module header before touching it** — the evidence (42.2% on ISO 7010, 20-of-23 vs
+11-of-23) is what decides why nothing is installed here.
+
+Three things a reader should know without opening it:
+
+1. **`Icon` is not exported from this package's barrel; `IconLabel` is.** `27-F35`'s ≥85%
+   comprehension / ≤5% critical-confusion retest with real staff **has not been run**, so a
+   pictogram may accompany a word and may never replace one. There is no prop that hides the
+   word and a blank label throws. Exporting `Icon` is how that law gets skipped.
+2. **Four drawings shipped wrong and were caught by LOOKING, not by the 44 tests.** `takeaway`
+   rendered as a *rubbish bin*, `sold_out` as a *bow tie*, `phone` as a *printer* and then as a
+   *castle*, `dine_in` as a *park bench*. Every one passed the whole suite: line drawings, on the
+   grid, in the mark band, distinct from every sibling. **A drawing is a claim about what a
+   person will see and no assertion in this package can check it.** Render the set and look.
+3. **The symbol is ONE type step above its word, and the ceiling is measured.** Two steps
+   (36 dp) fits a 76 dp tile and still failed `layout:check` — `[tablet-10.1 caller] 571px in a
+   567px box`, a new violation on the tightest panel in `27 §1a`. One step is 24 dp / 3.8 mm and
+   clears every panel. If staff cannot read a symbol at that size the answer is a simpler
+   drawing, not a bigger number.
+
 ### ⚠ THE COMPOSITE IS SPENT APART 34 TIMES OUT OF 36 — found while chasing the last 3 dp, OWED
 
 Bundling the face made macOS and Linux agree on almost everything (`layout:check` went **44 fatal
