@@ -435,6 +435,17 @@ export const Counter = () => {
    * 27-tile wall that argument was written about. `Send to kitchen`'s `no order started` stays on
    * its own tile because it describes exactly one control.
    *
+   * **The other half of the choice is MEASURED, and the number is here rather than in a commit
+   * message so it stays checkable.** `Tile` folds a reason into its accessible name
+   * (`${label} — ${reason}`), so the tile variant renames all three controls — and pre-existing
+   * suites address them with anchored matchers like `/^Takeaway$/i` in states where no channel is
+   * latched. Applying `unavailableReason: "no channel"` to these three tiles and running
+   * `pnpm -C apps/pos-electron test` fails **11 tests across 3 files** — `channel-and-soldout`,
+   * `double-settlement` and `unlock-gate` — none of which is defending anything `02-F49`
+   * overrules. Restated because the first draft of this decision claimed "~15 across six suites"
+   * from a grep of matcher SITES rather than from a run: a site is not a failure, the same way
+   * `AGENTS.md`'s own correction records that a mention is not an import.
+   *
    * It is a BOOLEAN and the words are composed at the render site, so the reason cannot drift
    * from the branch that produced it (`00 §5.7`).
    */
