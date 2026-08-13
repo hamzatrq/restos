@@ -9,7 +9,8 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./aging": "./src/aging.ts"
+    "./aging": "./src/aging.ts",
+    "./device-identity": "./src/device-identity.ts"
   },
   "dependencies": {
     "@restos/domain": "workspace:*"

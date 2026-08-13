@@ -46,7 +46,7 @@ import {
   type CatalogStore,
   createCatalogStore,
 } from "../catalog.js";
-import { openStore } from "../device-store.js";
+import { openStore } from "../store.js";
 
 const identity = { org_id: "org1", branch_id: "br1", device_id: "dev1" };
 

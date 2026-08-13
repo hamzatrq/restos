@@ -3,6 +3,12 @@
 // folds v1 per FOLDS.md (01-F6/F10/F34, 01-N1); T-01-05 lands hub election + the
 // LAN mesh session over the injected transport seam (01-F12/F13/F15;
 // plans/wave-0/kernel-tasks.md, HUB-ELECTION.md).
+//
+// ⚠ THIS ROOT ENTRY IS THE NODE / ELECTRON DOOR. It exports `createNodeStorageAdapter` and so
+// reaches `better-sqlite3`, a native addon Metro cannot bundle. React Native imports
+// `@restos/sync-client/rn` (`18 §4`'s second engine) and the cloud Auditor imports
+// `@restos/sync-client/fold-engine`; both exist so that a host taking one capability does not
+// take the other's native dependency with it.
 
 export {
   CATALOG_SCHEMA,
@@ -35,12 +41,12 @@ export {
   AckBeyondAppendedError,
   type AppendInput,
   type BranchTimeStatus,
+  createDeviceStore,
   type DeviceStore,
   DivergentDuplicateError,
   type IngestBatchResult,
   type IngestResult,
   type IngestStats,
-  openStore,
   type PageItem,
   type PageResult,
   SKEW_FLAG_THRESHOLD_MS,
@@ -101,5 +107,12 @@ export {
   type StaffSnapshot,
   type StaffUpdate,
 } from "./staff.js";
+export type { SqlValue, StorageAdapter, StorageStatement } from "./storage.js";
+export { createNodeStorageAdapter } from "./storage-node.js";
+export { createOpSqliteStorageAdapter, type OpSqliteDb } from "./storage-op-sqlite.js";
+// `18 §4`'s storage adapter: the port, the two drivers' Node half, and the door that resolves a
+// `{ path }` to it. The RN half is `./rn` — deliberately NOT re-exported here, because reaching
+// it through this entry would put `better-sqlite3` back in a phone's bundle.
+export { type OpenStoreOptions, openStore } from "./store.js";
 export { createWsCloudTransport, createWsLanTransport } from "./transport-ws.js";
 export { wallClock } from "./wall-clock.js";

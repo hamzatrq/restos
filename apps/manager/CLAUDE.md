@@ -8,9 +8,20 @@
   surface, because only a device holding a `01-F26` PIN session can author `approval.granted`
   with the approver on the envelope (`02-F41`). A cloud-plane web console cannot legally emit
   **any** event this module owns — `05-F28` has the measurement, and it stands.
-- **This app is a running Expo project with ONE screen, and that screen is a FEASIBILITY PROBE,
-  not the console.** `pnpm -C apps/manager start` is real. What it renders is `src/probe.ts`'s
-  measurements, for the reasons under "still blocked" below.
+- **⚠ THE SCREEN IS NO LONGER ONLY A PROBE (August 2026). It holds a REAL branch slice.**
+  `18 §4`'s storage adapter landed (`packages/sync-client/src/storage.ts` + `rn.ts`), so this app
+  opens a real device store on `@op-engineering/op-sqlite`, fills it over the cloud path
+  (`05-F29`), and draws `05-F1`/`05-F3`'s alarms off the real fold — order, channel, table, age,
+  printer. `src/branch.ts` is the composition root; `src/home.ts` stays import-pure so its model is
+  still testable under Node. The probes are still on the screen below the alarms; they measure a
+  runtime, not a product surface.
+  **Measured: `pnpm -C apps/manager bundle:check` → 699 modules, 2.6 MB Hermes bytecode, exit 0.**
+- **⚠ WHAT IS STILL SEEDED — read `src/branch.ts`'s header before calling this finished.** Identity
+  and the device credential come from `EXPO_PUBLIC_*`, i.e. from the BUILD: `01-F25`'s pairing
+  screen does not exist and `provision-device` needs shell access on the gateway host, which a
+  phone has not. `18 §8` wants `expo-secure-store` for the token; adding it before there is any way
+  to FILL it would be a correct subsystem with no seam. And there is **no PIN session** here, so
+  this device reads the branch and can author nothing — `05-F30`'s ack still has no producer.
 - **`05-F1`/`05-F3`/`05-F4`'s alarm DERIVATION landed August 2026 (`src/alarms.ts`), with
   `05-F22`/`05-F23`'s home model (`src/home.ts`) and 46 acceptance tests.** Both are pure; the
   bundle is **682** modules / 2.49 MB of Hermes bytecode — **re-measured 2026-08-12 after
@@ -38,13 +49,21 @@
 
 ## ⚠ Do not build the console yet, and do not build it against a stub
 
-Two things are missing, and neither is work this app can do inside its own directory. Building
-a queue screen against hand-made data would be AGENTS.md's recurring defect shipped on purpose.
+⚠ **BLOCKER 1 IS CLOSED (August 2026) AND IS KEPT HERE AS THE WORKED EXAMPLE, struck rather than
+deleted.** It read: *"`packages/sync-client` cannot open a store on this platform … `05-N5`
+requires the approval queue to survive app kill/restart … there is nothing to re-derive from, so
+the queue cannot be built correctly here today at all."* True when written, and the right call not
+to fake it. `18 §4`'s adapter closed it: this app opens a real store, and `05-N5`'s re-derivation
+is asserted over a real file that is closed and reopened. **Blocker 2 stands.**
 
-1. **`packages/sync-client` cannot open a store on this platform.** See the next section.
-   `05-N5` requires the approval queue to "survive app kill/restart without loss — they are
-   folds over the branch stream, re-derived on start (`01-F6`)". There is nothing to re-derive
-   from, so the queue cannot be built correctly here today at all.
+1. ~~`packages/sync-client` cannot open a store on this platform.~~ **CLOSED.** The port is
+   `packages/sync-client/src/storage.ts`; the RN driver is `storage-op-sqlite.ts`; the door is
+   `@restos/sync-client/rn`. ⚠ **op-sqlite is a TurboModule, so this app needs a custom dev client
+   / EAS build from now on — Expo Go cannot run it.** That is a constraint on the developer LOOP,
+   not on the shipped app (`18 §1`/`§8` put every Expo app on dev clients + EAS anyway), and
+   `18 §14` already allowlists the package. If *"pure-JS installable"* was ever meant to mean
+   *"runs in Expo Go"*, that reading and `18 §4`'s *"RN: `@op-engineering/op-sqlite`"* cannot both
+   stand — a founder call, reported rather than worked around.
 2. **`packages/ui` ships no RN components.** `18 §2` specifies it as an "RN component kit +
    design tokens (web consumes tokens only)" and **the repo built the inverse** — all 18
    exported components render React DOM (`packages/ui/src/components/*.tsx`). `21-F2` bans raw
@@ -60,15 +79,19 @@ turns vertical, which does not fit 69 mm of width. `apps/pos-electron`'s layout 
 `phone-6.5` out for the same reason. Whoever builds this module builds the first genuinely
 portrait surface, and `27-F11b` (~12 comfortable tiles) is the sizing input.
 
-## The storage port: what is needed, and how much already exists
+## The storage port: BUILT (August 2026). This section is the brief it was built from.
 
-`openStore` (`packages/sync-client/src/device-store.ts:446`) takes a `path` and constructs
-`new Database(path)` from **better-sqlite3** directly — a Node/Electron native addon that
-cannot load under Hermes. It is the **only** production file in the package that imports it.
-Everything downstream of that one import is portable, which is why the bundle proof below
-works at all.
+⚠ **It is kept because the measurement below is what made the work small, and because the count
+is worth re-taking if the port ever grows.** What it asked for exists:
+`packages/sync-client/src/storage.ts` is the port, `storage-node.ts` and `storage-op-sqlite.ts`
+are the two drivers, `store.ts` keeps the `{ path }` arm every existing caller passes, and
+`@restos/sync-client/rn` is the door this app uses. **One thing it got wrong and is corrected
+here rather than silently: it proposed promoting `catalog.ts`/`staff.ts`/`pin-attempts.ts`'
+private `Db` type. Those three were left alone** — they still take `db as never` — because
+widening their `unknown`-valued statement types to the port's `SqlValue` tuples would have
+touched three files for no behaviour, which `24 §3b` calls a drive-by.
 
-The surface an adapter must cover, measured 2026-08-11:
+The surface an adapter must cover, measured 2026-08-11 and unchanged:
 
 - `new Database(path, options)` — one construction
 - `db.pragma(...)` ×3 — `journal_mode = WAL`, `synchronous = FULL`, `foreign_keys = ON`
@@ -95,11 +118,16 @@ type Db = {
 ```
 
 Three sub-stores already run against that abstraction; `device-store.ts` passes them
-`db as never` rather than using it. So the work is not "invent a port", it is: promote that
-type to one exported declaration, add `pragma` / `exec` / `close`, and let `openStore` accept
-an injected `Db` instead of a `path`. `@op-engineering/op-sqlite` is already on `18 §14`'s
+`db as never` rather than using it. `@op-engineering/op-sqlite` is already on `18 §14`'s
 allowlist and offers a synchronous API, but it does **not** offer better-sqlite3's
 prepared-statement object model or `.transaction()`, so the adapter is a real (small) shim.
+
+**What that shim actually cost, now that it exists:** op-sqlite has exactly ONE synchronous
+primitive, `executeSync` — its `transaction()` and `prepareStatement().execute()` both return
+Promises — so `BEGIN`/`SAVEPOINT`/`RELEASE`/`ROLLBACK TO` are hand-rolled, and so is a SQL-script
+splitter, because op-sqlite compiles one statement per call while the device schema is one string
+with `--` comments and a semicolon inside a string literal. Statements are also not really
+*prepared* on RN: a performance property, not a correctness one, and recorded rather than hidden.
 
 ⚠ **`packages/sync-client` is a protected path (commandment 10). That change needs senior
 review and it is a `24 §3` task with its own acceptance tests, not a drive-by from this app.**
@@ -127,7 +155,19 @@ review and it is a `24 §3` task with its own acceptance tests, not a drive-by f
 - **Metro needs the `.js` → `.ts` fallback in `metro.config.js`.** The kernel packages import
   each other as `"./folds/customer-file.js"` naming `customer-file.ts` — correct TypeScript,
   unresolvable by Metro. The resolver tries the original specifier first.
-- **`@restos/sync-client/fold-engine` reaches RN and the native addon does not.**
+- **`@restos/sync-client/rn` reaches RN and the native addon does not** — re-measured 2026-08-13
+  after the storage adapter landed: `pnpm -C apps/manager bundle:check` → `Android Bundled …
+  (699 modules)`, **2.6 MB** of Hermes bytecode, exit 0. That is the whole kernel now — the device
+  store, the merge fold, the cloud session, the op-sqlite driver and the RN WebSocket transport —
+  not just the pure fold subpath the line below was written about. **The 19 extra modules are the
+  measurement worth keeping**: `18 §4`'s second engine cost this bundle almost nothing, because
+  everything downstream of the one native import was already portable.
+  ⚠ **`bundle:check` is a REAL gate and it bites**: pointing `transport-rn.ts` at
+  `@restos/sync-protocol`'s root instead of its `/messages` subpath fails it outright with
+  *"Unable to resolve module node:zlib"*. A `node:` import anywhere in the graph is a hard error,
+  which is why this command is the cheapest RN-safety proof available here.
+- **`@restos/sync-client/fold-engine` reaches RN and the native addon does not** (2026-08-11, the
+  earlier measurement, kept because its METHOD note below is the reusable part).
   `pnpm -C apps/manager bundle:check` → `Android Bundled … (680 modules)`, `2.48 MB` of
   **Hermes bytecode**, exit 0. In the readable dev bundle served by `expo start`,
   `require("better-sqlite3")` / `from "better-sqlite3"` occur **0 times** while
@@ -192,3 +232,39 @@ a screen feel fast, and lowering it is a kernel change to a credential (commandm
   gateway's `provision-device` CLI needs shell access on the service host, which a manager's
   phone does not have. **A phone cannot currently be admitted without an operator running a
   command for it.**
+
+## ⚠ THE COMPOSITION ROOT IS UNEXECUTABLE BY ANY TEST HERE, AND THREE MUTANTS LIVE IN THAT GAP
+
+Measured by an adversarial mutation round, 2026-08-13, on the shipped code with nothing else
+touched. `branch.ts` imports `@op-engineering/op-sqlite` at module scope, so **no test in this
+repository can load it**, and therefore no test can CALL `attachBranchSlice()`. Everything about
+that function is held by reading its source. Three mutants survive that:
+
+| mutant | what a manager sees | kills |
+|---|---|---|
+| `connected: () => true` hardcoded | the console claims contact it does not have — `05-F23`'s *"never imply calm"* broken in the one direction that matters | **0 of 72** |
+| `session.start()` deleted | a database that opens and is never fed: a permanently empty slice rendered as a calm kitchen | **1 of 72**, and that kill is a `/\.start\s*\(\s*\)/` regex over source, which a start through a variable would also fail |
+| `App.tsx` renders no alarm rows | the alarms are derived correctly and never drawn | **0 of 72** |
+
+The third is a different wall from the first two: `vitest.config.ts` explains why this package has
+no renderer, and it is right. **Do not close any of these by weakening what they mean.** Two honest
+routes exist and both are the implementer's call under `24 §3b`, not a drive-by: inject the store
+opener into `attachBranchSlice` so a suite can supply a fake (this creates a Rule-B optional seam,
+which is a cost, not a free win), or `vi.mock` the op-sqlite specifier — which **cannot be done
+from this package today**, because `@op-engineering/op-sqlite` is a dependency of
+`packages/sync-client` and does not resolve from `apps/manager` at all, so the mock cannot be keyed
+against the id `rn.ts` resolves. A `resolve.alias` in this package's `vitest.config.ts` is the only
+mechanism that works, and it would make the module loadable in *every* suite here.
+
+**A related hazard, measured rather than assumed.** `@op-engineering/op-sqlite@17.2.0` does publish
+a `"node"` export condition (`./node/dist/index.js`) and **it is backed by `better-sqlite3`** — the
+same engine the Electron till uses, wearing the other engine's name. It cannot load today for two
+independent reasons (its ESM build imports `./database` with no extension, and it declares no
+`better-sqlite3` dependency, so pnpm gives it none). If either is ever fixed upstream or papered
+over by hoisting, **a Node test could start passing against that shim and be quoted as evidence
+about a phone.** It is not. `18 §12`'s Maestro rig is still the only thing that would be.
+
+**`pnpm lint` cannot gate any of this either:** `biome check` exits 0 on warnings and this repo
+already carries one, so deleting `App.tsx`'s `attachBranchSlice()` call while leaving the import
+prints `noUnusedImports` and **still exits 0**. `pnpm seams:check` catches only the coarser version
+(delete the import too → Rule A, `[no importer at all]`, exit 1).

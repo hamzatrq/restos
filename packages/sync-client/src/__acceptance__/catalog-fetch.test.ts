@@ -13,7 +13,7 @@
 
 import { describe, expect, it } from "vitest";
 import { createCatalogFetch, type FetchStep, type WireCatalogResponse } from "../catalog-fetch.js";
-import { openStore } from "../device-store.js";
+import { openStore } from "../store.js";
 import { identity, must } from "./builders.js";
 
 const entry = (id: string, name: string, extra: Record<string, unknown> = {}) => ({

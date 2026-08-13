@@ -30,7 +30,6 @@ import {
   parseEvent,
   type TimeBasis,
 } from "@restos/domain";
-import Database from "better-sqlite3";
 import { CATALOG_SCHEMA, type CatalogStore, createCatalogStore } from "./catalog.js";
 import {
   type CustomerFileState,
@@ -66,6 +65,7 @@ import {
   type PinAttemptStore,
 } from "./pin-attempts.js";
 import { createStaffRegistry, STAFF_SCHEMA, type StaffRegistry } from "./staff.js";
+import type { StorageAdapter } from "./storage.js";
 
 export class AckBeyondAppendedError extends Error {
   constructor(watermark: number, ownHighWater: number | null) {
@@ -443,29 +443,29 @@ const canonical = (value: unknown): string =>
       : val,
   );
 
-export const openStore = (options: {
-  path: string;
+/**
+ * **The store, over `18 §4`'s injected storage adapter.**
+ *
+ * ⚠ **PROTECTED-PATH CHANGE, August 2026 (`20 §4.4` — senior review).** This function took a
+ * `path` and did `new Database(path)` from `better-sqlite3` at module scope. `18 §4` names TWO
+ * engines and ONE adapter, so a store module that binds one engine is not implementing that
+ * sentence — and the practical cost was total: importing `@restos/sync-client` at all was fatal
+ * under Hermes, which is why `apps/manager` could not open a store and its alarm screen had no
+ * source. The engine now arrives as an argument (`storage-node.ts` / `storage-op-sqlite.ts`) and
+ * NOTHING below changed: the schema, the 40 statements, the 7 transactions and the reopen
+ * self-heal are byte-identical, which is what makes the 660 pre-existing tests in this package the
+ * real negative control for the move.
+ *
+ * `openStore` in `store.ts` is the door most callers use — it keeps the `{ path }` shape the two
+ * Electron hosts and every suite already pass, and resolves it to `createNodeStorageAdapter`.
+ * This is the engine-free core underneath both doors.
+ */
+export const createDeviceStore = (options: {
+  adapter: StorageAdapter;
   identity: StoreIdentity;
-  /**
-   * An explicit path to the compiled `better_sqlite3.node`.
-   *
-   * Needed because ONE checkout serves two V8 ABIs. `better-sqlite3` resolves its addon through
-   * `bindings`, which checks `build/Release/` FIRST — so under pnpm, where every package shares
-   * one physical copy, rebuilding for Electron (ABI 148) overwrites the build Node (ABI 127)
-   * needs, and the test suites that open a store stop loading at all. They genuinely fight over
-   * one file; there is no ordering that satisfies both.
-   *
-   * So the DEFAULT is left alone — `build/Release/` stays the Node build, which is what every
-   * suite and every non-Electron host wants — and the Electron main process passes the path to
-   * its own ABI-matched binary instead. `apps/pos-electron` is the only caller.
-   */
-  nativeBinding?: string | undefined;
 }): DeviceStore => {
   const { identity } = options;
-  const db = new Database(
-    options.path,
-    options.nativeBinding === undefined ? {} : { nativeBinding: options.nativeBinding },
-  );
+  const db = options.adapter;
   db.pragma("journal_mode = WAL"); // multi-handle reads + crash recovery (18 §4)
   db.pragma("synchronous = FULL"); // plug-pull law outranks throughput (00 §5.2)
   db.pragma("foreign_keys = ON"); // device DB rule (18 §4)
