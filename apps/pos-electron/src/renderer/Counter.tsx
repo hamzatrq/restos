@@ -178,18 +178,45 @@ const ORDER_TYPES: readonly { id: string; label: string }[] = [
  * all channels' law holds from the first pilot day)"*. Until August 2026 this file pinned
  * `counter` and `02-F28`/`02-F30` had no surface at all.
  *
- * **It is THREE of `02-F42`'s five, and the narrowing is an INTERPRETATION — stated, not
- * silent.** `storefront` and `whatsapp` are absent because no FR has a counter operator keying
- * one in: `02-F9` puts cloud orders from docs 06/07 in an INBOX pane where they are *accepted*,
- * and `08-F8` auto-confirms aggregator API orders on ingest. A counter-created `storefront`
- * order would be fabricated provenance in the channel-economics axis (docs 12/13) that `02-F42`
- * closed the set to protect. The three that remain each have an FR that puts them here:
- * `counter` (`02-F1`), `phone` (`02-F27`/`02-F28`), `foodpanda` (`02-F30`).
+ * **It is FOUR of `02-F42`'s five, by FOUNDER RULING — this is a transcription now, not an
+ * interpretation.** ⚠ *Until August 2026 this list was three and its comment argued the narrowing
+ * as a pinned interpretation, naming "offer all five" as the simpler alternative it had declined.
+ * The founder ruled the middle answer: the channels a cashier may originate on are* in-restaurant,
+ * foodpanda, WhatsApp and call. *`whatsapp` moved from declined to ruled-in; the reasoning below
+ * for keeping `storefront` out is unchanged and still load-bearing.*
  *
- * **The simpler alternative, named rather than dismissed:** offer all five. Widening is additive
- * and costs one line; the wrong guess the other way writes a channel into an append-only ledger
- * that no report can ever attribute. `counter-channel-row.dom.test.tsx` §A is the tripwire so
- * this cannot widen or narrow by accident.
+ * `storefront` is the one that stays absent, because no FR has a counter operator keying one in:
+ * `02-F9` puts cloud orders from docs 06/07 in an INBOX pane where they are *accepted*, and
+ * `08-F8` auto-confirms aggregator API orders on ingest. A counter-created `storefront` order
+ * would be fabricated provenance in the channel-economics axis (docs 12/13) that `02-F42` closed
+ * the set to protect. The four that remain each have an FR that puts them here: `counter`
+ * (`02-F1`), `phone` (`02-F27`/`02-F28`), `foodpanda` (`02-F30`), `whatsapp` (`02-F42`'s closed
+ * set — a channel this restaurant answers on its own number).
+ *
+ * ⚠ **THE LABEL IS ENGLISH AND THE ID IS PERMANENT — DO NOT "TIDY" THE TWO INTO AGREEMENT.** Two
+ * of these rows deliberately read differently from what they store: `counter` is labelled *In
+ * restaurant* and `phone` is labelled *Call*. Renaming the ids to match typechecks (this list is
+ * `{ id: string }`) and reads beautifully, and it would put an `01-F4` refusal between a cashier
+ * and every sale on the busiest channel in the shop — `02-F42` closed the set to these five
+ * spellings, `01-F53` snapshots the value into `order.created`, `01-F1` forbids rewriting it, and
+ * `01-F60` keys every catalog price by it. Every order this till has ever rung already carries
+ * `counter`. The tripwires are `channel-ruling.dom.test.tsx` §C (the label→id pair, per tile) and
+ * `main/__acceptance__/channel-ruling.test.ts` §A (the trusted append refuses `in_restaurant` and
+ * `call`).
+ *
+ * **The kernel needed NO diff for this ruling and must not get one:** `ORDER_CHANNELS` in
+ * `packages/domain` — a protected path (commandment 10) — already contains `whatsapp`. What was
+ * missing was this list, and the dev seed's price column for it (`main/catalog.ts`'s
+ * `devPricesFor`): `01-F60` has no fallback, so a channel on this row that the catalog does not
+ * price greys **every tile** `no price set`. That is not hypothetical — it is what shipped when
+ * this row grew from one channel to three. `channel-ruling.test.ts` §E asserts the two lists agree.
+ *
+ * The scope tripwire is `channel-ruling.dom.test.tsx` §A (four, discovered from the DOM, never
+ * `storefront`) so this cannot widen or narrow by accident. ⚠ *The line here used to name
+ * `counter-channel-row.dom.test.tsx`, which has never existed in this repo — a comment promising a
+ * protection is worse than no comment, because it retires the assertion someone would otherwise
+ * write. The promise was in fact served by `channel-and-soldout.dom.test.tsx` §A, which still
+ * guards the no-default rule below.*
  *
  * **There is NO DEFAULT, extending `C4`'s founder ruling one axis over.** `ORDER_TYPES` below
  * records why order type has none: pre-selecting *"would save one tap on ~75 orders a shift and
@@ -200,10 +227,32 @@ const ORDER_TYPES: readonly { id: string; label: string }[] = [
  * as a pinned interpretation, not a transcription** — the ruling was made about `order_type`.
  */
 const ORDER_CHANNELS_AT_COUNTER: readonly { id: string; label: string }[] = [
-  { id: "counter", label: "Counter" },
-  { id: "phone", label: "Phone" },
+  // `27-F4` decides the ORDER, because the ruling's sentence lists a set. The three learned tiles
+  // keep the positions a finger already reaches for and the new one is APPENDED — inserting
+  // WhatsApp anywhere else moves `Foodpanda`, and reading the sentence positionally would move
+  // `Call` past two tiles. Reordering an operational item is a breaking change.
+  { id: "counter", label: "In restaurant" },
+  { id: "phone", label: "Call" },
   { id: "foodpanda", label: "Foodpanda" },
+  { id: "whatsapp", label: "WhatsApp" },
 ];
+
+/**
+ * The word a cashier reads for a stored channel id — the one direction of the ruling's mapping
+ * that a *display* needs (`00 §5.6`: the screen speaks the product's words, never the ledger's
+ * keys).
+ *
+ * It degrades to the id rather than to a guess, which is `01-F54`'s house rule: an open order on a
+ * channel this row cannot originate — `storefront`, arriving through `02-F9`'s inbox — is rare,
+ * honest and readable, where a fabricated label would not be.
+ *
+ * ⚠ **`packages/escpos` has its OWN `CHANNEL_LABELS` and it still reads `Counter`/`Phone`,** so a
+ * document printed today disagrees with this screen. That is a real gap, deliberately NOT closed
+ * here: `escpos` is a protected path (commandment 10) and whether the ruling reaches paper is a
+ * founder question, not an implementer's. Reported, not decided.
+ */
+const channelLabel = (id: string): string =>
+  ORDER_CHANNELS_AT_COUNTER.find((c) => c.id === id)?.label ?? id;
 
 /**
  * Which channel the GRID is greyed against before any order exists.
@@ -1934,12 +1983,17 @@ export const Counter = () => {
               */}
               <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
                 {pendingChannel !== null
-                  ? `Selling at ${
-                      ORDER_CHANNELS_AT_COUNTER.find((c) => c.id === pendingChannel)?.label ??
-                      pendingChannel
-                    } prices`
+                  ? `Selling at ${channelLabel(pendingChannel)} prices`
                   : current !== undefined
-                    ? `This order is ${current.channel ?? "counter"} — its prices are fixed`
+                    ? /*
+                        ⚠ **This branch interpolated the RAW STORED ID until the channel ruling
+                        landed**, which was invisible while the id and the label were the same
+                        word. They are not any more: a cashier who pressed `In restaurant` would
+                        read *"This order is counter"* one line below the tile she pressed — two
+                        names for one channel, on the surface `00 §5.6` says is navigated by
+                        memorised position by people who read little English.
+                      */
+                      `This order is ${channelLabel(current.channel ?? "counter")} — its prices are fixed`
                     : "Choose a channel first — it sets the price"}
               </p>
             </div>

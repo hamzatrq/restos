@@ -103,13 +103,21 @@ const DEV_MENU_ENV = "RESTOS_DEV_MENU";
  *
  * The channels are `Counter.tsx`'s `ORDER_CHANNELS_AT_COUNTER`, transcribed rather than imported —
  * that list is a RENDERER module and `18 §9` puts no main-process import across that boundary.
- * A drift here greys a column; `catalog-seam.test.ts` is where that is asserted.
+ * A drift here greys a column; `__acceptance__/channel-ruling.test.ts` §E is where that is
+ * asserted, by reading both files' source, since no runtime path can compare them. ⚠ *That
+ * sentence named `catalog-seam.test.ts` until August 2026 and the assertion was not there, or
+ * anywhere — a comment promising a protection, which retires the guard someone would otherwise
+ * write. It exists now; the reference is the thing that was wrong.*
  *
  * **The foodpanda markup is ILLUSTRATIVE and says so.** `01-F60`: *"aggregator commission is
  * 25–35%, so a restaurant prices the same dish differently per channel deliberately — higher on
  * foodpanda"*. 130% is a plausible midpoint for a seed whose purpose is a working till, and it is
- * deliberately NOT presented as advice: a real org sets these in the back office. `phone` takes
- * the house price because it is a channel the restaurant owns and pays no commission on.
+ * deliberately NOT presented as advice: a real org sets these in the back office. `phone` and
+ * `whatsapp` take the house price because they are channels the restaurant OWNS — its own staff,
+ * its own number — and pay no aggregator anything, so the markup's premise does not hold. Copying
+ * the marked-up line to add the fourth entry is the cheap mistake here: it passes "the tile is
+ * priced" and charges a WhatsApp customer 30% more for ever, snapshotted by `01-F53` into a
+ * ledger `01-F1` forbids correcting in place.
  *
  * `applyRateBps` rather than `price * 1.3`: `DEC-MONEY-005` bans raw money arithmetic and the
  * helper accumulates in BigInt with a stated rounding policy, which is the whole point of it.
@@ -122,6 +130,7 @@ const devPricesFor = (
 ): { branch_id: string; channel: string; price_paisa: number }[] => [
   { branch_id, channel: "counter", price_paisa },
   { branch_id, channel: "phone", price_paisa },
+  { branch_id, channel: "whatsapp", price_paisa },
   {
     branch_id,
     channel: "foodpanda",
