@@ -26,7 +26,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hashPin } from "@restos/domain";
 import { afterEach, describe, expect, it } from "vitest";
-import { type DeviceStore, openStore } from "../device-store.js";
+import type { DeviceStore } from "../device-store.js";
+import { openStore } from "../store.js";
 import { createPinSession, PIN_LOCKOUT_COOLDOWN_MS, type PinSession } from "../pin-session.js";
 
 const ORG = "org-restos";

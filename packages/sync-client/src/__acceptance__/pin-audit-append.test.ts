@@ -59,7 +59,7 @@ import { join } from "node:path";
 import { AUDIT_EVENT_TYPES, hashPin, verifyAuditChain } from "@restos/domain";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DeviceStore } from "../device-store.js";
-import { openStore } from "../device-store.js";
+import { openStore } from "../store.js";
 import * as syncClientNs from "../index.js";
 import { createPinSession, type PinAuditRecord, type UnlockRefusal } from "../pin-session.js";
 import type { StaffRegistry } from "../staff.js";

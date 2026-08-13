@@ -107,7 +107,7 @@ import * as domainNs from "@restos/domain";
 import { AUDIT_EVENT_TYPES } from "@restos/domain";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DeviceStore } from "../device-store.js";
-import { openStore } from "../device-store.js";
+import { openStore } from "../store.js";
 import * as syncClientNs from "../index.js";
 
 // ── The contract (P1..P7) ──────────────────────────────────────────────────────────────────

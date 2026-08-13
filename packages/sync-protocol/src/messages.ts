@@ -2,7 +2,25 @@
 // cloud. Unknown keys are stripped (reject-or-drop, 01-F40 — slices are
 // sender-enforced; a client can never smuggle one in). Contract fixtures:
 // src/__acceptance__/fixtures (20 §2.7 — changing them is a spec-review event).
-import { constants as zlibConstants, zstdCompressSync, zstdDecompressSync } from "node:zlib";
+//
+// ⚠ PROTECTED PATH (`20 §4.4`, commandment 10) — SENIOR REVIEW.
+//
+// ── THIS MODULE IS RUNTIME-PORTABLE, AND THAT IS NOW A LOAD-BEARING PROPERTY ───────────────────
+//
+// It used to open with `import { … } from "node:zlib"`, for the zstd framing that now lives in
+// `compression.ts`. That one line made the WHOLE package unbundlable for React Native: Metro
+// cannot resolve `node:zlib`, so anything reaching `@restos/sync-protocol` — including the
+// message parser a device needs to read a single frame — failed at bundle time, not at run time.
+// `18 §4` puts RN on `@op-engineering/op-sqlite` and `18 §8` requires the manager app to stay
+// installable, so a kernel package that only Node can load contradicts the handbook.
+//
+// The split is a MOVE, not a rewrite: `index.ts` re-exports exactly the same names from the same
+// package root, so every existing consumer (`services/sync-gateway`, `sync-client`'s ws transport,
+// every suite) is byte-identically unaffected. What is new is the `@restos/sync-protocol/messages`
+// subpath, which is this file and reaches nothing a phone lacks — the same mechanism, and the same
+// reason, as `@restos/sync-client/fold-engine`.
+//
+// Nothing here may import `node:*` again. A device that cannot parse a frame cannot sync.
 import { DEVICE_CLASSES, EventEnvelope, ORDER_CHANNELS } from "@restos/domain";
 import { z } from "zod";
 
@@ -307,31 +325,6 @@ export const encodeMessage = (message: ProtocolMessage): string => JSON.stringif
 
 export const decodeMessage = (text: string): ProtocolMessage => parseMessage(JSON.parse(text));
 
-// Additive compressed framing under v:1 (T-01-16; 01 §5 "JSON + zstd batch
-// compression", 26 §6.4 — the catch-up transfer is part of the <60 s/4G budget,
-// not an optimisation; DEC-SYNC-010 candidate, PROTOCOL.md compressed-framing
-// clause). zstd of the EXACT plain-codec bytes, so the compressed path is
-// transparent to every consumer: decodeCompressed(encodeCompressed(m)) deep-equals
-// m for every valid message, and the plain JSON codec above is UNTOUCHED (the
-// T-01-02 golden fixtures must not drift). zstd is Node's built-in (node:zlib,
-// synchronous; 18 §14 records the choice — 18 §15 rule 1 bias: no new dependency).
-//
-// Close-now follow-up #4 (audit-1): the frame carries a zstd CONTENT CHECKSUM
-// (ZSTD_c_checksumFlag, +4 bytes). A plain zstd frame has no integrity check, so
-// a single-byte-corrupted frame could decompress to a schema-valid but WRONG
-// ProtocolMessage that decodeCompressed then returned as real — a silent
-// mis-parse the merge engine would trust. With the checksum, decompression of a
-// corrupted frame FAILS (checksum mismatch → throw), making corruption LOUD, not
-// silent. Additive: the decoder auto-detects the flag from the frame header, the
-// round-trip law holds, and the plain JSON codec is untouched.
-export const encodeCompressed = (message: ProtocolMessage): Uint8Array =>
-  zstdCompressSync(Buffer.from(encodeMessage(message), "utf8"), {
-    params: { [zlibConstants.ZSTD_c_checksumFlag]: 1 },
-  });
-
-export const decodeCompressed = (bytes: Uint8Array): ProtocolMessage =>
-  decodeMessage(zstdDecompressSync(bytes).toString("utf8"));
-
 /** The negotiated framing for one connection; `undefined` = plain JSON (T-01-19). */
 export type Compression = "zstd";
 
@@ -371,28 +364,3 @@ export type FrameCodec = {
   encode(message: ProtocolMessage): string | Uint8Array;
   decode(frame: string | Uint8Array): ProtocolMessage;
 };
-
-/**
- * The handshake pair is ALWAYS sent plain, even once a codec is granted. `hello` is
- * what establishes what this peer can read, and `hello_ack` crosses the wire while
- * the client's decoder is still plain — compressing either would require the receiver
- * to already know the answer the message itself carries.
- */
-const ALWAYS_PLAIN: ReadonlySet<string> = new Set(["hello", "hello_ack"]);
-
-export const createFrameCodec = (compression: Compression | undefined): FrameCodec => ({
-  encode: (message) =>
-    compression === undefined || ALWAYS_PLAIN.has(message.kind)
-      ? encodeMessage(message)
-      : encodeCompressed(message),
-  decode: (frame) => {
-    if (typeof frame === "string") return decodeMessage(frame);
-    if (compression === undefined) {
-      throw new Error(
-        "received a binary frame on a connection that did not negotiate compression " +
-          "(DEC-SYNC-010 — framing comes from the handshake, never from sniffing the frame)",
-      );
-    }
-    return decodeCompressed(frame);
-  },
-});

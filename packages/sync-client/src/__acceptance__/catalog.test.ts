@@ -21,7 +21,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { CatalogEntry } from "../catalog.js";
-import { openStore } from "../device-store.js";
+import { openStore } from "../store.js";
 
 const identity = { org_id: "org1", branch_id: "br1", device_id: "dev1" };
 const store = () => openStore({ path: ":memory:", identity });

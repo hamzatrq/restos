@@ -290,7 +290,7 @@ importers:
         version: link:../sync-client
       drizzle-orm:
         specifier: 0.45.2
-        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(postgres@3.4.9)
+        version: 0.45.2(@op-engineering/op-sqlite@17.2.0(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.2.17)(react@19.2.8))(react@19.2.8))(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(postgres@3.4.9)
 
   packages/config: {}
 
@@ -343,6 +343,9 @@ importers:
 
   packages/sync-client:
     dependencies:
+      '@op-engineering/op-sqlite':
+        specifier: 17.2.0
+        version: 17.2.0(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.2.17)(react@19.2.8))(react@19.2.8)
       '@restos/domain':
         specifier: workspace:*
         version: link:../domain
@@ -510,7 +513,7 @@ importers:
         version: 5.81.3
       drizzle-orm:
         specifier: 0.45.2
-        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(postgres@3.4.9)
+        version: 0.45.2(@op-engineering/op-sqlite@17.2.0(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.2.17)(react@19.2.8))(react@19.2.8))(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(postgres@3.4.9)
       ioredis:
         specifier: 5.11.1
         version: 5.11.1
@@ -556,7 +559,7 @@ importers:
         version: link:../../packages/sync-protocol
       drizzle-orm:
         specifier: 0.45.2
-        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(postgres@3.4.9)
+        version: 0.45.2(@op-engineering/op-sqlite@17.2.0(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.2.17)(react@19.2.8))(react@19.2.8))(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(postgres@3.4.9)
       fastify:
         specifier: 5.10.0
         version: 5.10.0
@@ -2134,6 +2137,16 @@ packages:
   '@noble/hashes@2.2.0':
     resolution: {integrity: sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg==}
     engines: {node: '>= 20.19.0'}
+
+  '@op-engineering/op-sqlite@17.2.0':
+    resolution: {integrity: sha512-TmJSf83WGVZQ13RoYf+5oUrM2v7AenjifXeVwmyOqgXZaDL/dfnQDaVioD+3v8VH9syki3iyAI/fGUCZkJ3yYg==}
+    peerDependencies:
+      '@sqlite.org/sqlite-wasm': '*'
+      react: '*'
+      react-native: '*'
+    peerDependenciesMeta:
+      '@sqlite.org/sqlite-wasm':
+        optional: true
 
   '@oxc-parser/binding-android-arm-eabi@0.127.0':
     resolution: {integrity: sha512-0LC7ye4hvqbIKxAzThzvswgHLFu2AURKzYLeSVvLdu2TBOYWQDmHnTqPLeA597BcUCxiLqLsS4CJ5uoI5WYWCQ==}
@@ -7957,6 +7970,11 @@ snapshots:
 
   '@noble/hashes@2.2.0': {}
 
+  '@op-engineering/op-sqlite@17.2.0(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.2.17)(react@19.2.8))(react@19.2.8)':
+    dependencies:
+      react: 19.2.8
+      react-native: 0.81.5(@babel/core@7.29.7)(@types/react@19.2.17)(react@19.2.8)
+
   '@oxc-parser/binding-android-arm-eabi@0.127.0':
     optional: true
 
@@ -9635,8 +9653,9 @@ snapshots:
       esbuild: 0.25.12
       tsx: 4.23.1
 
-  drizzle-orm@0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(postgres@3.4.9):
+  drizzle-orm@0.45.2(@op-engineering/op-sqlite@17.2.0(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.2.17)(react@19.2.8))(react@19.2.8))(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(postgres@3.4.9):
     optionalDependencies:
+      '@op-engineering/op-sqlite': 17.2.0(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.2.17)(react@19.2.8))(react@19.2.8)
       '@types/better-sqlite3': 7.6.13
       better-sqlite3: 12.11.1
       postgres: 3.4.9
