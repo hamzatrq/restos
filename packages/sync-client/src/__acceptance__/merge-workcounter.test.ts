@@ -190,7 +190,30 @@ describe("registry growth must fail this suite before it can silently no-op (fix
     "order.created",
     "order.line_added",
     "order.line_price_overridden",
+    // ── AMENDED August 2026 (02-F8 / 02-F6 — the C8 + C7 registry growth) ────────────────
+    // `order.line_removed` (`02-F8`) and `order.note_added` (`02-F6`) gained payload schemas,
+    // which is what `01-F4` was blocking: both were `01 §4` vocabulary and therefore UNEMITTABLE,
+    // so a cashier could neither take a line off an order nor send an instruction to the kitchen.
+    // These two lines are the "spec-PR + oracle-pin event" the assertion below demands, and
+    // without them the compile-level pin reds — the design working, exactly as it did for
+    // `kot.print_failed`, the approval family, the escalatable writes and the park pair.
+    //
+    // Pinned HERE and not in `PINNED_NOT_FOLDED` for that set's own stated reason: it asserts
+    // `01-F52`'s "not an input to ANY fold". Both are ORDER-keyed, so `26 §3`'s sidecar answers
+    // `order:<order_id>` and the order-keyed engine in `merge.ts` is where they arrive.
+    //
+    // ⚠ **UNLIKE EVERY REGISTRY LANDING BEFORE THEM, THESE TWO ARE NOT PROJECTION-INERT — that is
+    // the substance of the change and it is deliberate.** `26 §7` still makes the merge rule an
+    // oracle-pinned DECISION rather than an implementer's; the difference is that here the FRs
+    // determine it and the debt would be the defect. `02-F9` calls line removal *"the only
+    // partial-confirmation mechanism"* and `01-F30` has **no `removed_value` term**, so a removal
+    // that projected nothing would leave the dish in `billed_total` with no void to balance it;
+    // `02-F6` prints the note *"prominently on the KOT"*, which a fold-inert note never reaches.
+    // The rules are pinned by `line-correction-fold.test.ts` §0 (M1–M4) and asserted by execution
+    // there, because a name in a list cannot tell a projecting arm from a `return;`.
+    "order.line_removed",
     "order.line_state_changed",
+    "order.note_added",
     // ── AMENDED August 2026 (02-F4 / 02-F9 / 06-F20 — the C10 + C20 registry growth) ─────
     // `order.parked` / `order.unparked` (`02-F4`) and `order.rejected` (`02-F9`, whose reason list
     // `06-F20` owns) gained payload schemas, which is what `01-F4` was blocking: all three were
