@@ -232,3 +232,39 @@ a screen feel fast, and lowering it is a kernel change to a credential (commandm
   gateway's `provision-device` CLI needs shell access on the service host, which a manager's
   phone does not have. **A phone cannot currently be admitted without an operator running a
   command for it.**
+
+## ⚠ THE COMPOSITION ROOT IS UNEXECUTABLE BY ANY TEST HERE, AND THREE MUTANTS LIVE IN THAT GAP
+
+Measured by an adversarial mutation round, 2026-08-13, on the shipped code with nothing else
+touched. `branch.ts` imports `@op-engineering/op-sqlite` at module scope, so **no test in this
+repository can load it**, and therefore no test can CALL `attachBranchSlice()`. Everything about
+that function is held by reading its source. Three mutants survive that:
+
+| mutant | what a manager sees | kills |
+|---|---|---|
+| `connected: () => true` hardcoded | the console claims contact it does not have — `05-F23`'s *"never imply calm"* broken in the one direction that matters | **0 of 72** |
+| `session.start()` deleted | a database that opens and is never fed: a permanently empty slice rendered as a calm kitchen | **1 of 72**, and that kill is a `/\.start\s*\(\s*\)/` regex over source, which a start through a variable would also fail |
+| `App.tsx` renders no alarm rows | the alarms are derived correctly and never drawn | **0 of 72** |
+
+The third is a different wall from the first two: `vitest.config.ts` explains why this package has
+no renderer, and it is right. **Do not close any of these by weakening what they mean.** Two honest
+routes exist and both are the implementer's call under `24 §3b`, not a drive-by: inject the store
+opener into `attachBranchSlice` so a suite can supply a fake (this creates a Rule-B optional seam,
+which is a cost, not a free win), or `vi.mock` the op-sqlite specifier — which **cannot be done
+from this package today**, because `@op-engineering/op-sqlite` is a dependency of
+`packages/sync-client` and does not resolve from `apps/manager` at all, so the mock cannot be keyed
+against the id `rn.ts` resolves. A `resolve.alias` in this package's `vitest.config.ts` is the only
+mechanism that works, and it would make the module loadable in *every* suite here.
+
+**A related hazard, measured rather than assumed.** `@op-engineering/op-sqlite@17.2.0` does publish
+a `"node"` export condition (`./node/dist/index.js`) and **it is backed by `better-sqlite3`** — the
+same engine the Electron till uses, wearing the other engine's name. It cannot load today for two
+independent reasons (its ESM build imports `./database` with no extension, and it declares no
+`better-sqlite3` dependency, so pnpm gives it none). If either is ever fixed upstream or papered
+over by hoisting, **a Node test could start passing against that shim and be quoted as evidence
+about a phone.** It is not. `18 §12`'s Maestro rig is still the only thing that would be.
+
+**`pnpm lint` cannot gate any of this either:** `biome check` exits 0 on warnings and this repo
+already carries one, so deleting `App.tsx`'s `attachBranchSlice()` call while leaving the import
+prints `noUnusedImports` and **still exits 0**. `pnpm seams:check` catches only the coarser version
+(delete the import too → Rule A, `[no importer at all]`, exit 1).
