@@ -104,8 +104,8 @@ describe("02-F27 — an unknown caller can actually be filed from the counter", 
   it("the Save control reaches the trusted side with the DIALLED digits", async () => {
     mount();
     render(<Counter />);
-    await screen.findByRole("button", { name: /^Phone$/i });
-    tap(/^Phone$/i);
+    await screen.findByRole("button", { name: /^Call$/i });
+    tap(/^Call$/i);
     await waitFor(() => enterNumber(DIALLED));
 
     // The control only exists on `02-F27`'s unknown-number branch, which is the branch the FR

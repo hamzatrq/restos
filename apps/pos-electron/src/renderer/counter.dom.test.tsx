@@ -217,7 +217,12 @@ describe("C4 — starting an order (02-F1, founder ruling: no default type)", ()
     // the corruption is a phone order billed at counter prices, frozen by `01-F53`.
     // The assertion below is UNCHANGED — this test still proves the chosen type and the channel
     // both reach the event.
-    fireEvent.click(await screen.findByRole("button", { name: /^Counter$/i }));
+    //
+    // ⚠ The TILE now reads `In restaurant` (founder ruling, August 2026) and the stored value is
+    // still `counter`, asserted three lines below. That is the ruling's whole content: `01-F53`
+    // snapshots the id into the event and `01-F1` forbids rewriting it, so the label is the only
+    // thing that can move. `channel-ruling.dom.test.tsx` owns the pair.
+    fireEvent.click(await screen.findByRole("button", { name: /^In restaurant$/i }));
     fireEvent.click(await screen.findByRole("button", { name: /Takeaway/i }));
 
     await waitFor(() => expect(appended).toHaveLength(1));

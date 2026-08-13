@@ -193,7 +193,7 @@ describe("§B 02-F1/02-F11 — a second order can be started, and it becomes THI
     render(<Counter />);
     await screen.findByRole("button", { name: /^Dine-in$/i });
 
-    tap(/^Counter$/i);
+    tap(/^In restaurant$/i);
     tap(/^Takeaway$/i);
 
     await waitFor(() => expect(appended).toHaveLength(1));
@@ -209,7 +209,7 @@ describe("§B 02-F1/02-F11 — a second order can be started, and it becomes THI
     render(<Counter />);
     await screen.findByRole("button", { name: /^Dine-in$/i });
 
-    tap(/^Counter$/i);
+    tap(/^In restaurant$/i);
     tap(/^Dine-in$/i);
     await waitFor(() => expect(appended).toHaveLength(1));
 
