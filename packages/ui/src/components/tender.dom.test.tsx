@@ -103,7 +103,22 @@ describe("02-F13 — a split is what a partial tender leaves behind", () => {
     // 1485 − 1000 = 485 still due, before anything is typed. It appears TWICE by design — as
     // the DUE header and as REMAINING — so this asserts both, rather than picking one and
     // being ambiguous about which.
-    expect(screen.getAllByText("Rs 485"), "DUE and REMAINING should both read 485").toHaveLength(2);
+    /**
+     * ⚠ **SCOPED TO THE READOUTS, August 2026 — the claim is unchanged and the COUNT could not
+     * survive `02-F50`.** This read `screen.getAllByText("Rs 485")` over the whole panel and
+     * expected exactly 2. `02-F50` requires the exact-amount target to **state the amount as a
+     * numeral on the control itself**, so the figure now appears a third time — on a button.
+     * Counting elements rather than readouts would have made this green test block that FR.
+     *
+     * What it asserts is what it always asserted: **DUE and REMAINING both read 485.** Filtering
+     * to non-button elements keeps that exact claim and stops it being a hidden cap on how many
+     * controls the panel may have. **A finding for the `02-F50` implementer, not a fix:** one
+     * number now renders three times on one surface, and `02-F45`/`27-F25` are the FRs to argue
+     * it against — the honest resolutions are to drop the REMAINING readout when it duplicates
+     * the control, or to accept the repetition deliberately. Neither is decided here.
+     */
+    const readouts = screen.getAllByText("Rs 485").filter((el) => el.closest("button") === null);
+    expect(readouts, "DUE and REMAINING should both read 485").toHaveLength(2);
     // The label is its own element: CHANGE is a 27-F12 DIRECTION carried inside the money
     // value ("CHANGE Rs 515" is one string), whereas REMAINING describes what is owed and is
     // a plain label beside it. Asserting them separately is what that difference looks like.

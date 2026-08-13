@@ -158,6 +158,44 @@ const MENU: MenuItem[] = [
   ...(i === 1 ? { contested: true } : {}),
 }));
 
+/**
+ * **A LONG CART, ADDED AUGUST 2026 FOR `27-F4` (f) — and it is the fixture boundary being paid up
+ * front again rather than after the defect.**
+ *
+ * This order carried THREE lines, and three lines fit anywhere. `27-F4` (f) moves `Send to
+ * kitchen` to the foot of the cart column and **pins it there** on `27-F2`'s ground — *"a long
+ * cart must never push it below the fold … the cart's line list gives up the room, never the
+ * control"* — and that is a claim no `.dom.test.tsx` in this repo can evaluate, because happy-dom
+ * performs no layout and every rect is zeroes. It is measurable **here and nowhere else**.
+ *
+ * A three-line cart makes the pin untestable in exactly the way `main.ts`'s own blind-spot list
+ * describes: *"it only sees the states its fixture produces."* So the cart is now a **worst
+ * realistic case** rather than a token one — eleven lines is an ordinary family order at a
+ * Pakistani counter (`02-N2` sizes the catalogue at 300 items; nothing anywhere caps a bill), and
+ * it is the shape that decides whether the confirm control survives a busy table.
+ *
+ * **What it is NOT:** a stress test. Handing the cart 200 lines would be the gate inventing a
+ * requirement no FR makes, which this file's own header refuses to do about the menu.
+ *
+ * ⚠ **MEASURED THE MOMENT IT WAS ADDED, and the result is a finding rather than a prediction.**
+ * With eleven lines the gate reports **three new verdicts, all on `tablet-10.1` and all the same
+ * box**: `OVERFLOW y: main … holds 587px of content in a 567px box — 20px is CLIPPED AWAY`, on
+ * `tab:Order`, `caller` and `caller-new`. Every other panel absorbs the cart. Baseline before
+ * this change was ONE violation (`tablet-10.1 tab:Cash`, owed under `27-F42`); it is now four.
+ *
+ * **That clip is NOT created by `27-F4` (f) — it is there today** and a cashier ringing a family
+ * order on a 10.1″ tablet loses 20 px of the Order surface right now. What (f) changes is *what*
+ * gets clipped: once the confirm control is at the foot of the cart, the 20 px is `Send to
+ * kitchen`, which is `27-F2` broken on the counter's second-most-frequent act.
+ *
+ * **The legal remedies, named so the implementer does not have to rediscover them, and none of
+ * them is "scroll the cart":** `probe.ts` counts `auto`/`scroll` as clipping exactly like
+ * `hidden`, because `27-F2` forbids reaching anything actionable that way — so a scrollbar on the
+ * cart is a violation here, not a fix. What is legal is **paging the line list** (the idiom
+ * `ItemGrid` and `OrderList` already use, and the shape `27-F2` mandates), or giving the cart
+ * column its room out of the grid column on `compact`. Which one is the implementer's call with
+ * the layout gate as the judge; this fixture is only the thing that asks the question.
+ */
 const ORDER: OpenOrder = {
   order_id: "order-gate-1",
   reference: "A-014",
@@ -188,7 +226,15 @@ const ORDER: OpenOrder = {
       removals: [],
       note: null,
     },
-  ],
+    { line_id: "line-4", name: "Seekh Kebab (4 pcs)", quantity: 2, modifiers: [], removals: [] },
+    { line_id: "line-5", name: "Chicken Tikka", quantity: 3, modifiers: [], removals: [] },
+    { line_id: "line-6", name: "Dal Makhani", quantity: 1, modifiers: [], removals: [] },
+    { line_id: "line-7", name: "Tandoori Roti", quantity: 6, modifiers: [], removals: [] },
+    { line_id: "line-8", name: "Raita", quantity: 2, modifiers: [], removals: [] },
+    { line_id: "line-9", name: "Kachumber Salad", quantity: 1, modifiers: [], removals: [] },
+    { line_id: "line-10", name: "Soft Drink 345ml", quantity: 4, modifiers: [], removals: [] },
+    { line_id: "line-11", name: "Kheer", quantity: 3, modifiers: [], removals: [] },
+  ].map((l) => ({ note: null, ...l })),
 };
 
 /**

@@ -198,14 +198,19 @@ describe("18 §6 / 18 §9 — the renderer's whole surface", () => {
         id: "i-karahi",
         label: "Chicken Karahi",
         unavailable: true,
-        unavailableReason: "86",
+        // ⚠ Was `"86"` until August 2026. `02-F51` rules the operator-facing word for this
+        // state is `Sold out` on every surface of the device — `00 §5.6` is English-only UI and
+        // the jargon has no standing in Pakistan. The FR keeps the jargon in the corpus and takes
+        // it off the glass; nothing about the fold, the event or this projection changed.
+        unavailableReason: "Sold out",
         sold_out: true,
       },
       {
         id: "i-daal",
         label: "Daal",
         unavailable: true,
-        unavailableReason: "86 — disputed",
+        // Was `"86 — disputed"` — same ruling, and `01-F58`'s qualifier survives the rename.
+        unavailableReason: "Sold out — disputed",
         sold_out: true,
         contested: true,
       },

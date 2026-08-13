@@ -105,7 +105,11 @@ describe("§A 02-F7 — a toggle is appended and the fold sees it", () => {
     // Read back through `menu()`, which joins the CATALOG to the FOLD's projection. Asserting
     // the append's return value instead would pass against a gateway that appended to nothing.
     expect(tile(gateway, "counter")?.sold_out).toBe(true);
-    expect(tile(gateway, "counter")?.unavailableReason).toBe("86");
+    // ⚠ Was `"86"` until August 2026, and this assertion is the reason the change is recorded
+    // here rather than made quietly: a GREEN test defending an overruled rule is this repo's
+    // named failure (`catalog-pricing.test.ts:394`). `02-F51` puts `Sold out` on every surface
+    // of one device; `availability-vocabulary.test.ts` is the suite that owns the new claim.
+    expect(tile(gateway, "counter")?.unavailableReason).toBe("Sold out");
     // The other item is the control: a toggle is per-item, not a switch on the whole grid.
     expect(tile(gateway, "counter", NAAN)?.sold_out).toBeUndefined();
   });
@@ -179,7 +183,8 @@ describe("§B 01-F57 — the toggle carries the fold's own heads", () => {
     // `01-F58` — the fold does not pick a winner; it resolves to UNAVAILABLE and flags it.
     expect(tile(gateway, "counter")?.contested).toBe(true);
     expect(tile(gateway, "counter")?.sold_out).toBe(true);
-    expect(tile(gateway, "counter")?.unavailableReason).toBe("86 — disputed");
+    // Was `"86 — disputed"` — `02-F51` again, and `01-F58`'s contest keeps its own qualifier.
+    expect(tile(gateway, "counter")?.unavailableReason).toBe("Sold out — disputed");
 
     // ONE tap clears it. This is the assertion `merge.ts`'s own comment demands — *"superseding
     // only the head your screen happened to show leaves the other head standing"* — and it is

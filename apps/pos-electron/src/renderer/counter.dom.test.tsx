@@ -273,7 +273,23 @@ describe("the grid before an order exists (founder ruling §3.6)", () => {
     render(<Counter />);
     // Not emptied: 27-F4 again. The tile an operator reaches for by position is still there.
     expect(await screen.findByRole("button", { name: /Karahi/i })).toBeTruthy();
-    expect(screen.getAllByText(/choose an order type first/i).length).toBeGreaterThan(0);
+    expect(await screen.findByRole("button", { name: /Biryani/i })).toBeTruthy();
+    /**
+     * ⚠ **A SECOND ASSERTION STOOD HERE AND IT PINNED AN OVERRULED SENTENCE.** It read
+     * `expect(screen.getAllByText(/choose an order type first/i).length).toBeGreaterThan(0)`.
+     *
+     * `02-F49` (a) rules that line FALSE: `startOrder` refuses without a latched **channel**, so
+     * the type row was never the first step and the surface was instructing an act the code
+     * declines. Leaving the assertion green would have blocked the correct implementation —
+     * this repo's `catalog-pricing.test.ts:394` shape, where a ruling landed and the suite
+     * encoding the old rule was not grepped the same day.
+     *
+     * **What this test is named for is untouched:** the grid is DISABLED IN PLACE and not
+     * emptied, which is the `27-F4` claim, and it is asserted above on both tiles rather than
+     * on one. Which words (if any) the surface uses is now owned by
+     * `order-entry-sequence.dom.test.tsx` §B, which asserts the property — no line names a
+     * precondition the code does not enforce — instead of a string.
+     */
   });
 
   it("C5: tapping an item with no order open adds NOTHING — no line, no append", async () => {
@@ -286,9 +302,11 @@ describe("the grid before an order exists (founder ruling §3.6)", () => {
     render(<Counter />);
     fireEvent.click(await screen.findByRole("button", { name: /Karahi/i }));
 
-    await waitFor(() =>
-      expect(screen.getAllByText(/choose an order type first/i).length).toBeGreaterThan(0),
-    );
+    // ⚠ The `waitFor` here used to poll for `/choose an order type first/i` — see the block in
+    // the test above for why that sentence is gone (`02-F49` (a) rules it false). The sync point
+    // is now the tile itself, which is what the tap was aimed at; the two assertions this test
+    // exists for are unchanged and are the ones that matter.
+    await waitFor(() => expect(screen.getByRole("button", { name: /Karahi/i })).toBeTruthy());
     expect(lines).toHaveLength(0);
     expect(appended).toHaveLength(0);
   });
