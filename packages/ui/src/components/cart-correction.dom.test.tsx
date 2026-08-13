@@ -93,13 +93,23 @@ const mount = (over: Partial<Parameters<typeof Cart>[0]> = {}) => {
   return onRemove;
 };
 
-/** Every control that removes something, in DOM order — the order a cashier scans down the cart. */
+/**
+ * Every control that removes a line, in DOM order — the order a cashier scans down the cart.
+ *
+ * Found by the DISH each one names rather than by a label word, which is U1's own claim ("each
+ * control is distinguishable by the dish it removes") and keeps this file from pinning a wording
+ * §B has not yet argued for. `queryAllByRole` and not `getAllByRole`: the latter THROWS when the
+ * document holds no button at all, which made the no-`onRemove` control below red against a
+ * correct implementation — a test that blocks the implementer is as damaging as a vacuous one.
+ */
 const removeControls = (): HTMLElement[] =>
   screen
-    .getAllByRole("button")
+    .queryAllByRole("button")
     .filter((b) =>
-      /remove|^\s*(no|×|✕|✖|x)\b/i.test(
-        `${b.getAttribute("aria-label") ?? ""} ${b.textContent ?? ""}`,
+      LINES.some((line) =>
+        `${b.getAttribute("aria-label") ?? ""} ${b.textContent ?? ""}`
+          .toLowerCase()
+          .includes(line.name.toLowerCase()),
       ),
     );
 

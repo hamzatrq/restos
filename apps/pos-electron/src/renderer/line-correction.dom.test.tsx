@@ -39,8 +39,38 @@
  *   subjects could not type a single word. `02-F50` defers `02-F6`'s free-text half entirely, with
  *   `03-F8`'s reason.
  *
+ * ## ⚠ TWO THINGS THE IMPLEMENTER WILL HIT, MEASURED ON A WORKING IMPLEMENTATION
+ *
+ * **(1) Landing `quickTags` REDS `cash-tab.dom.test.tsx` and `me-tab.dom.test.tsx`** — one
+ * assertion each, *"the Cash/Me surface reached for an unknown bridge member"*. Both wrap their
+ * stub in a `Proxy` that records any member the screen reads and their `known` maps predate this
+ * channel, so a SHELL read of a new bridge member trips a guard aimed at a surface inventing one.
+ * **The sanctioned amendment is already written in those files**: the K-7 note beside `alarms`
+ * records the identical situation and its resolution — add the member to `known` with a reason,
+ * which does not weaken the guard because *"the assertion is 'reached for an unknown bridge
+ * member', and every other name still trips it"*. `quickTags: vi.fn(async () => [])` is what a
+ * real host with no configured tags serves (`02-F50`).
+ *   It is **not pre-applied here**, deliberately: those are two other tracks' oracles and a stub
+ *   for a member `RestosBridge` does not yet declare would be a comment promising a contract that
+ *   does not exist.
+ *
+ * **(2) Read the tag list ONCE, not inside `reload()`.** Measured: putting it in the counter's
+ * reload spends an IPC round trip per ledger event — every line, every payment, every peer's
+ * event — for a `00 §7` layer-2 value that only moves when an owner edits it and for which there
+ * is no `changed` push at all. That is also the reason `CHANNELS.quickTags` is its own channel
+ * rather than a field on `DeviceState`. Neither placement changes any assertion in this file,
+ * which is exactly why it is written down instead.
+ *
  * ## What this file deliberately does NOT assert
  *
+ * - **WHICH line a tapped tag applies to.** No FR decides it and this is the design question the
+ *   implementer must answer, so §B2 asserts only that the event names *a* line (`02-F6` is an ITEM
+ *   note; `03-F55` gives it a position inside its item's block, so a note naming none has nowhere
+ *   legal to render). The two candidates, both defensible: the **last line rung**, which is where
+ *   the conversation is and costs no extra tap (`02-F2`: "≤ 2 taps from grid to confirm"), against
+ *   **select a cart line first**, which is explicit but adds a tap and a selection state to the
+ *   surface `27-F5` is strictest about. Pinning either here would make the other correct answer
+ *   red.
  * - **Geometry.** happy-dom lays nothing out. `pnpm layout:check` owns `27-F9`'s adjacency and
  *   `27-F8`'s millimetres, and the nine layout defects this repo has found were all found there or
  *   by launching the app — none by a `.dom.test.tsx`.
@@ -51,7 +81,7 @@
  *   state check is never the authority).
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppendRequest, DeviceState, MenuItem, OpenOrder } from "../shared/ipc";
 import { Counter } from "./Counter";
@@ -138,6 +168,17 @@ beforeEach(() => {
 
 const appendsOf = (type: string): AppendRequest[] => appended.filter((r) => r.type === type);
 
+/**
+ * The cart region, by the accessible name `Cart` ships (`<section aria-label="Current order">`).
+ *
+ * Queries are SCOPED to it deliberately: the menu grid renders a tile named `Coke` and the cart
+ * renders a control named for the same dish, so an unscoped `getByRole("button", {name: /coke/i})`
+ * matches BOTH and throws — a test red against a correct implementation, which is as damaging as a
+ * vacuous one. Scoping is also the honest form of the claim: §A is about the cart.
+ */
+const cart = async (): Promise<HTMLElement> =>
+  await screen.findByRole("region", { name: /current order/i });
+
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // §A — C8: the control is ON THE SCREEN and it sends the right event for the right line.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -147,7 +188,7 @@ describe("§A 02-F8 — a cashier can take the Coke off the order", () => {
     mount();
     render(<Counter />);
     expect(
-      await screen.findByRole("button", { name: /coke/i }),
+      within(await cart()).getByRole("button", { name: /coke/i }),
       "`Cart` declares `onRemove` and `Counter` never passes it — the prop, the 27-F9 comment " +
         "and the styling all exist, and no cashier can reach any of it",
     ).toBeTruthy();
@@ -165,7 +206,7 @@ describe("§A 02-F8 — a cashier can take the Coke off the order", () => {
   it("pressing it appends `order.line_removed` naming THAT line (R1)", async () => {
     mount();
     render(<Counter />);
-    fireEvent.click(await screen.findByRole("button", { name: /coke/i }));
+    fireEvent.click(within(await cart()).getByRole("button", { name: /coke/i }));
 
     await waitFor(() => expect(appendsOf("order.line_removed")).toHaveLength(1));
     expect(appendsOf("order.line_removed")[0]?.payload).toMatchObject({
@@ -188,7 +229,7 @@ describe("§A 02-F8 — a cashier can take the Coke off the order", () => {
     // tile rather than per cart line, would pass everything above.
     mount([{ ...ORDER, lines: [], total_paisa: 0 }]);
     render(<Counter />);
-    await screen.findByRole("button", { name: /karahi/i }); // the menu tile, not a cart control
+    expect(within(await cart()).queryAllByRole("button")).toEqual([]);
     expect(appendsOf("order.line_removed")).toEqual([]);
   });
 });
@@ -271,7 +312,7 @@ describe("§B2 27-F6/02-F50 — the tag is TAPPED, never typed (R2)", () => {
     // must still ring, which is what the menu tile below asserts.
     mount([ORDER]);
     render(<Counter />);
-    await screen.findByRole("button", { name: /karahi/i });
+    await cart(); // the counter surface is up, so the absence below is a rendered absence
     expect(screen.queryByRole("button", { name: /less spicy/i })).toBeNull();
     expect(appendsOf("order.note_added")).toEqual([]);
   });

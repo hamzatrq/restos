@@ -107,7 +107,14 @@ import { describe, expect, it } from "vitest";
 // Reached through the package's public entry point for the same reason `merge-builders.ts` drives
 // `openStore`: the oracle tests the surface a host app has, never an internal.
 import { billedEffectiveFromJsonLines as billedFrom } from "../index.js";
-import { appendInput, type Identity, identity, peerEnvelope, peerIdentity } from "./builders.js";
+import {
+  appendInput,
+  canonicalJson,
+  type Identity,
+  identity,
+  peerEnvelope,
+  peerIdentity,
+} from "./builders.js";
 import {
   created,
   foldStats,
@@ -247,6 +254,52 @@ describe("§A 02-F9/01-F30 — a removed line leaves the cart and leaves billed_
       "01-F30 has no `removed_value` term — a line that stays in billed_total makes the " +
         "conservation identity unsatisfiable without the void 02-F8 says this is NOT",
     ).toBe(2 * 6000);
+    store.close();
+  });
+
+  it("01-F33: the fold's OWN billed accumulator drops too — the two derivations must not diverge", () => {
+    /**
+     * ⚠ **ADDED BY MUTATION (matrix S6, first run: 0 kills).** Every other money assertion here
+     * goes through `billedEffectiveFromJsonLines`, which is what the product reads
+     * (`main/gateway.ts` feeds `OpenOrder.total_paisa` from it) — but `projectEntity` keeps a
+     * SECOND accumulator of the same quantity, and that one is not a column on the row. It is the
+     * input to `01-F33`'s `uncovered_addition` check, so a removal that dropped the CELL and kept
+     * its MONEY was invisible to the whole suite: the cart read right and the ceiling comparison
+     * read the pre-removal total.
+     *
+     * `01-F33` is where it becomes observable. The close attests a ceiling of 12,000 — exactly the
+     * surviving line — so a correct fold lands ON the ceiling and raises nothing, while a fold
+     * still carrying the removed 45,000 busts it and flags an addition nobody made. `26 §8` and
+     * the T-01-11 ruling are explicit that one total may not have two implementations; this is the
+     * assertion that the two inside this file agree.
+     */
+    const id = identity();
+    const store = mergeStore(id);
+    const counter = branchPeer(id, "d-counter-1");
+    ingestAll(store, [
+      envelopeFor(counter, 0, created("O1")),
+      envelopeFor(counter, 1, lineAdded("O1", "L1", { qty: 1, unit_price_paisa: 45000 })),
+      envelopeFor(counter, 2, lineAdded("O1", "L2", { qty: 2, unit_price_paisa: 6000 })),
+      envelopeFor(counter, 3, {
+        type: "order.settlement_closed",
+        payload: {
+          order_id: "O1",
+          settlement_attempt_ids: [] as string[],
+          billed_paisa: 2 * 6000,
+          tendered_paisa: 2 * 6000,
+          refunded_paisa: 0,
+          closed_by_user: "u-close",
+        },
+      }),
+      envelopeFor(counter, 4, lineRemoved("O1", "L1")),
+    ]);
+
+    expect(billed(store)).toBe(2 * 6000);
+    expect(
+      JSON.parse(onlyOrder(store).exceptions_json) as string[],
+      "01-F33 flagged an addition nobody made — the fold's own billed accumulator still carries " +
+        "the removed line while json_lines does not",
+    ).toEqual([]);
     store.close();
   });
 
@@ -417,10 +470,20 @@ describe("§B 01-F34/01-F16 — the removal wins whichever way the two events ar
   });
 
   it("CONTROL — a removal on ORDER A does not reach the same line_id on ORDER B", () => {
-    // `line_id` is minted per line, but nothing in the schema makes it globally unique, and a
-    // tombstone set keyed by `line_id` ALONE — rather than per entity — would cross orders. Two
-    // tills minting `L1` for two different orders is not exotic; it is what a per-order counter
-    // does by construction.
+    /**
+     * `line_id` is minted per line and NOTHING in the schema makes it globally unique — a
+     * per-order counter produces `L1` on every order by construction — so a tombstone set keyed by
+     * `line_id` ALONE, rather than per entity, silently empties the neighbouring bill.
+     *
+     * ⚠ **THE LAST EVENT IS LOAD-BEARING AND WAS ADDED BY MUTATION.** Without it this test
+     * SURVIVED a globally-keyed mutant (matrix S5, first run: 0 kills), and the reason is a
+     * property of the engine rather than of the mutant: `apply` returns only the keys it marked
+     * DIRTY, so after a removal on `OA` only `OA` is re-projected and `OB`'s stored row is the one
+     * computed before the tombstone existed. A cross-order leak is therefore invisible until
+     * something else touches `OB` — which in service is the very next tap. Adding a line to `OB`
+     * after the removal is what forces that re-projection, and it is the ordinary case, not a
+     * contrived one.
+     */
     const id = identity();
     const store = mergeStore(id);
     const counter = branchPeer(id, "d-counter-1");
@@ -430,14 +493,16 @@ describe("§B 01-F34/01-F16 — the removal wins whichever way the two events ar
       envelopeFor(counter, 2, created("OB")),
       envelopeFor(counter, 3, lineAdded("OB", "L1", { qty: 1, unit_price_paisa: 45000 })),
       envelopeFor(counter, 4, lineRemoved("OA", "L1")),
+      // The next ordinary act on the untouched order — a second dish rung on OB.
+      envelopeFor(counter, 5, lineAdded("OB", "L2", { qty: 1, unit_price_paisa: 6000 })),
     ]);
 
     const rows = Object.fromEntries(store.openOrders().map((r) => [r.order_id, r]));
     expect(Object.keys(JSON.parse(rows.OA?.json_lines ?? "{}") as object)).toEqual([]);
     expect(
-      Object.keys(JSON.parse(rows.OB?.json_lines ?? "{}") as object),
+      Object.keys(JSON.parse(rows.OB?.json_lines ?? "{}") as object).sort(),
       "the tombstone set is keyed by line_id alone and crossed into another order",
-    ).toEqual(["L1"]);
+    ).toEqual(["L1", "L2"]);
     store.close();
   });
 });
@@ -642,7 +707,11 @@ describe("§F 01-F34/26 §8 — no projected value reaches an envelope-id compar
       invariantBytes(relabelled),
       "a projected value moved under a bijective id relabel — something in the notes or the " +
         "tombstone set is reading envelope ids (01-F34)",
-    ).toBe(JSON.stringify(mapProjectionIds(before, map)));
+      // `canonicalJson` on BOTH sides, not `JSON.stringify`: `invariantBytes` is canonical
+      // (keys sorted at every depth) and a plain stringify preserves insertion order, so the two
+      // differ by key ORDER alone and the assertion fails against a CORRECT implementation. Caught
+      // on the first green run — the round-3 law's second corollary in miniature.
+    ).toBe(canonicalJson(mapProjectionIds(before, map)));
     plain.close();
     relabelled.close();
   });
