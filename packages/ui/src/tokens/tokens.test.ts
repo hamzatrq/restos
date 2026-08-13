@@ -6,7 +6,8 @@
 // which is the difference between a design system and a mood board.
 
 import { describe, expect, it } from "vitest";
-import { CVD_KINDS, contrast, deltaE00, hexToLab, lightness, simulate } from "./color-science";
+import { PAIRING } from "../components/Surface";
+import { contrast } from "./color-science";
 import tokens from "./tokens.json" with { type: "json" };
 
 type Tok = { value?: unknown; replacement?: unknown; [k: string]: unknown };
@@ -25,74 +26,26 @@ const at = (g: Record<string, Tok>, k: string): Tok => {
 };
 const hex = (name: string): string => at(color, name).value as string;
 
-/** Worst-case perceptual distance across normal vision and all three dichromacies. */
-const worstDeltaE = (a: string, b: string): { d: number; under: string } => {
-  let d = Number.POSITIVE_INFINITY;
-  let under = "";
-  for (const k of ["normal", ...CVD_KINDS]) {
-    const [x, y] = k === "normal" ? [a, b] : [simulate(a, k), simulate(b, k)];
-    const v = deltaE00(hexToLab(x), hexToLab(y));
-    if (v < d) {
-      d = v;
-      under = k;
-    }
-  }
-  return { d, under };
-};
-
-describe("27-F15 — status colours ride a monotonic lightness ladder", () => {
-  // The claim being checked: the naive equal-lightness traffic light measures ΔE00 8.2
-  // under deuteranopia (near-identical olive); a lightness ladder measures 31.4 worst-case.
-  // amber and red are the two RESTING states — 27-F14 makes green transient-only, so green
-  // is never co-present with them in a scanning task and is not part of the ladder.
-  it("separates the two resting states by at least the 31.4 the spec claims", () => {
-    const { d, under } = worstDeltaE(hex("bgColor-status-abnormal"), hex("bgColor-status-fault"));
-    expect(d, `worst under ${under}`).toBeGreaterThanOrEqual(31.4);
-  });
-
-  it("beats the equal-lightness traffic light it replaces, which collapses entirely", () => {
-    // The spec cites 8.2 for "the naive equal-lightness traffic-light palette". Constructing
-    // such a pair directly is worse than that: an amber and a red at the SAME L* and similar
-    // chroma are literally indistinguishable to a deutan — ΔE00 0.0, the near-identical olive
-    // 27-F15 describes. This is the failure mode, reproduced rather than quoted.
-    const naive = worstDeltaE("#C98145", "#E16C48"); // both L* ≈ 60
-    expect(naive.under).toBe("deuteranopia");
-    expect(naive.d).toBeLessThan(1);
-
-    const ours = worstDeltaE(hex("bgColor-status-abnormal"), hex("bgColor-status-fault")).d;
-    expect(ours).toBeGreaterThan(40);
-  });
-
-  it("orders lightness monotonically with severity", () => {
-    const surface = lightness(hex("bgColor-surface"));
-    const abnormal = lightness(hex("bgColor-status-abnormal"));
-    const fault = lightness(hex("bgColor-status-fault"));
-    // More severe = visually heavier = darker against a light page (27-F19 light default).
-    expect(surface).toBeGreaterThan(abnormal);
-    expect(abnormal).toBeGreaterThan(fault);
-  });
-
-  it("keeps every status FILL discriminable from the page it sits on", () => {
-    // 27-F15: "the fill carries it — never a dot, badge or thin rule." A fill that cannot be
-    // told from the page is not carrying anything. ΔE00 is the right metric here rather than
-    // a WCAG luminance ratio, because these differ chromatically as well as in lightness.
-    for (const name of ["status-abnormal", "status-fault", "status-confirmed", "interactive"]) {
-      const { d, under } = worstDeltaE(hex(`bgColor-${name}`), hex("bgColor-surface"));
-      expect(d, `${name} vs surface, worst under ${under}`).toBeGreaterThanOrEqual(20);
-    }
-  });
-});
-
-describe("27-F17 — assume 1 in 20 male staff is deutan and does not know it", () => {
-  it("never lets a red/green pair be the sole distinguishing signal by lightness alone", () => {
-    // This one is EXPECTED to be weak — red vs green is the classic confusion and no palette
-    // fixes it. The spec's answer is structural (27-F12: colour + shape + position + number),
-    // not chromatic. The test pins the residual so a future edit cannot quietly make it worse.
-    const { d } = worstDeltaE(hex("bgColor-status-fault"), hex("bgColor-status-confirmed"));
-    expect(d).toBeGreaterThan(15);
-  });
-});
-
+// 27-F15 and 27-F17 MOVED to `palette-ladder.oracle.test.ts` (oracle session, 24 §3 step 2).
+//
+// What used to live here asserted the pre-amendment design and would now be wrong in three
+// ways, so it is retired rather than re-pointed:
+//
+//   - the ΔE00 floor of **31.4**, which 27-F15 no longer carries. It was measured on one pair,
+//     on a different ladder, with no separation gate applied, and the amended FR replaces it
+//     with **>= 20 on the WORST pair, with the 27-F21 separation gate held**;
+//   - a "naive traffic light" exemplar built from two red-oranges, reproducing a real collapse
+//     but not the GREEN-VS-RED one the 8.2 figure describes;
+//   - a lightness ordering hardcoded to the LIGHT direction (`surface > abnormal > fault`),
+//     which cannot express 27-F19's dark opt-in at all — on a dark field a severe state is
+//     lighter than the page, not darker.
+//
+// It also contained a `27-F17` red/green assertion at a self-chosen `> 15` with a comment
+// conceding the result was "EXPECTED to be weak". A threshold that appears in no spec, chosen
+// by the session that wrote the palette, is not a gate.
+//
+// The replacement runs every pair of the 27-F14 allocation across BOTH polarities. Two files
+// asserting one law with two different numbers is the drift that made this round necessary.
 describe("27-F21 — gate on WCAG 2.2 AA", () => {
   it("gives every fill a paired foreground that clears 4.5:1 on it", () => {
     for (const [name, tok] of Object.entries(color)) {
@@ -148,9 +101,31 @@ describe("27-F38..F46 — the naming laws that stop a rename from inverting a me
     }
   });
 
+  it("27-F43: <Surface>'s restated pairing map is exactly the manifest's", () => {
+    // `Surface.tsx` cannot derive its pairing union from `tokens.json`, because
+    // `resolveJsonModule` widens every string to `string` and a type built on that accepts
+    // every fill/foreground combination — which is precisely the composition 27-F43 exists to
+    // make impossible (`fgColor-status-fault` on `bgColor-status-fault` is 1.00:1). So the map
+    // is restated as literals in that file, and the drift risk that creates is closed HERE
+    // rather than left to review.
+    const declared = Object.fromEntries(
+      Object.entries(tokens.color)
+        .filter(([k, v]) => !k.startsWith("$") && "pairsWith" in (v as object))
+        .map(([k, v]) => [k, (v as { pairsWith: string }).pairsWith]),
+    );
+    expect(PAIRING, "Surface's pairing map has drifted from the manifest").toEqual(declared);
+  });
+
   it("27-F40: colour tokens carry a role-first prefix", () => {
     for (const k of Object.keys(color)) {
-      expect(/^(bgColor|fgColor|borderColor)-/.test(k), `${k} lacks a role prefix`).toBe(true);
+      // `outlineColor-` joined the set with 27-F64. It is a distinct role on purpose: a
+      // decorative rule and a REQUIRED SC 1.4.11 boundary are different properties, and
+      // 27-F40 exists so a name says which one it is. Conflating it with `borderColor-`
+      // would have let the boundary be restyled away as decoration.
+      expect(
+        /^(bgColor|fgColor|borderColor|outlineColor)-/.test(k),
+        `${k} lacks a role prefix`,
+      ).toBe(true);
     }
   });
 

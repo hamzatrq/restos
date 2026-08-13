@@ -7,6 +7,29 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { newId } from "@restos/domain";
 
+/**
+ * T-2 (`02-F42`) — the ordinary order these fixtures model, on BOTH `02-F1` axes.
+ *
+ * Every `order.created` fixture in this file used to say `channel: "dine_in"`, which names no
+ * channel: `dine_in` is an order **type** (`02-F1`), and `02-F42` makes a channel value drawn
+ * from that vocabulary invalid. The drift was invisible because `channel` was an open string.
+ * It stopped being invisible when `01-F60` made the channel a **price key** — the field these
+ * fixtures were mis-filling is the one that now selects which catalog price a line snapshots.
+ *
+ * What the fixtures MEANT is "an ordinary dine-in order rung up at the till", which is two
+ * facts on two axes, and only one of them was written down — into the wrong field. Restored as
+ * both: `order_type: "dine_in"` (the fact the old value was actually stating) and
+ * `channel: "counter"` (the fact it was standing in for). `counter` and not one of the other
+ * four because the emitting device in every scenario in this package is a POS appending its
+ * own order; `phone`/`storefront`/`whatsapp`/`foodpanda` each imply a remote origin these
+ * fixtures do not model, and picking one would silently make them money-bearing under
+ * `01-F60`.
+ *
+ * `order_type` stays an open optional string in the registry — `02-F42` closes `channel` only —
+ * so this is a fixture correction, not an assertion about `order_type`'s schema.
+ */
+export const ORDINARY_ORDER = { order_type: "dine_in", channel: "counter" } as const;
+
 /** noUncheckedIndexedAccess-safe unwrap — a missing value is a loud test failure (T-01-05 additive). */
 export const must = <T>(value: T | undefined | null, what = "value"): T => {
   if (value === undefined || value === null) throw new Error(`expected ${what} to be defined`);
@@ -31,7 +54,7 @@ export const appendInput = (id: Identity, overrides: Record<string, unknown> = {
   device_created_at: 1752800000000,
   type: "order.created",
   schema_version: 1,
-  payload: { order_id: newId(), channel: "dine_in" },
+  payload: { order_id: newId(), ...ORDINARY_ORDER },
   refs: [],
   ...overrides,
 });
@@ -46,7 +69,7 @@ export const tempDbPath = () => join(mkdtempSync(join(tmpdir(), "restos-outbox-"
 
 export const orderCreated = (order_id: string, extra: Record<string, unknown> = {}) => ({
   type: "order.created",
-  payload: { order_id, channel: "dine_in", ...extra },
+  payload: { order_id, ...ORDINARY_ORDER, ...extra },
 });
 
 export const orderConfirmed = (order_id: string) => ({
@@ -134,6 +157,9 @@ export const paymentRecorded = (order_id: string, amount_paisa: number) => ({
     method: "cash",
     purpose: "settles_order",
     settlement_attempt_id: newId(),
+    // 26 §7 / 02-F37: the carried shift key, required and nullable. Null — no shift is open
+    // in this suite, which is exactly the case 02-F37 makes legal.
+    shift_id: null,
   },
 });
 
@@ -193,7 +219,7 @@ export const peerEnvelope = (
     server_received_at: null,
     type: "order.created",
     schema_version: 1,
-    payload: { order_id: newId(), channel: "dine_in" },
+    payload: { order_id: newId(), ...ORDINARY_ORDER },
     refs: [],
     ...overrides,
   };

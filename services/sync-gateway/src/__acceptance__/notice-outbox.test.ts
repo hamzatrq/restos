@@ -195,7 +195,7 @@ describe("law 4 — durable redelivery on the origin's next hello (01-F37 / DEC-
     clock.t = BASE_T + 12_000;
     const good0 = validEnvelope(identity, 0);
     const poison = validEnvelope(identity, 1, {
-      payload: { order_id: `n3-${NUL}-order`, channel: "dine_in" },
+      payload: { order_id: `n3-${NUL}-order`, channel: "counter" },
     }); // registry-valid; jsonb-unstorable → storage_reject
     await pusher.conn.handle(pushMsg([good0, poison]));
     expect(ofKind(pusher.rec.all, "quarantine_notice").map((n) => n.event_id)).toContain(poison.id);

@@ -68,6 +68,8 @@ No other states exist; surfaces may not invent intermediate ones (e.g. "arriving
 **Reporting hooks**
 - 09-F20 Events emitted here give docs 12/13 per-rider delivery counts, assigned→delivered spans (from event timestamps), failure rates, and over/short history. This module computes none of it; it only guarantees the events are complete and truthful.
 
+- 09-F21 **A rider goes on duty from their own app, over the CLOUD (gap G6, founder ruling July 2026).** `09-F4` allowed on-duty only via a branch device clock-in or a counter toggle, while `09-F2` makes the rider phone permanently a non-member of the branch LAN — so a rider starting from home base had no self-serve path at all. The rider app therefore transitions duty state through the **cloud API**, not the LAN. This does **not** breach `00 §5.1`: that law binds *in-branch* features, and the rider phone is by design never on the branch network, so the cloud is the only channel it has ever had. The counter toggle stays as the fallback for a rider whose phone is dead or out of data, and both paths are attributed. **Explicitly not adopted:** geofenced auto-on-duty (battery and location-permission cost, and a rider who is merely nearby starts receiving orders).
+
 ## 4. Key flows
 
 **Happy path**

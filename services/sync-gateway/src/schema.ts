@@ -9,7 +9,20 @@
 // uuid — the storage layer must not tighten the wire contract (assumption 11).
 // envelope jsonb is verbatim-as-received; the two cloud-stamped values live in
 // their own columns and are merged into the envelope at serve time (assumption 12).
-import { bigint, index, jsonb, pgSchema, primaryKey, text, unique } from "drizzle-orm/pg-core";
+// @unreached-by-design CONSUMED AT BUILD TIME, not at runtime. `drizzle.config.ts` points
+// drizzle-kit at this file to generate `./drizzle/*.sql`; the gateway itself issues raw SQL
+// through `postgres`, so no runtime module imports these table objects. The consumer is real and
+// outside `src/`, which is why this reads as unreached.
+import {
+  bigint,
+  bigserial,
+  index,
+  jsonb,
+  pgSchema,
+  primaryKey,
+  text,
+  unique,
+} from "drizzle-orm/pg-core";
 
 export const kernel = pgSchema("kernel");
 
@@ -128,6 +141,121 @@ export const deviceRegistry = kernel.table(
     token_expires_at: bigint("token_expires_at", { mode: "number" }),
   },
   (t) => [primaryKey({ columns: [t.org_id, t.device_id] })],
+);
+
+/**
+ * Published catalog versions (T-C2; `01-F52`, `01-F9` "plus org-scope reference data").
+ *
+ * **ORG-scoped, never branch-scoped** — `01-F52` is explicit, and it is why a training branch
+ * mirrors production read-only (`01-F49`) with no special case anywhere.
+ *
+ * The founder ruling (`plans/wave-1/catalog-transport.md` §6 Q1) is *the API publishes, the
+ * gateway serves*: the back office decides what the menu IS and calls `publishCatalog`; this
+ * service stores an immutable versioned artifact and answers device fetches from it. The
+ * gateway never interprets an entry — `name`, `sort` and the rest pass through untouched — so
+ * it cannot grow an opinion about menu structure, which was the whole point of the ruling.
+ * `18 §4`'s "every table owns exactly one writer service" holds: that service is this one.
+ *
+ * Versions are per-org and strictly increasing. A row here is the COMMIT POINT — `catalog_entries`
+ * rows are written first and this row last, so a reader that sees version N is guaranteed to see
+ * every entry of version N. That ordering is the whole atomicity story for a paged fetch.
+ */
+export const catalogVersions = kernel.table(
+  "catalog_versions",
+  {
+    org_id: text("org_id").notNull(),
+    version: bigint("version", { mode: "number" }).notNull(),
+    published_at: bigint("published_at", { mode: "number" }).notNull(),
+    /** `14 §`'s actor, so `14-F6`'s price history has an author without reading the ledger. */
+    actor_user_id: text("actor_user_id"),
+  },
+  (t) => [primaryKey({ columns: [t.org_id, t.version] })],
+);
+
+/**
+ * What CHANGED at each version — a delta, never a full menu per version.
+ *
+ * This shape is chosen so the two things the device protocol asks for are both cheap and both
+ * derived from one table: a **delta** from version A to B is `A < version <= B`, and a
+ * **snapshot** at V is the greatest `version <= V` per `(kind, id)`. Storing a full menu per
+ * version would make the delta a diff — the expensive direction, and the one that invites a
+ * gateway to start comparing entries, i.e. to start understanding the menu.
+ *
+ * `deleted` is a TOMBSTONE row, not an absence (`01-F55`): a reprint of an order placed before
+ * an item was deleted must still render its name, so a delete travels as a marked entry. The
+ * oracle round found that the device side destroyed tombstones on every snapshot recovery;
+ * carrying them explicitly here is what lets the device stop doing that.
+ */
+export const catalogEntries = kernel.table(
+  "catalog_entries",
+  {
+    org_id: text("org_id").notNull(),
+    version: bigint("version", { mode: "number" }).notNull(),
+    kind: text("kind").notNull(),
+    entry_id: text("entry_id").notNull(),
+    name: text("name").notNull(),
+    /** 03-F38 — a short kitchen name, so long item names stop being a KOT layout problem. */
+    kitchen_name: text("kitchen_name"),
+    parent_id: text("parent_id"),
+    sort: bigint("sort", { mode: "number" }),
+    deleted: bigint("deleted", { mode: "number" }).notNull(),
+    /**
+     * `01-F60` — the `(branch, channel) → integer paisa` grid, stored as jsonb.
+     *
+     * jsonb rather than a side table because the gateway is forbidden an opinion about menu
+     * structure (the founder ruling this service is built on: "the API publishes, the gateway
+     * serves"). A `catalog_prices` table would make this service join, filter and therefore
+     * UNDERSTAND pricing; a column it passes through keeps it a store. The completeness rule
+     * lives at the writer, in `publishCatalog`, which is where `01-F60` puts it.
+     */
+    prices: jsonb("prices"),
+    /** `03-F50` — the kitchen station. Null means INHERIT from the parent, not "none". */
+    station: text("station"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.org_id, t.version, t.kind, t.entry_id] }),
+    // Both access paths in one index: the delta scan (org, version range) and the snapshot
+    // fold (org, entity, greatest version).
+    index("catalog_entries_org_kind_entry_version_idx").on(t.org_id, t.kind, t.entry_id, t.version),
+  ],
+);
+
+/**
+ * ORG-SCOPED events (`01-F62`, closing `DEC-SYNC-012`).
+ *
+ * **This is not `kernel.events` with a nullable branch, and the separation is the FR.**
+ * `01-F62` rules shape (c): an org-scoped event "lands in an org-scoped audit store that is not
+ * the branch ledger at all". It "never enters a branch stream and no device folds it", so it has
+ * no `global_seq` (a branch delivery cursor), no `lamport_seq` (a per-device chain), no
+ * `device_id`, and above all **no `branch_id` and no branch stamp** — the alternative the FR
+ * rejected was putting a server value into `branch_created_at`, which would have made a branch
+ * field carry a non-branch value and invited a fold to read it.
+ *
+ * `server_received_at` is the ordering authority (`01-F18`, `01-F62`), and it is trustworthy here
+ * for the reason the FR gives: the cloud plane is the one place a clock is not a threat — the
+ * inverse of the device-clock threat model `01-F43` was written for.
+ *
+ * `seq` is a surrogate arrival order, NOT an ordering authority a reader may interpret. It exists
+ * because `server_received_at` is a millisecond and a bulk edit (`14-F8`) writes five records at
+ * one instant on purpose, so reading them back needs a stable tiebreak. Nothing folds it and no
+ * client is told about it.
+ *
+ * Append-only, like `kernel.events`: no UPDATE and no DELETE of this table exists anywhere in
+ * this package (`01-F1`).
+ */
+export const orgEvents = kernel.table(
+  "org_events",
+  {
+    seq: bigserial("seq", { mode: "number" }).primaryKey(),
+    org_id: text("org_id").notNull(),
+    /** The `01 §4` type. Only `01-F62`'s org-scoped set is accepted — see `appendOrgEvent`. */
+    type: text("type").notNull(),
+    /** `01-F5`/`02-F19` attribution. Nullable because the envelope schema says nullable. */
+    actor_user_id: text("actor_user_id"),
+    server_received_at: bigint("server_received_at", { mode: "number" }).notNull(),
+    payload: jsonb("payload").notNull(),
+  },
+  (t) => [index("org_events_org_received_seq_idx").on(t.org_id, t.server_received_at, t.seq)],
 );
 
 /**

@@ -133,7 +133,7 @@ describe("cloud session quarantine surfacing (contract (b); 01-F37/DEC-SYNC-005)
     a.store.append(appendInput(cloudId("dev-a"))); // lamport 0 — clean
     const poison = a.store.append(
       appendInput(cloudId("dev-a"), {
-        payload: { order_id: `order-${NUL}-poison`, channel: "dine_in" },
+        payload: { order_id: `order-${NUL}-poison`, channel: "counter" },
       }),
     ); // lamport 1 — storage_reject at the cloud
     a.store.append(appendInput(cloudId("dev-a"))); // lamport 2 — clean

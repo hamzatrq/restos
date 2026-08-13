@@ -23,7 +23,7 @@ import { expect } from "vitest";
 import type { AppendInput, DeviceStore } from "../index.js";
 // createCloudSession is the un-built T-01-06 impl surface — its absence is the RED.
 import { createCloudSession, createMeshSession, type MeshSession, openStore } from "../index.js";
-import { must, seededRng } from "./builders.js";
+import { must, ORDINARY_ORDER, seededRng } from "./builders.js";
 import { originLamports } from "./mesh-builders.js";
 
 /** One org/branch for the whole simulated fleet — the branch stream is identity-scoped (01-F9). */
@@ -208,7 +208,8 @@ export const generateSpikeRush = (params: {
     const order_id = `order-${params.seed}-${o}`;
     const l1 = `line-${params.seed}-${o}-1`;
     const l2 = `line-${params.seed}-${o}-2`;
-    push(owner, "order.created", { order_id, channel: "dine_in" });
+    // T-2 (02-F42): corrected onto both 02-F1 axes — see ./builders.ts ORDINARY_ORDER.
+    push(owner, "order.created", { order_id, ...ORDINARY_ORDER });
     push(owner, "order.confirmed", { order_id });
     push(owner, "order.line_added", {
       order_id,
@@ -248,6 +249,9 @@ export const generateSpikeRush = (params: {
       method: "cash",
       purpose: "settles_order",
       settlement_attempt_id: `pay-${params.seed}-${o}`,
+      // 26 §7 / 02-F37: the carried shift key, required and nullable. Null — no shift is
+      // open in the spike, which is exactly the case 02-F37 makes legal.
+      shift_id: null,
     });
   }
   return steps;
@@ -262,7 +266,9 @@ export const generateOwnCreates = (params: {
   Array.from({ length: params.count }, (_unused, i) =>
     mkInput(params.device_id, `bulk-${params.seed}-${i}`, BASE_TS + i, "order.created", {
       order_id: `bulk-order-${params.seed}-${i}`,
-      channel: "delivery",
+      // T-2 (02-F42): was `channel: "delivery"`, an order TYPE. Backlog-depth fixtures — the
+      // value is opaque to every assertion, so they take the file's ordinary order.
+      ...ORDINARY_ORDER,
     }),
   );
 

@@ -4,6 +4,21 @@
     "build": {
       "dependsOn": ["^build"]
     },
+    // `@restos/escpos` devDepends on `@restos/testing` (K-4's `kot-document.test.ts` renders through
+    // the virtual printer) and `@restos/testing` depends on `@restos/escpos` (the virtual printer is
+    // a thin wrapper over the ONE byte→page interpretation, `18 §10`). That is a genuine cycle in
+    // the PACKAGE graph and pnpm links it fine, but `^build` turns it into a cycle in the TASK graph
+    // and `turbo run build` refuses to plan. Cutting it here rather than duplicating the walk: two
+    // interpretations of one command set is the defect the shared module exists to prevent, and a
+    // build-order edge between two packages whose `build` is `echo` is not a cost.
+    //
+    // If either package gains a REAL build step, this override becomes a hazard and the cycle has to
+    // be broken in the package graph instead — most likely by moving the virtual printer into
+    // `@restos/escpos`, which is a `18 §10` amendment ("the virtual printer (in `packages/testing`)")
+    // and therefore a spec PR, not a refactor.
+    "@restos/testing#build": {
+      "dependsOn": []
+    },
     "test": {},
     "typecheck": {},
     "lint": {}

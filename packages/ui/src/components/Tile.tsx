@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
-import { color, type Posture, space, targetFor, typography } from "../tokens/index";
+import { IconLabel, type IconName } from "../icons/index";
+import { useColor } from "../theme";
+import { type Posture, space, type TypeName, targetFor, typography } from "../tokens/index";
 
 /**
  * 27-F8 — touch minimums are POSTURE-typed. There is deliberately no `size` prop: the
@@ -13,21 +15,53 @@ import { color, type Posture, space, targetFor, typography } from "../tokens/ind
 export type TileProps = {
   posture: Posture;
   label: string;
-  children?: ReactNode;
-  onPress?: () => void;
+  children?: ReactNode | undefined;
+  onPress?: (() => void) | undefined;
   /**
    * 27-F4 — a conditional surface is DISABLED IN PLACE, never absent. A tile that vanishes
    * when unavailable destroys the positional memory of every operator who learned the grid
    * with it there, and adding/removing/reordering a grid item is a breaking change.
    */
-  unavailable?: boolean;
+  unavailable?: boolean | undefined;
   /** Why it is unavailable. Shown, because an unexplained dead tile reads as a broken app. */
-  unavailableReason?: string;
+  unavailableReason?: string | undefined;
   /**
    * 27-F9 — destructive actions are never adjacent to high-frequency ones on any surface a
    * wet hand touches. Marking a tile destructive is what lets a layout test assert that.
    */
-  destructive?: boolean;
+  destructive?: boolean | undefined;
+  /**
+   * **This tile is the one CHOSEN from a pick-list** (`02-F26`'s paid-out reason, `27-F6`'s
+   * "reasons are pick-lists of tiles, or voice").
+   *
+   * `27-F66` decides the shape and it is not a preference: *"a state difference between two
+   * neutral fills is carried by an independent mark meeting 3:1 — an accent rule, a border
+   * change, a glyph — never by the fill step alone"*, because the elevation fills sit ~1.1:1
+   * apart and cannot carry perceivability. So this draws the accent rule at the tile's lower
+   * edge — the identical mark `TabRail` uses for the active tab and `TenderPanel` for the
+   * selected payment method, which is `27-F4`'s argument as much as `27-F66`'s: three surfaces
+   * on one device that mark "this one is chosen" three different ways teach three habits.
+   *
+   * **It is never the only signal.** `27-F12` requires state to be carried by a word or a glyph
+   * and never by colour alone, so a caller marking a tile selected still says so in words —
+   * `CashSurfaces` renders `chosen` as the tile's child. This prop adds the preattentive half;
+   * it does not replace the readable one.
+   */
+  selected?: boolean | undefined;
+  /**
+   * `27 §5` — the symbol this tile carries, ACCOMPANYING its word and never replacing it.
+   *
+   * Optional, and it stays optional: `27-F37` caps the vocabulary at ~25 absolutely stable
+   * symbols, so most tiles in this product legitimately have none — a menu item is a recognition
+   * target at a fixed grid position (that FR's own distinction), not a symbol to be learned.
+   * Passing a name here is a claim that this tile is one of the ~25, and `ICON_NAMES` is what
+   * decides whether that claim is true.
+   *
+   * `27-F35`'s comprehension gate has NOT been run, so this can only ever add a channel to a
+   * tile that already reads. The label is still required and still rendered; there is no
+   * arrangement of these props that produces a pictogram on its own.
+   */
+  icon?: IconName | undefined;
 };
 
 export const Tile = ({
@@ -38,13 +72,43 @@ export const Tile = ({
   unavailable = false,
   unavailableReason,
   destructive = false,
+  selected = false,
+  icon,
 }: TileProps) => {
+  const color = useColor();
   const min = targetFor(posture);
-  const t = typography["text-label"];
+  /**
+   * `27-F25` — "Numbers are the operational payload and the largest element in their region."
+   *
+   * The `keypad` posture IS numeric entry: `27-F8` defines that row as "cash / numeric keypad —
+   * standing, high-consequence entry", and the only things composed from it are the two PIN pads
+   * (`App.tsx`, `ManagerApproval.tsx`). Found by looking, August 2026: those pads rendered their
+   * digits at `text-label` — **14 px inside a 126 dp box** — while `NumericKeypad`, the money pad
+   * two screens away, renders the same digits at `text-numeric-primary`. Two keypads that differ
+   * only in glyph size teach two different habits on one device, and the smaller one was the
+   * credential surface an operator hits 20–60x a shift (`01-F61`).
+   *
+   * Every other posture keeps `text-label`: a menu tile's payload is a NAME, and `27-F16`'s
+   * argument applies to size as well as colour — emphasising the base case emphasises nothing.
+   */
+  const typeName: TypeName = posture === "keypad" ? "text-numeric-primary" : "text-label";
+  const t = typography[typeName];
   return (
     <button
       type="button"
-      disabled={unavailable}
+      /**
+       * **NOT `disabled`.** `01-F59` is explicit: *"Availability is not an `01-F17` block …
+       * the counter may still sell it deliberately — `02-F31` owns the oversell path."*
+       * `02-F7` asks only that an 86'd item "grey out", and `02-F40`'s founder ruling names
+       * `02-F31`'s oversell handling as what absorbs the printer-only kitchen's walk-to-the-
+       * counter delay — which requires the counter to be ABLE to sell it.
+       *
+       * A `disabled` button removed that path entirely, so the platform withheld a sale on
+       * availability state, which is the one thing `01-F17` says it must never do. The tile is
+       * greyed and carries its reason (`27-F4` — disabled IN PLACE, with the reason, because
+       * the reason is what makes disabling-in-place useful); the decision stays with the
+       * operator.
+       */
       onClick={onPress}
       aria-label={unavailable && unavailableReason ? `${label} — ${unavailableReason}` : label}
       style={{
@@ -61,19 +125,63 @@ export const Tile = ({
         fontSize: t.fontSize,
         fontWeight: t.fontWeight,
         borderRadius: space["space-2"],
-        cursor: unavailable ? "not-allowed" : "pointer",
+        // `pointer` even when unavailable, because it IS allowed (01-F59). `not-allowed` was
+        // the same claim the `disabled` attribute made, in a second place.
+        cursor: "pointer",
         // 27-F13: design achromatically first. The resting tile carries NO status colour —
         // colour is reserved for exceptions, so spending it on the base case would blunt it.
-        background: destructive ? color["bgColor-status-fault"] : color["bgColor-surface-raised"],
-        color: destructive ? color["fgColor-on-status-fault"] : color["fgColor-default"],
-        border: `1px solid ${color["borderColor-default"]}`,
-        opacity: unavailable ? 0.45 : 1,
+        background: unavailable
+          ? color["bgColor-surface-sunken"]
+          : destructive
+            ? color["bgColor-status-fault"]
+            : color["bgColor-surface-raised"],
+        color: unavailable
+          ? color["fgColor-disabled"]
+          : destructive
+            ? color["fgColor-on-status-fault"]
+            : color["fgColor-default"],
+        // NO opacity. A 0.45 wash puts the reason text at 1.89:1 — far under AA — which
+        // defeats 27-F4's entire purpose: the tile is disabled IN PLACE so the operator can
+        // read WHY. "Disabled" is carried by the sunken fill (27-F15: the fill carries it),
+        // and the reason stays fully legible at 5.22:1.
+        // 27-F64 — a STATUS fill takes its own outline; a neutral fill takes the neutral one
+        // (27-F66). A destructive tile was rendering `borderColor-default` over a fault fill,
+        // which is the boundary for the surface it is NOT on.
+        border: `1px solid ${color[destructive ? "outlineColor-status-fault" : "borderColor-default"]}`,
+        // 27-F66 — the chosen state is an independent MARK, never the fill step (1.15:1, which
+        // carries nothing). The transparent rule is always present so selecting a tile does not
+        // change its height and move the row under a hand already reaching (27-F4).
+        borderBottom: selected
+          ? `3px solid ${color["bgColor-interactive"]}`
+          : "3px solid transparent",
       }}
     >
-      <span>{label}</span>
+      {/*
+        The un-iconed path is byte-for-byte what it always was: every tile in this product that
+        does not name a symbol renders exactly the element it rendered before, so nothing moves
+        on a surface an operator has already learned (`27-F4`).
+      */}
+      {icon === undefined ? (
+        <span>{label}</span>
+      ) : (
+        <IconLabel name={icon} label={label} size={typeName} />
+      )}
       {children}
       {unavailable && unavailableReason ? (
-        <span style={{ color: color["fgColor-muted"] }}>{unavailableReason}</span>
+        // The reason is a QUALIFIER on the label, never a competitor to it: pinned to
+        // `text-label` rather than inherited, so it cannot ride the posture's own type step
+        // (27-F25 makes a keypad tile's label numeric-sized, and a 28 px reason under a 28 px
+        // label is two headlines and no hierarchy).
+        <span
+          style={{
+            fontFamily: typography["text-label"].fontFamily,
+            fontSize: typography["text-label"].fontSize,
+            color: color["fgColor-disabled"],
+            fontWeight: 600,
+          }}
+        >
+          {unavailableReason}
+        </span>
       ) : null}
     </button>
   );

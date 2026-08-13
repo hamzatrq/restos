@@ -30,8 +30,16 @@ import {
   parseEvent,
   type TimeBasis,
 } from "@restos/domain";
-import Database from "better-sqlite3";
+import { CATALOG_SCHEMA, type CatalogStore, createCatalogStore } from "./catalog.js";
 import {
+  type CustomerFileState,
+  type CustomerRow,
+  emptyCustomerFile,
+  foldCustomerFile,
+  projectCustomerFile,
+} from "./folds/customer-file.js";
+import {
+  type AvailabilityRow,
   createMergeEngine,
   type DropPlan,
   type FoldState,
@@ -41,6 +49,23 @@ import {
   type ParkedRow,
   type ProjectedOrder,
 } from "./folds/merge.js";
+import {
+  type DayRow,
+  emptyShiftCash,
+  foldShiftCash,
+  projectShiftCash,
+  type ShiftCashState,
+  type ShiftRow,
+  type UnboundDrawerRow,
+  type UnboundRow,
+} from "./folds/shift-cash.js";
+import {
+  createPinAttemptStore,
+  PIN_ATTEMPTS_SCHEMA,
+  type PinAttemptStore,
+} from "./pin-attempts.js";
+import { createStaffRegistry, STAFF_SCHEMA, type StaffRegistry } from "./staff.js";
+import type { StorageAdapter } from "./storage.js";
 
 export class AckBeyondAppendedError extends Error {
   constructor(watermark: number, ownHighWater: number | null) {
@@ -161,6 +186,36 @@ export type DeviceStore = {
   openOrders(): OpenOrderRow[];
   kitchenQueue(): KitchenQueueRow[];
   parked(): ParkedRow[];
+  /** Item availability rows (01-F22, 01-F6) — the 26 §3 item-keyed projection. */
+  availability(): AvailabilityRow[];
+  /** `shift_cash` rows (FOLDS.md line 15): the cashier's shift reconciliation (02-F23),
+   * the business day (02-F22/02-F24), and 02-F37's settlements taken with no shift open. */
+  shifts(): ShiftRow[];
+  days(): DayRow[];
+  unboundSettlements(): UnboundRow[];
+  /** `02-F43`: the drawer opens and paid-outs that named no shift — counted, never dropped. */
+  unboundDrawer(): UnboundDrawerRow;
+  /**
+   * `customer_file` rows (`02-F27`/`02-F28`): the customer file `01-F23` keys by normalized
+   * E.164 phone — the name, the saved addresses, and `01-F31`'s retained divergence.
+   *
+   * This is the READ `02-F28`'s *"≤30 s from number entry"* is measured from, and it exists
+   * because a fold that converged perfectly and was reachable from no store method would be this
+   * wave's recurring defect exactly. Mutation-measured rather than assumed: deleting the
+   * `foldCustomerFile` call in `applyFold` reddens 3 of `customer-file-store.test.ts`'s 4 tests,
+   * and deleting the `recomputeFolds` replay reddens the fourth.
+   *
+   * ⚠ **AND THE SEAM STOPS HERE, WHICH IS THE HONEST STATE RATHER THAN A CLOSED LOOP.** As of
+   * August 2026 **no app calls this method and no shipping code emits either `customer.*` type** —
+   * `02-F27`'s phone-entry screen is unbuilt, so the file is written by nobody and read by nobody
+   * outside the acceptance suites. `pnpm seams:check` cannot see that: a method on a returned
+   * object is not a value export (Rule A) and not an optional member of an options bag (Rule B),
+   * and the fold's three exports ARE reached — by this file. So the rail is clean and the loop is
+   * still open, which is precisely the pair this wave has recorded fourteen times. The debt is
+   * `02-F27`'s screen, and it is not marked `@unreached-owed` because a marker on a reached export
+   * FAILS the check; this comment is where the grep should land instead.
+   */
+  customers(): CustomerRow[];
   refold(): void;
   /** Fold work counters (T-01-15 contract; events_folded is the real quantity). */
   foldStats(): FoldStats;
@@ -177,6 +232,20 @@ export type DeviceStore = {
    */
   setBranchTimeOffset(offset_ms: number): void;
   branchTimeStatus(): BranchTimeStatus;
+  /** Device catalog — reference data, display only (01-F52..F56). Never read by a fold. */
+  readonly catalog: CatalogStore;
+  /**
+   * Synced staff credentials + role assignments (01-F26/F28) — reference data on the same
+   * `01-F21` chain as the catalog, and never read by a fold for the same reason. This is what
+   * makes offline PIN verification possible after a reboot with the WAN down.
+   */
+  readonly staff: StaffRegistry;
+  /**
+   * The durable PIN failure counter (01-F61), scoped per (device, user). Handed to
+   * `createPinSession` by the host: a counter that lives only in the process is defeated by
+   * relaunching the app, by the attacker standing at the device.
+   */
+  readonly pinAttempts: PinAttemptStore;
   /**
    * The token to present on the next connection (01-F47): the most recent renewal the
    * cloud has issued, or null before any renewal — in which case the caller uses the
@@ -250,7 +319,11 @@ export type DeviceStore = {
 // Device schema v1 (01 §5). `sync_state` is the single-row write-checkpoint
 // (19 §5): the outbox is derived — events past the checkpoint — so acking is a
 // checkpoint move, never a row delete.
+
 const SCHEMA = `
+${CATALOG_SCHEMA}
+${STAFF_SCHEMA}
+${PIN_ATTEMPTS_SCHEMA}
 CREATE TABLE IF NOT EXISTS events (
   id TEXT PRIMARY KEY,
   lamport_seq INTEGER NOT NULL UNIQUE,
@@ -345,6 +418,17 @@ CREATE TABLE IF NOT EXISTS parked (
   waiting_for TEXT NOT NULL,
   envelope_json TEXT NOT NULL
 ) STRICT;
+-- 01-F6 names availability a materialized state table; 26 §3 makes it an item-keyed
+-- projection of the same engine. Deliberately NOT joined to the catalog table — the catalog
+-- says what exists, availability is an operational override, and catalog is never a fold
+-- input (01-F52).
+CREATE TABLE IF NOT EXISTS availability (
+  item_id TEXT PRIMARY KEY,
+  available INTEGER NOT NULL,
+  contested INTEGER NOT NULL,
+  head_ids_json TEXT NOT NULL,
+  anomalies_json TEXT NOT NULL
+) STRICT;
 `;
 
 /** Canonical JSON (sorted object keys) — structural divergence detection for re-appends (01-F8). */
@@ -359,13 +443,48 @@ const canonical = (value: unknown): string =>
       : val,
   );
 
-export const openStore = (options: { path: string; identity: StoreIdentity }): DeviceStore => {
+/**
+ * **The store, over `18 §4`'s injected storage adapter.**
+ *
+ * ⚠ **PROTECTED-PATH CHANGE, August 2026 (`20 §4.4` — senior review).** This function took a
+ * `path` and did `new Database(path)` from `better-sqlite3` at module scope. `18 §4` names TWO
+ * engines and ONE adapter, so a store module that binds one engine is not implementing that
+ * sentence — and the practical cost was total: importing `@restos/sync-client` at all was fatal
+ * under Hermes, which is why `apps/manager` could not open a store and its alarm screen had no
+ * source. The engine now arrives as an argument (`storage-node.ts` / `storage-op-sqlite.ts`) and
+ * NOTHING below changed: the schema, the 40 statements, the 7 transactions and the reopen
+ * self-heal are byte-identical, which is what makes the 660 pre-existing tests in this package the
+ * real negative control for the move.
+ *
+ * `openStore` in `store.ts` is the door most callers use — it keeps the `{ path }` shape the two
+ * Electron hosts and every suite already pass, and resolves it to `createNodeStorageAdapter`.
+ * This is the engine-free core underneath both doors.
+ */
+export const createDeviceStore = (options: {
+  adapter: StorageAdapter;
+  identity: StoreIdentity;
+}): DeviceStore => {
   const { identity } = options;
-  const db = new Database(options.path);
+  const db = options.adapter;
   db.pragma("journal_mode = WAL"); // multi-handle reads + crash recovery (18 §4)
   db.pragma("synchronous = FULL"); // plug-pull law outranks throughput (00 §5.2)
   db.pragma("foreign_keys = ON"); // device DB rule (18 §4)
   db.exec(SCHEMA);
+
+  // 01-F52: reference data, constructed alongside the ledger but deliberately separate from
+  // it. Nothing in `folds/` may reach for this — a projected value that read a name would
+  // depend on catalog sync state at fold time, which is the 01-F34 break.
+  // The branch is passed in, not looked up: 01-F60 resolves a price from "the `branch_id`
+  // already in its identity", and taking it as a call argument would let a caller price an
+  // order against a branch this device is not in.
+  const catalog = createCatalogStore(db as never, identity.branch_id);
+
+  // 01-F28: the staff registry rides the same reference-data chain, for the same reason and
+  // with the same separation from the ledger — `01-F1` makes a credential hash written into an
+  // event permanent and therefore unrotatable. 01-F61: the PIN failure counter is durable
+  // because an in-memory one is defeated by relaunching the app.
+  const staff = createStaffRegistry(db as never);
+  const pinAttempts = createPinAttemptStore(db as never);
 
   const byId = db.prepare<[string], { envelope: string }>(
     "SELECT envelope FROM events WHERE id = ?",
@@ -491,6 +610,20 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   const selectParked = db.prepare<[], ParkedRow>(
     "SELECT event_id, waiting_for, envelope_json FROM parked ORDER BY event_id",
   );
+  // 26 §3 item-key projection. Upsert rather than delete-then-insert: an availability row
+  // never ceases to exist once toggled — the fold's own "untoggled items never appear" is
+  // about items with no toggle at all, not about a toggle being withdrawn.
+  const insertAvailabilityRow = db.prepare<[string, number, number, string, string]>(
+    `INSERT INTO availability (item_id, available, contested, head_ids_json, anomalies_json)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(item_id) DO UPDATE SET available = excluded.available,
+       contested = excluded.contested, head_ids_json = excluded.head_ids_json,
+       anomalies_json = excluded.anomalies_json`,
+  );
+  const deleteAllAvailability = db.prepare("DELETE FROM availability");
+  const selectAvailability = db.prepare<[], AvailabilityRow>(
+    "SELECT item_id, available, contested, head_ids_json, anomalies_json FROM availability ORDER BY item_id",
+  );
 
   const rowToEnvelope = (row: { envelope: string }): EventEnvelopeT =>
     parseEnvelope(JSON.parse(row.envelope));
@@ -526,6 +659,19 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   // open by full replay of the surviving set (order-free, 01-F6).
   const engine = createMergeEngine();
 
+  // The `shift_cash` accumulator (S-2, FOLDS.md line 15). Held in memory and projected on
+  // read rather than materialized into its own STRICT tables: nothing in the store queries
+  // shift state through SQL, and the reopen self-heal below (`refoldTx()`) rebuilds it from
+  // the surviving ledger by the SAME replay that rebuilds every other fold table — so
+  // durability across a reopen is identical, and a mirrored table would be write-only data
+  // that silently goes stale (the reason the cloud-order mirror column was cut in review).
+  let shiftCash: ShiftCashState = emptyShiftCash();
+
+  // The `customer_file` accumulator (02-F27/02-F28). In memory and projected on read for the
+  // same reasons as `shiftCash` above: nothing queries the customer file through SQL, and the
+  // reopen self-heal rebuilds it by the same replay that rebuilds every other fold table.
+  let customerFile: CustomerFileState = emptyCustomerFile();
+
   const readAllParsed = (): ParsedEvent[] =>
     // Audit events are fold-inert (01-F5/01-F6): they carry no order/line/money
     // state, so they never enter the fold feed.
@@ -538,6 +684,10 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     clearOrders.run();
     clearQueue.run();
     clearParked.run();
+    // Availability is rebuilt from the same snapshot as every other table — the whole point
+    // of the sidecar is that refold() covers it without a second code path (01-F6).
+    deleteAllAvailability.run();
+    for (const row of state.availability) upsertAvailability(row);
     for (const row of state.orders) {
       insertOrderRow.run(
         row.order_id,
@@ -576,8 +726,26 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
   // peer_events — replay order irrelevant, the fold is a pure function of the
   // set. The reopen self-heal and the refold() surface (01-F6).
   const recomputeFolds = (): void => {
-    engine.rebuild(readAllParsed());
+    const events = readAllParsed();
+    engine.rebuild(events);
+    shiftCash = emptyShiftCash();
+    customerFile = emptyCustomerFile();
+    for (const event of events) {
+      shiftCash = foldShiftCash(shiftCash, event.envelope);
+      customerFile = foldCustomerFile(customerFile, event.envelope);
+    }
     writeFullTables(engine.snapshot());
+  };
+
+  /** Replace one item's availability row in place — the `item:`-key targeted delta. */
+  const upsertAvailability = (row: AvailabilityRow): void => {
+    insertAvailabilityRow.run(
+      row.item_id,
+      row.available,
+      row.contested,
+      row.head_ids_json,
+      row.anomalies_json,
+    );
   };
 
   // Replace one order's rows in place (the targeted delta); the queue row exists
@@ -647,6 +815,19 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
     }
     for (const eventId of result.drained) deleteParkedRow.run(eventId);
     for (const orderId of result.dirty) upsertOrder(orderId, engine.projectOrder(orderId));
+    // 26 §3 sidecar: item keys write their own materialized table (01-F6). Kept a separate
+    // loop over a separate field rather than a namespaced `dirty` — a namespaced key
+    // reaching this writer while it still expected a bare id would leave the lattice right
+    // and SQLite stale, visible only on a read BETWEEN deliveries with no refold.
+    for (const itemId of result.dirtyItems) upsertAvailability(engine.projectItemKey(itemId));
+    // The `shift_cash` fold (S-2, FOLDS.md line 15). It runs INSIDE ingest with no try/catch
+    // between, which is why it never throws: a bucket it cannot represent contributes zero
+    // and raises `money_overflow` — the bucket refuses, the till does not (01-F17).
+    shiftCash = foldShiftCash(shiftCash, parsed.envelope);
+    // The `customer_file` fold (02-F27/02-F28). Same position and same obligation: it runs
+    // INSIDE ingest with no try/catch between, so it never throws — an unknown type changes
+    // nothing and a customer event can never wedge the ingest of a real, rung-up sale (01-F17).
+    customerFile = foldCustomerFile(customerFile, parsed.envelope);
   };
 
   // Lamport assignment and the durable insert are one transaction (01-F3): a
@@ -1027,6 +1208,30 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
       return selectParked.all();
     },
 
+    availability() {
+      return selectAvailability.all();
+    },
+
+    shifts() {
+      return projectShiftCash(shiftCash).shifts;
+    },
+
+    days() {
+      return projectShiftCash(shiftCash).days;
+    },
+
+    unboundSettlements() {
+      return projectShiftCash(shiftCash).unbound;
+    },
+
+    unboundDrawer() {
+      return projectShiftCash(shiftCash).unbound_drawer;
+    },
+
+    customers() {
+      return projectCustomerFile(customerFile).customers;
+    },
+
     refold() {
       refoldTx();
     },
@@ -1100,6 +1305,9 @@ export const openStore = (options: { path: string; identity: StoreIdentity }): D
       writeCredential.run(token);
     },
 
+    catalog,
+    staff,
+    pinAttempts,
     branchTimeStatus() {
       const { offset_ms, acquired } = branchTime();
       // Skew is |offset|: branch time is device clock + offset, so the offset IS how far

@@ -72,6 +72,8 @@ const recordedPayload = () => ({
   method: "cash",
   purpose: "settles_order",
   settlement_attempt_id: newId(),
+  // 26 §7 / 02-F37: the carried shift key, required and nullable.
+  shift_id: newId(),
 });
 
 const refundedPayload = () => ({
@@ -262,7 +264,8 @@ describe("order.settlement_closed — the new 01 §4 event type (01-F33)", () =>
 describe("payloadHash — the clock-neutral tiebreak primitive (01-F34, matrix conventions)", () => {
   it("01-F34: payloadHash(payload) = sha256 hex over canonicalJson(payload)", () => {
     const payloadHash = mustExport(maybeExports.payloadHash, "payloadHash");
-    const payload = { order_id: "O1", channel: "dine_in", nested: { b: 2, a: 1 } };
+    // T-2 (02-F42): `counter` is a real channel; the payload is opaque hash input either way.
+    const payload = { order_id: "O1", channel: "counter", nested: { b: 2, a: 1 } };
     const expected = createHash("sha256").update(canonicalJson(payload), "utf8").digest("hex");
     expect(payloadHash(payload)).toBe(expected);
   });
@@ -287,7 +290,22 @@ describe("LEGAL_NEXT — the exported legality predicate (01-F35, states.ts)", (
     expect(LEGAL_NEXT).toEqual({
       placed: ["confirmed", ...exits],
       confirmed: ["in_prep", ...exits],
-      in_prep: ["ready", ...exits],
+      // ⚠ AMENDED BY RULING — `DEC-HW-002` (August 2026). This row read `["ready", ...exits]`
+      // from T-01-15 until `02-F31`'s settlement half was built against it and could not be:
+      // that FR requires *"settlement → lines `served`"* and in its very next clause forbids
+      // fabricating `ready`, so with `served` reachable only from `ready` the two clauses could
+      // not both hold. `03-F26` confirms the prohibition is about the STATE and not merely the
+      // sample — *"T1 branches produce no ready-marks (02-F31), so they honestly produce no
+      // samples."*
+      //
+      // **This assertion is updated rather than annotated**, because a green test defending an
+      // overruled rule is a documented failure of this repo (`catalog-pricing.test.ts:394` under
+      // `01-F60`, which went on defending a rule the founder had overruled and would have failed
+      // the correct implementation). The ruling and the whole argument are on the table itself in
+      // `../states.ts`; the reason is NOT restated here, so there is one place to read it.
+      //
+      // It is a PROTECTED-PATH oracle edit and is called out for senior review as one.
+      in_prep: ["ready", "served", ...exits],
       ready: ["served", "picked_up", ...exits],
       picked_up: ["delivered", ...exits],
       served: [],

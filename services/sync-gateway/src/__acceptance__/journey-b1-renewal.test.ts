@@ -237,7 +237,7 @@ const appendSale = (store: DeviceStore, identity: Identity, order_id: string): v
     device_created_at: BASE_T,
     type: "order.created",
     schema_version: 1,
-    payload: { order_id, channel: "dine_in" },
+    payload: { order_id, channel: "counter" },
     refs: [],
   });
 };
@@ -418,7 +418,7 @@ describe("J1/B1 end to end — the registry SEEDS token_expires_at so a relayed 
             server_received_at: null,
             type: "order.created",
             schema_version: 1,
-            payload: { order_id: `ord-${origin.device_id}`, channel: "dine_in" },
+            payload: { order_id: `ord-${origin.device_id}`, channel: "counter" },
             refs: [],
           },
         ],

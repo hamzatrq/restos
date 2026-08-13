@@ -122,6 +122,14 @@ function emitOrder(
       method: chance(0.5) ? "cash" : "card",
       purpose: "settles_order",
       settlement_attempt_id: attempt,
+      // REQUIRED and nullable since S-1 (`26 §7`'s carried shift key, `02-F37`'s null shift
+      // reference). Nothing here validates payloads — `bench/` sits outside the root tsconfig
+      // `include` and the harness aliases a zod-free kernel — but the README's claim is that
+      // "the code under test is byte-for-byte the shipped kernel", and a fixture generating a
+      // payload the shipped registry would REFUSE quietly voids it. Null, not a minted id:
+      // these fixtures are seeded and clock-free so the same seed yields byte-identical events
+      // on every engine, which is the precondition for the parity comparison.
+      shift_id: null,
     });
     if (chance(0.15))
       ev("payment.refunded", {

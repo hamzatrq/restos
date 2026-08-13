@@ -177,21 +177,21 @@ describe("X9 — quarantine surfacing on-device (01-F37 / DEC-SYNC-005)", () => 
       a,
       eventInput("dev-a", `x9-0-${seed}`, "order.created", {
         order_id: `x9-clean0-${seed}`,
-        channel: "dine_in",
+        channel: "counter",
       }),
     ); // lamport 0 — clean
     const poison = appendOn(
       a,
       eventInput("dev-a", `x9-poison-${seed}`, "order.created", {
         order_id: poisonOrderId,
-        channel: "dine_in",
+        channel: "counter",
       }),
     ); // lamport 1 — storage_reject
     appendOn(
       a,
       eventInput("dev-a", `x9-2-${seed}`, "order.created", {
         order_id: `x9-clean2-${seed}`,
-        channel: "dine_in",
+        channel: "counter",
       }),
     ); // lamport 2 — clean
     sim.runFor(SETTLE_MS);
@@ -216,7 +216,7 @@ describe("X9 — quarantine surfacing on-device (01-F37 / DEC-SYNC-005)", () => 
       a,
       eventInput("dev-a", `x9-3-${seed}`, "order.created", {
         order_id: `x9-clean3-${seed}`,
-        channel: "dine_in",
+        channel: "counter",
       }),
     );
     sim.runFor(SETTLE_MS);

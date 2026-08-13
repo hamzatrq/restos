@@ -119,13 +119,25 @@ export const businessDate = (
  * Half-open by construction so consecutive days TILE — every instant lands in exactly
  * one business day, with no gap and no double-count. A closed upper bound would put the
  * cutover instant itself in two days at once, and double-count a sale rung exactly on it.
+ *
+ * **First shipping caller, August 2026: `services/api`'s `dayEndBoundary` (B-4).** `14-F28` lands
+ * a menu edit at the next 05:00 cutover, which is this function's `end_ms` — so the debt marker
+ * that stood here ("no shipped surface queries a business-day RANGE yet") is discharged and gone.
+ * The day-close reconciliation and the `specs/12`/`specs/13` reports are still owed, but they are
+ * no longer what stands between this and a caller.
  */
 export const businessDayBounds = (
   at_ms: number,
   cutover_hour: number = BUSINESS_DAY_CUTOVER_HOUR_DEFAULT,
 ): { start_ms: number; end_ms: number } => {
   assertCutover(cutover_hour);
-  const date = businessDate(at_ms, cutover_hour);
+  return boundsOfDate(businessDate(at_ms, cutover_hour), cutover_hour);
+};
+
+/** `YYYY-MM-DD`, strictly. A shorter or malformed string is a caller error, never a nearby day. */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+const boundsOfDate = (date: string, cutover_hour: number): { start_ms: number; end_ms: number } => {
   const y = Number(date.slice(0, 4));
   const m = Number(date.slice(5, 7));
   const d = Number(date.slice(8, 10));
@@ -133,4 +145,35 @@ export const businessDayBounds = (
   const [ny, nm, nd] = shiftDate(y, m, d, 1);
   const end_ms = instantOfKarachiWall(ny, nm, nd, cutover_hour);
   return { start_ms, end_ms };
+};
+
+/**
+ * Half-open `[start_ms, end_ms)` of a NAMED business day (`01-F46`, `12-F13`).
+ *
+ * `businessDayBounds` answers "which day contains this instant"; this answers "when was the day
+ * called `2026-08-09`", which is the question a report browsable by calendar date actually asks
+ * (`12-F13`: "summary history is browsable by calendar date"). Both resolve through the same
+ * `instantOfKarachiWall`, so there is ONE definition of a day's edges in the platform and a caller
+ * cannot reconstruct a near-miss out of `Date.UTC` and an assumed +05:00 — which is what every
+ * caller of the instant-based function was otherwise going to do, and which silently loses an hour
+ * on Pakistan's 2008–2009 DST summers.
+ *
+ * The date is validated rather than coerced: `new Date("2026-8-9")` parses, and a report that
+ * quietly answers for a day the caller did not ask for is the failure `00 §5.7` names.
+ */
+export const businessDayBoundsOfDate = (
+  date: string,
+  cutover_hour: number = BUSINESS_DAY_CUTOVER_HOUR_DEFAULT,
+): { start_ms: number; end_ms: number } => {
+  assertCutover(cutover_hour);
+  if (!ISO_DATE.test(date)) {
+    throw new RangeError(`business date must be YYYY-MM-DD, got ${JSON.stringify(date)} (01-F46)`);
+  }
+  const bounds = boundsOfDate(date, cutover_hour);
+  // A round trip, so a date that does not exist (2026-02-30) is refused rather than silently
+  // rolling into March. `instantOfKarachiWall` builds on `Date.UTC`, which rolls over happily.
+  if (businessDate(bounds.start_ms + 1, cutover_hour) !== date) {
+    throw new RangeError(`no such business date: ${date} (01-F46)`);
+  }
+  return bounds;
 };

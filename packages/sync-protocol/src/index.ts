@@ -1,11 +1,17 @@
 // @restos/sync-protocol — wire types shared by sync-client and sync-gateway
 // (PROTECTED PATH, 20 §4.4). Owning spec: 01 §8; design: PROTOCOL.md.
+//
+// This root entry is the NODE door and its export list is unchanged: the zstd framing moved from
+// `messages.ts` into `compression.ts` (which owns the `node:zlib` import) and is re-exported here
+// under exactly the same names, so every existing consumer is unaffected. The portable half is
+// also published on its own as `@restos/sync-protocol/messages` — see that file's header for why
+// a `node:` import at the top of the message parser made the kernel unbundlable for RN.
+export { createFrameCodec, decodeCompressed, encodeCompressed } from "./compression.js";
 export {
+  CatalogEntryWire,
+  type CatalogEntryWireT,
   type Compression,
-  createFrameCodec,
-  decodeCompressed,
   decodeMessage,
-  encodeCompressed,
   encodeMessage,
   type FrameCodec,
   MESSAGE_KINDS,

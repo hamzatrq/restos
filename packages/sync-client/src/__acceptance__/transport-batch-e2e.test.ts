@@ -104,7 +104,7 @@ describe("T-01-16 e2e — GREEN PRESERVATION: the per-event granularity survives
     const cStore = openStore({ path: ":memory:", identity: cloudId("dev-c") });
     cStore.ingest({
       ...x,
-      payload: { order_id: "C-LOCAL-DIVERGENT", channel: "dine_in" }, // differs from A's payload
+      payload: { order_id: "C-LOCAL-DIVERGENT", channel: "counter" }, // differs from A's payload
     });
     const cSession = createCloudSession({
       store: cStore,
@@ -189,13 +189,13 @@ describe("T-01-16 e2e — COVER 5: landed-stack composition — a quarantine-slo
     const cloud = createSimCloud({ sim });
     const a = cloudDevice(sim, cloud, "dev-a");
     a.store.append(
-      appendInput(cloudId("dev-a"), { payload: { order_id: "clean-0", channel: "dine_in" } }),
+      appendInput(cloudId("dev-a"), { payload: { order_id: "clean-0", channel: "counter" } }),
     );
     const poison = a.store.append(
-      appendInput(cloudId("dev-a"), { payload: { order_id: `poison-${NUL}`, channel: "dine_in" } }),
+      appendInput(cloudId("dev-a"), { payload: { order_id: `poison-${NUL}`, channel: "counter" } }),
     );
     a.store.append(
-      appendInput(cloudId("dev-a"), { payload: { order_id: "clean-2", channel: "dine_in" } }),
+      appendInput(cloudId("dev-a"), { payload: { order_id: "clean-2", channel: "counter" } }),
     );
     a.session.notifyAppended();
     run(sim);

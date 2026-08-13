@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      No user-scalable viewport: 27-F11c designs in millimetres and renders in pixels, and a
+      scalable viewport would put a second, invisible factor between the two. A pass panel is a
+      fixed physical surface hanging on a wall, not a responsive one.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      18 §9 — the renderer has no Node access, and this CSP is the belt to that brace. The app
+      ships every asset it uses; a kitchen runs offline-first (00 §5.1) and a stylesheet that
+      needs the WAN is a screen that goes blank when the link does.
+
+      `font-src 'self' data:` is 27-F26's typeface arriving as bytes (August 2026) — the same
+      addition, for the same reason, as `apps/pos-electron`'s CSP. It adds no scheme that could
+      reach the network; `img-src` already carries the same `data:` allowance. Without it the
+      @font-face rules parse and every face is silently blocked.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'"
+    />
+    <title>RestOS — Pass</title>
+    <style>
+      /*
+        The height chain. Every surface in `packages/ui` is `height: 100%`, which resolves against
+        its parent — so without this the whole shell collapses to its content and the bottom of
+        the panel is bare page.
+
+        `overflow: hidden` is 27-F2 at the outermost level: 03-F46 PAGES the queue and never
+        scrolls it, so a scrollbar here would mean the layout is wrong and hiding it. Nearly half
+        of field subjects did not know content existed below the fold, which on a pass screen is
+        a ticket nobody cooks.
+      */
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+
+      /*
+        BORDER-BOX, and it is a correctness rule rather than a preference — the same one
+        `apps/pos-electron` records at length. `packages/ui` declares every box as the number it
+        means (`minHeight: targetFor("kitchen")` is 96 dp of TARGET), and under the CSS default
+        padding and border are ADDED to all of them, so a declared box is never the box that
+        renders. That is how a 1418 px alarm band ended up inside a 1392 px window.
+      */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

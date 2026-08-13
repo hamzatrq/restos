@@ -8,8 +8,11 @@ export {
   BUSINESS_TIMEZONE,
   businessDate,
   businessDayBounds,
+  businessDayBoundsOfDate,
 } from "./business-day.js";
 export { canonicalJson } from "./canonical.js";
+// 01-F60 — the sellable-kind set, declared once here (18 §2) after three copies drifted apart.
+export { SELLABLE_KINDS } from "./catalog.js";
 export { DEVICE_CLASSES, type DeviceClass, HUB_ELIGIBLE_CLASSES } from "./device-classes.js";
 export {
   EventEnvelope,
@@ -28,6 +31,8 @@ export {
 export {
   addPaisa,
   applyRateBps,
+  type DirectedPaisa,
+  directedPaisa,
   type Milligrams,
   type Millilitres,
   mg,
@@ -44,18 +49,61 @@ export {
 } from "./money.js";
 export { payloadHash } from "./payload-hash.js";
 export {
+  type AuthDecision,
+  type AuthOutcome,
+  type AuthScope,
+  type AuthSubject,
+  can,
+  // `05-F19` — the paid-out threshold decision, with both figures as required inputs.
+  canPayOut,
+  type PaidOutRequest,
+  PERMISSION_ACTIONS,
+  type PermissionAction,
+  type ReportReach,
+  ROLES,
+  type Role,
+  type RoleAssignment,
+  reportScope,
+} from "./permissions.js";
+// 01-F26 / 01-F61 — the PIN credential primitive. `01-F28` verifies against these hashes
+// on-device, offline, so the algorithm is platform law and lives here (18 §2).
+export { hashPin, PIN_ARGON2ID_PARAMS, verifyPin } from "./pin.js";
+export {
   AVAILABILITY_FALSE_WINS,
   CONTESTED_LINE_BILLABLE,
   EXCESS_TENDER_IS_EXCEPTION,
   KOT_TWO_HEAD_TABLE_HEADER,
 } from "./product-constants.js";
 export {
+  // 05-F30 — the closed set of alarm categories `audit.alarm_acknowledged` may name. Exported
+  // because `05 §5`'s derived alarm list must narrow an incoming ack against the SAME two words.
+  ALARM_ACK_KINDS,
+  type AlarmAckKind,
+  // 05-F7 — the closed `approval_type` set of the manager console's event extension.
+  APPROVAL_TYPES,
+  type ApprovalType,
   AUDIT_EVENT_TYPES,
   type AuditEventType,
+  // 14-F3 — one moved price cell on `catalog.changed`, so the history can render "450 → 480".
+  CatalogPriceChange,
+  type CatalogPriceChangeT,
   eventRegistry,
   isAuditEvent,
+  // 01-F23 / 02-F27 — is this string the E.164 form the customer file is keyed by? The writer
+  // asks before it appends, so `02-F28`'s lookup can answer "not a number yet" without a throw.
+  isPhoneE164,
   type KnownEventType,
+  ORDER_CHANNELS,
+  // 06-F20 — the closed rejection-reason list `02-F9`'s Reject control chooses from.
+  ORDER_REJECTION_REASONS,
+  type OrderChannel,
+  type OrderRejectionReason,
+  PAYMENT_METHODS,
   type ParsedEvent,
+  type PaymentMethod,
+  // 03-F53 — the closed status set the till's `printer.status_changed` producer emits.
+  PRINTER_STATUSES,
+  type PrinterStatus,
   parseEvent,
   UnknownEventTypeError,
 } from "./registry.js";

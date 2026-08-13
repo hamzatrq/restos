@@ -13,3 +13,27 @@ audit-1.md
 
 # Storybook build output (packages/ui)
 storybook-static/
+
+# Electron build output (apps/pos-electron) — three bundles, all generated
+out/
+
+# Compile-time oracle fixtures (packages/ui, type-contracts.oracle.test.ts).
+# Written INSIDE the package and removed in afterAll — which does not run when the task is
+# KILLED, and turbo kills sibling tasks the moment another package's suite fails. The residue
+# then makes `pnpm verify` red on generated fixtures, pointing at the wrong defect entirely.
+# Same class as the `out/` entry above (9ca0189: "verify was linting generated bundles").
+# Agent worktrees (24 §3 step 8 isolation). Each parallel agent gets its own git worktree here so
+# it cannot capture a sibling's half-written files — the failure that put a protected-path change
+# into 8c03e4d under a message describing none of it. They are working copies of tracked content,
+# never content in their own right, and must never be committed into the tree they were cut from.
+.claude/worktrees/
+.oracle-typecheck/
+# Same pattern, same hazard: layout-physical.oracle.test.ts writes fixtures to
+# packages/ui/.oracle-layout and removes them in afterAll — so a KILLED run leaves
+# them in the tree, where they red `pnpm verify` on generated files. Ignored for
+# the same reason its sibling above is.
+.oracle-layout/
+
+# apps/manager — `pnpm -C apps/manager bundle:check` output (Metro resolution proof, 05-F29)
+.expo-bundle-check/
+.expo/

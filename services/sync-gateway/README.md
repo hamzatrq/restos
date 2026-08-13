@@ -29,9 +29,12 @@ Four responsibilities, one process:
 3. **The quarantine-notice outbox** (`kernel.quarantine_notices`) — a durable
    at-least-once channel that tells a device "your event N was quarantined,
    reason R," delivered live on push and redelivered on the device's next hello.
-4. **The Auditor** (`auditor.ts`) — a READ-ONLY nightly job that re-derives
+4. **The Auditor** (`@restos/auditor`) — a READ-ONLY nightly job that re-derives
    everything from `kernel.events` with the real fold engine and reports any
-   divergence. It writes nothing, ever, and survives any poisoned input.
+   divergence. It writes nothing, ever, and survives any poisoned input. It was
+   written here and moved to a package when `services/jobs` became its second
+   consumer (`DEC-ARCH-001`); `src/index.ts` re-exports it unchanged, which is
+   the surface this package's ten auditor suites are pinned to.
 
 Everything the wire understands comes from `@restos/sync-protocol`; every
 envelope validation comes from `@restos/domain`; the merge/refold engine is
@@ -100,12 +103,15 @@ two cloud stamps merged back into the envelope only at serve time.
 | `gateway.ts` | The session state machine + merge pipeline. The bulk of the package. |
 | `auth.ts` | `issueDeviceToken` / `verifyDeviceToken` — jose HS256, signature + claim-shape only. |
 | `registry.ts` | `registerDevice` / `revokeDevice` / `readRegistryRow` — the `device_registry` seams. |
-| `auditor.ts` | `runAuditor` — the five READ-ONLY correctness legs. |
+| *(`@restos/auditor`)* | `runAuditor` — the five READ-ONLY correctness legs. Not a file in this package any more (`DEC-ARCH-001`); `index.ts` re-exports it. |
 | `quarantine-query.ts` | `listQuarantine` — a read-only projection for the fleet-health dashboard (doc 15 READ seam only). |
 | `errors.ts` | Typed error taxonomy + the closed `QuarantineReason` union. |
-| `schema.ts` | Drizzle table definitions (the six `kernel` tables). |
-| `migrate.ts` | `applyMigrations(databaseUrl)` — runs every `drizzle/` migration. |
-| `server.ts` | `buildServer` / `start` — thin Fastify + `@fastify/websocket` adapter; owns the wire codec. Boot-smoke tested only (`server.test.ts` exists). |
+| `catalog.ts` | `publishCatalog` / `catalogPage` / `catalogVersion` — the published catalog artifact (`01-F52`..`01-F56`), and `01-F60`'s completeness check at the writer. |
+| `org-events.ts` | `appendOrgEvent` / `orgEventHistory` — `01-F62`'s ORG-SCOPED store (no branch fields, ordered by `server_received_at`). |
+| `publish-http.ts` | `registerPublishRoutes` — the `/internal` surface `services/api` publishes through (founder ruling: the API publishes, the gateway serves). Credential-gated; fail-CLOSED with none configured. |
+| `schema.ts` | Drizzle table definitions (the six `kernel` tables + `org_events`). |
+| `migrate.ts` | `applyMigrations(databaseUrl)` — runs every `drizzle/` migration. Also the deploy step itself: `pnpm -C services/sync-gateway migrate`. |
+| `server.ts` | `buildServer` / `start` — thin Fastify + `@fastify/websocket` adapter; owns the wire codec, and mounts `/internal`. Boot-smoke tested only (`server.test.ts` exists); the `/internal` routes have their own acceptance suite. |
 | `index.ts` | Public barrel. |
 
 ### `gateway.ts` — the merge pipeline
@@ -216,7 +222,7 @@ belong to the doc 14/15 emitters). `registerDevice` rejects an unknown
 the first revoke stamps. `readRegistryRow` is the auth-check read used at hello,
 at every per-operation revocation re-check, and at the relayed-origin boundary.
 
-### `auditor.ts` — the nightly correctness net
+### `@restos/auditor` — the nightly correctness net
 
 `runAuditor({ db, org_id, read_model? })` is a **READ-ONLY** batch over one org's
 kernel tables — only `SELECT`s exist in the file; it returns `{ ok, findings }`
@@ -258,7 +264,12 @@ crash. Five legs:
   `storage_reject`, `invariant_violation`, `origin_unregistered`,
   `origin_revoked`.
 - **`migrate.ts`** — `applyMigrations(databaseUrl)` runs every `drizzle/`
-  migration programmatically (exercised on every suite run).
+  migration programmatically (exercised on every suite run). It is also the
+  **declared deploy step**: `pnpm -C services/sync-gateway migrate`, idempotent,
+  with `pendingMigrations` answering the schema-state question the server's
+  fourth boot line reports. Migration is deliberate and never automatic — see
+  `CLAUDE.md` for why the server does not migrate itself, and for what the boot
+  check does and does not prove.
 - **`server.ts`** — `buildServer` / `start`: Fastify + `@fastify/websocket`,
   env via `@restos/config` `defineEnv` (crash at boot on invalid env). Requires
   `DATABASE_URL` and `DEVICE_TOKEN_SECRET` (≥ 32 bytes). The **real clock is

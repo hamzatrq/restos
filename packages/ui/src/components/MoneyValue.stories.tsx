@@ -1,3 +1,4 @@
+import { paisa } from "@restos/domain";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { MoneyValue } from "./MoneyValue";
 
@@ -15,16 +16,16 @@ export default meta;
 type Story = StoryObj<typeof MoneyValue>;
 
 /** 27-F23 — `Rs`, symbol-first. Not ₨, not PKR in staff UI. */
-export const Body: Story = { args: { paisa: 125000 } };
+export const Body: Story = { args: { paisa: paisa(125000) } };
 
 /** 27-F25 — numbers are the operational payload and the largest element in their region. */
-export const Hero: Story = { args: { paisa: 348500, size: "hero" } };
+export const Hero: Story = { args: { paisa: paisa(348500), size: "hero" } };
 
 /**
  * **Pakistan does NOT inherit lakh grouping.** CLDR gives `ur` and `en-PK` the `#,##0.###`
  * pattern, so 1,250,000 — never 12,50,000. This story is the regression guard for it.
  */
-export const LargeAmount: Story = { args: { paisa: 125000000, size: "primary" } };
+export const LargeAmount: Story = { args: { paisa: paisa(125000000), size: "primary" } };
 
 /**
  * **Money has no sign here, and the acceptance tests are what established it.** The `Paisa`
@@ -35,10 +36,12 @@ export const LargeAmount: Story = { args: { paisa: 125000000, size: "primary" } 
  * 27-F12 backs the same conclusion from the other end: a lone `-` is one glyph wide, is the
  * first mark lost at distance or on a scratched panel, and means nothing to a non-reader.
  */
-export const Refund: Story = { args: { paisa: 45000, size: "primary", direction: "refund" } };
+export const Refund: Story = {
+  args: { paisa: paisa(45000), size: "primary", direction: "refund" },
+};
 
 /** The change due — the number the cashier reads aloud, so it is hero-sized (27-F24/F25). */
-export const Change: Story = { args: { paisa: 25000, size: "hero", direction: "change" } };
+export const Change: Story = { args: { paisa: paisa(25000), size: "hero", direction: "change" } };
 
 /**
  * 27-F16 — **money is never coloured by default.** Colour on a number means *this number is
@@ -47,17 +50,17 @@ export const Change: Story = { args: { paisa: 25000, size: "hero", direction: "c
  * threshold and almost nothing else.
  */
 export const AbnormalOptIn: Story = {
-  args: { paisa: 45000, size: "primary", direction: "short", abnormal: true },
+  args: { paisa: paisa(45000), size: "primary", direction: "short", abnormal: true },
 };
 
 /** A column of amounts — tabular figures must not jitter (27-F26 chose the face for this). */
 export const TabularColumn: Story = {
-  args: { paisa: 0 },
+  args: { paisa: paisa(0) },
   decorators: [
     () => (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
         {[125000, 9900, 348500, 1200, 125000000].map((p) => (
-          <MoneyValue key={p} paisa={p} size="primary" />
+          <MoneyValue key={p} paisa={paisa(p)} size="primary" />
         ))}
       </div>
     ),

@@ -92,11 +92,26 @@ plausibly a non-reader, and the person the system is protecting (`02-F23`).
 
 | Tab | Task(s) | Primary information | Why it earns a tab |
 |---|---|---|---|
-| **Order** | C3–C10 | The item grid + the cart | The default. ~150–300 visits/shift; everything else is an interruption from here |
-| **Orders** | C12, C14, C20 | Open + parked orders, and the cloud-order queue | Chronological, paged (`03-F46`). Cloud orders arrive with an S2 chime and must be *reachable*, not modal |
-| **Pay** | C11, C13 | Amount due, tender, change | Separate surface because `27-F8` puts numeric entry at **126 dp** — it cannot share a layout with 76 dp tiles |
-| **Cash** | C1, C2, C15–C18 | Drawer, paid-outs, shift open/close | Low frequency, high consequence. Isolated so a mis-tap on the Order tab can never reach it |
-| **Me** | C19 | Own reconciliation, own day, clock state | `02-F23`'s "I'm clean". A protection surface, not an admin one |
+| **Order** | C4–C10 | The item grid + the cart | The default. ~150–300 visits/shift; everything else is an interruption from here |
+| **Orders** | C19, C20, C31, C32 | Open + parked orders, and the cloud-order queue | Chronological, paged (`03-F46`). Cloud orders arrive with an S2 chime and must be *reachable*, not modal |
+| **Pay** | C11–C14 | Amount due, tender, change | Separate surface because `27-F8` puts numeric entry at **126 dp** — it cannot share a layout with 76 dp tiles |
+| **Cash** | C2, C3, C28, C29, C33, C34 | Drawer, paid-outs, shift open/close | Low frequency, high consequence. Isolated so a mis-tap on the Order tab can never reach it |
+| **Me** | C33 (read half) | Own reconciliation, own day, clock state | `02-F23`'s "I'm clean". A protection surface, not an admin one |
+
+> **Task IDs corrected July 2026.** As first written, every row but one cited task IDs that did
+> not match `role-task-inventories.md` — the Cash tab pointed at C15–C18 (table moves, receipt
+> printing, phone orders) and the Me tab at C19 (*accept a cloud order*). The inventory has
+> **never** been renumbered (verified against `a235a96`, the commit that added this file), so these
+> were wrong when authored rather than drifted. They are re-derived above from each row's own
+> stated purpose. `C32` sits on the Orders tab on `02-F33`'s authority — ready-marking lives on
+> *"the POS queue panel"* when the org assigns the ready signal to counter.
+>
+> **`C1` (unlock with PIN) is deliberately absent from the rail.** It is not a tab: it gates every
+> surface 20–60× a shift, so it is a lock surface over the whole app. **No screen in this map owns
+> it yet** — `plans/wave-1/service-surface.md` **S-0c** does.
+>
+> **`Me`'s "clock state" has no task behind it in Wave 1.** Clock-in is `11-F1`, Wave 3. The
+> column stays as the surface's eventual shape; nothing renders there yet.
 
 **The Order surface, in detail** — it is the most important screen in the product:
 

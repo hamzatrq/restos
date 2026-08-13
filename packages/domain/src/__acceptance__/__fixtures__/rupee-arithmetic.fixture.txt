@@ -1,0 +1,197 @@
+FIXTURE — the DEC-MONEY-005 money-arithmetic ban, RUPEE half (oracle review F1).
+================================================================================
+
+Authored from spec text + the fix-round decision only (24 §3 step 2; read-only to the
+implementing session).
+
+  00 §6                — money = integer paisas; no module may divide or scale money inline.
+  18 §4                — raw `number` arithmetic on money is banned, backed by a LINT RULE.
+  DECISIONS.md
+    DEC-MONEY-005      — the ban exists because division and rates are where floats enter.
+
+WHY THIS FIXTURE EXISTS. `rupeesFromPaisa` (money.ts:109) returns a field named `rupees`.
+The shipped rule matches on the NAME — `[Pp]aisa` in a bare identifier or a member property
+— and `rupees` contains neither. Measured against the shipped rule, every FLAG case in the
+first block below produced ZERO diagnostics while its paisa-named twin was flagged. The
+helper that exists to satisfy the ban is currently the shortest way around it.
+
+Decision for this round: the ban extends to rupee-named identifiers and members exactly as
+it already covers paisa-named ones.
+
+FORMAT. Sections are introduced by a line beginning `#=== `, followed by a verdict, a `|`,
+and a label. The body runs to the next header. Each body is standalone TypeScript that is
+lint-clean apart from the money rule, so a diagnostic can only come from the rule itself.
+
+  FLAG   — the rule MUST report "Raw arithmetic on a money value is banned".
+  CLEAN  — the rule MUST NOT report it. These are the false-positive controls; a rule that
+           cries wolf gets suppressed, which is worse than the gap it closes.
+  GAP    — a known, accepted limitation, asserted clean so it is recorded rather than
+           forgotten. See the note at the end of this file before changing one.
+
+NOT ASSERTED HERE, deliberately. String concatenation with `+` where one operand is money
+(`"Rs " + amount_paisa`) is FLAGGED by the shipped rule today — measured, and contrary to
+the rule's own header comment, which claims string concatenation stays legal. Extending the
+name set makes `"Rs " + rupees` flag too. That is inherited behaviour, not a decision taken
+in this round, so no case below asserts either way on it. The production formatter
+(MoneyValue.tsx:50) uses a template literal and `.toLocaleString()`, both measured clean and
+both pinned below, so nothing shipped depends on the answer. Flagged to the implementer as a
+comment defect in the .grit header worth correcting while in there.
+
+
+#=== FLAG | rupee identifier DIVIDED — a split bill computed in the UI
+export const perGuest = (rupees: number, guests: number): number => rupees / guests;
+
+#=== FLAG | rupee identifier SCALED BY A FLOAT LITERAL — a 17% tax, the doc-16 case
+export const withTax = (rupees: number): number => rupees * 1.17;
+
+#=== FLAG | rupee identifier ADDED to a plain number
+export const plus = (rupees: number, other: number): number => rupees + other;
+
+#=== FLAG | rupee identifier reconstituted into paisa the unsafe way
+export const backToPaisa = (rupees: number, other: number): number => rupees * 100 + other;
+
+#=== FLAG | rupee identifier MODULO
+export const remainder = (rupees: number, n: number): number => rupees % n;
+
+#=== FLAG | COMPOUND ASSIGNMENT accumulating rupees into a double — the idiom the ban exists for
+export const total = (values: readonly number[]): number => {
+  let running = 0;
+  for (const rupees of values) {
+    running += rupees;
+  }
+  return running;
+};
+
+#=== FLAG | COMPOUND ASSIGNMENT whose LEFT side is rupee-named
+export const applyDiscount = (discount: number): number => {
+  let totalRupees = 1000;
+  totalRupees -= discount;
+  return totalRupees;
+};
+
+#=== FLAG | UPDATE expression on a rupee identifier, postfix
+export const bumpPost = (): number => {
+  let rupees = 0;
+  rupees++;
+  return rupees;
+};
+
+#=== FLAG | UPDATE expression on a rupee identifier, prefix
+export const bumpPre = (): number => {
+  let rupees = 0;
+  --rupees;
+  return rupees;
+};
+
+#=== FLAG | rupee identifier scaled inside a rounding call — a 10% discount in floats
+export const discounted = (rupees: number): number => Math.round(rupees * 0.9);
+
+#=== FLAG | snake_case rupee identifier
+export const scaled = (subtotal_rupees: number, qty: number): number => subtotal_rupees * qty;
+
+#=== FLAG | rupee MEMBER expression minus another
+type Row = { rupees: number };
+export const spread = (a: Row, b: Row): number => a.rupees - b.rupees;
+
+#=== FLAG | rupee MEMBER expression behind an `as` cast, accumulated
+type Cell = { rupees: unknown };
+export const sum = (cells: readonly Cell[]): number => {
+  let running = 0;
+  for (const cell of cells) {
+    running += cell.rupees as number;
+  }
+  return running;
+};
+
+#=== FLAG | rupee member read off a CALL RESULT — the shape `rupeesFromPaisa(x).rupees` takes
+declare const rupeesFromPaisa: (n: number) => { rupees: number };
+export const third = (amount: number): number => rupeesFromPaisa(amount).rupees / 3;
+
+#=== FLAG | the F2 companion — the signed-money magnitude field must be inside the ban too
+declare const directedPaisa: (n: number) => { magnitudePaisa: number; sign: number };
+export const halved = (residual: number): number => {
+  const { magnitudePaisa } = directedPaisa(residual);
+  return magnitudePaisa * 1.17;
+};
+
+#=== FLAG | REGRESSION — the shipped paisa coverage must survive the extension, binary
+export const perHundred = (amount_paisa: number): number => amount_paisa / 100;
+
+#=== FLAG | REGRESSION — the shipped paisa coverage must survive the extension, member + cast
+type M = { amount_paisa: unknown };
+export const totalOf = (members: readonly M[]): number => {
+  let running = 0;
+  for (const m of members) {
+    running += m.amount_paisa as number;
+  }
+  return running;
+};
+
+#=== CLEAN | COMPARISON on a rupee value — a set predicate, not arithmetic
+export const isLarge = (rupees: number, threshold: number): boolean => rupees > threshold;
+
+#=== CLEAN | COMPARISON between two rupee members
+type Row = { rupees: number };
+export const richer = (a: Row, b: Row): boolean => a.rupees >= b.rupees;
+
+#=== CLEAN | PLAIN ASSIGNMENT of a rupee value — `=` is not arithmetic
+export const shown = (rupees: number): number => {
+  let display = 0;
+  display = rupees;
+  return display;
+};
+
+#=== CLEAN | passing a rupee value as a FUNCTION ARGUMENT
+declare const render: (n: number) => string;
+export const show = (rupees: number): string => render(rupees);
+
+#=== CLEAN | `.toLocaleString()` on a rupee value — the shipped MoneyValue.tsx:50 idiom
+export const grouped = (rupees: number): string => rupees.toLocaleString("en-US");
+
+#=== CLEAN | TEMPLATE LITERAL interpolation of a rupee value — the shipped MoneyValue.tsx:50 idiom
+export const labelled = (rupees: number): string => `Rs ${rupees}`;
+
+#=== CLEAN | arithmetic on NON-money identifiers — the extension stays scoped to money names
+export const spread = (qty: number, count: number, minutes: number, offset: number): number =>
+  qty * count + (minutes - offset);
+
+#=== CLEAN | arithmetic on the `sign` companion field — a sign is not money
+declare const directedPaisa: (n: number) => { magnitudePaisa: number; sign: number };
+export const flipped = (residual: number): number => directedPaisa(residual).sign * -1;
+
+#=== CLEAN | the BLESSED helper path — the ban must never flag the domain helpers
+import { applyRateBps, paisa, splitPaisa } from "@restos/domain";
+
+export const shares = (amount: number, guests: number) => splitPaisa(paisa(amount), guests);
+export const taxed = (amount: number) => applyRateBps(paisa(amount), 1700);
+
+#=== GAP | DESTRUCTURE-AND-RENAME defeats the ban — accepted, recorded, not closable by naming
+export const laundered = (source: { rupees: number }): number => {
+  const { rupees: whole } = source;
+  return whole * 1.17;
+};
+
+#=== GAP | assignment to a non-money local defeats the ban — same shape, same limitation
+export const alsoLaundered = (rupees: number): number => {
+  const whole = rupees;
+  return whole / 2;
+};
+
+#=== NOTE | on the two GAP cases above (not a test case; the runner skips NOTE sections)
+The ban is a syntactic, name-matching rule. Biome's GritQL has no type information, so any
+name-based rule is defeated by renaming the value. Both GAP cases above are measured clean
+against the shipped rule and are expected to stay clean after this round: extending the name
+set raises the cost of the evasion from zero to deliberate and makes it visible in review — a
+destructure that renames a money value is a legible red flag in a diff — but it does not seal
+it. This mitigates; it does not seal. Claiming otherwise in a commit message would be the
+overclaim, so it is written down here instead.
+
+Sealing would require either type-aware linting (which this engine cannot do) or a display
+helper that returns no number at all — a finished string — leaving nothing to do arithmetic
+on. That is a coherent alternative design and is named here rather than silently passed over,
+but it is a larger change than this round, and it moves locale grouping into `domain`, which
+27-F23 makes a display concern.
+
+If a future session DOES close one of these, the fix is to invert the assertion in the test
+that reads this fixture — which is the test-owning session's job, per 24 §3 step 2. Deleting
+the case would erase the record that the limitation was known and accepted.

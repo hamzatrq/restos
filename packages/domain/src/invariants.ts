@@ -10,15 +10,12 @@
 // lines, agreed tendering/refund sums) come from the real merge engine's
 // projection at the call site. PLACEMENT = T-01-11 ruling 4's senior-review
 // checkpoint.
+import { asPaisaInt } from "./money.js";
 
-/** Integer-paisa runtime guard (00 §6: floats never; brands are compile-time
- * only — T-01-13 posture — so the runtime check IS the enforcement). */
-const asPaisaInt = (n: number, label: string): number => {
-  if (!Number.isSafeInteger(n) || n < 0) {
-    throw new RangeError(`${label} must be a non-negative safe integer of paisas, got ${n}`);
-  }
-  return n;
-};
+// Integer-paisa runtime guard (00 §6: floats never; brands are compile-time only — T-01-13
+// posture — so the runtime check IS the enforcement). Imported, not redeclared: this module
+// carried its own copy with identical semantics and a differently-worded message, and the
+// message is where two copies of one rule diverge first (18 §2).
 
 export type RefundRemainderArgs = {
   /** The parent payment attempt's amount (01-F29: the merged `payment.recorded`
@@ -58,9 +55,8 @@ export type SettledConservationArgs = {
 
 /**
  * The settled conservation equation (01-F30 as amended July 2026: Σ tendering
- * payments − Σ refunds = billed − voids − comps − discounts once settled;
- * void/comp/discount VALUE terms are 0 at v1 — those event types carry no
- * payload schema, 26 §7). Returns the residual `billed − (tendered − refunded)`:
+ * payments − Σ refunds = billed − voids − comps − discounts once settled).
+ * Returns the residual `billed − (tendered − refunded)`:
  *   > 0  — SHORTFALL: a violation once settled (01-F32 "No order reaches
  *          settled state with conservation violated") — the Auditor flags it;
  *   = 0  — conserved;
@@ -70,6 +66,67 @@ export type SettledConservationArgs = {
  * legitimately exceed `tendered` (unprovable refunds merge before their parent,
  * 01-F17/DEC-SYNC-007), so the interior subtraction must be allowed to go
  * negative.
+ *
+ * ## ⚠ THERE IS NO PARAMETER FOR `void_value`, `comp_value` OR `discounts`, AND
+ * ## THE REASON THIS COMMENT USED TO GIVE HAS EXPIRED
+ *
+ * It read *"void/comp/discount VALUE terms are 0 at v1 — those event types
+ * carry no payload schema, 26 §7"*. That was true when it was written and is
+ * FALSE as of August 2026: `registry.ts` now carries `void.recorded`,
+ * `comp.recorded`, `discount.recorded` and `order.line_price_overridden`, each
+ * with an `order_id` and an `amount_paisa` (`specs/26-merge-semantics.md:113`
+ * still asserts the retired premise and is owed a correction). The conclusion
+ * survives; its reason does not, and a comment resting on an expired premise is
+ * how the next reader concludes the question is settled.
+ *
+ * The three terms stay absent — NOT defaulted to zero behind an optional
+ * parameter, which would be a term with no producer — for four reasons that are
+ * live today. They are recorded here rather than in a commit message because
+ * this is the file a session reaches for when it decides to "just add them".
+ * The worked argument and the options are `plans/wave-1/f30-conservation-terms-
+ * options.md`; the decision is a founder's.
+ *
+ *  1. **No idempotency key exists on any of the four types, and `01-F31`'s
+ *     mechanism IS a key** (*"folds dedupe by attempt key … a fold never picks
+ *     a winner"*). Exactly two schemas in the repo carry one — `payment.recorded`
+ *     and `payment.refunded` — and `02-F36`, the only FR naming a key beside a
+ *     void, names the linked REFUND's. Σ-over-members and Σ-over-event-ids both
+ *     make a double-tapped "void Rs 500" subtract Rs 1,000, which is the failure
+ *     `01-F31` exists to prevent. Minting a key is a payload change to four
+ *     `01 §4` types: a spec PR (commandments 2 and 9), not an implementer's call.
+ *  2. **`26 §7` already rules this is not a fold problem** — its *"looks like
+ *     ordering, actually needs"* table maps `01-F30` to a **closure** mechanism
+ *     (the Auditor over the merged log), and conservation is absent from its
+ *     four-entry ordering list. `packages/sync-client`'s merge engine keeps the
+ *     four types projection-inert on that reading and says so at its case arm.
+ *  3. **`billed_paisa` already excludes exited lines** (see its doc above), so an
+ *     order-level `void.recorded` beside line exits would subtract the same money
+ *     TWICE — permanently, converged, and silently under `01-F1`. Which of the two
+ *     representations is authoritative is answered by no FR.
+ *  4. ~~**The equation does not run for these orders yet.**~~ **CLOSED by `01-F63`
+ *     (August 2026).** This read *"`order.settlement_closed` has ZERO production
+ *     emitters, so adding a term here would be a correct subsystem with no seam
+ *     to the product"*, and it was true when written. `apps/pos-electron/src/main/
+ *     settlement-closer.ts` is now that emitter — the till appends the act on the
+ *     edge into tendered-for-in-full — so `order.settled` reaches `1` on a real
+ *     order and this equation executes for the first time. **It is the ONE blocker
+ *     that has moved; 1–3 above are untouched and each is independently fatal.**
+ *  5. **All four escalatable types have ZERO PRODUCTION EMITTERS** (`DEC-MONEY-010`,
+ *     measured 2026-08-12). `void.recorded`, `comp.recorded`, `discount.recorded`
+ *     and `order.line_price_overridden` each carry a schema, an authorization row
+ *     and a fold arm, and nothing in `apps/` or `services/` constructs one —
+ *     `02-F20`'s void/comp/price-override surfaces do not exist. So a term added
+ *     today would be summed from an empty set for a second, independent reason.
+ *     `__acceptance__/conservation-terms-gate.test.ts` §B is the hand-written
+ *     tripwire for it, because `seams:check` is blind to a missing producer for an
+ *     event type.
+ *
+ *  **`DEC-MONEY-010` (August 2026) converts all of this into a GATE rather than a
+ *  deferral:** a term enters this signature when, and only when, its type has (i) a
+ *  production emitter, (ii) an `01-F31`-class idempotency key and (iii) a `26 §7`
+ *  merge rule — and until then it is ABSENT, **never defaulted to zero behind an
+ *  optional parameter**, because an optional zero term is a term with no producer
+ *  wearing a signature that says it has one.
  */
 export const settledConservationResidualPaisa = (args: SettledConservationArgs): number => {
   const billed = asPaisaInt(args.billed_paisa, "billed_paisa");

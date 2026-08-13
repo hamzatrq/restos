@@ -81,6 +81,8 @@ In scope: menu browsing, cart, checkout in three modes, customer identity captur
 - 06-F25 Each org storefront exposes correct per-org metadata: page titles, OpenGraph tags, and a share preview (logo + name) so links shared on WhatsApp/Instagram render as the restaurant, not the platform. Search indexing is on for the menu landing page, off for cart/checkout/status URLs.
 - 06-F26 A hosted order summary is viewable from the status page after completion (items, totals, payment method stated as recorded); it mirrors branch receipt data but is not a fiscal receipt — the printed receipt (docs 02/16) remains authoritative.
 
+- 06-F29 **Customer surfaces are governed by their own law, not by `21 §5` (gap G8, founder ruling July 2026).** `21 §5` claims to cover every screen, but its role laws optimise for an **expert operator, trained, on known hardware, repeating a task hundreds of times a shift**. A customer is the opposite on every axis: untrained, one-time, on their own unknown phone, with no incentive to learn anything. Stretching the staff law over that problem would import the wrong defaults — density tuned for experts, a closed vocabulary sized for a 15.6″ terminal, and budgets derived from repetition. **This module and `07` own the customer law.** Two things do carry across unchanged, because they are about the population rather than the posture: `27-F22`/`27-F23` (Western digits, `Rs` symbol-first, no operational decimals) and `27-F24` (the system computes; nobody does mental arithmetic). Touch minimums follow `27-F8`'s handheld row as a **floor**, not a target — a customer holds their phone one-handed like a waiter does.
+
 ## 4. Key flows
 
 **QR dine-in (happy path)**

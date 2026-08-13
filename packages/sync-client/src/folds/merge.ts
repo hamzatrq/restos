@@ -24,6 +24,7 @@
 // indexed by `waiting_for`, so a drain touches only the events awaiting the
 // newly-arrived key (26 §4 defect 2 removed structurally).
 import {
+  AVAILABILITY_FALSE_WINS,
   applyLineState,
   CONTESTED_LINE_BILLABLE,
   canonicalJson,
@@ -75,10 +76,30 @@ export type FoldStats = {
   events_folded: number;
 };
 
+/**
+ * Item availability (`01-F22`, `01-F57`..`01-F59`) — the first `item:`-keyed projection.
+ *
+ * `head_ids_json` is the maximal set, exported so an operator surface can build a correct
+ * superseding toggle WITHOUT re-deriving the supersedes-DAG. Without it a contest was
+ * unclearable in practice: superseding only the head your screen happened to show leaves the
+ * other head standing, and the item stays 86'd forever. The sort is UTF-16 and is a
+ * PRESENTATION sequence only — it never reaches a value (`01-F34`), which the relabel
+ * property pins.
+ */
+export type AvailabilityRow = {
+  item_id: string;
+  /** 0/1 — SQLite STRICT has no boolean type. */
+  available: number;
+  contested: number;
+  head_ids_json: string;
+  anomalies_json: string;
+};
+
 export type FoldState = {
   orders: OpenOrderRow[];
   queue: KitchenQueueRow[];
   parked: ParkedRow[];
+  availability: AvailabilityRow[];
 };
 
 export type ProjectedOrder = { order: OpenOrderRow; queue: KitchenQueueRow | null };
@@ -87,6 +108,18 @@ export type ProjectedOrder = { order: OpenOrderRow; queue: KitchenQueueRow | nul
 export type ApplyResult = {
   /** Orders whose projection must be rewritten (scoped, never the ledger). */
   dirty: readonly string[];
+  /**
+   * Item keys whose availability projection must be rewritten (`26 §3` sidecar).
+   *
+   * A SEPARATE field rather than namespacing `dirty` in place. The order path's dirty
+   * plumbing is threaded through seven fold arms, the store's row-write and the drop plan,
+   * and the oracle named a silent-staleness regression there as the second-highest risk of
+   * this change — a namespaced key reaching a row-writer that still expects a bare id leaves
+   * the lattice right and SQLite wrong, visible only on a read BETWEEN deliveries. Adding a
+   * field cannot break a consumer that does not read it; changing the meaning of an existing
+   * one can. Key DERIVATION is generalised (see `keysFor`); the write channels stay typed.
+   */
+  dirtyItems: readonly string[];
   /** Parked row to insert (the event itself parked), or null. */
   parked: ParkedRow | null;
   /** Parked event ids drained (applied) by this delivery. */
@@ -122,6 +155,10 @@ type PaymentP = { order_id: string; settlement_attempt_id: string };
 type ClosedP = { order_id: string; billed_paisa?: unknown };
 
 type LineValue = { item_id: string; qty: number; unit_price_paisa: number };
+/** `02-F8`'s removal (`{order_id, line_id}` — the registry's P1, a *plain* event). */
+type LineRemovedP = { order_id: string; line_id: string };
+/** `02-F6`'s item note. `line_id` is required — the note names the dish it qualifies. */
+type NoteAddedP = LineRemovedP & { note: string };
 type Edge = {
   event_id: string;
   to: string;
@@ -145,6 +182,45 @@ type Entity = {
   closes: Map<string, Record<string, unknown>>;
   /** Per-line value MVR: line id → (canonical bytes → {item, qty, price}). */
   lineValues: Map<string, Map<string, LineValue>>;
+  /**
+   * `02-F8`'s pre-confirm removals — a grow-only TOMBSTONE SET of line ids (`26 §7` M1).
+   *
+   * A SET and not a mutation of `lineValues`, and that is the whole convergence argument. The
+   * projection is `project(values, tombstones)`: a pure function of two grow-only sets, so union
+   * is commutative and idempotent and no clock, `lamport_seq`, `global_seq` or envelope-id
+   * comparison is reachable (`01-F34`). Deleting the value at fold time instead — which is what
+   * the retention `droppedLines` filter legitimately does one screen down, for a
+   * session-scoped outer-layer act — makes the outcome depend on ARRIVAL ORDER: the removal only
+   * works when it happens to be folded after its `order.line_added`, and `01-F16` puts
+   * concurrent adds from two terminals in ordinary service.
+   *
+   * REMOVE-WINS. A `line_id` is minted by the till that adds the line, so a removal naming one can
+   * only be issued by a device that has already SEEN the add — the genuinely concurrent add/remove
+   * pair does not arise. What arises constantly is delivery reordering, and remove-wins is the
+   * only rule under which both orders agree.
+   *
+   * Per ENTITY, so keying is `(order, line)` and never `line` alone: nothing makes a `line_id`
+   * globally unique (a per-order counter produces `L1` on every order by construction), and a
+   * globally keyed tombstone set silently empties the neighbouring bill.
+   */
+  lineTombstones: Set<string>;
+  /**
+   * `02-F6`'s item notes — a grow-only VALUE SET per line id, deduplicated by TEXT (`26 §7` M2).
+   *
+   * A set and not a register because `01 §4` carries `note_added` and offers no `note_removed`
+   * and no `note_changed`, and `02-F6`'s quick-tags are a PICK LIST (`02-F50`) — two taps are two
+   * facts. A register would need a tiebreak and every available one is banned (`01-F34`; `26 §7`
+   * bans `min(envelope.id)` by name because UUIDv7 makes an id comparison wall clock in disguise),
+   * and its failure direction is the unsafe one: the second tag silently erasing *"no peanuts"*.
+   *
+   * Keyed by the TEXT rather than by the event id for the reason `createMembers`, `lineValues` and
+   * the availability lattice are all value-keyed: it is what makes redelivery idempotent, and it
+   * is what lets the rendering sort by a set-determined key instead of by an id.
+   *
+   * Held for a line this device has not seen yet (matrix row 61 — *"edges for a not-yet-added line
+   * are held, never parked, never dropped"*). A note whose line arrives later renders on it.
+   */
+  lineNotes: Map<string, Set<string>>;
   /** Per-line edge G-Set: line id → (event id → edge). Held unconditionally. */
   lineEdges: Map<string, Map<string, Edge>>;
   /** UKS: attempt id → (canonical member bytes → member); member = payload minus its key. */
@@ -181,7 +257,37 @@ const edgeLegal = (ed: Edge): boolean => {
 
 /** One projected line cell as rendered into `json_lines` — the billed
  * derivation's input shape (line VALUE fields + projected workflow states). */
-export type BilledLineCell = { qty: number; unit_price_paisa: number; states: string[] };
+export type BilledLineCell = {
+  /**
+   * The catalog item this line sells. **Corrected July 2026:** this field was always
+   * WRITTEN (the cell is built as `{ ...lineValue, states, anomalies }` and `LineValue`
+   * carries `item_id`) but was not declared here — so a host app reading `json_lines` had no
+   * typed way to resolve a line to a catalog entry, and `apps/pos-electron` could not render
+   * an item name. A declaration narrower than the data is a silent capability loss.
+   *
+   * Display resolution only (`01-F52`): the catalog is never a fold input, and the money on
+   * this cell was captured at append time (`01-F53`), so a stale catalog costs a word and
+   * never a rupee.
+   */
+  item_id: string;
+  qty: number;
+  unit_price_paisa: number;
+  states: string[];
+  anomalies?: Record<string, string>;
+  /**
+   * `02-F6`'s item notes on this line, deduplicated and text-sorted (`26 §7` M2).
+   *
+   * An ARRAY and not a joined string: the separator would be a presentation decision taken inside
+   * the kernel, and `03-F55` puts the chit's arrangement in `packages/escpos`. A shape that could
+   * hold only one note would force the merge rule back to a register.
+   *
+   * OPTIONAL, and absent rather than `[]` on a line with nothing to say. A projection is not a
+   * ledger — `01-F1` does not reach it — and the convention is this file's own: `menu()`'s
+   * `sold_out`/`contested` spread conditionally for the same reason, and pinning the empty-case
+   * bytes would churn every existing `json_lines` assertion for a fact that is not there.
+   */
+  notes?: string[];
+};
 
 /** billed_effective of ONE projected cell (01-F30: billed derives from
  * delivered lines, exited lines excluded — "a fully-voided order nets to
@@ -314,6 +420,8 @@ export type MergeEngine = {
   rebuild(events: readonly ParsedEvent[]): void;
   /** One order's projected rows (null when the order has no delivered create). */
   projectOrder(orderId: string): ProjectedOrder | null;
+  /** One item's availability row — the `item:`-key analogue of `projectOrder` (`26 §3`). */
+  projectItemKey(itemId: string): AvailabilityRow;
   /** Every fold row, for a full table rewrite after rebuild(). */
   snapshot(): FoldState;
   parkedRows(): ParkedRow[];
@@ -347,6 +455,218 @@ export type DropPlan = {
  * amended: everything else carries its full projection keys and never parks). */
 const PARKING_TYPES: ReadonlySet<string> = new Set(["order.confirmed", "kot.printed"]);
 
+/**
+ * Registry types that are DELIBERATELY NOT FOLDED, with the FR that says so.
+ *
+ * `catalog.changed` is the first of these and it is why this set exists. `01-F52` is
+ * explicit: *"catalog state is not an input to any fold — a projected value that read a name
+ * would depend on catalog sync state at fold time, which is the `01-F34` break law 1 exists
+ * to prevent."* Before this, the engine's model was binary — every registry type had a merge
+ * rule or the build failed — so the first type that must have NO rule could not be expressed
+ * at all, and the honest answer looked identical to the mistake the exhaustiveness guard
+ * exists to catch.
+ *
+ * Membership here is a claim that needs an FR, not a way to silence the compiler. A type
+ * added to this set without one is exactly the silent fall-through `assertNever` prevents,
+ * wearing a different hat.
+ */
+const NON_FOLD_TYPES = {
+  "catalog.changed": "01-F52",
+  /**
+   * `03-F53` (August 2026) — `03-F11`'s printer transition, which got a payload schema and a till
+   * producer and therefore entered this registry for the first time.
+   *
+   * It lands HERE rather than in the switch beside `kot.print_failed`, and the reason is
+   * structural rather than editorial: `kot.print_failed` carries an `order_id`, so the sidecar can
+   * honestly answer with an order key and the switch can then say "consumed, projects nothing".
+   * **This event names no order and no item** — its whole payload is a printer and a status — so
+   * there is no key to answer with, and `keysFor`'s `payload.order_id` fallback would mint
+   * `order:undefined` and hand a phantom row to the engine.
+   *
+   * ⚠ **The CLAIM, stated at its real strength, because this set's own doc warns that membership
+   * is a claim and not a way to silence the compiler.** `03-F53` names its consumers: *"`05-F3`'s
+   * alarm list and doc 15's fleet health"*. Neither is a fold — the alarm list is doc 05's derived
+   * VIEW (`apps/manager/src/alarms.ts`, which declares no fold and keys no entity, under `18 §6`'s
+   * *"app-specific derived VIEWS but not new folds"*), and fleet health is a cloud read model
+   * (`01-F7`). So no fold in this package reads it, which is the same claim the `kot.print_failed`
+   * arm already makes in the switch below. That is WEAKER than `catalog.changed`'s, which has
+   * `01-F52` forbidding any fold from reading it for all time; if a fold ever needs this fact, this
+   * row moves and the compiler says so — which is what a row is for.
+   *
+   * ⚠ **THE COMPILER SAYS SO ONLY IF THE ROW IS DELETED, NOT IF IT MOVES TO THE WRONG SET —
+   * measured 2026-08-13 (adversarial mutation).** Deleting this row reddens `pnpm typecheck` at
+   * `assertNever` (`TS2345`, line ~920), which is the pin working. But MOVING it into
+   * `OTHER_FOLD_TYPES` below — whose doc says the two sets *"make different claims and conflating
+   * them would be a lie in the direction that matters"* — passes **all 642 tests in this package
+   * AND the root `pnpm typecheck`, exit 0 on both**. `keysFor` answers `[]` from either branch, so
+   * the two sets are runtime-identical and the only thing distinguishing them is the sentence a
+   * reader believes. `merge-workcounter.test.ts`'s `PINNED_NOT_FOLDED` does not close this: it
+   * cross-checks the TEST's own two lists against `eventRegistry.types()`, never against this
+   * file's classification. So *"no fold may read this"* and *"another fold in this package owns
+   * this"* are, today, interchangeable assertions — which is worth knowing before either is cited
+   * as evidence about a money-bearing type, the exact case that doc warns about.
+   */
+  "printer.status_changed": "03-F53",
+} as const satisfies Partial<Record<KnownEventType, string>>;
+type NonFoldEventType = keyof typeof NON_FOLD_TYPES;
+const isNonFold = (t: string): t is NonFoldEventType => t in NON_FOLD_TYPES;
+
+/**
+ * Registry types this engine does not fold because ANOTHER fold in this package owns them,
+ * with the FR each one closes. `folds/shift-cash.ts` (the `shift_cash` fold, `FOLDS.md`
+ * line 15) consumes `shift.*` / `day.*` / `cash.*`; they carry neither an order key nor an
+ * item key, so this engine's sidecar answers with the empty list for them.
+ *
+ * A SEPARATE set from `NON_FOLD_TYPES` on purpose, because the two make different claims and
+ * conflating them would be a lie in the direction that matters: `NON_FOLD_TYPES` says NO fold
+ * may read the type (`01-F52`), and putting a money-bearing shift event under that banner
+ * would assert the cash reconciliation is unfoldable. This set says the opposite — the type
+ * IS folded, by a fold whose projections this engine does not own.
+ *
+ * `payment.recorded` is deliberately absent: it is order-keyed HERE (`01-F31` keyed sums into
+ * `pay_total`) *and* shift-keyed there (`02-F23` expected cash), which is exactly the
+ * two-planes case `DEC-MONEY-007` describes — one event legitimately reaching two totals.
+ */
+const OTHER_FOLD_TYPES = {
+  "shift.opened": "02-F22",
+  "shift.closed": "02-F23",
+  "day.opened": "02-F22",
+  "day.closed": "02-F24",
+  "cash.drawer_opened": "02-F21",
+  "cash.paid_out": "02-F26",
+  "cash.deposit_recorded": "02-F24",
+  // `folds/customer-file.ts` (the `customer_file` fold) consumes both. Their key is `01-F23`'s
+  // normalized phone — neither an order key nor an item key — so this engine's sidecar answers
+  // the empty list for them, and for the same reason as the seven above it: the type IS folded,
+  // by a fold whose projections this engine does not own.
+  "customer.created": "01-F23",
+  "customer.address_added": "02-F27",
+} as const satisfies Partial<Record<KnownEventType, string>>;
+type OtherFoldEventType = keyof typeof OTHER_FOLD_TYPES;
+const isOtherFold = (t: string): t is OtherFoldEventType => t in OTHER_FOLD_TYPES;
+
+/** Every registry type the ORDER-keyed switch handles — i.e. all of them except the
+ * item-keyed ones, the ones no fold may read, and the ones another fold owns. Declared as an
+ * Exclude so adding a new item-keyed, non-fold or other-fold event is a compile error in
+ * exactly one place (the sidecar) rather than a silent fall-through here. */
+type OrderKeyedEventType = Exclude<
+  KnownEventType,
+  "availability.changed" | NonFoldEventType | OtherFoldEventType
+>;
+
+const ORDER_NS = "order:";
+const ITEM_NS = "item:";
+
+type AvailabilityChangedP = { item_id: string; available: boolean; supersedes: string[] };
+
+/**
+ * The `26 §3` projection-key sidecar: every key an event affects.
+ *
+ * Returning a LIST rather than one key is the point — `26 §3` specifies it that way so an
+ * event may touch more than one projection, and the engine routes on the namespace instead
+ * of assuming `payload.order_id`. Today every event yields exactly one key; the shape is
+ * what makes the next multi-key event a data change rather than an engine change.
+ */
+const keysFor = (event: ParsedEvent): readonly string[] => {
+  // A non-fold type affects NO projection, so the honest sidecar answer is the empty list —
+  // not a key nothing reads. `26 §3` asks "which projections does this event touch"; for
+  // `catalog.changed` the answer is none, and saying so here is what keeps the engine from
+  // having to special-case it downstream.
+  if (isNonFold(event.type)) return [];
+  // Same empty answer, different claim (see OTHER_FOLD_TYPES): the `shift_cash` fold reads
+  // these, and none of them touches an order or item projection.
+  if (isOtherFold(event.type)) return [];
+  if (event.type === "availability.changed") {
+    return [`${ITEM_NS}${(event.payload as AvailabilityChangedP).item_id}`];
+  }
+  return [`${ORDER_NS}${(event.payload as OrderRefP).order_id}`];
+};
+
+/**
+ * One item's availability lattice, keyed by `<event id>\u0000<payload hash>`.
+ *
+ * The composite key is what makes this a value-register rather than a last-write-wins cell:
+ * an identical redelivery collapses (same id, same bytes), while two claimants' DIVERGENT
+ * payloads under one id both survive and render as a conflict. Keying by id alone made the
+ * projection depend on ARRIVAL ORDER — a live `01-F34` break.
+ *
+ * `event_id` is carried in the VALUE because the key is an internal dedup device: heads and
+ * supersedes are both stated in envelope ids, and leaking a composite key into `head_ids_json`
+ * would hand an operator surface a token it cannot put in a `supersedes` array.
+ */
+type ItemEntity = Map<string, { event_id: string; value: boolean; supersedes: readonly string[] }>;
+
+/**
+ * Project one item from its toggle set (`01-F22`, `01-F57`..`01-F59`). A pure function of
+ * the SET, so delivery order cannot reach the result.
+ *
+ * "Latest wins" is illegal here — it needs a device clock (`01-F45`) or an id comparison
+ * reaching a projected value (`01-F34`), and concurrent toggles are ORDINARY because
+ * `01-F22` puts the 86 control on the POS, the pass screen and the manager console at once.
+ * So each toggle names what it replaces and the fold takes the maximal set.
+ */
+const projectItem = (
+  toggles: ItemEntity,
+): { available: boolean; contested: boolean; heads: string[]; anomalies: string[] } => {
+  const superseded = new Set<string>();
+  for (const t of toggles.values()) {
+    // Self-reference excluded — a malformed event must not erase itself and take the item's
+    // whole history with it. `order.table_assigned` now carries the identical guard.
+    for (const s of t.supersedes) if (s !== t.event_id) superseded.add(s);
+  }
+  const live = [...toggles.values()].filter((t) => !superseded.has(t.event_id));
+  const heads = [...new Set(live.map((t) => t.event_id))].sort();
+
+  if (toggles.size === 0) return { available: true, contested: false, heads, anomalies: [] };
+
+  if (heads.length === 0) {
+    // Every delivered toggle is superseded by one that is absent, or the supersedes edges
+    // form a cycle. NOT a default: it is a data-completeness fact, and the old code answered
+    // it with `available: true`, which meant a k>=2 cycle over toggles that ALL said
+    // unavailable projected AVAILABLE and resurrected an 86'd dish with no anomaly. Under
+    // `01-F39`'s scoped waiter slice that is reachable from an ordinary partial delivery.
+    //
+    // `26 §7` names this hazard — availability subset-blindness — as provably unfixable by
+    // any algebra, needing a delivery-completeness mechanism nobody has specced. So this is
+    // not a fix: it is the SAFE direction plus visibility. Direction comes from the ratified
+    // constant, not from a hardcoded literal (`26 §9`, `DEC-*` product constants).
+    // contested is TRUE here too: it means "the heads did not resolve this", and an
+    // unresolvable head set is unresolved whether the cause is disagreement or incompleteness.
+    // The two are told apart by the anomaly code, not by pretending one of them settled.
+    return {
+      available: !AVAILABILITY_FALSE_WINS,
+      contested: true,
+      heads,
+      anomalies: ["availability_incomplete"],
+    };
+  }
+
+  const distinct = new Set(live.map((t) => t.value));
+  if (distinct.size === 1) {
+    return { available: [...distinct][0] === true, contested: false, heads, anomalies: [] };
+  }
+  // 01-F58 — the fold does not pick a winner (01-F31). The errors are asymmetric: failing to
+  // sell a dish you could costs a re-toggle; selling one you cannot costs a refund and a
+  // customer. `heads` is what makes this CLEARABLE in one operator act.
+  return {
+    available: !AVAILABILITY_FALSE_WINS,
+    contested: true,
+    heads,
+    anomalies: ["availability_contested"],
+  };
+};
+
+const availabilityRowOf = (item_id: string, toggles: ItemEntity): AvailabilityRow => {
+  const p = projectItem(toggles);
+  return {
+    item_id,
+    available: p.available ? 1 : 0,
+    contested: p.contested ? 1 : 0,
+    head_ids_json: canonicalJson(p.heads),
+    anomalies_json: canonicalJson([...new Set(p.anomalies)].sort()),
+  };
+};
+
 type DropKey =
   | { kind: "order"; order_id: string }
   | { kind: "line"; order_id: string; line_id: string };
@@ -378,9 +698,14 @@ const parseDropKey = (key: string): DropKey => {
  * type without an oracle-pinned merge rule must not compile; at runtime
  * (unreachable — the domain parseEvent admits only registry types) it fails
  * loud, never a silent no-op that still counts fold work. */
+/* v8 ignore start -- unreachable by construction: `never` means the compiler has
+   already proved no value reaches here. A test for this would be a test that
+   TypeScript works, and an uncoverable line makes a 100% gate permanently red for
+   a reason no author can act on (24-F3). */
 const assertNever = (type: never): never => {
   throw new Error(`foldIn: no merge rule for event type ${String(type)} (fix-round F5)`);
 };
+/* v8 ignore stop */
 
 export const createMergeEngine = (): MergeEngine => {
   let entities = new Map<string, Entity>();
@@ -396,6 +721,39 @@ export const createMergeEngine = (): MergeEngine => {
    * and the retention scope is part of what the projection is a function of. */
   const droppedOrders = new Set<string>();
   const droppedLines = new Set<string>();
+  /** `item:`-keyed lattice — a disjoint key space from `entities`, one engine. */
+  let items = new Map<string, ItemEntity>();
+
+  const foldAvailability = (event: ParsedEvent): void => {
+    const p = event.payload as AvailabilityChangedP;
+    let m = items.get(p.item_id);
+    if (!m) {
+      m = new Map();
+      items.set(p.item_id, m);
+    }
+    // Keyed by event id AND canonical payload bytes, exactly as the engine keys its other
+    // MVRs (`createMembers`, `lineValues`, `pay`/`refund`). Keying by id alone made this
+    // last-write-wins by ARRIVAL for two same-id envelopes with divergent payloads — a live
+    // 01-F34 break the shipped property suite hit on ~2.5% of runs. The store rejects same-id
+    // divergence on ingest, but 01-F37 keys quarantine per (org, claimed_event_id, device_id)
+    // — "each claimant's bytes are preserved as its own evidence row" — so two claimants'
+    // envelopes genuinely coexist in the merged cloud log the Auditor refolds. Value-keying
+    // is an ENGINE obligation, not a store one.
+    m.set(`${event.envelope.id}\u0000${payloadHash(p as unknown as Record<string, unknown>)}`, {
+      event_id: event.envelope.id,
+      value: p.available,
+      supersedes: p.supersedes,
+    });
+  };
+
+  /** Availability rows, keyed by item. Untoggled items never appear (01-F52: the catalog
+   * says what exists; availability is an operational override, never catalog-driven). */
+  // The `id`s come from `items.keys()`, so every `get` hits — the `?? new Map()` that stood here
+  // was an unreachable branch (0/546) and the last thing blocking `20 §2.2`'s 100% branch gate on
+  // `src/folds/**`. Removed rather than covered: a test can only "exercise" it by pretending, and
+  // a defensive default on a key we just enumerated hides a real bug rather than guarding one.
+  const availabilitySnapshot = (): AvailabilityRow[] =>
+    [...items.keys()].sort().map((id) => availabilityRowOf(id, items.get(id) as ItemEntity));
   const lineKey = (orderId: string, lineId: string): string => `${orderId}\u0000${lineId}`;
 
   const entity = (orderId: string): Entity => {
@@ -409,6 +767,8 @@ export const createMergeEngine = (): MergeEngine => {
       confirms: new Map(),
       closes: new Map(),
       lineValues: new Map(),
+      lineTombstones: new Set(),
+      lineNotes: new Map(),
       lineEdges: new Map(),
       pay: new Map(),
       refund: new Map(),
@@ -430,7 +790,12 @@ export const createMergeEngine = (): MergeEngine => {
   const foldIn = (event: ParsedEvent, dirty: Set<string>): void => {
     counters.events_folded += 1;
     const env = event.envelope;
-    const type: KnownEventType = event.type;
+    // ORDER-KEYED types only. `apply` routes item-keyed events to their own fold before this
+    // is reached, and narrowing the type here makes that routing invariant COMPILER-ENFORCED
+    // rather than a comment: an item-keyed type can no longer have a case in this switch, so
+    // the branch cannot exist to be dead. A `case` that merely returned would still count
+    // `events_folded` above it if the routing ever regressed — the F5 honesty overcount.
+    const type: OrderKeyedEventType = event.type as OrderKeyedEventType;
     switch (type) {
       case "order.created": {
         const p = event.payload as CreatedP;
@@ -464,11 +829,104 @@ export const createMergeEngine = (): MergeEngine => {
         // carry yet (doc-03 work).
         return;
       }
+      case "kot.print_failed": {
+        // K-7 (03-F5): emitted when the 03-F4 retry budget exhausts. Consumed and
+        // projection-inert for the same reason as kot.printed directly above — 26's
+        // ratified matrix has no device projection for a print fact, and the anchor
+        // this event might otherwise touch (age_basis) is deliberately the CONFIRM,
+        // so "a failed print never hides a late order" (03-F14). Its reader is doc
+        // 05's alarm console (05-F3), a cloud read model (01-F7), not a fold here.
+        //
+        // Deliberately NOT in `PARKING_TYPES`: parking is for bare order facts that must wait
+        // for their order key, and this case touches no entity at all, so an early straggler
+        // costs one counted no-op rather than a phantom order row.
+        return;
+      }
+      case "approval.requested":
+      case "approval.granted":
+      case "approval.denied": {
+        // `05-F7`'s extension, registered August 2026. Consumed and projection-inert here for
+        // the same reason as the two print facts above: `26`'s ratified matrix declares no
+        // device projection for an approval, and the thing an approval *changes* is a
+        // `void/comp/discount.recorded` that `05-F6` has the requesting POS append separately —
+        // so projecting the decision here would give one fact two homes and let a fold and a
+        // ledger event disagree about whether an act was authorised.
+        //
+        // `01-F36`'s idempotency ("applies only while its request is pending; duplicates and
+        // stale responses are logged no-ops") is deliberately NOT enforced here either. It is a
+        // rule about the pending QUEUE, which `05 §5` materialises on the manager device and
+        // `01-F7` puts in a cloud read model — and expressing "first response wins" in a fold
+        // would need a total order this engine does not have and `01-F34` forbids inventing.
+        //
+        // Deliberately NOT in `PARKING_TYPES`, on `kot.print_failed`'s reasoning: this case
+        // touches no entity, so an early straggler costs one counted no-op rather than a
+        // phantom row.
+        return;
+      }
+      case "void.recorded":
+      case "comp.recorded":
+      case "discount.recorded":
+      case "order.line_price_overridden": {
+        // `02-F20`'s four escalatable writes, registered August 2026. Consumed and
+        // **projection-inert**, and unlike the three approval facts above that is a stated DEBT
+        // rather than a settled disposition — `01-F30` conserves
+        // `Σ payments − Σ refunds = billed_total − void_value − comp_value − discounts`, so three
+        // of its four right-hand terms go on evaluating to ZERO until a merge rule exists here.
+        //
+        // It is deliberately not written in the change that gave these types a payload schema.
+        // `26 §7` makes a fold rule an ORACLE-PINNED decision: each of these is money, each needs
+        // its own idempotency key and its own divergence disposition under `01-F31`, and a rule
+        // guessed at this seam would let delivery order decide a money outcome — the exact failure
+        // `26 §2` exists to remove. What `01-F4` was blocking was the EMIT, and that is what the
+        // schemas closed; the fold is a separate, spec-PR-sized piece of work.
+        //
+        // Deliberately NOT in `PARKING_TYPES`, on `kot.print_failed`'s reasoning: this case
+        // touches no entity, so an early straggler costs one counted no-op rather than a phantom
+        // order row.
+        return;
+      }
+      case "order.rejected":
+      case "order.parked":
+      case "order.unparked": {
+        // `02-F9`/`06-F20`'s rejection and `02-F4`'s park pair, registered August 2026 — all three
+        // were `01 §4` vocabulary with no payload schema, so `01-F4` made them unemittable and a
+        // cashier could neither reject a cloud order nor set one aside. Consumed and
+        // **projection-inert**, and like the escalatable writes above that is a stated DEBT rather
+        // than a settled disposition: `26 §7` makes a merge rule an ORACLE-PINNED decision, not an
+        // implementer's, and what `01-F4` was blocking was the EMIT.
+        //
+        // What is owed, named so it is not discovered in the field:
+        //   · `order.rejected` — a rejected order goes on appearing in every till's `open_orders`.
+        //     Genuinely UNDECIDED rather than merely unbuilt: `06-F20`'s consumer is the storefront
+        //     status page, a cloud read model on the other plane (`18 §6`), and `01 §4`'s canonical
+        //     states carry no `rejected` at all (its exit states are `voided / cancelled`). Guessing
+        //     a removal here would invent an order state (commandment 2).
+        //   · `order.parked` / `order.unparked` — a parked order is indistinguishable from an active
+        //     one, so a later `02-F10` recall surface cannot filter on it. **`02-F4`'s stated
+        //     requirement needs no new projection**: "visible to every terminal in the branch" holds
+        //     because `open_orders` folds from the branch stream and the order has been in it since
+        //     its `order.created`. Projection-inert is therefore CORRECT for `02-F4` as written and
+        //     owed only for the parked FLAG. The `supersedes` link both halves carry is the causal
+        //     edge that fold will need (`01-F34`); nothing reads it yet.
+        //
+        // ⚠ Deliberately NOT in `PARKING_TYPES`, and here that is more than the `kot.print_failed`
+        // reasoning it shares. That set and `parked()` are `01-F10`'s KEY-PRESENCE HOLD and have
+        // nothing to do with `02-F4` — the collision is purely lexical, and wiring `order.parked`
+        // into it would move a real, operator-visible order's event into a delivery-layer holding
+        // table (`DEC-SYNC-011`'s stuck-cursor shape wearing a POS feature's name). This case
+        // touches no entity, so an early straggler costs one counted no-op rather than a phantom
+        // order row.
+        return;
+      }
       case "order.table_assigned": {
         const p = event.payload as TableAssignedP;
         const e = entity(p.order_id);
         e.nodes.set(env.id, p.table_id);
-        for (const id of p.supersedes) e.tombstones.add(id);
+        // Self-reference is EXCLUDED: a malformed event that supersedes itself must not
+        // erase itself and take the anchor with it. The availability fold guarded this and
+        // this one did not, so two folds gave opposite answers to one malformed input while
+        // three places claimed they were identical (oracle P2-8). One engine now, one guard.
+        for (const id of p.supersedes) if (id !== env.id) e.tombstones.add(id);
         dirty.add(p.order_id);
         return;
       }
@@ -491,6 +949,53 @@ export const createMergeEngine = (): MergeEngine => {
           canonicalJson(value),
           value,
         );
+        dirty.add(p.order_id);
+        return;
+      }
+      /**
+       * `02-F8`'s pre-confirm removal. **NOT projection-inert, unlike every registry landing
+       * before it, and the difference is textual rather than aesthetic:** `02-F9` calls this
+       * *"the only partial-confirmation mechanism"*, and a partial confirmation that leaves the
+       * line in the order is not partial — the order confirms whole, the KOT prints the
+       * unavailable dish and the customer is billed for it. `01-F30` conserves
+       * `Σ payments − Σ refunds = billed_total − void_value − comp_value − discounts` and has
+       * **no `removed_value` term**, so a line that stayed in `billed_total` after a removal
+       * would make the identity unsatisfiable without a `void.recorded` — precisely the event
+       * `02-F8` says a pre-confirm removal is NOT. An inert arm here would ship a control that
+       * returns without complaint and changes nothing, which is strictly worse than the unbuilt
+       * state because the cashier believes the Coke came off.
+       *
+       * A grow-only SET insert — commutative, idempotent, and reading nothing outside the
+       * delivered event (`01-F34`). The projection applies it (see `projectEntity`); NOTHING is
+       * deleted here, from the lattice or from the ledger (`02-F5`: *"Nothing is deleted in any
+       * of these — pure event composition"*, `01-F1`).
+       *
+       * **Deliberately NOT in `PARKING_TYPES`.** A removal for a line — or an order — this device
+       * has not seen yet is HELD in the set: the tombstone is a fact about a key, and when the
+       * `order.line_added` arrives the projection already knows the line is gone. Parking it would
+       * move a real operator act into `01-F10`'s delivery-layer holding table, and the straggler
+       * case is the ordinary one on a LAN reorder rather than an exotic one.
+       */
+      case "order.line_removed": {
+        const p = event.payload as LineRemovedP;
+        const e = entity(p.order_id);
+        e.lineTombstones.add(p.line_id);
+        dirty.add(p.order_id);
+        return;
+      }
+      /**
+       * `02-F6`'s item note, `02-F50`'s quick tag. Also NOT projection-inert: the FR requires it
+       * *"printed prominently on the KOT"* and `03 §1` lists `order.note_added` among doc 03's
+       * consumed events, so a note that reaches no projection reaches no ticket — `03-F55` gives
+       * it a slot on the chit that nothing could fill.
+       *
+       * Value-keyed insert into a per-line set, held whether or not the line has arrived (matrix
+       * row 61). Same parking argument as the removal above.
+       */
+      case "order.note_added": {
+        const p = event.payload as NoteAddedP;
+        const e = entity(p.order_id);
+        sub(e.lineNotes, p.line_id, () => new Set<string>()).add(p.note);
         dirty.add(p.order_id);
         return;
       }
@@ -548,20 +1053,37 @@ export const createMergeEngine = (): MergeEngine => {
     // a new KnownEventType needs an oracle-pinned merge rule before the engine
     // may consume it; a silent fall-through would still count events_folded
     // (the honesty overcount F5 names).
+    /* v8 ignore next -- same proof as the declaration: `type` is `never` here, so the
+       compiler has already shown no value arrives. Marked at the CALL SITE too because a
+       region directive around the declaration does not reach this line, and an unpaired
+       region is how ~68% of this file silently left the measured set once already. */
     assertNever(type);
   };
 
   const apply = (event: ParsedEvent): ApplyResult => {
+    // 26 §3 projection-key sidecar. Key derivation is no longer hardcoded to the order key:
+    // `availability.changed` is the first `item:`-keyed event, which is exactly the trigger
+    // the engine's own note named for this work. The sidecar answers "which projections does
+    // this event touch", and the engine routes on the namespace.
+    const keys = keysFor(event);
+    // No keys means no projection is touched (01-F52). ZERO fold work, and deliberately NOT
+    // counted: `events_folded` is an honesty counter, and incrementing it for an event that
+    // folded nothing is precisely the overcount the work-counter pin exists to prevent — the
+    // same mistake `availability.changed` made when it was wired to nothing.
+    if (keys.length === 0) return { dirty: [], dirtyItems: [], parked: null, drained: [] };
+    const itemKey = keys.find((k) => k.startsWith(ITEM_NS));
+    if (itemKey !== undefined) {
+      foldAvailability(event);
+      counters.events_folded += 1;
+      return { dirty: [], dirtyItems: [itemKey.slice(ITEM_NS.length)], parked: null, drained: [] };
+    }
     const payload = event.payload as OrderRefP;
-    // Key derivation is deliberately hardcoded to the ORDER key (fix-round F5
-    // ruling): every registry type carries `order_id`; generalising to a key
-    // sidecar is the scheduled follow-up task, not drive-by work here.
     const orderId = payload.order_id;
     // Fix-round F2 session memory: a straggler for a DROPPED order key is
     // ledger-retained by the caller but does ZERO fold work here — never
     // folded, never parked, never projected, and never counted (the honesty
     // counter must not claim work; oracle-pinned counter treatment).
-    if (droppedOrders.has(orderId)) return { dirty: [], parked: null, drained: [] };
+    if (droppedOrders.has(orderId)) return { dirty: [], dirtyItems: [], parked: null, drained: [] };
     const dirty = new Set<string>();
     // Key-presence parking (01-F10): bare order facts wait for their order key.
     if (PARKING_TYPES.has(event.type) && (entities.get(orderId)?.createMembers.size ?? 0) === 0) {
@@ -572,7 +1094,7 @@ export const createMergeEngine = (): MergeEngine => {
       };
       sub(parkedByKey, orderId, () => new Map<string, ParsedEvent>()).set(event.envelope.id, event);
       parkedRowsById.set(event.envelope.id, row);
-      return { dirty: [], parked: row, drained: [] };
+      return { dirty: [], dirtyItems: [], parked: row, drained: [] };
     }
     foldIn(event, dirty);
     // Drain: an applied create makes the order key present — re-attempt ONLY the
@@ -584,7 +1106,7 @@ export const createMergeEngine = (): MergeEngine => {
         drained.push(eventId);
       }
     }
-    return { dirty: [...dirty], parked: null, drained };
+    return { dirty: [...dirty], dirtyItems: [], parked: null, drained };
   };
 
   /** Remove and return the parked entries waiting on a key (shared by the create
@@ -741,12 +1263,32 @@ export const createMergeEngine = (): MergeEngine => {
     // Lines: value MVR + edge-set workflow projection.
     const cells: Record<
       string,
-      LineValue & { states: string[]; anomalies: Record<string, string> }
+      LineValue & { states: string[]; anomalies: Record<string, string>; notes?: string[] }
     > = {};
     let billedEffective = 0n;
     let linesTotal = 0;
     let linesReady = 0;
     for (const [lineId, values] of e.lineValues) {
+      /**
+       * `02-F8`/`02-F9` — the tombstone set applied, and applied HERE rather than at fold time so
+       * the result is a pure function of two grow-only sets and cannot depend on which of the two
+       * events arrived first (`01-F34`; see `Entity.lineTombstones`).
+       *
+       * `continue` before ANYTHING is computed, which is what makes the three derivations agree.
+       * The cell never enters `json_lines` (so `billedEffectiveFromJsonLines` — what
+       * `main/gateway.ts` feeds `OpenOrder.total_paisa` from — cannot see it), the `billedEffective`
+       * accumulator directly below never adds it (that one is NOT a column: it is the input to
+       * `01-F33`'s `uncovered_addition` ceiling check, so a removal that dropped the cell and kept
+       * the money would read right in the cart and flag an addition nobody made), and `linesTotal`
+       * never counts it (`03-F25`'s queue would otherwise put a phantom dish on the cook's ticket).
+       *
+       * The line's NOTES go with it (M4): they render on the cell, and there is no cell. `03-F55`
+       * puts a note inside its item's block, so an orphan note has nowhere legal to print at all.
+       *
+       * `line_value_conflict` is deliberately not raised for a removed line either — a line that
+       * is gone has no value left to disagree about.
+       */
+      if (e.lineTombstones.has(lineId)) continue;
       let value: LineValue | null = null;
       let valueHash: string | null = null;
       for (const member of values.values()) {
@@ -759,7 +1301,27 @@ export const createMergeEngine = (): MergeEngine => {
       if (values.size > 1) exceptions.add("line_value_conflict");
       const v = value as LineValue;
       const lp = projectLine(e.lineEdges.get(lineId));
-      cells[lineId] = { ...v, states: lp.states, anomalies: lp.anomalies };
+      /**
+       * `02-F6` M2's rendering — sorted by TEXT, never by the id of the event that added the note
+       * and never by arrival.
+       *
+       * Sorting by envelope id is an id comparison REACHING A PROJECTED VALUE, which is the exact
+       * `01-F34` break and one that survives plain convergence testing: every replica agrees, and
+       * the agreed answer still moves under a bijective relabel because UUIDv7 puts wall clock in
+       * the id prefix. `26 §8` names this as the binding oracle lesson. A text sort is
+       * set-determined, so the projection is invariant under both a relabel and a clock injection.
+       *
+       * `utf16` is safe here for its declared precondition — a Set spread holds distinct members.
+       */
+      const notes = [...(e.lineNotes.get(lineId) ?? [])].sort(utf16);
+      cells[lineId] = {
+        ...v,
+        states: lp.states,
+        anomalies: lp.anomalies,
+        // Spread conditionally: a line with no note carries no key rather than an empty array —
+        // see `BilledLineCell.notes` for why absence is the honest rendering here.
+        ...(notes.length === 0 ? {} : { notes }),
+      };
       // The declared-once billed rule (billedCellPaisa; T-01-11 fix round F4):
       // exited-decided zero, contested per the policy constant.
       billedEffective += billedCellPaisa(cells[lineId] as BilledLineCell);
@@ -850,6 +1412,7 @@ export const createMergeEngine = (): MergeEngine => {
   const rebuild = (events: readonly ParsedEvent[]): void => {
     counters.full_rebuilds += 1;
     entities = new Map();
+    items = new Map();
     parkedByKey = new Map();
     parkedRowsById = new Map();
     // The fold is a pure function of the SET — replay order is irrelevant; the
@@ -868,8 +1431,13 @@ export const createMergeEngine = (): MergeEngine => {
       orders: projections.map((p) => p.order),
       queue: projections.map((p) => p.queue).filter((q): q is KitchenQueueRow => q !== null),
       parked: parkedRows(),
+      availability: availabilitySnapshot(),
     };
   };
+
+  /** One item's availability row (the `item:`-key analogue of `projectOrder`). */
+  const projectItemKey = (itemId: string): AvailabilityRow =>
+    availabilityRowOf(itemId, items.get(itemId) ?? new Map());
 
   const parkedRows = (): ParkedRow[] => [...parkedRowsById.values()];
 
@@ -943,6 +1511,7 @@ export const createMergeEngine = (): MergeEngine => {
     apply,
     rebuild,
     projectOrder,
+    projectItemKey,
     snapshot,
     parkedRows,
     stats: () => ({ ...counters }),

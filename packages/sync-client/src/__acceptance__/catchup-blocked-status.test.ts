@@ -210,7 +210,7 @@ describe("T-01-20 — a blocked catch-up cursor is OBSERVABLE (DEC-SYNC-011(a); 
     // report must name the FIRST blockage (that is where the cursor stops), not the last.
     const skew = peerEnvelope(peer, 1, {
       type: "order.teleported",
-      payload: { order_id: "O-skew", channel: "dine_in" },
+      payload: { order_id: "O-skew", channel: "counter" },
     });
     const behind = peerEnvelope(peer, 2, orderCreated("O-behind"));
     const alsoSkew = peerEnvelope(peer, 3, { type: "order.levitated", payload: {} });
@@ -457,7 +457,12 @@ describe("T-01-20 — the DIVERGENT DUPLICATE surface must not regress (01-F34/0
 
     // Same id, divergent content: its id is ALREADY stored, so re-fetching cannot help.
     // Deliberately PASSED (the cursor advances) and surfaced in `quarantined`.
-    const divergent = { ...original, payload: { order_id: "O-diverge", channel: "takeaway" } };
+    // T-2 (02-F42): `phone` is a real channel and differs from the original's `counter`, so the
+    // divergence is single-variable — the old fixture also diverged by omitting `order_type`.
+    const divergent = {
+      ...original,
+      payload: { order_id: "O-diverge", order_type: "dine_in", channel: "phone" },
+    };
     const clean = peerEnvelope(peer, 1, orderCreated("O-after"));
     cloud.deliver(catchupPage([withSeq(divergent, 2), withSeq(clean, 3)]));
 

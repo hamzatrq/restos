@@ -743,6 +743,34 @@ Category tabs are explicitly permitted at depth one, so a 300-item menu across ~
 
 ### 10.1 Tasks staff perform that no FR covers
 
+> **Closed since (July 2026):** **G1** training mode → `DEC-TRAIN-001` / `01-F49..F51` /
+> `27-F63` (it is a *branch*, not a flag) · **G4** settling with no shift open → `02-F37`
+> (succeeds with an `unbound_settlement` anomaly; `01-F17` left no other legal option) ·
+> **G5** kitchen reprint → `03-F48` · **G7** kitchen touch minimum → `27-F8`'s kitchen row
+> (96 dp) · **G10** quick-tag cap → `02-F39` (one page at the target posture, derived not
+> fixed) · **G16** no self-approval → `02-F38`.
+>
+> **Closed by founder ruling (July 2026):** **G2** → `04-F19` (there is *no* busser role —
+> the waiter clears; closed by removing a role, not adding one) · **G3** → `04-F20` ·
+> **G6** → `09-F21` (self-serve on duty over the *cloud*; the rider phone was never on the
+> LAN, so `00 §5.1` was never engaged) · **G8** → `06-F29` (customers get their own law;
+> `21 §5`'s defaults are tuned for trained experts on known hardware) · **G11** → `05-F27`
+> (budget the taps, not the walk — the walk is floor layout, not software) · **G12** →
+> `02-F41` (attribution is whoever's PIN is in; no "acting for" concept) · **G13** → the
+> screen map's one-band rule · **G14** → `02-F40` (a stated tier consequence, with the
+> residual oversell risk named) · **G15** → `05-F26` · **G17** → `14-F28` (day-end by
+> default, with an explicit per-edit "apply now").
+>
+> **G9 — DEFERRED to Wave 4 with the question recorded (founder ruling July 2026).** The
+> call-center operator (`02-F29`) is genuinely Wave-4 scope and nothing in Waves 1–3 depends
+> on it. **The answer must land before `02-F29` is built, not during it:** is it a *mode* of
+> the cashier role (same permissions minus drawer and printer, plus a branch selector — but
+> "cashier with no drawer" is an awkward thing for the permission model to say) or a
+> *distinct role* (cleanest, but a role defined years before anyone uses it tends to be
+> defined wrong). Recorded here so it is not discovered late.
+>
+> **All seventeen gaps are now dispositioned.**
+
 | # | Gap | Evidence | Who it blocks |
 |---|---|---|---|
 | **G1** | **Training mode does not exist.** `27-F52` makes it a product requirement that *"reaches the kernel… This needs an architectural answer, not a UI toggle. (Owed to doc 01/02.)"* Nothing in doc 01 or 02 answers it. The research finding behind it (P5): staff either train on live tickets — polluting an append-only ledger and every report built on it — or don't train. | `27-F52`; `pos-kds-patterns.md` P5 | **Every role.** Also blocks `21-F11` RITE rounds and `27-F53`'s experienced-operator speed test, which need somewhere to run |

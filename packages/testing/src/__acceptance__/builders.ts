@@ -35,7 +35,10 @@ export const envelope = (device_id: string, lamport_seq: number) => ({
   server_received_at: null,
   type: "order.created",
   schema_version: 1,
-  payload: { order_id: newId(), channel: "dine_in" },
+  // T-2 (02-F42): was `channel: "dine_in"`, an order TYPE (02-F1) sitting in the field that
+  // `01-F60` turned into a price key. Restored onto both axes — same correction, and same
+  // reasoning, as `packages/sync-client/src/__acceptance__/builders.ts` ORDINARY_ORDER.
+  payload: { order_id: newId(), order_type: "dine_in", channel: "counter" },
   refs: [],
 });
 

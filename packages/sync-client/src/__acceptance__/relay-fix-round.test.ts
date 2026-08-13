@@ -39,7 +39,7 @@ const CONVERGE_MS = 2_000;
 const SETTLE_MS = 20_000;
 
 const order = (device_id: string, id: string, order_id: string) =>
-  eventInput(device_id, id, "order.created", { order_id, channel: "dine_in" });
+  eventInput(device_id, id, "order.created", { order_id, channel: "counter" });
 
 describe("F3 — an oversized relayed cloud ack never crashes the follower (fix round F3 / 19 §5)", () => {
   it("F3/19 §5/DEC-SYNC-009: push_ack{origin_device_id: self, acked_watermark: ownHigh+1000} from the hub → no throw, checkpoint unchanged or clamped ≤ own high, and the session keeps processing (a later genuine relayed ack still drains the outbox)", () => {

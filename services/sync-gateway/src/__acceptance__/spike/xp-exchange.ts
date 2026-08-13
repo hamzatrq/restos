@@ -70,7 +70,10 @@ const envelope = (lamport: number, id: string, orderId: string): EventEnvelopeT 
     server_received_at: null,
     type: "order.created",
     schema_version: 1,
-    payload: { order_id: orderId, channel: "dine_in" },
+    // T-2 (02-F42): was `channel: "dine_in"`, an order TYPE (02-F1) in the field `01-F60` makes
+    // a price key. Changing it re-pins the committed golden transcript (20 §2.7), so the fixture
+    // was REGENERATED with xp-record.ts rather than hand-edited — the diff is the record.
+    payload: { order_id: orderId, order_type: "dine_in", channel: "counter" },
     refs: [],
   }) as EventEnvelopeT;
 

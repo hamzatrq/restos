@@ -32,6 +32,8 @@ const recordedPayload = () => ({
   method: "cash",
   settlement_attempt_id: newId(),
   purpose: "settles_order",
+  // 26 §7 / 02-F37: the carried shift key, required and nullable.
+  shift_id: newId(),
 });
 
 const refundedPayload = () => ({
@@ -59,7 +61,10 @@ describe("typed event registry (01-F4)", () => {
   });
 
   it("01-F4: parseEvent returns a typed event for a valid order.created envelope, preserving its payload", () => {
-    const payload = { order_id: newId(), channel: "dine_in" };
+    // T-2 (02-F42): was `channel: "dine_in"`. `dine_in` is an order TYPE (02-F1) and a channel
+    // drawn from that vocabulary is invalid; the fixture meant "a dine-in order rung up at the
+    // till", which is two facts on two axes. See order-channel.test.ts for the closure itself.
+    const payload = { order_id: newId(), order_type: "dine_in", channel: "counter" };
     const event = parseEvent(envelope("order.created", payload));
     expect(event.type).toBe("order.created");
     expect(event.payload).toMatchObject(payload);

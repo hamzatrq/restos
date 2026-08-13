@@ -3,6 +3,32 @@
 // folds v1 per FOLDS.md (01-F6/F10/F34, 01-N1); T-01-05 lands hub election + the
 // LAN mesh session over the injected transport seam (01-F12/F13/F15;
 // plans/wave-0/kernel-tasks.md, HUB-ELECTION.md).
+//
+// ⚠ THIS ROOT ENTRY IS THE NODE / ELECTRON DOOR. It exports `createNodeStorageAdapter` and so
+// reaches `better-sqlite3`, a native addon Metro cannot bundle. React Native imports
+// `@restos/sync-client/rn` (`18 §4`'s second engine) and the cloud Auditor imports
+// `@restos/sync-client/fold-engine`; both exist so that a host taking one capability does not
+// take the other's native dependency with it.
+
+export {
+  CATALOG_SCHEMA,
+  type CatalogApplyResult,
+  type CatalogDelta,
+  type CatalogEntry,
+  type CatalogKind,
+  type CatalogSnapshot,
+  type CatalogStore,
+  type CatalogUpdate,
+  createCatalogStore,
+  DEFAULT_STATION,
+} from "./catalog.js";
+export {
+  type CatalogFetch,
+  createCatalogFetch,
+  type FetchStep,
+  type WireCatalogResponse,
+  type WireEntry,
+} from "./catalog-fetch.js";
 export {
   type BlockedCursor,
   type BlockedReason,
@@ -15,19 +41,30 @@ export {
   AckBeyondAppendedError,
   type AppendInput,
   type BranchTimeStatus,
+  createDeviceStore,
   type DeviceStore,
   DivergentDuplicateError,
   type IngestBatchResult,
   type IngestResult,
   type IngestStats,
-  openStore,
   type PageItem,
   type PageResult,
   SKEW_FLAG_THRESHOLD_MS,
   type StoreIdentity,
   type SyncStatus,
 } from "./device-store.js";
-export type { FoldStats, KitchenQueueRow, OpenOrderRow, ParkedRow } from "./folds/merge.js";
+export type {
+  AvailabilityRow,
+  FoldStats,
+  KitchenQueueRow,
+  OpenOrderRow,
+  ParkedRow,
+} from "./folds/merge.js";
+// `billedEffectiveFromJsonLines` is exported as a VALUE because host apps must render the
+// order total from the engine's own derivation rather than summing `json_lines` themselves
+// (26 §8 / 01-F34, and the T-01-11 ruling that deleted the Auditor's mirror of this sum:
+// two implementations of one total is how a money anomaly becomes a false finding).
+export { billedEffectiveFromJsonLines } from "./folds/merge.js";
 export { electHub } from "./hub-election.js";
 export {
   createMeshSession,
@@ -40,5 +77,42 @@ export {
   type MeshSessionStatus,
   REELECTION_BUDGET_MS,
 } from "./mesh-session.js";
+// 01-F26/F27/F28/F61 — the PIN session and the reference data it verifies against.
+export {
+  createMemoryPinAttemptStore,
+  createPinAttemptStore,
+  NO_ATTEMPTS,
+  PIN_ATTEMPTS_SCHEMA,
+  type PinAttemptRecord,
+  type PinAttemptStore,
+} from "./pin-attempts.js";
+export { createPinAuditSink, type PinAuditSinkOptions } from "./pin-audit.js";
+export {
+  createPinSession,
+  PIN_LOCKOUT_COOLDOWN_MS,
+  type PinAuditRecord,
+  type PinSession,
+  type PinSessionOptions,
+  type UnlockRefusal,
+  type UnlockResult,
+} from "./pin-session.js";
+export {
+  createStaffRegistry,
+  STAFF_SCHEMA,
+  type StaffApplyResult,
+  type StaffAssignment,
+  type StaffDelta,
+  type StaffMember,
+  type StaffRegistry,
+  type StaffSnapshot,
+  type StaffUpdate,
+} from "./staff.js";
+export type { SqlValue, StorageAdapter, StorageStatement } from "./storage.js";
+export { createNodeStorageAdapter } from "./storage-node.js";
+export { createOpSqliteStorageAdapter, type OpSqliteDb } from "./storage-op-sqlite.js";
+// `18 §4`'s storage adapter: the port, the two drivers' Node half, and the door that resolves a
+// `{ path }` to it. The RN half is `./rn` — deliberately NOT re-exported here, because reaching
+// it through this entry would put `better-sqlite3` back in a phone's bundle.
+export { type OpenStoreOptions, openStore } from "./store.js";
 export { createWsCloudTransport, createWsLanTransport } from "./transport-ws.js";
 export { wallClock } from "./wall-clock.js";

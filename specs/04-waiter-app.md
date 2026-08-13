@@ -80,12 +80,16 @@ Expo React Native, sharing `packages/domain` + `packages/sync-client` with the f
   Filtering is enforced server- and hub-side (01-F27) — the client never merely hides the data.
 - 04-F18 A scoped device that loses its slice (reinstall, cache purge) re-syncs from hub or cloud in < 60 s on branch Wi-Fi — small by construction. Section reassignment mid-shift triggers slice backfill for the gained tables.
 
+- 04-F19 **Clearing a table is the waiter's action; there is no busser role (gap G2, founder ruling July 2026).** `04 §4` said "busser taps done" while no busser existed in Appendix A, held a device, or was named in any FR — ~40 table turns a shift with no owner. **Resolved by removing the role, not by adding one:** the waiter already holds a handheld and already owns the table, so `table.state_changed → available` is a waiter action needing no new device, login or permission row. **Stated cost:** attribution records the waiter who tapped, which may not be the person who physically cleaned — acceptable because the attribution that matters here is *who asserts the table is ready to seat*, and that is a waiter judgement either way.
+
+- 04-F20 **The waiter has an own-attribution day view — the "I'm clean" view (gap G3).** `04 §5` listed it under Data and no FR created it, while every other role's protection view has one (`02-F23` cashier, `09-F16` rider, `11-F6` staff). It shows the waiter their own tables, their own items and their own day, and nothing about anyone else. Same purpose as `02-F23`: adoption depends on staff believing the system is on their side rather than watching them, and a role that can be *questioned* by the record but cannot *read* it is being watched.
+
 ## 4. Key flows
 
 **Seat → order → serve (happy path)**
 1. Waiter marks table seated → captures 3 items with modifiers + a note → confirm → KOT prints at stations < 2 s → table auto-flips to `ordered`.
 2. Kitchen bumps; pass assembles ("2 of 3 ready…"); order marked ready → waiter's phone chimes, names the table → waiter picks up, taps served → table `served`.
-3. Guests ask for the bill → waiter taps needs-bill → counter POS surfaces it, settles, prints the receipt → table flips `cleaning` → busser taps done → `available`.
+3. Guests ask for the bill → waiter taps needs-bill → counter POS surfaces it, settles, prints the receipt → table flips `cleaning` → **the waiter** taps done → `available` (04-F19 — **founder ruling July 2026: there is no busser role**).
 
 **WAN down, LAN up**
 1. Internet dies mid-rush → the handheld keeps capturing over the LAN mesh (00 §5.1).

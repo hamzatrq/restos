@@ -2,8 +2,26 @@
 // cloud. Unknown keys are stripped (reject-or-drop, 01-F40 — slices are
 // sender-enforced; a client can never smuggle one in). Contract fixtures:
 // src/__acceptance__/fixtures (20 §2.7 — changing them is a spec-review event).
-import { constants as zlibConstants, zstdCompressSync, zstdDecompressSync } from "node:zlib";
-import { DEVICE_CLASSES, EventEnvelope } from "@restos/domain";
+//
+// ⚠ PROTECTED PATH (`20 §4.4`, commandment 10) — SENIOR REVIEW.
+//
+// ── THIS MODULE IS RUNTIME-PORTABLE, AND THAT IS NOW A LOAD-BEARING PROPERTY ───────────────────
+//
+// It used to open with `import { … } from "node:zlib"`, for the zstd framing that now lives in
+// `compression.ts`. That one line made the WHOLE package unbundlable for React Native: Metro
+// cannot resolve `node:zlib`, so anything reaching `@restos/sync-protocol` — including the
+// message parser a device needs to read a single frame — failed at bundle time, not at run time.
+// `18 §4` puts RN on `@op-engineering/op-sqlite` and `18 §8` requires the manager app to stay
+// installable, so a kernel package that only Node can load contradicts the handbook.
+//
+// The split is a MOVE, not a rewrite: `index.ts` re-exports exactly the same names from the same
+// package root, so every existing consumer (`services/sync-gateway`, `sync-client`'s ws transport,
+// every suite) is byte-identically unaffected. What is new is the `@restos/sync-protocol/messages`
+// subpath, which is this file and reaches nothing a phone lacks — the same mechanism, and the same
+// reason, as `@restos/sync-client/fold-engine`.
+//
+// Nothing here may import `node:*` again. A device that cannot parse a frame cannot sync.
+import { DEVICE_CLASSES, EventEnvelope, ORDER_CHANNELS } from "@restos/domain";
 import { z } from "zod";
 
 export const PROTOCOL_VERSION = 1;
@@ -13,6 +31,95 @@ const seq = z.number().int().nonnegative();
 
 /** Envelope as carried in merged streams — cloud may have stamped global_seq (01-F3). */
 export const WireEnvelope = EventEnvelope.extend({ global_seq: seq.optional() });
+
+/**
+ * One catalog entity on the wire — **exported so the WRITER can validate against it.**
+ *
+ * It has to be one definition. When this lived inline in `catalog_response`, only the read path
+ * knew the rules: `publishCatalog` stored anything the Postgres column accepted, and an entry
+ * with an empty `name` then made the whole frame unserialisable. The throw landed on the SERVER,
+ * inside dispatch, where the handler closes the socket — so one blank name from a bulk import
+ * (`15 §42` names that path) put every device in the org into a permanent reconnect loop, taking
+ * the ledger push path down with it. Not self-healing either: a corrective publish does not help
+ * a device asking for a delta whose range still spans the poisoned version.
+ *
+ * Validating at the writer is the fix; this export is what makes "the same rules" literal
+ * rather than a comment asking two files to agree.
+ */
+export const CatalogEntryWire = z.object({
+  kind: z.string().min(1),
+  id: z.string().min(1),
+  name: z.string().min(1),
+  /** 03-F38 — a short kitchen name, so long item names stop being a KOT layout problem. */
+  kitchen_name: z.union([z.string().min(1), z.null()]).optional(),
+  parent_id: z.union([z.string().min(1), z.null()]).optional(),
+  /**
+   * Display order. Bounded to a safe integer because the column is `bigint`: a value past 2^53
+   * round-trips lossily through `Number()`, which would silently reorder a menu.
+   */
+  sort: z
+    .number()
+    .int()
+    .min(-(2 ** 53) + 1)
+    .max(2 ** 53 - 1)
+    .optional(),
+  /**
+   * `01-F55` — deletion is a TOMBSTONE. A reprint of an order placed before an item was
+   * deleted must still render its name, so a delete travels as a marked entry rather
+   * than as an absence. This is also why a snapshot carries its tombstones: the oracle
+   * round found that clearing and re-inserting destroyed every one of them, and made
+   * `01-F55` fail on its own named scenario after any recovery.
+   */
+  deleted: z.boolean().optional(),
+  /**
+   * `01-F60` — the price, per `(branch, channel)` pair, in integer paisa (`00 §6`).
+   *
+   * A flat list rather than a nested map because a map key must be a string and a `branch_id`
+   * is data, not a shape: nesting would make the wire's structure depend on which branches an
+   * org happens to have, and JSON object key order is not something a golden fixture can pin.
+   *
+   * **Optional on the wire, and that is not a relaxation.** `01-F60` puts completeness "at the
+   * WRITER", so `publishCatalog` refuses an entry that omits an enabled pair; the wire must
+   * still carry categories and modifier groups, which are priced by nothing.
+   *
+   * `price_paisa` is bounded to a safe integer for the same reason `sort` is: the column is
+   * `bigint`, and a value past 2^53 round-trips lossily through `Number()` — which for a price
+   * is a silently wrong bill rather than a reordered menu.
+   */
+  prices: z
+    .array(
+      z.object({
+        branch_id: z.string().min(1),
+        /**
+         * `02-F42`'s CLOSED set, not a free string — declared once in `domain` and reused here
+         * rather than restated (`18 §4`).
+         *
+         * A price keyed to a channel that does not exist is money nobody can resolve: `01-F60`
+         * looks a price up by the ORDER's channel, so a `dine_in` key (an order TYPE, `02-F1`)
+         * matches no lookup ever and the item reads as unpriced on every real channel. Refusing
+         * it here is what stops that reaching a device — and this is the wire, so it is also
+         * what stops it being stored.
+         */
+        channel: z.enum(ORDER_CHANNELS),
+        price_paisa: z
+          .number()
+          .int()
+          .min(0)
+          .max(2 ** 53 - 1),
+      }),
+    )
+    .optional(),
+  /**
+   * `03-F50` — the kitchen station that cooks this, joining `kitchen_name` as catalog data
+   * rather than layer-2 config.
+   *
+   * Optional because absence is **inheritance**, not "no station": an entry with none takes its
+   * parent's through the `01-F21` chain, and one with none anywhere up the chain resolves to the
+   * default station rather than vanishing from every ticket.
+   */
+  station: z.union([z.string().min(1), z.null()]).optional(),
+});
+export type CatalogEntryWireT = z.infer<typeof CatalogEntryWire>;
 
 export const messageSchemas = {
   hello: z.object({
@@ -49,6 +156,17 @@ export const messageSchemas = {
     // AND this server accepts — a closed vocabulary, so an unknown codec name is a
     // parse failure rather than a silent downgrade. Absent ⇒ plain, forever.
     compression: z.literal("zstd").optional(),
+    /**
+     * Additive under v:1 (T-C1, `01-F9` "plus org-scope reference data"). The ORG's current
+     * authoritative catalog version.
+     *
+     * **This single field is what makes the catalog transport correct**, and the push below
+     * is only latency. The device compares it against its own stored version and requests if
+     * behind, so every reconnection reconciles — including for a device that has been offline
+     * for a week and has no hope of replaying an announcement it was not connected for.
+     * Absent ⇒ an older server that serves no catalog, and the device simply never asks.
+     */
+    catalog_version: seq.optional(),
   }),
   push: z.object({ v, kind: z.literal("push"), events: z.array(EventEnvelope), watermark: seq }),
   push_ack: z.object({
@@ -80,6 +198,70 @@ export const messageSchemas = {
     complete: z.boolean(),
     next_from: seq,
   }),
+  /**
+   * `T-C1` — the catalog fetch pair (`01-F9`, `01-F52`..`01-F56`).
+   *
+   * The device asks; the server decides snapshot vs delta from `have_version`. A delta if it
+   * can construct one from that EXACT base, a snapshot otherwise — including `have_version: 0`
+   * and including a base too old to reconstruct. The device's existing `needs_snapshot`
+   * refusal (`01-F56`) is then the belt to that braces: it is what happens if the server gets
+   * this wrong, and it is already implemented and tested.
+   */
+  catalog_request: z.object({
+    v,
+    kind: z.literal("catalog_request"),
+    /** What the device has now. `0` means "nothing", and gets a snapshot. */
+    have_version: seq,
+    /**
+     * **The version this fetch is TOWARD**, echoed from the first page's `catalog_response`.
+     * Absent on the first request; required on every continuation.
+     *
+     * Without it a paged fetch has no identity. The server re-reads the current version on
+     * every page, so a publish landing between page 1 and page 2 changed both the version AND
+     * the row set the offset indexes into — the device accumulated page 1's stale rows and
+     * committed them at page 2's version, after which `hello_ack` matched forever and the edit
+     * was never re-fetched. Silent, permanent, and `01-F56`'s named failure verbatim: "diverges
+     * one device's menu from every other's, undetectable at the till, surfacing days later as a
+     * mispriced item".
+     *
+     * With it the server serves that exact version or refuses; the fetch is atomic in the
+     * version dimension as well as the row dimension.
+     */
+    at_version: seq.optional(),
+    /** Paging cursor, echoed from a previous `catalog_response.next_from`. */
+    from: seq.optional(),
+  }),
+  catalog_response: z.object({
+    v,
+    kind: z.literal("catalog_response"),
+    form: z.enum(["snapshot", "delta"]),
+    /** The version this payload brings the device TO. */
+    version: seq,
+    /** For a delta, the exact base it applies to. A device holding anything else refuses. */
+    base_version: seq.optional(),
+    entries: z.array(CatalogEntryWire),
+    /**
+     * Paging, in `catchup_response`'s vocabulary rather than a second idiom. A large org's
+     * catalog will exceed one frame. **A snapshot must apply ATOMICALLY** — the device must
+     * never hold half a menu — so paged snapshot chunks accumulate and commit on `complete`.
+     */
+    complete: z.boolean(),
+    next_from: seq,
+  }),
+  /**
+   * `T-C1` — server→device, org-scoped, carrying ONLY a version number.
+   *
+   * Covers a version changing DURING a live session, so a menu edit does not wait for the
+   * next reconnect. It is a freshness optimisation and **the system is correct without it**,
+   * which is the property that matters: a notice is exactly the kind of message that gets
+   * dropped on a lossy link, and `hello_ack.catalog_version` is what makes that cost freshness
+   * rather than correctness.
+   */
+  catalog_notice: z.object({
+    v,
+    kind: z.literal("catalog_notice"),
+    version: seq,
+  }),
   quarantine_notice: z.object({
     v,
     kind: z.literal("quarantine_notice"),
@@ -94,6 +276,11 @@ export const messageSchemas = {
   pong: z.object({ v, kind: z.literal("pong"), t: z.number().int() }),
 } as const;
 
+/**
+ * @unreached-owed The wire vocabulary as a LIST. Both ends dispatch on a concrete `kind` through
+ * `decodeMessage`, so nothing enumerates the set in production; the golden-fixture suites do. A
+ * caller arrives with protocol-version negotiation or an admin/inspection surface.
+ */
 export const MESSAGE_KINDS = Object.keys(
   messageSchemas,
 ) as readonly (keyof typeof messageSchemas)[];
@@ -107,6 +294,9 @@ const union = z.discriminatedUnion("kind", [
   messageSchemas.event_batch,
   messageSchemas.catchup_request,
   messageSchemas.catchup_response,
+  messageSchemas.catalog_request,
+  messageSchemas.catalog_response,
+  messageSchemas.catalog_notice,
   messageSchemas.quarantine_notice,
   messageSchemas.purge_command,
   messageSchemas.ping,
@@ -134,31 +324,6 @@ export const parseMessage = (value: unknown): ProtocolMessage => {
 export const encodeMessage = (message: ProtocolMessage): string => JSON.stringify(message);
 
 export const decodeMessage = (text: string): ProtocolMessage => parseMessage(JSON.parse(text));
-
-// Additive compressed framing under v:1 (T-01-16; 01 §5 "JSON + zstd batch
-// compression", 26 §6.4 — the catch-up transfer is part of the <60 s/4G budget,
-// not an optimisation; DEC-SYNC-010 candidate, PROTOCOL.md compressed-framing
-// clause). zstd of the EXACT plain-codec bytes, so the compressed path is
-// transparent to every consumer: decodeCompressed(encodeCompressed(m)) deep-equals
-// m for every valid message, and the plain JSON codec above is UNTOUCHED (the
-// T-01-02 golden fixtures must not drift). zstd is Node's built-in (node:zlib,
-// synchronous; 18 §14 records the choice — 18 §15 rule 1 bias: no new dependency).
-//
-// Close-now follow-up #4 (audit-1): the frame carries a zstd CONTENT CHECKSUM
-// (ZSTD_c_checksumFlag, +4 bytes). A plain zstd frame has no integrity check, so
-// a single-byte-corrupted frame could decompress to a schema-valid but WRONG
-// ProtocolMessage that decodeCompressed then returned as real — a silent
-// mis-parse the merge engine would trust. With the checksum, decompression of a
-// corrupted frame FAILS (checksum mismatch → throw), making corruption LOUD, not
-// silent. Additive: the decoder auto-detects the flag from the frame header, the
-// round-trip law holds, and the plain JSON codec is untouched.
-export const encodeCompressed = (message: ProtocolMessage): Uint8Array =>
-  zstdCompressSync(Buffer.from(encodeMessage(message), "utf8"), {
-    params: { [zlibConstants.ZSTD_c_checksumFlag]: 1 },
-  });
-
-export const decodeCompressed = (bytes: Uint8Array): ProtocolMessage =>
-  decodeMessage(zstdDecompressSync(bytes).toString("utf8"));
 
 /** The negotiated framing for one connection; `undefined` = plain JSON (T-01-19). */
 export type Compression = "zstd";
@@ -199,28 +364,3 @@ export type FrameCodec = {
   encode(message: ProtocolMessage): string | Uint8Array;
   decode(frame: string | Uint8Array): ProtocolMessage;
 };
-
-/**
- * The handshake pair is ALWAYS sent plain, even once a codec is granted. `hello` is
- * what establishes what this peer can read, and `hello_ack` crosses the wire while
- * the client's decoder is still plain — compressing either would require the receiver
- * to already know the answer the message itself carries.
- */
-const ALWAYS_PLAIN: ReadonlySet<string> = new Set(["hello", "hello_ack"]);
-
-export const createFrameCodec = (compression: Compression | undefined): FrameCodec => ({
-  encode: (message) =>
-    compression === undefined || ALWAYS_PLAIN.has(message.kind)
-      ? encodeMessage(message)
-      : encodeCompressed(message),
-  decode: (frame) => {
-    if (typeof frame === "string") return decodeMessage(frame);
-    if (compression === undefined) {
-      throw new Error(
-        "received a binary frame on a connection that did not negotiate compression " +
-          "(DEC-SYNC-010 — framing comes from the handshake, never from sniffing the frame)",
-      );
-    }
-    return decodeCompressed(frame);
-  },
-});

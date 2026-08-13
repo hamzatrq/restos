@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      No `viewport` scaling and no zoom: 27-F11c designs in millimetres and renders in pixels,
+      and a user-scalable viewport would put a second, invisible scale factor between the two.
+      A counter panel is a fixed physical surface, not a responsive one.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      18 §9 — the renderer has no Node access, and this CSP is the belt to that brace: no
+      remote code, no remote anything. The app ships every asset it uses; a counter runs
+      offline-first (00 §5.1) and a stylesheet that needs the WAN is a screen that goes blank
+      when the link does.
+
+      `font-src 'self' data:` is 27-F26's typeface arriving as bytes (August 2026). `packages/ui`
+      bundles IBM Plex Sans as base64 @font-face rules — nothing is fetched, and note that this
+      does NOT loosen the no-remote rule: no scheme is added that could reach the network, and
+      `img-src` already carries the same `data:` allowance. The bytes are a compile-time constant
+      of ours, never anything a user supplies.
+
+      ⚠ Without this directive `font-src` falls back to `default-src 'self'`, the data: URI is
+      refused, and every face is blocked while the CSS parses cleanly — a failure that looks
+      exactly like success. `pnpm layout:check` asserts the faces are LOADED, which is what
+      catches it.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'"
+    />
+    <title>RestOS — Counter</title>
+    <style>
+      /*
+        The height chain. `AppShell` is `height: 100%`, which resolves against its parent — and
+        every ancestor had no height at all, so the whole shell collapsed to its content and
+        left the bottom two thirds of the window as bare page. A counter screen with a dead
+        band under it reads as a half-loaded app.
+
+        `overflow: hidden` on the body is 27-F2 stated at the outermost level: paging replaces
+        scrolling for anything actionable, so a scrollbar here would mean the layout is wrong
+        and hiding it — nearly half of field subjects did not know content existed below the
+        fold, which is exactly what a scrollbar on a till invites.
+      */
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+
+      /*
+        BORDER-BOX, and it is a correctness rule rather than a preference.
+
+        `packages/ui` is styled entirely with inline style objects and every component in it
+        declares its box as the number it means: `AlarmBand` is `width: 100%`, `TenderPanel` is
+        `minWidth: 360`, and every touch target is `minWidth/minHeight: targetFor(posture)`
+        (27-F8). Under the CSS default — `content-box` — padding and border are ADDED to all of
+        those, so a declared box is never the box that renders.
+
+        Found by looking, August 2026: the S1 alarm band measured 1418 px inside a 1392 px
+        viewport (100% + 2x12 padding + 2x1 border) and pushed its "I SAW THIS" control 13 px
+        off the right edge of the screen. `03-F5` requires that alert to be acknowledged and
+        `27-F11g` makes it the ONLY signal that food is not being cooked, so an acknowledgement
+        the operator cannot fully reach is the most expensive instance of this bug in the
+        product — but it is the same bug in every component, and fixing it per-component would
+        leave the next one to rediscover it.
+
+        It does not weaken 27-F8. A `minHeight: targetFor("counter")` box is 76 dp of PHYSICAL
+        target either way; content-box was making targets bigger than declared by accident, not
+        by design, and the FR is a floor that border-box meets exactly.
+      */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

@@ -28,6 +28,16 @@ export const Handheld: Story = { args: { posture: "handheld", label: "Table 6" }
  * vanishes when 86'd destroys the positional memory of every operator who learned the grid
  * with it there. Adding, removing or reordering a grid item is a breaking change.
  */
+/**
+ * **What a non-reader must be able to do with this:** see that this dish is off, and still be
+ * able to press it if the manager says to sell it anyway.
+ *
+ * `01-F59` — greyed is NOT disabled. "Availability is not an `01-F17` block … the counter may
+ * still sell it deliberately — `02-F31` owns the oversell path." This tile stays pressable on
+ * purpose: `02-F40`'s founder ruling accepts that a printer-only kitchen 86s by walking to the
+ * counter, and names `02-F31`'s oversell handling as what absorbs the delay — which only works
+ * if the counter can complete the sale.
+ */
 export const Unavailable: Story = {
   args: {
     posture: "counter",
@@ -46,9 +56,17 @@ export const Destructive: Story = {
   args: { posture: "counter", label: "VOID", destructive: true },
 };
 
-/** All postures together — the ladder is the point, not any single number. */
+/**
+ * All four DESIGN postures together — the ladder is the point, not any single number.
+ *
+ * `floor` is deliberately absent. 27-F8 lists it as "absolute floor, anything — 48 dp", which
+ * is a permission for a control with nowhere better to be, not a posture to design to. While
+ * it was a member of `Posture` this story rendered it beside the others as if it were a peer,
+ * and `<ItemGrid posture="floor">` typechecked into a 48 dp counter grid where 27-F8 requires
+ * 76. The floor is still reachable — `targetFor("floor")` — just not as a design decision.
+ */
 export const PostureLadder: Story = {
-  args: { posture: "floor", label: "x" },
+  args: { posture: "counter", label: "x" },
   decorators: [
     () => (
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
@@ -56,7 +74,6 @@ export const PostureLadder: Story = {
         <Tile posture="kitchen" label="READY" />
         <Tile posture="counter" label="Karahi" />
         <Tile posture="handheld" label="T6" />
-        <Tile posture="floor" label="min" />
       </div>
     ),
   ],

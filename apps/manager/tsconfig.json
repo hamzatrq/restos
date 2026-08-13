@@ -1,0 +1,47 @@
+{
+  // ⚠ THIS FILE IS TYPECHECKED BY `typescript@5.9.3`, PINNED IN THIS APP'S devDependencies,
+  // WHILE THE REST OF THE REPO IS ON 7.0.2. That divergence is deliberate and load-bearing.
+  //
+  // TypeScript 7 is the Go port, and it removed the classic compiler API from the JS package:
+  // `ts.sys`, `ts.readConfigFile` and `ts.parseJsonConfigFileContent` are all `undefined`
+  // (verified 2026-08-11). `@expo/cli` calls all three in `utils/tsconfig/evaluateTsConfig.ts`
+  // to read the project tsconfig, so under TS7 every Expo command dies with:
+  //     TypeError: Cannot read properties of undefined (reading 'getCurrentDirectory')
+  //
+  // **Deleting this file does NOT avoid it.** `expo start` runs its TypeScript setup step
+  // first, AUTO-GENERATES a `tsconfig.json` when it sees `.ts` sources, and then crashes
+  // reading the file it just wrote. Measured both ways: with no tsconfig, `expo export`
+  // succeeds (it skips the setup step) and `expo start` still fails. So the app could be
+  // BUNDLED but never RUN, which is the worse of the two failures and the harder to notice.
+  //
+  // `@expo/cli` resolves TypeScript from the project directory, so a 5.x pinned here is found
+  // and the whole toolchain works — `expo start` serves, Metro bundles, `expo export` emits
+  // Hermes bytecode.
+  //
+  // ⚠ **RATIFY OR REPLACE THIS — a session should not be the last word on it.** `typescript`
+  // is already on `18 §14`'s allowlist so this adds no new package, but carrying two versions
+  // of the compiler is a governance call under `18 §15`. The alternative is waiting for Expo
+  // to support TS7 upstream, and the cost of waiting is that this app cannot start at all.
+  //
+  // Its own program, on purpose — see the `exclude` note in the root tsconfig. React Native's
+  // ambient globals (notably `setTimeout` returning `number`) are incompatible with
+  // `@types/node`, so this app cannot be typechecked in the same pass as the services.
+  //
+  // `types: []` is the other half of that isolation: it stops `@types/node` being pulled in
+  // implicitly from the workspace root, which would recreate the exact clash in reverse.
+  "extends": "../../packages/config/tsconfig.base.json",
+  "include": ["src"],
+  "compilerOptions": {
+    "types": [],
+    // "DOM" is what Expo's own `tsconfig.base` uses, and it is NOT a claim that a DOM exists.
+    // It is how the web-standard globals Hermes implements get types at all — `TextEncoder`
+    // (which `packages/domain`'s audit hash and payload hash both construct) and
+    // `crypto.getRandomValues` (which `@noble/hashes` needs for the PIN salt) live there.
+    // ⚠ It also types `document` and `window`, which do NOT exist on this platform. TypeScript
+    // will not stop you reaching for them here; Hermes will, at runtime.
+    "lib": ["ES2022", "DOM"],
+    "jsx": "react-jsx",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true
+  }
+}

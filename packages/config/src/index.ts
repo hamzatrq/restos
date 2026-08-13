@@ -1,6 +1,8 @@
 // @restos/config — shared config home (18 §2). defineEnv: services read process
 // env ONLY through this factory and crash at boot on invalid values (18 §5).
 // First consumer: services/sync-gateway/src/server.ts (T-01-07).
+export { redactedDsn } from "./dsn.js";
+
 export type EnvParser<T> = (raw: string | undefined, key: string) => T;
 
 export const defineEnv = <S extends Record<string, EnvParser<unknown>>>(

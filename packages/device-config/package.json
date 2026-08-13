@@ -1,0 +1,18 @@
+{
+  "name": "@restos/device-config",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "echo 'no suite here — the three resolvers are exercised by their consumers (apps/pos-electron: panel-density.test.ts, device-identity-seam.test.ts, orders-aging.test.ts; apps/pass-kds: pass-queue.test.ts, ready-mark.test.ts, shared-config-extraction.test.ts). DEC-ARCH-001 is a pure move: no test moved with it.'",
+    "build": "echo 'no build yet — scaffold stub'"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./aging": "./src/aging.ts",
+    "./device-identity": "./src/device-identity.ts"
+  },
+  "dependencies": {
+    "@restos/domain": "workspace:*"
+  }
+}

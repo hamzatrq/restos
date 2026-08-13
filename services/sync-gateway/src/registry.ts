@@ -42,7 +42,23 @@ type SqlExecutor = Pick<GatewayDb, "execute">;
 const isDeviceClass = (value: string): value is DeviceClass =>
   (DEVICE_CLASSES as readonly string[]).includes(value);
 
-/** Layer-1 provisioning seam (01 §7). Unknown class throws, nothing written (01-F39). */
+/**
+ * Layer-1 provisioning seam (01 §7). Unknown class throws, nothing written (01-F39).
+ *
+ * **IT HAS A SHIPPING CALLER AS OF AUGUST 2026 — `provision-device.ts`, the declared
+ * `pnpm -C services/sync-gateway provision-device` command.** The debt marker that stood here said
+ * "a device is provisioned only by a test or by hand-written SQL", and that was exactly true:
+ * `plans/wave-1/running-the-stack.md` §6b was a `tsx -e` one-liner plus a psql `INSERT` into this
+ * table. It is deleted now, because a marker on something reached fails `seams:check`. What is
+ * still owed is the `01-F25` *pairing code* — registration is specified as "a one-time pairing via
+ * back office code", and this is an operator command on the service host, which is a smaller thing
+ * that happens to remove the SQL.
+ *
+ * (The marker token is deliberately not spelled out above. `check-seams.mjs` matches the literal
+ * anywhere in the declaration's comment, so quoting it here re-declares the exception it describes
+ * and fails the rail as STALE — measured on this change, and `migrate.ts` records the file-header
+ * form of the same trap.)
+ */
 export const registerDevice = async (
   db: GatewayDb,
   registration: DeviceRegistration,
@@ -79,6 +95,23 @@ export const registerDevice = async (
  * proposed, unpinned): the DATABASE clock — registry bookkeeping is not domain
  * logic, and using Postgres `now()` keeps `Date.now()` out of gateway src
  * (18 §4 spirit). Only the FIRST revocation stamps; a re-revoke is a no-op.
+ *
+ * **IT HAS A SHIPPING CALLER AS OF AUGUST 2026 — `revoke-device.ts`, the declared
+ * `pnpm -C services/sync-gateway revoke-device` command.** The debt note that stood here said no
+ * operator surface set `revoked_at`, which made this the LONELY half of the pair: `registerDevice`
+ * gained `provision-device.ts` hours earlier and this had nothing, so a stolen till could be
+ * admitted by a declared command and taken away only with hand-written SQL. The note is deleted
+ * because a marker on something reached fails `seams:check` — and, as above, the literal token is
+ * deliberately not written out, since the rail matches it anywhere in this declaration's comment and
+ * would re-declare the very exception this paragraph announces the deletion of.
+ *
+ * What is still owed here is `14-F13` — revocation from the back-office **device list**, emitting
+ * `device.revoked` with an **actor**. The command is an operator command on the service host and has
+ * no authenticated user, so it deliberately writes no event: the T-01-09 ratified ruling above puts
+ * that emission on the doc 14/15 emitters, and a `null` actor in an append-only store is a worse
+ * record than none. The ENFORCEMENT of `revoked_at` was already live (`01-F48`'s ≤30 s sweep); the
+ * act of setting it is what had no caller. `provision-device` refuses to re-credential a revoked
+ * row precisely so the two halves cannot fight, and nothing anywhere un-revokes.
  */
 export const revokeDevice = async (
   db: GatewayDb,
@@ -90,6 +123,45 @@ export const revokeDevice = async (
         where org_id = ${target.org_id} and device_id = ${target.device_id}
           and revoked_at is null`,
   );
+};
+
+/**
+ * `14-F12`'s **device list**, one org at a time — the read the back office's device screen is.
+ *
+ * ⚠ **IT PROJECTS WHAT THIS TABLE HAS AND NOT WHAT `14-F12` ASKS FOR, and the gap is named rather
+ * than filled.** The FR wants "class, app version, last-seen, sync lag"; `kernel.device_registry`
+ * holds class and nothing else on that list. **App version and last-seen are not stored anywhere in
+ * this service** — no heartbeat table exists, doc 15's device pipeline is unbuilt — and sync lag is
+ * derived from a cursor this row does not carry. Inventing a plausible value (a `last_seen` stamped
+ * at hello, say) would be a second interpretation of a fact the corpus assigns to another module,
+ * and `00 §5.7` forbids a screen showing an aged number as a fresh one. So the three absent columns
+ * are absent here, the screen says so, and closing them is doc 15's pipeline landing — not a column
+ * added on a guess.
+ *
+ * `token_expires_at` IS carried, because it is real and it is the one liveness fact this table
+ * honestly has (`01-F47`).
+ *
+ * Ordered by `(branch_id, device_id)` so the list is stable between visits: without it the planner
+ * decides the order and a `14-F12` list re-shuffles under an owner between two reads of the same
+ * unchanged fleet.
+ */
+export const listDevices = async (
+  executor: SqlExecutor,
+  orgId: string,
+): Promise<readonly (DeviceRegistryRow & { device_id: string })[]> => {
+  const rows = await executor.execute(
+    sql`select device_id, branch_id, device_class, revoked_at, token_expires_at
+        from kernel.device_registry
+        where org_id = ${orgId}
+        order by branch_id asc, device_id asc`,
+  );
+  return [...rows].map((row) => ({
+    device_id: String(row.device_id),
+    branch_id: String(row.branch_id),
+    device_class: String(row.device_class),
+    revoked_at: row.revoked_at === null ? null : Number(row.revoked_at),
+    token_expires_at: row.token_expires_at === null ? null : Number(row.token_expires_at),
+  }));
 };
 
 /** The auth-check read: one (org, device) row, or undefined when never registered. */

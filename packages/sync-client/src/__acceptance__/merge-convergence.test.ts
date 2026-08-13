@@ -333,10 +333,14 @@ describe("time-valued columns — value stamping is BRANCH time (01-F45, T-01-17
     const id = identity();
     const peer = peerIdentity(id);
     const store = mergeStore(id);
-    store.ingest(peerEnvelope(peer, 0, { ...created("O1", { channel: "takeaway" }), ...at(0) }));
+    // T-2 (02-F42): `takeaway` is an order TYPE. `phone` is a real channel and is deliberately
+    // NOT the builders' default `counter` — a queue row that hardcoded the default would be
+    // indistinguishable from one that carries the value, and "carried from order.created" is
+    // the whole claim of this test.
+    store.ingest(peerEnvelope(peer, 0, { ...created("O1", { channel: "phone" }), ...at(0) }));
     expect(store.kitchenQueue()).toEqual([]);
     store.ingest(peerEnvelope(peer, 1, { ...confirmed("O1"), ...at(100) }));
-    expect(store.kitchenQueue().map((r) => [r.order_id, r.channel])).toEqual([["O1", "takeaway"]]);
+    expect(store.kitchenQueue().map((r) => [r.order_id, r.channel])).toEqual([["O1", "phone"]]);
     store.close();
   });
 });

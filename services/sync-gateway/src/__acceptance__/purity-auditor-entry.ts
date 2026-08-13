@@ -4,7 +4,7 @@
 // @restos/sync-client/fold-engine, drizzle-orm — never touches the native
 // addon (t-01-11 ruling 2). Exit 0 + marker = pass; any resolution of
 // better-sqlite3 throws in the blocker and the process dies non-zero.
-import { runAuditor } from "../auditor.js";
+import { runAuditor } from "@restos/auditor";
 
 if (typeof runAuditor !== "function") {
   process.stderr.write("[t-01-11 F7] auditor module loaded but runAuditor is not a function\n");
