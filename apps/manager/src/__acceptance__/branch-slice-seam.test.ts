@@ -414,6 +414,26 @@ const specifiersOf = (code: string): string[] => {
  * package boundary could not tell those two apart. `apps/manager/metro.config.js` documents the
  * same resolution (`unstable_enablePackageExports`, and the `.js` → `.ts` fallback below).
  */
+/**
+ * ⚠ **`node:fs` PATH, NOT A `URL` — and the difference is this app's program, not a preference.**
+ *
+ * `react-native/src/types/globals.d.ts:463` declares its own ambient `URL`, so in THIS package's
+ * TypeScript program `new URL(...)` is RN's and `readFileSync`/`existsSync`/`readdirSync` want
+ * `node:url`'s. They are structurally incompatible (`URLSearchParams`' iterator gained
+ * `[Symbol.dispose]`), so passing a `URL` straight to `node:fs` here is 9 `tsc` errors that no
+ * implementation can clear — `pnpm -C apps/manager typecheck` is a named gate, and a suite that
+ * cannot compile blocks the implementer indefinitely.
+ *
+ * ⚠ **THIS IS AN IMPLEMENTER'S EDIT TO A `24 §3` ORACLE FILE AND IT IS RECORDED RATHER THAN MADE
+ * QUIETLY.** It changes NO assertion, no fixture and no walk: `.pathname` on a `file://` URL is
+ * the absolute path, and it is the idiom this suite's sibling
+ * (`packages/sync-client/src/__acceptance__/storage-adapter.test.ts`) already uses on `SRC_DIR`.
+ * The one behaviour difference is percent-encoding in a repo path containing spaces, which this
+ * checkout does not have. The author's own report says the four files were left with `tsc` errors
+ * attributed to missing exports; these nine were a separate, pre-existing cause.
+ */
+const at = (url: URL): string => url.pathname;
+
 const appGraph = (root = "index.ts"): { bare: Set<string>; files: Set<string> } => {
   const files = new Set<string>();
   const bare = new Set<string>();
@@ -424,8 +444,8 @@ const appGraph = (root = "index.ts"): { bare: Set<string>; files: Set<string> } 
     const match = /^@restos\/([^/]+)(\/.*)?$/.exec(specifier);
     if (match === null) return null;
     const pkg = new URL(`packages/${match[1]}/package.json`, repo);
-    if (!existsSync(pkg)) return null;
-    const manifest = JSON.parse(readFileSync(pkg, "utf8")) as {
+    if (!existsSync(at(pkg))) return null;
+    const manifest = JSON.parse(readFileSync(at(pkg), "utf8")) as {
       exports?: Record<string, string>;
       main?: string;
     };
@@ -444,7 +464,7 @@ const appGraph = (root = "index.ts"): { bare: Set<string>; files: Set<string> } 
   const resolveFile = (url: URL): URL => {
     const base = url.href.replace(/\.js$/, "");
     const candidates = [url, new URL(`${base}.ts`), new URL(`${base}.tsx`)];
-    const found = candidates.find((candidate) => existsSync(candidate));
+    const found = candidates.find((candidate) => existsSync(at(candidate)));
     if (found === undefined)
       throw new Error(`24-F14: cannot resolve ${url.href} — walk is vacuous`);
     return found;
@@ -454,7 +474,7 @@ const appGraph = (root = "index.ts"): { bare: Set<string>; files: Set<string> } 
     const url = resolveFile(queue.pop() as URL);
     if (files.has(url.href)) continue;
     files.add(url.href);
-    for (const specifier of specifiersOf(readFileSync(url, "utf8"))) {
+    for (const specifier of specifiersOf(readFileSync(at(url), "utf8"))) {
       if (specifier.startsWith(".")) {
         queue.push(new URL(specifier.replace(/\.js$/, ".ts"), url));
         continue;
@@ -478,9 +498,9 @@ const appGraph = (root = "index.ts"): { bare: Set<string>; files: Set<string> } 
  */
 const appSource = (): string => {
   const dir = new URL(".", SRC);
-  const files = readdirSync(dir, { withFileTypes: true })
+  const files = readdirSync(at(dir), { withFileTypes: true })
     .filter((entry) => entry.isFile() && /\.tsx?$/.test(entry.name))
-    .map((entry) => readFileSync(new URL(entry.name, dir), "utf8"));
+    .map((entry) => readFileSync(at(new URL(entry.name, dir)), "utf8"));
   expect(files.length).toBeGreaterThanOrEqual(4); // 24-F14: an empty read passes every `not`
   return files.map(stripComments).join("\n");
 };

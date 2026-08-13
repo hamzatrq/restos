@@ -27,8 +27,8 @@ import { join } from "node:path";
 import { hashPin } from "@restos/domain";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DeviceStore } from "../device-store.js";
-import { openStore } from "../store.js";
 import { createPinSession, PIN_LOCKOUT_COOLDOWN_MS, type PinSession } from "../pin-session.js";
+import { openStore } from "../store.js";
 
 const ORG = "org-restos";
 const BRANCH = "branch-gulberg";

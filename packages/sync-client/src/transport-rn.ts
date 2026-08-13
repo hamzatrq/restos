@@ -37,15 +37,16 @@
  * file's logic — dial, reconnect, up/down edges, frame decode — is exercisable from Node against
  * a real server, and so that `seams:check` Rule B has nothing optional to go unsupplied.
  */
+// The PORTABLE subpaths, and they must stay that way: `@restos/sync-protocol`'s root entry
+// reaches `compression.ts` and with it `node:zlib`, which Metro cannot resolve and which a React
+// Native TypeScript program cannot even TYPE — a type-only import still loads the target module
+// graph, so these two specifiers are load-bearing rather than cosmetic.
+import { decodeMessage, encodeMessage, type ProtocolMessage } from "@restos/sync-protocol/messages";
 import type {
   Clock,
   CloudTransport,
   CloudTransportHandlers,
-  ProtocolMessage,
-} from "@restos/sync-protocol";
-// The PORTABLE subpath, and it must stay that way: `@restos/sync-protocol`'s root entry reaches
-// `compression.ts` and with it `node:zlib`, which Metro cannot resolve. See that file's header.
-import { decodeMessage, encodeMessage } from "@restos/sync-protocol/messages";
+} from "@restos/sync-protocol/transport";
 
 /** Default cloud reconnect cadence — the same value `transport-ws.ts` uses, for the same reason. */
 const DEFAULT_RECONNECT_MS = 1_000;
@@ -74,6 +75,14 @@ export const createRnCloudTransport = (config: {
   clock: Clock;
   /** `(url) => new WebSocket(url)` on a phone. Injected — see the coverage note in the header. */
   socket: (url: string) => RnWebSocket;
+  /**
+   * @unreached-by-design A TUNING DEFAULT, not a capability — the same call and the same reason as
+   * `createWsCloudTransport`'s identical option, which carries this marker already.
+   * `DEFAULT_RECONNECT_MS` is the right value for the one host there is, and an unsupplied default
+   * is only a defect when omitting it silently drops a REQUIREMENT (`createSpooler({ store })`'s
+   * `03-F4` crash clause). Two transports disagreeing about how fast to redial would be a worse
+   * outcome than either number.
+   */
   reconnect_ms?: number;
 }): CloudTransport => {
   const { url, clock, socket: connect } = config;

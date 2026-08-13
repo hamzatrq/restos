@@ -18,12 +18,15 @@
 // double fires onUp/onDown, the real WS adapter schedules reconnect through its own
 // clock).
 import { type DeviceClass, type EventEnvelopeT, UnknownEventTypeError } from "@restos/domain";
+// The portable subpaths rather than the package ROOT: the root re-exports `compression.ts`,
+// whose `node:zlib` import a React Native program cannot even TYPE — and this session runs on
+// the manager's phone (`05-F29`). A type-only import still loads the target module graph.
+import type { ProtocolMessage } from "@restos/sync-protocol/messages";
 import type {
   Clock,
   CloudTransport,
   CloudTransportHandlers,
-  ProtocolMessage,
-} from "@restos/sync-protocol";
+} from "@restos/sync-protocol/transport";
 import { type CatalogFetch, createCatalogFetch } from "./catalog-fetch.js";
 import { type DeviceStore, DivergentDuplicateError, type PageItem } from "./device-store.js";
 
