@@ -79,6 +79,27 @@ export type PrintJob = {
   document: Uint8Array;
   printer_name: string;
   order_ref: string;
+  /**
+   * `03-F55` — what this document COMMITTED TO PAPER, as opaque line identifiers.
+   *
+   * CARRIED and never interpreted, exactly as `printer_name` and `order_ref` are: this layer does
+   * not know what a line is, does not group by it, and does not compare two jobs' coverage. The
+   * host decides what a station is still owed (`main/printing.ts`); the spool is only where that
+   * answer has to survive.
+   *
+   * **It rides on the JOB ROW and not in the host's memory, because `03-F4` is written about the
+   * power cut and the relaunch is exactly when both failures appear**: a spool re-read without the
+   * coverage either reprints a chit already on the spike in the kitchen, or loses an addition that
+   * never got there. `03-F4` already carries the bytes across a restart — "never drops it" — and
+   * this belongs to the same row.
+   *
+   * **OPTIONAL**, for `SpoolerOptions.store`'s reason and one more: `__acceptance__/spooler-job-
+   * store.test.ts` and this package's own `spooler*.test.ts` build `PrintJob`s that predate this
+   * FR and are oracles no implementing session may edit. Absent means "this job kept no record",
+   * which is a spool row written before `03-F55` — a state the host must decide about and this
+   * layer must not paper over with an empty array.
+   */
+  covers?: readonly string[];
 };
 
 /** What the spooler knows about a job. `attempts` is `03-F4`'s budget counter. */
@@ -89,6 +110,8 @@ export type JobRecord = {
   attempts: number;
   printer_name: string;
   order_ref: string;
+  /** `03-F55`'s coverage, carried back out unchanged — see `PrintJob.covers`. */
+  covers?: readonly string[];
 };
 
 /**
@@ -245,6 +268,10 @@ export const createSpooler = ({ transport, store }: SpoolerOptions): Spooler => 
           attempts: 0,
           printer_name: job.printer_name,
           order_ref: job.order_ref,
+          // Conditional because `exactOptionalPropertyTypes` distinguishes "absent" from
+          // "undefined", and `03-F55` reads absent as a spool row that kept no coverage — a
+          // distinction the store has to be able to write down.
+          ...(job.covers === undefined ? {} : { covers: job.covers }),
         },
         document: job.document,
       };

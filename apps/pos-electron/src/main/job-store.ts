@@ -53,9 +53,26 @@ CREATE TABLE IF NOT EXISTS print_jobs (
   attempts INTEGER NOT NULL,
   printer_name TEXT NOT NULL,
   order_ref TEXT NOT NULL,
-  document BLOB NOT NULL
+  document BLOB NOT NULL,
+  covers TEXT
 ) STRICT;
 `;
+
+/**
+ * `03-F55`'s coverage column on a spool this device already wrote.
+ *
+ * `CREATE TABLE IF NOT EXISTS` does nothing to a table that exists, so a till upgraded with orders
+ * still open would `SELECT covers` against a five-column table and throw on the first read — at
+ * boot, on the one file whose whole job is to outlive the process. `03-F55` requires the opposite:
+ * "a spool written before this FR is honoured rather than reprinted on the upgrade".
+ *
+ * NULLABLE and never backfilled. A row written by the previous version recorded no coverage and
+ * there is nothing to reconstruct it from; `main/printing.ts` decides what to do about that, and
+ * writing `'[]'` here would forge the answer "that chit carried nothing" into a durable file.
+ */
+const MIGRATIONS: readonly { column: string; sql: string }[] = [
+  { column: "covers", sql: "ALTER TABLE print_jobs ADD COLUMN covers TEXT" },
+];
 
 export type OpenJobStore = SpoolerJobStore & {
   /** Release the file handle. Registered on `will-quit`; also the tests' power cut. */
@@ -71,7 +88,12 @@ export type OpenJobStoreOptions = {
   nativeBinding?: string | undefined;
 };
 
-type Row = Omit<PersistedJob, "document" | "state"> & { state: string; document: Buffer };
+type Row = Omit<PersistedJob, "document" | "state" | "covers"> & {
+  state: string;
+  document: Buffer;
+  /** JSON, or `NULL` for a row written before `03-F55` (see `MIGRATIONS`). */
+  covers: string | null;
+};
 
 export const openJobStore = ({ path, nativeBinding }: OpenJobStoreOptions): OpenJobStore => {
   const db = new Database(path, nativeBinding === undefined ? {} : { nativeBinding });
@@ -80,20 +102,32 @@ export const openJobStore = ({ path, nativeBinding }: OpenJobStoreOptions): Open
   db.pragma("journal_mode = WAL");
   db.pragma("synchronous = FULL");
   db.exec(SCHEMA);
+  const present = new Set(
+    (db.pragma("table_info(print_jobs)") as { name: string }[]).map((column) => column.name),
+  );
+  for (const migration of MIGRATIONS) {
+    if (!present.has(migration.column)) db.exec(migration.sql);
+  }
 
   // `rowid` is the FIRST-write order (`SpoolerJobStore.load`: "in the order it was first
   // written"). `ON CONFLICT DO UPDATE` preserves it, so a job that transitions four times keeps
   // the position it was enqueued in rather than jumping to the end of the queue on every commit.
+  //
+  // ⚠ **EVERY COLUMN IS NAMED HERE THREE TIMES AND NOTHING CHECKS THE THREE AGREE.** A field added
+  // to `PersistedJob` and not to these two statements is dropped silently, with the type checker,
+  // `pnpm seams:check` and every suite in this package green — the job round-trips, it just comes
+  // back without the field. `03-F55`'s two power-cut assertions in `__acceptance__/kot-addendum.
+  // test.ts` are the only things in this repo that can see it happen to `covers`.
   const all = db.prepare(
-    "SELECT job_id, state, attempts, printer_name, order_ref, document FROM print_jobs ORDER BY rowid",
+    "SELECT job_id, state, attempts, printer_name, order_ref, document, covers FROM print_jobs ORDER BY rowid",
   );
   const upsert = db.prepare(
-    `INSERT INTO print_jobs (job_id, state, attempts, printer_name, order_ref, document)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO print_jobs (job_id, state, attempts, printer_name, order_ref, document, covers)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(job_id) DO UPDATE
        SET state = excluded.state, attempts = excluded.attempts,
            printer_name = excluded.printer_name, order_ref = excluded.order_ref,
-           document = excluded.document`,
+           document = excluded.document, covers = excluded.covers`,
   );
 
   return {
@@ -107,6 +141,9 @@ export const openJobStore = ({ path, nativeBinding }: OpenJobStoreOptions): Open
         printer_name: row.printer_name,
         order_ref: row.order_ref,
         document: Uint8Array.from(row.document),
+        // `NULL` stays ABSENT rather than becoming `[]` — `03-F55` reads the two differently, and
+        // an empty array is the claim "that chit carried no lines", which is never true of a chit.
+        ...(row.covers === null ? {} : { covers: JSON.parse(row.covers) as readonly string[] }),
       })),
     // SYNCHRONOUS, and that is forced rather than chosen: `enqueue` is synchronous (`01-F17` — a
     // sale is never blocked) and `03-F4` puts this write BEFORE the first transmit. An await
@@ -119,6 +156,7 @@ export const openJobStore = ({ path, nativeBinding }: OpenJobStoreOptions): Open
         job.printer_name,
         job.order_ref,
         Buffer.from(job.document),
+        job.covers === undefined ? null : JSON.stringify(job.covers),
       );
     },
     close: () => db.close(),

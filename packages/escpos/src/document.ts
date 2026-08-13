@@ -182,6 +182,26 @@ export type KotData = {
    * marker — whether THIS print is a reprint is a property of the print job (`03-F7`).
    */
   readonly reprint: boolean;
+  /**
+   * `03-F55`: which chit this is at this station — `0` on the one that opened it, `n ≥ 1` on the
+   * nth addition. **Exactly one field, and it is a COUNT rather than a flag**, because the FR's own
+   * reason for putting it on paper is that the content cannot tell two additions apart: "a family
+   * that asks for one naan and then, five minutes later, one more naan produces two chits with
+   * identical bodies", and a cook holding both must be able to see he is not looking at a duplicate.
+   *
+   * On the DATA and not in the profile for `reprint`'s reason exactly (`03-F32`: "type invariants
+   * override configuration"), and it shares `reprint`'s band rather than taking a second one —
+   * `27-F56` allows ONE banner per document and "a ticket that uses inversion twice has used it
+   * zero times".
+   *
+   * **OPTIONAL, and the reason is `24 §3` step 2 rather than design taste**, the same constraint
+   * `KotPrinterDeps.routesToPaper` and `CashPrinterDeps.append` hit: `__acceptance__/kot-document.
+   * test.ts` declares seven `KotData` fixtures that predate this FR and is an oracle no
+   * implementing session may edit, so a REQUIRED member would redden a suite for a surface it does
+   * not exercise. Absent reads as `0` — the opening chit, which is what every one of those
+   * fixtures is.
+   */
+  readonly addendum?: number;
   readonly lines: readonly KotLine[];
 };
 
@@ -225,20 +245,41 @@ const REMOVAL_MARKER = "NO";
 const KOT_BLOCK_RENDERERS: Readonly<Record<string, BlockRenderer>> = {
   /**
    * `03-F37`: "Reprint markers are mandatory per type, **in a locked region** … Reprints are
-   * already a named fraud vector — the paper must say so." `27-F56` gives it the document's ONE
-   * banner.
+   * already a named fraud vector — the paper must say so." `03-F55` puts the addendum ordinal in
+   * the same place for the same reason, and `27-F56` gives the two ONE banner between them.
    *
    * The block declares no slot, and that is what makes the band unsuppressible rather than merely
    * unsuppressed: `03-F33` puts owner content only outside a locked block and `03-F34` refuses any
    * document that breaks that, so there is no profile an owner could write which reaches this band.
+   *
+   * ⚠ **ONE part, not two, and that is `03-F55`'s catastrophic case rather than tidiness.**
+   * `27-F56`'s budget is enforced in `encode()` and a second `banner`-scoped part separated by
+   * anything but a feed answers `banner_budget_exceeded`, which `03-F34` turns into a HARD REFUSAL
+   * — so the naive shape (a `REPRINT` block plus an `ADDED n` block) prints **nothing at all** for
+   * a reprinted addendum: this FR's own defect arriving through the fix for it.
+   *
+   * The block id still reads `KOT_REPRINT_BAND` deliberately. `03-F30` versions specs so a block
+   * id is part of the shipped contract, `03-F55` adds no document type and no block, and renaming
+   * it would be a spec-shape change for a comment's benefit. What it names is now the document's
+   * one banner; this sentence is where that is said.
    */
-  KOT_REPRINT_BAND: (data) =>
-    kotOf(data).reprint
-      ? [
-          { kind: "text", value: "REPRINT", ink: "inverted", scope: "banner" },
+  KOT_REPRINT_BAND: (data) => {
+    const kot = kotOf(data);
+    // `00 §5.6`'s Western numerals, and the word before the number in both cases: `03-F55` writes
+    // the band as `ADDED 2` and `REPRINT ADDED 2`. `27-F35`'s ≥85% comprehension gate on real
+    // staff has NOT been run on either word — it has not been run on `REPRINT` since K-5 either —
+    // so the wording is provisional and the FR says so about itself.
+    const words = [
+      ...(kot.reprint ? ["REPRINT"] : []),
+      ...((kot.addendum ?? 0) > 0 ? [`ADDED ${kot.addendum}`] : []),
+    ];
+    return words.length === 0
+      ? []
+      : [
+          { kind: "text", value: words.join(" "), ink: "inverted", scope: "banner" },
           { kind: "feed", lines: 1 },
-        ]
-      : [],
+        ];
+  },
   KOT_HEAD: (data) => {
     const kot = kotOf(data);
     return [
@@ -367,6 +408,9 @@ const KOT_SPEC = {
     station: "GRILL",
     branch_created_at: 1_754_300_000_000,
     reprint: false,
+    // `03-F55`: the chit that OPENED the station, which is what `03-F36`'s build-time witness
+    // should be — the ordinary ticket a kitchen sees three hundred times a shift.
+    addendum: 0,
     lines: [
       {
         quantity: 2,
