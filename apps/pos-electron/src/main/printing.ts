@@ -471,6 +471,16 @@ export const createKotPrinter = ({
       // has been told to expect exactly one. A document `03-F34` REFUSED is the opposite — no job
       // was created, so nothing was committed and the next press renders those lines again.
       const prefix = chitPrefix(order_id, at);
+      // A FILTER over every job and not an ordinal probe (`spooler.job(`${prefix}::1`)`, `::2`, …
+      // until one is missing), which would be O(1) per chit instead of O(all jobs on this device).
+      // The probe is refused because it rests on the ordinals being CONTIGUOUS, and a single gap
+      // would make it re-issue an id `enqueue` then overwrites — losing a chit's coverage row and
+      // its bytes. **The cost is named rather than hidden: `03-F4` has no compaction clause and
+      // this store has no `DELETE`, so `jobs()` grows for the life of the device**, and this walk
+      // runs once per station per press on `01-F17`'s synchronous path. It is the same order as
+      // what already ships — `reconcile` here and in both cash/receipt printers each walk `jobs()`
+      // on every pump — so the thing that would actually need fixing is the unbounded spool
+      // (`22`/`25`'s retention question), not this filter.
       const prior = spooler.jobs().filter((job) => isChitOf(job.job_id, prefix));
       // A row written before `03-F55` kept no coverage and there is nothing to reconstruct it
       // from. DECLARED INTERPRETATION (`24 §3b`): unknown coverage HONOURS THE PAPER — this
