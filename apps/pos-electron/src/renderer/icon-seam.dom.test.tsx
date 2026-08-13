@@ -99,7 +99,7 @@ const drawingsIn = (el: Element): number => el.querySelectorAll("svg").length;
  * the row being deleted, which is the failure this exists to catch.
  */
 const ORDER_TYPE_WORDS = ["Dine-in", "Takeaway", "Delivery"] as const;
-const CHANNEL_WORDS = ["Counter", "Phone", "Foodpanda"] as const;
+const CHANNEL_WORDS = ["In restaurant", "Call", "Foodpanda", "WhatsApp"] as const;
 
 describe("27 §5 / 00 §5.6 — the counter's learned rows carry their symbols", () => {
   it("draws a symbol on every order-type tile, beside the word and never instead of it", async () => {
