@@ -198,8 +198,21 @@ describe("§A 02-F42 — the counter originates on the ruling's four channels", 
     // this cashier's reading at "little English": two words for one act is the exact cost that
     // rule exists to refuse, and it is invisible to a test that only checks the new word is
     // present.
+    //
+    // ⚠ **THIS ASSERTION DID NOT CATCH THE CASE THE PARAGRAPH ABOVE CLAIMS, and was corrected
+    // by the mutation pass rather than by reading.** It was `expect(channelLabels())
+    // .not.toContain(stale)` — and `toContain` on an ARRAY is element equality, so a label of
+    // `"Call — Phone"` is not the element `"Phone"` and the guard passed. Measured: the mutant
+    // `{ id: "phone", label: "Call — Phone" }` left this test GREEN (it was killed only by the
+    // `toEqual` in the first test of this section, which is a different assertion owning a
+    // different claim). The earlier `"Counter — In restaurant"` mutant *looked* caught here, but
+    // its failure was this test's own `findByRole(/^In restaurant$/i)` SETUP line timing out —
+    // the assertion never ran. A SUBSTRING sweep is what the comment always described.
     for (const stale of ["Counter", "Phone"]) {
-      expect(channelLabels(), `${stale} is the pre-ruling word for a channel`).not.toContain(stale);
+      const fused = channelLabels().filter((label) => label.includes(stale));
+      expect(fused, `${stale} is the pre-ruling word for a channel, fused into a label`).toEqual(
+        [],
+      );
     }
   });
 });
@@ -408,6 +421,41 @@ describe("§E 00 §5.6 — the screen speaks the ruling's words, never the ledge
     ]);
     render(<Counter />);
     await waitFor(() => expect(fixedLine()).toContain("WhatsApp"));
+  });
+
+  it("degrades to the stored ID for a channel this row cannot originate — never a guess", async () => {
+    // `01-F54`, and it is a promise `channelLabel`'s own doc comment makes in shipped source:
+    // *"It degrades to the id rather than to a guess ... an open order on a channel this row
+    // cannot originate — `storefront`, arriving through `02-F9`'s inbox — is rare, honest and
+    // readable, where a fabricated label would not be."*
+    //
+    // ⚠ **NOTHING ASSERTED THAT PROMISE UNTIL THIS TEST**, which is the shape AGENTS.md calls
+    // worse than no comment: a protection named in source retires the assertion someone would
+    // otherwise write. Measured by mutation on the shipped tree — replacing the `?? id` fallback
+    // with `?? "In restaurant"` failed **0 of 1041** tests in this package. A storefront order
+    // would then have read *"This order is In restaurant"*: a placeholder that looks like data,
+    // which commandment 2 forbids and `00 §5.7` names.
+    mount([
+      {
+        order_id: "order-3",
+        reference: "A-3",
+        total_paisa: 0,
+        paid_paisa: 0,
+        lines: [],
+        channel: "storefront",
+      } as OpenOrder,
+    ]);
+    render(<Counter />);
+    await waitFor(() => expect(fixedLine()).toContain("storefront"));
+
+    // The half that bites: an honest id, and NOT one of the four words this row owns. Without
+    // this loop the test passes against any fallback that happens to contain the id.
+    for (const ruled of RULED_CHANNELS) {
+      expect(
+        fixedLine(),
+        `${ruled.label} is a fabricated label for an order on a channel the row cannot originate`,
+      ).not.toContain(ruled.label);
+    }
   });
 
   it("the latched-channel line names the tile's own words", async () => {
