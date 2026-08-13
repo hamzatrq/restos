@@ -116,6 +116,69 @@ describe("§A 02-F1/01-F60 — a type tap alone starts NOTHING", () => {
     expect(appended).toEqual([]);
   });
 
+  it("stops asking for a channel the moment one is latched (00 §5.7)", async () => {
+    /**
+     * ⚠ **A SECOND SURVIVOR, MEASURED AUGUST 2026 — and, like M8 above, a shipped comment had
+     * already PROMISED this protection.** `Counter.tsx`'s channel tile carries
+     * `setTypeRefused(false)` with the note *"a standing refusal is about the press as it was
+     * made, and this is the act that resolves it. Leaving it up over a row that is now live
+     * would be a false statement one tap old (`00 §5.7`)"*. Deleting that one line left **969
+     * of 969 pos-electron tests green**, and left `Choose a channel first` on the glass above a
+     * type row that was, by then, live.
+     *
+     * `AGENTS.md`: *"a comment promising a protection that does not exist is worse than no
+     * comment: it retires the hand-written assertion someone would otherwise write."* This is
+     * that assertion.
+     *
+     * **It asserts the SURFACE, not the mechanism, so it does not pick between `02-F49` (b)'s
+     * two legal arms.** That FR permits either the tile carrying the reason or the press
+     * producing one; on the arm where the tiles carry it the reason goes with `unavailable`, on
+     * the arm shipped here it goes with `typeRefused`. Both satisfy this test, and an
+     * implementation that reddened it would be one that still asks for a channel it has.
+     */
+    mount([]);
+    render(<Counter />);
+    await screen.findByRole("button", { name: /^Counter(\s|$)/i });
+
+    /**
+     * ⚠ **THE MATCHERS HERE ARE TOLERANT ON PURPOSE, AND THE STRICT ONES ELSEWHERE IN THIS FILE
+     * ARE A SEPARATE FINDING RATHER THAN A STYLE.** `Tile` folds a reason into its accessible
+     * name (`${label} — ${reason}`), so on `02-F49` (b)'s tile-carries-the-reason arm every type
+     * control is renamed — and an anchored `/^Dine-in$/i` then fails to FIND the control it was
+     * about, which is a matcher failing, not a claim failing. Measured: that arm reds **11
+     * tests across 3 files** on this branch, none of them for a reason `02-F49` cares about.
+     * `order-entry-sequence.dom.test.tsx`'s own `exactly()` helper is the shape copied here.
+     */
+    const anchored = (label: string) => new RegExp(`^${label}(\\s|$|\\s—)`, "i");
+
+    // The refused press first — the state this is about does not exist without one.
+    tap(anchored("Dine-in"));
+    await waitFor(() =>
+      expect(screen.getAllByText(/choose a channel first/i).length).toBeGreaterThan(0),
+    );
+
+    // And now the act that resolves it.
+    tap(anchored("Phone"));
+
+    await waitFor(() =>
+      expect(
+        screen
+          .queryAllByText(/choose a channel/i)
+          .map((el) => (el.textContent ?? "").trim())
+          .concat(
+            screen
+              .getAllByRole("button")
+              .map((el) => el.getAttribute("aria-label") ?? "")
+              .filter((n) => /choose a channel/i.test(n)),
+          ),
+        "00 §5.7 BROKEN: the counter is still asking for a channel it already has. A refusal " +
+          "that outlives the act resolving it is a false statement one tap old, on the surface " +
+          "21 §5 says the operator navigates by position rather than by reading.",
+      ).toEqual([]),
+    );
+    expect(appended).toEqual([]);
+  });
+
   it("names the price consequence in WORDS, not by the selected tile's fill alone", async () => {
     mount([]);
     render(<Counter />);
