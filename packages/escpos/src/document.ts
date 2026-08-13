@@ -252,11 +252,36 @@ const KOT_BLOCK_RENDERERS: Readonly<Record<string, BlockRenderer>> = {
    * unsuppressed: `03-F33` puts owner content only outside a locked block and `03-F34` refuses any
    * document that breaks that, so there is no profile an owner could write which reaches this band.
    *
-   * ⚠ **ONE part, not two, and that is `03-F55`'s catastrophic case rather than tidiness.**
-   * `27-F56`'s budget is enforced in `encode()` and a second `banner`-scoped part separated by
-   * anything but a feed answers `banner_budget_exceeded`, which `03-F34` turns into a HARD REFUSAL
-   * — so the naive shape (a `REPRINT` block plus an `ADDED n` block) prints **nothing at all** for
-   * a reprinted addendum: this FR's own defect arriving through the fix for it.
+   * ⚠ **ONE part, not two — and the reason written here when `03-F55` landed was FALSE. Measured
+   * against `encode()` 2026-08-13 and corrected in place rather than deleted, because a comment
+   * that names a hazard which does not exist retires the assertion someone would otherwise write.**
+   *
+   * What it said: that a second `banner`-scoped part answers `banner_budget_exceeded`, which
+   * `03-F34` turns into a hard refusal, "so the naive shape (a `REPRINT` block plus an `ADDED n`
+   * block) prints **nothing at all** for a reprinted addendum". It does not. `encode()`'s budget
+   * counts BANDS, not parts, and its own rule is that a feed does not close a band — so two banner
+   * parts with only feeds between them are ONE band, and two ADJACENT banner parts are one band
+   * too, because `openBand` is reset by a part that is neither a feed nor a banner. Four shapes,
+   * encoded directly:
+   *
+   * ```
+   * one part `REPRINT ADDED 2`                 ok=true   runs=["REPRINT ADDED 2"]
+   * two parts separated by a FEED              ok=true   runs=["REPRINT" + "ADDED 2"]
+   * two parts, NOTHING between                 ok=true   runs=["REPRINTADDED 2"]
+   * two parts separated by BODY TEXT           ok=false  banner_budget_exceeded
+   * ```
+   *
+   * Only the fourth refuses, and no one places the band after the items. Both naive shapes were
+   * then built as mutants — two parts in this block, and a genuinely separate `KOT_ADDED_BAND`
+   * spec block — and each passed **357/357 escpos and 966/966 pos-electron**, including every one
+   * of `03-F55`'s 35 new assertions.
+   *
+   * **The real reason for one part, which nothing tests:** a `text` part emits no separator and no
+   * line terminator (only `feed` does), so two adjacent parts put `REPRINTADDED 2` on the paper.
+   * That shape renders, spends one band, and passes every assertion in both suites — the document
+   * oracle asks the run to CONTAIN `REPRINT`, `ADDED` and the ordinal, which a run-together band
+   * does. It is a `27-F35` legibility question and `27-F35` has not been run on this band at all,
+   * so the space is a judgement and not a proven requirement.
    *
    * The block id still reads `KOT_REPRINT_BAND` deliberately. `03-F30` versions specs so a block
    * id is part of the shipped contract, `03-F55` adds no document type and no block, and renaming
