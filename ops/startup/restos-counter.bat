@@ -33,14 +33,54 @@ for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%RESTOS_ENV_FILE%") do (
   if not "%%~A"=="" set "%%~A=%%~B"
 )
 
+REM  WHICH DEVICE THIS IS (01-F13 / 01-F65). apps/pos-electron resolves these PER KEY and falls
+REM  back to a marked DEV SEED -- 01-F65's one stated exemption, granted to the counter app's
+REM  documented no-environment `pnpm start`. This file is the PRODUCTION launcher, not that launch.
+REM  A till left on the seed carries a device_id no gateway has ever heard of: it starts, every
+REM  boot line reports success, and it never sees a menu and never syncs a sale. There is no error
+REM  message for that anywhere in the product, which is the whole reason to refuse it here.
+if not defined RESTOS_ORG_ID (
+  echo.
+  echo RestOS: RESTOS_ORG_ID is not set in %RESTOS_ENV_FILE%.
+  echo The till would fall back to a DEV SEED id and would silently belong to no organisation:
+  echo it starts, reports success everywhere, and never sees a menu. Copy all three ids from
+  echo ops\ids.env -- the SAME values you passed to provision-device for THIS machine.
+  echo.
+  pause
+  exit /b 2
+)
+if not defined RESTOS_BRANCH_ID (
+  echo.
+  echo RestOS: RESTOS_BRANCH_ID is not set in %RESTOS_ENV_FILE%.
+  echo The till would fall back to a DEV SEED branch. Prices are per (branch, channel) with no
+  echo fallback, so every tile would read "no price set" and nothing would be sellable.
+  echo Copy it from ops\ids.env.
+  echo.
+  pause
+  exit /b 2
+)
+if not defined RESTOS_DEVICE_ID (
+  echo.
+  echo RestOS: RESTOS_DEVICE_ID is not set in %RESTOS_ENV_FILE%.
+  echo The till would fall back to a DEV SEED device id that no gateway has admitted, so it
+  echo would never sync -- and if a second machine did the same, two tills would push under one
+  echo id and fork one outbox, permanently (01-F1, 01-F8). Copy it from ops\ids.env.
+  echo.
+  pause
+  exit /b 2
+)
+
 REM  Fail loudly on the value whose absence is silent. An unset RESTOS_STATION_ROUTES does not
 REM  stop the till — it makes EVERY order raise a print alarm nobody can clear, all night.
 if not defined RESTOS_STATION_ROUTES (
   echo.
   echo RestOS: RESTOS_STATION_ROUTES is not set in %RESTOS_ENV_FILE%.
-  echo There is no printer transport in this product, so with the default every order will
-  echo raise an alarm band ~20 seconds after "send to kitchen" and the kitchen will get
-  echo nothing. Set  RESTOS_STATION_ROUTES=*=screen  and make sure the pass screen is on.
+  echo With the default every station routes to PAPER, so unless RESTOS_PRINTER names a real
+  echo printer every order will raise an alarm band ~20 seconds after "send to kitchen" and the
+  echo kitchen will get nothing. Set  RESTOS_STATION_ROUTES=*=screen  and make sure the pass
+  echo screen is on. NOTE: that setting routes KITCHEN STATIONS only. Receipts and cash slips
+  echo are not station-routed, so on a till with no printer every settlement still raises a
+  echo band the cashier clears by hand.
   echo.
   pause
   exit /b 2

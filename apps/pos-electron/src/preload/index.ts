@@ -28,6 +28,10 @@ const bridge: RestosBridge = {
   // band is the ONLY signal that food is not being cooked.
   alarms: () => ipcRenderer.invoke(CHANNELS.alarms),
   acknowledgeAlarm: (alarm_id) => ipcRenderer.invoke(CHANNELS.acknowledgeAlarm, alarm_id),
+  // `03-F6` — the RECOVERY on that same alert: resend the failed kitchen ticket. Optional on the
+  // contract, always served here, for the reason `alarms` records directly above. Without it the
+  // band offers a cashier nothing but dismissal, which is the state this device shipped in.
+  resendAlarm: (alarm_id) => ipcRenderer.invoke(CHANNELS.resendAlarm, alarm_id),
   // `02-F6`/`02-F50` — the org's kitchen quick-tags. Optional on the contract, always served
   // here, for the reason `cashState` and `alarms` record above: this bridge is the one main
   // actually ships, and in Wave 1 this list is `C7`'s only input (`27-F6`).
@@ -58,6 +62,11 @@ const bridge: RestosBridge = {
   // main's. `01-F61`: the identity is what the failure counter is keyed on, so it travels with
   // the attempt rather than being inferred from the PIN at the far end.
   unlock: (user_id, pin) => ipcRenderer.invoke(CHANNELS.unlock, user_id, pin),
+  // `02-F54` — the other half of the gesture above: end the session on purpose. Optional on the
+  // contract, always served here, for the reason `cashState` and `alarms` record. Nothing crosses
+  // in either direction — the screen re-reads `deviceState()` for lock state, exactly as it does
+  // when `01-F26`'s idle timer ends a session with no call in sight.
+  lock: () => ipcRenderer.invoke(CHANNELS.lock),
   onChanged: (fn) => {
     const handler = () => fn();
     ipcRenderer.on(CHANNELS.changed, handler);

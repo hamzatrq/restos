@@ -279,6 +279,12 @@ let alarms: Alarm[] = [
     id: "alarm-1",
     message: "The kitchen printer did not answer. This ticket has not printed.",
     subject: "TH230 — order A-014",
+    // `03-F6`'s RECOVERY, and it is here for the reason this file's own header records: the gate
+    // only measures the states the fixture produces. `AlarmBand` renders this control only when
+    // the band carries an action, so a fixture without one takes the resend out of the sweep
+    // silently — the same shape `escalationFor: () => null` had, which hid a dead `Approve` for
+    // weeks. With it, the band is measured with BOTH of its controls on all eleven panels.
+    action: { label: "SEND AGAIN" },
   },
 ];
 

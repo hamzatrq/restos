@@ -21,7 +21,9 @@ import {
 } from "@restos/device-config";
 import { businessDate } from "@restos/domain";
 import { createPinAuditSink, openStore, wallClock } from "@restos/sync-client";
-import { app, BrowserWindow, dialog, ipcMain, screen } from "electron";
+// No `dialog`: `01-F67` (iii) took the modal off the refusal path, and it was this host's only
+// caller. A blocking box on an unattended kitchen screen is the defect, not the delivery.
+import { app, BrowserWindow, ipcMain, screen } from "electron";
 import {
   CHANNELS,
   HandOverRequestSchema,
@@ -590,18 +592,78 @@ const boot = async (): Promise<void> => {
 app.setName("RestOS Pass");
 
 /**
+ * `01-F66` — **a second process on this device's store must not silently proceed.**
+ *
+ * Two instances of one app open one `device.db`: the loser's every append dies `SQLITE_BUSY` and
+ * `01-F8` no longer holds, because two processes each keep their own high-water mark over one
+ * `events` table and neither is this device's own `lamport_seq` (`01-F3`). The counter is where
+ * that was measured (a cashier rang four items onto a cart that stayed empty); this screen writes
+ * `ready` and `served` edges to the same file through the same store, and a lost handover is
+ * `01-F35`-terminal work that simply never happened.
+ *
+ * **AFTER `app.setName`, and that is load-bearing rather than tidy.** Chromium scopes the lock to
+ * the userData directory, which is resolved from the app name at first use — so taking it before
+ * the rename would put this screen and the counter on ONE lock and the second app to launch on a
+ * shared machine would be refused as if it were a duplicate of the first. `01-F64` corollary (a)
+ * is the same argument about the same directory one artefact along.
+ *
+ * **The loser EXITS; the holder is untouched and RAISES ITS WINDOW.** `01-F66` (a) requires the
+ * second process to return and cites `01-F67` for what returning means, so it is a non-zero exit
+ * and a line on stderr rather than `app.quit()`. `01-F66` (b) forbids last-one-wins outright: this
+ * screen is showing a kitchen its open tickets and a guard that took it down mid-service would be
+ * worse than the defect. Raising the window is the `00 §5.7` half — an operator who pressed the
+ * shortcut twice gets the running screen instead of nothing at all, which is the honest answer
+ * because the screen he wanted is already there. `01-F66` leaves that free ("whether the surviving
+ * instance raises its window"); it is chosen because the alternative is a press that does nothing.
+ * `01-F17` is untouched in both directions: no ledger is opened by the loser and none is disturbed
+ * on the holder. **Nothing is persisted by either** (`01-F66` (c)) — Chromium releases the lock
+ * with the process, including one that was killed, so no next launch inherits a refusal.
+ *
+ * **OWED, named:** `apps/pos-electron` carries this same decision in its own `index.ts`, so one
+ * interpretation lives in two files. `DEC-ARCH-001` rules EXTRACT at the second consumer and
+ * `@restos/device-config` is where the other five shared host decisions went; it is not taken here
+ * because this change's allowlist is the two app entry points, and a package change is a separate
+ * surgical piece of work (`24 §3b`).
+ */
+if (!app.requestSingleInstanceLock()) {
+  process.stderr.write(
+    "RestOS pass screen is already running on this device (01-F66).\n\n" +
+      "Another process holds this device's store. That screen is still showing the kitchen " +
+      "queue; this launch is refused so the two cannot write one events table (01-F8).\n",
+  );
+  app.exit(1);
+}
+
+app.on("second-instance", () => {
+  const [window] = BrowserWindow.getAllWindows();
+  if (window === undefined) return;
+  if (window.isMinimized()) window.restore();
+  window.focus();
+});
+
+/**
  * `00 §5.7` — **a launch that cannot start must SAY SO.** `void boot()` with no catch is an
  * unhandled rejection and a process that exits with no window, no dialog and no line; this app
  * has already shipped that failure once (see the top of `boot`). `01-F65` adds a refusal that an
  * operator meets on a first launch — the pass screen he has not told which device it is — so the
  * catch is what turns that from a binary which "does not start" into one sentence he can act on.
+ *
+ * ⚠ **AND FOR A ROUND IT DID NOT RETURN. `dialog.showErrorBox` IS MODAL AND SYNCHRONOUS**, so the
+ * catch wrote its line and then blocked for ever waiting for a click — measured on the built
+ * binary at 40 s and it would have been 40 minutes. `01-F67` (iii) forbids exactly that: a refusal
+ * may not be delivered *by waiting for a human*, and this is the one surface in a `27-F11g`
+ * kitchen that **nobody is standing in front of**. `ops/startup/restos-kitchen.bat` is a `:loop`
+ * around the start script, so a launcher that never returns never restarts and the screen stays
+ * dark until somebody walks over with a mouse — the failure the loop exists to remove.
+ *
+ * The modal is **dropped rather than moved after the exit**, where it would never paint. `01-F67`
+ * (i) is satisfied by stderr, which is where the launcher's captured stream is and therefore the
+ * only place the sentence survives the process (`01-F67` permits a box beside it, never instead of
+ * it or gating it). The cost is stated rather than hidden: an operator standing at a screen that
+ * refuses now sees a window that does not appear, and finds the reason in the launcher's log.
  */
 void boot().catch((error: unknown) => {
   const detail = error instanceof Error ? error.message : String(error);
   process.stderr.write(`RestOS pass screen could not start\n\n${detail}\n`);
-  dialog.showErrorBox(
-    "RestOS pass screen could not start",
-    `${detail}\n\nThis screen cannot show the kitchen queue until it is fixed.`,
-  );
   app.exit(1);
 });

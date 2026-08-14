@@ -56,6 +56,8 @@ export type StatusStripProps = {
   panelFit?: PanelNotice | null | undefined;
   alarms: readonly Alarm[];
   onAcknowledgeAlarm: (id: string) => void;
+  /** `03-F6` — the recovery beside the dismissal. Passed straight through to `AlarmBand`. */
+  onAlarmAction?: ((id: string) => void) | undefined;
 };
 
 export const StatusStrip = ({
@@ -69,6 +71,7 @@ export const StatusStrip = ({
   panelFit = null,
   alarms,
   onAcknowledgeAlarm,
+  onAlarmAction,
 }: StatusStripProps) => {
   const color = useColor();
   const t = typography["text-label"];
@@ -109,7 +112,7 @@ export const StatusStrip = ({
           Day {businessDay}
         </span>
       </div>
-      <AlarmBand alarms={alarms} onAcknowledge={onAcknowledgeAlarm} />
+      <AlarmBand alarms={alarms} onAcknowledge={onAcknowledgeAlarm} onAction={onAlarmAction} />
     </div>
   );
 };

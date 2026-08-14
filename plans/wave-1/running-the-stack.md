@@ -349,8 +349,14 @@ an owner add a till without touching the service host — is owed, as is device-
 RESTOS_CLOUD_URL=ws://127.0.0.1:8080/sync \
 RESTOS_DEVICE_TOKEN="$RESTOS_DEVICE_TOKEN" \
 RESTOS_DEV_PIN=4821 \
+RESTOS_DEV_PIN_BILAL=5137 \
+RESTOS_DEV_PIN_HINA=9064 \
 pnpm -C apps/pos-electron start
 ```
+
+⚠ **All three keys, three different numbers.** One key per roster member since August 2026, with
+no fallback between them (`01-F28`) — `RESTOS_DEV_PIN` on its own seeds **Ayesha alone**, and she
+is a cashier, so `02-F22` leaves the day unopenable and no sale can be recorded.
 
 `pnpm start` is `electron-vite build && electron out/main/index.js`. Running those two apart lets
 you pass Electron's own switches, which is what this run did and what makes the store findable and
@@ -362,6 +368,8 @@ pnpm exec electron-vite build
 RESTOS_CLOUD_URL=ws://127.0.0.1:8080/sync \
 RESTOS_DEVICE_TOKEN="$RESTOS_DEVICE_TOKEN" \
 RESTOS_DEV_PIN=4821 \
+RESTOS_DEV_PIN_BILAL=5137 \
+RESTOS_DEV_PIN_HINA=9064 \
   pnpm exec electron out/main/index.js --user-data-dir=/tmp/restos-till
 cd -
 ```
@@ -400,18 +408,51 @@ the measurement rather than stopping the till (`01-F17`).
 The store is the ground truth, and reading it is how you tell "the catalog never arrived" from "the
 line was printed before it did":
 
+⚠ **There is no `sqlite3` CLI on a stock Ubuntu box and this snippet used to assume one** — the
+command simply is not found, which reads as "the store is missing" if you are not paying attention.
+Read the store through the `better-sqlite3` copy already in `node_modules` instead:
+
 ```sh
-sqlite3 /tmp/restos-till/device.db 'select version from catalog_state;'
-sqlite3 /tmp/restos-till/device.db 'select json from catalog;'
+STORE=~/.config/'RestOS Counter'/device.db
+node -e '
+const D = require("better-sqlite3");
+const db = new D(process.argv[1], { readonly: true });
+console.log("catalog version", db.prepare("select version from catalog_state").get());
+console.log("events", db.prepare("select count(*) c from events").get().c);
+for (const r of db.prepare("select json from catalog limit 3").all()) console.log(r.json);
+' "$STORE"
 # {"kind":"item","id":"chicken-biryani","name":"Chicken Biryani","kitchen_name":"Biryani",
 #  "prices":[{"branch_id":"…0002","channel":"counter","price_paisa":45000}, …]}
 ```
 
-Without `--user-data-dir` the store is under Electron's own `app.getPath("userData")` — this run
-never used the default, so its exact path is unverified here rather than stated wrongly.
+Run it from a directory that can resolve `better-sqlite3` (`apps/pos-electron` declares it; under
+pnpm's strict layout the repo root cannot), or give `require` an absolute path to it as
+`ops/sqlite-backup.mjs` does.
 
-Sign in with any of the three seeded staff — **Ayesha**, **Bilal** (cashiers) or **Hina** (branch
-manager) — with the PIN you passed as `RESTOS_DEV_PIN`. Only Hina can open the day (`02-F22`).
+⚠ **Read it WITH its `-wal`, or copy all three files.** The store is WAL with `synchronous = FULL`
+and the app never closes it, so the main file alone can be arbitrarily stale — measured on two real
+stores, one showed **no tables at all** and the other a full schema with **`events` = 0**.
+
+**Where the store is, now that it is measurable** (this said *"its exact path is unverified here"*
+because that run always passed `--user-data-dir`). Each Electron host calls `app.setName`
+(`01-F64`), so on Linux:
+
+| app | store |
+|---|---|
+| `apps/pos-electron` | `~/.config/RestOS Counter/device.db` (+ `print-spool.db`) |
+| `apps/pass-kds` | `~/.config/RestOS Pass/device.db` |
+
+On Windows the same names sit under `%APPDATA%`. Before August 2026 **both** apps resolved to
+`~/.config/Electron/device.db` — one file, two `device_id`s — so a machine that ran either app
+before the rename still has that directory, and **nothing migrates it and nothing points at it**.
+See `ops/README.md`'s upgrade note.
+
+Sign in with any of the seeded staff — **Ayesha** (`RESTOS_DEV_PIN`), **Bilal**
+(`RESTOS_DEV_PIN_BILAL`), both cashiers, or **Hina** (`RESTOS_DEV_PIN_HINA`, branch manager). ⚠
+*This said "with the PIN you passed as `RESTOS_DEV_PIN`" and that stopped being true in August
+2026:* there is one key per member and **no fallback between them**, so `RESTOS_DEV_PIN` alone
+seeds Ayesha and nobody else. Only Hina can open the day (`02-F22`) — so a run with only the one
+key set can neither open a day nor record a sale, and the boot line says so.
 
 ### 6d. Switch a device OFF — the stolen-tablet path (`01-F25`/`01-F48`)
 
@@ -487,12 +528,12 @@ Stated plainly, because a runbook that oversells is worse than none.
 | **device identity** | still a marked DEV SEED with fixed UUIDs, and this is the half `provision-device` does **not** close: the command admits an identity you already know, and nothing gives the device one. `01-F25`'s pairing code is what would, and it is owed — which is why §0 still exists |
 | **device token** | **the product mints one now** (§6b) — a declared command on the gateway, not a UI. `01-F25` specifies "a one-time pairing via back office code" and the doc-14/15 pairing UX is owed in full; so is device-side persistence of `01-F47`'s silent renewal, and the host warning below 25% remaining life |
 | **device revocation** | **the product revokes now** (§6d) — `pnpm -C services/sync-gateway revoke-device`, a declared command, not SQL and not a UI. `01-F48`'s ≤30 s eviction sweep was always live; what had no caller was the *act* of setting `revoked_at`. What is still owed is `14-F13`: the back-office device list, and the `device.revoked` **event with an actor** — the command emits none, because a shell on the service host has no authenticated user |
-| **the staff roster** | a DEV SEED behind `RESTOS_DEV_PIN` (three staff sharing one PIN). PIN *verification* is real; nothing populates the registry |
+| **the staff roster** | a DEV SEED, **one environment key per member** since August 2026 — `RESTOS_DEV_PIN` (Ayesha), `RESTOS_DEV_PIN_BILAL`, `RESTOS_DEV_PIN_HINA` — with **no fallback between members**, so an unset key means that person is absent from the grid rather than reachable with a neighbour's digits. ⚠ *This row said "three staff sharing one PIN", which was the authorization hole rather than a shortcut: one secret opened the branch manager's row, so `02-F22`'s role guard was one tile-tap away and `02-F38`'s self-approval refusal was keyed on a `user_id` two people had (`01-F28`).* PIN *verification* was always real; nothing populates the registry |
 | **the owner account** | one owner declared in env (`bootstrapUsers`), an in-memory `UserStore` that dies with the process. No user table, no reset, no lockout, no rate limiting, no rotation, no `audit.login` |
 | **staged edits** | `createMemoryStagedEditStore` — a pending day-end edit does **not** survive an API restart |
 | **the session bearer** | `sessionStorage` in the browser; an httpOnly cookie is the correct shape and is owed |
 | **LAN / hub** | reported `OFF` and that is honest — no mesh session exists yet |
-| **printing** | no printer. Every confirm raises `03-F5`'s band ~20 s later. `RESTOS_PRINT_TO_FILE=<dir>` renders documents to PDF and **does not** close K-8 |
+| **printing** | ⚠ *this said "no printer"* — a **transport** ships now (`RESTOS_PRINTER`: `tcp://`, `windows://`, `device://` — `03-F1`/`18 §10`), driven against a loopback socket and a file and **never against a print head (K-8)**. With it unset the behaviour is unchanged: every confirm raises `03-F5`'s band ~20 s later, and **so does every settlement**, because receipts and cash slips are not station-routed and `*=screen` does not reach them. `RESTOS_PRINT_TO_FILE=<dir>` renders documents to PDF and **does not** close K-8 |
 | **migrations** | run by ONE declared command (§2), by hand. That command is now the deploy step — but nothing *automated* calls it yet, because no deploy pipeline exists to call it |
 
 **OWED, found by this run:**

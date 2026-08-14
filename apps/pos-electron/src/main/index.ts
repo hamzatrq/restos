@@ -36,7 +36,9 @@ import {
 import { businessDate } from "@restos/domain";
 import { createSpooler, printerCapability } from "@restos/escpos";
 import { createPinAuditSink, createPinSession, openStore, wallClock } from "@restos/sync-client";
-import { app, BrowserWindow, dialog, ipcMain, screen } from "electron";
+// No `dialog`: `01-F67` (iii) took the modal off the refusal path, and `fatal` was its only caller
+// here. A box that blocks until somebody clicks is not a refusal on an unattended till.
+import { app, BrowserWindow, ipcMain, screen } from "electron";
 import { AppendRequestSchema, CHANNELS, type EscalationResult, type Session } from "../shared/ipc";
 import { createAggregatorSettlement } from "./aggregator-settlement";
 import { recordApprovals } from "./approval-record";
@@ -199,8 +201,60 @@ const AGE_TICK_MS = 1_000;
  * `RESTOS_KOT_PRINTER="TH230"` restores the old behaviour for anyone who genuinely has one, and
  * a real 80 mm model id is what makes the KOT printable — which is the assignment doc 14 owes.
  */
-const kotCapability = () =>
-  printerCapability(process.env["RESTOS_KOT_PRINTER"] ?? "no printer configured");
+/**
+ * ⚠ **`??` DOES NOT CATCH AN EMPTY STRING, AND THIS SHIPPED AS `?? "no printer configured"`
+ * (`03-F5`, corrected August 2026 from a dress rehearsal).** `RESTOS_KOT_PRINTER=` — an operator
+ * clearing the key, or a `.bat` writing `set RESTOS_KOT_PRINTER=%PRINTER%` with `%PRINTER%` unset —
+ * is *present* to `??`, so the default was skipped and the capability record was built with an
+ * **empty id**. `printerCapability` keeps the id it is handed (that is what makes an unknown model
+ * still nameable), and `printing.ts:348` is `printer_name = capability.model_id`.
+ *
+ * **Measured through the real `printerCapability` and the real `01 §4` validator, because the two
+ * blank shapes do NOT fail the same way and a comment that said they did would be false:**
+ *
+ * | `RESTOS_KOT_PRINTER` | before — `03-F5` band | before — `kot.print_failed` |
+ * |---|---|---|
+ * | unset      | `… did not print — no printer configured` | emitted |
+ * | `` (empty) | `… did not print — `   **unnamed**       | **REFUSED by `01 §4`** |
+ * | `"   "`    | `… did not print —    `                   | emitted, `printer_name: "   "` |
+ * | `" TH230 "`| `… did not print —  TH230 `               | emitted, `printer_name: " TH230 "` |
+ *
+ * The empty row is the severe one and it is severe in a way nothing on the device reveals: `""` is
+ * the one value `registry.ts`'s `printer_name: z.string().min(1)` refuses, and `printing.ts`'s
+ * `emit` swallows a failed append **by design** (`01-F17` — a ledger write must not cost the band).
+ * So `03-F5`'s three consequences came apart in their worst arrangement: **an unnamed alarm on the
+ * glass and NOTHING in the ledger, permanently.** Doc 05's alarms and `15-F14`'s vendor paging both
+ * read a `kot.print_failed` rate that stays at zero while the kitchen prints nothing.
+ *
+ * The other two rows are milder and are still wrong: `min(1)` counts `"   "` as three characters,
+ * so they reach the ledger *permanently* (`01-F1`) under a name no human typed, and a padded id
+ * makes one physical printer two distinct `printer_name`s to every reader downstream. `03-F5`
+ * requires the alert to NAME the printer and `00 §5.7` requires it to be true.
+ *
+ * Trim, then default: a blank value is *not a configured printer*, which is `01-F65`'s reading of
+ * the same shape one key over (*"a value that is present but blank or padded is refused on both
+ * paths alike"*). Padding is trimmed rather than refused, because `03 §7`'s answer for a value that
+ * is not a model it knows is already *"defaulting conservatively to 32"* — a name with a stray
+ * space is an unrecognised model, not an unconfigured device, and trimming keeps it the printer's
+ * NAME on the band where `03-F5` needs one.
+ *
+ * ⚠ **THE `??` IS KEPT DELIBERATELY AND THE LITERAL IS WRITTEN TWICE ON PURPOSE.**
+ * `__acceptance__/printer-default.test.ts` recovers the shipped default by matching this file's
+ * SOURCE against `/RESTOS_KOT_PRINTER"\]\s*\?\?\s*"([^"]*)"/`, and its `24-F14` empty-match guard
+ * FAILS when no such fallback is found — so it is protecting the assertion from going vacuous, and
+ * it does that by pinning the exact syntax whose `??` is the defect above. The first draft of this
+ * fix used `process.env[…]?.trim()` and a ternary, which is the same behaviour more directly, and
+ * it reddened that guard (measured: `printer-default.test.ts` 5/6, the empty-match row). The
+ * oracle is read-only to an implementing session (`24 §3`), so the shape bends to it rather than
+ * the other way: the `??` still supplies the unset case, and the trim-and-retest handles the blank
+ * case the `??` cannot see. **Reported as a finding for that file's owner** — a regex over source
+ * pins a construct, not a property, and the property it wants ("the default is a named unknown
+ * model") would survive any spelling.
+ */
+const kotCapability = () => {
+  const configured = (process.env["RESTOS_KOT_PRINTER"] ?? "no printer configured").trim();
+  return printerCapability(configured === "" ? "no printer configured" : configured);
+};
 
 /**
  * `03-F1`/`18 §10` — the LINK to that printer, as `00 §5.7`'s boot line needs to describe it.
@@ -441,12 +495,30 @@ const load = (window: BrowserWindow): void => {
  * message — which is what a fresh checkout gets when `pnpm rebuild:native` has not been run,
  * the very failure this app's own CLAUDE.md documents. To an operator the POS simply "does not
  * start", and there is nothing on screen to report.
+ *
+ * ⚠ **AND IT WAS UNREACHABLE FOR A ROUND, WHICH IS WORSE THAN HAVING NO HANDLER (`01-F67`).**
+ * The wiring was `app.whenReady().then(cb, fatal)` — and `fatal` is the *onRejected* of the very
+ * `.then` whose *onFulfilled* throws. A promise never routes a handler's own rejection to its
+ * sibling, so a `01-F64` store refusal raised inside `cb` reached nothing at all: measured on the
+ * built binary as an `UnhandledPromiseRejection` warning, **no window, no dialog and a process
+ * that never exited**, still alive past 45 s. `ops/startup/restos-counter.bat` is a `:loop` around
+ * the start script, so a launcher that never returns never restarts and the till stays dark until
+ * a human walks to it — the failure the loop exists to remove. It is now `.then(cb).catch(fatal)`,
+ * which is the only chaining under which a rejection from either source reaches this function.
+ *
+ * **`01-F67` (i) is stderr and (iii) is why the modal is GONE.** `dialog.showErrorBox` is modal
+ * and *synchronous*: it blocks until somebody clicks, and a refusal delivered by waiting for a
+ * human is exactly what that clause forbids. Moving it after `app.exit` would paint nothing. So
+ * the sentence goes to the stream the launcher captured, which is the only place it survives the
+ * process, and the exit is **non-zero** so a supervisor, a log scraper or `%errorlevel%` can tell
+ * a refusal from a shift ending normally. The cost is stated rather than hidden: an operator at
+ * the counter now sees a window that does not appear and finds the reason in the launcher's log.
  */
 const fatal = (error: unknown): void => {
   const detail = error instanceof Error ? error.message : String(error);
-  dialog.showErrorBox(
-    "RestOS could not start",
-    `The device store could not be opened.\n\n${detail}\n\nThis device cannot take orders until it is fixed.`,
+  process.stderr.write(
+    `RestOS could not start\n\nThe device store could not be opened.\n\n${detail}\n\n` +
+      "This device cannot take orders until it is fixed.\n",
   );
   app.exit(1);
 };
@@ -473,7 +545,67 @@ const fatal = (error: unknown): void => {
  */
 app.setName("RestOS Counter");
 
-app.whenReady().then(async () => {
+/**
+ * `01-F66` — **a second counter process on this device's store must not silently proceed.**
+ *
+ * The measured defect, on this binary: two instances started, **neither said anything**, and the
+ * second signed in, rang four items and showed `Nothing added yet` under `TOTAL Rs 0` while its
+ * main log carried `SqliteError: database is locked`. A cashier cannot tell that till from a
+ * working one until she counts the drawer. It breaks `01-F2` at its hinge — *"persists events
+ * locally BEFORE acknowledging the action to the UI"* — and `01-F8` underneath it, because two
+ * processes each keep their own high-water mark over one `events` table and neither is this
+ * device's own `lamport_seq` any more (`01-F3`). `01-F64`'s binding cannot see it: it refuses a
+ * DIFFERENT identity, and this is the same app, the same identity, launched twice — a
+ * double-clicked shortcut, an operator "restarting" a till that was already up, or
+ * `ops/startup/restos-counter.bat`'s `:loop` firing over a process that had not exited.
+ *
+ * **AFTER `app.setName`, and that is load-bearing rather than tidy.** Chromium scopes this lock to
+ * the userData directory, which is resolved from the app name at first use — so taking it before
+ * the rename would put the counter and `apps/pass-kds` on ONE lock, and on a machine running both
+ * the second to launch would be refused as a duplicate of the first. That is `01-F64` corollary
+ * (a)'s directory collision, one artefact along.
+ *
+ * **The loser EXITS; the holder is untouched and RAISES ITS WINDOW.** `01-F66` (a) requires the
+ * second process to return and cites `01-F67` for what returning means, so this is a non-zero exit
+ * with a line on stderr rather than `app.quit()`. `01-F66` (b) refuses last-one-wins **by name**:
+ * the till that is already open is the one with a cashier's hands on it and an order half-rung,
+ * and a guard that takes it down mid-service has converted a silent defect into a stopped till
+ * (`01-F17`, `00 §5.1`). Raising the window is the `00 §5.7` half — the FR leaves it free
+ * (*"whether the surviving instance raises its window"*) and it is chosen because the alternative
+ * is a shortcut press that does nothing at all, which is the same silence one layer up; the
+ * running till **is** the honest answer to "start the till", so this hands it over. `01-F17` is
+ * untouched in both directions: the loser opens no store, and the holder is not interrupted — no
+ * dialog, no reload, no modal between the cashier and the customer.
+ *
+ * **Nothing is persisted, which is `01-F66` (c) and the clause a plausible repair breaks.** A
+ * hand-rolled PID or lock FILE survives the power cut that produced it, and a till that will not
+ * restart unattended at 05:00 is a stopped till. Chromium releases this lock with the process —
+ * including one that was killed — so the next launch is an ordinary launch. That is why the
+ * Electron primitive is used rather than a lock of our own.
+ *
+ * **OWED, named:** `apps/pass-kds` carries this same decision in its own `index.ts`, so one
+ * interpretation lives in two files. `DEC-ARCH-001` rules EXTRACT at the second consumer and
+ * `@restos/device-config` is where the other five shared host decisions went; it is not taken here
+ * because this change's allowlist is the two app entry points, and a package change is a separate
+ * surgical piece of work (`24 §3b`).
+ */
+if (!app.requestSingleInstanceLock()) {
+  process.stderr.write(
+    "RestOS Counter is already running on this device (01-F66).\n\n" +
+      "Another process holds this device's store. That till is still selling; this launch is " +
+      "refused so the two cannot write one events table (01-F2, 01-F8).\n",
+  );
+  app.exit(1);
+}
+
+app.on("second-instance", () => {
+  const [window] = BrowserWindow.getAllWindows();
+  if (window === undefined) return;
+  if (window.isMinimized()) window.restore();
+  window.focus();
+});
+
+const counterBoot = app.whenReady().then(async () => {
   // Resolved BEFORE the store, and inside `whenReady` so a refusal reaches `fatal`'s dialog
   // rather than dying at module load with no window and nothing on screen.
   const identity = resolveDeviceIdentity(process.env);
@@ -1330,6 +1462,26 @@ app.whenReady().then(async () => {
     notifyChanged();
   });
   /**
+   * `03-F6`/`03-F48` — the RECOVERY on that same band: send the failed kitchen ticket again.
+   *
+   * Only the KOT printer is called, and that is the FR boundary rather than an oversight. `03-F6`
+   * is doc 03's kitchen alert; a cash slip has no reprint act in `01 §4` at all, and a receipt's
+   * is `02-F16`'s named fraud vector routed through `C17`'s deliberate banded reprint — neither
+   * is this channel's. Their bands carry no action, so the control never appears on them
+   * (`27-F5`: no dead control), and a renderer that called this with one of their ids reaches a
+   * printer that does not hold that band and nothing happens.
+   *
+   * `notifyChanged()` for `acknowledgeAlarm`'s reason exactly: the band either goes (the ticket is
+   * queued again) or is REWRITTEN with the reason it will not (`main/printing.ts`'s
+   * `refuseResend`), and the screen learns about both by re-reading `CHANNELS.alarms`.
+   */
+  ipcMain.handle(CHANNELS.resendAlarm, (_event, alarm_id: unknown) => {
+    // Type-checked rather than trusted, exactly as the acknowledgement above is.
+    if (typeof alarm_id !== "string") return;
+    kot.resend(alarm_id);
+    notifyChanged();
+  });
+  /**
    * `01-F61` — the identification grid's roster. **Mapped, not forwarded**: `StaffMember`
    * carries the Argon2id `pin_hash`, and `01-F28` puts verification in this process, so the
    * renderer has no use for a credential and must not be handed one. `01-F54`'s degradation
@@ -1386,6 +1538,36 @@ app.whenReady().then(async () => {
     const result = await pins.unlock(user_id, pin);
     notifyChanged();
     return { unlocked: result.ok };
+  });
+  /**
+   * `02-F54` — **THE SESSION ENDS ON PURPOSE, and `PinSession.lock()` finally has a production
+   * caller (August 2026).**
+   *
+   * `createPinSession` has exported `lock()` since Wave 0 and **nothing in this product ever
+   * called it**: a symbol-precise grep for `.lock()` across every package and app `src` tree,
+   * outside tests, returned nothing. That is `AGENTS.md`'s named recurring defect
+   * on the seam that decides `02-F41`'s attribution — the mechanism correct, tested and
+   * unreachable, with every gate green — and the cost was measured on a live till: with no way to
+   * end a session, every `order.created`, `payment.recorded` and `cash.paid_out` the ARRIVING
+   * cashier made carried the LEAVING cashier's `actor_user_id` until the ten-minute idle timer
+   * fired, permanently (`01-F1`).
+   *
+   * It is the same seam the idle timer moves and it is moved the same way: end the session, push
+   * `changed`, return nothing. The push is what makes it reach the glass — the renderer decides
+   * lock state from `deviceState()` and never from this call (`02-F18`, `02-F45`).
+   *
+   * **`touch()` is deliberately NOT called here** (unlike the two write channels): touching would
+   * refresh `last_activity` on the one gesture whose whole purpose is to end the session.
+   *
+   * **No append, and that is commandment 2 rather than a gap.** `01 §4` carries no session-end
+   * type; `01-F5`'s `audit.login` is the PIN sink's to write and it has no record for a
+   * voluntary sign-out. `02-F54` states the reason a new one may not be invented: this gesture
+   * happens 20–60 times a shift and a permanent row per lock is not a ledger fact anyone asked
+   * for.
+   */
+  ipcMain.handle(CHANNELS.lock, () => {
+    pins.lock();
+    notifyChanged();
   });
   /**
    * `01-F26` — what makes the idle auto-lock IDLE. `createPinSession` evaluates the timeout
@@ -1647,7 +1829,13 @@ app.whenReady().then(async () => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) load(createWindow());
   });
-}, fatal);
+});
+
+// `01-F67` — **`.catch`, NEVER `.then(cb, fatal)`.** The second argument of a `.then` is the
+// rejection handler *of the promise it is attached to*, not of the callback beside it, so every
+// throw in the ~1100 lines above used to reach nothing at all. `.catch` is a link further down the
+// chain and therefore sees them. See `fatal` for the measured failure this cost.
+counterBoot.catch(fatal);
 
 // Windows is the counter platform (`18 §9`), where closing the last window means quitting.
 app.on("window-all-closed", () => {

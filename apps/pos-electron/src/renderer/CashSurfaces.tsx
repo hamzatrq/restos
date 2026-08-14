@@ -27,9 +27,15 @@ import type { AppendRequest, CashShift, CashState } from "../shared/ipc";
  *
  * Two peer tabs, and the split between them is `02-F23`'s, not a layout convenience: Cash is
  * where a shift and a day are OPENED and CLOSED and where the drawer is opened and paid out of;
- * Me is the cashier's own reconciliation — *"I'm clean"* — which is a **protection** surface and
- * carries no control at all. A role that can be QUESTIONED by the record but cannot READ it is
- * being watched, and adoption depends on the opposite.
+ * Me is the cashier's own reconciliation — *"I'm clean"* — which is a **protection** surface. A
+ * role that can be QUESTIONED by the record but cannot READ it is being watched, and adoption
+ * depends on the opposite.
+ *
+ * ⚠ *That sentence used to end "and carries no control at all", and `02-F54` retired the clause in
+ * August 2026.* Me carries exactly one control now — **Sign out** — and it is the same protection
+ * argument rather than an exception to it: `02-F41` makes attribution whoever's PIN is in, so the
+ * act that stops her name carrying other people's work belongs on the surface that shows her what
+ * her name is carrying. It appends nothing and it reads nothing (see the panel's own note).
  *
  * ── The laws that shaped this file ──────────────────────────────────────────────────────────
  *
@@ -421,6 +427,23 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
   } as const;
 
   const enteredPaisa = (Number(entry) || 0) * 100;
+  /**
+   * `02-F56` — **HAS A HUMAN COUNTED, or is this pad simply untouched?**
+   *
+   * `enteredPaisa` cannot answer it. `(Number("") || 0) * 100` is `0` and `(Number("0") || 0) *
+   * 100` is `0`, so at the EVENT the two are one number — and the two facts they stand for are
+   * *"she counted, and the drawer was empty"* and *"she counted nothing"*. `02-F48` already
+   * refuses to let the VALUE be banned (an empty drawer is a real, stated fact), so the only
+   * place the difference survives is the buffer itself: `entry === ""` means no key was ever
+   * pressed.
+   *
+   * **Measured on the shipped counter, August 2026:** one press of *Close my shift* against an
+   * untouched pad wrote `counted_cash_paisa: 0` and a `variance_paisa` of the whole expectation —
+   * an observed **Rs 1,080 shortage** filed against the cashier's own name (`02-F41`), permanent
+   * (`01-F1`), and read downstream as real by the manager's reconciliation and the owner's
+   * nightly summary. Nobody counted anything.
+   */
+  const counted = entry !== "";
   const openShift = openShiftOf(cash);
   const openDay = latest(
     cash.days.filter((d) => d.closed === 0),
@@ -626,7 +649,7 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
               posture="counter"
               label="Close the day"
               onPress={
-                openDay === null
+                openDay === null || !counted
                   ? undefined
                   : () => {
                       const day_id = openDay.day_id;
@@ -650,8 +673,21 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
                       });
                     }
               }
-              unavailable={openDay === null}
-              {...(openDay === null ? { unavailableReason: "no day open" } : {})}
+              /*
+                `02-F56` / `02-F24` — **the day close carries the same hazard as the shift close
+                and binds identically**, and it carries it one step further: `cash.deposit_recorded`
+                asserts that the counted amount went to the bank. An uncounted day close therefore
+                fabricates a deposit as well as a variance.
+
+                Arm (a) of `02-F56` — REQUIRE the count — is the one taken here, and the reason for
+                choosing it over arm (b) is stated once at `Close my shift` below.
+              */
+              unavailable={openDay === null || !counted}
+              {...(openDay === null
+                ? { unavailableReason: "no day open" }
+                : counted
+                  ? {}
+                  : { unavailableReason: "count the drawer first" })}
             />
           </div>
         </Panel>
@@ -692,7 +728,7 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
               posture="counter"
               label="Close my shift"
               onPress={
-                openShift === null || expected === null || reconciled === null
+                openShift === null || expected === null || reconciled === null || !counted
                   ? undefined
                   : () =>
                       submit({
@@ -713,8 +749,35 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
                         refs: [],
                       })
               }
-              unavailable={openShift === null}
-              {...(openShift === null ? { unavailableReason: "no shift open" } : {})}
+              /*
+                `02-F56` — **A DRAWER THAT WAS NOT COUNTED IS NEVER RECORDED AS A DRAWER COUNTED
+                AT ZERO.**
+
+                That FR offers two arms and this takes **(a): the close REQUIRES the count**. Arm
+                (b) — state the number and the variance before the press — was refused on this
+                surface's own evidence rather than on taste: the reconciliation block below
+                already renders `entry === "" ? null : <Variance/>`, so the one figure `02-F23`
+                calls the cashier's protection is on the glass in every state EXCEPT the one that
+                files it, and the `AMOUNT` readout reads `Rs 0` whether or not a key was ever
+                pressed. Making arm (b) real would mean printing a shortage over an untouched pad
+                — a number nobody produced, offered as though she had — which is the same
+                fabrication one step earlier.
+
+                **`27-F4`: disabled IN PLACE, with its reason.** Nothing is added, removed, moved
+                or resized; the tile keeps its cell and gains the sentence that says what to do,
+                which is the whole point of that FR's "with its reason" clause. A dead button with
+                no reason at the end of a shift is the failure it exists to prevent.
+
+                **It is NOT an `01-F17` block.** No sale is stopped, `01-F30`'s money is already
+                in the ledger, the shift stays open, the drawer and `02-F21`'s no-sale stay
+                reachable, and she closes the instant she has counted — one keystroke away.
+              */
+              unavailable={openShift === null || !counted}
+              {...(openShift === null
+                ? { unavailableReason: "no shift open" }
+                : counted
+                  ? {}
+                  : { unavailableReason: "count the drawer first" })}
             />
           </div>
 
@@ -900,7 +963,17 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
  * that the CLIENT scopes, which is the exact thing that commandment bans. It belongs to main,
  * on the read.
  */
-export const MeSurface = ({ cash }: { cash: CashState }) => {
+export type MeSurfaceProps = {
+  cash: CashState;
+  /**
+   * `02-F54` — **end this session.** A callback and not a bridge call, deliberately: this
+   * component reaches for no `window.restos` member of its own (`me-tab.dom.test.tsx` asserts
+   * exactly that), and `Counter.tsx` owns the one seam that moves the session.
+   */
+  onLock: () => void;
+};
+
+export const MeSurface = ({ cash, onLock }: MeSurfaceProps) => {
   const drawer = cash.unbound_drawer;
   const anomalous =
     cash.unbound.length > 0 || drawer.no_sale_count > 0 || drawer.paid_out_paisa > 0;
@@ -1056,6 +1129,54 @@ export const MeSurface = ({ cash }: { cash: CashState }) => {
           </Readout>
         </Panel>
       ) : null}
+      {/*
+        `02-F54` — **THE ONE CONTROL A CASHIER USES TO END HER OWN SESSION, and before August 2026
+        this product had none.**
+
+        `02-F18` gives this device exactly two ways out of a session and both were passive:
+        `01-F26`'s idle auto-lock, at ten minutes, and killing the app. `02-F41` then does what it
+        says — attribution is whoever's PIN is in — so from the moment one cashier stepped away
+        until that timer fired, every `order.created`, `payment.recorded` and `cash.paid_out` the
+        NEXT cashier made carried the LEAVING cashier's `actor_user_id`, permanently and
+        uncorrectably in place (`01-F1`). A handover at a counter running `01-F61`'s 20–60 unlocks
+        a shift is over long before ten minutes.
+
+        ── WHY THIS SURFACE, AND NOT THE RAIL AND NOT CASH ────────────────────────────────────
+
+        **Not a seventh tab.** `27-F4` makes adding a rail item a breaking change for every
+        operator who learned six, paid on every surface, for a control used once or twice a
+        shift. `02-F54` says in terms that a control inside a surface that already exists is what
+        the FR permits.
+
+        **Not the Cash tab.** `02-F54` separates these two acts and gives the reason: ending a
+        session is an IDENTITY act with no count, no expectation and no variance, while
+        `02-F23`'s close is a MONEY act with all three. Putting *Sign out* beside *Close my shift*
+        invites the conflation the FR exists to forbid — and a lock that closed a shift would file
+        a variance nobody counted (`02-F56`, one panel over in this same file).
+
+        **Me, because Me is already hers.** `02-F23` makes this the cashier's own protection
+        surface — *"I'm clean"* — and the two acts on it are the same act at two scales: read what
+        my name is carrying, then stop my name carrying anything more. It is the surface she is
+        already on at the end of her shift.
+
+        ── WHAT IT DOES NOT DO ───────────────────────────────────────────────────────────────
+
+        **It never blocks and it never asks** (`01-F17`, `02-F37`, `02-F49`). No confirmation
+        step: friction on the one control that protects attribution is what teaches an operator to
+        stop using it, and there is nothing to lose — an open order, an unconfirmed order and an
+        open shift are the BRANCH's (`02-F11`), not the session's, and the arriving cashier reaches
+        them through `02-F51`'s recall. So the tile is never `unavailable` and never conditional.
+
+        **It appends NOTHING** (commandment 2). A session end is not an `01 §4` fact in this
+        product; `01-F5`'s `audit.login` is main's to write against a store-owned chain, and
+        inventing an event here would put a permanent row on a gesture that happens 20–60 times a
+        shift.
+      */}
+      <Panel title="This session" note="ends when you sign out">
+        <div style={{ display: "flex", gap: space["space-2"], flexWrap: "wrap" }}>
+          <Tile posture="counter" label="Sign out" onPress={onLock} />
+        </div>
+      </Panel>
     </div>
   );
 };

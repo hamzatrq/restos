@@ -165,6 +165,41 @@ export const isAlreadySettled = (order: Pick<OpenOrder, "total_paisa" | "paid_pa
   order.total_paisa > 0 && order.paid_paisa >= order.total_paisa;
 
 /**
+ * `02-F55` — **the three states the kitchen handoff has, and the separating fact is MAIN's.**
+ *
+ * `none` nothing has been told · `sent` the kitchen has it and owes nothing · `owed` it has
+ * been told once and lines have landed since (`03-F55`'s addendum).
+ */
+type KitchenState = "none" | "sent" | "owed";
+
+/**
+ * The projected kitchen state for an order, degrading to `none`.
+ *
+ * ── WHY THE CAST, AND WHY IT IS NOT A RENDERER DERIVATION ───────────────────────────────────
+ *
+ * `02-F55` fixes the separating fact as *"lines this device has not yet committed to paper for
+ * this order"*, says `printing.ts` already computes it off `03-F4`'s durable spool, and forbids
+ * the renderer re-deriving it: a renderer flag is defeated by a relaunch and by `02-F11`'s second
+ * terminal, and `01-F53`/`03-F14` keep the confirm anchor a fold fact. So this reads a field and
+ * never computes one.
+ *
+ * **`confirmed_at` is NOT that field and cannot stand in for it**, which is `03-F55`'s whole
+ * finding: an order can be confirmed AND still owe the kitchen a chit. Keying on the anchor —
+ * the tempting shape, since it already crosses the bridge — passes every idempotence case and
+ * silently loses the naan.
+ *
+ * ⚠ **THE HOST DOES NOT SUPPLY THIS FIELD YET AND THAT IS REPORTED, NOT PAPERED OVER.**
+ * `main/gateway.ts` builds the open-order row and is outside this task's allowlist, so on the
+ * shipped till this resolves to `none` for every order today. `01-F54` fixes the degrade
+ * direction and `02-F55` states it: an absent value must leave the control PRESSABLE, because a
+ * duplicate row is a smaller harm than a dish nobody cooks. What survives the absence is the
+ * in-flight guard below (the measured triple-tap); what waits on the projection is the glass
+ * being able to say the kitchen HAS it.
+ */
+const kitchenOf = (order: OpenOrder): KitchenState =>
+  (order as OpenOrder & { readonly kitchen?: KitchenState }).kitchen ?? "none";
+
+/**
  * `02-F51` — **WHICH of the branch's open orders this terminal is working on.**
  *
  * Two arms, and the whole FR is in the difference between them.
@@ -546,6 +581,41 @@ export const Counter = () => {
    */
   const [callerRefused, setCallerRefused] = useState(false);
   /**
+   * `02-F57` — **THE LAST WRITE THIS SURFACE ORIGINATED WAS REFUSED, said out loud.**
+   *
+   * `true` from the moment any append through either write helper is rejected until the next
+   * attempt. A BOOLEAN and not a message: the refusal's wording is this file's (`00 §5.6` binds
+   * it and nothing else fixes it), and carrying main's thrown string would put a developer
+   * sentence — or a raw `01 §4` event type — on a counter screen. `02-F57` leaves open whether a
+   * refusal names the permission or only the act, and naming the act would need a words table
+   * for event types that no FR supplies (commandment 2, and `ManagerApproval`'s owed item is the
+   * same gap one surface over). So this says the true thing it can say.
+   *
+   * It is a STATE about the last attempt and not an event, which is why it takes `02-F47`'s
+   * shape — `role="status"`, no acknowledgement control — rather than `03-F5`'s band. See
+   * `write` for the three FRs that make the band positively forbidden here.
+   */
+  const [writeRefusal, setWriteRefusal] = useState(false);
+  /**
+   * `02-F55` — **the order this surface has already sent, and the kitchen state it was in when
+   * it was sent.**
+   *
+   * The measured defect is a triple-tap: three presses of *Send to kitchen* inside one breath,
+   * before any read returns, wrote **three permanent `order.confirmed` rows** (`01-F1`). The
+   * projection cannot save that case — the fold has not moved between the presses — so the
+   * surface has to remember its own act.
+   *
+   * **The kitchen state is remembered WITH the id, and that pairing is the whole design.**
+   * Keying on the order alone would refuse `03-F55`'s addendum: ring → send → the customer asks
+   * for one more naan → send again is a press that MUST reach the kitchen, and a renderer that
+   * remembered "I already confirmed this order" would close one silent loss by re-opening the
+   * worse one. Remembering the state means the guard expires exactly when the projected fact
+   * moves — which is when something new is genuinely owed.
+   */
+  const [lastSent, setLastSent] = useState<{ order_id: string; kitchen: KitchenState } | null>(
+    null,
+  );
+  /**
    * **The lookup's re-ask counter, and it exists because a SUCCESS was as silent as a failure.**
    *
    * The effect below keys on `[pendingChannel, dialled, callerRevision]`. Without the third the
@@ -769,6 +839,14 @@ export const Counter = () => {
   const openShift = cash === null ? null : openShiftOf(cash);
 
   /**
+   * `02-F11` / `02-F51` — **the branch's bills that still owe money**, which is a different fact
+   * from *this terminal's cart* and is the one the Pay surface's empty state was getting wrong.
+   * Derived, never stored: see `cartOrder` for why a second writer of "which order" is the defect
+   * this file already paid for once.
+   */
+  const unsettledInBranch = orders.filter((o) => !isAlreadySettled(o));
+
+  /**
    * Every write goes through here, and the `catch` is the point.
    *
    * `void promise.then(reload)` leaves a REJECTION UNHANDLED, which in a renderer is not a tidy
@@ -781,13 +859,33 @@ export const Counter = () => {
    * rather than holding whatever it optimistically assumed. `01-F17`: the sale is never blocked,
    * so one refused item must leave the rest of the counter working.
    *
-   * **What is deliberately NOT here: a visible alarm.** `03-F5`'s S1 band is the surface a
-   * refusal should reach, and `AppShell` already takes `alarms` — but nothing constructs one yet,
-   * and inventing a local error banner would put a second, competing error surface on the screen
-   * that the alarm model is meant to own. Recorded rather than improvised.
+   * ⚠ **THIS HEADER USED TO SAY *"What is deliberately NOT here: a visible alarm … Recorded
+   * rather than improvised"* — AND `02-F57` IS THE FR THAT ANSWERS IT (August 2026).**
+   *
+   * The recorded cost was paid for real on a live till: a cashier holding no `day.open_close`
+   * pressed **Open the day** and *nothing whatever happened*. The surface after the refusal was
+   * byte-identical to the surface before the press, so *"you may not do this"*, *"this device is
+   * offline"* and *"this till is broken"* were one picture, and the only way to tell them apart
+   * was to fetch somebody.
+   *
+   * The old note was right about the ALARM and wrong to stop there. `27-F14` allocates red to a
+   * closed list this is not on, `21 §5` reserves alarm severities to itself (*"no module invents
+   * its own alarm behavior"*), and `27-F11g` makes `03-F5`'s band the only signal that food is
+   * not being cooked — so a band here is forbidden, exactly as recorded. What `02-F57` requires
+   * instead is `02-F47`'s shape, which this file already ships one surface over for the refused
+   * caller record: a **word**, announced (`role="status"`), non-interrupting (`02-F37` — nothing
+   * goes between the cashier and the customer), in the work area where the act was taken.
+   *
+   * **Cleared at the ATTEMPT and set on the rejection**, which is `recordCaller`'s own idiom: a
+   * retry that fails again must read as a fresh refusal rather than as the previous one still
+   * standing, and a stale refusal over an act that has since succeeded is `00 §5.7` inverted.
+   *
+   * `reload()` still runs either way — `01-F17`, the sale is never blocked, and the act stays
+   * retryable IN PLACE so a manager can put a PIN in and press the same control again.
    */
   const write = (op: Promise<unknown>) => {
-    void op.catch(() => {}).then(reload);
+    setWriteRefusal(false);
+    void op.catch(() => setWriteRefusal(true)).then(reload);
   };
 
   /**
@@ -827,14 +925,26 @@ export const Counter = () => {
    * `escalate` cell and a pad there would be a control that can never succeed.
    */
   const escalatableWrite = (req: AppendRequest) => {
+    setWriteRefusal(false);
     void window.restos
       .append(req)
-      .then(() => null)
-      .catch(() => window.restos.escalationFor?.(req)?.catch(() => null) ?? null)
-      .then(async (offer) => {
+      .then(() => ({ offer: null as EscalationOffer | null, refused: false }))
+      .catch(async () => ({
+        offer: (await (window.restos.escalationFor?.(req)?.catch(() => null) ?? null)) ?? null,
+        refused: true,
+      }))
+      .then(async ({ offer, refused }) => {
         setApprovalRefusal(null);
         if (!offer) {
           setPending(null);
+          /*
+            `02-F57` — **THE HALF THAT MADE SCOPING THIS TO ONE HELPER A DEFECT.** An act the
+            matrix escalates raises `02-F20`'s manager pad and needs no word; an act it plainly
+            DENIES has no offer, so before this line it fell straight through to silence — which
+            is exactly what a cashier pressing `Open the day` met. A pad cannot be the answer to a
+            plain denial, because it offers a route that can never succeed; a word can.
+          */
+          setWriteRefusal(refused);
           return;
         }
         // `01-F61` — who could approve, read at the moment the pad is raised. Main supplies the
@@ -1127,8 +1237,62 @@ export const Counter = () => {
    * The KOT print that `03-F5` hangs off this is NOT here: `packages/escpos` is a stub, and a
    * confirm that silently failed to print would be worse than one that never claimed to.
    */
+  /**
+   * `02-F55` / `02-F9` — **at most one `order.confirmed` per order id, decided AT ORIGINATION.**
+   *
+   * `02-F9` has fixed this property for the cloud inbox since Wave 1 opened — *"idempotent — at
+   * most one confirm per order id"* — and `02-F8`'s counter confirm is the same act on the same
+   * event reached from another surface. No clause ever said so and the till never checked: the
+   * rehearsal pressed three times and three permanent rows landed.
+   *
+   * **It is `02-F49`'s pattern exactly**: a local, synchronous decision against this device's own
+   * converged fold and its own memory of what it just did — no peer, no clock, no network. It is
+   * not a schema tightening (`01-F31`'s keys cover money and `01-F8`'s dedupe covers transport
+   * duplicates; neither can see two genuinely distinct envelopes carrying one intent), and a
+   * device whose own ledger already holds two must go on folding both (`01-F37`, `01-F17`).
+   *
+   * Two refusals, and they answer different questions:
+   *   `kitchen === "sent"` — the FOLD says the kitchen owes nothing. State (iii).
+   *   `lastSent` matches — I pressed this, in this state, and nothing has moved since. The
+   *      triple-tap, which no projection can catch.
+   *
+   * **`owed` is deliberately NOT refused.** `02-F55`: what is forbidden is the second EVENT in
+   * the state where nothing is owed, never the second CHIT. One is a permanent false record; the
+   * other is a dish somebody is waiting for.
+   */
+  const kitchenIsOwedNothing = (order: OpenOrder): boolean => kitchenOf(order) === "sent";
+
   const sendToKitchen = (order_id: string) => {
-    write(window.restos.append({ type: "order.confirmed", payload: { order_id }, refs: [] }));
+    const order = orders.find((o) => o.order_id === order_id);
+    if (order === undefined) return;
+    const kitchen = kitchenOf(order);
+    if (kitchen === "sent") return;
+    if (lastSent !== null && lastSent.order_id === order_id && lastSent.kitchen === kitchen) return;
+    setLastSent({ order_id, kitchen });
+    write(
+      window.restos
+        .append({ type: "order.confirmed", payload: { order_id }, refs: [] })
+        .catch((refusal: unknown) => {
+          /*
+            `02-F57` × `02-F55` — **A REFUSED CONFIRM IS NOT A CONFIRM, and forgetting that would
+            have closed one defect by opening another.**
+
+            Found by running the two acceptance suites together: `02-F57` requires a refused act
+            to stay retryable IN PLACE (`01-F17`, `27-F5` — an inert primary control is that FR's
+            own failure mode, and `02-F22`'s first attempt is legitimately a cashier's with the
+            manager's PIN arriving afterwards), while the guard above remembers the press. A
+            rejection put NOTHING in the append-only ledger, so there is no permanent row to
+            protect and nothing is owed-nothing — the memory has to go with it, or a cashier
+            refused once could never send that order to the kitchen again without restarting the
+            till.
+
+            Re-thrown, so `write` still announces the refusal: this handler corrects the guard's
+            bookkeeping and decides nothing about the glass.
+          */
+          setLastSent(null);
+          throw refusal;
+        }),
+    );
   };
 
   /**
@@ -1478,9 +1642,39 @@ export const Counter = () => {
       // The empty state is centred too. A single muted sentence in the top-left corner of a
       // 531 mm panel is the same defect at a smaller scale, and `00 §5.7` makes this line the
       // device honestly reporting that there is nothing to settle — a fact worth composing.
-      <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
-        No order to settle — start one on Order.
-      </p>
+      /*
+        ⚠ **`No order to settle — start one on Order.` WAS SHOWN OVER AN UNSETTLED OPEN BILL, and
+        the remedy it named was the wrong one (August 2026, `02-F51`, `02-F11`, `00 §5.7`).**
+
+        This is the failure mode created by making two open orders possible — `02-F51` (c)
+        releases the cart when the money side closes, correctly — and the sentence was true about
+        the TERMINAL and false about the BRANCH. `02-F11` makes `orders` branch-wide, so *"this
+        till has nothing and neither does the branch"* and *"this till has nothing but A-001 is
+        still unpaid"* are DIFFERENT facts, and one sentence reported them identically: it is
+        wrong in one of the two cases whichever wording it picks.
+
+        Naming the wrong remedy is the sharper half. `01-F33` does not reopen an order, so
+        starting a new one leaves the open bill exactly where it was — the act this cashier needs
+        is `02-F51` (a)'s RECALL, on the Orders tab, and the surface was sending her to the
+        control that cannot reach it.
+
+        **The unsettled test is `isAlreadySettled` — the reading `main/settlement-guard.ts` and
+        the branch below both already make** — so this surface cannot disagree with itself about
+        what "still owes money" means. `02-F13`'s partial tender still counts as open, which is
+        right: a split halfway through is a bill somebody has to come back to.
+
+        The resting sentence is UNCHANGED for the state it was always true of, so nothing a
+        cashier learned about an empty counter moved (`27-F4`).
+      */
+      unsettledInBranch.length === 0 ? (
+        <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
+          No order to settle — start one on Order.
+        </p>
+      ) : (
+        <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
+          {`Nothing on this till — ${unsettledInBranch.length === 1 ? "one bill is" : `${unsettledInBranch.length} bills are`} still open in this branch. Recall it on Orders to settle it.`}
+        </p>
+      )
     ) : current.channel === AGGREGATOR_CHANNEL ? (
       /*
         `02-F30` — **THERE IS NO SETTLEMENT STEP, AND THE SURFACE SAYS SO.**
@@ -1631,7 +1825,10 @@ export const Counter = () => {
    * and a manager-PIN pad on a control that can never need one is a pad that can never succeed.
    */
   const acceptCloudOrder = (order_id: string) => {
-    write(window.restos.append({ type: "order.confirmed", payload: { order_id }, refs: [] }));
+    // `02-F55` — the SAME act and therefore the same guard. `screen-map §4`: screens do not hand
+    // off to each other, they append to one ledger, so a guard living on one tile is a guard the
+    // other surface walks around. This is `sendToKitchen` reached from the inbox.
+    sendToKitchen(order_id);
   };
 
   /**
@@ -1688,7 +1885,56 @@ export const Counter = () => {
       // the local manager-PIN path when main says the matrix escalates it.
       <CashSurface cash={cash} onAppend={escalatableWrite} />
     ) : (
-      <MeSurface cash={cash} />
+      /*
+        `02-F54` — the session-end seam, and it is a CALL rather than an append.
+
+        Main ends the session and pushes `changed`; this renderer learns nothing from the call but
+        that it returned, because `02-F18`/`App.tsx` put the lock decision in `deviceState()`
+        alone — `01-F26`'s idle auto-lock fires with no call in sight, and a screen that flipped a
+        local flag would leave main holding the session while looking right. `02-F41` would then
+        go on stamping the departed cashier into every envelope the next one produces, which is
+        the whole defect with a convincing screen in front of it.
+
+        Optional-chained for the reason every other write member on this bridge records: a host
+        that does not serve it leaves the control inert rather than throwing on the counter. The
+        shipped preload always serves it.
+
+        ⚠ **THE `catch` IS NOT TIDINESS, AND MUTATION FOUND IT — measured on the built binary,
+        not reasoned.** Delete main's `ipcMain.handle(CHANNELS.lock, …)` and:
+
+          · **all 329 renderer tests stay green** — every one of them injects its own bridge, so
+            no suite in this app can see the main half of this channel at all;
+          · the preload still exposes the member, so the optional chain saves nothing and the call
+            REJECTS — driven on a live till: *"Error invoking remote method 'restos:lock': Error:
+            No handler registered for 'restos:lock'"*;
+          · the session therefore does **not** end. Verified by pressing the control on that build
+            and reading the DOM back: `session ended? false`.
+
+        Without this arm that rejection is unhandled, which `write`'s own header records as a
+        process-level error in Electron rather than anything a cashier can act on — so she presses
+        `Sign out`, keeps her session, and sees **nothing at all**: the exact silence `02-F57`
+        exists to kill, landing on the one control that protects attribution (`02-F41`). With it,
+        the same build puts one line in the work area — *"Not done — nothing has changed…"* — and
+        that is the measured difference between the two. A lock that did not happen is a lock she
+        must be able to see did not happen (`00 §5.7`), and it takes the announced word the
+        refused writes already use rather than a second, competing surface.
+
+        **The seam itself is guarded by nothing and that is REPORTED, not hidden.** `main/index.ts`
+        builds an Electron app at module scope so no suite here can import it; the repo's
+        instrument for exactly this is a source read in `main/__acceptance__/*-seam.test.ts`
+        (`line-advance-seam.test.ts` §A). Writing one is the test-owning session's job under
+        `24 §3` step 2 — this session implemented the FR and is disqualified from asserting it.
+      */
+      <MeSurface
+        cash={cash}
+        onLock={() => {
+          setWriteRefusal(false);
+          void window.restos
+            .lock?.()
+            .catch(() => setWriteRefusal(true))
+            .then(reload);
+        }}
+      />
     );
 
   return (
@@ -1735,11 +1981,62 @@ export const Counter = () => {
         // reading this device. `reload` follows so the band goes when main says it went.
         void window.restos.acknowledgeAlarm?.(id).then(reload);
       }}
+      /*
+        `03-F6`/`03-F48` — the RECOVERY beside the dismissal, and it is the whole point of this
+        prop existing: until August 2026 a cashier whose kitchen ticket had exhausted `03-F4`'s
+        retry budget could acknowledge that the food was not being cooked and nothing else, while
+        pressing *Send to kitchen* again appended a second `order.confirmed` and printed nothing
+        (`03-F55`'s coverage guard, working correctly on a job that never reached paper).
+
+        The control renders only when the band CARRIES an action, which is main's decision and not
+        this screen's — a renderer that decided would be a renderer that could offer a resend for
+        a chit the kitchen already holds. Nothing is worded here either: the label rides on the
+        alarm and the refusal comes back as the band's own subject (`AlarmSchema`, `18 §9`).
+      */
+      onAlarmAction={(id) => {
+        void window.restos.resendAlarm?.(id).then(reload);
+      }}
       tabs={tabs}
       activeTabId={activeTab}
       onSelectTab={setActiveTab}
       training={device.training}
     >
+      {/*
+        `02-F57` — **A REFUSED WRITE IS VISIBLE, and it is visible HERE.**
+
+        `role="status"` and not `role="alert"`: this is the same choice `CatalogHealth`,
+        `PanelHealth`, `ConnectionFacts`, `AgeBadge` and this file's own caller strip all made,
+        and `write`'s header carries the three FRs that make `03-F5`'s band positively forbidden
+        rather than merely unnecessary. No modal (`02-F37` — nothing goes between the cashier and
+        the customer), and no acknowledgement control: the fact clears when the next attempt is
+        made, which is the act that changes it.
+
+        **In the work area rather than on the strip**, because `02-F57` puts the word *"where the
+        act was taken"* — the strip is chrome about the DEVICE (who is on it, what it can reach,
+        which day it is) and this is about the press she just made. It sits above the surface so
+        it is in the same field of view as the control, and it is one `text-label` line so a
+        surface at the hardware floor loses nothing structural to it.
+
+        **No colour**, `27-F12`: the word carries it. `27-F14`'s three status hues are allocated
+        to a closed list this is not on, and `fgColor-default` against the muted lines around it
+        is legible in greyscale (`27-F13`).
+
+        **The wording names no permission and no event type**, which `02-F57` explicitly leaves
+        open — see `writeRefusal` for why naming the act would need a vocabulary no FR supplies.
+        What it must do is separate three states, and it does: untried (nothing here), refused
+        (this line), done (nothing here, and the surface below has moved).
+
+        ⚠ *It read "this till would not record that" until the session-end control started using
+        this same line.* A `02-F54` lock records nothing even when it SUCCEEDS, so that clause was
+        false on one of the two acts it now serves — the `AMOUNT`/`COUNTED` caption defect in
+        `CashSurfaces.tsx` is the same mistake one surface over. **What is true of both is that
+        the act did not happen and nothing moved**, and that is what it says.
+      */}
+      {writeRefusal ? (
+        <p role="status" style={{ ...STATE_LINE, color: color["fgColor-default"], marginLeft: 0 }}>
+          Not done — nothing has changed. Try again, or ask a manager.
+        </p>
+      ) : null}
       {/*
         `02-F20` — the local manager-PIN path, in the WORK AREA and never over the chrome.
         `27-F11d`'s ruling is that the band and the strip stay put while a work surface changes,
@@ -1749,45 +2046,59 @@ export const Counter = () => {
         It is raised only when MAIN said the matrix escalates the refused write (`escalationFor`),
         so it can never appear over a `deny` — a pad that cannot succeed is worse than a refusal.
       */}
-      {pending !== null ? (
-        <ManagerApproval
-          satisfiedBy={pending.offer.satisfied_by}
-          roster={roster}
-          // `02-F38` — whose request this is, so her tile is not drawn on the approver grid.
-          // `device.user` is `02-F41`'s attribution read through the same seam main appends
-          // from, never a second copy of the identity (`02-F45`).
-          requesterId={device.user?.user_id ?? ""}
-          refusal={approvalRefusal}
-          onSubmit={approve}
-          // `05-F6` — the pad answers both ways, and only one of them lets the write through.
-          onDeny={deny}
-          onCancel={() => {
-            setPending(null);
-            setApprovalRefusal(null);
-          }}
-        />
-      ) : activeTab === "orders" ? (
-        /*
+      {/*
+        `02-F57` — **THE BOX THE SURFACES GET, so the refusal line above cannot cost one a
+        control.**
+
+        `WorkSurface` is a flex COLUMN and every surface below claims `height: 100%`, so a sibling
+        line above them would push their full height past the box and `AppShell`'s `overflow:
+        hidden` would silently eat the bottom of whichever surface was mounted — which on Cash is
+        the drawer controls and on Pay is `TAKE CASH`. This wrapper takes the leftover instead:
+        with no refusal it is the whole box and nothing about any surface changes, and with one it
+        is the box minus a `text-label` line. `27-F2` forbids reaching a primary action by
+        scrolling, so the cost has to land somewhere it can be measured, and a `flex: 1` box is
+        where `layout:check` already looks.
+      */}
+      <div style={{ flex: 1, minHeight: 0, minWidth: 0, display: "flex", flexDirection: "column" }}>
+        {pending !== null ? (
+          <ManagerApproval
+            satisfiedBy={pending.offer.satisfied_by}
+            roster={roster}
+            // `02-F38` — whose request this is, so her tile is not drawn on the approver grid.
+            // `device.user` is `02-F41`'s attribution read through the same seam main appends
+            // from, never a second copy of the identity (`02-F45`).
+            requesterId={device.user?.user_id ?? ""}
+            refusal={approvalRefusal}
+            onSubmit={approve}
+            // `05-F6` — the pad answers both ways, and only one of them lets the write through.
+            onDeny={deny}
+            onCancel={() => {
+              setPending(null);
+              setApprovalRefusal(null);
+            }}
+          />
+        ) : activeTab === "orders" ? (
+          /*
           `C19`/`C31`. It takes the whole `orders` read — the same array the Order tab draws
           `current` from — because `02-F11` makes an order started on one terminal visible on
           every other, and a second, narrower read for this tab would be a second answer to
           "what is open" that could disagree with the cart.
         */
-        <OrdersSurface
-          orders={orders}
-          inboxPage={inboxPage}
-          onInboxPageChange={setInboxPage}
-          openPage={openPage}
-          onOpenPageChange={setOpenPage}
-          onAccept={acceptCloudOrder}
-          // `02-F51` (a) — a SECOND action, on the other list. `OrderList` takes exactly one each
-          // (`27-F9`), so these are two props rather than one shared handler: passing the recall to
-          // both would silently replace `02-F9`'s Accept and a website order could no longer be
-          // taken at all.
-          onRecall={recallOrder}
-        />
-      ) : activeTab === "soldout" ? (
-        /*
+          <OrdersSurface
+            orders={orders}
+            inboxPage={inboxPage}
+            onInboxPageChange={setInboxPage}
+            openPage={openPage}
+            onOpenPageChange={setOpenPage}
+            onAccept={acceptCloudOrder}
+            // `02-F51` (a) — a SECOND action, on the other list. `OrderList` takes exactly one each
+            // (`27-F9`), so these are two props rather than one shared handler: passing the recall to
+            // both would silently replace `02-F9`'s Accept and a website order could no longer be
+            // taken at all.
+            onRecall={recallOrder}
+          />
+        ) : activeTab === "soldout" ? (
+          /*
           `02-F7` — THE 86, and the first surface in the product that can emit
           `availability.changed`. The fold, the lattice, the store table and `menu()`'s join have
           all shipped since July 2026 with no producer, so until now a restaurant that ran out of
@@ -1810,7 +2121,7 @@ export const Counter = () => {
           the kitchen has run out of something nobody has touched. So it reads `sold_out`, the
           fold's own fact, and an unpriced item is togglable here like any other.
         */
-        /*
+          /*
           **CENTRED, and the layout gate is what decided it.** On `desktop-24` and `ultrawide-32`
           this surface first laid 332 dp of grid into a 944 dp work area and left 595 dp of slack
           at the bottom — the gate's `ANCHORED y` verdict, at 61% asymmetry against a 25% budget.
@@ -1823,11 +2134,17 @@ export const Counter = () => {
           ergonomic size — which is `27-F68` (b)'s ban read backwards, and just as wrong. So the
           room is given back symmetrically, exactly as Pay and Cash already do through `centred`.
         */
-        <div style={{ display: "flex", gap: 16, height: "100%", minHeight: 0 }}>
-          <div
-            style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}
-          >
-            {/*
+          <div style={{ display: "flex", gap: 16, height: "100%", minHeight: 0 }}>
+            <div
+              style={{
+                flex: 1,
+                minWidth: 0,
+                minHeight: 0,
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              {/*
               **THE BOX THE GRID IS COSTED AGAINST MUST BE THE BOX THE GRID GETS. Three gate
               runs taught that, and the third one cost this surface its instruction line.**
 
@@ -1860,84 +2177,90 @@ export const Counter = () => {
               sizes tiles in millimetres of glass (`tileMm`, `27-F8`), so filling a 24" panel
               would mean growing targets past their ergonomic size — `27-F68` (b) read backwards.
             */}
-            <div
-              ref={soldOutSurfaceRef}
-              style={{
-                flex: 1,
-                minWidth: 0,
-                minHeight: 0,
-                display: "flex",
-                alignItems: "safe center",
-              }}
-            >
-              {soldOutMm === null ? null : (
-                <ItemGrid
-                  items={items.map((i) => ({
-                    id: i.id,
-                    label: i.label,
-                    // `01-F58` — CONTESTED is its own state and not an intensifier: two devices
-                    // disagree and the fold refused to pick a winner (`01-F31`). It resolves to
-                    // unavailable, and one tap here supersedes ALL heads at once, which is what
-                    // makes it clearable in a single operator act.
-                    ...(i.sold_out === true
-                      ? {
-                          unavailable: true,
-                          unavailableReason:
-                            i.contested === true ? "Sold out — disputed" : "Sold out",
-                        }
-                      : {}),
-                  }))}
-                  posture="counter"
-                  widthMm={soldOutMm.widthMm}
-                  heightMm={soldOutMm.heightMm}
-                  tileMm={28}
-                  page={soldOutPage}
-                  onPageChange={setSoldOutPage}
-                  /*
+              <div
+                ref={soldOutSurfaceRef}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  minHeight: 0,
+                  display: "flex",
+                  alignItems: "safe center",
+                }}
+              >
+                {soldOutMm === null ? null : (
+                  <ItemGrid
+                    items={items.map((i) => ({
+                      id: i.id,
+                      label: i.label,
+                      // `01-F58` — CONTESTED is its own state and not an intensifier: two devices
+                      // disagree and the fold refused to pick a winner (`01-F31`). It resolves to
+                      // unavailable, and one tap here supersedes ALL heads at once, which is what
+                      // makes it clearable in a single operator act.
+                      ...(i.sold_out === true
+                        ? {
+                            unavailable: true,
+                            unavailableReason:
+                              i.contested === true ? "Sold out — disputed" : "Sold out",
+                          }
+                        : {}),
+                    }))}
+                    posture="counter"
+                    widthMm={soldOutMm.widthMm}
+                    heightMm={soldOutMm.heightMm}
+                    tileMm={28}
+                    page={soldOutPage}
+                    onPageChange={setSoldOutPage}
+                    /*
                     `Tile` fires `onPress` even when unavailable (`01-F59`'s requirement on the
                     Order tab), which is exactly what this surface needs: the greyed tiles are
                     the ones that must be tappable to be put BACK. So the target state is
                     computed from the fold's fact, never from the tile's appearance.
                   */
-                  onSelect={(item_id) => {
-                    const item = items.find((i) => i.id === item_id);
-                    if (item === undefined) return;
-                    toggleAvailability(item_id, item.sold_out === true);
-                  }}
-                />
-              )}
+                    onSelect={(item_id) => {
+                      const item = items.find((i) => i.id === item_id);
+                      if (item === undefined) return;
+                      toggleAvailability(item_id, item.sold_out === true);
+                    }}
+                  />
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      ) : activeTab === "pay" ? (
-        centred(paySurface)
-      ) : activeTab === "cash" || activeTab === "me" ? (
-        centred(cashSurface)
-      ) : (
-        <div style={{ display: "flex", gap: 16, height: "100%", minHeight: 0 }}>
-          {/*
+        ) : activeTab === "pay" ? (
+          centred(paySurface)
+        ) : activeTab === "cash" || activeTab === "me" ? (
+          centred(cashSurface)
+        ) : (
+          <div style={{ display: "flex", gap: 16, height: "100%", minHeight: 0 }}>
+            {/*
           The measured surface. The grid renders INSIDE this box, so what is measured and what
           is filled are the same element — a grid sized from one box and placed in another is
           how the cart got pushed off screen.
         */}
-          <div
-            style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}
-          >
-            {/*
+            <div
+              style={{
+                flex: 1,
+                minWidth: 0,
+                minHeight: 0,
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              {/*
             C4 — the order-type row. It holds this position ALWAYS (`27-F4` positional memory,
             `27-F5` no controls that change with context): when an order is open the three
             choices are greyed in place with the reason, never removed and never replaced by
             something else. A row that vanished once work started would move the grid under a
             cashier mid-order, which is the one thing `27-F4` calls a breaking change.
           */}
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              {ORDER_TYPES.map((t) => (
-                <Tile
-                  key={t.id}
-                  posture="counter"
-                  label={t.label}
-                  icon={t.id}
-                  /*
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {ORDER_TYPES.map((t) => (
+                  <Tile
+                    key={t.id}
+                    posture="counter"
+                    label={t.label}
+                    icon={t.id}
+                    /*
                     `DEC-MONEY-009`'s contributing defect, and this is the half that made the
                     double settlement easy to reach. These three tiles were greyed by
                     `current !== undefined`, so **once anything in the branch was open this till
@@ -1953,26 +2276,73 @@ export const Counter = () => {
                     `27-F4` is untouched: no tile is added, removed or moved. A greying is
                     lifted, which is precisely what that FR calls a non-breaking change.
                   */
-                  onPress={() => startOrder(t.id)}
-                  // Greyed while no channel is latched, because `02-F1` requires BOTH axes at
-                  // creation and `startOrder` refuses without one. `27-F4`: disabled IN PLACE
-                  // with the reason on the surface's state line — never removed, never moved.
-                  unavailable={pendingChannel === null}
-                />
-              ))}
-              {/*
+                    onPress={() => startOrder(t.id)}
+                    // Greyed while no channel is latched, because `02-F1` requires BOTH axes at
+                    // creation and `startOrder` refuses without one. `27-F4`: disabled IN PLACE
+                    // with the reason on the surface's state line — never removed, never moved.
+                    unavailable={pendingChannel === null}
+                  />
+                ))}
+                {/*
               C9 — one tap, and it is the whole kitchen handoff (`21 §4`'s 2-tap law counts
               grid → confirm). Greyed with its reason until there is an order to send, rather
               than absent, for the same positional reason as the row above.
             */}
-              <Tile
-                posture="counter"
-                label="Send to kitchen"
-                onPress={current === undefined ? undefined : () => sendToKitchen(current.order_id)}
-                unavailable={current === undefined}
-                {...(current === undefined ? { unavailableReason: "no order started" } : {})}
-              />
-              {/*
+                {/*
+                `02-F55` — **THE GLASS NOW SAYS WHETHER THE KITCHEN HAS IT, and the third state
+                is the one that did not exist.**
+
+                Measured August 2026: the tile read `Send to kitchen` before the first press and
+                after it, so nothing on the surface separated *sent* from *not sent* — and the
+                second press is the reasonable act of somebody who cannot see the first one
+                worked. `03-F55` had already filed this surface question as OWED from the
+                kitchen's side; this is that half.
+
+                Three states, `27-F4`'s "disabled IN PLACE with its reason" throughout — the
+                control never moves, is never removed and never loses its label:
+
+                  (i)   no order          greyed · `no order started`   (unchanged, preserved)
+                  (ii)  not told          live, claiming nothing
+                  (iii) told, owes nothing greyed · `the kitchen has this order`
+
+                `Tile` never sets `disabled` (`01-F59`'s recorded reason), so the greying alone
+                cannot refuse a press — the refusal is in `sendToKitchen`, where it can tell state
+                (iii) from `03-F55`'s addendum. That is the same division of labour the item grid
+                already uses one box down.
+              */}
+                <Tile
+                  posture="counter"
+                  label="Send to kitchen"
+                  onPress={
+                    current === undefined ? undefined : () => sendToKitchen(current.order_id)
+                  }
+                  unavailable={current === undefined || kitchenIsOwedNothing(current)}
+                  {...(current === undefined
+                    ? { unavailableReason: "no order started" }
+                    : kitchenIsOwedNothing(current)
+                      ? { unavailableReason: "the kitchen has this order" }
+                      : {})}
+                />
+                {/*
+                `02-F55` / `03-F55` — **the addendum state, and it needs a sentence of its own.**
+
+                An order that has been confirmed AND has gained lines since is the case `03-F55`
+                exists for: the dish is on the bill, `01-F53` captured its price, and nobody in
+                the kitchen has been told. The tile alone cannot carry it — a live `Send to
+                kitchen` looks identical to the ordinary not-yet-sent state — so the one state
+                whose whole point is "something changed since you last sent" says so.
+
+                Rendered only in that state, which is `27-F16`'s rule applied to words rather than
+                to colour: spend the channel on the exception, never on the base case. The two
+                ordinary states (nothing sent yet; kitchen has everything) are carried by the tile
+                itself, so this line costs the row nothing in the states a cashier is in all day.
+              */}
+                {current !== undefined && kitchenOf(current) === "owed" ? (
+                  <p style={{ ...STATE_LINE, color: color["fgColor-default"] }}>
+                    New lines — the kitchen has not been told about them
+                  </p>
+                ) : null}
+                {/*
                 THE SURFACE'S STATE, SAID ONCE.
 
                 Found by looking, August 2026. `27-F4` requires an unready surface to be
@@ -1998,13 +2368,13 @@ export const Counter = () => {
                 The tiles keep the greyed fill, their labels and their positions — nothing
                 moves, which is the half of `27-F4` that actually protects muscle memory.
               */}
-              {/*
+                {/*
                 Unchanged wording, deliberately. Each row now states ITS OWN precondition — this
                 line is about the type row, the channel row below has its own — so the sentence a
                 cashier learned for this row still describes this row. Which row is actionable is
                 said by the greying, not by re-writing a line about a different control.
               */}
-              {/*
+                {/*
                 ⚠ The second half of this sentence changed with `DEC-MONEY-009`, because the
                 control it describes changed. It read `Order in progress` beside three tiles that
                 were inert, which was true of both. The tiles are live now — a type tap starts
@@ -2013,13 +2383,35 @@ export const Counter = () => {
                 labelled target. The first branch is untouched, so the sentence a cashier learned
                 for an empty counter is the one she still reads there.
               */}
-              <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
-                {current === undefined
-                  ? "Choose an order type first"
-                  : "Order in progress — a type starts another order"}
-              </p>
-            </div>
-            {/*
+                {/*
+                ⚠ **THE SECOND BRANCH NAMED A TAP IT WOULD SILENTLY IGNORE — corrected August
+                2026 (`27-F4`, `27-F5`, `02-F1`).**
+
+                It read *"Order in progress — a type starts another order"*, which is an
+                INSTRUCTION, and the tap it instructs does nothing: `startOrder` returns
+                immediately when no channel is latched. `27-F5` gives every action a persistent,
+                visible, labelled target; here the target was visible, labelled and inert, with
+                the surface's own state line — the one place `27-F4` puts the reason — spent
+                asserting the opposite of what happens.
+
+                **The refusal is CORRECT and is not what changed.** `02-F1` requires both axes at
+                creation and forbids inferring either later, so a type tap with no channel must
+                refuse; defaulting the channel would ring a phone order at counter prices into a
+                ledger `01-F1` forbids correcting. What was wrong was the sentence.
+
+                The resting state already had this right — *"Choose a channel first — it sets the
+                price"* sits on the row below — so the fix is to give the in-progress branch the
+                same two-step honesty rather than to invent a new idiom: the goal, and the
+                precondition the tap is actually waiting for, both on the glass. The promise
+                `27-F5` needs is kept and the condition is stated in the same breath.
+              */}
+                <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
+                  {current === undefined
+                    ? "Choose an order type first"
+                    : "Order in progress — a type starts another order once a channel is chosen"}
+                </p>
+              </div>
+              {/*
               `C18`/`C21` — THE CHANNEL ROW (`02-F1`, `02-F28`, `02-F30`, `restaurant-os.md` §8).
 
               **`27-F4` BREAKING CHANGE, justified: this row is ADDED BELOW the `C4` row and
@@ -2044,24 +2436,24 @@ export const Counter = () => {
               creation and never infers it later: nothing here touches the open order, and the
               state line below says which channel that order is on until a new one is latched.
             */}
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              {ORDER_CHANNELS_AT_COUNTER.map((c) => (
-                <Tile
-                  key={c.id}
-                  posture="counter"
-                  label={c.label}
-                  icon={c.id}
-                  selected={pendingChannel === c.id}
-                  onPress={() => {
-                    setPendingChannel(c.id);
-                    // Latching a different channel ends the call: this order is not a phone order
-                    // any more, so the caller it was for is not a fact about it (`02-F1` — the
-                    // channel is set at creation, and so is who it is for).
-                    if (c.id !== PHONE_CHANNEL) clearCaller();
-                  }}
-                />
-              ))}
-              {/*
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {ORDER_CHANNELS_AT_COUNTER.map((c) => (
+                  <Tile
+                    key={c.id}
+                    posture="counter"
+                    label={c.label}
+                    icon={c.id}
+                    selected={pendingChannel === c.id}
+                    onPress={() => {
+                      setPendingChannel(c.id);
+                      // Latching a different channel ends the call: this order is not a phone order
+                      // any more, so the caller it was for is not a fact about it (`02-F1` — the
+                      // channel is set at creation, and so is who it is for).
+                      if (c.id !== PHONE_CHANNEL) clearCaller();
+                    }}
+                  />
+                ))}
+                {/*
                 `Tile.selected` is explicit that a selection is *"never by colour alone, so a
                 caller marking a tile selected still says so in words"* (`27-F66`). This line is
                 those words, and it names the PRICE consequence rather than the tag — which is
@@ -2073,11 +2465,11 @@ export const Counter = () => {
                 With nothing latched an open order still reports its own fixed channel, so the
                 sentence a cashier reads mid-order is unchanged from before this ruling.
               */}
-              <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
-                {pendingChannel !== null
-                  ? `Selling at ${channelLabel(pendingChannel)} prices`
-                  : current !== undefined
-                    ? /*
+                <p style={{ ...STATE_LINE, color: color["fgColor-muted"] }}>
+                  {pendingChannel !== null
+                    ? `Selling at ${channelLabel(pendingChannel)} prices`
+                    : current !== undefined
+                      ? /*
                         ⚠ **This branch interpolated the RAW STORED ID until the channel ruling
                         landed**, which was invisible while the id and the label were the same
                         word. They are not any more: a cashier who pressed `In restaurant` would
@@ -2085,33 +2477,33 @@ export const Counter = () => {
                         names for one channel, on the surface `00 §5.6` says is navigated by
                         memorised position by people who read little English.
                       */
-                      `This order is ${channelLabel(current.channel ?? "counter")} — its prices are fixed`
-                    : "Choose a channel first — it sets the price"}
-              </p>
-            </div>
-            {/*
+                        `This order is ${channelLabel(current.channel ?? "counter")} — its prices are fixed`
+                      : "Choose a channel first — it sets the price"}
+                </p>
+              </div>
+              {/*
             The measured surface. The grid renders INSIDE this box, so what is measured and what
             is filled are the same element — a grid sized from one box and placed in another is
             how the cart got pushed off screen.
           */}
-            <div ref={surfaceRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex" }}>
-              {/*
+              <div ref={surfaceRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex" }}>
+                {/*
               Nothing is drawn until the first measurement. `usePhysicalSize` deliberately returns
               null rather than a default, because a default is a guessed panel by another name and
               a grid costed for the wrong surface puts tiles off-page where no pager can reach
               them — on a counter, an item that cannot be sold.
             */}
-              {/*
+                {/*
                 `02-F27` — the caller surface takes this box while the phone channel is latched.
                 See `callerSurface` for the measurement that put it HERE rather than in a row of
                 its own, and for what that costs.
               */}
-              {pendingChannel === PHONE_CHANNEL ? (
-                callerSurface
-              ) : gridMm === null ? null : (
-                <ItemGrid
-                  items={
-                    /*
+                {pendingChannel === PHONE_CHANNEL ? (
+                  callerSurface
+                ) : gridMm === null ? null : (
+                  <ItemGrid
+                    items={
+                      /*
                     The grid is DISABLED IN PLACE until an order exists (founder ruling, §3.6) —
                     greyed with the reason, never emptied, so the tile an operator reaches for by
                     position is still where they learned it.
@@ -2123,20 +2515,20 @@ export const Counter = () => {
                     attribute here would break `01-F59` for the 86 case, which is the exact
                     defect `8b28a72` removed.
                   */
-                    current === undefined
-                      ? items.map((i) => ({
-                          ...i,
-                          unavailable: true,
-                        }))
-                      : items
-                  }
-                  posture="counter"
-                  widthMm={gridMm.widthMm}
-                  heightMm={gridMm.heightMm}
-                  tileMm={28}
-                  page={page}
-                  onPageChange={setPage}
-                  /*
+                      current === undefined
+                        ? items.map((i) => ({
+                            ...i,
+                            unavailable: true,
+                          }))
+                        : items
+                    }
+                    posture="counter"
+                    widthMm={gridMm.widthMm}
+                    heightMm={gridMm.heightMm}
+                    tileMm={28}
+                    page={page}
+                    onPageChange={setPage}
+                    /*
                   C5 — the counter's highest-frequency act, ~300x a shift, and now one tap.
 
                   THE GUARD IS REAL NOW, and it has to be here rather than in the greying above:
@@ -2150,15 +2542,15 @@ export const Counter = () => {
                   main resolves the price from this device's branch and the ORDER's channel
                   (`01-F60`) and captures it into the event (`01-F53`).
                 */
-                  onSelect={(item_id) => {
-                    if (current === undefined) return;
-                    write(window.restos.addLine({ order_id: current.order_id, item_id, qty: 1 }));
-                  }}
-                />
-              )}
+                    onSelect={(item_id) => {
+                      if (current === undefined) return;
+                      write(window.restos.addLine({ order_id: current.order_id, item_id, qty: 1 }));
+                    }}
+                  />
+                )}
+              </div>
             </div>
-          </div>
-          {/*
+            {/*
           The cart stays here and only here — `screen-map §3.1` requires it "always visible,
           never a separate screen, never collapsed", because it is the operator's working
           memory while she is ringing. Settling moved to the Pay tab; see `paySurface` above
@@ -2172,15 +2564,15 @@ export const Counter = () => {
           document" was all any of them could say. Caught on the gate's first screenshot, which
           is this repo's ninth layout defect found by looking and its tenth overall.
         */}
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: space["space-2"],
-              minHeight: 0,
-            }}
-          >
-            {/*
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: space["space-2"],
+                minHeight: 0,
+              }}
+            >
+              {/*
               ⚠ **THE `flex: 1` ROW BOX AROUND THE CART IS LOAD-BEARING AND WAS ADDED BY
               MEASURING.** The cart used to be a direct child of the surface's flex ROW, so it
               stretched to the full working height; wrapping it in a COLUMN to hang the tag row
@@ -2193,30 +2585,30 @@ export const Counter = () => {
               height back, and `flex: 1` + `minHeight: 0` is what lets it yield exactly the tag
               row's height rather than pushing it off the glass.
             */}
-            <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
-              <Cart
-                lines={(current?.lines ?? []).map((l) => ({
-                  id: l.line_id,
-                  name: l.name,
-                  quantity: l.quantity,
-                  modifiers: l.modifiers,
-                  removals: l.removals,
-                  ...(l.note === null ? {} : { note: l.note }),
-                }))}
-                // The total is the ENGINE's own derivation, carried across the IPC seam as
-                // branded integer paisa and never re-summed here (00 §6, 26 §8).
-                totalPaisa={paisa(current?.total_paisa ?? 0)}
-                /*
+              <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+                <Cart
+                  lines={(current?.lines ?? []).map((l) => ({
+                    id: l.line_id,
+                    name: l.name,
+                    quantity: l.quantity,
+                    modifiers: l.modifiers,
+                    removals: l.removals,
+                    ...(l.note === null ? {} : { note: l.note }),
+                  }))}
+                  // The total is the ENGINE's own derivation, carried across the IPC seam as
+                  // branded integer paisa and never re-summed here (00 §6, 26 §8).
+                  totalPaisa={paisa(current?.total_paisa ?? 0)}
+                  /*
                   `C8`/`02-F8` — **this prop is what the whole track turned on.** `Cart` has
                   declared `onRemove` since it was written and this line never passed it, so the
                   component rendered no control at all: a prop, a `27-F9` comment about where a
                   destructive target may sit, styling, and no way for a cashier to reach any of
                   it. The wave's named recurring defect at its smallest — one argument.
                 */
-                onRemove={removeLine}
-              />
-            </div>
-            {/*
+                  onRemove={removeLine}
+                />
+              </div>
+              {/*
               `C7`/`02-F6`/`02-F50` — the quick-tag pick list, drawn directly under the cart.
 
               `27-F5`'s persistence is honoured the way it can be here: the row is present whenever
@@ -2231,33 +2623,34 @@ export const Counter = () => {
               `QuantityItemLine`'s own note row, so the operator sees where it went (`21 §5`:
               icons + numbers dominant, minimal words; `00 §5.6`: memorized position).
             */}
-            {lastLine === undefined || quickTags.length === 0 ? null : (
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  alignItems: "center",
-                  // `27-F59`'s indent, the same one `QuantityItemLine` gives a modifier: this row
-                  // belongs to the cart above it and reads as subordinate to it.
-                  paddingLeft: space["space-6"],
-                }}
-              >
-                {quickTags.map((tag) => (
-                  <Tile
-                    key={tag}
-                    // `27-F8`'s standing-counter minimum. NOT `keypad`: that row is
-                    // "high-consequence NUMERIC entry" and spending 20 mm of the tightest
-                    // vertical budget on the screen here is what pushes the pad off the glass.
-                    posture="counter"
-                    label={tag}
-                    onPress={() => addNote(lastLine.line_id, tag)}
-                  />
-                ))}
-              </div>
-            )}
+              {lastLine === undefined || quickTags.length === 0 ? null : (
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                    // `27-F59`'s indent, the same one `QuantityItemLine` gives a modifier: this row
+                    // belongs to the cart above it and reads as subordinate to it.
+                    paddingLeft: space["space-6"],
+                  }}
+                >
+                  {quickTags.map((tag) => (
+                    <Tile
+                      key={tag}
+                      // `27-F8`'s standing-counter minimum. NOT `keypad`: that row is
+                      // "high-consequence NUMERIC entry" and spending 20 mm of the tightest
+                      // vertical budget on the screen here is what pushes the pad off the glass.
+                      posture="counter"
+                      label={tag}
+                      onPress={() => addNote(lastLine.line_id, tag)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </AppShell>
   );
 };

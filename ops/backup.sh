@@ -6,12 +6,21 @@
 #   corpus talks about is a REPLICATION property and runs the other way: the cloud is a copy of
 #   the device, not the reverse. Lose the till before it pushes and the sales are gone.
 #
-# ⚠ COPYING device.db ALONE SILENTLY OMITS COMMITTED SALES — AND USUALLY ALL OF THEM. The device
-#   store is opened WAL + `synchronous = FULL` and apps/pos-electron never closes it (there is no
-#   store.close() on any quit handler), so the write-ahead log is never checkpointed. Measured on
-#   a store written exactly the way the device store is: 500 committed rows, main file 4 KB,
-#   -wal 2 MB, and a copy of the main file alone opened with "no such table". Not a short tail —
-#   the whole ledger. So: online backup first, and a plain copy takes db, -wal AND -shm.
+# ⚠ COPYING device.db ALONE SILENTLY OMITS COMMITTED SALES. The device store is opened WAL +
+#   `synchronous = FULL` and apps/pos-electron never closes it (there is no store.close() on any
+#   quit handler), so the write-ahead log is not reliably checkpointed.
+#
+#   THE FAILURE HAS TWO SHAPES AND THIS COMMENT USED TO DESCRIBE ONLY THE LOUD ONE. It said a copy
+#   of the main file alone "opened with no such table — not a short tail, the whole ledger", from a
+#   synthetic 500-row store. That is what a NEVER-CHECKPOINTED store does. Re-measured 2026-08-15
+#   on two real till stores: one behaved exactly so (integrity_check ok, NO TABLES AT ALL); the
+#   other — main 135 KB, -wal 45 KB — opened CLEAN, passed integrity_check, showed the full schema,
+#   and reported events = 0 with a stale staff registry. The second is the dangerous one: it looks
+#   like a healthy database recording a quiet day. Every table rolls back to its last checkpoint,
+#   not just `events`.
+#
+#   So: online backup first, and a plain copy takes db, -wal AND -shm. And whoever verifies a
+#   restore must COUNT events rather than check that the file opens.
 #
 # Usage:
 #   ops/backup.sh                 both halves, whichever is configured
@@ -62,22 +71,46 @@ mkdir -p "$RESTOS_BACKUP_DIR" || { echo "backup: cannot create $RESTOS_BACKUP_DI
 # back the ledger without the spool loses whatever had not printed.
 #
 # There is no boot line printing this path, so it is discovered. On Windows it is under %APPDATA%.
-discover_data_dir() {
-  [ -n "${RESTOS_TILL_DATA_DIR:-}" ] && { echo "$RESTOS_TILL_DATA_DIR"; return; }
+#
+# ⚠ IT FINDS ALL OF THEM, AND THAT IS THE POINT — it used to take ONE, from an unsorted
+#   `find … | head -1`, and report success either way. Since the August 2026 rename (01-F64:
+#   app.setName, so each host gets its own userData directory) an UPGRADED till has TWO:
+#   the dead pre-rename store under Electron/, and the live one under "RestOS Counter"/.
+#   `head -1` would have backed up whichever the filesystem happened to return first — very
+#   possibly the dead one — and printed "done." A backup of the wrong file is worse than no
+#   backup, because it stops anyone looking.
+#
+# Prints one directory per line, deduplicated and in a deterministic order. RESTOS_TILL_DATA_DIR
+# overrides the search entirely: an operator who names a directory means that one and no other.
+discover_data_dirs() {
+  if [ -n "${RESTOS_TILL_DATA_DIR:-}" ]; then
+    printf '%s\n' "$RESTOS_TILL_DATA_DIR"
+    return
+  fi
   local root
-  for root in \
-    "${APPDATA:-}" \
-    "$HOME/.config" \
-    "$HOME/Library/Application Support"
-  do
-    [ -n "$root" ] && [ -d "$root" ] || continue
-    # One level down only: the userData directory is a direct child named for the app.
-    local hit
-    hit="$(find "$root" -maxdepth 2 -name device.db -print 2>/dev/null | head -1)"
-    [ -n "$hit" ] && { dirname "$hit"; return; }
-  done
-  echo ""
+  {
+    for root in \
+      "${APPDATA:-}" \
+      "$HOME/.config" \
+      "$HOME/Library/Application Support"
+    do
+      [ -n "$root" ] && [ -d "$root" ] || continue
+      # One level down only: the userData directory is a direct child named for the app.
+      # No `head`: every hit, from every root. `-print0` is not used because a userData
+      # directory that contains a newline is not a case this kit needs to survive, and the
+      # sort/uniq below want lines.
+      find "$root" -maxdepth 2 -name device.db -print 2>/dev/null | while IFS= read -r hit; do
+        dirname "$hit"
+      done
+    done
+  } | sort -u
 }
+
+# A directory name safe to use as one path component of the output, so two stores whose files are
+# both called device.db cannot overwrite each other. "RestOS Counter" -> "RestOS_Counter".
+# `printf '%s'` and not `basename … |`: a pipe feeds the trailing newline to `tr`, which turns it
+# into one more underscore, so "RestOS Counter" came out as "RestOS_Counter_".
+label_for() { printf '%s' "$(basename "$1")" | tr -c 'A-Za-z0-9._-' '_'; }
 
 backup_sqlite() {
   local src="$1" dest_base="$2"
@@ -120,21 +153,53 @@ backup_sqlite() {
 }
 
 if [ "$DO_TILL" -eq 1 ]; then
-  DATA_DIR="$(discover_data_dir)"
-  if [ -z "$DATA_DIR" ]; then
+  DATA_DIRS="$(discover_data_dirs)"
+  if [ -z "$DATA_DIRS" ]; then
     fail "no device.db found. Set RESTOS_TILL_DATA_DIR to the app's userData directory."
     fail "  (Searched \$APPDATA, ~/.config and ~/Library/Application Support, two levels deep.)"
   else
-    note "till data directory: $DATA_DIR"
+    DIR_COUNT="$(printf '%s\n' "$DATA_DIRS" | wc -l | tr -d ' ')"
+    note "till data directories found: $DIR_COUNT"
+    printf '%s\n' "$DATA_DIRS" | while IFS= read -r d; do echo "backup:   $d"; done
+    # More than one is the UPGRADED-TILL case and it is named rather than silently handled: the
+    # operator has to know that one of these is a dead pre-rename store (01-F64 / app.setName) and
+    # which one the live till is actually writing to. Every one is still backed up — the dead one
+    # may hold sales that never synced, and it is the only copy of them.
+    if [ "$DIR_COUNT" -gt 1 ]; then
+      note "  ⚠ MORE THAN ONE device.db ON THIS MACHINE. Since the August 2026 rename each app has"
+      note "    its own userData directory, so an upgraded till keeps a DEAD pre-rename store"
+      note "    beside the live one. All of them are backed up below, under their own names. Work"
+      note "    out which the running app uses (the newest mtime is the usual answer) before you"
+      note "    restore anything, and do not delete the other: nothing migrated it and any sale in"
+      note "    it that never synced exists nowhere else."
+    fi
+
     OUT="$RESTOS_BACKUP_DIR/till-$STAMP"
     mkdir -p "$OUT"
-    backup_sqlite "$DATA_DIR/device.db" "$OUT/device"
-    backup_sqlite "$DATA_DIR/print-spool.db" "$OUT/print-spool"
-    # An empty output directory means every store failed or none was present. Either way there is
-    # nothing here to restore, so do not leave a directory that looks like a backup.
+    # No subshell: a `while read` on the right of a pipe cannot set FAILED in this shell, and a
+    # backup that fails silently is the one thing this script exists not to do.
+    SAVED_IFS="$IFS"
+    IFS=$'\n'
+    for DATA_DIR in $DATA_DIRS; do
+      IFS="$SAVED_IFS"
+      LABEL="$(label_for "$DATA_DIR")"
+      note "backing up $DATA_DIR (as $LABEL)"
+      mkdir -p "$OUT/$LABEL"
+      backup_sqlite "$DATA_DIR/device.db" "$OUT/$LABEL/device"
+      backup_sqlite "$DATA_DIR/print-spool.db" "$OUT/$LABEL/print-spool"
+      # An empty per-store directory means that store failed or held nothing. Do not leave a
+      # directory that looks like a backup.
+      if [ -z "$(ls -A "$OUT/$LABEL" 2>/dev/null)" ]; then
+        rmdir "$OUT/$LABEL"
+        fail "nothing was backed up from $DATA_DIR — removed the empty $OUT/$LABEL"
+      fi
+      IFS=$'\n'
+    done
+    IFS="$SAVED_IFS"
+
     if [ -z "$(ls -A "$OUT" 2>/dev/null)" ]; then
       rmdir "$OUT"
-      fail "nothing was backed up from $DATA_DIR — removed the empty $OUT"
+      fail "nothing was backed up from any data directory — removed the empty $OUT"
     fi
   fi
 fi

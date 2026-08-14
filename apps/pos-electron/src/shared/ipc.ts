@@ -488,6 +488,17 @@ export const AlarmSchema = z.object({
   message: z.string().min(1),
   /** Who or what it concerns: the printer, the order. */
   subject: z.string().min(1),
+  /**
+   * `03-F6` — *"from the failure alert, the operator can resend the failed job"*.
+   *
+   * The recovery this band offers, if it offers one. **The LABEL crosses, not a flag**, on the
+   * same argument the two fields above rest on: the operator-facing wording is written in main
+   * (`main/printing.ts`), so one screen cannot word the kitchen's recovery differently from
+   * another. Absent means this band has no recovery — a cash slip and a receipt have none today
+   * (`01 §4` carries no reprint act for either), and the band then renders exactly as it always
+   * did, which is why every existing harness in this app composes unchanged.
+   */
+  action: z.object({ label: z.string().min(1) }).optional(),
 });
 export type Alarm = z.infer<typeof AlarmSchema>;
 
@@ -735,6 +746,20 @@ export const CHANNELS = {
    */
   acknowledgeAlarm: "restos:acknowledge-alarm",
   /**
+   * `03-F6`/`03-F48` — the RECOVERY on that same alert, and until August 2026 there was none.
+   *
+   * Once a kitchen ticket exhausted `03-F4`'s three attempts the spooler's job was terminal and
+   * `printing.ts` skipped every line a prior chit already covered (`03-F55`), so pressing *Send
+   * to kitchen* again appended a second `order.confirmed` and printed **nothing**. The food was
+   * billed, the kitchen never heard, and the cashier's only affordance was to dismiss the band.
+   *
+   * A channel of its own rather than a payload on `acknowledgeAlarm`, because the two are
+   * opposite acts: one says *"I have read this and it stands"*, the other says *"try again"*.
+   * Main decides whether the act is possible and re-words the band when it is not — a renderer
+   * that could decide would be a renderer that could re-send a chit the kitchen already holds.
+   */
+  resendAlarm: "restos:resend-alarm",
+  /**
    * `02-F6`/`02-F50` — the kitchen quick-tag list a cashier picks an item note from. A READ:
    * nothing is appended and nothing is authorized on this channel; the tap that follows rides
    * `append` like any other `order.note_added`.
@@ -844,6 +869,20 @@ export const CHANNELS = {
    * not a role. It re-reads `deviceState` for that, so lock state has ONE source (`02-F45`).
    */
   unlock: "restos:unlock",
+  /**
+   * `02-F54` — **END THE SESSION.** `unlock`'s other half, and until August 2026 there was none.
+   *
+   * `02-F18` gave this device two ways out of a session and both were passive — `01-F26`'s idle
+   * auto-lock at ten minutes, and killing the app — so a handover attributed the arriving
+   * cashier's whole run to the cashier who left (`02-F41`), permanently (`01-F1`).
+   *
+   * **No append rides this channel**, exactly as none rides `unlock`: a session end is not an
+   * `01 §4` fact in this product and `01-F5`'s `audit.login` is main's to write against a
+   * store-owned chain. It resolves with nothing at all — the renderer reads `deviceState().user`
+   * for lock state, so there is ONE source (`02-F45`) and an auto-lock decided with no call in
+   * sight reaches the screen by the same route.
+   */
+  lock: "restos:lock",
   /** Push: main tells the renderer the folds moved. Carries no data — the renderer re-reads. */
   changed: "restos:changed",
 } as const;
@@ -921,6 +960,20 @@ export type RestosBridge = {
    */
   alarms?: () => Promise<Alarm[]>;
   acknowledgeAlarm?: (alarm_id: string) => Promise<void>;
+  /**
+   * `03-F6` — resend the failed kitchen ticket this band is about.
+   *
+   * **OPTIONAL for the reason `alarms` directly above records, and with the same named cost.**
+   * `AlarmBand` renders the control only when the band CARRIES an action, so a harness that does
+   * not serve this channel shows the band exactly as it did before — no dead control (`27-F5`).
+   * The shipped preload serves it (`preload/index.ts`).
+   *
+   * It resolves with nothing. The outcome reaches the operator on the band itself: main clears
+   * it when the ticket is queued again, and REWRITES its subject with the reason when it will
+   * not (`00 §5.7` — a refusal that does not say why is a device claiming a state it will not
+   * explain), so the renderer re-reads `alarms` and never words a refusal itself.
+   */
+  resendAlarm?: (alarm_id: string) => Promise<void>;
   /**
    * `02-F6`/`02-F50` — the org's kitchen quick-tags, which in Wave 1 are `C7`'s ONLY input
    * (`27-F6`: 24 of 27 field subjects could not type a single word, so the non-typing route is
@@ -1024,6 +1077,25 @@ export type RestosBridge = {
    * in place. Positional and in this order, matching `createPinSession.unlock(user_id, pin)`.
    */
   unlock: (user_id: string, pin: string) => Promise<{ unlocked: boolean }>;
+  /**
+   * `02-F54` — end the session that is in. **The operator's way to decide what `01-F26`'s idle
+   * timer already decides on its own**, and the reason a handover stops writing the outgoing
+   * cashier's name into an append-only ledger.
+   *
+   * **OPTIONAL on the contract for the reason `cashState`, `alarms` and `escalationFor` all
+   * record above**, and the cost is the same: three oracle harnesses in this app close with
+   * `satisfies RestosBridge` and predate this channel, so a REQUIRED member would break files an
+   * implementing session may not edit (`24 §3` step 2). The shipped preload always serves it, and
+   * `Counter.tsx` optional-chains it — a host that does not leaves the control inert rather than
+   * throwing on the counter (`01-F17`).
+   *
+   * **It resolves with nothing, and that is not an oversight.** `unlock` returns a boolean
+   * because an attempt can fail; ending a session cannot. Lock state is read from
+   * `deviceState().user` and from nowhere else (`02-F18`), so a return value here would be a
+   * second source for one fact (`02-F45`) and a renderer could believe itself locked while main
+   * still held the session.
+   */
+  lock?: () => Promise<void>;
   /** Subscribe to fold changes. Returns an unsubscribe. */
   onChanged: (fn: () => void) => () => void;
 };

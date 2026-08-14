@@ -207,12 +207,23 @@ export RESTOS_DEVICE_TOKEN="$DEV_TOKEN"
 ELECTRON_DISABLE_SANDBOX=1 \
 RESTOS_CLOUD_URL=ws://127.0.0.1:8080/sync \
 RESTOS_DEV_PIN=4821 \
+RESTOS_DEV_PIN_BILAL=5137 \
+RESTOS_DEV_PIN_HINA=9064 \
 RESTOS_STATION_ROUTES='*=screen' \
   pnpm -C apps/pos-electron start
 ```
 
-Sign in as **Ayesha** or **Bilal** (cashiers) or **Hina** (branch manager) with `RESTOS_DEV_PIN`. Only
-a manager can open the day.
+**All three PIN keys, with three DIFFERENT numbers, or this quickstart produces a till nobody can
+sell on.** There is one key per roster member since August 2026 (`01-F28`; the map is
+`DEV_STAFF_PIN_ENV` in `packages/device-config/src/dev-staff.ts`) and there is deliberately **no
+fallback between members** — a member whose key is unset is absent from the identification grid
+rather than reachable with a neighbour's digits. `RESTOS_DEV_PIN` alone seeds **Ayesha alone**, and
+Ayesha is a cashier: `02-F22` gives day open and float entry to a manager only, so a till with no
+`RESTOS_DEV_PIN_HINA` starts, looks entirely correct, and **cannot open a day or record a sale**.
+The boot line names everybody it could not seed and says that sentence out loud (`describeDevStaff`).
+
+Sign in as **Ayesha** (`RESTOS_DEV_PIN`) or **Bilal** (`RESTOS_DEV_PIN_BILAL`) — both cashiers — or
+**Hina** (`RESTOS_DEV_PIN_HINA`, branch manager). Only a manager can open the day.
 
 **Notes that cost real time if you miss them:**
 
@@ -223,14 +234,29 @@ a manager can open the day.
 - **Headless?** Prefix with `xvfb-run -a --server-args="-screen 0 1366x768x24"`.
 - **First launch downloads Electron** (~100 MB) — `pnpm install` does not, because
   `onlyBuiltDependencies` lists only `better-sqlite3`. It fails offline.
-- **`RESTOS_STATION_ROUTES='*=screen'`** matters because the default route is `paper` and **there is
-  no printer transport in the product**. Left at the default, every confirmed order burns three print
-  attempts and raises a permanent alarm band.
+- **`RESTOS_STATION_ROUTES='*=screen'`** matters because the default route is `paper` and this
+  launch names no printer. Left at the default, every confirmed order burns three print attempts and
+  raises an alarm band. ⚠ **It routes KITCHEN STATIONS and nothing else.** Receipts and cash slips
+  are not station-routed — `routesToPaper` is passed to `createKotPrinter` alone — so on a till with
+  no `RESTOS_PRINTER` **every settlement still raises an S1 band** the cashier clears by hand. See
+  the configuration reference below.
 - **`catalog v0 — 0 tile(s)` at boot is correct**, not a failure. The line prints before the socket
   connects and is never reprinted.
-- The device store lands in `~/.config/Electron/device.db` on Linux (the app sets no `productName`).
+- The device store lands in `~/.config/RestOS Counter/device.db` on Linux, and the pass screen's in
+  `~/.config/RestOS Pass/device.db`. Each host calls `app.setName` (`01-F64` — until August 2026
+  both resolved to `~/.config/Electron/device.db`, one file for two `device_id`s).
   `pnpm start -- --user-data-dir=X` silently does **not** forward the flag; to control the location,
   run `electron-vite build` and `electron out/main/index.js --user-data-dir=…` as two steps.
+- ⚠ **UPGRADING A TILL THAT RAN BEFORE THE RENAME? IT STARTS ON AN EMPTY STORE.** The old file is
+  still at `~/.config/Electron/device.db` (`%APPDATA%\Electron\device.db` on Windows) and **nothing
+  migrates it and nothing points at it**. The till comes up with no open day, no shift and no
+  orders, which looks like a fresh install rather than a fault, and **any sale in the old file that
+  had not yet synced is unreachable from the product**. Do not delete the old directory: it is a
+  ledger `01-F1` forbids reconstructing. **Copying it across is not a supported move and may be
+  wrong**: on any machine where both apps ran, that one file holds two `device_id`s' events
+  interleaved — the fork `01-F64` exists to refuse — and it predates the `store_identity` row, so it
+  carries no binding to refuse with and would be stamped with whichever identity opened it first.
+  See [`ops/README.md`](ops/README.md#upgrading-a-till-that-ran-before-the-august-2026-rename).
 - There is no `sqlite3` CLI on a stock Ubuntu. Read the store through the copy already in
   `node_modules` with `node -e`.
 
@@ -485,15 +511,40 @@ standing in the restaurant. The rest of this section is the engineering view of 
 | [`ops/id.sh`](ops/id.sh) | mints the org/branch/device ids and the three shared secrets **once**, into one gitignored file. The single most common failure in this system is those values disagreeing across four processes, which produces four healthy processes and no menu with **no error anywhere** |
 | [`ops/env/*.env.example`](ops/env/) | every variable each host role reads, one line of what it does and what happens when it is wrong, derived by grepping `process.env` rather than copied from a doc |
 | [`ops/startup/*.bat`](ops/startup/) | Windows `shell:startup` auto-start + restart loop, per device role |
-| [`ops/systemd/`](ops/systemd/) | a unit per cloud service, plus the nightly backup timer |
-| [`ops/backup.sh`](ops/backup.sh) | nightly backup of the till (`device.db` **and its `-wal`/`-shm`** — see below) and `pg_dump` for the cloud |
+| [`ops/systemd/`](ops/systemd/) | a unit per cloud service, plus the nightly backup timer — **cloud only**, see below |
+| [`ops/backup.sh`](ops/backup.sh) | backs up the till (`device.db` **and its `-wal`/`-shm`** — see below) and `pg_dump`s the cloud. **Nothing schedules the till half** |
+
+⚠ **TILL BACKUPS ARE NOT AUTOMATED, and the till holds the only copy of a sale until it syncs.**
+`ops/systemd/restos-backup.service` runs `ops/backup.sh --cloud` and only that; its `ProtectHome=true`
+would block the till half even if the argument changed, and the till is a **Windows** machine with no
+systemd on it at all. There is no scheduled task, no `.bat` and no timer anywhere in `ops/startup/`
+that runs `backup.sh --till`. So the till half exists as a script an operator must remember to run,
+by hand, on the machine that is the sole custodian of every sale not yet pushed to the cloud
+(`22-F21`). Closing this needs a Windows Task Scheduler job that `ops/` does not ship.
 
 **The till backup is not a file copy, and this is the sharp edge.** The device store is opened WAL
-with `synchronous = FULL` and `apps/pos-electron` never closes it, so the write-ahead log is never
-checkpointed. Measured: 500 committed rows, `device.db` 4 KB, `device.db-wal` 2 MB, and a copy of
-`device.db` alone opens with *"no such table"* — the whole ledger, not a tail. `ops/backup.sh`
-uses SQLite's online backup API, falls back to copying all three files, and **fails writing
-nothing** if it can do neither (`22-F21`).
+with `synchronous = FULL` and `apps/pos-electron` never closes it, so the write-ahead log is not
+reliably checkpointed. `ops/backup.sh` uses SQLite's online backup API, falls back to copying all
+three files, and **fails writing nothing** if it can do neither (`22-F21`).
+
+⚠ **The failure mode has TWO shapes and the loud one is not the one to fear.** This paragraph used
+to carry one piece of evidence — *"a copy of `device.db` alone opens with `no such table` — the
+whole ledger, not a tail"* — and that is what a **never-checkpointed** store does, not what a real
+till store does. Both shapes were measured 2026-08-15, on the two live stores this box happens to
+hold:
+
+| store | main file | `-wal` | what a copy of the main file ALONE does |
+|---|---|---|---|
+| `~/.config/RestOS Pass/device.db` | 4 KB | 276 KB | `integrity_check` **ok** — and **no tables at all** |
+| `~/.config/RestOS Counter/device.db` | 135 KB | 45 KB | `integrity_check` **ok**, full schema, **`events` = 0**, and a *stale* `staff` snapshot (3 rows where the WAL holds 1) |
+
+The second row is the one that matters, and it is why the old evidence understated the danger rather
+than overstating it. That copy **opens cleanly and passes the sanity check an operator would
+actually run**, and what it then reports is a complete schema holding zero sales — which reads as a
+quiet day, not as a destroyed backup. The loss is also not confined to the ledger: every table rolls
+back to its last checkpoint, so a restore silently reinstates an older staff registry and an older
+catalog too. **Never judge a till backup by whether it opens.** Count `events` in it and compare
+against the till it came from.
 
 ### What exists
 
@@ -517,8 +568,8 @@ nothing** if it can do neither (`22-F21`).
 | ~~No process supervision~~ **Supervision on one box only** | `ops/systemd/` restarts each cloud service and `ops/startup/*.bat` restarts each Windows app. Both need `Restart=always` to be actually enabled, BIOS restore-on-AC-power-loss, and Windows auto-logon — all three named in `ops/README.md`, none of them enforceable from here |
 | **No TLS, no reverse proxy, no rate limiting** | the gateway binds `0.0.0.0` in plain HTTP/WS |
 | **No health or readiness endpoint** | the gateway serves `/sync` and seven `/internal/*` routes; the API serves `/trpc/*` |
-| ~~No backup, restore or retention~~ **Backups exist; the recovery objective is not met** | `ops/backup.sh` + the systemd timer cover the till's `device.db`/`print-spool.db` and a nightly `pg_dump`. That is `22-F22`'s stated interim: `22-F1` wants continuous WAL archiving with an **RPO ≤ 5 min**, and a nightly dump's real RPO is **up to 24 h**. Nothing does PITR, and no restore drill has been run |
-| **No printer transport** | the only two implementations are an *unattached* printer that raises the alarm band and a file printer that writes PDFs. A restaurant cannot print a kitchen ticket |
+| ~~No backup, restore or retention~~ **Backups exist; the recovery objective is not met, and the TILL half is not scheduled** | `ops/backup.sh` can back up the till's `device.db`/`print-spool.db` and `pg_dump` the cloud — but the systemd timer runs `--cloud` **only** and the till is a Windows box with no systemd, so **nothing automates the till half** (see above). That is short of `22-F22`'s stated interim: `22-F1` wants continuous WAL archiving with an **RPO ≤ 5 min**, and a nightly dump's real RPO is **up to 24 h**. Nothing does PITR, and no restore drill has been run |
+| ~~No printer transport~~ **A transport exists; no printer has ever been attached (K-8)** | `main/printer-link.ts` ships three forms — `tcp://host:9100`, `windows://ShareName`, `device:///dev/usb/lp0` (`03-F1`, `18 §10`) — selected by `RESTOS_PRINTER`, plus an *unattached* printer that raises the alarm band and a file printer that writes PDFs. It has been driven against a **loopback socket** and a **file** and against **no print head, ever**, so nothing here is evidence about cutter, feed, paper-out or legibility (`27-F35`). The two USB forms are write-only and cannot read `03-F40`'s paper sensor — a roll that runs out reads as a printed ticket — so prefer `tcp://`. Budget real time for the first physical printer |
 | **No device pairing from the back office** | provisioning needs shell access on the gateway host |
 | **No owner-account creation** | the only owner is declared in env and held in an **in-memory** store that dies with the process; staged catalog edits are in memory too |
 | **No log shipping or metrics** | the gateway and jobs write pino JSON to stdout; the API logs one boot line. Nothing collects any of it |
@@ -567,19 +618,42 @@ about the wrong ledger), `REDIS_URL` (**required**), `AUDITOR_INTERVAL_MS` (defa
 
 | var | default | notes |
 |---|---|---|
-| `RESTOS_ORG_ID` / `RESTOS_BRANCH_ID` / `RESTOS_DEVICE_ID` | dev seed | **resolved per key.** Set all three on every device — two apps sharing a device id share one store |
+| `RESTOS_ORG_ID` / `RESTOS_BRANCH_ID` / `RESTOS_DEVICE_ID` | **counter: dev seed · pass: REFUSES** | **resolved per key**, and the two apps differ on purpose (`01-F65`). `apps/pos-electron` falls back per key to a marked dev seed — the FR's single exemption, for its documented no-environment `pnpm start` — so a *production* till left unset starts, reports success on every line, and never sees a menu. `apps/pass-kds` calls `requireDeviceIdentity` and **refuses to start** on any absent key, because falling back there would adopt *the counter's* identity and put two hosts on one store. Set all three on every device |
 | `RESTOS_CLOUD_URL` | unset ⇒ fully offline | full WebSocket URL **including the path**: `ws://host:8080/sync` |
 | `RESTOS_DEVICE_TOKEN` | unset ⇒ offline | minted for that exact device id; renewals are persisted, so this is a bootstrap |
 | `RESTOS_LAN_PORT` / `_HOST` / `_PEERS` | unset ⇒ **mesh off** | the port is what turns the LAN mesh on; peers without a port is a boot refusal |
 | `RESTOS_PANEL_PPI` | measured, else assumed 15.6″ | being wrong here **looks exactly like being right** — every touch target renders at the wrong physical size and nothing looks broken |
-| `RESTOS_STATION_ROUTES` | `paper` for all | `*=screen` if you have no printer, or every order raises an alarm |
+| `RESTOS_STATION_ROUTES` | `paper` for all | `*=screen` if you have no printer, or every order raises an alarm. **It routes KITCHEN STATIONS only** — see the note below the table |
 | `RESTOS_AGING_THRESHOLDS` | `dine_in=10/20,…` | `order_type=amber/red` in minutes |
-| `RESTOS_KOT_PRINTER` | none ⇒ every KOT refused | a printer model id |
+| `RESTOS_PRINTER` | unset ⇒ no printer link | the CABLE (`03-F1`, `18 §10`): `tcp://host[:9100]`, `windows://ShareName` (a share on **this** machine), or `device:///dev/usb/lp0`. Unreadable values are refused whole and named on the boot line. **Prefer `tcp://`** — it is the only form that can read `03-F40`'s paper sensor; the two USB forms take the bytes silently, so a paper-out reads as a printed ticket. **No printer has ever been attached to this code (K-8)** |
+| `RESTOS_KOT_PRINTER` | none ⇒ 32-column record | the printer MODEL, not the cable. Unset resolves conservatively to 32 Font-A columns; a KOT needs 42, so every KOT is refused before a byte is sent. **Not irrelevant under `*=screen`** — the shift-close slip (35) and day summary (34) are refused too |
 | `RESTOS_SERVE_SIGNAL_OWNER` | `settlement` | must be the **same value** on the till and the pass |
 | `RESTOS_READY_SIGNAL_OWNER` | `pass` | pass-kds only. **A different set of values** from the serve signal |
-| `RESTOS_DEV_PIN` | unset ⇒ empty staff grid | **dev seed** — seeds three staff **sharing one PIN** |
+| `RESTOS_DEV_PIN` | unset ⇒ Ayesha absent | **dev seed** — **one key per member since August 2026** (`01-F28`). This one is **Ayesha's alone** (cashier) |
+| `RESTOS_DEV_PIN_BILAL` | unset ⇒ Bilal absent | the second cashier. A warning, not a blocker — one cashier and one manager is a workable shift |
+| `RESTOS_DEV_PIN_HINA` | unset ⇒ **no day can be opened** | the branch manager. `02-F22` gives day open and float entry to a manager only, so a till without this starts, looks correct, and **cannot record a sale** |
 | `RESTOS_DEV_MENU` | unset | dev seed; applied only when the catalog is at version 0 |
 | `RESTOS_PRINT_TO_FILE` | unset | a directory; writes each document as a PDF. Opt-in on purpose — the default must never claim it printed |
+
+⚠ **Give the three PINs three DIFFERENT numbers, and never reuse one.** There is deliberately **no
+fallback between members**: a member nobody configured is absent from the grid rather than reachable
+with a neighbour's digits. One secret for the roster is the authorization hole this split closed —
+it put the branch manager's row behind the digits both cashiers type 20–60× a shift, so `02-F22`'s
+role guard was one tile-tap away and `02-F38`'s self-approval refusal was keyed on a `user_id` one
+secret opened twice (`01-F28`). The boot line names everybody it could not seed.
+
+⚠ **`RESTOS_STATION_ROUTES=*=screen` DOES NOT MAKE A PRINTERLESS TILL QUIET.** It routes **kitchen
+stations**, and a station routed `screen` enqueues nothing — no bytes, no attempt, no band, no
+`kot.print_failed` (`03-F22`/`03-F51`). **Receipts and cash slips are not station-routed at all**:
+`routesToPaper` is passed to `createKotPrinter` and to neither `createReceiptPrinter` nor
+`createCashPrinter`, so on a till with no `RESTOS_PRINTER` **every settlement enqueues a receipt,
+exhausts `03-F4`'s three attempts and raises an S1 band the cashier must clear by hand** (`03-F5`,
+`03-F12`), and the first such failure appends one permanent `printer.status_changed(offline)` row
+(`03-F54`, a transition — not one row per sale, and **not** a `kot.print_failed`, which is a KOT
+fact this path deliberately never writes). Shift close and day summary take `03-F34`'s column
+refusal instead, and their bands are unrecorded because `01 §4` carries no `slip.print_failed`.
+**A branch with no printer at all is not yet a quiet configuration** — `03-F22`'s per-station choice
+has no equivalent for the customer's copy.
 
 ### `apps/backoffice`
 

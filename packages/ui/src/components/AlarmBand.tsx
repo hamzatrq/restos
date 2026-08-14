@@ -28,15 +28,33 @@ export type Alarm = {
   message: string;
   /** Who or what it concerns: printer name, order number, drawer. */
   subject: string;
+  /**
+   * `03-F6` — "**from the failure alert**, the operator can resend the failed job".
+   *
+   * The RECOVERY, beside the dismissal. Until August 2026 the only control on this band was
+   * `I SAW THIS`, so a cashier whose kitchen ticket had exhausted `03-F4`'s budget could
+   * acknowledge that the food was not being cooked and could do nothing about it.
+   *
+   * **Data, not a flag**, and the label is written in MAIN for `AlarmSchema`'s stated reason:
+   * the operator-facing wording never crosses to the untrusted side of `18 §9`'s bridge. Absent
+   * means this band has no recovery — a cash slip or a receipt today — and the band then renders
+   * exactly as it did before, which is what keeps every existing surface unchanged.
+   */
+  action?: { label: string } | undefined;
 };
 
 export type AlarmBandProps = {
   /** Oldest first. Only the head renders; the tail becomes a count (27-F11d, gap G13). */
   alarms: readonly Alarm[];
   onAcknowledge: (id: string) => void;
+  /**
+   * `03-F6`'s resend. Called with the head's id; rendered only when the head CARRIES an action
+   * and a handler was supplied, so a host that has not wired it shows no dead control (`27-F5`).
+   */
+  onAction?: ((id: string) => void) | undefined;
 };
 
-export const AlarmBand = ({ alarms, onAcknowledge }: AlarmBandProps) => {
+export const AlarmBand = ({ alarms, onAcknowledge, onAction }: AlarmBandProps) => {
   const color = useColor();
   const head = alarms[0];
   if (!head) return null;
@@ -80,6 +98,35 @@ export const AlarmBand = ({ alarms, onAcknowledge }: AlarmBandProps) => {
           {others > 0 ? ` · and ${others} more` : ""}
         </span>
       </div>
+
+      {head.action !== undefined && onAction !== undefined ? (
+        <button
+          type="button"
+          onClick={() => onAction(head.id)}
+          style={{
+            // The SAME target as the acknowledgement beside it: `03-F6`'s resend is at least as
+            // consequential as dismissing the band, and two adjacent controls at different sizes
+            // on one band is how a wet hand hits the wrong one (`27-F8`/`27-F9`).
+            minWidth: targetFor("keypad"),
+            minHeight: targetFor("counter"),
+            padding: space["space-3"],
+            fontFamily: label.fontFamily,
+            fontSize: label.fontSize,
+            fontWeight: 600,
+            // OUTLINED where the acknowledgement is filled, so the two are told apart by shape
+            // and not only by their words. No new colour pair: the outline and the text are the
+            // band's own on-colour, which `nontext-contrast.oracle.test.ts` already measures
+            // against `bgColor-status-fault`.
+            background: "transparent",
+            color: color["fgColor-on-status-fault"],
+            border: `2px solid ${color["fgColor-on-status-fault"]}`,
+            borderRadius: space["space-2"],
+            cursor: "pointer",
+          }}
+        >
+          {head.action.label}
+        </button>
+      ) : null}
 
       <button
         type="button"

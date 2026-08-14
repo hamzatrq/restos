@@ -60,6 +60,8 @@ export type AppShellProps = {
   panelFit?: PanelNotice | null | undefined;
   alarms: readonly Alarm[];
   onAcknowledgeAlarm: (id: string) => void;
+  /** `03-F6` — the recovery on the failure alert. Passed through to `StatusStrip`/`AlarmBand`. */
+  onAlarmAction?: ((id: string) => void) | undefined;
   tabs: readonly Tab[];
   activeTabId: string;
   onSelectTab: (id: string) => void;
@@ -80,6 +82,7 @@ export const AppShell = ({
   panelFit = null,
   alarms,
   onAcknowledgeAlarm,
+  onAlarmAction,
   tabs,
   activeTabId,
   onSelectTab,
@@ -107,6 +110,7 @@ export const AppShell = ({
         panelFit={panelFit}
         alarms={alarms}
         onAcknowledgeAlarm={onAcknowledgeAlarm}
+        onAlarmAction={onAlarmAction}
         tabs={tabs}
         activeTabId={activeTabId}
         onSelectTab={onSelectTab}
@@ -132,6 +136,7 @@ const Shell = ({
   panelFit,
   alarms,
   onAcknowledgeAlarm,
+  onAlarmAction,
   tabs,
   activeTabId,
   onSelectTab,
@@ -207,6 +212,7 @@ const Shell = ({
         panelFit={panelFit}
         alarms={alarms}
         onAcknowledgeAlarm={onAcknowledgeAlarm}
+        onAlarmAction={onAlarmAction}
       />
       {/*
         **THE RAIL AND THE WORK AREA SIT SIDE BY SIDE ON SHORT GLASS.**

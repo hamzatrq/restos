@@ -135,6 +135,53 @@ export type KotPrinter = {
   /** `03-F5`'s unacknowledged S1s, oldest first (`27-F11d` renders the head plus a count). */
   alarms: () => readonly Alarm[];
   acknowledge: (alarm_id: string) => void;
+  /**
+   * **`03-F6`/`03-F48` — send a failed kitchen ticket again, from the alert it raised.**
+   *
+   * Until August 2026 this did not exist and the consequence was measured on a running till, not
+   * predicted: once a chit exhausted `03-F4`'s three attempts the spooler's job was TERMINAL
+   * (`isTerminal` — `pump()` never touches it again) and `confirmed()` skips every line a prior
+   * chit already covers (`03-F55`), so pressing *Send to kitchen* again appended a second
+   * `order.confirmed` and enqueued **nothing**. The food was billed, the customer waited, the
+   * kitchen was never told, and the only control on the band was `I SAW THIS`.
+   *
+   * ── The three properties it has to have, and where each comes from ───────────────────────────
+   *
+   *   * **No second `order.confirmed`.** This is not a confirm path at all: it re-renders the
+   *     chit that already exists and re-enqueues it under its OWN job id, so no ledger event of
+   *     any kind is appended by the act itself (see the gap named below).
+   *   * **On the alert.** `03-F6` puts the resend *"from the failure alert"*, which `03-F5` puts
+   *     on the host device — the counter. `03-F48` agrees for a printer-only kitchen (*"the
+   *     counter is the only path"*) and asks for it on the counter's ORDER LIST as well; that
+   *     half is NOT built here and the reason is a test rather than a judgement — see below.
+   *   * **It cannot double-print a chit that printed.** Only a `failed` job is resent. `printed`
+   *     is refused, and so is `stalled`, which is `03-F41` in terms: the printer TOOK those bytes
+   *     and is holding them for a roll, and re-transmitting *"double-prints the instant the roll
+   *     is loaded"*. A band raised by `03-F34`'s refusal has no job at all and is refused too —
+   *     nothing was committed, so those lines are still owed to the kitchen and the NEXT press of
+   *     *Send to kitchen* renders them again (`03-F55`).
+   *
+   * **A refusal is not silent and is not a code**: the band stays up, its subject is rewritten in
+   * this process with the reason, and it loses its resend control so the operator is not invited
+   * to press a button that has already said no (`27-F5`, `00 §5.7`).
+   *
+   * **The chit is re-rendered with `reprint: true` (`03-F3`/`03-F37`), so the paper says REPRINT.**
+   * A resent chit is one the kitchen may or may not already hold: three transmits reported no
+   * answer, and *no answer* is not *no paper*. `03-F41` spends a paragraph on the cook who bins
+   * one of two identical chits being the failure this system exists to prevent, and the band is
+   * what lets him tell them apart. It is also the only honest reading of `03-F37` — *"reprints are
+   * a named fraud vector — the paper must say so"* — for a document a human asked for twice.
+   *
+   * **⚠ THE ACT IS NOT LOGGED, AND THAT IS A KERNEL GAP RATHER THAN AN OMISSION.** `03-F7` requires
+   * *"reprint … always logged with actor + reason (`kot.reprint_requested`)"*. The type IS in the
+   * `01 §4` catalog and `packages/domain/src/registry.ts` carries **no payload schema for it**, so
+   * `01-F4` makes emitting it a runtime error — the identical shape `03-F53` records for
+   * `printer.status_changed` and `02-F16` for `receipt.printed`. Commandment 2 forbids inventing
+   * the payload here, and `packages/domain` is a protected path (commandment 10). What IS recorded
+   * is the outcome: a resend that fails again appends its own `kot.print_failed` through
+   * `reconcile`, so the ledger still carries every failure — only the human's act is missing.
+   */
+  resend: (alarm_id: string) => void;
 };
 
 /**
@@ -227,6 +274,27 @@ const CHIT_ORDINAL = /^\d+$/;
 const isChitOf = (job_id: string, prefix: string): boolean =>
   job_id === prefix ||
   (job_id.startsWith(`${prefix}::`) && CHIT_ORDINAL.test(job_id.slice(prefix.length + 2)));
+
+/**
+ * The inverse of `chitPrefix` + the ordinal — which station a spooled chit was for, and which
+ * addendum it is (`03-F55`). `null` when the id is not a chit of this order at all.
+ *
+ * It is READ BACK rather than remembered, because `03-F6`'s resend has to work after the relaunch
+ * that `03-F4` is written about: the durable row is all that survives, and a station kept only in
+ * this process is exactly the record a power cut takes. The ordinal is matched with `isChitOf`'s
+ * own digit rule so a station name containing `::` cannot be read as another station's addendum.
+ */
+const chitOf = (job_id: string, order_id: string): { station: string; addendum: number } | null => {
+  const head = `${order_id}::`;
+  if (!job_id.startsWith(head)) return null;
+  const rest = job_id.slice(head.length);
+  const cut = rest.lastIndexOf("::");
+  if (cut === -1) return rest.length === 0 ? null : { station: rest, addendum: 0 };
+  const tail = rest.slice(cut + 2);
+  if (!CHIT_ORDINAL.test(tail)) return { station: rest, addendum: 0 };
+  const station = rest.slice(0, cut);
+  return station.length === 0 ? null : { station, addendum: Number(tail) };
+};
 
 /**
  * **`03-F5`'s third consequence, and until August 2026 it was the one nothing produced.**
@@ -354,7 +422,7 @@ export const createKotPrinter = ({
    * — TH230"); the ack needs them as data, and re-parsing an operator-facing string to recover
    * them is how a wording change silently empties a ledger field.
    */
-  const raised = new Map<string, { alarm: Alarm; order_id: string }>();
+  const raised = new Map<string, { alarm: Alarm; order_id: string; printer_name: string }>();
   let pumping = false;
   /**
    * `03-F54`: **the prior state is assumed `online`.** A device that boots with no prior state has
@@ -400,7 +468,20 @@ export const createKotPrinter = ({
    * survived removal because the `Map` key already de-duplicates the BAND, which is exactly how
    * a dead-looking line hides a live defect one caller over.
    */
-  const raise = (id: string, order_ref: string, why: string): boolean => {
+  const raise = (
+    id: string,
+    order_ref: string,
+    // **THE PRINTER THE JOB WAS FOR, not this construction's.** The band used to name
+    // `capability.model_id` unconditionally, so a chit that exhausted its budget under the
+    // printer configured yesterday was reported against whatever `RESTOS_KOT_PRINTER` says
+    // today — while `kot.print_failed` beside it correctly carried `job.printer_name`. One
+    // device, one act, two names, and `05-F3` raises both onto ONE alarm list, which is the
+    // exact "two spellings of one printer" defect `03-F53` refuses to create.
+    printer: string,
+    why: string,
+    // `03-F6`'s recovery, offered only where it can actually do something — see `resend`.
+    action?: { label: string },
+  ): boolean => {
     if (raised.has(id)) return false;
     raised.set(id, {
       alarm: {
@@ -408,13 +489,55 @@ export const createKotPrinter = ({
         // the line a cashier reads first, because either one alone is unactionable — the order
         // without the printer sends her hunting, the printer without the order does not say which
         // food is not being cooked.
-        message: `${DOCUMENT_NOUNS.kot} ${order_ref.slice(0, 8)} did not print — ${printer_name}`,
+        message: `${DOCUMENT_NOUNS.kot} ${order_ref.slice(0, 8)} did not print — ${printer}`,
         subject: why,
         id,
+        ...(action === undefined ? {} : { action }),
       },
       order_id: order_ref,
+      printer_name: printer,
     });
     return true;
+  };
+
+  /**
+   * `03-F6`'s control, as the operator reads it. Written HERE and not in the renderer, for
+   * `AlarmSchema`'s stated reason: the band's words are main's, one copy for the device.
+   */
+  const RESEND_LABEL = "SEND AGAIN";
+
+  /**
+   * Rewrite a band in place with the reason its resend was refused, and take the control away.
+   *
+   * `03-F5`'s band stays UP — the ticket still did not print and nothing about the refusal makes
+   * that untrue — so this replaces the subject rather than raising a second band (`27-F11d`: one
+   * band, or it has become the screen). Dropping the action is `27-F5` read honestly: a control
+   * that has just answered "no, and here is why" is not a control any more.
+   */
+  const refuseResend = (alarm_id: string, why: string): void => {
+    const band = raised.get(alarm_id);
+    if (band === undefined) return;
+    raised.set(alarm_id, {
+      ...band,
+      alarm: { id: band.alarm.id, message: band.alarm.message, subject: why },
+    });
+  };
+
+  /** One projected line cell as `KotData` wants it — shared by the confirm and the resend. */
+  const kotLineOf = (cell: LineCell): KotData["lines"][number] => {
+    const note = kotNoteOf(cell.notes);
+    return {
+      quantity: cell.qty,
+      // `01-F54` — the identifier is a poor word and a blank line is a dish nobody cooks.
+      name: catalog(cell.item_id)?.name ?? cell.item_id,
+      // The read models carry no modifier detail yet (`gateway.ts` says the same); empty is
+      // honest, and inventing it here would be fold logic outside the engine (`26 §8`).
+      modifiers: [],
+      // `02-F6`/`03-F56` — the half of `C7` that actually matters: an item note that reaches
+      // the cart and not the chit is a note the COOK never gets. Spread conditionally because
+      // `KotLine.note` is optional and `03-F56` gives an absent note no row (`00 §5.7`).
+      ...(note === undefined ? {} : { note }),
+    };
   };
 
   const confirmed = (order_id: string): void => {
@@ -441,22 +564,7 @@ export const createKotPrinter = ({
     )) {
       const at = station(cell.item_id);
       const lines = byStation.get(at) ?? [];
-      const note = kotNoteOf(cell.notes);
-      lines.push({
-        line_id,
-        line: {
-          quantity: cell.qty,
-          // `01-F54` — the identifier is a poor word and a blank line is a dish nobody cooks.
-          name: catalog(cell.item_id)?.name ?? cell.item_id,
-          // The read models carry no modifier detail yet (`gateway.ts` says the same); empty is
-          // honest, and inventing it here would be fold logic outside the engine (`26 §8`).
-          modifiers: [],
-          // `02-F6`/`03-F56` — the half of `C7` that actually matters: an item note that reaches
-          // the cart and not the chit is a note the COOK never gets. Spread conditionally because
-          // `KotLine.note` is optional and `03-F56` gives an absent note no row (`00 §5.7`).
-          ...(note === undefined ? {} : { note }),
-        },
-      });
+      lines.push({ line_id, line: kotLineOf(cell) });
       byStation.set(at, lines);
     }
 
@@ -563,7 +671,12 @@ export const createKotPrinter = ({
             : ` — needs ${result.required_columns} columns, this printer has ${result.available_columns}`;
         // The band FIRST, and the ledger record only if the band is new: `raise` is what makes a
         // repeated confirm idempotent here, the way `spooler.job(job_id)` does on the path below.
-        if (raise(job_id, order_id, `refused: ${result.reason}${measured}`)) {
+        //
+        // NO resend control (`03-F6`): a refusal created no job, so there is nothing to send —
+        // and re-rendering the same lines against the same capability would be refused again for
+        // the same reason. Those lines are still OWED to the kitchen (`03-F55`), so the recovery
+        // is the next press of *Send to kitchen* on a printer that can print them, not this.
+        if (raise(job_id, order_id, printer_name, `refused: ${result.reason}${measured}`)) {
           emit("kot.print_failed", { order_id, printer_name });
         }
         continue;
@@ -658,7 +771,15 @@ export const createKotPrinter = ({
       }
       if (job.state === "failed") {
         emit("kot.print_failed", { order_id: job.order_ref, printer_name: job.printer_name });
-        raise(job.job_id, job.order_ref, `printing failed after ${job.attempts} attempts`);
+        // `03-F6` — the band carries the RECOVERY, because this is the one case where there is
+        // something to recover: a job exists, it is terminal, and it never reached paper.
+        raise(
+          job.job_id,
+          job.order_ref,
+          job.printer_name,
+          `printing failed after ${job.attempts} attempts`,
+          { label: RESEND_LABEL },
+        );
       }
       // `stalled` is deliberately absent (`03-F41`): the printer TOOK the bytes and is holding
       // them until the roll is replaced. A band here is the duplicate KOT arriving by a human.
@@ -683,9 +804,136 @@ export const createKotPrinter = ({
     reconcile(before);
   };
 
+  /** `03-F6`/`03-F48` — see `KotPrinter.resend` for the whole argument. */
+  const resend = (alarm_id: string): void => {
+    // A band this printer does not hold is not this printer's business — the IPC handler is free
+    // to call every printer for one tap, exactly as `acknowledge` is.
+    if (!raised.has(alarm_id)) return;
+
+    const job = spooler.job(alarm_id);
+    if (job === undefined) {
+      // `03-F34` refused this document before a job existed (`03-F55`: "no job was created,
+      // nothing was committed, its lines are still owed to the kitchen").
+      refuseResend(
+        alarm_id,
+        "nothing to send — this ticket was refused before it was made; it needs a printer that can print it",
+      );
+      return;
+    }
+    if (job.state === "printed") {
+      // (c). `03-F41`: "a duplicate KOT is a real kitchen error, not a cosmetic one."
+      refuseResend(alarm_id, "already printed — sending it again would cook this food twice");
+      return;
+    }
+    if (job.state === "stalled") {
+      // `03-F41` in terms: the printer TOOK the bytes and is holding them until the roll is
+      // replaced, and re-transmitting "double-prints the instant the roll is loaded".
+      refuseResend(
+        alarm_id,
+        "the printer is holding this ticket for a new roll — it prints when the paper is replaced",
+      );
+      return;
+    }
+    if (job.state !== "failed") {
+      refuseResend(alarm_id, "still trying — this ticket has not used up its attempts yet");
+      return;
+    }
+    if (job.covers === undefined) {
+      // A row written before `03-F55` kept no coverage, so this process cannot know which lines
+      // that chit carried, and re-rendering the station's whole line set would cook the rest of
+      // the order twice. Same DECLARED interpretation as `confirmed()`: unknown coverage honours
+      // the paper. `03-F48`'s reprint is "the last CHIT, not the whole order" (`03-F55`, owed 2).
+      refuseResend(
+        alarm_id,
+        "this ticket kept no record of which lines it carried — nothing was sent",
+      );
+      return;
+    }
+
+    const chit = chitOf(alarm_id, job.order_ref);
+    if (chit === null) {
+      refuseResend(alarm_id, "this ticket's station cannot be read back — nothing was sent");
+      return;
+    }
+    // The confirm ANCHOR and the lines, re-read from the fold — `27-F62`, print what was true at
+    // APPEND time. `openOrders`/`kitchenQueue` are the same two projections `confirmed()` used and
+    // neither drops a row on settlement, so a chit that failed on an order the cashier has since
+    // taken money for is still resendable — which is the ordinary case, not the exotic one.
+    const queued = store.kitchenQueue().find((row) => row.order_id === job.order_ref);
+    const order = store.openOrders().find((row) => row.order_id === job.order_ref);
+    if (queued === undefined || order === undefined) {
+      refuseResend(alarm_id, "this till no longer holds that order — nothing was sent");
+      return;
+    }
+    const cells = JSON.parse(order.json_lines) as Record<string, LineCell>;
+    const lines = job.covers.flatMap((line_id) => {
+      const cell = cells[line_id];
+      return cell === undefined ? [] : [kotLineOf(cell)];
+    });
+    if (lines.length === 0) {
+      refuseResend(
+        alarm_id,
+        "the lines on this ticket are no longer on the order — nothing was sent",
+      );
+      return;
+    }
+
+    const result = render(
+      spec,
+      {},
+      {
+        ticket_no: job.order_ref.slice(0, 8),
+        table: tableOf(order.table_ids_json, order.channel),
+        station: chit.station,
+        branch_created_at: queued.age_basis,
+        // `03-F3`/`03-F37` — the paper says REPRINT. Three transmits reported no answer, and no
+        // answer is not no paper: if the kitchen does hold the first copy, this band is what lets
+        // a cook tell the two apart instead of binning one (`03-F41`).
+        reprint: true,
+        // `03-F55`'s ordinal, unchanged — this is the SAME chit, not a new addendum.
+        addendum: chit.addendum,
+        lines,
+      } satisfies KotData,
+      capability,
+    );
+    if (!result.ok) {
+      const measured =
+        result.required_columns === undefined || result.available_columns === undefined
+          ? ""
+          : ` — needs ${result.required_columns} columns, this printer has ${result.available_columns}`;
+      // `03-F34` again, on the resend path: nothing is enqueued, and the band says why.
+      refuseResend(alarm_id, `refused: ${result.reason}${measured}`);
+      return;
+    }
+
+    // **THE SAME `job_id`, and that is the whole of why this cannot corrupt `03-F55`.** A new id
+    // would add a row to `spooler.jobs()`, which is what `confirmed()` counts to get the next
+    // addendum ordinal — so a resend would silently renumber the station's next addition. Re-using
+    // the id overwrites the terminal row in place: one chit, one coverage record, a fresh
+    // `03-F4` budget, and `pump()` picks it up because it is no longer terminal.
+    spooler.enqueue({
+      job_id: alarm_id,
+      document: result.bytes,
+      // The printer this document was just rendered AGAINST, which is the one that will be
+      // transmitted to. `capability` may have moved since the failed attempt.
+      printer_name,
+      order_ref: job.order_ref,
+      covers: job.covers,
+    });
+    // The band goes: the condition it reported is over — this ticket is queued again, not failed.
+    // If it fails again, `reconcile` raises a fresh band AND appends a fresh `kot.print_failed`,
+    // so nothing about the second failure is silent (`03-F5`). What is NOT recorded is the human's
+    // act — `03-F7`'s `kot.reprint_requested` has no payload schema (see `KotPrinter.resend`).
+    raised.delete(alarm_id);
+    // `01-F17`, exactly as `confirmed()`: the socket is never on the stack of the IPC handler
+    // that has not yet answered the operator.
+    queueMicrotask(() => void pump());
+  };
+
   return {
     confirmed,
     pump,
+    resend,
     alarms: () => [...raised.values()].map((band) => band.alarm),
     acknowledge: (alarm_id) => {
       const band = raised.get(alarm_id);
@@ -699,7 +947,9 @@ export const createKotPrinter = ({
       // only cleared the screen if its append succeeded would leave a full-screen repeating
       // banner on the counter because the ledger was busy. `emit` swallows for the same reason.
       raised.delete(alarm_id);
-      emit(PRINT_ACK, { alarm_id, order_id: band.order_id, printer_name });
+      // The BAND's printer, not this construction's — it is the field `kot.print_failed` carries
+      // for the same job, and the ack exists to be joined to that failure on it.
+      emit(PRINT_ACK, { alarm_id, order_id: band.order_id, printer_name: band.printer_name });
     },
   };
 };
@@ -790,8 +1040,32 @@ export const createCashPrinter = ({
   append,
 }: CashPrinterDeps): CashPrinter => {
   const printer_name = capability.model_id;
-  const raised = new Map<string, Alarm>();
-  const seen = new Map<string, string>();
+  const raised = new Map<string, { alarm: Alarm; printer_name: string }>();
+  /**
+   * **SEEDED FROM THE SPOOL, and that is a behaviour fix rather than an initialisation detail.**
+   *
+   * `seen` records the state each job was already in the last time this printer looked. Empty, the
+   * first `reconcile()` after a launch treats every row the durable store handed back as a fresh
+   * transition — so a slip that failed on Friday raised its band again on Saturday morning, on
+   * every relaunch, for ever. `03-F5`'s band is the loudest thing on the glass precisely so a
+   * cashier acts on it; a band that is up before the first order of the day is how staff learn to
+   * dismiss it without reading, which defeats the FR rather than serving it.
+   *
+   * This makes the cash and receipt printers agree with the KOT printer, which never had the
+   * defect: its `reconcile(before)` takes its baseline from `spooler.jobs()` at the top of every
+   * `pump()`, so a restored terminal row differs from nothing and raises nothing. One file, two
+   * behaviours, and one of them had to be wrong.
+   *
+   * **DECLARED INTERPRETATION (`24 §3b`).** `03-F5` says the alert repeats "until acknowledged"
+   * and acknowledgement is not persisted anywhere, so a band the operator never dismissed is lost
+   * at a relaunch either way. The named alternative — persist the acknowledgement and re-raise
+   * only the unacknowledged ones — is the correct one, needs a durable ack store the device does
+   * not have, and is OWED. What is not defensible is the state this replaces, where a band the
+   * operator HAD dismissed came back too.
+   */
+  const seen = new Map<string, string>(
+    spooler.jobs().map((job) => [job.job_id, job.state] as const),
+  );
 
   /** `01-F17`, exactly as the KOT printer's: a failed ledger write must not cost the act. */
   const emit = (type: string, payload: Record<string, unknown>): void => {
@@ -832,7 +1106,13 @@ export const createCashPrinter = ({
           ? ""
           : ` — needs ${result.required_columns} columns, this printer has ${result.available_columns}`;
       // `03-F34`: NOTHING is enqueued. No ledger record either — see `CASH_JOB_PREFIX`.
-      raise(job_id, DOCUMENT_NOUNS[kind], ref, `refused: ${result.reason}${measured}`);
+      raise(
+        job_id,
+        DOCUMENT_NOUNS[kind],
+        ref,
+        printer_name,
+        `refused: ${result.reason}${measured}`,
+      );
       return;
     }
     spooler.enqueue({ job_id, document: result.bytes, printer_name, order_ref: ref });
@@ -842,16 +1122,30 @@ export const createCashPrinter = ({
     queueMicrotask(() => void pump());
   };
 
-  const raise = (id: string, noun: string, ref: string, why: string): void => {
+  const raise = (
+    id: string,
+    noun: string,
+    ref: string,
+    // The printer THIS JOB was for — see the KOT printer's `raise` for why naming the
+    // construction's was wrong. The spool is durable, so a job outlives a configuration change.
+    printer: string,
+    why: string,
+  ): void => {
     if (raised.has(id)) return;
     raised.set(id, {
-      // `03-F5` requires the alert to name the printer and the subject — and the DOCUMENT, because
-      // "KOT 5f3a9c21 did not print" sends a cashier to the kitchen printer for a slip that is not
-      // a KOT and does not tell her the reconciliation she is waiting to sign never appeared.
-      message: `${noun} ${ref.slice(0, 8)} did not print — ${printer_name}`,
-      subject: why,
-      id,
+      alarm: {
+        // `03-F5` requires the alert to name the printer and the subject — and the DOCUMENT,
+        // because "KOT 5f3a9c21 did not print" sends a cashier to the kitchen printer for a slip
+        // that is not a KOT and does not tell her the reconciliation she is waiting to sign never
+        // appeared.
+        message: `${noun} ${ref.slice(0, 8)} did not print — ${printer}`,
+        subject: why,
+        id,
+      },
+      printer_name: printer,
     });
+    // No `03-F6` resend control on this band: `01 §4` carries no reprint act for a cash slip and a
+    // second signature surface is `02-F16`'s fraud shape one document over. Named, not forgotten.
   };
 
   /**
@@ -973,18 +1267,27 @@ export const createCashPrinter = ({
         const kind = job.job_id.startsWith(`${CASH_JOB_PREFIX}day_summary::`)
           ? DOCUMENT_NOUNS.day_summary
           : DOCUMENT_NOUNS.shift_close_slip;
-        raise(job.job_id, kind, job.order_ref, `printing failed after ${job.attempts} attempts`);
+        raise(
+          job.job_id,
+          kind,
+          job.order_ref,
+          job.printer_name,
+          `printing failed after ${job.attempts} attempts`,
+        );
       }
     },
-    alarms: () => [...raised.values()],
+    alarms: () => [...raised.values()].map((band) => band.alarm),
     acknowledge: (alarm_id) => {
       // Only for a band this printer actually holds — the handler calls both, and an ack for a
       // KOT band written twice would be two permanent records of one tap (`01-F1`).
-      if (!raised.delete(alarm_id)) return;
+      const band = raised.get(alarm_id);
+      if (band === undefined) return;
+      raised.delete(alarm_id);
       // NO `order_id`. This band's subject is a shift id or a day id (`CASH_JOB_PREFIX`), and
       // putting one in a field called `order_id` writes a permanent lie into a ledger that has no
       // edit path. `alarm_id` IS the spool job id, so which document was dismissed is still said.
-      emit(PRINT_ACK, { alarm_id, printer_name });
+      // The printer is the BAND's, so the ack names the printer the document actually failed on.
+      emit(PRINT_ACK, { alarm_id, printer_name: band.printer_name });
     },
   };
 };
@@ -1073,18 +1376,24 @@ export const createReceiptPrinter = ({
 }: ReceiptPrinterDeps): ReceiptPrinter => {
   const printer_name = capability.model_id;
   const raised = new Map<string, Alarm>();
-  const seen = new Map<string, string>();
+  /** Seeded from the spool for the reason `createCashPrinter`'s own `seen` records at length. */
+  const seen = new Map<string, string>(
+    spooler.jobs().map((job) => [job.job_id, job.state] as const),
+  );
 
-  const raise = (id: string, ref: string, why: string): void => {
+  const raise = (id: string, ref: string, printer: string, why: string): void => {
     if (raised.has(id)) return;
     raised.set(id, {
       // `03-F5`'s sentence shape, with the DOCUMENT named: "Receipt 5f3a9c21 did not print — TH230"
       // sends a cashier to the right piece of paper, where "KOT … did not print" would send her to
-      // the kitchen for a document the kitchen never sees.
-      message: `${DOCUMENT_NOUNS.receipt} ${ref.slice(0, 8)} did not print — ${printer_name}`,
+      // the kitchen for a document the kitchen never sees. The printer is the JOB's — see the KOT
+      // printer's `raise` for why naming this construction's was wrong.
+      message: `${DOCUMENT_NOUNS.receipt} ${ref.slice(0, 8)} did not print — ${printer}`,
       subject: why,
       id,
     });
+    // No `03-F6` resend control: `02-F16` makes a second copy a named fraud vector and `C17`'s
+    // deliberate, banded reprint act is the path the corpus gives it. Named, not forgotten.
   };
 
   const settled = (order_id: string): void => {
@@ -1178,7 +1487,7 @@ export const createReceiptPrinter = ({
           : ` — needs ${result.required_columns} columns, this printer has ${result.available_columns}`;
       // `03-F34`: NOTHING is enqueued, and no ledger record either — `01 §4` carries no
       // `receipt.print_failed` (see `RECEIPT_JOB_PREFIX`).
-      raise(job_id, order_id, `refused: ${result.reason}${measured}`);
+      raise(job_id, order_id, printer_name, `refused: ${result.reason}${measured}`);
       return;
     }
     spooler.enqueue({ job_id, document: result.bytes, printer_name, order_ref: order_id });
@@ -1203,7 +1512,12 @@ export const createReceiptPrinter = ({
         // `03-F5`'s argument — a silent failure is forbidden — is what the band delivers. Reading
         // `03-F5` as KOT-only would leave a cashier believing a customer has a receipt they do not
         // have, which is the same harm one document over. Same declared reading as S-7's slips.
-        raise(job.job_id, job.order_ref, `printing failed after ${job.attempts} attempts`);
+        raise(
+          job.job_id,
+          job.order_ref,
+          job.printer_name,
+          `printing failed after ${job.attempts} attempts`,
+        );
       }
     },
     alarms: () => [...raised.values()],
