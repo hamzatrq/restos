@@ -141,6 +141,15 @@ export type OrdersSurfaceProps = {
   onOpenPageChange: (page: number) => void;
   /** `C19` — one tap, `order.confirmed`, idempotent (`02-F9`). */
   onAccept: (orderId: string) => void;
+  /**
+   * `C31` — one tap, and it appends NOTHING (`02-F51`). The pressed order becomes the terminal's
+   * current order; the caller decides what that means and where the operator lands.
+   *
+   * **Separate from `onAccept` on purpose.** These are two lists with one action each (`27-F9`,
+   * and `OrderList` takes exactly one by design), and the obvious economy — one handler for both —
+   * would replace `02-F9`'s Accept with a recall, leaving a website order that can never be taken.
+   */
+  onRecall: (orderId: string) => void;
 };
 
 export const OrdersSurface = ({
@@ -150,6 +159,7 @@ export const OrdersSurface = ({
   openPage,
   onOpenPageChange,
   onAccept,
+  onRecall,
 }: OrdersSurfaceProps) => {
   /**
    * `27-F11c` — capacity is a PHYSICAL question, so each list is costed from a MEASURED surface
@@ -256,10 +266,19 @@ export const OrdersSurface = ({
       >
         <div ref={openRef} style={{ flex: 1, minHeight: 0, display: "flex" }}>
           {/*
-            `02-F10` recall, and `02-F33`'s read-only posture: NO `action` is passed. That is
-            the whole of the ready-marking decision expressed in one absent prop — see this
-            file's header for why `C32` cannot be drawn, and note that a greyed Ready control
-            would still be claiming the act exists, which is the opposite of read-only.
+            ⚠ **THIS LIST PASSED NO `action` AT ALL UNTIL `02-F51`, and that absence was a defect
+            wearing a design decision's clothes.** The comment here read *"`02-F10` recall, and
+            `02-F33`'s read-only posture: NO `action` is passed"* — which conflated two different
+            questions and answered the wrong one. `02-F33` is read-only for line **STATES**, and
+            that is still true: no Ready control, no Reject, for the reasons this file's header
+            gives per FR. But `02-F10` calls open orders *"recallable"* and **nothing in the
+            product could recall one** — `setCartOrderId` had a single call site inside
+            `startOrder`, so starting a second order made the first unreachable: no further lines,
+            and no settlement. The order was never lost (`01-F1`); no screen could reach it.
+
+            `02-F51` (a) is the FR that puts the control here. It is ONE control (`27-F9`), it
+            changes no line state, and it appends nothing — so the read-only posture the old
+            comment was defending is untouched by it.
           */}
           {openMm === null ? null : (
             <OrderList
@@ -267,6 +286,13 @@ export const OrdersSurface = ({
               heightMm={openMm.heightMm}
               page={openPage}
               onPageChange={onOpenPageChange}
+              /*
+                `02-F11`'s own word for the act — an order is *"resumed, extended, or settled"* on
+                another terminal — rather than an invented one. No FR fixes this string, so the
+                oracle finds the control positionally and a future comprehension test (`27-F35`)
+                may move it without touching an assertion.
+              */
+              action={{ label: "Resume", onAct: onRecall }}
               empty="No open orders. Start one on the Order tab."
             />
           )}

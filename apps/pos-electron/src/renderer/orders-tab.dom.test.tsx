@@ -8,6 +8,12 @@
 // button that cannot emit `order.rejected` and a Ready button that emits an illegal edge are
 // both controls that can never succeed.
 //
+// ⚠ **§E's THIRD assertion was rewritten on 2026-08-14 and its old text is quoted in place.**
+// `02-F51` (a) put `02-F10`'s recall control on the open-order row, so *"offers no control at
+// all"* stopped being the rule; what that test actually owned — no line-STATE control, and not a
+// menu of controls on one row — is asserted there instead. Read it before adding anything to a
+// row here.
+//
 // Written against the round-3 law. The assertions that carry the file, and the mutant each is
 // aimed at — every one of them survives a suite that only checks "the tab renders something":
 //
@@ -300,14 +306,39 @@ describe("§E — ANTI-SCOPE: C20 and C32 are BLOCKED and must not be drawn", ()
     expect(screen.queryByRole("button", { name: /ready/i })).toBeNull();
   });
 
-  it("offers no control at all on an open-order row (02-F10 recall is read-only)", async () => {
+  it("02-F51: an open-order row carries exactly ONE control, and it is no state change", async () => {
+    /*
+      ⚠ **RETIRED AND REWRITTEN, 2026-08-14, by the test-authoring session for `02-F51` — the
+      assertion is not deleted, it is here in the paragraph below.** It read *"offers no control
+      at all on an open-order row (02-F10 recall is read-only)"* and pinned the surface's whole
+      button count at 6 (the rail's six tabs, nothing else).
+
+      **What changed: `02-F51` (a).** That count encoded a scope decision — this row draws
+      nothing — which turned out to be a defect rather than a narrowing: `02-F10`'s recall had no
+      control **anywhere in the product**, so `setCartOrderId` had exactly one call site (inside
+      `startOrder`) and starting a second order made the first UNREACHABLE — no further lines,
+      and no settlement. The FR now puts one control on this row and says what it does.
+
+      **The anti-scope property this test really owned is kept, and it was never "no control".**
+      It was (i) no control that changes a line STATE (`02-F33`'s read-only posture, `C32`'s
+      blocker) and (ii) not a MENU of controls on a row (`27-F9`; `OrderList` takes exactly one
+      action by design). Both are asserted below, per row rather than as a whole-surface count —
+      which is also stronger than the number was, since 6 could be reached by adding a row
+      control and removing a tab. The two assertions above — no Reject, no Ready — are
+      untouched, and `order-recall.dom.test.tsx` §A carries the same one-control-per-row check
+      from the other side.
+    */
     mountWith([order({ order_id: "counter-1" }), order({ order_id: "counter-2" })]);
     await openOrdersTab();
     await screen.findByText("Open orders");
-    // Only the RAIL's tabs remain. No row control, and no pager at this panel size. The count
-    // is a proxy for "this surface draws no control of its own", so it moved 5 → 6 with the rail
-    // (`02-F7`'s Sold-out tab) and the anti-scope property it guards is untouched.
-    expect(screen.getAllByRole("button")).toHaveLength(6);
+    const rows = screen.getAllByRole("article");
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(within(row).getAllByRole("button")).toHaveLength(1);
+    }
+    // Still no pager at this panel size, and the rail is still six: the surface adds one control
+    // PER ROW and nothing else of its own.
+    expect(screen.getAllByRole("button")).toHaveLength(6 + rows.length);
   });
 });
 

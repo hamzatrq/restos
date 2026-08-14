@@ -77,19 +77,71 @@ export const IDENTITY_ENV = {
  * device stricter than the registry that admits it would refuse credentials that work.
  */
 export const resolveDeviceIdentity = (env: Record<string, string | undefined>): DeviceIdentity => {
+  const read = (key: keyof DeviceIdentity): string =>
+    readIdentityKey(env, key) ?? DEV_IDENTITY[key];
+  return { org_id: read("org_id"), branch_id: read("branch_id"), device_id: read("device_id") };
+};
+
+/**
+ * One key, validated. `undefined` means ABSENT — what the caller does with that is the whole
+ * difference between `resolveDeviceIdentity` and `requireDeviceIdentity`, and it is the only
+ * difference, so the present-but-unusable refusal below cannot drift between them.
+ */
+const readIdentityKey = (
+  env: Record<string, string | undefined>,
+  key: keyof DeviceIdentity,
+): string | undefined => {
+  const name = IDENTITY_ENV[key];
+  const raw = env[name];
+  if (raw === undefined) return undefined;
+  if (raw.trim() === "" || raw.trim() !== raw) {
+    throw new Error(
+      `${name} is set to ${JSON.stringify(raw)}, which is not a usable ${key}. A device ` +
+        "identity keys its own outbox and cannot be corrected afterwards (01-F1, 01-F8), so " +
+        `this refuses rather than falling back to the dev seed. Unset ${name} to use the seed, ` +
+        "or set it to the exact value passed to `provision-device`.",
+    );
+  }
+  return raw;
+};
+
+/**
+ * `01-F65` — **the same three ids, with no seed under them.** An ABSENT key REFUSES here.
+ *
+ * `resolveDeviceIdentity` above falls back per key to `DEV_IDENTITY`, which is right for exactly
+ * one host: `apps/pos-electron`, whose documented dev launch is `pnpm start` with no environment
+ * and whose seed this is. It is wrong for every OTHER host on the same machine, because falling
+ * back there does not produce an unconfigured device — it produces **the counter**. Two processes
+ * answering to one `device_id` are one origin with two interleaved lamport sequences (`01-F3`),
+ * both draining into one outbox (`01-F8`), in a log `01-F1` forbids unwinding. The pass screen
+ * launched with no environment was that device, silently, and `apps/manager/src/branch.ts` had
+ * already met and hand-refused the same hazard on the phone.
+ *
+ * **A separate entry point rather than a flag on the one above**, deliberately: an options
+ * argument leaves the seed one keystroke away under the same name and cannot be grepped for at a
+ * call site, which is how `01-F60`'s enabled set came to be declared twice. The host names which
+ * discipline it is under, in a word a reader and a seam test can both find.
+ *
+ * Validation of a value that IS present is byte-identical to the resolver's, by construction: not
+ * a UUID check, because `provision-device` mints a token for any non-empty string and
+ * `kernel.device_registry` stores `text`, so a device stricter than the registry that admits it
+ * would refuse credentials that work.
+ */
+export const requireDeviceIdentity = (env: Record<string, string | undefined>): DeviceIdentity => {
   const read = (key: keyof DeviceIdentity): string => {
-    const name = IDENTITY_ENV[key];
-    const raw = env[name];
-    if (raw === undefined) return DEV_IDENTITY[key];
-    if (raw.trim() === "" || raw.trim() !== raw) {
+    const value = readIdentityKey(env, key);
+    if (value === undefined) {
+      const name = IDENTITY_ENV[key];
       throw new Error(
-        `${name} is set to ${JSON.stringify(raw)}, which is not a usable ${key}. A device ` +
-          "identity keys its own outbox and cannot be corrected afterwards (01-F1, 01-F8), so " +
-          `this refuses rather than falling back to the dev seed. Unset ${name} to use the seed, ` +
-          "or set it to the exact value passed to `provision-device`.",
+        `${name} is not set, and this host may not guess which device it is. Falling back would ` +
+          `adopt another device's ${key} — on this machine, the counter's dev seed — and two ` +
+          "devices under one origin interleave one lamport sequence (01-F3) into one outbox " +
+          "(01-F8), permanently (01-F1). Set " +
+          `${Object.values(IDENTITY_ENV).join(", ")} to the exact values passed to ` +
+          "`provision-device` for THIS device (00 §5.7).",
       );
     }
-    return raw;
+    return value;
   };
   return { org_id: read("org_id"), branch_id: read("branch_id"), device_id: read("device_id") };
 };

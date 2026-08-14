@@ -165,6 +165,45 @@ export const isAlreadySettled = (order: Pick<OpenOrder, "total_paisa" | "paid_pa
   order.total_paisa > 0 && order.paid_paisa >= order.total_paisa;
 
 /**
+ * `02-F51` — **WHICH of the branch's open orders this terminal is working on.**
+ *
+ * Two arms, and the whole FR is in the difference between them.
+ *
+ * **Chosen (`02-F51` (a)/(c)).** This terminal started an order or recalled one, so the answer is
+ * that order and nothing else. When its money side closes it is RELEASED and this returns
+ * `undefined` — the surface goes back to its resting state and a tile tap adds a line nowhere.
+ * **There is no `?? orders[0]` on this arm and that absence is the assertion**: `orders` is
+ * BRANCH-wide (`02-F11`), so falling through would silently re-point the cart at whatever another
+ * terminal has open and the next tap would ring a dish onto a stranger's bill — at a price
+ * `01-F53` freezes into an append-only ledger `01-F1` forbids correcting. Nothing on the glass
+ * would move while it happened.
+ *
+ * **Never chosen (`02-F51` (d)).** A fresh launch still shows the branch's first open order, which
+ * is the `01-F17` compatibility path `DEC-MONEY-009` left behind and which `double-settlement.dom
+ * .test.tsx` §A depends on: a till that has claimed nothing must still be able to READ a settled
+ * bill and be told so, rather than showing a blank Pay surface to a customer asking about it.
+ * Retiring that arm is a ruling with a measured blast radius across suites this FR does not own.
+ *
+ * **The release test is `isAlreadySettled` — the reading `main/settlement-guard.ts` already
+ * makes — and never "some money has arrived".** `02-F13` splits a settlement across methods, so a
+ * partial tender must leave the cart exactly where it was: a cashier halfway through a split who
+ * lost her order would ring the rest of the split onto nothing.
+ *
+ * **DERIVED, not stored.** The alternative is an effect that clears `cartOrderId` when the fold
+ * says settled; that adds a second writer of this fact and a window in which the two disagree,
+ * and it is the window a `changed` push lands in. Reading it out of the projection each render
+ * cannot drift.
+ */
+const cartOrder = (
+  orders: readonly OpenOrder[],
+  cartOrderId: string | null,
+): OpenOrder | undefined => {
+  if (cartOrderId === null) return orders[0];
+  const chosen = orders.find((o) => o.order_id === cartOrderId);
+  return chosen === undefined || isAlreadySettled(chosen) ? undefined : chosen;
+};
+
+/**
  * `27 §5` — **`id` is typed `IconName`, so the compiler asks the question `27-F34` asks.**
  *
  * These three tiles are co-displayed and are chosen ~75x a shift by an operator `21 §5` puts at
@@ -556,16 +595,19 @@ export const Counter = () => {
    * and they have **no payload schema in `packages/domain`**, so `01-F4` makes them unemittable
    * and C10 stays owed. Nothing here emits anything.
    *
-   * **`null` falls back to `orders[0]`, which is deliberate and is the whole of the compatibility
-   * story.** A till that has started nothing this session — a fresh launch, or one whose order has
-   * just settled out of the projection — behaves exactly as it did. What changes is that the
-   * moment this till starts an order, THAT order is its cart, whatever else the branch has open.
+   * **`null` means this terminal has CHOSEN nothing, and that arm alone falls back to `orders[0]`**
+   * — see `cartOrder`, which is where both arms and `02-F51` (c)'s release are written down. A
+   * non-null value naming a settled order is a RELEASE and never a fallback.
    *
-   * **Owed, and named rather than left to look intentional:** an order started on this till and
-   * then abandoned to a relaunch is reachable only through `orders[0]`. `02-F10`'s recall is the
-   * FR that closes it and the Orders tab is its surface, but `orders-tab.dom.test.tsx` §E is an
-   * oracle asserting that an open-order row carries **no control at all** — so putting a recall
-   * action there is a change for that file's test owner to make, not for this session (`24 §3`).
+   * **⚠ `setCartOrderId` had ONE call site for a round, and the second one is `02-F51`.** Until
+   * August 2026 it was set from `startOrder` alone, so an order started here and then left — for a
+   * relaunch, or for the walk to the Orders tab — was reachable only through `orders[0]`: no
+   * further lines and **no settlement**. `recallOrder` is that second call site and it discharges
+   * `02-F10`'s *"open orders … recallable"*. The comment that stood here filed the gap as blocked
+   * on `orders-tab.dom.test.tsx` §E (*"an open-order row carries no control at all"*), which was
+   * correct at the time: that file's own test owner rewrote §E for `02-F51` before this landed
+   * (`24 §3`), and the assertion it replaced it with — one control per row, and no line-STATE
+   * control — is what this must keep satisfying.
    */
   const [cartOrderId, setCartOrderId] = useState<string | null>(null);
   /**
@@ -589,7 +631,7 @@ export const Counter = () => {
    * Declared HERE, above the early return, because hooks may not sit below it and `menuChannel`
    * feeds `reload`'s dependency list. It is the same row the render below draws.
    */
-  const current = orders.find((o) => o.order_id === cartOrderId) ?? orders[0];
+  const current = cartOrder(orders, cartOrderId);
   const menuChannel = current?.channel ?? pendingChannel ?? GRID_PREVIEW_CHANNEL;
   /**
    * `02-F6`'s note target — the LAST line in the cart, which is the last row drawn and therefore
@@ -1593,6 +1635,29 @@ export const Counter = () => {
   };
 
   /**
+   * `C31` / `02-F10` / `02-F51` (a) — **RECALL: the pressed order becomes this terminal's cart.**
+   *
+   * The one act on this surface that appends NOTHING (`02-F51` (b)). `02-F4`'s `order.parked` /
+   * `order.unparked` are the branch-wide, ledger-visible form of this question and carry no
+   * `01-F4` payload schema, so an emit is unbuildable — and a recall that wrote would file a
+   * permanent row (`01-F1`) every time a cashier glanced at her own queue. **Which order a
+   * TERMINAL is on is terminal state; which orders a BRANCH has open is the ledger's**, and
+   * `02-F11` already publishes that. The stated cost: a recall here is invisible to every other
+   * terminal, so two tills may hold one order — the state `02-F11` describes and
+   * `DEC-MONEY-009`'s guard already refuses at settlement.
+   *
+   * **It also leaves the tab it was pressed on**, because the act is not finished on this surface:
+   * the cart, the grid and `02-F8`'s confirm are all one tab over, and a cashier left staring at
+   * the queue would have to know to navigate — a second act for one intent, which is what
+   * `21 §4`'s tap budget and `screen-map §2`'s depth rule both spend. `27-F4` is untouched: the
+   * rail is the same tabs in the same positions, and this moves the selection, not a control.
+   */
+  const recallOrder = (order_id: string) => {
+    setCartOrderId(order_id);
+    setActiveTab("order");
+  };
+
+  /**
    * `screen-map §5` — **"a cloud-order popup" gets no screen at all**: it *"interrupts a cart,
    * which `27-F11d` forbids"*, and the ruled alternative is *"S2 chime + count badge on the
    * Orders tab"*. This is the badge half.
@@ -1715,6 +1780,11 @@ export const Counter = () => {
           openPage={openPage}
           onOpenPageChange={setOpenPage}
           onAccept={acceptCloudOrder}
+          // `02-F51` (a) — a SECOND action, on the other list. `OrderList` takes exactly one each
+          // (`27-F9`), so these are two props rather than one shared handler: passing the recall to
+          // both would silently replace `02-F9`'s Accept and a website order could no longer be
+          // taken at all.
+          onRecall={recallOrder}
         />
       ) : activeTab === "soldout" ? (
         /*

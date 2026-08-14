@@ -108,11 +108,20 @@
 //
 //     export const DEV_PIN_ENV: "RESTOS_DEV_PIN"
 //     export const DEV_STAFF: readonly { user_id, display_name, role }[]
+//     export const DEV_STAFF_PIN_ENV: Readonly<Record<string, string>>   ← user_id → env key
 //     export const seedDevStaff: (o: {
 //       registry: { version(): number; apply(u: …): unknown }   ← structurally typed, as
 //       branch_id: string                                          `DisplayFacts` already is
-//       pin: string | undefined
+//       env: Record<string, string | undefined>
 //     }) => Promise<boolean>       // false ⇒ nothing was seeded
+//
+//     ⚠ AMENDED 2026-08-14 by this file's test owner. This row read `pin: string | undefined`,
+//     and §A below required all three seeded members — the branch MANAGER included — to verify
+//     against that one PIN. See §A's own retirement note: one credential for three people is
+//     refused by `01-F28` ("synced credential HASHES", plural) and is what made `02-F22` and
+//     `02-F38` unenforceable on this device. `env` REPLACES `pin`, which is also the contract
+//     `apps/pos-electron/src/main/__acceptance__/dev-staff-credentials.test.ts` — authored from
+//     spec text only, and the independent oracle for this question — states in terms.
 //
 //     `apps/pos-electron/src/main/index.ts` declares `DEV_STAFF` and `seedDevStaff` today, and
 //     `18 §2` forbids `apps → apps` outright. `DEC-ARCH-001` rules EXTRACT at the second consumer
@@ -131,7 +140,13 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEV_PIN_ENV, DEV_STAFF, resolveServeSignal, seedDevStaff } from "@restos/device-config";
+import {
+  DEV_PIN_ENV,
+  DEV_STAFF,
+  DEV_STAFF_PIN_ENV,
+  resolveServeSignal,
+  seedDevStaff,
+} from "@restos/device-config";
 import { hashPin, verifyPin } from "@restos/domain";
 import { type DeviceStore, openStore, PIN_LOCKOUT_COOLDOWN_MS } from "@restos/sync-client";
 import { afterEach, describe, expect, it } from "vitest";
@@ -352,29 +367,102 @@ const edgesInLedger = (store: DeviceStore) =>
 // with a correct unlock path and an empty registry is a kitchen nobody can sign in to.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * ⚠ **RETIRED 2026-08-14 BY THIS FILE'S TEST OWNER, AND REPLACED RATHER THAN DELETED.**
+ *
+ * §A used to call `seedDevStaff({ registry, branch_id, pin: "4821" })` and then require EVERY
+ * seeded member — `DEV_STAFF`'s branch MANAGER included — to verify against that one PIN.
+ * **That assertion WAS the hole**, and it is the `catalog-pricing.test.ts:394` shape exactly: a
+ * green test defending a rule the corpus refuses, which would have failed the correct
+ * implementation. The FRs decide it and none of them is new:
+ *
+ *   - `01-F28` verifies "on-device against synced credential **hashes**" — plural, one per user.
+ *     Nothing in `01-F26`/`01-F27`/`01-F28` admits ONE credential standing for three people.
+ *   - `01-F61` names two staff sharing a 4-digit PIN as a hazard it TOLERATES when two humans
+ *     happen to pick the same digits. It does not licence a seed to MANUFACTURE that state
+ *     across a role boundary, and the identification step cannot repair it: tapping a tile is a
+ *     CLAIM, and the hash is what is supposed to turn a claim into an authentication.
+ *   - So `02-F22`'s role guard was one tile-tap away (the manager's row opened with the digits
+ *     both cashiers type 20–60× a shift), `02-F38`'s self-approval refusal was keyed on a
+ *     `user_id` one secret opened twice and therefore refused nothing, and `02-F41` wrote the
+ *     wrong person into a ledger `01-F1` forbids correcting in place.
+ *
+ * Because `hashPin` is SALTED, the retired assertion could not be satisfied by distinct
+ * credentials at all — so it was not merely inconvenient, it was unsatisfiable by any correct
+ * implementation. **Every property §A actually owned is kept below**: a real Argon2id credential
+ * per member, the plaintext absent from the row, `01-F26`'s per-LOCATION assignment on THIS
+ * branch, a non-opaque display name, "unconfigured ⇒ nothing seeded", and `01-F17`'s re-seed.
+ * What is added is the property the old assertion inverted — **no member's PIN opens another
+ * member's row**. The seed is driven through `DEV_STAFF_PIN_ENV`, one `00 §7` layer-3 key per
+ * member, which is the contract `apps/pos-electron/src/main/__acceptance__/
+ * dev-staff-credentials.test.ts` (authored from spec text only) states in terms: `env` REPLACES
+ * `pin`.
+ */
+const pinFixture = (): { pins: Map<string, string>; env: Record<string, string> } => {
+  const pins = new Map<string, string>();
+  const env: Record<string, string> = {};
+  DEV_STAFF.forEach(({ user_id }, i) => {
+    // Pairwise distinct on purpose: a fixture that reused one value could not tell the
+    // per-member seed from the shared-credential one it replaces.
+    const pin = `48${21 + i}`;
+    const key = DEV_STAFF_PIN_ENV[user_id];
+    expect(key, `DEV_STAFF_PIN_ENV names no environment key for ${user_id}`).toBeDefined();
+    pins.set(user_id, pin);
+    env[key as string] = pin;
+  });
+  return { pins, env };
+};
+
 describe("§A 03-F53 OWED (3) / DEC-ARCH-001 — the DEV SEED, moved and not copied", () => {
   it("seeds a real Argon2id credential for every member, against a REAL registry", async () => {
     // MUTANT: a seed that stores the PIN, or a hash from a different algorithm. Caught — the
     // credential is proved by `domain`'s own verifier and the plaintext is proved absent.
     const store = freshStore();
-    const seeded = await seedDevStaff({ registry: store.staff, branch_id: BRANCH, pin: "4821" });
+    const { pins, env } = pinFixture();
+    const seeded = await seedDevStaff({ registry: store.staff, branch_id: BRANCH, env });
 
     expect(seeded, "seedDevStaff reported that it seeded nothing").toBe(true);
     expect(store.staff.list()).toHaveLength(DEV_STAFF.length);
     expect(DEV_STAFF.length, "a roster of nobody cannot be identified against").toBeGreaterThan(0);
 
     for (const member of store.staff.list()) {
-      expect(await verifyPin(member.pin_hash, "4821"), `${member.user_id} cannot unlock`).toBe(
-        true,
-      );
+      const own = pins.get(member.user_id);
+      expect(own, `no PIN was configured for seeded member ${member.user_id}`).toBeDefined();
+      expect(
+        await verifyPin(member.pin_hash, own as string),
+        `${member.user_id} cannot unlock`,
+      ).toBe(true);
       // `01-F1`/`01-F28`: what is synced is a HASH. A registry row holding the digits would be a
       // credential on disk, and the same row is what a real transport will one day carry.
-      expect(member.pin_hash.includes("4821"), "the PIN is in the credential").toBe(false);
+      expect(member.pin_hash.includes(own as string), "the PIN is in the credential").toBe(false);
       // `01-F26` — the assignment is per LOCATION, and it must be THIS branch or the row
       // authorizes nothing here and renders no role on the tile.
       expect(member.assignments.some((a) => a.branch_id === BRANCH)).toBe(true);
       // `01-F61` — "a grid of tiles labelled by opaque id is unusable".
       expect(member.display_name ?? "").not.toBe("");
+    }
+  });
+
+  it("01-F28/02-F22 — one configured secret is ONE person's credential and nobody else's", async () => {
+    // THE ASSERTION THAT REPLACES THE RETIRED ONE (2026-08-14). The old §A required the opposite
+    // and was green while `02-F38`'s self-approval refusal was defeated by a tile tap. This is
+    // the cross-product, so it fails whichever member the seed leaks — and it fails hardest for
+    // the branch manager, which is the row that carries authority (`02-F22`).
+    //
+    // MUTANT: `seedDevStaff` hashing any one configured value onto every member (the pre-August
+    // 2026 implementation). Caught here — the manager's hash opens under a cashier's digits.
+    const store = freshStore();
+    const { pins, env } = pinFixture();
+    await seedDevStaff({ registry: store.staff, branch_id: BRANCH, env });
+
+    for (const member of store.staff.list()) {
+      for (const [other, pin] of pins) {
+        if (other === member.user_id) continue;
+        expect(
+          await verifyPin(member.pin_hash, pin),
+          `${other}'s PIN opens ${member.user_id}'s row — one secret, two people (01-F28)`,
+        ).toBe(false);
+      }
     }
   });
 
@@ -384,16 +472,31 @@ describe("§A 03-F53 OWED (3) / DEC-ARCH-001 — the DEV SEED, moved and not cop
     // reached (`00 §5.7`) — which is also what production looks like until the transport lands."
     //
     // MUTANT: a hardcoded fallback PIN. Caught — a seeded roster reds both assertions.
+    //
+    // ⚠ AMENDED 2026-08-14 with §A's retirement: this drove the absent case with `pin: undefined`
+    // and `pin: ""`. Unset and blank are now asserted PER MEMBER through the environment, which
+    // is a strictly stronger reading of the same rule — `DEV_STAFF_PIN_ENV`'s whole point is that
+    // a member nobody configured is absent from the grid rather than reachable with a
+    // neighbour's digits, and that is only observable when the keys are separable.
     const store = freshStore();
-    expect(await seedDevStaff({ registry: store.staff, branch_id: BRANCH, pin: undefined })).toBe(
+    const { env } = pinFixture();
+    const blank = Object.fromEntries(Object.keys(env).map((key) => [key, ""]));
+    expect(await seedDevStaff({ registry: store.staff, branch_id: BRANCH, env: {} })).toBe(false);
+    expect(store.staff.list()).toEqual([]);
+    expect(await seedDevStaff({ registry: store.staff, branch_id: BRANCH, env: blank })).toBe(
       false,
     );
     expect(store.staff.list()).toEqual([]);
-    expect(await seedDevStaff({ registry: store.staff, branch_id: BRANCH, pin: "" })).toBe(false);
-    expect(store.staff.list()).toEqual([]);
     // The env var is NAMED by the package, not spelled out twice — a second spelling is the
     // divergence `DEC-ARCH-001` exists to prevent, and it fails silently (unset ⇒ no roster).
+    // `DEV_PIN_ENV` survives as ONE member's key (see `dev-staff.ts`), so the name is still the
+    // package's to declare and this app still spells it nowhere.
     expect(DEV_PIN_ENV).toBe("RESTOS_DEV_PIN");
+    // One key per member, pairwise DISTINCT — the structural half of the property the test above
+    // proves behaviourally. Two members sharing a key is the retired hole re-entering by the
+    // configuration door, and it would look like a typo in a map nobody reads.
+    const keys = DEV_STAFF.map(({ user_id }) => DEV_STAFF_PIN_ENV[user_id]);
+    expect(new Set(keys).size, "two members share one environment key").toBe(DEV_STAFF.length);
   });
 
   it("01-F17 — a re-seed on a device that already has a roster does not empty it", async () => {
@@ -404,15 +507,16 @@ describe("§A 03-F53 OWED (3) / DEC-ARCH-001 — the DEV SEED, moved and not cop
     //
     // MUTANT: `version: 1` hardcoded instead of `version() + 1`. Caught here and nowhere else.
     const dir = scratchDir();
+    const { env } = pinFixture();
     const first = freshStore(dir);
-    await seedDevStaff({ registry: first.staff, branch_id: BRANCH, pin: "4821" });
+    await seedDevStaff({ registry: first.staff, branch_id: BRANCH, env });
     first.close();
 
     const second = freshStore(dir);
     expect(second.staff.list(), "the roster did not survive the restart").toHaveLength(
       DEV_STAFF.length,
     );
-    await seedDevStaff({ registry: second.staff, branch_id: BRANCH, pin: "4821" });
+    await seedDevStaff({ registry: second.staff, branch_id: BRANCH, env });
     expect(second.staff.list(), "re-seeding emptied the registry").toHaveLength(DEV_STAFF.length);
     second.close();
   });

@@ -20,7 +20,7 @@ normative behaviour lives in [`specs/`](specs/) and **the specs are the contract
 - [The specs corpus](#the-specs-corpus) — how to find the doc that owns your problem
 - [Development](#development)
 - [Contributing](#contributing)
-- [Deploying to a real restaurant](#deploying-to-a-real-restaurant)
+- [Deploying to a real restaurant](#deploying-to-a-real-restaurant) — and [`ops/`](ops/), the operator kit
 - [Configuration reference](#configuration-reference)
 
 ---
@@ -36,7 +36,7 @@ shape: **counter + takeaway + phone/WhatsApp pickup, kitchen on a screen, cash a
 | `pnpm verify` | **RED at step 6.** Steps 1–5 pass; `layout:check` fails — see [Development](#the-six-gates) |
 | Runs as a process | the till, the pass screen, the back office, the API, the sync gateway, the jobs worker |
 | Not built yet | storefront, waiter, rider, owner app, platform admin, foodpanda, WhatsApp, tax, intelligence |
-| Not deployable yet | no installer, no container images, no TLS, no backups, no printer transport |
+| Not deployable yet | no installer, no container images, no TLS, no printer transport. Backups and single-box supervision now exist in [`ops/`](ops/) |
 
 **This README states measurements, not intentions.** Where a number appears it was read off a command
 on `main`. Where something does not work, it says so. The repo has a documented history of status
@@ -301,6 +301,14 @@ different orders still converge.
 | `packages/config` | Reads service env vars and crashes at boot, readably, if any are missing or invalid. |
 | `packages/testing` | Test-only: simulates several devices and a stand-in cloud so sync behaviour is testable without hardware. |
 
+### Not code
+
+| path | what it is |
+|---|---|
+| [`ops/`](ops/) | **The operator kit** — day-zero runbook, env templates per host role, id minting, Windows and systemd startup, backups. No TypeScript; this is what gets installed in a restaurant. |
+| `specs/` | The contract. `restaurant-os.md` is the product vision. |
+| `plans/` | Per-area build plans. **Not a scope list and not a status board** — see `plans/wave-1/wave-1-scope-reconciliation.md`. |
+
 ---
 
 ## The specs corpus
@@ -463,8 +471,29 @@ green FR turned red.
 
 ## Deploying to a real restaurant
 
-**Read this section before promising anyone a date.** The software runs; the deployment story does
-not exist yet.
+**Read this section before promising anyone a date.** The software runs; the deployment story is
+partial — there is now an operator kit, and there is still no installer.
+
+### → [`ops/`](ops/) — the operator kit
+
+**[`ops/README.md`](ops/README.md) is the day-zero runbook**: stand up the cloud box, migrate,
+provision two devices, author the menu, train the staff. It is the document to follow when you are
+standing in the restaurant. The rest of this section is the engineering view of the same ground.
+
+| | |
+|---|---|
+| [`ops/id.sh`](ops/id.sh) | mints the org/branch/device ids and the three shared secrets **once**, into one gitignored file. The single most common failure in this system is those values disagreeing across four processes, which produces four healthy processes and no menu with **no error anywhere** |
+| [`ops/env/*.env.example`](ops/env/) | every variable each host role reads, one line of what it does and what happens when it is wrong, derived by grepping `process.env` rather than copied from a doc |
+| [`ops/startup/*.bat`](ops/startup/) | Windows `shell:startup` auto-start + restart loop, per device role |
+| [`ops/systemd/`](ops/systemd/) | a unit per cloud service, plus the nightly backup timer |
+| [`ops/backup.sh`](ops/backup.sh) | nightly backup of the till (`device.db` **and its `-wal`/`-shm`** — see below) and `pg_dump` for the cloud |
+
+**The till backup is not a file copy, and this is the sharp edge.** The device store is opened WAL
+with `synchronous = FULL` and `apps/pos-electron` never closes it, so the write-ahead log is never
+checkpointed. Measured: 500 committed rows, `device.db` 4 KB, `device.db-wal` 2 MB, and a copy of
+`device.db` alone opens with *"no such table"* — the whole ledger, not a tail. `ops/backup.sh`
+uses SQLite's online backup API, falls back to copying all three files, and **fails writing
+nothing** if it can do neither (`22-F21`).
 
 ### What exists
 
@@ -483,12 +512,12 @@ not exist yet.
 | missing | consequence |
 |---|---|
 | **No installer** for the till or pass screen | no `.exe`, no `.msi`, no signing, no auto-update. You run both from a git checkout with `pnpm`, Node and a dev-installed Electron on the restaurant's machine |
-| **No container images, no compose, no deploy manifest** | zero Dockerfiles in the repo; no Procfile, systemd unit, Terraform or k8s |
+| **No container images, no compose, no deploy manifest** | zero Dockerfiles in the repo; no Procfile, Terraform or k8s. `ops/systemd/` covers a **single Linux box** and nothing above it |
 | **No compiled server artifact** | all three services run `tsx` over source; their `build` scripts are echo stubs |
-| **No process supervision** | nothing restarts a crashed service or a till after a power cut |
+| ~~No process supervision~~ **Supervision on one box only** | `ops/systemd/` restarts each cloud service and `ops/startup/*.bat` restarts each Windows app. Both need `Restart=always` to be actually enabled, BIOS restore-on-AC-power-loss, and Windows auto-logon — all three named in `ops/README.md`, none of them enforceable from here |
 | **No TLS, no reverse proxy, no rate limiting** | the gateway binds `0.0.0.0` in plain HTTP/WS |
 | **No health or readiness endpoint** | the gateway serves `/sync` and seven `/internal/*` routes; the API serves `/trpc/*` |
-| **No backup, restore or retention** | the till's `device.db` and `print-spool.db` under the OS user-data dir are unmanaged |
+| ~~No backup, restore or retention~~ **Backups exist; the recovery objective is not met** | `ops/backup.sh` + the systemd timer cover the till's `device.db`/`print-spool.db` and a nightly `pg_dump`. That is `22-F22`'s stated interim: `22-F1` wants continuous WAL archiving with an **RPO ≤ 5 min**, and a nightly dump's real RPO is **up to 24 h**. Nothing does PITR, and no restore drill has been run |
 | **No printer transport** | the only two implementations are an *unattached* printer that raises the alarm band and a file printer that writes PDFs. A restaurant cannot print a kitchen ticket |
 | **No device pairing from the back office** | provisioning needs shell access on the gateway host |
 | **No owner-account creation** | the only owner is declared in env and held in an **in-memory** store that dies with the process; staged catalog edits are in memory too |

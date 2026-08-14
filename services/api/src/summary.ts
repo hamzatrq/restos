@@ -40,6 +40,16 @@
  *                              redelivered under two envelope ids collapses to one member; two
  *                              members that differ dispute the line, contribute ZERO money and
  *                              raise `order_line_divergence`.
+ *   line removal (`02-F8`)     monotone G-Set of `line_id` PER ORDER, off `order.line_removed`. A
+ *                              tombstone, never arithmetic: subtracting at fold time would subtract
+ *                              twice on a redelivery (`01-F31`) and would subtract a line not yet
+ *                              delivered, and a `delete` would be resurrected by an add arriving
+ *                              after the removal (`01-F34` — the answer is a function of the SET,
+ *                              never of delivery order). Per ORDER because `line_id` is
+ *                              `z.string().min(1)` in `packages/domain` and nothing makes it
+ *                              org-unique. This is the rule `packages/sync-client/src/folds/merge.ts`
+ *                              already applies on the device, and `12-F21`'s "one number,
+ *                              everywhere" is why it must be the same rule here.
  *   sales by channel           Σ (BigInt) of the agreed lines of the orders on that channel.
  *   top items                  Σ per `item_id`, ranked by (revenue desc, item_id asc). The
  *                              tiebreak is a PAYLOAD field, never an envelope id.
@@ -292,6 +302,11 @@ type OrderAcc = {
   readonly created: Members;
   /** `line_id` → its own MVR register. */
   readonly lines: Map<string, Members>;
+  /**
+   * `02-F8` — `line_id`s this order's `order.line_removed` events tombstoned. Monotone, so a
+   * redelivered removal is idempotent, and independent of whether the line itself has arrived.
+   */
+  readonly removed: Set<string>;
 };
 
 type ShiftAcc = {
@@ -343,7 +358,7 @@ const sub = <K, V>(m: Map<K, V>, k: K, mk: () => V): V => {
 };
 
 const orderOf = (state: SummaryState, id: string): OrderAcc =>
-  sub(state.orders, id, () => ({ created: new Map(), lines: new Map() }));
+  sub(state.orders, id, () => ({ created: new Map(), lines: new Map(), removed: new Set() }));
 
 const shiftOf = (state: SummaryState, id: string): ShiftAcc =>
   sub(state.shifts, id, () => ({
@@ -407,6 +422,17 @@ export const foldSummary = (state: SummaryState, event: SummaryEvent): SummarySt
         canonicalJson(member),
         member,
       );
+      return state;
+    }
+    /**
+     * `02-F8` — "line removal pre-confirm is `order.line_removed`". The payload is `{ order_id,
+     * line_id }` and carries no quantity and no amount, so there is nothing partial it could
+     * express and nothing to subtract: the tombstone is recorded here and the money is left out at
+     * PROJECTION time. A removed line has no `void_value` term in `01-F30`, which is precisely
+     * `02-F8`'s point — a line taken off before the kitchen heard of it was never a sale.
+     */
+    case "order.line_removed": {
+      orderOf(state, payload.order_id as string).removed.add(payload.line_id as string);
       return state;
     }
     case "shift.opened": {
@@ -599,6 +625,12 @@ export const projectSummary = (
 
     let orderTotal = 0n;
     for (const line_id of sortedKeys(acc.lines)) {
+      // `02-F8` — the tombstone is read BEFORE the register, so the line leaves every block at
+      // once: the total, its channel row, the top-items table and the hourly bucket. A build that
+      // subtracted only from the total leaves the Coke standing in three of the six blocks
+      // `12-F10` names, and an owner reads two different days off one screen. Nothing is disputed
+      // about a line that is gone, so no `order_line_divergence` is raised for one.
+      if (acc.removed.has(line_id)) continue;
       const register = acc.lines.get(line_id) as Members;
       const member = agreed(register, "order_line_divergence", anomalies);
       if (member === null) continue;

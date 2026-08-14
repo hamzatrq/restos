@@ -91,6 +91,19 @@ export type PassLine = {
   readonly name: string;
   readonly quantity: number;
   /**
+   * `03-F56`/`02-F6` — the item note, as ONE row of this line's item block. Absent where the line
+   * has none (`00 §5.7`: a line with nothing to say says nothing; an invented blank row is a zero
+   * on a clock).
+   *
+   * **Optional rather than nullable, and that is `packages/ui`'s declaration rather than a
+   * preference.** `QuantityItemLineProps.note` is `note?: string` and `03-F56` makes that component
+   * *"the cheap-glass twin"* the pass and the paper must not diverge from — so the field this
+   * surface carries is the field the component consumes, with nothing in between to normalise.
+   * (`OpenOrder.lines[].note` is `string | null` because `OpenOrderSchema` declares it nullable;
+   * `03-F56` rules on the NAME and not on the two spellings.)
+   */
+  readonly note?: string;
+  /**
    * The line's projected state, or `null` when the fold projects a CONTESTED set (`01-F31`: *"a
    * fold never picks a winner"*). A contested line is shown as contested and is never bumped.
    */
@@ -171,7 +184,29 @@ export type PassTicket = {
  */
 export const referenceOf = (order_id: string): string => order_id.slice(0, 8);
 
-type LineCell = { item_id?: unknown; qty?: unknown; states?: unknown };
+type LineCell = { item_id?: unknown; qty?: unknown; states?: unknown; notes?: unknown };
+
+/**
+ * `03-F56`/`02-F50` — `02-F6`'s accumulated notes as the ONE row an item block gets.
+ *
+ * `merge.ts` projects `notes` as a **grow-only value set per line, deduplicated by text and
+ * text-sorted** (`26 §7` M2), so *"one tag is one `order.note_added`, and tags ACCUMULATE"*
+ * (`02-F50`) arrives here as an array. Taking `notes[0]` would silently discard *"no peanuts"*
+ * half the time, so every element is joined and none is dropped — and there is no cap and no
+ * truncation, because `03-F56` states neither and inventing one is commandment 2.
+ *
+ * **`" / "`, the same separator as `apps/pos-electron`'s `gateway.ts#noteFrom` (glass) and
+ * `printing.ts#kotNoteOf` (paper).** ⚠ **This is the THIRD declaration of that join and it is
+ * copied deliberately rather than shared.** `18 §2` forbids an app importing another app, and
+ * `24 §3b` forbids the drive-by extraction into a package while implementing an FR — which is the
+ * same call `printing.ts` recorded when it became the second (*"Reported rather than abstracted"*).
+ * **The extraction is OWED**, and it is exactly `03-F40`'s two-sensor-bit-layouts shape: what must
+ * never diverge is what a cook reads on the pass and what he reads on the chit for one order.
+ */
+const noteOf = (notes: unknown): string | undefined => {
+  const texts = Array.isArray(notes) ? notes.filter((n): n is string => typeof n === "string") : [];
+  return texts.length === 0 ? undefined : texts.join(" / ");
+};
 
 /** A catalog lookup narrowed to what a kitchen card needs. `03-F38` prefers the kitchen name. */
 export type KitchenNameResolver = (item_id: string) => string;
@@ -193,12 +228,18 @@ export const linesOf = (jsonLines: string, name: KitchenNameResolver): readonly 
     const states = Array.isArray(cell.states) ? cell.states : [];
     const only = states.length === 1 ? states[0] : null;
     const state = isLineState(only) ? only : null;
+    const note = noteOf(cell.notes);
     return {
       line_id,
       // `01-F54` — an unsynced or renamed item degrades to its identifier and NEVER blocks. The
       // cook loses a word; the ticket, the quantity and the age are all still on the glass.
       name: name(typeof cell.item_id === "string" ? cell.item_id : line_id),
       quantity: typeof cell.qty === "number" ? cell.qty : 0,
+      // `03-F56` — the note is a FIELD OF ITS OWN and is never joined into `name`. `27-F57` is
+      // why: the quantity sits immediately left of the item name on one line, and
+      // `1 KARAHI (NO PEANUTS)` is a name that wraps, which `27-F59` bans. Spread conditionally
+      // so a line with no note carries no key at all (`00 §5.7`), exactly as `KotLine.note` is.
+      ...(note === undefined ? {} : { note }),
       state,
       // `ready` counts as done for `03-F15`'s assembly view; so does anything past it.
       done: state !== null && (state === "ready" || KITCHEN_DONE.has(state)),

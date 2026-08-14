@@ -192,7 +192,23 @@ export const PassSurface = ({
               channel={t.channel}
               tables={t.tables}
               assembly={{ done: t.linesDone, total: t.linesTotal }}
-              lines={t.lines.map((l) => ({ id: l.line_id, quantity: l.quantity, name: l.name }))}
+              // `03-F56` — the note rides through `QuantityItemLine`'s own `note` prop and NOT
+              // through `modifiers` or `removals`. The FR rules on that by name: a note fed in as
+              // a modifier either steals `27-F59`'s one inverted marker from a removal (the
+              // allergen case that marker exists for) or makes a note's emphasis depend on whether
+              // the dish happens to have a removal — one fact printing two ways. The slot also
+              // carries `03-F3`'s *"visually emphasized"* the way `27-F58` says the document has
+              // it: weight and POSITION (last row of its own item block), never a third inversion.
+              //
+              // Spread conditionally because `exactOptionalPropertyTypes` is on: `note?: string`
+              // and `note: string | undefined` are different types here, and the absent key is the
+              // one `00 §5.7` wants anyway.
+              lines={t.lines.map((l) => ({
+                id: l.line_id,
+                quantity: l.quantity,
+                name: l.name,
+                ...(l.note === undefined ? {} : { note: l.note }),
+              }))}
               // `03-F24` — no control at all where this surface does not own the signal, and none
               // on a ticket with nothing left to advance. `27-F5`: an inert primary target is a
               // context-dependent control wearing a different name.

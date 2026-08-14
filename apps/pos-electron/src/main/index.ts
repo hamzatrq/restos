@@ -13,9 +13,9 @@ import { fileURLToPath } from "node:url";
 import {
   AGING_THRESHOLDS_ENV,
   DEV_IDENTITY,
-  DEV_PIN_ENV,
   describeAging,
   describeDeviceIdentity,
+  describeDevStaff,
   describeLanMesh,
   describePanelDensity,
   describeQuickTags,
@@ -65,6 +65,12 @@ import {
 import { openJobStore } from "./job-store";
 import { createLineAdvance } from "./line-advance";
 import { createLanMesh } from "./mesh";
+import {
+  describePrinterLink,
+  PRINTER_LINK_ENV,
+  type PrinterLink,
+  resolvePrinterLink,
+} from "./printer-link";
 import {
   createCashPrinter,
   createKotPrinter,
@@ -195,6 +201,21 @@ const AGE_TICK_MS = 1_000;
  */
 const kotCapability = () =>
   printerCapability(process.env["RESTOS_KOT_PRINTER"] ?? "no printer configured");
+
+/**
+ * `03-F1`/`18 §10` — the LINK to that printer, as `00 §5.7`'s boot line needs to describe it.
+ *
+ * The transport itself is chosen by `printerTransport` below, which resolves through this same pure
+ * function on the same environment; this call exists because `describePrinterLink` takes a link and
+ * the boot line has to have one. Two calls of one total function on one input cannot disagree, and
+ * the alternative — carrying the resolved link down to the spooler construction 800 lines below —
+ * would put the selection in two places instead of the description.
+ */
+const printerLink = (): PrinterLink =>
+  resolvePrinterLink({
+    configured: process.env[PRINTER_LINK_ENV],
+    capability: kotCapability(),
+  });
 
 /**
  * What this terminal is called (`00 §5.7` — the strip names the device beside the operator).
@@ -430,6 +451,28 @@ const fatal = (error: unknown): void => {
   app.exit(1);
 };
 
+/**
+ * `01-F64` — **this app's own userData directory, and therefore its own `device.db`.**
+ *
+ * Both Electron hosts in this repo opened `join(app.getPath("userData"), "device.db")` and neither
+ * named itself, so on Linux both resolved to `~/.config/Electron/device.db`: ONE FILE, TWO APPS.
+ * Two `device_id`s merged into one `events` table, each store served the other's events as its
+ * own, and both outboxes pushed them upward into a log `01-F1` cannot unwind.
+ *
+ * **`app.setName` and not `productName` in `package.json`, because the manifest does nothing at
+ * the path this repo ships.** `pnpm start` runs `electron out/main/index.js`, so Electron resolves
+ * the app path to the SCRIPT's directory and reads no manifest of ours — measured on this repo's
+ * own Electron 43.2.0: a `name` + `productName` at the app root still yields `Electron` and
+ * `~/.config/Electron`. Renaming the FILE instead would have worked equally at this instant and
+ * is weaker over time: it separates one file per app while leaving every other artefact either
+ * host ever puts under `userData` — caches, `print-spool.db`, a future one nobody has written yet
+ * — sharing a directory. The directory is the axis the collision is really on.
+ *
+ * At module scope, before anything reads `getPath`: Electron resolves `userData` from the app name
+ * at first use and a later rename does not move what has already been opened.
+ */
+app.setName("RestOS Counter");
+
 app.whenReady().then(async () => {
   // Resolved BEFORE the store, and inside `whenReady` so a refusal reaches `fatal`'s dialog
   // rather than dying at module load with no window and nothing on screen.
@@ -446,10 +489,15 @@ app.whenReady().then(async () => {
 
   // Before the window, so the first paint of the identification grid already has a roster to
   // draw: a grid that fills in a moment later would move tiles under a finger (`27-F4`).
+  //
+  // **The whole ENVIRONMENT, never one resolved PIN (`01-F28`).** The package reads one key per
+  // member out of `DEV_STAFF_PIN_ENV`, so the credential of the branch manager this till
+  // authorizes against (`02-F22`, `main/authorize.ts`) is not the digits both cashiers type 20–60×
+  // a shift. Handing a single `pin` here is the hole itself, whatever the package does downstream.
   await seedDevStaff({
     registry: store.staff,
     branch_id: store.identity.branch_id,
-    pin: process.env[DEV_PIN_ENV],
+    env: process.env,
   });
   /**
    * T-C6 — and for the same reason and on the same schedule as the roster above: the catalog
@@ -733,6 +781,19 @@ app.whenReady().then(async () => {
   console.log(describeStationRouting(stationRouting()));
 
   /**
+   * `00 §5.7` on the line the one above it hands the tickets to, and `03-F51`'s *"reported at length
+   * wherever the configuration was made"* — which, since doc 14 owes a printer setting and has none,
+   * is HERE and nowhere else. Without this line the refusal machinery in `main/printer-link.ts` is
+   * decorative: the product would know `RESTOS_PRINTER` is unreadable and tell nobody, and the
+   * operator would meet the consequence as `03-F5`'s band saying the printer did not answer — sent
+   * to check a cable for a typo in a setting.
+   *
+   * It also names the one thing a working link can still be silently wrong about: `device://` and
+   * `windows://` are write-only, so a paper-out on them reads as a printed ticket (`03-F40`).
+   */
+  console.log(describePrinterLink(printerLink()));
+
+  /**
    * `00 §5.7` a fourth time, on a value with exactly the same property as the three above it: a
    * wrong aging threshold is **invisible from the screen**. Every ticket still shows a number and
    * a colour, and nothing looks broken — the order simply goes amber at the wrong minute, which is
@@ -749,6 +810,20 @@ app.whenReady().then(async () => {
    * gives a worked example rather than reporting a number nobody can act on.
    */
   console.log(describeQuickTags(quickTags));
+
+  /**
+   * `00 §5.7` a sixth time, and this one is a CREDENTIAL rather than a threshold, which makes the
+   * silent failure worse in both directions. A half-configured roster looks entirely healthy from
+   * the glass — the grid draws the tiles it has, and nothing on it says a member is missing — so
+   * the cost is discovered when somebody needs the person who is not there. `02-F22` makes that
+   * concrete and expensive: with no branch manager seeded the day cannot be opened, so no shift
+   * opens and no sale is recorded, at 09:00, by which time nobody is reading a boot line.
+   *
+   * The line exists at all because this variable set CHANGED (August 2026): one `RESTOS_DEV_PIN`
+   * used to open every row including the manager's, and a till upgraded without its two new keys
+   * now seeds ONE CASHIER. That is the correct behaviour and it must not be a surprise.
+   */
+  console.log(describeDevStaff(process.env));
 
   /**
    * `00 §5.7` a fifth time, and this one is the sharpest of them: **a branch with no LAN mesh looks

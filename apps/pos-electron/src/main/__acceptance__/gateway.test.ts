@@ -194,18 +194,31 @@ describe("18 §6 / 18 §9 — the renderer's whole surface", () => {
       // for `02-F7`'s toggle surface: `unavailable` is a DISPLAY verdict that also covers the
       // unpriced case, and `01-F60` calls those two dispositions opposites. The greying
       // assertions either side of them are unchanged.
+      //
+      // ⚠ RETIRED 2026-08-14, by the test owner, under `02-F52`. These two literals read `86`
+      // and `86 — disputed` — the jargon — and they were an artefact of this file rather than a
+      // requirement: no FR had ever named the operator-facing word, and this suite's own header
+      // says it was "written alongside the implementation … Owed an independent oracle pass", so
+      // what it pinned here was the implementation's choice fed back as a contract. `02-F52` now
+      // decides the word: `00 §5.6` makes the UI English-only, `86` is American restaurant slang
+      // that has to be TAUGHT, and `21 §5` puts this operator at plausibly non-reading. The FR's
+      // evidence is that the product contradicted ITSELF — `Counter.tsx`'s Sold-out tab has
+      // always computed `Sold out` from the same two facts, so one cashier saw two names for one
+      // state depending on her tab. The STRUCTURE of the assertion is untouched: two facts, two
+      // dispositions, `i-roti` still the sellable control, `no price set` still separate
+      // (`01-F60` calls it the opposite disposition and this FR leaves it alone).
       {
         id: "i-karahi",
         label: "Chicken Karahi",
         unavailable: true,
-        unavailableReason: "86",
+        unavailableReason: "Sold out",
         sold_out: true,
       },
       {
         id: "i-daal",
         label: "Daal",
         unavailable: true,
-        unavailableReason: "86 — disputed",
+        unavailableReason: "Sold out — disputed",
         sold_out: true,
         contested: true,
       },

@@ -292,3 +292,102 @@ describe("§E 02-F7 — the Sold-out tab toggles availability", () => {
     expect(toggles[0]).toEqual({ item_id: "item-x", available: false });
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// §F — `02-F52`: ONE STATE, ONE WORD, ON BOTH TABS. ADDED 2026-08-14 by this file's test owner,
+// because the surface `02-F52` is ABOUT was guarded by nothing. Measured, not assumed:
+//
+//   • Deleting `unavailableReason` from the Order tab's grid entirely — the tile a cashier meets
+//     ~300× a shift, and the one that read `86` — left **all 1067 pos-electron tests green.**
+//   • Deleting the Sold-out tab's reason text left **11 of §E's 12 green**; only §E's
+//     `01-F58` disputed case died, so the PLAIN `Sold out` word was unguarded too.
+//   • §E's intended guard for it, `expect(screen.queryAllByText(/^Sold out$/i).filter(…))
+//     .toBeTruthy()` at the end of §E, is VACUOUS — an array is truthy however empty it is.
+//     It is left exactly as it stands (it is not wrong, only weak, and it is not this FR's), and
+//     this section is the assertion it was reaching for.
+//
+// `02-F52`'s content is that ONE cashier saw TWO names for ONE state depending on her tab: the
+// Sold-out tab computes its own word from `sold_out`/`contested` and always read `Sold out`,
+// while the Order tab renders `menu()`'s `unavailableReason` verbatim and that string read `86`.
+// So the assertion is a CROSS-SURFACE EQUALITY rather than two hard-coded literals — the word the
+// host serves and the word the renderer computes must be the same word, whichever one moves.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+describe("§F 02-F52 — the sold-out word reaches the glass, and it is ONE word", () => {
+  /**
+   * The shape `main/gateway.ts` actually serves for an 86'd item: the display verdict, the fold's
+   * own two facts, and the operator-facing reason. §E's `MENU` deliberately carries `sold_out`
+   * with NO reason — it is testing the toggle, not the wording — which is part of why the wording
+   * went unguarded on this surface for as long as it did.
+   */
+  const GATEWAY_MENU: MenuItem[] = [
+    { id: "item-karahi", label: "Karahi" },
+    {
+      id: "item-biryani",
+      label: "Biryani",
+      unavailable: true,
+      unavailableReason: "Sold out",
+      sold_out: true,
+    },
+    {
+      id: "item-daal",
+      label: "Daal",
+      unavailable: true,
+      unavailableReason: "Sold out — disputed",
+      sold_out: true,
+      contested: true,
+    },
+  ];
+
+  /** The Order tab's grid passes items STRAIGHT through once a terminal has an order. */
+  const OPEN: OpenOrder = {
+    order_id: "order-f1",
+    reference: "A-001",
+    total_paisa: 0,
+    paid_paisa: 0,
+    lines: [],
+  };
+
+  /**
+   * `Tile.tsx` composes an unavailable tile's accessible name as `${label} — ${reason}`, so this
+   * reads the reason off the CONTROL and can never match the tab rail's own `Sold out` button —
+   * the vacuity trap `main.ts`'s `soldOutReasonPresent` records for the layout gate, one rail over.
+   */
+  const tileName = (label: string): string | null =>
+    screen.getByRole("button", { name: new RegExp(`^${label} — `) }).getAttribute("aria-label");
+
+  it("renders main's reason on the ORDER tab — the tile that used to say 86", async () => {
+    // MUTANT: `Counter.tsx` dropping `unavailableReason` on the way into the Order grid. Measured
+    // to leave all 1067 tests green before this assertion existed; it fails here now.
+    mount([OPEN], GATEWAY_MENU);
+    render(<Counter />);
+    await screen.findByRole("button", { name: /^Biryani — / });
+    expect(tileName("Biryani")).toBe("Biryani — Sold out");
+    // `01-F58`'s CONTESTED stays its own rendered state and is not collapsed into the plain one.
+    expect(tileName("Daal")).toBe("Daal — Sold out — disputed");
+    // `01-F59` — an 86'd item is greyed and still SELLABLE, so the word is all that changed.
+    expect(screen.getByRole("button", { name: "Karahi" })).toBeTruthy();
+  });
+
+  it("names the state with the SAME word on the Sold-out tab as on the Order tab", async () => {
+    // THE PROPERTY `02-F52` EXISTS FOR. The two tabs derive the word from different places — the
+    // host's join here, the renderer's own `sold_out`/`contested` read there — so this fails if
+    // EITHER drifts, which is the defect the FR closed (`86` on one tab, `Sold out` on the other).
+    mount([OPEN], GATEWAY_MENU);
+    render(<Counter />);
+    await screen.findByRole("button", { name: /^Biryani — / });
+    const onOrderTab = tileName("Biryani");
+
+    tap(/^Sold out$/i);
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Biryani — / })).toBeTruthy());
+    const onSoldOutTab = tileName("Biryani");
+
+    expect(onSoldOutTab, "the two tabs name one state differently (02-F52)").toBe(onOrderTab);
+    // Pinned on the SOLD-OUT tab, because that literal is `Counter.tsx`'s own and this file owns
+    // this screen; the host's half is pinned by `main/__acceptance__/gateway.test.ts` and
+    // `availability-seam.test.ts`. `00 §5.6` is English-only and `21 §5` puts this operator at
+    // plausibly non-reading — `86` is a number that has to be taught, and it never reaches glass.
+    expect(onSoldOutTab).toBe("Biryani — Sold out");
+    expect(onSoldOutTab).not.toMatch(/86/);
+  });
+});

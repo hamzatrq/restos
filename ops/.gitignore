@@ -1,0 +1,9 @@
+# The output of `ops/id.sh`. It holds this restaurant's org/branch/device ids AND its three
+# shared secrets, so it is the one file in this repo that must never be committed. `id.sh`
+# also chmods it 600; this entry is the second lock, because a `git add -A` from an
+# orchestrator that shares this working tree would otherwise capture it (AGENTS.md records
+# that exact accident on a different path).
+ids.env
+
+# Backup output, if an operator points `ops/backup.sh` here instead of at a real destination.
+backups/

@@ -58,7 +58,8 @@ import type { AppendRequest, CashShift, CashState } from "../shared/ipc";
  * opening a shift (per person, several times a day) and taking money out of the drawer (`02-F26`,
  * needs a reason and a receipt) are three different kinds of act with three different
  * consequences, and they read as one undifferentiated field. Worse, the relationship the surface
- * most needed to show — that `Supplier` and `Receipt photo` are PRECONDITIONS of `Paid out` —
+ * most needed to show — that `Supplier` and the receipt tile (`Receipt photo` then, `Receipt kept`
+ * since `02-F53`) are PRECONDITIONS of `Paid out` —
  * was carried by nothing at all: those three tiles sat in the same row as `No-sale drawer open`,
  * which has no preconditions and is a different act entirely.
  *
@@ -385,15 +386,23 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
   const [entry, setEntry] = useState("");
   const [reason, setReason] = useState<string | null>(null);
   /**
-   * `02-F26` "receipt photo (object storage ref)" + `02 §8`: *"captured locally, uploaded
-   * opportunistically to object storage, and referenced by id in the event — the event never
-   * waits for the upload."* The id is therefore minted HERE, at the moment of capture, and the
-   * bytes follow.
+   * `02-F26`'s receipt precondition, as `02-F53` rules it must be stated **until a capture seam
+   * exists** — an operator ATTESTATION, never a claim that an image was taken.
    *
-   * **There is no camera seam on this device yet**, so what this tile mints today is the
-   * reference an upload will fill. That gap is real and is reported rather than papered over;
-   * what is NOT done is minting a ref the operator never asked for, which would put a
-   * photo-shaped hole in an append-only ledger with nothing to point at.
+   * `02 §8` fixes the intended sequence: *"captured locally, uploaded opportunistically to object
+   * storage, and referenced by id in the event — the event never waits for the upload."* The id is
+   * therefore minted HERE and the bytes follow. **There is no camera, no file picker and no
+   * uploader anywhere in this product**, so today nothing follows.
+   *
+   * ⚠ **THE CONTROL USED TO SAY `Receipt photo` AND REPORT `captured`, AND THAT WAS A LIE THE
+   * LEDGER KEPT.** `01-F1` makes `cash.paid_out.receipt_photo_ref` permanent, so every paid-out
+   * ever taken asserted an image in object storage that no one photographed — and `05-F19` has the
+   * over-threshold approval arrive *"with the receipt photo inline"*, an interrupt built to display
+   * that picture. `02-F53` relabels rather than removes: the ref is required and non-empty in the
+   * `01 §4` payload, so deleting the control would either stop paid-outs outright or move the
+   * minting out of the operator's sight, which is the same false record with the witness removed.
+   * The event, its schema and every fold are untouched — the reference was always only a
+   * reference, and the defect was this surface claiming the referent existed.
    */
   const [photoRef, setPhotoRef] = useState<string | null>(null);
 
@@ -827,12 +836,19 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
               </div>
             </Readout>
             <div style={tileRow}>
+              {/*
+                `02-F53` — the words are the whole of this change. `Receipt kept` states what the
+                operator did; `confirmed` states that she said so. Neither claims an image was
+                taken, stored or uploaded, which is what `Receipt photo` / `captured` claimed on a
+                device with no camera. It stays shorter than the label it replaces, so the tile
+                row's `27-F4` geometry and `COMPACT_TILE_ROW_DP` are unaffected.
+              */}
               <Tile
                 posture="counter"
-                label="Receipt photo"
+                label="Receipt kept"
                 onPress={() => setPhotoRef(newId())}
                 selected={photoRef !== null}
-                {...(photoRef === null ? {} : { children: <span>captured</span> })}
+                {...(photoRef === null ? {} : { children: <span>confirmed</span> })}
               />
               <Tile
                 posture="counter"
@@ -860,7 +876,7 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
                 }
                 unavailable={reason === null || photoRef === null}
                 {...(reason === null || photoRef === null
-                  ? { unavailableReason: "needs a reason and a receipt photo" }
+                  ? { unavailableReason: "needs a reason and the receipt kept" }
                   : {})}
               />
             </div>

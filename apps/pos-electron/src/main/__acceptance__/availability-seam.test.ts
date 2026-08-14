@@ -105,7 +105,14 @@ describe("§A 02-F7 — a toggle is appended and the fold sees it", () => {
     // Read back through `menu()`, which joins the CATALOG to the FOLD's projection. Asserting
     // the append's return value instead would pass against a gateway that appended to nothing.
     expect(tile(gateway, "counter")?.sold_out).toBe(true);
-    expect(tile(gateway, "counter")?.unavailableReason).toBe("86");
+    // ⚠ RETIRED 2026-08-14, by the test owner, under `02-F52`. This read `"86"`. The string was
+    // never spec'd — this file's own header says it was written alongside the implementation and
+    // is "owed an independent oracle pass", so the literal was the implementation's word echoed
+    // back. `02-F52` rules the operator-facing name is `Sold out` (`00 §5.6` English-only UI;
+    // `21 §5`'s plausibly non-reading operator; the jargon stays in the FRs and the comments and
+    // never reaches glass). What this assertion OWNS is unchanged and is the point of §A: the
+    // reason is read back through `menu()`, i.e. through the real fold, not off the request.
+    expect(tile(gateway, "counter")?.unavailableReason).toBe("Sold out");
     // The other item is the control: a toggle is per-item, not a switch on the whole grid.
     expect(tile(gateway, "counter", NAAN)?.sold_out).toBeUndefined();
   });
@@ -179,7 +186,11 @@ describe("§B 01-F57 — the toggle carries the fold's own heads", () => {
     // `01-F58` — the fold does not pick a winner; it resolves to UNAVAILABLE and flags it.
     expect(tile(gateway, "counter")?.contested).toBe(true);
     expect(tile(gateway, "counter")?.sold_out).toBe(true);
-    expect(tile(gateway, "counter")?.unavailableReason).toBe("86 — disputed");
+    // ⚠ RETIRED 2026-08-14, by the test owner, under `02-F52` — this read `"86 — disputed"`.
+    // Same reason as §A's literal above. `01-F58`'s CONTESTED remains its own distinct rendered
+    // state rather than being collapsed into the plain one, which is what this line asserts and
+    // what the FR preserves ("the two rendered strings are `Sold out` and `Sold out — disputed`").
+    expect(tile(gateway, "counter")?.unavailableReason).toBe("Sold out — disputed");
 
     // ONE tap clears it. This is the assertion `merge.ts`'s own comment demands — *"superseding
     // only the head your screen happened to show leaves the other head standing"* — and it is

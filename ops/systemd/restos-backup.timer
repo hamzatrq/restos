@@ -1,0 +1,18 @@
+[Unit]
+Description=RestOS nightly cloud backup timer
+Documentation=file:///opt/restos/ops/README.md
+
+[Timer]
+# 06:00 local — AFTER the 05:00 business-day cutover, so a night's trading is complete and closed
+# before it is dumped rather than being cut across the boundary.
+# ⚠ OnCalendar uses the SYSTEM timezone. Set the box to Asia/Karachi or this fires at 06:00 UTC,
+# which is 11:00 in the restaurant — mid-service, on the previous day's still-open books:
+#   sudo timedatectl set-timezone Asia/Karachi
+OnCalendar=*-*-* 06:00:00
+# Load shedding means the box is often OFF at 06:00. Without this the run is simply skipped and
+# a day goes unbacked-up with nothing said.
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

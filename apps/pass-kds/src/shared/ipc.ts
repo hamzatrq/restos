@@ -20,6 +20,19 @@ export const PassLineSchema = z.object({
   line_id: z.string(),
   name: z.string(),
   quantity: z.number().int(),
+  /**
+   * `03-F56`/`02-F6` — the item note, and it is declared HERE or it does not exist.
+   *
+   * `z.object` **strips undeclared keys**, so a projection that reads the note and a schema that
+   * does not name it delete it at one line with every gate green — `catalog-fetch.ts`'s `toEntry`
+   * defect (*"the gateway served them, the wire schema carried them, the device store declared and
+   * read them, and the reshape between did not copy them"*, 0 of 579 tests failed) one seam over.
+   *
+   * `.optional()` and not `.nullable()`: `PassLine.note` is absent on a line with none (`00 §5.7`)
+   * and `QuantityItemLineProps.note` — `03-F56`'s cheap-glass twin, which draws it — is `note?:
+   * string`. No length cap, because `03-F56` states none (*"No length cap and no truncation"*).
+   */
+  note: z.string().optional(),
   /** `01 §4`'s vocabulary, or `null` for an `01-F31` contested line the fold refused to decide. */
   state: z.string().nullable(),
   done: z.boolean(),

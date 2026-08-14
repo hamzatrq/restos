@@ -566,7 +566,21 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
       // what is sellable. This argument used to be pinned to `counter`, which was correct only
       // for as long as `Counter.tsx` could not start any other kind of order.
       const unpriced = deps.priceOf(entry.id, channel) === null;
-      const reason = off ? (contested ? "86 — disputed" : "86") : unpriced ? "no price set" : null;
+      // 02-F52 — the OPERATOR-facing name is `Sold out`, never the jargon. `00 §5.6` is
+      // English-only UI and 86 is American restaurant slang: a number that has to be TAUGHT, to
+      // an operator `21 §5` puts at plausibly non-reading. The jargon stays in the FRs and in
+      // the comments above; it does not reach glass. These two strings are what `Counter.tsx`'s
+      // Sold-out tab already computed for itself from `sold_out`/`contested` — the Order tab
+      // rendered THIS value and so read `86` for the identical state, which is one cashier
+      // seeing two names for one fact depending on her tab. `no price set` is deliberately
+      // unchanged and stays separate: `01-F60` calls the unpriced case the OPPOSITE disposition.
+      const reason = off
+        ? contested
+          ? "Sold out — disputed"
+          : "Sold out"
+        : unpriced
+          ? "no price set"
+          : null;
       return {
         id: entry.id,
         label: entry.name,

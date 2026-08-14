@@ -307,8 +307,12 @@ export const createSpooler = ({ transport, store }: SpoolerOptions): Spooler => 
  * FR: paper-end takes the printer offline, an offline printer "does not execute `GS r` at all", so a
  * health check built on it reports "paper present" forever.
  *
- * @unreached-owed With `checkPrinterHealth` — K-8. No transport has ever sent a real-time query,
- * because no printer is attached (`main/printing.ts` ships `unattachedPrinter`).
+ * @unreached-owed With `checkPrinterHealth` — K-8. ⚠ The reason recorded here said *"no transport
+ * has ever sent a real-time query, because no printer is attached"*, and the first half stopped
+ * being true in August 2026: `apps/pos-electron/src/main/printer-link.ts`'s `tcp://` link sends
+ * `PAPER_STATUS_QUERY` after every document. It reads the transport's decoded `status()` directly,
+ * which is why THIS binding and `checkPrinterHealth` still have no caller — the pre-flight they
+ * describe is a host act nobody performs yet, not a query nobody sends.
  */
 export const PRINTER_HEALTH_QUERY = PAPER_STATUS_QUERY;
 

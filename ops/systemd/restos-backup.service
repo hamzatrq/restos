@@ -1,0 +1,32 @@
+[Unit]
+# 22-F22's interim cloud backup. Paired with restos-backup.timer.
+Description=RestOS nightly cloud backup (pg_dump)
+Documentation=file:///opt/restos/ops/README.md
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User=restos
+Group=restos
+WorkingDirectory=/opt/restos
+
+# DATABASE_URL comes from the same file the services read, so the backup cannot end up pointed at
+# a different database from the one the gateway writes to.
+EnvironmentFile=/etc/restos/cloud.env
+Environment=RESTOS_BACKUP_DIR=/var/backups/restos
+Environment=RESTOS_BACKUP_KEEP_DAYS=30
+
+ExecStart=/opt/restos/ops/backup.sh --cloud
+
+# The script exits non-zero and writes NO file when a dump fails, so a failed unit here means
+# "there is no backup for tonight" and not "a warning was printed". Check it:
+#   systemctl status restos-backup.service
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=restos-backup
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/restos

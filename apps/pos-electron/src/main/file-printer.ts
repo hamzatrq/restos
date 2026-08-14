@@ -63,7 +63,7 @@ import {
   type SpoolerTransport,
   simulate,
 } from "@restos/escpos";
-import { unattachedPrinter } from "./printing";
+import { PRINTER_LINK_ENV, resolvePrinterLink } from "./printer-link";
 
 /**
  * The opt-in, and its VALUE is the directory the documents land in.
@@ -150,13 +150,27 @@ export const filePrinter = (
 };
 
 /**
- * **The one place the default is decided, and the default is NO PRINTER.**
+ * **The one place the transport is decided, and with nothing set it is NO PRINTER.**
  *
- * With `RESTOS_PRINT_TO_FILE` unset or empty this returns `unattachedPrinter`, which reports
- * `no_response` on every transmit and drives `03-F5`'s band — the honest state of a device with no
- * `18 §10` link. The file transport is strictly opt-in, in the same spirit as `RESTOS_DEV_PIN` and
+ * Three outcomes, in this order:
+ *
+ *   1. **A real `18 §10` link** where `RESTOS_PRINTER` names one (`main/printer-link.ts`).
+ *   2. **The PDF simulator** where `RESTOS_PRINT_TO_FILE` names a directory.
+ *   3. **`unattachedPrinter`** — the honest state of a device with no link at all, which reports
+ *      `no_response` on every transmit and drives `03-F5`'s band within 45 s.
+ *
+ * The file transport is strictly opt-in, in the same spirit as `RESTOS_DEV_PIN` and
  * `RESTOS_DEV_MENU`, and for a sharper reason than either: those seed data, this one would make a
  * till claim it printed.
+ *
+ * ⚠ **THE ORDER OF (1) AND (2) IS A DECLARED INTERPRETATION AND THE CORPUS IS SILENT ON IT
+ * (`24 §3b`, commandment 2).** Both are transports and no FR says which wins when both keys are set.
+ * A real link is taken FIRST on this file's own named hazard: a till that silently SIMULATED a
+ * printer it was configured to have would be the worst of the three, because the simulator answers
+ * `ok` to everything and would remove the band that is the only honest signal about real hardware.
+ * A REFUSED link falls through to (2) rather than to (3) because `03-F51` makes a refused
+ * configuration *"simply not applied"* — the device then behaves exactly as if the key were unset,
+ * and the boot line carries the refusal.
  *
  * `env` is a parameter rather than a read of `process.env` inside the function so that the default
  * is assertable without mutating the process — the mutation that matters here is "the file
@@ -167,7 +181,11 @@ export const printerTransport = (
   capability: PrinterCapability,
   env: Record<string, string | undefined>,
 ): SpoolerTransport => {
+  const link = resolvePrinterLink({ configured: env[PRINTER_LINK_ENV], capability });
+  if (link.source === "configured") return link.transport;
   const directory = env[PRINT_TO_FILE_ENV];
-  if (directory === undefined || directory === "") return unattachedPrinter(capability);
+  // `link.transport` and not a second `unattachedPrinter(capability)`: the default lives in ONE
+  // place, so the unset case and the refused case cannot drift apart.
+  if (directory === undefined || directory === "") return link.transport;
   return filePrinter(capability, { directory });
 };

@@ -1,0 +1,46 @@
+[Unit]
+# The device end. Every till and pass screen holds a WebSocket to this process; it is also what
+# serves the published menu. It must come up before the API, which refuses to boot without it.
+Description=RestOS sync gateway
+Documentation=file:///opt/restos/ops/README.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=restos
+Group=restos
+WorkingDirectory=/opt/restos
+
+# ONE env file for all four cloud units, so a value two processes must agree on (PUBLISH_TOKEN
+# here, SYNC_GATEWAY_TOKEN in the API) cannot drift between two files. PORT is per-unit because
+# these four processes each want a different one and all read the same variable name.
+EnvironmentFile=/etc/restos/cloud.env
+Environment=PORT=8080
+Environment=NODE_ENV=production
+
+# tsx over source: there is no compiled artifact — `build` is an echo stub in every service.
+ExecStart=/usr/bin/env pnpm -C services/sync-gateway start
+
+# Load shedding is the design case, not an edge case: the mains go, the UPS runs out, the power
+# returns at 21:40 and nobody is at a keyboard. `always` restarts on a clean exit too, which is
+# what we want — this process has no legitimate reason to stop.
+Restart=always
+RestartSec=5
+# Do not give up. The default (5 starts in 10 s) latches a unit OFF after a fast crash loop, and
+# a gateway that is off is a restaurant whose tills silently stop syncing.
+StartLimitIntervalSec=0
+
+# stdout is pino JSON; nothing in this product collects it, so the journal is the log.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=restos-sync-gateway
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/restos
+
+[Install]
+WantedBy=multi-user.target

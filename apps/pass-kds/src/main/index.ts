@@ -4,15 +4,15 @@ import { fileURLToPath } from "node:url";
 import {
   AGING_THRESHOLDS_ENV,
   DEV_IDENTITY,
-  DEV_PIN_ENV,
   describeAging,
   describeDeviceIdentity,
+  describeDevStaff,
   describeLanMesh,
   describePanelDensity,
   describeServeSignal,
   measurePhysicalWidthMm,
+  requireDeviceIdentity,
   resolveAging,
-  resolveDeviceIdentity,
   resolveLanMesh,
   resolvePanelDensity,
   resolveServeSignal,
@@ -21,7 +21,7 @@ import {
 } from "@restos/device-config";
 import { businessDate } from "@restos/domain";
 import { createPinAuditSink, openStore, wallClock } from "@restos/sync-client";
-import { app, BrowserWindow, ipcMain, screen } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, screen } from "electron";
 import {
   CHANNELS,
   HandOverRequestSchema,
@@ -162,7 +162,17 @@ const boot = async (): Promise<void> => {
    */
   await app.whenReady();
   const env = process.env;
-  const identity = resolveDeviceIdentity(env);
+  /**
+   * `01-F65` — **`require`, not `resolve`: this host may not guess which device it is.**
+   *
+   * `resolveDeviceIdentity` falls back per key to `DEV_IDENTITY`, which is `apps/pos-electron`'s
+   * own dev seed and its documented no-environment launch. Falling back HERE does not produce an
+   * unconfigured pass screen; it produces **the counter**, and two devices under one origin
+   * interleave one lamport sequence into one outbox (`01-F3`/`01-F8`) in a log `01-F1` cannot
+   * unwind. The seed stays reachable where it belongs and is unreachable from here by NAME, not
+   * by an argument a later edit could drop.
+   */
+  const identity = requireDeviceIdentity(env);
   const aging = resolveAging(env[AGING_THRESHOLDS_ENV]);
   const readySignal = resolveReadySignal(env[READY_SIGNAL_OWNER_ENV]);
   /**
@@ -194,14 +204,20 @@ const boot = async (): Promise<void> => {
    * about who is on shift in a ledger `01-F1` cannot correct.
    *
    * Before the window, so the first paint of the identification grid already has a roster to draw:
-   * a grid that fills in a moment later would move tiles under a finger (`27-F4`). Unset
-   * `RESTOS_DEV_PIN` ⇒ nothing is seeded, and the door SAYS the registry is empty rather than
-   * drawing an empty grid (`00 §5.7`, `03-F53`).
+   * a grid that fills in a moment later would move tiles under a finger (`27-F4`). A member whose
+   * key is unset ⇒ that member is not seeded, and with none of them set the door SAYS the registry
+   * is empty rather than drawing an empty grid (`00 §5.7`, `03-F53`).
+   *
+   * **The whole ENVIRONMENT, never one resolved PIN (`01-F28`).** The package reads one key per
+   * member out of `DEV_STAFF_PIN_ENV`. This screen authorizes nothing itself (`03-F53`: *"signing
+   * in at the pass grants no authority; it supplies attribution"*), but it seeds the SAME registry
+   * the counter authorizes against — so a shared secret here is the counter's `02-F22` hole,
+   * written from the kitchen.
    */
   await seedDevStaff({
     registry: store.staff,
     branch_id: store.identity.branch_id,
-    pin: env[DEV_PIN_ENV],
+    env,
   });
 
   /**
@@ -514,10 +530,18 @@ const boot = async (): Promise<void> => {
        * device whose registry never synced draws a door with nothing on it, and the door says so
        * (`00 §5.7`), but the boot line is where the person who set the machine up is looking.
        */
+      /**
+       * `00 §5.7` on a CREDENTIAL, and the reason it is its own line rather than a clause of the
+       * one below: a half-configured roster draws a door that looks entirely healthy, so the
+       * missing member is discovered only when somebody needs them. The variable set CHANGED in
+       * August 2026 — one `RESTOS_DEV_PIN` used to open every row — so a screen upgraded without
+       * the two new keys seeds ONE CASHIER, which is correct and must not be a surprise.
+       */
+      `  ${describeDevStaff(env)}`,
       store.staff.list().length === 0
         ? "  identity: 01-F26's PIN session runs here (03-F53), and THE STAFF REGISTRY IS EMPTY — " +
-          `nobody can sign in, so no ready-mark and no handover can be written. Set ${DEV_PIN_ENV}` +
-          "=<digits> to seed the dev roster; nothing populates a real one yet (01-F47 admits " +
+          "nobody can sign in, so no ready-mark and no handover can be written. See the staff " +
+          "line above for the keys to set; nothing populates a real roster yet (01-F47 admits " +
           "devices, not people)."
         : `  identity: 01-F26's PIN session runs here (03-F53) — ${store.staff.list().length} ` +
           "member(s) on the identification grid, verified on-device against synced Argon2id " +
@@ -550,4 +574,34 @@ const boot = async (): Promise<void> => {
   });
 };
 
-void boot();
+/**
+ * `01-F64` — **this app's own userData directory, and therefore its own `device.db`.** This host
+ * and `apps/pos-electron` both opened `join(app.getPath("userData"), "device.db")` and neither
+ * named itself, so on Linux both resolved to `~/.config/Electron/device.db`: two `device_id`s in
+ * one `events` table, each store serving the other's events as its own, both outboxes pushing
+ * them upward into a log `01-F1` cannot unwind.
+ *
+ * `app.setName` rather than `productName` in `package.json`: `pnpm start` runs
+ * `electron out/main/index.js`, so Electron resolves the app path to the SCRIPT's directory and
+ * reads no manifest of ours — measured, a `productName` there leaves the name `Electron`. At
+ * module scope because `userData` is resolved from the name at first use, and `boot()`'s first
+ * `getPath` is a rename too late.
+ */
+app.setName("RestOS Pass");
+
+/**
+ * `00 §5.7` — **a launch that cannot start must SAY SO.** `void boot()` with no catch is an
+ * unhandled rejection and a process that exits with no window, no dialog and no line; this app
+ * has already shipped that failure once (see the top of `boot`). `01-F65` adds a refusal that an
+ * operator meets on a first launch — the pass screen he has not told which device it is — so the
+ * catch is what turns that from a binary which "does not start" into one sentence he can act on.
+ */
+void boot().catch((error: unknown) => {
+  const detail = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`RestOS pass screen could not start\n\n${detail}\n`);
+  dialog.showErrorBox(
+    "RestOS pass screen could not start",
+    `${detail}\n\nThis screen cannot show the kitchen queue until it is fixed.`,
+  );
+  app.exit(1);
+});

@@ -335,6 +335,16 @@ CREATE TABLE IF NOT EXISTS sync_state (
   last_global_seq INTEGER
 ) STRICT;
 INSERT OR IGNORE INTO sync_state (id, acked_watermark, last_global_seq) VALUES (0, NULL, NULL);
+-- 01-F64: the file is BOUND to the device it was created for. Written once, when the store is
+-- created, and compared on every open — not derived from the contents, because a store that has
+-- been opened and not yet written is exactly the state both Electron hosts are in for the first
+-- seconds after launch and a freshly provisioned pair is in on its first morning.
+CREATE TABLE IF NOT EXISTS store_identity (
+  id INTEGER PRIMARY KEY CHECK (id = 0),
+  org_id TEXT NOT NULL,
+  branch_id TEXT NOT NULL,
+  device_id TEXT NOT NULL
+) STRICT;
 -- Branch-stream ingest (T-01-04): peer envelopes, dedupe by id (01-F8); a
 -- (device, lamport) collision under a different id is corruption (01-F3). Cloud
 -- order lives ONLY in the global_seq_map sidecar — a mirror column here was cut
@@ -444,6 +454,53 @@ const canonical = (value: unknown): string =>
   );
 
 /**
+ * `01-F64` — **one device, one store.** Claims the file for `identity` the first time it is
+ * opened, and thereafter refuses any other identity rather than merging two devices into one
+ * `events` table.
+ *
+ * It lives in the CORE and not in `openStore`'s door because `openRnStore` and every
+ * caller-built adapter (`apps/manager`, `services/sync-gateway`) go through here and not through
+ * that door — `18 §4` puts one storage port under one core, and the binding belongs with the code
+ * that reads and writes the rows.
+ *
+ * **Refusing is the whole of it.** `01-N5`'s replacement path is a fresh `device_id` and the
+ * corpus offers no merge, split or re-stamp for a store that has already forked, so inventing a
+ * repair here would be commandment 2. The adapter is closed before the throw: a caller that
+ * cannot have the store must not be left holding its file handle.
+ */
+const bindStoreIdentity = (db: StorageAdapter, identity: StoreIdentity): void => {
+  const bound = db
+    .prepare<[], { org_id: string; branch_id: string; device_id: string }>(
+      "SELECT org_id, branch_id, device_id FROM store_identity WHERE id = 0",
+    )
+    .get();
+  if (bound === undefined) {
+    db.prepare<[string, string, string]>(
+      "INSERT INTO store_identity (id, org_id, branch_id, device_id) VALUES (0, ?, ?, ?)",
+    ).run(identity.org_id, identity.branch_id, identity.device_id);
+    return;
+  }
+  if (
+    bound.org_id === identity.org_id &&
+    bound.branch_id === identity.branch_id &&
+    bound.device_id === identity.device_id
+  ) {
+    return;
+  }
+  db.close();
+  throw new Error(
+    "this device database was created for device " +
+      `${bound.device_id} (org ${bound.org_id}, branch ${bound.branch_id}) and was opened as ` +
+      `device ${identity.device_id} (org ${identity.org_id}, branch ${identity.branch_id}). ` +
+      "01-F2 persists events for one DEVICE and 01-F8 drains that device's outbox in its own " +
+      "lamport order, so two identities in one `events` table interleave one sequence between " +
+      "two origins (01-F3) and each pushes the other's envelopes into a log 01-F1 forbids " +
+      "unwinding — this refuses instead. Point this host at its own store file, or give the " +
+      "replacement device a fresh device_id and a fresh file (01-N5).",
+  );
+};
+
+/**
  * **The store, over `18 §4`'s injected storage adapter.**
  *
  * ⚠ **PROTECTED-PATH CHANGE, August 2026 (`20 §4.4` — senior review).** This function took a
@@ -469,7 +526,23 @@ export const createDeviceStore = (options: {
   db.pragma("journal_mode = WAL"); // multi-handle reads + crash recovery (18 §4)
   db.pragma("synchronous = FULL"); // plug-pull law outranks throughput (00 §5.2)
   db.pragma("foreign_keys = ON"); // device DB rule (18 §4)
+  /**
+   * `01-F64` — the default busy timeout is **0**, so a second writer on one file threw
+   * `database is locked` after ~248 ms of nothing rather than waiting. WAL admits many handles
+   * and this store's own schema step writes (`INSERT OR IGNORE` on the singleton rows), so the
+   * contended moment is ordinary and the refusal was not.
+   *
+   * **Stated honestly, because half of it is unfixed by this line:** a `busy_timeout` retries
+   * `SQLITE_BUSY`, and a DEFERRED transaction that has already read and then tries to write into
+   * a snapshot another writer moved gets `SQLITE_BUSY_SNAPSHOT`, which **no busy handler
+   * retries** — SQLite cannot upgrade that lock without discarding the read. The complete answer
+   * for that case is `BEGIN IMMEDIATE`, which is a change to the seven transactions and not to a
+   * pragma. What this closes is the plain lock contention; `01-F64`'s binding above is what stops
+   * the case that produced it here, which was two apps on one file.
+   */
+  db.pragma("busy_timeout = 5000");
   db.exec(SCHEMA);
+  bindStoreIdentity(db, identity);
 
   // 01-F52: reference data, constructed alongside the ledger but deliberately separate from
   // it. Nothing in `folds/` may reach for this — a projected value that read a name would

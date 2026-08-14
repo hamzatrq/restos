@@ -146,7 +146,17 @@ const refusedPaidOut = async () => {
   await screen.findAllByText("Paid out");
   // `02-F26` — the tile is unavailable until a reason and a receipt ref exist.
   press("Supplier");
-  press("Receipt photo");
+  // ⚠ WIDENED 2026-08-14, by the test owner, under `02-F53`. This pressed `"Receipt photo"`.
+  // NOTHING IS RETIRED HERE: this is `refusedPaidOut`, a NAVIGATOR that drives the Cash surface
+  // to a refused above-threshold paid-out so the ESCALATION pad renders. This file owns
+  // `02-F20`'s pad and asserts nothing whatever about the receipt control's wording — the label
+  // is `CashSurfaces.tsx`'s, and `cash-tab.dom.test.tsx` (its owning oracle) already navigates
+  // tolerantly with `/photo|receipt|camera/i` for exactly this reason. `02-F53` relabels the
+  // control `Receipt kept` / `confirmed`, because there is no camera, no file picker and no
+  // uploader anywhere in this product and the old label made `cash.paid_out.receipt_photo_ref`
+  // assert an image nobody photographed, permanently (`01-F1`). Matching the stable prefix keeps
+  // this navigator pointed at the control rather than at a word another FR owns.
+  press("Receipt");
   press("Paid out");
 };
 

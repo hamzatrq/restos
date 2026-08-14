@@ -12,8 +12,12 @@
  *     is the layer that tells them apart — the spooler decides what to DO about it, and must not
  *     need this file's bit map to do so.
  *
- * There is no I/O in this file. Nothing here opens a socket, a serial port or a Bluetooth link:
- * the transports named in `18 §10` are unbuilt, and `03-F10`'s rig pass is owed in full.
+ * There is no I/O in this file. Nothing here opens a socket, a serial port or a Bluetooth link —
+ * that stays true, but the sentence that followed it ("the transports named in `18 §10` are
+ * unbuilt") stopped being true in August 2026: `apps/pos-electron/src/main/printer-link.ts` ships
+ * the TCP-9100 link and two write-only USB forms, and it is this file's first caller. `03-F10`'s
+ * rig pass is owed in full and NO PRINTER HAS BEEN ATTACHED TO ANY OF IT (K-8), so every bit map
+ * below is still a reading of the published command set rather than of a printer.
  */
 
 import type { PrinterCapability } from "./capability.js";
@@ -130,11 +134,17 @@ export type RealtimeQueryWindow = {
  * the window shut after four refusals and the second would widen the cap by over-receiving, and
  * the cap exists because the printer's real-time response buffer is finite.
  *
- * **This window has no caller yet.** `18 §10`'s three transports are unbuilt; the first one to
- * land must be tested against this, or the cap is a number in a file.
+ * **THE DEBT MARKER THAT STOOD HERE IS PAID AND HAS BEEN DELETED (August 2026).** It said *"the
+ * first real transport owes this its caller, or the cap is a number in a file"*, and
+ * `apps/pos-electron/src/main/printer-link.ts`'s `tcp://` link is that transport: it takes a slot
+ * before anything is written and frees it when the interaction ends, so the cap bounds the wire and
+ * not just this file. `__acceptance__/printer-transport.test.ts` §E asserts it ON THE WIRE — any
+ * mechanism satisfies it, this window included — and `pnpm seams:check`'s anti-rot rule is what
+ * forced the deletion the moment the caller landed.
  *
- * @unreached-owed K-8 / `18 §10` — the first real transport owes this its caller. "The cap is a
- * number in a file" is this rail's defect stated in the author's own words, one round early.
+ * **Still unreached in this package and still true of the OTHER two transports**: `device://` and
+ * `windows://` are write-only links with no back-channel, so they send no real-time query at all
+ * and a paper-out on them is invisible (`03-F40`). That is a limit of those cables, not of this.
  */
 export const createRealtimeQueryWindow = (): RealtimeQueryWindow => {
   let outstanding = 0;

@@ -1,0 +1,42 @@
+[Unit]
+# The 20 §4.2 Auditor: a nightly whole-ledger refold that checks money conservation, state
+# legality, lamport gaps and the audit hash chain, per org. It is the only thing in the product
+# looking for a doubled or lost cash figure. If this unit is off, nothing is checking.
+Description=RestOS jobs worker (nightly Auditor)
+Documentation=file:///opt/restos/ops/README.md
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=restos
+Group=restos
+WorkingDirectory=/opt/restos
+
+# Needs DATABASE_URL (required here, with NO default — a job that audits a database nobody named
+# would report "ok" about the wrong ledger) and REDIS_URL (required; ioredis retries a refused
+# connection for ever, so a worker with no Redis boots, prints, and audits nothing, silently).
+EnvironmentFile=/etc/restos/cloud.env
+Environment=NODE_ENV=production
+
+ExecStart=/usr/bin/env pnpm -C services/jobs start
+
+Restart=always
+RestartSec=15
+StartLimitIntervalSec=0
+
+# A finding terminates in the LOG — the doc 15 alert surface does not exist yet. So this journal
+# is the only place an Auditor finding is ever reported. Someone has to read it:
+#   journalctl -u restos-jobs -p err --since yesterday
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=restos-jobs
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/restos
+
+[Install]
+WantedBy=multi-user.target

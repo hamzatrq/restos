@@ -1,0 +1,42 @@
+[Unit]
+# The owner's browser surface. Next.js, proxying /api/trpc/* to the API at request time.
+Description=RestOS back office (Next.js)
+Documentation=file:///opt/restos/ops/README.md
+After=network-online.target restos-api.service
+Wants=network-online.target restos-api.service
+
+[Service]
+Type=simple
+User=restos
+Group=restos
+WorkingDirectory=/opt/restos
+
+EnvironmentFile=/etc/restos/cloud.env
+Environment=PORT=3000
+Environment=NODE_ENV=production
+
+# `next start` serves a PREVIOUSLY BUILT app and will exit immediately if .next is missing.
+# ExecStartPre builds it, so a machine that was updated and rebooted comes back up on its own
+# rather than needing someone to remember. It costs a minute on every restart; on a load-shedding
+# schedule that is the right trade against a back office that does not return.
+# ⚠ `--webpack` is required — Turbopack cannot resolve this repo's `.js`-for-`.ts` specifiers.
+ExecStartPre=/usr/bin/env pnpm -C apps/backoffice build
+ExecStart=/usr/bin/env pnpm -C apps/backoffice start
+
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=0
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=restos-backoffice
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# The Next build writes apps/backoffice/.next, so this unit needs the checkout writable.
+ReadWritePaths=/opt/restos
+
+[Install]
+WantedBy=multi-user.target

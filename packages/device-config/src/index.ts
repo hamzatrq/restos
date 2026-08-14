@@ -23,7 +23,9 @@ export {
 export {
   DEV_PIN_ENV,
   DEV_STAFF,
+  DEV_STAFF_PIN_ENV,
   type DevStaffRegistry,
+  describeDevStaff,
   seedDevStaff,
 } from "./dev-staff.js";
 export {
@@ -31,6 +33,7 @@ export {
   type DeviceIdentity,
   describeDeviceIdentity,
   IDENTITY_ENV,
+  requireDeviceIdentity,
   resolveDeviceIdentity,
 } from "./device-identity.js";
 export {

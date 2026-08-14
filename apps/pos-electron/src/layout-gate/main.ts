@@ -1680,7 +1680,14 @@ const run = async (): Promise<number> => {
     } else {
       await click(cashTab);
       await new Promise((r) => setTimeout(r, 350));
-      const taps = [await press("Supplier"), await press("Receipt photo"), await press("Paid out")];
+      // ⚠ `press("Receipt")` and not `press("Receipt photo")` — widened 2026-08-14 under
+      // `02-F53`, which relabelled that control `Receipt kept` (there is no camera anywhere in
+      // this product, and the old label made every paid-out assert an image nobody took). This
+      // rail navigates by label to REACH `ManagerApproval`; it judges geometry, never wording, so
+      // the stable prefix is what it should have matched all along. It does NOT go quiet if the
+      // tap misses — `taps.some((t) => !t)` below is a `24-F14` EMPTY MATCH failure, which is why
+      // the relabel reddened this gate loudly instead of silently dropping the surface.
+      const taps = [await press("Supplier"), await press("Receipt"), await press("Paid out")];
       await new Promise((r) => setTimeout(r, 500));
       if (taps.some((t) => !t)) {
         failures.push({

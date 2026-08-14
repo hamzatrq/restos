@@ -1,0 +1,44 @@
+[Unit]
+# The back office's only backend. It REFUSES TO BOOT without SYNC_GATEWAY_URL and
+# SYNC_GATEWAY_TOKEN, deliberately — an API that starts without a gateway looks completely
+# healthy and ships no menu at all. So the ordering below is real, not decorative.
+Description=RestOS API (back-office backend)
+Documentation=file:///opt/restos/ops/README.md
+After=network-online.target restos-sync-gateway.service
+Wants=network-online.target
+# `Wants`, not `Requires`: if the gateway is stopped for maintenance the API should keep trying
+# rather than be stopped with it. Its own restart loop is what recovers.
+Wants=restos-sync-gateway.service
+
+[Service]
+Type=simple
+User=restos
+Group=restos
+WorkingDirectory=/opt/restos
+
+EnvironmentFile=/etc/restos/cloud.env
+Environment=PORT=3001
+Environment=NODE_ENV=production
+
+ExecStart=/usr/bin/env pnpm -C services/api start
+
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=0
+
+# ⚠ A restart re-seeds the ONE owner account from BOOTSTRAP_OWNER_* and DROPS EVERYTHING ELSE:
+# the user store and the staged (unpublished) catalog edits are both IN MEMORY. An owner who was
+# halfway through authoring a menu when the power went loses the draft, not the published menu.
+# Tell them. It is not recoverable and there is no warning on the screen.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=restos-api
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/restos
+
+[Install]
+WantedBy=multi-user.target
