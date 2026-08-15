@@ -26,7 +26,16 @@ import {
   type LedgerRecord,
 } from "../publish.js";
 
-export type Recorded = { readonly path: string; readonly body: unknown };
+export type Recorded = {
+  readonly path: string;
+  readonly body: unknown;
+  /**
+   * The request's query parameters. Recorded because for a GET the `org_id` IS the request — the
+   * question "did a correctly-scoped request leave the process" (`01-F71` (b)) cannot be answered
+   * from a pathname, and `path`-only recording made every GET look identical regardless of tenant.
+   */
+  readonly query: Readonly<Record<string, string>>;
+};
 
 /**
  * One `kernel.events` row as `12-F10`'s window projects it — **exactly the seven envelope fields
@@ -61,8 +70,31 @@ export type FakeDeviceRow = {
   readonly device_id: string;
   readonly branch_id: string;
   readonly device_class: string;
+  /**
+   * `01-F70`. **Required on the fixture even though the column is nullable**, so a test must decide
+   * whether the till it is seeding is named — `null` is the UNNAMED row and has to be written out.
+   * An optional field here would let a fixture forget the name and let the suite bless a projection
+   * that dropped it.
+   */
+  readonly display_name: string | null;
   revoked_at: number | null;
   readonly token_expires_at: number | null;
+};
+
+/** `01-F68`'s org row as this fake holds it. Absent ⇒ the org is UNNAMED, which is a 200. */
+export type FakeOrgRow = {
+  readonly display_name: string;
+  readonly status: string;
+  readonly created_at: number;
+};
+
+/** `01-F69`'s branch row. `display_name` is `NOT NULL` in the real schema, so it is required here. */
+export type FakeBranchRow = {
+  readonly branch_id: string;
+  readonly display_name: string;
+  readonly branch_type: string;
+  readonly branch_class: string;
+  readonly created_at: number;
 };
 
 export type FakeGateway = {
@@ -80,6 +112,12 @@ export type FakeGateway = {
   registerDevice(org_id: string, row: FakeDeviceRow): void;
   /** `12-F10` — seed the merged org log this fake will window over. */
   seedLedger(org_id: string, rows: readonly FakeLedgerRow[], latest_arrival_ms?: number): void;
+  /**
+   * `01-F68`/`01-F69` — seed one org's directory. Calling it with `org: null` seeds branches under
+   * an UNNAMED org, which is the state every real deployment is in today and therefore the state a
+   * naming surface has to render correctly.
+   */
+  seedTenancy(org_id: string, org: FakeOrgRow | null, branches: readonly FakeBranchRow[]): void;
   /** The registry as it stands now, so a test can assert `revoked_at` actually MOVED. */
   devices(org_id: string): readonly FakeDeviceRow[];
   close(): Promise<void>;
@@ -95,6 +133,8 @@ export const startFakeGateway = async (): Promise<FakeGateway> => {
   const registry = new Map<string, FakeDeviceRow[]>();
   const ledgerRows = new Map<string, FakeLedgerRow[]>();
   const ledgerArrival = new Map<string, number>();
+  const orgRows = new Map<string, FakeOrgRow>();
+  const branchRows = new Map<string, FakeBranchRow[]>();
   /**
    * The real gateway stamps `revoked_at` from the DATABASE clock. A monotonic counter here keeps
    * two revocations in one millisecond distinguishable, which `Date.now()` does not — and the
@@ -128,7 +168,7 @@ export const startFakeGateway = async (): Promise<FakeGateway> => {
       for await (const chunk of req) chunks.push(chunk as Buffer);
       const raw = Buffer.concat(chunks).toString("utf8");
       const body: unknown = raw === "" ? null : JSON.parse(raw);
-      received.push({ path: url.pathname, body });
+      received.push({ path: url.pathname, body, query: Object.fromEntries(url.searchParams) });
 
       const org_id = url.searchParams.get("org_id") ?? "";
       if (req.method === "POST" && url.pathname === "/internal/catalog/publish") {
@@ -169,6 +209,24 @@ export const startFakeGateway = async (): Promise<FakeGateway> => {
       }
       if (req.method === "GET" && url.pathname === "/internal/org-events") {
         send(200, { events: await ledger.history(org_id) });
+        return;
+      }
+      /**
+       * `01-F68`/`01-F69`. **It filters by `org_id`, and that filter is load-bearing rather than
+       * decorative:** the whole isolation question this surface raises is whether one tenant can
+       * read another's estate, and a fake that answered every org's rows to every caller could not
+       * tell a correctly-scoped request from a leak. The real gateway's `where org_id =` is asserted
+       * against real Postgres in its own suite; what is reproduced here is only the scoping, because
+       * that is what the API-side assertion depends on.
+       *
+       * An org with no seeded row answers `org: null` — `01-F68`'s UNNAMED, and a 200.
+       */
+      if (req.method === "GET" && url.pathname === "/internal/tenancy") {
+        const org = orgRows.get(org_id);
+        send(200, {
+          org: org === undefined ? null : { org_id, ...org },
+          branches: (branchRows.get(org_id) ?? []).map((row) => ({ ...row, org_id })),
+        });
         return;
       }
       if (req.method === "GET" && url.pathname === "/internal/devices") {
@@ -259,6 +317,10 @@ export const startFakeGateway = async (): Promise<FakeGateway> => {
     seedLedger: (org_id, rows, latest_arrival_ms) => {
       ledgerRows.set(org_id, [...rows]);
       if (latest_arrival_ms !== undefined) ledgerArrival.set(org_id, latest_arrival_ms);
+    },
+    seedTenancy: (org_id, org, branches) => {
+      if (org !== null) orgRows.set(org_id, org);
+      branchRows.set(org_id, [...branches]);
     },
     devices: (org_id) => [...(registry.get(org_id) ?? [])],
     close: () =>

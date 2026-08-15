@@ -42,6 +42,7 @@ import { IntegrationError } from "./errors.js";
 import type { DayLedger } from "./ledger.js";
 import type { CatalogRuntime } from "./publish.js";
 import { verifySessionToken } from "./session.js";
+import type { TenancyDirectory } from "./tenancy.js";
 import type { UserStore } from "./users.js";
 
 /**
@@ -73,6 +74,14 @@ export type ApiContext = {
    * render `Rs 0 · 0 orders` over a day that took any amount at all. See `ledger.ts`.
    */
   readonly ledger: DayLedger;
+  /**
+   * `01-F68`/`01-F69`. Required for `catalog`'s reason and one sharper: the fallback
+   * `createApiServer` resolves REFUSES every read rather than answering emptily, because
+   * "unnamed org, no branches" is **the true answer for every tenant today** — so a stub here would
+   * be indistinguishable from a correct implementation and would stay indistinguishable after
+   * provisioning landed. See `unconfiguredTenancyDirectory`.
+   */
+  readonly tenancy: TenancyDirectory;
 };
 
 /**
@@ -177,8 +186,21 @@ const integrationBoundary = t.middleware(async ({ next, path, type }) => {
 
 export const publicProcedure = t.procedure.use(integrationBoundary);
 
-/** What the session middleware adds: the server's own answer to "who is this". */
-type SubjectContext = ApiContext & { readonly subject: AuthSubject };
+/**
+ * What the session middleware adds: the server's own answer to "who is this".
+ *
+ * **`subject_display_name` sits BESIDE the `AuthSubject`, never inside it** (`11-F20`, `21-F15`).
+ * `AuthSubject` is `packages/domain`'s authorization INPUT — `can()`, `reportScope` and `rolesAt`
+ * read it — and a person's name is not an authorization fact. Putting it there would widen a
+ * PROTECTED type for a rendering concern, and would invite the next reader to believe a name might
+ * matter to a verdict; `11-F20` says the opposite in terms ("a name is NOT an identifier … two
+ * people legitimately share one"). It is `null` when the store holds no name, which is
+ * `21-F15`'s unnamed case and not an error — see `users.ts`.
+ */
+type SubjectContext = ApiContext & {
+  readonly subject: AuthSubject;
+  readonly subject_display_name: string | null;
+};
 
 /**
  * Authentication. Resolves the bearer to a user the STORE still has, and rebuilds the subject
@@ -201,7 +223,16 @@ const withSession = t.middleware(async ({ ctx, next }) => {
     org_id: user.org_id,
     assignments: user.assignments,
   };
-  return next({ ctx: { ...ctx, subject } satisfies SubjectContext });
+  // Re-read every request alongside the assignments, for `01-F27`'s reason applied to a name: a
+  // rename lands on the next request rather than at the next login, and nothing snapshots it.
+  // `11-F20`: "names are resolved at RENDER TIME" — and a session token is not render time.
+  return next({
+    ctx: {
+      ...ctx,
+      subject,
+      subject_display_name: user.display_name ?? null,
+    } satisfies SubjectContext,
+  });
 });
 
 /** Authenticated, not yet authorized. Every member of `SESSION_ONLY_PROCEDURES` builds on this. */

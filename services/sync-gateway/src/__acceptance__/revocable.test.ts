@@ -126,6 +126,12 @@ const runScript = async (
 const revoke = (id: Identity, extra: readonly string[] = []): Promise<Ran> =>
   runScript("revoke-device", ["--org", id.org_id, "--device", id.device_id, ...extra]);
 
+/**
+ * ⚠ `--name` joined this list in August 2026 — `01-F70` makes a device's human name REQUIRED at
+ * registration and `provision-device` refuses without it (`15-F27`). Nothing this file asserts is
+ * about the name; the fixture supplies one so §F can still reach the revocation round trip it is
+ * actually testing. `provisionable.test.ts` §G owns the requirement itself.
+ */
 const provisionFlags = (id: Identity): string[] => [
   "--org",
   id.org_id,
@@ -135,6 +141,9 @@ const provisionFlags = (id: Identity): string[] => [
   id.device_id,
   "--class",
   "counter_electron",
+  "--name",
+  // Quoted — `runScript` joins argv with spaces and runs it through a shell.
+  '"Counter till"',
 ];
 
 /** The registry row as the auth checks read it — asked of the DATABASE, never of our code. */

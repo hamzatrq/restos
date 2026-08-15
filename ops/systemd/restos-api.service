@@ -26,10 +26,16 @@ Restart=always
 RestartSec=5
 StartLimitIntervalSec=0
 
-# ⚠ A restart re-seeds the ONE owner account from BOOTSTRAP_OWNER_* and DROPS EVERYTHING ELSE:
-# the user store and the staged (unpublished) catalog edits are both IN MEMORY. An owner who was
+# ⚠ A restart DROPS the staged (unpublished) catalog edits — they are IN MEMORY. An owner who was
 # halfway through authoring a menu when the power went loses the draft, not the published menu.
 # Tell them. It is not recoverable and there is no warning on the screen.
+#
+# ACCOUNTS now survive a restart, and this comment used to say they did not. With DATABASE_URL set
+# (cloud.env) the login path reads kernel.users — the rows `pnpm -C services/sync-gateway
+# create-owner` writes (15-F26/15-F27) — so a restart re-reads them rather than re-seeding one
+# owner from BOOTSTRAP_OWNER_*. Those three variables are the development seed and are MUTUALLY
+# EXCLUSIVE with DATABASE_URL: set both and this unit fails to start, loudly, naming both.
+# The second boot line in the journal says which is in force: `@restos/api accounts: …`.
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=restos-api

@@ -154,6 +154,11 @@ const provision = (id: Identity): Promise<Ran> =>
       id.device_id,
       "--class",
       "counter_electron",
+      // ⚠ `--name` became REQUIRED in August 2026 (`01-F70`, `15-F27`) and is quoted because
+      // `runScript` joins argv with spaces through a shell. Nothing this file asserts is about the
+      // name; the fixture supplies one so the redaction sweep still reaches a running command.
+      "--name",
+      '"Counter till"',
     ],
     { DATABASE_URL: leakyDsn },
   );

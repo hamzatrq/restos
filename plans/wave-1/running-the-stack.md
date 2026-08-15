@@ -48,6 +48,13 @@ export BRANCH_ID=00000000-0000-7000-8000-000000000002
 export DEVICE_ID=00000000-0000-7000-8000-000000000003
 ```
 
+⚠ **AS OF AUGUST 2026 THESE THREE IDS SHOULD COME FROM `15-F27`'s PROVISIONING COMMANDS, NOT FROM
+THIS BLOCK** — see §2b, which runs after the migrations and before anything else. Hand-picked ids
+still *work* (nothing keys on the directory, `01-F68` forbids a foreign key), but an org with no
+`kernel.orgs` row is **UNNAMED**: every surface that resolves a name renders the UUID, which is the
+defect `01-F68`/`01-F69`/`21-F15` exist to close. The block above is kept because it is what makes
+the four-process id trap above readable, and because a run that skips §2b still comes up.
+
 ---
 
 ## 1. Prerequisites
@@ -88,21 +95,29 @@ DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/restos' \
 Healthy — one line, and the DSN is password-redacted (`18 §5`):
 
 ```
-@restos/sync-gateway migrate applied 10 of 10 migrations · postgres://postgres:*****@127.0.0.1:5432/restos
+@restos/sync-gateway migrate applied 12 of 12 migrations · postgres://postgres:*****@127.0.0.1:5432/restos
 ```
 
-and nine tables in `kernel`:
+and twelve tables in `kernel`:
 
 ```sh
 docker exec restos-pg psql -U postgres -d restos -c '\dt kernel.*'
-# catalog_entries · catalog_versions · device_registry · device_watermarks
-# events · org_events · org_sequences · quarantine · quarantine_notices
+# branches · catalog_entries · catalog_versions · device_registry · device_watermarks
+# events · org_events · org_sequences · orgs · quarantine · quarantine_notices · users
 ```
+
+`orgs` and `branches` arrived at `0010` (`01-F68`/`01-F69` — the tenancy directory) and `users` at
+`0011` (`11-F20`/`15-F26`). ⚠ **This paragraph said "nothing fills them yet" and that stopped being
+true in August 2026** — §2b's four declared commands are the writer. They are still empty on a fresh
+stack, and a run that skips §2b still comes up: `01-F68` makes an org with events and no record
+**UNNAMED, not invalid**, no ledger table references any of the three, and `\d kernel.events` shows
+no foreign key. What you lose by skipping is every name — the org, the branch, the till and the
+owner all render as UUIDs (`21-F15`).
 
 **It is idempotent.** A second run says so and changes nothing:
 
 ```
-@restos/sync-gateway migrate nothing to apply — all 10 migrations were already present · postgres://…
+@restos/sync-gateway migrate nothing to apply — all 12 migrations were already present · postgres://…
 ```
 
 ⚠ **Postgres `NOTICE` objects on the second run are not errors.** `42P06 schema "drizzle" already
@@ -118,9 +133,61 @@ a fourth boot line reports the schema state, so forgetting this step is a senten
 bringing the stack up rather than a `500` somewhere else later.
 
 ```
-@restos/sync-gateway schema up to date — all 10 migrations applied
-@restos/sync-gateway schema NOT MIGRATED — 10 of 10 migrations are unapplied. Run `pnpm -C services/sync-gateway migrate`; …
+@restos/sync-gateway schema up to date — all 12 migrations applied
+@restos/sync-gateway schema NOT MIGRATED — 12 of 12 migrations are unapplied. Run `pnpm -C services/sync-gateway migrate`; …
 ```
+
+---
+
+## 2b. Provision the TENANT — the org, its branch and its first owner (`15-F27`)
+
+**New in August 2026, and it replaces nothing you were doing — it replaces nothing existing at
+all.** Until these landed there was no way to create a tenant: `org_id` was a UUID you typed, the
+only owner was three environment variables in `services/api`, and no row anywhere said what the
+restaurant is called. `01-F68`/`01-F69`/`11-F20` make each of those a NAMED record and `15-F27`
+makes creating them an invokable step.
+
+Four commands, all needing `DATABASE_URL` and nothing else. **Each prints its machine value on
+stdout and its prose on stderr**, so `$( … )` captures an id and not a paragraph:
+
+```sh
+cd services/sync-gateway
+export DATABASE_URL='postgres://gateway:…@127.0.0.1:5432/restos'   # the same one §2 migrated
+
+export ORG_ID=$(pnpm create-org --name "Karachi Biryani House" | tail -1)
+export BRANCH_ID=$(pnpm create-branch --org "$ORG_ID" --name "Tariq Road" | tail -1)
+
+# The owner's INITIAL PASSWORD is minted here and printed ONCE. Nobody chose it and nothing
+# stores it — 15-F26 forbids the vendor holding a restaurant's password.
+pnpm create-owner --org "$ORG_ID" --email owner@example.test --name "Ayesha Khan"
+
+pnpm list-tenancy --org "$ORG_ID"        # read it all back; stdout is JSON, pipe it to jq
+cd -
+```
+
+`| tail -1` is there because a package manager prints its own banner ahead of the script.
+
+**What each one refuses, and why the refusal is the point.** `01-F68` forbids a foreign key from any
+ledger table *ever* — an FK would refuse ingest for orgs whose events predate their record, which is
+refusing a sale a till has already rung — so **ordering is enforced by these commands or by nothing
+at all**: a branch under an unnamed org, or an owner in one, is refused by name. Re-running with the
+same id and the same name is a **no-op that says so**; a re-run that would CHANGE a stored name is
+refused, because a rename is `14-F2`/`14-F30` from an authenticated surface, not a side effect of a
+script re-run with a typo. `create-owner` refuses a **second** owner (`15-F26` creates the first;
+the rest are `14-F14`'s CRUD) and refuses `--password`/`--password-hash` **by name**.
+
+⚠ **THE OWNER THIS CREATES CANNOT LOG IN YET, AND §5 IS STILL THE PATH THAT WORKS.**
+`create-owner` writes a real, verifiable row into `kernel.users` — but `services/api` still builds
+its `UserStore` from `BOOTSTRAP_OWNER_*` in memory, so the login path never reads that table. Until
+`createPostgresUserStore` lands, do §5a/§5b as written **and** run `create-owner` if you want the
+directory to be complete. That is the one half of `15-F26` this step does not close, and it is named
+here rather than left to be discovered at a login screen.
+
+⚠ **NONE OF THESE COMMANDS WRITES AN EVENT**, though `15-F4` says provisioning emits the org's first
+`config.changed` and `15-F3` audits every staff action with an actor. A command on a service host
+has no authenticated user, so the actor could only ever be `null`, permanently, in an append-only
+store (`01-F1`) — the same reason `revoke-device` writes none. **A tenant created here has no ledger
+record and no attribution.** That is owed to `15-F1`'s platform-admin console.
 
 ---
 
@@ -155,7 +222,7 @@ pnpm -C services/sync-gateway start          # `dev` to watch
 @restos/sync-gateway listening on http://0.0.0.0:8080
 @restos/sync-gateway database postgres://postgres:*****@127.0.0.1:5432/restos (opened lazily …)
 @restos/sync-gateway publish surface enabled (PUBLISH_TOKEN configured)
-@restos/sync-gateway schema up to date — all 10 migrations applied
+@restos/sync-gateway schema up to date — all 12 migrations applied
 ```
 
 **Read the fourth line too.** `schema NOT MIGRATED — …` means you skipped §2; the gateway is up and
@@ -311,15 +378,22 @@ export RESTOS_DEVICE_TOKEN=$(
   DEVICE_TOKEN_SECRET="$DEVICE_TOKEN_SECRET" \
   pnpm -C services/sync-gateway provision-device \
     --org "$ORG_ID" --branch "$BRANCH_ID" --device "$DEVICE_ID" --class counter_electron \
+    --name "Counter till" \
   | tail -1)
 ```
+
+⚠ **`--name` is REQUIRED as of August 2026 and the command refuses without it** (`01-F70`,
+`15-F27`): a device that may be named later never is, and the operator reading `14-F12`'s device
+list is by construction not standing in front of the till. It is a LABEL — `device_id` remains the
+sole key for admission, fan-out and `01-F64`'s store binding — and `--reissue` will **refuse** a
+different one rather than rename (a rename is `device.manage`, `14-F30`, from the back office).
 
 **The token is the only thing on stdout; every readable line goes to stderr**, so `$( … )` captures
 a credential and not a paragraph. (`| tail -1` is still needed because the package manager prints
 its own banner ahead of the script.) You will see, on stderr:
 
 ```
-@restos/sync-gateway provision-device registered …0003 · org …0001 · branch …0002 · class counter_electron · postgres://postgres:*****@127.0.0.1:5432/restos
+@restos/sync-gateway provision-device registered "Counter till" (…0003) · org …0001 · branch …0002 · class counter_electron · postgres://postgres:*****@127.0.0.1:5432/restos
 @restos/sync-gateway provision-device token expires 2026-11-06T15:41:55.015Z (01-F47, 90 days). Binding: iss=(unbound) aud=(unbound) — these must match the gateway that will verify it.
 @restos/sync-gateway provision-device the next line on STDOUT is the device token. It is a credential: do not log it.
 ```

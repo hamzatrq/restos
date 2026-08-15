@@ -178,6 +178,8 @@ beforeAll(async () => {
     device_id: "device-counter-1",
     branch_id: BRANCH,
     device_class: "counter",
+    // `01-F70` — this one IS named, so the projection has something to drop if it stops carrying it.
+    display_name: "Front counter till",
     revoked_at: null,
     token_expires_at: 1_900_000_000_000,
   });
@@ -185,6 +187,8 @@ beforeAll(async () => {
     device_id: "device-kds-1",
     branch_id: BRANCH,
     device_class: "kds",
+    // `01-F70` UNNAMED — a row provisioned before `0010`. Both cases must survive the same list.
+    display_name: null,
     revoked_at: null,
     token_expires_at: 1_900_000_000_000,
   });
@@ -193,6 +197,7 @@ beforeAll(async () => {
     device_id: "device-cli-revoked",
     branch_id: BRANCH,
     device_class: "counter",
+    display_name: null,
     revoked_at: 1_700_000_000_000,
     token_expires_at: 1_900_000_000_000,
   });
@@ -429,6 +434,7 @@ describe("§D — the join's own contract (14-F13, 01-F1)", () => {
     device_id: "d1",
     branch_id: BRANCH,
     device_class: "counter",
+    display_name: null,
     revoked_at: 5_000,
     token_expires_at: null,
     ...over,

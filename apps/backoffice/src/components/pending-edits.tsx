@@ -18,6 +18,7 @@ import type { ReactNode } from "react";
 import { strings } from "../lib/strings";
 import { useTRPC } from "../lib/trpc";
 import { formatInstant } from "../lib/when";
+import { nounForKind } from "./entry-editor";
 import { Button } from "./ui/button";
 import { Note } from "./ui/surface";
 
@@ -89,14 +90,38 @@ export const PendingEdits = (): ReactNode => {
                   decide whether to cancel it, and the identity below is the tie-breaker. */}
               <span className="truncate text-body text-foreground">{edit.name}</span>
               <span className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">
-                {/* The identity, DEMOTED — not deleted. Two entries may share a display name (an
-                    `item` "Coke" and a `modifier` "Coke"), and this row's control cancels one of
-                    them: `shell.dom.test.tsx` names cancelling the wrong edit as the same failure
-                    as a cancelled edit publishing anyway. It stays exactly one text node reading
-                    `${entity} / ${entity_id}`, which that suite reads with
-                    `getByText("item / tikka")`. Same demotion as `Problem`'s `detail`: lead with
-                    the meaning, keep the raw string available. */}
-                <span className="truncate">{`${edit.entity} / ${edit.entity_id}`}</span>
+                {/*
+                  **The identity, DEMOTED — and now in the owner's vocabulary (`14-F32`).**
+
+                  This node read `${edit.entity} / ${edit.entity_id}` — *"item / mutton-karahi"*,
+                  *"modifier_group / spice-level"* — which is the raw `01-F21` kind string and a
+                  bare key, on the one list whose job is to let an owner recognise what lands at
+                  05:00 and take it back. `14-F32` is explicit that *"the internal kind strings are
+                  vendor vocabulary under `14-F38` and are not rendered; the task noun is this
+                  surface's name for a kind EVERYWHERE"* — so it is `nounForKind`, the same table
+                  the editor's own header and the menu list already draw from, and never a second
+                  vocabulary invented here.
+
+                  Both halves stay, and both are still needed. The KIND, because two entries may
+                  share a display name (a dish *Coke* and an add-on *Coke*) and this row's control
+                  cancels exactly one of them; the identifier, because `14-F33` makes it the thing
+                  an owner quotes to whoever supports him and the thing a till renders when its
+                  menu has not caught up (`01-F54`) — so it is labelled the way the editor labels
+                  it rather than left as a naked token. The name above still leads; this is the
+                  tie-breaker under it, at caption scale.
+
+                  ⚠ **This is a live conflict with two older suites, reported and NOT worked
+                  around** (`24-F5`): `shell.dom.test.tsx` finds this row by
+                  `getByText("item / tikka")` and `pending-name.dom.test.tsx` asserts
+                  `toContain("item / item-chicken-karahi")`. Both predate `14-F32`/`14-F38` and
+                  both encode the string those FRs ban, so no implementation satisfies the corpus
+                  and those five assertions at once. They are for the test-owning session; the
+                  assertion those files were really written to defend — that the NAME leads and the
+                  identity is demoted under it — is unchanged and still true here.
+                */}
+                <span className="truncate">
+                  {`${nounForKind(edit.entity)} · ${strings.catalog.reference} ${edit.entity_id}`}
+                </span>
                 <span>
                   {`${strings.timing.landsAt} ${landsAtText(edit.lands_at)} · ${strings.timing.stagedBy} ${edit.actor_user_id}`}
                 </span>

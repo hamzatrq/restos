@@ -89,8 +89,15 @@ docker run -d --name restos-pg \
 until [ "$(docker logs restos-pg 2>&1 | grep -ac 'ready to accept connections')" -ge 2 ]; do sleep 1; done
 
 pnpm -C services/sync-gateway migrate
-# -> @restos/sync-gateway migrate applied 10 of 10 migrations · postgres://postgres:*****@…
+# -> @restos/sync-gateway migrate applied 12 of 12 migrations · postgres://postgres:*****@…
 # Idempotent. On a second run the 42P06/42P07 Postgres NOTICE dumps are NOT errors.
+
+# ── 2b. the tenant (15-F27: every provisioned record has a declared step) ────
+# The org and the branch are ROWS, and an owner under an org with no record is
+# refused by name. --org / --branch pin the ids to the dev seed above; omit them
+# and each command mints a fresh UUIDv7 instead.
+pnpm -C services/sync-gateway create-org    --org "$ORG_ID" --name "Dev Restaurant"
+pnpm -C services/sync-gateway create-branch --org "$ORG_ID" --branch "$BRANCH_ID" --name "Dev Branch"
 
 # ── 3. secrets ───────────────────────────────────────────────────────────────
 export DEVICE_TOKEN_SECRET=$(openssl rand -hex 24)   # >= 32 bytes, enforced at boot
@@ -105,16 +112,17 @@ until curl -sf "http://127.0.0.1:8080/internal/catalog/published?org_id=$ORG_ID"
   -H "Authorization: Bearer $PUBLISH_TOKEN" >/dev/null; do sleep 1; done
 echo "gateway healthy"     # {"version":0,"entries":[]} — this also proves step 2 ran
 
-# ── 5. owner credential, then the API (port 3001) ────────────────────────────
-export OWNER_PASSWORD='dev-pass-change-me'
-HASH=$(pnpm -C services/api exec tsx -e \
-  "import('@restos/domain').then(m=>m.hashPin(process.env.OWNER_PASSWORD)).then(h=>console.log(h))" | tail -1)
-# $HASH is an Argon2id PHC string, full of '$'. Keep it double-quoted, always.
-# Never put the plaintext password in env — the env would then hold the credential.
+# ── 5. the owner, then the API (port 3001) ───────────────────────────────────
+# The owner is a ROW in kernel.users, not an environment variable. The command mints the
+# password itself and prints it ONCE on stdout — 15-F26 forbids the vendor holding a
+# restaurant's password, so nothing here chooses one and nothing stores the plaintext.
+OWNER_PASSWORD=$(pnpm -C services/sync-gateway create-owner \
+  --org "$ORG_ID" --email owner@example.test --name "Ayesha Khan" 2>/dev/null | tail -1)
+echo "initial password: $OWNER_PASSWORD"   # hand this to the owner; it is not stored anywhere
 
-BOOTSTRAP_OWNER_EMAIL=owner@example.test \
-BOOTSTRAP_OWNER_PASSWORD_HASH="$HASH" \
-BOOTSTRAP_ORG_ID="$ORG_ID" \
+# DATABASE_URL is what makes the API read those rows. It is MUTUALLY EXCLUSIVE with the
+# BOOTSTRAP_OWNER_* seed — set both and the API refuses to boot rather than pick one.
+DATABASE_URL="$DATABASE_URL" \
 ENABLED_BRANCHES="$BRANCH_ID" \
 ENABLED_CHANNELS=counter,storefront \
 SYNC_GATEWAY_URL=http://127.0.0.1:8080 \
@@ -626,8 +634,21 @@ bound is declared anywhere. Redis (tested against 7) is needed by `services/jobs
 | `SYNC_GATEWAY_TOKEN` | **yes** | — | must equal the gateway's `PUBLISH_TOKEN` |
 | `ENABLED_BRANCHES` | no | empty | **empty refuses every catalog save.** The single declaration; the back office reads it back |
 | `ENABLED_CHANNELS` | no | empty | `counter`, `phone`, `storefront`, `whatsapp`, `foodpanda`. An unknown value crashes at boot |
-| `BOOTSTRAP_OWNER_EMAIL` / `_PASSWORD_HASH` / `BOOTSTRAP_ORG_ID` | no | — | all three or none: absent leaves the user store **empty and nobody can log in**. The hash is an Argon2id PHC string, never a plaintext password |
+| `DATABASE_URL` | no | — (**no default, unlike the gateway's**) | **where accounts live.** Set ⇒ the login path reads `kernel.users`, the rows `create-owner` writes, and accounts survive a restart. Connects **lazily**: a wrong DSN is a named 503 on the first login, not a boot crash |
+| `BOOTSTRAP_OWNER_EMAIL` / `_PASSWORD_HASH` / `BOOTSTRAP_ORG_ID` / `_NAME` | no | — | the **development seed**, and `15-F26` calls it a stopgap: one owner, in memory, **gone on restart**. All three (name optional) or none — absent leaves the store **empty and nobody can log in** (fail-closed). The hash is an Argon2id PHC string, never a plaintext password |
 | `PORT` | no | `3001` | |
+
+⚠ **`DATABASE_URL` and `BOOTSTRAP_OWNER_*` are MUTUALLY EXCLUSIVE — both set is a boot crash that
+says so.** They are two answers to one question (who may sign in), and the API will not choose. A
+real deployment sets `DATABASE_URL` and creates people with
+`pnpm -C services/sync-gateway create-owner`; that is the only path producing an account
+`list-tenancy` can report and `14-F14`'s CRUD could ever deactivate (`15-F26`, `15-F27`). An
+env-declared owner beside a real users table would be a permanent backdoor in neither.
+
+The API prints **two** boot lines, and the second is the one to read: `@restos/api accounts: …`
+names `kernel.users` (with a password-redacted DSN), the in-memory seed, or `NONE`. Before it
+existed, a deployment whose accounts evaporate on restart and one with a real users table looked
+identical from outside the process.
 
 `BOOTSTRAP_ORG_ID` must equal the till's org id, and the till's branch must be in `ENABLED_BRANCHES`.
 **Nothing checks this**, and getting it wrong produces four healthy processes and no menu.

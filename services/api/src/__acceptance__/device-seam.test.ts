@@ -140,6 +140,8 @@ describe("the device surface reaches the gateway (the seam, out of process)", ()
       device_id: DEVICE,
       branch_id: BRANCH,
       device_class: "counter_electron",
+      // `01-F70`. Null is the UNNAMED row every real registry row is today.
+      display_name: null,
       revoked_at: null,
       token_expires_at: 1_900_000_000_000,
     });
@@ -175,12 +177,46 @@ describe("the device surface reaches the gateway (the seam, out of process)", ()
         device_id: DEVICE,
         branch_id: BRANCH,
         device_class: "counter_electron",
+        // `01-F70`. Null is UNNAMED and travels as null — see `devices.ts`.
+        display_name: null,
         revoked_at: null,
         token_expires_at: 1_900_000_000_000,
         revoked_by: null,
       },
     ]);
     expect(gateway.received.some((entry) => entry.path === "/internal/devices")).toBe(true);
+  });
+
+  /**
+   * **THE TENANCY SEAM (`01-F68`/`01-F69`), and it rides this block for a measured reason.**
+   *
+   * `tenancy-names.test.ts` proves `tenancy.directory` does the right thing when it is HANDED a real
+   * `TenancyDirectory`. It cannot prove the SHIPPED PROCESS hands it one — the decisive mutant is
+   * `server.ts` building `unconfiguredTenancyDirectory()` instead of `createGatewayTenancyDirectory(link)`,
+   * under which the process boots, logs in, gates every procedure, lists devices and publishes a
+   * menu, while every name slot in the product goes permanently unnamed. Only an assertion that
+   * inspects **what the peer received** separates those two worlds.
+   *
+   * It is an `it` in this file rather than a third spawned process because the package already
+   * carries a documented flake class around subprocess-spawning oracles under contention
+   * (`services/api/CLAUDE.md`), and this question needs a running shipped host, not its own.
+   */
+  it("`tenancy.directory` reaches the gateway's directory — not a stub (01-F68, 01-F69)", async () => {
+    const directory = await query(running.base, "tenancy.directory", auth);
+    expect(directory.status, JSON.stringify(directory.body)).toBe(200);
+    // The composition root wired a REAL directory: the request left the process. What comes back is
+    // `01-F68`'s UNNAMED org, because this fake seeds no tenancy rows — which is exactly the state
+    // every deployment is in until provisioning runs, and `unconfiguredTenancyDirectory` would have
+    // thrown here instead of answering it.
+    expect(dataOf(directory)).toEqual({
+      org: { org_id: ORG, display_name: null, status: null },
+      branches: [],
+    });
+    expect(
+      gateway.received.some((entry) => entry.path === "/internal/tenancy"),
+      "no /internal/tenancy request ever left the process — the composition root supplied a stub, " +
+        "and every name slot in the product is frozen at 'unnamed' with every gate green",
+    ).toBe(true);
   });
 
   it("`devices.revoke` writes to the gateway's REGISTRY — the act that stops the till", async () => {

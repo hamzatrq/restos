@@ -128,6 +128,14 @@ const freshIdentity = (): Identity => ({
   device_id: newId(),
 });
 
+/**
+ * ⚠ **`--name` JOINED THIS HELPER IN AUGUST 2026 AND IT IS REQUIRED (`01-F70`, `15-F27`).** The FR
+ * puts the refusal at registration — *"an absent name is refused … so a nameless device cannot be
+ * created and named later"* — so the command refuses without it and every invocation below supplies
+ * one. Nothing else in this file changed: the assertions, the streams, the exit codes and the
+ * refusals are the contract, and they are untouched. §G is the assertion that the requirement is
+ * real rather than decorative.
+ */
 const flags = (id: Identity, deviceClass = "counter_electron"): string[] => [
   "--org",
   id.org_id,
@@ -137,6 +145,10 @@ const flags = (id: Identity, deviceClass = "counter_electron"): string[] => [
   id.device_id,
   "--class",
   deviceClass,
+  "--name",
+  // Quoted: these argv entries are joined with spaces and run THROUGH A SHELL, so a bare
+  // `Counter till` arrives as two arguments and `parseArgs` refuses the positional one.
+  '"Counter till"',
 ];
 
 /**
@@ -337,6 +349,77 @@ describe("services/sync-gateway can provision a device (01-F25/01-F47 — the se
     expect(`${ran.err}${ran.out}`).toContain("DEVICE_CLASSES");
     expect(await registryRow(id), "a refused class still wrote a registry row").toBeUndefined();
   }, 120_000);
+
+  it("§G 01-F70: the device's NAME is required at registration and lands on the registry row", async () => {
+    // ⚠ This test exists because `0010`'s mutation matrix found the hole and said so: *"nothing
+    // asserts 01-F70's column exists — the only test that notices is the torn-schema resume …
+    // The writer phase must land a real assertion on `device_registry.display_name`"*. This is it.
+    const nameOf = async (id: Identity): Promise<string | null | undefined> => {
+      const rows = await db.execute(
+        sql`select display_name from kernel.device_registry
+            where org_id = ${id.org_id} and device_id = ${id.device_id}`,
+      );
+      const row = [...rows][0];
+      if (row === undefined) return undefined;
+      return row.display_name === null ? null : String(row.display_name);
+    };
+
+    // ── the REFUSAL half, and it is the FR's own clause: "an absent name is refused, naming the
+    // argument an operator must supply". Two-sided against the write below, so a command that
+    // accepted anything would fail here rather than passing for having stored something.
+    const bare = freshIdentity();
+    const withoutName = [
+      ...["--org", bare.org_id],
+      ...["--branch", bare.branch_id],
+      ...["--device", bare.device_id],
+      ...["--class", "counter_electron"],
+    ];
+    const refused = await provision(withoutName);
+    expect(refused.code, "a device was registered with no name").not.toBe(0);
+    expect(`${refused.err}${refused.out}`).toContain("--name");
+    expect(await nameOf(bare), "a refused registration still wrote a row").toBeUndefined();
+
+    // A name that renders as NOTHING is refused too — `21-F15`: a slot "is never blank — a blank is
+    // the same lie with less information". `packages/domain`'s `DisplayName` is what decides this,
+    // which is why the schema carries no CHECK constraint (one interpretation, `03-F40`).
+    const blank = freshIdentity();
+    const blankName = await provision([
+      ...["--org", blank.org_id],
+      ...["--branch", blank.branch_id],
+      ...["--device", blank.device_id],
+      ...["--class", "counter_electron"],
+      ...["--name", '"   "'],
+    ]);
+    expect(blankName.code, "a whitespace-only device name was accepted").not.toBe(0);
+    expect(await nameOf(blank)).toBeUndefined();
+
+    // ── the WRITE half: the name the operator typed is the name the row holds.
+    const named = freshIdentity();
+    const ran = await provision([
+      ...["--org", named.org_id],
+      ...["--branch", named.branch_id],
+      ...["--device", named.device_id],
+      ...["--class", "kitchen"],
+      ...["--name", '"Kitchen screen"'],
+    ]);
+    expect(ran.code, `stdout:\n${ran.out}\nstderr:\n${ran.err}`).toBe(0);
+    expect(await nameOf(named)).toBe("Kitchen screen");
+
+    // ── and `--reissue` NEVER renames (`15-F27`). A required argument that the re-credentialling
+    // path silently discarded would be worse than an optional one: the operator would believe they
+    // had corrected the label.
+    const rename = await provision([
+      ...["--org", named.org_id],
+      ...["--branch", named.branch_id],
+      ...["--device", named.device_id],
+      ...["--class", "kitchen"],
+      ...["--name", '"Pass screen"'],
+      "--reissue",
+    ]);
+    expect(rename.code, "--reissue renamed a device").not.toBe(0);
+    expect(`${rename.err}${rename.out}`).toContain("14-F30");
+    expect(await nameOf(named)).toBe("Kitchen screen");
+  }, 180_000);
 
   it("§F the 32-byte DEVICE_TOKEN_SECRET floor is enforced here too (18 §5)", async () => {
     // The command MINTS with this key; the server VERIFIES with it. A floor enforced on one side

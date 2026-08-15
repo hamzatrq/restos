@@ -49,11 +49,17 @@ const PKG_DIR = resolve(import.meta.dirname, "..", "..");
 const DEVICE_SECRET = "a-device-token-secret-of-at-least-32-bytes-for-the-migratable-suite";
 
 /**
- * The nine tables `plans/wave-1/running-the-stack.md` §2 tells an operator to expect. Written out
+ * The twelve tables `plans/wave-1/running-the-stack.md` §2 tells an operator to expect. Written out
  * rather than derived from `schema.ts`: a list derived from the same source the migrations were
  * generated from would agree with itself no matter what the migrations actually did.
+ *
+ * `branches` and `orgs` joined at `0010` (01-F68/01-F69 — the tenancy directory) and `users` at
+ * `0011` (11-F20/15-F26 — the person, and the org's first owner). This list is a FACT about the
+ * shipped migrations, so it moves with them; the assertions using it are unchanged and are still
+ * exact equality, which is why adding a table cannot pass here unnoticed.
  */
 const EXPECTED_TABLES = [
+  "branches",
   "catalog_entries",
   "catalog_versions",
   "device_registry",
@@ -61,8 +67,10 @@ const EXPECTED_TABLES = [
   "events",
   "org_events",
   "org_sequences",
+  "orgs",
   "quarantine",
   "quarantine_notices",
+  "users",
 ];
 
 type Scripts = Record<string, string | undefined>;
@@ -277,17 +285,31 @@ describe("services/sync-gateway migrations are runnable as a deploy step (the se
     expect((await runDeclared(migrate, { DATABASE_URL: url })).code).toBe(0);
 
     // Tear off the last migration exactly as an interrupted deploy would leave it — its journal
-    // row gone and its table gone. (Measured: drizzle 0.45.2 runs every PENDING migration in ONE
+    // row gone and its tables gone. (Measured: drizzle 0.45.2 runs every PENDING migration in ONE
     // transaction, so this state cannot arise from a failed run; it is the hand-repaired case, and
     // what matters is that re-running converges rather than erroring.)
+    //
+    // ⚠ THE TIMESTAMP AND THE TABLES BOTH NAME THE **LAST** MIGRATION AND MOVE WITH IT. drizzle
+    // resumes from `max(created_at)`, so tearing off any EARLIER migration re-applies nothing and
+    // this test would silently stop exercising resumption while still passing its exit-code
+    // assertion. `1785000700000` is `0011_tenancy_users`' `when`; it was `1785000600000`
+    // (`0010_tenancy_records`) until 0011 landed, and `1785000500000` (`0009_org_events`) before that.
     const sql = postgres(url);
     try {
-      await sql`delete from drizzle.__drizzle_migrations where created_at = 1785000500000`;
-      await sql`drop table kernel.org_events`;
+      await sql`delete from drizzle.__drizzle_migrations where created_at = 1785000700000`;
+      // `0011` is one CREATE plus two indexes; dropping the table takes its indexes with it, and
+      // the tear-off has to undo ALL of a migration because it ran as one transaction. Leaving any
+      // object behind would make the re-apply fail on `already exists` — a real property of every
+      // migration in this folder, none of which is written `IF NOT EXISTS`. Idempotency here is
+      // JOURNAL-level (drizzle's `max(created_at)` watermark), never statement-level.
+      await sql`drop table kernel.users`;
     } finally {
       await sql.end({ timeout: 5 });
     }
-    expect(await kernelTables(url)).not.toContain("org_events");
+    expect(await kernelTables(url)).not.toContain("users");
+    // The migration BELOW the tear-off is untouched and must stay applied — without this, tearing
+    // off the whole tail would look identical to tearing off the last one.
+    expect(await kernelTables(url)).toContain("orgs");
 
     const again = await runDeclared(migrate, { DATABASE_URL: url });
     expect(again.code, `stdout:\n${again.out}\nstderr:\n${again.err}`).toBe(0);

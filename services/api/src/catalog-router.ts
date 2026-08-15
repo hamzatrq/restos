@@ -248,17 +248,27 @@ export const catalogProcedures = {
     })),
 
   /**
-   * The day-end sweep, reachable as a procedure so an operator can run it and so the acceptance
-   * suite can advance the clock rather than wait six hours for a timer. `start()` also runs it on
-   * an interval — that is the production path, and this is not a second one: both call the SAME
-   * `scheduler.runDue()`, which re-reads the live pending set every sweep.
+   * The day-end sweep for **this caller's org**, reachable as a procedure so an owner can land her
+   * own pending edits without waiting for the boundary, and so the acceptance suite can advance
+   * the clock rather than wait six hours for a timer.
    *
-   * Org-scoped despite the sweep being global: it returns only this caller's org's result, so a
-   * back office cannot learn that another org published anything.
+   * **⚠ `01-F71` — THIS USED TO SWEEP EVERY TENANT ON THE HOST, and it is worth reading why the
+   * defect survived every gate.** It called `scheduler.runDue()`, which takes and publishes the due
+   * edits of *every* org, and then narrowed the ANSWER with a `find` on the subject's org. So the
+   * read was scoped and the side effect was not: tenant A pressing this published tenant B's staged
+   * menu to B's tills, consumed `14-F28`'s "cancellable until they land" window with nobody in B
+   * having acted, and wrote a row into B's `14-F3` history that `01-F1` makes permanent — while
+   * answering A `{ version: null }`, so neither tenant was told. Every existing assertion here reads
+   * the answer, and the answer was right; only a second tenant with data of its own can see it
+   * (`__acceptance__/tenant-isolation.test.ts` §4). `01-F71` forbids a subject *causing a write in*
+   * another org, not merely reading one, and `runDueForOrg` scopes the take itself.
+   *
+   * **This is not the only path, and it is not the one `14-F28` rests on.** `start()` runs the
+   * unscoped `runDue()` on an interval — that is the production landing for every tenant, including
+   * the ones whose owner never opens a back office. Both re-read the live pending set every sweep,
+   * so a cancel at 04:59:59 still works on either.
    */
-  runDayEnd: authorized("catalog.edit_menu_prices").mutation(async ({ ctx }) => {
-    const landed = await ctx.catalog.scheduler.runDue();
-    const mine = landed.find((entry) => entry.org_id === ctx.subject.org_id);
-    return { version: mine === undefined ? null : mine.version };
-  }),
+  runDayEnd: authorized("catalog.edit_menu_prices").mutation(async ({ ctx }) => ({
+    version: await ctx.catalog.scheduler.runDueForOrg(ctx.subject.org_id),
+  })),
 };

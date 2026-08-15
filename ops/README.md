@@ -76,19 +76,12 @@ sudo chown restos:restos /etc/restos/cloud.env && sudo chmod 600 /etc/restos/clo
 sudo -e /etc/restos/cloud.env       # fill in every blank from ops/ids.env
 ```
 
-Generate the owner's password hash — **never put the plaintext password in the file**. The env
-would then hold the credential, and it is the same hashing the till uses for staff PINs:
-
-```bash
-cd /opt/restos
-OWNER_PASSWORD='the-real-password' pnpm -C services/api exec tsx -e \
-  "import('@restos/domain').then(m=>m.hashPin(process.env.OWNER_PASSWORD)).then(console.log)"
-# -> $argon2id$v=19$m=19456,t=2,p=1$...$...
-```
-
-Paste that string into `BOOTSTRAP_OWNER_PASSWORD_HASH`, **double-quoted** — it is full of `$`,
-and an unquoted one is silently mangled by the shell into a hash nobody can log in against.
-Then clear it from your shell history.
+**There is no owner credential in this file.** That step used to be "hash a password you chose and
+paste the PHC string into `BOOTSTRAP_OWNER_PASSWORD_HASH`", and it is gone: the owner is a row in
+`kernel.users`, created after the migration by a declared command that **mints the password itself**
+(`15-F26` — the vendor never holds a restaurant's password; `15-F27` — no record is created by hand).
+See §3b below. Leave every `BOOTSTRAP_OWNER_*` variable **unset**: beside `DATABASE_URL` they make
+the API refuse to boot, on purpose.
 
 ### 3. Migrate
 
@@ -102,6 +95,46 @@ state on a boot line instead of migrating itself, so this is a step you take del
 If the Postgres container was just started, **wait for the second `ready to accept connections`**.
 The image answers `pg_isready` from a temporary init server first, and a migration fired in that
 window dies with `read ECONNRESET`.
+
+### 3b. Provision the tenant and its first owner (`15-F27`)
+
+Four declared commands, all needing `DATABASE_URL` and nothing else. Run them **after** the
+migration and **before** starting the API: an owner under an org with no record is refused by name,
+and there is no foreign key that could have told you (`01-F68`).
+
+```bash
+cd /opt/restos
+export DATABASE_URL=...            # the same DSN §3 migrated
+
+# --org / --branch pin the ids; omit them and each command mints a fresh UUIDv7 and prints it.
+# Whatever they are, ORG_ID must equal every device's RESTOS_ORG_ID and BRANCH_ID must appear in
+# the API's ENABLED_BRANCHES. Keep both in ops/ids.env.
+sudo -u restos DATABASE_URL=$DATABASE_URL pnpm -C services/sync-gateway create-org \
+  --org "$ORG_ID" --name "The restaurant's real name"
+sudo -u restos DATABASE_URL=$DATABASE_URL pnpm -C services/sync-gateway create-branch \
+  --org "$ORG_ID" --branch "$BRANCH_ID" --name "Tariq Road"
+sudo -u restos DATABASE_URL=$DATABASE_URL pnpm -C services/sync-gateway create-owner \
+  --org "$ORG_ID" --email owner@the-restaurant.pk --name "Ayesha Khan"
+```
+
+**The last command prints a one-time initial password on stdout and nothing else on that stream.**
+Nobody chose it and nobody has ever seen it — hand it to the owner, do not log it, do not store it.
+Every readable line is on stderr, so `PW=$(… create-owner …)` captures the credential alone.
+
+⚠ It does **not** expire and nothing forces a change at first login — `15-F26`'s single-use
+set-credential link needs a redemption screen behind `14-F1` and is **owed** (`15-F27` records it).
+Tell the owner to treat it as a password they must not keep.
+
+Read back what exists at any time, and confirm the owner is really there:
+
+```bash
+sudo -u restos DATABASE_URL=$DATABASE_URL pnpm -C services/sync-gateway list-tenancy --org "$ORG_ID"
+```
+
+A second `create-owner` for the same org is **refused**, not a no-op: the password is minted, so a
+"no-op" would print a secret that does not open the account. Every user after the first is
+`14-F14`'s back-office CRUD — which does not exist yet — and a lost password is a reset flow this
+product does not have. That is the honest state; do not improvise around it with SQL.
 
 ### 4. Start the four cloud processes
 
@@ -134,8 +167,22 @@ that from a gateway that did not print it*):
 If the third reads `publish surface DISABLED — no PUBLISH_TOKEN`, the API gets a 503 on every
 publish and no menu will ever ship. If the fourth reads `NOT MIGRATED`, go back to step 3.
 
-The API prints one line, `@restos/api listening on ...`. If it did not boot, `journalctl` has the
-reason and it will name the variable.
+The API prints **two** lines, and the second is the one that used to be missing:
+
+```
+@restos/api listening on http://0.0.0.0:3001
+@restos/api accounts: kernel.users at postgres://restos:*****@127.0.0.1:5432/restos (persistent; …)
+```
+
+If the second says `BOOTSTRAP_OWNER_* development seed … DIES WITH THIS PROCESS`, this host is
+running the dev stopgap and every account will be gone at the next restart — `DATABASE_URL` is not
+reaching the unit. If it says `NONE — … nobody can log in`, neither is configured; that is
+fail-closed and correct, and §3b is the step you have not run. **Before this line existed all three
+states printed identically**, which is how a deployment ends up with a provisioned owner who cannot
+sign in.
+
+If it did not boot at all, `journalctl` has the reason and it will name the variable — including
+the refusal to run with `DATABASE_URL` and `BOOTSTRAP_OWNER_*` both set.
 
 ### 5. Provision the two devices
 

@@ -232,12 +232,45 @@ describe("01-F60 — an EMPTY answer is a refusal, not a permission", () => {
     expect(log.filter((call) => call.path === "catalog.save")).toHaveLength(1);
   });
 
-  it("names the enabled set's real home — not a variable this app no longer reads", async () => {
-    // The vacuity guard for the sentence itself. `strings.grid.notEnabled` told owners to set
-    // `NEXT_PUBLIC_ENABLED_*` for months; a string that names a deleted variable is a screen
-    // stating a gap it does not have, which this codebase treats as badly as hiding one.
-    expect(strings.grid.notEnabled).toContain("ENABLED_BRANCHES");
-    expect(strings.grid.notEnabled).not.toContain("NEXT_PUBLIC");
+  /**
+   * ⚠ **RETIRED ASSERTION, 16 August 2026 — `expect(strings.grid.notEnabled).toContain("ENABLED_BRANCHES")`.**
+   *
+   * *What changed:* this test REQUIRED an environment variable name in a sentence an owner reads.
+   * It was the right assertion under the rule it was written against — `strings.grid.notEnabled`
+   * had told owners to set `NEXT_PUBLIC_ENABLED_*` for months after this app stopped reading it,
+   * and naming the *real* home was the fix. `14-F38` (August 2026) overrules the fix, not the
+   * defect: it quotes this very string as one of its two worked examples — *"one tells the owner
+   * to 'Set ENABLED_BRANCHES and ENABLED_CHANNELS on the RestOS service.' To a restaurant owner
+   * those are error codes"* — and rules that **no rendered string contains … a config or
+   * environment variable name**, because *"a message about something the owner cannot change
+   * names the ROLE that can, never the mechanism"*.
+   *
+   * *Which FR decides it:* `14-F38`. `01-F60` still decides that an empty set is a refusal and
+   * `14-F29` still decides that the grid is not drawn; neither is touched here, and neither is
+   * any other assertion in this file.
+   *
+   * *What the retirement must not cost:* the vacuity guard. A sentence that names nothing at all
+   * is exactly the screen this test was written to prevent, so the property is re-stated rather
+   * than dropped — the string must say WHAT is missing, say WHO can supply it, and name no
+   * variable. The negative half is now the general rule, which strictly subsumes the
+   * `NEXT_PUBLIC` clause it replaces: `ENABLED_BRANCHES` and `NEXT_PUBLIC_ENABLED_BRANCHES` both
+   * fail it.
+   */
+  it("says what is missing and names the ROLE that can supply it, never a variable", () => {
+    const sentence = strings.grid.notEnabled;
+
+    // `00 §5.7` — the surface says what is true. Both axes of `01-F60`'s key are named.
+    expect(sentence).toMatch(/branch/i);
+    expect(sentence).toMatch(/channel/i);
+    // `14-F38` — the ROLE, not the mechanism: whoever runs the service for this restaurant.
+    expect(sentence).toMatch(/whoever|who set|the person|your installer|support/i);
+
+    // `14-F38` — no SCREAMING_SNAKE variable of any kind, which is what both the shipped defect
+    // and the assertion this replaces were made of.
+    expect(sentence).not.toMatch(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/);
+    // …and no FR id, event type or code symbol either, since the same clause bans all four.
+    expect(sentence).not.toMatch(/\b(?:[0-9]{2}|[A-Z])-[FNT][0-9]+[a-z]?\b/);
+    expect(sentence).not.toMatch(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/);
   });
 });
 

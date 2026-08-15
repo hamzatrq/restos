@@ -100,15 +100,33 @@ export type StagedEditStore = {
   /** `14-F28`'s "cancellable until they land". `false` when there was nothing to cancel. */
   cancel(org_id: string, edit_id: string): Promise<boolean>;
   /**
-   * Remove and return every edit due at or before `at`, grouped by org.
+   * Remove and return every edit due at or before `at`, **for every org on this host**.
    *
    * **Removal and reading are one call on purpose.** The obvious alternative — read the due set,
    * publish it, then delete — leaves a window in which a cancel arrives against an edit already
    * in flight, and the edit lands anyway. Taking first means a cancelled edit is simply not in
    * the set, which is the property `14-F28` needs and the one a scheduler that captured its work
    * list at stage time cannot have.
+   *
+   * ⚠ **THIS IS THE UNSCOPED SWEEP AND ONLY A SCHEDULE MAY CALL IT (`01-F71`).** It is the
+   * platform acting on its own behalf for every tenant at the `01-F46` boundary. Reached from a
+   * REQUEST it is a cross-tenant write: it removes and publishes another org's staged edits under
+   * one tenant's authority, and because the *answer* can still be narrowed to the caller, nothing
+   * on either side reports it. That is exactly what `catalog.runDayEnd` did until August 2026 —
+   * see `takeDueForOrg`.
    */
   takeDue(at: number): Promise<readonly { org_id: string; edits: readonly StagedEdit[] }[]>;
+  /**
+   * The same take, **narrowed to one org** — `01-F71` (b): the org comes from the authenticated
+   * subject, and the SIDE EFFECT is scoped by it, not merely the answer.
+   *
+   * **A separate named method rather than an optional argument on `takeDue`**, on `01-F65`'s
+   * recorded discipline: *"a separate, named resolution rather than a flag on a permissive one, so
+   * that a call site states which discipline it is under and a later edit cannot re-enable a
+   * fallback by dropping an argument."* An `org_id?` here would mean a caller who simply forgot it
+   * silently gets the every-tenant sweep, which is the defect this exists to close.
+   */
+  takeDueForOrg(at: number, org_id: string): Promise<readonly StagedEdit[]>;
 };
 
 /**
@@ -127,6 +145,22 @@ export const createMemoryStagedEditStore = (): StagedEditStore => {
     return created;
   };
 
+  /**
+   * ONE take, so the scoped sweep and the every-tenant sweep cannot disagree about what "due"
+   * means or about the take-before-publish ordering `takeDue` documents. It reads with `get` and
+   * never `of`, so asking about an org this host has never staged for creates no row for it —
+   * a foreign org id arriving on a request leaves no trace at all.
+   */
+  const takeFrom = (org_id: string, at: number): readonly StagedEdit[] => {
+    const edits = byOrg.get(org_id);
+    if (edits === undefined) return [];
+    const ready = [...edits.values()]
+      .filter((edit) => edit.lands_at <= at)
+      .sort((a, b) => a.staged_at - b.staged_at || 0);
+    for (const edit of ready) edits.delete(edit.edit_id);
+    return ready;
+  };
+
   return {
     stage: async (edit) => {
       of(edit.org_id).set(edit.edit_id, edit);
@@ -135,17 +169,16 @@ export const createMemoryStagedEditStore = (): StagedEditStore => {
       [...of(org_id).values()].sort((a, b) => a.staged_at - b.staged_at || 0),
     cancel: async (org_id, edit_id) => of(org_id).delete(edit_id),
     takeDue: async (at) => {
-      const due: { org_id: string; edits: StagedEdit[] }[] = [];
-      for (const [org_id, edits] of byOrg) {
-        const ready = [...edits.values()]
-          .filter((edit) => edit.lands_at <= at)
-          .sort((a, b) => a.staged_at - b.staged_at || 0);
+      const due: { org_id: string; edits: readonly StagedEdit[] }[] = [];
+      // The key list is snapshotted because `takeFrom` mutates the inner maps as it goes.
+      for (const org_id of [...byOrg.keys()]) {
+        const ready = takeFrom(org_id, at);
         if (ready.length === 0) continue;
-        for (const edit of ready) edits.delete(edit.edit_id);
         due.push({ org_id, edits: ready });
       }
       return due;
     },
+    takeDueForOrg: async (at, org_id) => takeFrom(org_id, at),
   };
 };
 

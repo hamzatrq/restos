@@ -170,6 +170,15 @@ describe("§B — the device list (14-F12)", () => {
       device_id: id.device_id,
       branch_id: id.branch_id,
       device_class: "counter_electron",
+      /**
+       * `01-F70` — the device's human name, added to this projection in August 2026 because the FR
+       * exists to stop `14-F12` naming a till only by its UUID. `null` here is the honest UNNAMED
+       * row: this fixture registers without a name, `0010` made the column nullable with no
+       * backfill, and `21-F15` decides what the screen does with the absence. The `toEqual` is kept
+       * exact rather than loosened — the block below turns on this object listing what the table
+       * HAS and nothing else, and a `toMatchObject` would retire that guarantee.
+       */
+      display_name: null,
       revoked_at: null,
       token_expires_at: 42,
     });

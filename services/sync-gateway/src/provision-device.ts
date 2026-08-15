@@ -55,11 +55,18 @@
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { defineEnv, redactedDsn } from "@restos/config";
+import { DisplayName } from "@restos/domain";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { DEVICE_TOKEN_TTL_MS, issueDeviceToken } from "./auth.js";
 import { DATABASE_URL_DEFAULT } from "./database-url.js";
 import type { GatewayDb } from "./gateway.js";
-import { readRegistryRow, recordTokenExpiry, registerDevice } from "./registry.js";
+import {
+  readDeviceName,
+  readRegistryRow,
+  recordDeviceName,
+  recordTokenExpiry,
+  registerDevice,
+} from "./registry.js";
 
 /**
  * The command's own narrative prefix, exported so `__acceptance__/provisionable.test.ts` matches
@@ -87,17 +94,29 @@ type Args = {
   readonly branch: string;
   readonly device: string;
   readonly deviceClass: string;
+  /** `01-F70`'s human label. REQUIRED — see the note under `parseProvisionArgs`. */
+  readonly name: string;
   readonly reissue: boolean;
 };
 
 const USAGE =
   "provision-device --org <org_id> --branch <branch_id> --device <device_id> " +
-  "--class <device_class> [--reissue]";
+  '--class <device_class> --name "<human name>" [--reissue]';
 
 /**
  * Arguments, not configuration. They are `parseArgs` flags rather than env keys on purpose: an env
  * key that names a specific device would read as a `00 §7` config layer, which is what a device
  * identity is emphatically not. Secrets stay in env, where the rest of this service keeps them.
+ *
+ * ⚠ **`--name` IS REQUIRED, AND `01-F70` REQUIRES IT TO BE (August 2026).** *"Required at
+ * registration, on `01-F65`'s discipline: an absent name is refused, naming the argument an operator
+ * must supply, **so a nameless device cannot be created and named later — which never happens.**"*
+ * The FR's own measured complaint is that `14-F12`'s device list and `15-F11`'s fleet dashboard could
+ * name a till only by its UUID while the operator reading either is by construction not standing in
+ * front of it. **The simpler alternative — an optional flag with a warning — was rejected as the
+ * thing the FR names**: an optional label is a label the busy path never sets, and the busy path is
+ * the only one that ever provisions a device. It cost two fixture helpers in the acceptance suites,
+ * which is the price of a required argument and not a reason to soften one.
  */
 export const parseProvisionArgs = (argv: readonly string[]): Args => {
   const { values } = parseArgs({
@@ -107,16 +126,22 @@ export const parseProvisionArgs = (argv: readonly string[]): Args => {
       branch: { type: "string" },
       device: { type: "string" },
       class: { type: "string" },
+      name: { type: "string" },
       reissue: { type: "boolean", default: false },
     },
     strict: true,
   });
-  const missing = (["org", "branch", "device", "class"] as const).filter(
+  const missing = (["org", "branch", "device", "class", "name"] as const).filter(
     (key) => values[key] === undefined || values[key] === "",
   );
   if (missing.length > 0) {
     throw new Error(
-      `missing required argument(s): ${missing.map((k) => `--${k}`).join(", ")}\n${USAGE}`,
+      `missing required argument(s): ${missing.map((k) => `--${k}`).join(", ")}\n${USAGE}\n` +
+        (missing.includes("name")
+          ? '--name is the device\'s HUMAN name ("Counter till", "Kitchen screen") — 01-F70 ' +
+            "requires it AT REGISTRATION, because a device that may be named later never is, and " +
+            "the operator reading 14-F12's device list is not standing in front of the till."
+          : ""),
     );
   }
   return {
@@ -124,6 +149,7 @@ export const parseProvisionArgs = (argv: readonly string[]): Args => {
     branch: values.branch as string,
     device: values.device as string,
     deviceClass: values.class as string,
+    name: values.name as string,
     reissue: values.reissue === true,
   };
 };
@@ -145,6 +171,12 @@ export const provisionDevice = async (
   binding: { readonly issuer?: string; readonly audience?: string },
   now: number,
 ): Promise<{ readonly token: string; readonly expires_at: number; readonly reissued: boolean }> => {
+  // `01-F70`'s non-empty rule, enforced through `packages/domain`'s `DisplayName` (`18 §2`) and
+  // BEFORE anything is written or minted: `"   "`, a control character and a 121-code-point label
+  // are refused here. `0010` declined a CHECK constraint precisely so this would be the one place
+  // that decides what a name may be.
+  const display_name = DisplayName.parse(args.name);
+
   const existing = await readRegistryRow(db, args.org, args.device);
 
   if (existing !== undefined && !args.reissue) {
@@ -179,6 +211,23 @@ export const provisionDevice = async (
     );
   }
 
+  // **`--reissue` NEVER RENAMES, and it is not allowed to ignore `--name` either.** A required
+  // argument the re-credentialling path silently discarded would be worse than an optional one: the
+  // operator would believe they had corrected a label. So a stored name that disagrees is a refusal
+  // pointing at `14-F30`, and a row `0010` left UNNAMED is filled below — filling a null is
+  // `01-F68`'s reconciliation applied to a device, not a rename.
+  const storedName =
+    existing === undefined ? undefined : await readDeviceName(db, args.org, args.device);
+  if (storedName !== undefined && storedName !== null && storedName !== display_name) {
+    throw new Error(
+      `device ${args.device} is named "${storedName}", not "${display_name}" (org ${args.org}). ` +
+        "Provisioning creates; it never renames (15-F27). Renaming a device is device.manage " +
+        "(14-F30) from the back office's device list (14-F12), where the change carries the actor " +
+        "who made it — a command on this host has no authenticated user and could not record one. " +
+        "Re-run with the stored name to re-issue the credential.",
+    );
+  }
+
   const expires_at = now + DEVICE_TOKEN_TTL_MS;
   const token = await issueDeviceToken(
     { org_id: args.org, branch_id: args.branch, device_id: args.device, expires_at },
@@ -192,12 +241,19 @@ export const provisionDevice = async (
       branch_id: args.branch,
       device_id: args.device,
       device_class: args.deviceClass,
+      // `01-F70`. Parsed through `packages/domain`'s `DisplayName` (`18 §2`), so `"   "`, a control
+      // character and a 121-code-point label are refused before any row is written — which is where
+      // `0010` said the non-empty rule would live when it declined a CHECK constraint.
+      display_name,
       token_expires_at: expires_at,
     });
   } else {
     // `recordTokenExpiry` is documented as the SINGLE writer of this column, "called at mint and at
     // renewal". A hand-triggered re-mint is a mint; it goes through the same writer.
     await recordTokenExpiry(db, args.org, args.device, expires_at);
+    // Fill a name `0010` left null. `recordDeviceName`'s `and display_name is null` clause is what
+    // makes this incapable of renaming, whatever this branch is asked to do later.
+    if (storedName === null) await recordDeviceName(db, args.org, args.device, display_name);
   }
 
   return { token, expires_at, reissued: existing !== undefined };
@@ -239,9 +295,9 @@ const main = async (): Promise<void> => {
       Date.now(),
     );
     say(
-      `${reissued ? "re-issued a token for registered device" : "registered"} ${args.device} ` +
-        `· org ${args.org} · branch ${args.branch} · class ${args.deviceClass} · ` +
-        `${redactedDsn(env.DATABASE_URL)}`,
+      `${reissued ? "re-issued a token for registered device" : "registered"} ` +
+        `"${args.name}" (${args.device}) · org ${args.org} · branch ${args.branch} · ` +
+        `class ${args.deviceClass} · ${redactedDsn(env.DATABASE_URL)}`,
     );
     say(
       `token expires ${new Date(expires_at).toISOString()} (01-F47, 90 days). Binding: ` +

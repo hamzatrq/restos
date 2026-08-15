@@ -115,3 +115,32 @@ export {
   type OrderLineState,
   TERMINAL_LINE_STATES,
 } from "./states.js";
+// Named tenancy (`01-F68` org, `01-F69` branch, `01-F70` device, `11-F20` person; `15-F25`
+// lifecycle). The records an `org_id`/`branch_id`/`device_id`/`user_id` points AT — declared here
+// once (`18 §2`) because BOTH planes read them and a per-plane copy would disagree about what a
+// restaurant is called. No event type, no payload schema, no merge rule: every FR above routes
+// through existing acts and says so in terms.
+//
+// Nothing constructs these yet; the recorded debt marker lives at the DECLARATION, in
+// `tenancy.ts`. Deliberately not repeated here — measured 2026-08-16, a marker written above this
+// re-export was INERT: `check-seams` reports Rule A at the declaration site, and "a barrel
+// re-export is not a use" cuts both ways. A marker that looks like a rail exception and is not is
+// the worst kind of comment, so this one names where the real one is instead.
+export {
+  BRANCH_CLASSES,
+  BRANCH_TYPES,
+  type BranchClass,
+  BranchRecord,
+  type BranchRecordT,
+  type BranchType,
+  DeviceRecord,
+  type DeviceRecordT,
+  DISPLAY_NAME_MAX_CODE_POINTS,
+  DisplayName,
+  ORG_STATUSES,
+  OrgRecord,
+  type OrgRecordT,
+  type OrgStatus,
+  PersonRecord,
+  type PersonRecordT,
+} from "./tenancy.js";

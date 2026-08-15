@@ -48,7 +48,27 @@ export const Label = ({
   </label>
 );
 
-/** A label bound to its control, plus the help text that explains the field's consequence. */
+/**
+ * The id of a field's help sentence, derived from the control's own id.
+ *
+ * **`14-F34` requires the sentence to be BOUND to the control, not merely near it** — *"rendered
+ * adjacent to it and readable without pointing at it; never a tooltip, a hover or a `title`
+ * attribute as the only carrier"*. Adjacency is a layout property and nothing in this app performs
+ * layout in a test, so the binding a DOM can actually carry is the accessible description.
+ *
+ * It is a derived id rather than a `cloneElement` on the child, deliberately: every control passes
+ * `aria-describedby={helpId(id)}` in plain sight, so a field shipping WITHOUT its help is visible
+ * in the diff instead of being silently supplied by a wrapper.
+ */
+export const helpId = (htmlFor: string): string => `${htmlFor}-help`;
+
+/**
+ * A label bound to its control, plus the help text that explains the field's consequence.
+ *
+ * The help is rendered under the control and carries `helpId(htmlFor)`; the control itself points
+ * at that id. One help element may serve several controls — the price grid binds all nine cells to
+ * one sentence, because nine copies of it would be noise rather than guidance.
+ */
 export const Field = ({
   label,
   help,
@@ -64,7 +84,9 @@ export const Field = ({
     <Label htmlFor={htmlFor}>{label}</Label>
     {children}
     {help === undefined ? null : (
-      <p className="text-xs leading-relaxed text-muted-foreground">{help}</p>
+      <p id={helpId(htmlFor)} className="text-xs leading-relaxed text-muted-foreground">
+        {help}
+      </p>
     )}
   </div>
 );

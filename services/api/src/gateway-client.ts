@@ -45,6 +45,7 @@ import {
 import { IntegrationError } from "./errors.js";
 import type { DayLedger } from "./ledger.js";
 import type { CatalogPublisher, LedgerAppender, LedgerRecord } from "./publish.js";
+import type { TenancyDirectory } from "./tenancy.js";
 
 /**
  * Where the gateway is and how to prove we may talk to it.
@@ -145,8 +146,46 @@ const DeviceListResponse = z.object({
       device_id: z.string(),
       branch_id: z.string(),
       device_class: z.string(),
+      /**
+       * `01-F70`. **`.nullable()` and not `.optional()`, and the difference is the whole
+       * assertion.** A gateway that stopped SENDING the field would satisfy `.optional()` silently
+       * and every till would render as unnamed with nothing anywhere reporting a fault — which is
+       * `21-F15`'s failure mode arriving as data. Present-and-null is the honest UNNAMED row;
+       * absent is a contract break and is refused here.
+       */
+      display_name: z.union([z.string(), z.null()]),
       revoked_at: z.union([z.number().int(), z.null()]),
       token_expires_at: z.union([z.number().int(), z.null()]),
+    }),
+  ),
+});
+
+/**
+ * `01-F68`/`01-F69`'s directory as the gateway answers it.
+ *
+ * `org: null` is the UNNAMED org and is NOT an error — see `tenancy.ts`. It is parsed rather than
+ * cast for `OrgEventResponse`'s reason: this crosses a service boundary, and an unparsed body would
+ * let a gateway-side rename reach an owner's screen as `undefined` rendered in a name slot, which is
+ * exactly the "renders as data rather than as a bug" failure `21-F15` is about.
+ */
+const TenancyResponse = z.object({
+  org: z.union([
+    z.object({
+      org_id: z.string(),
+      display_name: z.string(),
+      status: z.string(),
+      created_at: z.number().int(),
+    }),
+    z.null(),
+  ]),
+  branches: z.array(
+    z.object({
+      branch_id: z.string(),
+      org_id: z.string(),
+      display_name: z.string(),
+      branch_type: z.string(),
+      branch_class: z.string(),
+      created_at: z.number().int(),
     }),
   ),
 });
@@ -391,6 +430,43 @@ export const createGatewayDeviceDirectory = (link: GatewayLink): DeviceDirectory
           server_received_at: event.server_received_at,
         }),
       );
+  },
+});
+
+/**
+ * `TenancyDirectory`, bound to the gateway's `01-F68`/`01-F69` directory tables.
+ *
+ * **The org id is the CALLER'S, resolved from the authenticated subject before this is ever
+ * called** (`router.ts`), never from a request body — `01-F71` (b). This adapter takes it as an
+ * argument and asks no questions about it, exactly as `createGatewayDeviceDirectory` and
+ * `createGatewayDayLedger` do; the isolation decision is made one layer up, in one place, for all
+ * three.
+ *
+ * **`created_at` is parsed and then DROPPED.** It is registry bookkeeping on the clock of whatever
+ * provisioned the row (`packages/domain`'s `tenancy.ts` says so in terms: *"NOT branch time and no
+ * fold may read it"*), and nothing on a naming surface has any use for it. Carrying it to a client
+ * would put a wall-clock instant on the plane where somebody eventually renders it as though it
+ * meant something — `01-F43`'s hazard on a field the corpus has already ruled unreadable. It is
+ * parsed rather than ignored so that a gateway sending garbage there is still a loud failure.
+ */
+export const createGatewayTenancyDirectory = (link: GatewayLink): TenancyDirectory => ({
+  directory: async (org_id) => {
+    const body = await getJson(link, "/internal/tenancy", org_id, "tenancy directory");
+    const parsed = TenancyResponse.parse(body);
+    return {
+      org: {
+        org_id,
+        // `01-F68` UNNAMED. Two nulls from one absent row, never invented separately.
+        display_name: parsed.org?.display_name ?? null,
+        status: parsed.org?.status ?? null,
+      },
+      branches: parsed.branches.map((branch) => ({
+        branch_id: branch.branch_id,
+        display_name: branch.display_name,
+        branch_type: branch.branch_type,
+        branch_class: branch.branch_class,
+      })),
+    };
   },
 });
 

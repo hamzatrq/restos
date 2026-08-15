@@ -150,9 +150,18 @@ describe("14-F28 — pending edits are visible and cancellable until they land",
   ];
 
   it("shows every staged edit with who staged it", async () => {
+    // ⚠ **RE-POINTED 16 August 2026 by the test-owning session (`24 §3` step 2, `24-F5`).** These
+    // two rows were found by `getByText("item / tikka")` / `getByText("item / karahi")`, which is
+    // the raw `01-F21` kind string on the glass. `14-F32` — written after this file — bans it:
+    // *"the internal kind strings are vendor vocabulary under `14-F38` and are not rendered; the
+    // task noun is this surface's name for a kind everywhere."* The assertion this test OWNS is
+    // *every* staged edit is on screen and attributable, so it still reads each row's own demoted
+    // identity and still reads them as two distinct rows — in the vocabulary `14-F32` mandates.
+    // Nothing was dropped: the kind is still asserted (as its owner-facing noun), the identifier is
+    // still asserted, and `u-ali` is untouched.
     mount({ "catalog.pending": () => pending }, <PendingEdits />);
-    await waitFor(() => expect(screen.getByText("item / tikka")).toBeTruthy());
-    expect(screen.getByText("item / karahi")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Dish · Reference code tikka")).toBeTruthy());
+    expect(screen.getByText("Dish · Reference code karahi")).toBeTruthy();
     expect(screen.getAllByText(/u-ali/)).not.toHaveLength(0);
   });
 
@@ -163,7 +172,13 @@ describe("14-F28 — pending edits are visible and cancellable until they land",
       { "catalog.pending": () => pending, "catalog.cancelPending": () => ({ cancelled: true }) },
       <PendingEdits />,
     );
-    await waitFor(() => expect(screen.getByText("item / karahi")).toBeTruthy());
+    // ⚠ **RE-POINTED 16 August 2026 (`14-F32`, test-owning session).** This waited on
+    // `getByText("item / karahi")`, which was a NAVIGATOR — a way to know both rows had rendered
+    // before clicking the second control — and never an assertion about the row's wording. It is
+    // now the same wait expressed as what it always meant, so a change of vocabulary cannot break a
+    // test about CANCELLING. This test's own claim (the click sends the pointed-at `edit_id`, and
+    // mutant M6b's "cancels the wrong edit") is asserted below and is untouched.
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(2));
     const buttons = screen.getAllByRole("button", { name: "Cancel this edit" });
     expect(buttons).toHaveLength(2);
     fireEvent.click(buttons[1] as HTMLElement);
@@ -184,7 +199,10 @@ describe("14-F28 — pending edits are visible and cancellable until they land",
       { "catalog.pending": () => pending, "catalog.cancelPending": () => ({ cancelled: true }) },
       <PendingEdits />,
     );
-    await waitFor(() => expect(screen.getByText("item / tikka")).toBeTruthy());
+    // ⚠ **RE-POINTED 16 August 2026 (`14-F32`, test-owning session)** — same navigator as above,
+    // for the same reason. The re-read claim (mutant M6c, "does not re-read the server") is the
+    // call-count assertion below and is untouched.
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(2));
     const before = log.filter((call) => call.path === "catalog.pending").length;
     fireEvent.click(screen.getAllByRole("button", { name: "Cancel this edit" })[0] as HTMLElement);
     await waitFor(() =>

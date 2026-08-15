@@ -16,7 +16,7 @@ import { z } from "zod";
 import { catalogProcedures } from "./catalog-router.js";
 import { deviceProcedures } from "./device-router.js";
 import { issueSessionToken } from "./session.js";
-import { summaryProcedures } from "./summary-router.js";
+import { summaryBranchScope, summaryProcedures } from "./summary-router.js";
 import {
   type ApiMeta,
   authorized,
@@ -67,12 +67,86 @@ const sessionRouter = router({
    * Who the SERVER says you are. The shell (B-5) needs this to render at all, and it is the one
    * place assignments cross to a client — as a description of the caller, never as an input that
    * comes back. `org_id` is the subject's, so a request stating another org changes nothing.
+   *
+   * **`display_name` is the PERSON's (`11-F20`), and it is the only name this procedure serves.**
+   * The org's name is `01-F68`'s and lives on `tenancy.directory` below, for one measured reason
+   * rather than a taxonomic one: the org record is in `services/sync-gateway`, so serving it here
+   * would give `whoami` a cross-service dependency and a gateway outage would stop the back office
+   * rendering *who you are* — an identity read that cannot answer without a peer is not an identity
+   * read. `__acceptance__/startable.test.ts` is the proof it matters: it boots this service with
+   * `SYNC_GATEWAY_URL` pointing at a CLOSED port and drives `session.whoami` over a socket, so a
+   * whoami that reached the gateway would 503 there. Splitting them also gives a client two
+   * independent loading and error states, which is what it actually needs to render an unnamed org
+   * beside a named person.
+   *
+   * **Still `SESSION_ONLY_PROCEDURES`, and neither exemption list changed.** A person's own name is
+   * the caller's own identity by the same reading that already exempts their own id and
+   * assignments; it is not an `01 §4` action and has no Appendix A row, so gating it would mean
+   * inventing policy (commandment 2).
    */
   whoami: sessionProcedure.query(({ ctx }) => ({
     user_id: ctx.subject.user_id,
     org_id: ctx.subject.org_id,
     assignments: ctx.subject.assignments,
+    // `null` ⇔ the store holds no name — `21-F15`'s unnamed case, never a default (see `users.ts`).
+    display_name: ctx.subject_display_name,
   })),
+});
+
+/**
+ * `01-F68` + `01-F69` — the caller's own org and its branches, by NAME.
+ *
+ * **Gated on `report.sales_view`, and the choice is narrow on purpose.** `12-F10`'s owner summary is
+ * the surface that needs this — its branch selector is the task this closes, and its header is where
+ * the restaurant's name belongs — so the read is gated by the action that screen already requires.
+ * That is the same pattern `catalog.enabled` records one file over ("the editor's reads are gated by
+ * the edit action they exist to serve"), and it is preferred here to the two alternatives:
+ *
+ *   - **inventing a `tenancy.read` action** would be commandment 2 — Appendix A has no row for it,
+ *     `PERMISSION_ACTIONS` lives in a PROTECTED package, and `14-F30`'s precedent is that a new
+ *     action is an FR that decides its cells, not a convenience taken by an implementer;
+ *   - **adding it to `SESSION_ONLY_PROCEDURES`** would exempt an org-scoped read from the matrix
+ *     entirely. That list is for procedures reading the CALLER'S OWN identity, and `catalog.enabled`
+ *     already records the ruling that org-level configuration is not that.
+ *
+ * The cost is stated: a subject whose `report.sales_view` reach is `own_shift` (a cashier) or `none`
+ * cannot learn the org's name here. That is the narrow direction and it costs nothing today — the
+ * back office is owner-only in practice (doc 14 §9's first open question is whether managers get a
+ * slice at all), and widening later is additive.
+ */
+const tenancyRouter = router({
+  /**
+   * **The branch list is NARROWED BY `reportScope`, not merely gated.** `summaryBranchScope` decides
+   * which branches a subject's *answer* may cover; this returns exactly those and no others, so the
+   * selector cannot offer a branch whose figures the summary will refuse. A branch manager sees her
+   * own branch; an owner sees the estate.
+   *
+   * That reuse is the point rather than a shortcut: `summary-router.ts` records that the middleware
+   * answers *may this request happen* and only the resolver can answer *how wide is the answer*. A
+   * selector built from an unnarrowed list would be a second answer to the second question, and the
+   * two would drift the first time either changed.
+   *
+   * **The ORG's name is NOT narrowed** — it is the caller's own tenant, the same value `whoami`
+   * already returns as `org_id`, and there is no reach under which knowing your own employer's name
+   * is a wider answer than knowing its id.
+   */
+  directory: authorized("report.sales_view")
+    /**
+     * `.optional()` because an org-wide owner has no branch to state and a GET with no `input`
+     * parameter is the honest way to ask. It costs nothing on the security side: `branchOf` reads
+     * the RAW input in the middleware, an absent one `safeParse`s to a failure, and that resolves to
+     * `null` — which `rolesAt` matches against org-wide assignments ONLY. The fail-closed direction
+     * (`trpc.ts` decision 3) is the same whether the scope is missing or malformed.
+     */
+    .input(scopeInput.optional())
+    .query(async ({ ctx, input }) => {
+      const { org, branches } = await ctx.tenancy.directory(ctx.subject.org_id);
+      const covers = summaryBranchScope(ctx.subject, input?.branch_id ?? null);
+      return {
+        org,
+        branches: covers === null ? branches : branches.filter((b) => covers.includes(b.branch_id)),
+      };
+    }),
 });
 
 /**
@@ -126,6 +200,7 @@ export const appRouter = router({
   catalog: catalogRouter,
   devices: deviceRouter,
   summary: summaryRouter,
+  tenancy: tenancyRouter,
   ops: opsRouter,
 });
 

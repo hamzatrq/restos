@@ -13,7 +13,7 @@
       @restos/sync-gateway listening on http://0.0.0.0:8080
       @restos/sync-gateway database postgres://gateway:*****@127.0.0.1:5432/restos (opened lazily …)
       @restos/sync-gateway publish surface enabled (PUBLISH_TOKEN configured)
-      @restos/sync-gateway schema up to date — all 10 migrations applied
+      @restos/sync-gateway schema up to date — all 12 migrations applied
 
   **The first line is load-bearing** — `__acceptance__/startable.test.ts` spawns the declared script
   with `PORT=0` and finds the ephemeral port by reading it. The other three exist because each
@@ -37,7 +37,7 @@
     dependency). `pendingMigrations` runs **after `listen` and is not awaited**: an unroutable host
     waits out `postgres-js`'s 30 s connect timeout, so awaiting it would trade a fast boot for
     exactly the stall the lazy connection exists to avoid. Unmigrated reads `schema NOT MIGRATED —
-    10 of 10 migrations are unapplied. Run ...`; an unreachable database reads `schema could not be
+    12 of 12 migrations are unapplied. Run ...`; an unreachable database reads `schema could not be
     checked — the database did not answer (… ← connect ECONNREFUSED …)`, on ONE line and with no
     DSN in it.
   - **Idempotency and partial application, MEASURED against a real Postgres.** drizzle 0.45.2 runs
@@ -45,7 +45,7 @@
     transactional, so a failed run is all-or-nothing: verified by planting a colliding
     `kernel.events` before migrating — the run failed on `CREATE SCHEMA "kernel"` and left **zero**
     journal rows and no new tables. A second run on a migrated database applies nothing (journal
-    row count unchanged at 10) and says `nothing to apply`.
+    row count unchanged — 11 when that was the count, 12 since `0011`) and says `nothing to apply`.
   - ⚠ **What the boot check does NOT prove — the honest boundary.** It answers *"has this build's
     journal been applied"*, **not** *"is the schema intact"*. drizzle keeps ONE `created_at`
     watermark and never re-checks the objects, so dropping `kernel.org_events` by hand while
@@ -62,7 +62,7 @@
     previously called them "Postgres error objects", which is what they look like and not what they
     are.
 - **DEVICE PROVISIONING IS A DECLARED COMMAND (August 2026):
-  `pnpm -C services/sync-gateway provision-device --org <id> --branch <id> --device <id> --class <device_class> [--reissue]`.**
+  `pnpm -C services/sync-gateway provision-device --org <id> --branch <id> --device <id> --class <device_class> --name "<human name>" [--reissue]`.**
   Until then **nothing in this product minted a device credential.** Both halves of admission were
   correct, tested and unreachable: `registerDevice` carried a debt marker reading *"a device is
   provisioned only by a test or by hand-written SQL"*, and `issueDeviceToken`'s only production
@@ -242,6 +242,116 @@
   Rule B's hole one layer out. Correctness never depended on it and must not: `catalog-transport.md`
   §3.2 makes version-on-`hello_ack` the correctness mechanism and the notice "only latency", so the
   call sits **after** the publish commits and cannot fail it.
+- **`kernel.orgs` + `kernel.branches` + `kernel.users` — THE TENANCY DIRECTORY (`0010`/`0011`,
+  `01-F68`/`01-F69`/`11-F20`), and `device_registry.display_name` (`01-F70`). ⚠ THIS BULLET SAID
+  "STORAGE ONLY: THEY HAVE NO WRITER YET" AND THAT IS NO LONGER TRUE — see the tenancy-command
+  bullet below (`15-F27`).** `01 §5` has
+  listed `orgs/branches` among the cloud tables since Draft 1 and nothing created them, so `org_id`
+  arrived here as free text with nothing for it to point at and every surface rendered a UUID where
+  a restaurant's name belongs. Exact shape: `orgs(org_id pk, display_name, status, created_at)`;
+  `branches(branch_id pk, org_id, display_name, branch_type, branch_class, created_at)` +
+  `branches_org_idx` on `org_id`; `device_registry.display_name text NULL`.
+  - ⚠ **THERE IS NO FOREIGN KEY ANYWHERE IN `kernel`, AND `01-F68` FORBIDS ONE FROM ANY LEDGER TABLE
+    *EVER*.** Events already exist under org ids no row here names — that is the deployment's actual
+    state — so a constraint from `kernel.events` would refuse ingest for exactly those orgs, and
+    refusing ingest is refusing a sale a till already rang and persisted (`01-F17`, `00 §5.1`).
+    Admission is the gate and it is one layer up (`01-F25`/`01-F47`/`01-F48`, `01-F71` (c)).
+    **An org with events and no record is UNNAMED, not invalid.** Verified against real Postgres:
+    `select … from pg_constraint where connamespace='kernel'::regnamespace and contype='f'` → 0 rows,
+    and an `INSERT` into `kernel.events` under an org absent from `kernel.orgs` succeeds.
+  - The directory's own edges are unconstrained too (`branches.org_id` does not reference `orgs`;
+    `device_registry.branch_id` does not reference `branches`) — an **interpretation**, recorded in
+    `schema.ts`: the first would turn a directory into an ordering gate on the reconciliation
+    `01-F68` describes, and the second would break provisioning outright, because every device
+    registered to date has no branch row.
+  - **Closed sets carry no CHECK** — `orgs.status` (`15-F25`: `active | suspended`, no third value),
+    `branch_type` (`01-F25`), `branch_class` (`01-F49`) — matching `device_class` and
+    `catalog_entries.kind`. Validation is the writer's, in Zod, so the set has ONE interpretation.
+    `display_name`'s **non-empty** rule is `NOT NULL` here and enforced at the writer through
+    `packages/domain`'s `DisplayName`; `01-F70`'s *required at registration* is CLOSED —
+    `provision-device --name` refuses without one. Both were OWED in this bullet until `15-F27`.
+  - ⚠ **`drizzle-kit generate` CANNOT BE USED VERBATIM HERE.** `meta/` carries snapshots for
+    `0000..0003` only, so the generator diffs against `0003_snapshot.json` and re-emits every change
+    from `0004..0009` as well — measured: it recreates `catalog_entries`/`catalog_versions`/
+    `org_events`, re-adds `token_expires_at`, and DROPs two constraints that no longer exist. That
+    output fails on any migrated database. Run it into a scratch folder, take the DDL for the NEW
+    objects, discard the replay — which is what `0004` onward already did, and `0010` documents.
+  - **`__acceptance__/auditor-builders.ts`'s `TABLES` deliberately does NOT include them.** It is an
+    org-scoped ledger digest; a directory row is not history and adding it would change what the
+    Auditor's read-only pin covers.
+  - **`kernel.users` (`0011`) has ONE WRITER AND TWO READERS, and the split is deliberate.** `18 §4`
+    wants one writer service per table and that is this one; `services/api` READS it on the login
+    path and never writes it. Shape:
+    `users(user_id pk, org_id, email, display_name, password_hash, assignments jsonb, grid_ordinal,
+    created_at)` + `users_email_lower_uq` UNIQUE on `lower(email)` + `users_org_idx`.
+    **Email is unique case-folded and GLOBALLY, not per org**, because `UserStore.findByEmail` takes
+    an email and nothing else — `01-F71` (b) takes the org FROM the authenticated subject, so a
+    per-org index would admit two rows one lookup cannot choose between. `password_hash` is NOT NULL
+    and holds an Argon2id PHC string from `domain`'s `hashPin` (`01-F26`'s single hashing story at
+    `01-F61`'s cost floor), never a password.
+- **TENANT PROVISIONING IS FOUR DECLARED COMMANDS (August 2026, `15-F27`):
+  `create-org`, `create-branch`, `create-owner`, `list-tenancy`.** Until this landed there was **no
+  way to onboard a tenant at all**: the kernel had been org-scoped since Wave 0, `0010`/`0011` had
+  shipped the tables, `packages/domain/src/tenancy.ts` had shipped the records — and the only org a
+  running deployment had was `BOOTSTRAP_ORG_ID` + two more environment variables in `services/api`,
+  assembled into a `Map` that dies with the process. That is AGENTS.md's recurring defect at the
+  BUSINESS-MODEL level: correct multi-tenant plumbing, one tenant, once, until restart.
+
+      pnpm -C services/sync-gateway create-org     --name "Karachi Biryani House" [--org <id>]
+      pnpm -C services/sync-gateway create-branch  --org <id> --name "Tariq Road" [--branch <id>] [--type …] [--class …]
+      pnpm -C services/sync-gateway create-owner   --org <id> --email <email> --name "Ayesha Khan"
+      pnpm -C services/sync-gateway list-tenancy   [--org <id>]
+
+  - **Why commands and not a console** (`24 §3b`, alternatives in each file's header). The same
+    argument `provision-device` and `revoke-device` already made: **they grant no authority their
+    inputs did not already carry** — `DATABASE_URL` and nothing else, and anyone holding it can
+    already `INSERT` these rows. `15-F1`'s role-scoped internal console with `15-F3`'s audit trail
+    is the destination and `15-F27` says so; `apps/platform-admin` is a two-line stub. An
+    `/internal` route behind `PUBLISH_TOKEN` was rejected for `provision-device`'s reason **and one
+    more**: unlike revocation there is no person-level `can()` above it, because no user exists yet.
+    Self-service signup is refused by `15-F26` outright, not merely unbuilt.
+  - **ORDERING IS ENFORCED AT THE WRITER BECAUSE THE SCHEMA CANNOT ENFORCE IT.** `01-F68` forbids a
+    foreign key and `0010`/`0011` extend that restraint to the directory's own edges, so a branch
+    under an unnamed org, or an owner in one, is refused **here or nowhere** — and "nowhere" means
+    rows that look correct and that no query anywhere reports. This is `01-F60`'s completeness
+    discipline at `publishCatalog`, one level out.
+  - **Provisioning CREATES; it never renames, re-credentials or resurrects.** A re-run with the same
+    id and the same name is a **no-op that says so** (provisioning has to be safe to repeat), and a
+    re-run that would CHANGE a stored name is **refused**, pointing at `14-F2`/`14-F30`: a rename is
+    made by an authenticated human whose identity it is attributed to, never by re-running a script
+    with a typo in it. `--reissue` on `provision-device` refuses a differing `--name` for the same
+    reason, and FILLS a name `0010` left null (filling a null is `01-F68`'s reconciliation, not a
+    rename — `recordDeviceName`'s `and display_name is null` clause is what makes that structural).
+  - ⚠ **A PASSWORD IS NEVER AN INPUT TO `create-owner` — not in argv, not in env, not as a hash.**
+    `15-F26`: *"The vendor never holds a restaurant's password … onboarding staff type no password."*
+    argv reaches every `ps` on the host and the shell history; env reaches `/proc`, crash dumps and
+    every child; and `--password-hash` (what the runbook does today, `hashPin` in a `tsx -e`
+    one-liner) only moves the problem, because a human still chose it. So the command **mints** a
+    192-bit secret, hashes it with `hashPin`, and prints it **once on stdout alone**. `parseArgs`
+    runs `strict`, so `--password`/`--password-hash`/`--pin` are refused **by name**.
+    ⚠ **What this does NOT satisfy, stated rather than implied:** `15-F26` specifies a *single-use,
+    expiring set-credential LINK*. What ships is an initial PASSWORD — it does not expire, it is not
+    single-use, nothing forces rotation. The redemption surface has to sit behind `14-F1` and does
+    not exist. Strictly smaller than the state it replaces; strictly larger than the FR.
+  - ⚠ **NONE OF THEM EMITS AN EVENT, AND `15-F4`/`15-F3` SAY THEY SHOULD.** `revoke-device`'s
+    ratified reasoning, unchanged: a command on a service host has no authenticated user, so
+    `OrgEvent.actor_user_id` could only ever be `null`, permanently, in an append-only store
+    (`01-F1`), and `15-F3` audits every staff action **with an actor**. An unattributed provisioning
+    record is worse than none because it reads like one. **So a tenant created today has no ledger
+    record and no attribution** — the `15-F4`/`15-F3` half is OWED to the console.
+  - ⚠ **`kernel.users` IS WRITTEN HERE AND STILL READ FROM MEMORY BY `services/api`.** `create-owner`
+    persists a real, verifiable owner; `services/api`'s `createMemoryUserStore` is unchanged, so the
+    login path still serves `BOOTSTRAP_OWNER_*`. **The owner this command creates cannot yet sign
+    in.** Closing it is one `UserStore` implementation (`createPostgresUserStore`, `findByEmail` /
+    `findById` over `kernel.users`, `password_hash` compared with `verifyPin`) plus the composition
+    root preferring it when `DATABASE_URL` is configured. It was **not** taken in this change because
+    a concurrent session held `services/api/src/users.ts` and `server.ts` in the working tree, and
+    AGENTS.md's rule is to leave a path another agent is mid-edit on.
+  - **`list-tenancy` reports the DIRECTORY, not `15-F11`'s fleet dashboard.** App version, last-seen
+    and sync lag are stored nowhere in this service, so they are ABSENT rather than invented
+    (`00 §5.7`); the password hash is not even selected. stdout is JSON so `| jq` works; the prose is
+    on stderr. An org with no record is a REFUSAL that says **UNNAMED, not invalid** (`01-F68`) —
+    a command claiming "no such org" would be asserting something about a ledger it never read.
 - **`kernel.org_events` — `01-F62`'s ORG-SCOPED store (`org-events.ts`), a seventh table.** It is
   deliberately not `kernel.events` with a nullable branch: an org-scoped event carries `org_id` and
   **no `branch_id`, no branch stamp, no `device_id`, no `global_seq`, no `lamport_seq`**, and
@@ -404,6 +514,33 @@ the sweep and the per-operation check see a revocation performed by **another pr
 only way a CLI kill switch can work and is exactly how `server.ts`'s `setInterval` learns of one.
 A mutant inside `sweepRevocations` would kill §C *and* that suite's tests, so its kill would not be
 attributable to this file; no such row is claimed here.
+
+## Mutation matrix for `0010_tenancy_records` (round-3 law) — control **334/334** green
+
+A migration's seam is the journal: the `.sql` is inert until `meta/_journal.json` names it, and
+`readMigrationFiles` reads the journal and nothing else. So the seam mutant is *"delete the journal
+entry"* — the migration file still sits in the folder, `git status` still shows it, and nothing
+applies it. In-tree with byte-exact backups and a restore trap (no security constant is touched);
+every row is the FULL package suite, `REAL_EXIT` read from a marker written inside the log.
+
+**In every row the failing FILE was `migratable.test.ts` alone**, so the kills are attributable.
+
+| # | mutant (exactly one branch) | tests failed (of 334) | rest of the suite |
+|---|---|---|---|
+| T1 | **the `0010` journal entry deleted — the file ships and never applies** | **3** | **331 green** |
+| T2 | **the `CREATE TABLE kernel.orgs` block deleted (journal intact)** | **3** | **331 green** |
+| T3 | the `ALTER TABLE device_registry ADD COLUMN display_name` line deleted | **1** | 333 green |
+
+**T1 is the row to re-run after any change here.** It is the shape a reviewer cannot see in a diff:
+the migration reads perfectly, the schema file declares the tables, `tsc` and `seams:check` are both
+clean, and no database ever grows the tables.
+
+⚠ **T3 is a WEAKNESS the matrix exposes rather than a strength it proves.** One kill, and it is
+*incidental*: nothing asserts `01-F70`'s column exists — the only test that notices is the torn-schema
+resume, whose tear-off `drop column`s it and therefore errors if it was never added. `EXPECTED_TABLES`
+checks table names and no column names at all. **The writer phase must land a real assertion on
+`device_registry.display_name`**, or a future migration that drops the column will fail exactly one
+test for the wrong reason.
 
 ## Mutation matrix for the `catalog_notice` publish seam — control 282/282 green
 
@@ -569,3 +706,53 @@ built its gateway with `Date.now()`; `helpers.ts` mints session tokens against `
 token read as 90 days expired and the session opened straight into `01-F47` drain mode — where reads
 are refused **for the wrong reason**, and §C's read assertion would have passed against an unrevoked
 device. `journey-catalog.test.ts` records the same trap from the other side. Fixed to `makeClock()`.
+
+## Mutation matrix for the tenancy commands (round-3 law) — control **358/358** green
+
+`15-F27`'s four commands plus `01-F70`'s `--name`. Control: **358/358 green, 53 files,
+`REAL_EXIT=0`** read from a marker written INSIDE the log, never from a reported status. In-tree
+with byte-exact backups and a restore trap; every file was `cmp`'d against its backup after each
+row. **Nothing here is a security constant** — no cost floor, no key length, no permission cell is
+touched, so a stranded mutant reds a test rather than downgrading a credential (AGENTS.md's narrow
+out-of-tree rule does not bite). Every row is the FULL package suite and differs from the control in
+exactly one branch, except T4 which is labelled.
+
+**In EVERY row the failing FILE was a single one, so the other 52 files stayed green under every
+mutant** — the kills are attributable to the new suite rather than to the package at large.
+
+| # | mutant | tests failed (of 358) | failing file | rest |
+|---|---|---|---|---|
+| T1 | **the DECLARED `create-org` script deleted — the file ships, nothing can run it** | **11** | `tenancy-provisionable` | **52 files green** |
+| T2 | **`create-org` never calls `insertOrg`** — prints a confident org_id, writes nothing | **8** | `tenancy-provisionable` | **52 files green** |
+| T3 | **the ORDERING refusal removed** — a branch under an org with no record is accepted | **1** | `tenancy-provisionable` | 52 files green |
+| T4 | `--name` OPTIONAL again on `provision-device` (two branches: required-list + default) | 1 | `provisionable` | 52 files green |
+| T5 | **`create-owner` hashes something OTHER than the secret it prints** | **1** | `tenancy-provisionable` | 52 files green |
+| T6 | **CONTROL: same states, same writes, same refusals — different PROSE everywhere** | **0** | — | **all green** |
+
+**T1, T2 and T3 are the ones to re-run after any change here.** T1 is `startable`'s M1 /
+`migratable`'s N1 / `provisionable`'s P1 for this file — delete the declared script and eleven of
+the suite's assertions go red, which is the whole reason every test spawns `scripts["create-org"]`
+rather than a hardcoded `tsx src/create-org.ts`. T2 is the seam row: a command that mints a UUIDv7,
+prints it, exits 0 and writes **no row** is indistinguishable from a working one at the terminal —
+this wave's named defect in an operator's hands. **T3 is the one a reviewer should look hardest at**,
+because it is not hypothetical: it is exactly what the absent foreign key permits, and `01-F68`
+forbids adding that key **ever**, so the writer's refusal is the only enforcement that can exist.
+
+⚠ **T6 KILLED ONE TEST ON ITS FIRST RUN, AND THAT WAS A FINDING ABOUT THE SUITE.** §B2 asserted the
+re-run narration contained the word `ALREADY` — a test keying on **wording** rather than on
+behaviour, which is precisely the vacuity the round-3 law exists to catch, and it would have gone on
+passing against a command that stopped being idempotent as long as it kept saying the word. The
+idempotence claim is now `expect(await orgRow(orgId)).toEqual(first)` — `created_at` is inside
+`first`, so an insert-or-overwrite that produced identical-looking output fails while a true no-op
+passes — and the refusal assertions match **FR ids** (`14-F2`, `14-F14`, `14-F30`), which are the
+stable contract (commandment 9). T6 re-run after the fix: **0 killed, 358/358 green.**
+
+⚠ **THE FIRST CONTROL RUN WAS RED FOR A REASON WORTH KEEPING: `--name "Counter till"` UNQUOTED.**
+Three suites join `argv` with spaces and run the result **through a shell**, so a bare two-word name
+arrives as two arguments and `parseArgs` refuses the positional one — 12 failures across
+`provisionable`, `revocable` and `dsn-redaction` that looked like a broken command and were a broken
+fixture. Every fixture that supplies a name now quotes it, and says why. A second red — `§B`'s
+global `select count(*) from kernel.orgs` reading 3 where 1 was expected — is `helpers.ts`'s own
+isolation rule being broken: *"per-test isolation is fresh org_ids, never truncation"*, and vitest's
+`forks` pool runs FILES in parallel against one database. **A global row count in this suite is a
+race by construction.** The assertion is per-`org_id` now.

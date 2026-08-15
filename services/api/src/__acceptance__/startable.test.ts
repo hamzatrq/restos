@@ -270,6 +270,15 @@ describe("services/api is startable as a process (the seam to the product)", () 
       user_id: `bootstrap-owner:${ORG}`,
       org_id: ORG,
       assignments: [{ role: "owner", branch_id: null }],
+      /**
+       * `11-F20`/`21-F15` — the person's name, `null` because this host's env declares no
+       * `BOOTSTRAP_OWNER_NAME` (see `bootstrapUsers`). **The `toEqual` is kept exact rather than
+       * loosened to `toMatchObject`**: this assertion's job is to pin the whole shape a client
+       * receives, and `null` here is the load-bearing half — it proves `whoami` answers over a
+       * socket with `SYNC_GATEWAY_URL` pointing at a CLOSED port, which is exactly the property
+       * that keeps the org's name off this procedure and on `tenancy.directory`.
+       */
+      display_name: null,
     });
 
     // `catalog.published` is built with `authorized("catalog.edit_menu_prices")`, so a 200 here is

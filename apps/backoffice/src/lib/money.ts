@@ -25,6 +25,7 @@
 
 import { paisa, rupeesFromPaisa } from "@restos/domain";
 import { money } from "@restos/ui/tokens";
+import { strings } from "./strings";
 
 /** The wire's ceiling (`CatalogEntryWire.prices[].price_paisa`), restated so the refusal is local. */
 const MAX_PAISA = 2 ** 53 - 1;
@@ -42,22 +43,25 @@ export type RupeeParse =
  * `""` is NOT a zero and never reaches here as one — an empty cell is *missing*, which is
  * `price-grid.ts`'s distinction and the whole of `01-F60`'s free-modifier rule. This refuses it
  * so a caller that skipped that check cannot turn a forgotten channel into a free item.
+ *
+ * **Every `reason` below is a sentence an OWNER reads** — `14-F29`'s grid renders it at the cell
+ * and `entry-editor.tsx` restates it beside the control he pressed. They therefore live in the
+ * string catalog (`00 §5.6`, `14-F38`) and not here: this file's four sentences named `27-F23`,
+ * `27-F22` and their reasoning, which is our filing system rendered at a restaurant owner. The
+ * citations survive in `strings.ts`'s comments beside each one, which is where `14-F38` puts them.
  */
 export const paisaFromRupees = (input: string): RupeeParse => {
   const text = input.trim();
-  if (text === "") return { ok: false, reason: "no price entered" };
+  if (text === "") return { ok: false, reason: strings.grid.reasonNoPrice };
   if (text.includes(".") || text.includes(",")) {
-    return {
-      ok: false,
-      reason: "whole rupees only — no decimals and no grouping separators (27-F23)",
-    };
+    return { ok: false, reason: strings.grid.reasonNotWhole };
   }
-  if (!WHOLE_RUPEES.test(text)) return { ok: false, reason: "digits only (27-F22)" };
+  if (!WHOLE_RUPEES.test(text)) return { ok: false, reason: strings.grid.reasonNotNumber };
 
   // Two zeros appended, never a multiply. `Number` of a digit string is exact below 2^53.
   const price_paisa = Number(`${text}00`);
   if (!Number.isSafeInteger(price_paisa) || price_paisa > MAX_PAISA) {
-    return { ok: false, reason: "too large to hold exactly" };
+    return { ok: false, reason: strings.grid.reasonTooLarge };
   }
   return { ok: true, price_paisa };
 };

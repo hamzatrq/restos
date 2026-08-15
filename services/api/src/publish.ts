@@ -320,8 +320,14 @@ export const publishEdits = async (
  * never shipped an `effective_at`, and moving the schedule into this service does not make it
  * safe — only reading the live set does.
  *
- * Idempotent by construction: `takeDue` removes what it returns, so a sweep that runs twice
- * publishes once.
+ * Idempotent by construction: `takeDue`/`takeDueForOrg` remove what they return, so a sweep that
+ * runs twice publishes once.
+ *
+ * **TWO SWEEPS, AND WHICH ONE A CALLER GETS IS `01-F71`.** `runDue` is the platform's schedule
+ * acting for every tenant at the `01-F46` boundary; `runDueForOrg` is one tenant landing its own.
+ * They are separate names rather than one method with an optional org for `01-F65`'s reason — a
+ * flag on a permissive resolution can be re-loosened by dropping an argument, and here dropping it
+ * would publish another restaurant's menu to that restaurant's tills.
  */
 export const createDayEndScheduler = (deps: CatalogDeps): DayEndScheduler => ({
   runDue: async () => {
@@ -332,10 +338,21 @@ export const createDayEndScheduler = (deps: CatalogDeps): DayEndScheduler => ({
     }
     return landed;
   },
+  runDueForOrg: async (org_id) =>
+    publishEdits(deps, org_id, await deps.staged.takeDueForOrg(deps.now(), org_id)),
 });
 
 export type DayEndScheduler = {
+  /**
+   * ⚠ **EVERY TENANT ON THIS HOST. Only a SCHEDULE may call this — never a request** (`01-F71`).
+   * `server.ts`'s interval is its one production caller.
+   */
   runDue(): Promise<readonly { org_id: string; version: number }[]>;
+  /**
+   * One org's due edits, taken and published. The version the kernel assigned, or `null` when that
+   * org had nothing due — `publishEdits` refuses an empty change set as a version (`01-F52`).
+   */
+  runDueForOrg(org_id: string): Promise<number | null>;
 };
 
 /**

@@ -129,6 +129,18 @@ export const ApplyWhenControl = ({
             <RadioGroup.Item
               value={option.value}
               id={`apply-${option.value}`}
+              /*
+                **`14-F34` — the consequence is the DESCRIPTION of this control, never its name.**
+
+                The paragraph below was already rendered beside the radio; what was missing was the
+                binding, so nothing tied *this* option to *that* sentence except adjacency — which
+                is a layout property no test in this app can see. `aria-describedby` is the tie a
+                DOM can carry, and it is deliberately not `aria-labelledby`: folding the
+                consequence into the accessible NAME is the live a11y regression this file's own
+                comment above records, where a screen reader announced the whole sentence as what
+                the option is called.
+              */
+              aria-describedby={`apply-${option.value}-consequence`}
               className={cn(
                 "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border border-input bg-background",
                 option.disruptive
@@ -158,7 +170,12 @@ export const ApplyWhenControl = ({
                 {option.label}
               </label>
               {/* The consequence, ON the control. Never a tooltip and never after the click. */}
-              <p className="text-xs leading-relaxed text-muted-foreground">{option.consequence}</p>
+              <p
+                id={`apply-${option.value}-consequence`}
+                className="text-xs leading-relaxed text-muted-foreground"
+              >
+                {option.consequence}
+              </p>
             </div>
           </div>
         );

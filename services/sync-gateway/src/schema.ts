@@ -1,7 +1,13 @@
 // T-01-07 Postgres data contract (binding — plans/wave-0/kernel-tasks.md T-01-07;
 // owning spec 01 §3/§5): the four original kernel-schema tables, plus the
-// T-01-08 quarantine-notice outbox (DEC-SYNC-008) and the T-01-09 device
-// registry — six in all. sync-gateway is the sole writer of all six (18 §4).
+// T-01-08 quarantine-notice outbox (DEC-SYNC-008), the T-01-09 device
+// registry, the T-C2 catalog pair, 01-F62's org-scoped store and 01-F68/01-F69/11-F20's
+// tenancy directory — TWELVE in all. sync-gateway is the sole writer of all twelve (18 §4).
+// (`kernel.users` has a second READER, `services/api`'s login path, and exactly one writer —
+// this service. See the table's own comment; `0011`'s header states the split in full.)
+// (This header read "six in all" while the file declared nine: a count in a comment rots
+// silently, so it is a count of the `kernel.table(` declarations below — and this one was
+// written "TWELVE" first and corrected against `drizzle-kit generate`'s own tally.)
 // No UPDATE or DELETE of kernel.events exists anywhere in this
 // package (01-F1 append-only ledger; quarantine/registry rows are mutable —
 // heal-in-place T-01-11, revocation T-01-09 — but the event ledger never is).
@@ -13,6 +19,7 @@
 // drizzle-kit at this file to generate `./drizzle/*.sql`; the gateway itself issues raw SQL
 // through `postgres`, so no runtime module imports these table objects. The consumer is real and
 // outside `src/`, which is why this reads as unreached.
+import { sql } from "drizzle-orm";
 import {
   bigint,
   bigserial,
@@ -22,6 +29,7 @@ import {
   primaryKey,
   text,
   unique,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const kernel = pgSchema("kernel");
@@ -133,6 +141,26 @@ export const deviceRegistry = kernel.table(
     branch_id: text("branch_id").notNull(),
     device_id: text("device_id").notNull(),
     device_class: text("device_class").notNull(),
+    /**
+     * `01-F70` — the device's HUMAN NAME ("Counter till", "Kitchen screen").
+     *
+     * On the registry row and not in device-local configuration (`00 §7` layer 3): the two
+     * surfaces that need it — `14-F12`'s device list and `15-F11`'s fleet dashboard — are lists
+     * of devices nobody is holding, and a name typed into a device's own environment is a name
+     * only that device knows.
+     *
+     * **It is a LABEL and never an identifier.** `device_id` stays the sole key for admission,
+     * fan-out, watermarks, relay attestation (`01-F13`) and `01-F64`'s store binding; two devices
+     * may legitimately share a name and nothing may key on it.
+     *
+     * **Nullable HERE although `01-F70` makes it required at REGISTRATION**, on the precedent
+     * `0005`/`0008` already set in this table and in `catalog_entries`: rows provisioned before
+     * this migration have no name, and backfilling one would invent a fact about a physical
+     * device nobody looked at. `01-F70` puts the refusal at the writer, and a device that has
+     * not yet learned its own name renders per `21-F15`. The writer-side requirement is OWED —
+     * `provision-device`/`registerDevice` do not yet take a `--name`.
+     */
+    display_name: text("display_name"),
     revoked_at: bigint("revoked_at", { mode: "number" }),
     // The cloud's record of this device's last-issued token expiry (T-01-18,
     // 01-F47). Load-bearing for hub-relayed renewal: a WAN-less origin's token
@@ -290,5 +318,186 @@ export const quarantineNotices = kernel.table(
     ),
     // The hello-time drain query (undelivered notices for one device).
     index("quarantine_notices_org_device_delivered_idx").on(t.org_id, t.device_id, t.delivered_at),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * THE TENANCY DIRECTORY (01-F68, 01-F69) — `01 §5` has listed `orgs/branches`
+ * among the cloud tables since Draft 1 and nothing created them.
+ *
+ * ⚠ READ THIS BEFORE ADDING A CONSTRAINT: **these two tables carry NO FOREIGN KEY
+ * AND NOTHING REFERENCES THEM**, and that is `01-F68`'s own ⚠ clause, not an omission.
+ * Events already exist under org ids that no row here names — that is the state of the
+ * deployment today — so a referential constraint from `kernel.events` would refuse ingest
+ * for exactly those orgs, and refusing ingest is refusing a sale a till has already rung
+ * and persisted (`01-F17`, `00 §5.1`, `01-F2`). It also buys nothing: **admission is the
+ * gate and it is one layer up** (`01-F25`/`01-F47`/`01-F48` — a device cannot push without
+ * a registered, unrevoked, unexpired credential naming its org, and `01-F71` (c) quarantines
+ * an envelope whose `org_id` disagrees with its session's).
+ *
+ * The ban is stated for LEDGER tables; it is honoured here for the DIRECTORY tables too,
+ * and that extension is an interpretation rather than a quotation. Two reasons.
+ * `branches.org_id → orgs.org_id` would make naming a branch impossible until its org is
+ * named, turning a directory into an ordering gate on the reconciliation `01-F68` describes
+ * ("an org with events and no record is UNNAMED, not invalid"). And
+ * `device_registry.branch_id → branches.branch_id` would be far worse: every device
+ * registered today has no branch row, so provisioning and admission would start failing
+ * on a table added to hold a *name*. Ordering lives at the writer (`15-F26` provisioning),
+ * which is where this service already puts completeness rules (`01-F60`, `publishCatalog`).
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * `01-F68` — THE ORG AS A NAMED RECORD; `15-F25` — its lifecycle.
+ *
+ * The record holds four things and that is the whole of it. Operating profile and hardware
+ * capability (`15-F4`), the fiscal province (`16-F19`), branding (`06`) and anything to do
+ * with plan, billing, quota or metering (`15-F5a`, `15-F24`) are each owned by another FR and
+ * deliberately absent — a column with no reader is a fact captured by human discretion and
+ * left to drift (`00 §5.8`).
+ *
+ * `status` is `15-F25`'s CLOSED set — `active | suspended`, with **no third value**: a `closed`
+ * org would be indistinguishable, in every enforcement path this product has, from a permanent
+ * suspension plus revoked devices. It is stored as free text with no CHECK, exactly as
+ * `device_registry.device_class` and `catalog_entries.kind` already are — this schema validates
+ * closed sets at the writer (Zod), never in Postgres, and a second interpretation of a closed
+ * set is the defect `03-F40`'s two sensor bit layouts cost this corpus.
+ *
+ * `display_name` is NOT NULL because `01-F68` makes it required. **Non-empty is NOT enforced
+ * here** for the same single-interpretation reason; it is OWED at the writer, and this is the
+ * one place a reviewer should check that claim was honoured when provisioning lands.
+ */
+export const orgs = kernel.table("orgs", {
+  /**
+   * UUIDv7 (`00 §6`), minted once at provisioning (`15-F4`) and **never reused**: `01-F1` makes
+   * every event under it permanent, so a recycled id merges two restaurants' histories into one
+   * ledger with no rule for separating them again. Unchanged as a join key — the envelope, the
+   * registry and the catalog already share it.
+   */
+  org_id: text("org_id").primaryKey(),
+  /** What the restaurant calls itself — the only value `21-F15` permits in an org's name slot. */
+  display_name: text("display_name").notNull(),
+  /** `15-F25`: `active | suspended`. Transitions are `config.changed` in the org's own ledger. */
+  status: text("status").notNull(),
+  created_at: bigint("created_at", { mode: "number" }).notNull(),
+});
+
+/**
+ * `01-F69` — A BRANCH IS A NAMED RECORD UNDER EXACTLY ONE ORG.
+ *
+ * **`branch_id` is the primary key on its own, and that is the FR being enforced rather than a
+ * departure from `device_registry`'s `(org_id, device_id)` pair.** "Under exactly one org" and
+ * "never reused" are both untrue under a composite key, which would happily admit the same
+ * `branch_id` beneath two orgs. `org_id` is carried and indexed because listing an org's branches
+ * is the only read path this table has.
+ *
+ * **NO TIMEZONE COLUMN, and that is a refusal rather than a deferral** (`01-F69`): `01-F46`
+ * anchors the business day to Asia/Karachi regardless of cloud region or device locale and makes
+ * the cutover *hour* the layer-2 setting while the anchor itself is not configurable. A per-branch
+ * timezone would be a layer-3 record overriding platform law (`00 §7` forbids it outright) and its
+ * failure would be silent — every duration, day boundary, shift report and cash reconciliation
+ * re-dating itself against a field nobody remembers setting. Multi-timezone is an amendment to
+ * `01-F46`, not a column here.
+ *
+ * **Address and phone are DEFERRED to the FRs that will read them** — `16-F19` (province, branch
+ * registration status) and `06-F9`/`06-F11` (delivery capture). What Wave 1 needs is a name.
+ *
+ * **A branch record is never deleted.** `01-F51`'s droppability is a *training*-branch property
+ * argued from the fact that a training branch is by construction not history, and it extends to
+ * nothing else; decommissioning a production branch is revoking its devices (`01-F42`, `14-F13`).
+ */
+export const branches = kernel.table(
+  "branches",
+  {
+    /** UUIDv7, never reused — `01-F68`'s reasoning applies unchanged one level down. */
+    branch_id: text("branch_id").primaryKey(),
+    org_id: text("org_id").notNull(),
+    /**
+     * Required: a device's identity resolves against a branch (`01-F65`) and fan-out is keyed by
+     * it (`01-F71` (d)), so an unnamed branch is printed by the till, the pass screen and the
+     * fleet dashboard alike.
+     */
+    display_name: text("display_name").notNull(),
+    /**
+     * `01-F25`: `branch | prep_kitchen | storage`. Named `branch_type` rather than `type` on
+     * `device_registry.device_class`'s precedent — the one existing column of exactly this shape.
+     */
+    branch_type: text("branch_type").notNull(),
+    /**
+     * `01-F49`: `production | training`. **There is no training flag anywhere in the kernel** —
+     * a training branch is a real branch with a real ledger, and branch-scoped credentials,
+     * fan-out and reporting isolate it for free. This column is that whole mechanism.
+     */
+    branch_class: text("branch_class").notNull(),
+    created_at: bigint("created_at", { mode: "number" }).notNull(),
+  },
+  // The only read path: one org's branches.
+  (t) => [index("branches_org_idx").on(t.org_id)],
+);
+
+/**
+ * `11-F20` — THE PERSON AS A STORED RECORD, and `15-F26`'s first owner (`0011`).
+ *
+ * `01 §5` has listed `orgs/branches/users/roles` among the cloud tables since Draft 1. `0010`
+ * added the first two; this is the third. **`roles` is not owed a table**: `01-F26`'s roles are a
+ * CLOSED set declared once in `packages/domain`'s permission matrix, and a table of them would be
+ * a second interpretation of a set the matrix already fixes — the `03-F40` argument this schema
+ * applies to every closed set it stores.
+ *
+ * **What it replaces:** `services/api` assembles ONE owner at boot from `BOOTSTRAP_OWNER_EMAIL` /
+ * `BOOTSTRAP_OWNER_PASSWORD_HASH` / `BOOTSTRAP_ORG_ID` into a process-local `Map` that dies with
+ * the process — `15-F26` names that as a stopgap standing in a provisioning step's place.
+ *
+ * ⚠ **ONE WRITER, TWO READERS.** `18 §4` requires one writer service per table and that is this
+ * one — the sole writer of every table in this file since T-01-07, and where the provisioning
+ * commands live. `services/api` READS this table on the login path and never writes it. Two
+ * services on one Postgres is not the cross-service *import* `18 §2` forbids; a second users table
+ * in a second schema would be two answers to "who owns this org", which is the drift `18 §4`
+ * exists to stop. `14-F14`'s user CRUD is owed and lands as a write through this service.
+ *
+ * **No foreign key to `kernel.orgs`**, on `01-F68`'s reasoning extended exactly as `branches`
+ * extends it, plus one more that is specific to this table: it is read on the LOGIN path, so a
+ * referential failure here is a restaurant locked out of its own back office. Ordering is enforced
+ * at the writer (`15-F27`) — `create-owner` refuses an org with no record, by name.
+ */
+export const users = kernel.table(
+  "users",
+  {
+    /** UUIDv7, never reused — `01-F1` makes attribution permanent (`11-F20`). */
+    user_id: text("user_id").primaryKey(),
+    org_id: text("org_id").notNull(),
+    /**
+     * The login handle. Unique **case-folded and globally**, not per org, because
+     * `UserStore.findByEmail` takes an email and nothing else — `01-F71` (b) takes the org FROM
+     * the authenticated subject, so a per-org index would admit two rows one lookup cannot choose
+     * between. One human in two orgs therefore needs two emails; that is
+     * `backoffice-catalog.md` Q3's open multi-org question, not this table's to answer.
+     */
+    email: text("email").notNull(),
+    /** `11-F20`: required, non-empty. Non-empty is the writer's (Zod `DisplayName`). */
+    display_name: text("display_name").notNull(),
+    /**
+     * An Argon2id PHC string from `domain`'s `hashPin` (`01-F61`'s cost floor, `01-F26`'s single
+     * hashing story) — **never a password**. NOT NULL because a row that cannot authenticate is a
+     * user who does not exist for every purpose this product has; `15-F26`'s set-credential link,
+     * which a nullable column would be preparing for, needs a redemption surface behind `14-F1`
+     * that does not exist yet (`15-F27` names the gap, and relaxing this later is additive).
+     */
+    password_hash: text("password_hash").notNull(),
+    /** `01-F26`'s `(role, branch_id|null)` pairs. `branch_id: null` is org-wide (`15-F26`). */
+    assignments: jsonb("assignments").notNull(),
+    /**
+     * `01-F61` — the identification grid's explicit position. Not derived: ordering by `user_id`,
+     * name or recency inserts a new hire wherever it sorts and shifts every tile after it,
+     * destroying the positional memory `27-F4` protects.
+     */
+    grid_ordinal: bigint("grid_ordinal", { mode: "number" }).notNull(),
+    created_at: bigint("created_at", { mode: "number" }).notNull(),
+  },
+  (t) => [
+    // `lower()` because `createMemoryUserStore` already folds on read; a durable store that folded
+    // on read but not on write would admit `Owner@x` and `owner@x` and serve whichever it reached.
+    uniqueIndex("users_email_lower_uq").on(sql`lower(${t.email})`),
+    // The only other read path: one org's people.
+    index("users_org_idx").on(t.org_id),
   ],
 );

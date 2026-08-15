@@ -72,6 +72,12 @@ describe("the CatalogPublisher / LedgerAppender adapters speak the gateway's con
     expect(gateway.received).toEqual([
       {
         path: "/internal/catalog/publish",
+        // `fake-gateway.ts` records query parameters as well as the body (August 2026), so an
+        // assertion can ask WHICH ORG a GET actually named — `01-F71` (b) is unanswerable from a
+        // pathname. A publish carries its org in the body, so this one is empty. The `toEqual` is
+        // kept exact rather than loosened to `toMatchObject`: this assertion's whole job is that
+        // the adapter posts `publishCatalog`'s argument list and nothing else.
+        query: {},
         body: {
           org_id: ORG,
           entries: [priced("a", 100, 120)],

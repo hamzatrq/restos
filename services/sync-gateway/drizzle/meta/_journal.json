@@ -71,6 +71,20 @@
       "when": 1785000500000,
       "tag": "0009_org_events",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785000600000,
+      "tag": "0010_tenancy_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785000700000,
+      "tag": "0011_tenancy_users",
+      "breakpoints": true
     }
   ]
 }

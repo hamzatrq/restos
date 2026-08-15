@@ -16,6 +16,7 @@
     "@trpc/server": "11.18.0",
     "fastify": "5.10.0",
     "jose": "6.2.4",
+    "postgres": "3.4.9",
     "superjson": "2.2.6",
     "zod": "4.4.3"
   },

@@ -9,6 +9,7 @@ import { listDevices } from "./registry.js";
 // `revoke-device.ts` carries a main-module entry guard, so importing it runs nothing. Reaching for
 // the CLI's own function is the point — see the route below.
 import { revokeRegisteredDevice } from "./revoke-device.js";
+import { listBranches, readOrg } from "./tenancy.js";
 
 /**
  * **THE SEAM THE FOUNDER RULED INTO EXISTENCE: the API publishes, the gateway serves**
@@ -312,6 +313,40 @@ export const registerPublishRoutes = (app: FastifyInstance, deps: PublishDeps): 
     } catch (error: unknown) {
       request.log.error({ err: error }, "org events: database read failed");
       return reply.code(500).send({ error: databaseFailure("org events", error) });
+    }
+  });
+
+  /**
+   * **`01-F68`/`01-F69`'s TENANCY DIRECTORY — one org's own record and its branches.**
+   *
+   * One route for both, and that is the shape rather than two: they are read together by every
+   * surface that needs either (a shell that names the restaurant is the same render as a selector
+   * that names its branches), the pair is one org's *directory*, and splitting them would make a
+   * back-office screen take two round trips to answer one question about one tenant.
+   *
+   * **`org: null` is `01-F68`'s UNNAMED and it is a 200, not a 404.** The FR: *"An org with events
+   * and no record is UNNAMED, not invalid … it folds, syncs, prints and settles exactly as any
+   * other."* A 404 here would tell `services/api` the tenant does not exist, which is false of every
+   * org in this deployment today — the tables have no writer yet — and would turn a naming gap into
+   * an outage. `21-F15` decides what the SCREEN does with the null; this route only reports it.
+   *
+   * **It reads and interprets nothing else.** No count, no "primary branch", no derived status: the
+   * rows as stored, parsed through `packages/domain`'s records so the closed sets have exactly one
+   * interpretation (`schema.ts` stores them with no CHECK for precisely that reason).
+   */
+  app.get("/internal/tenancy", async (request, reply) => {
+    const parsed = OrgQuery.safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ error: "tenancy: org_id required" });
+    const { org_id } = parsed.data;
+    try {
+      const [org, branches] = await Promise.all([
+        readOrg(deps.db, org_id),
+        listBranches(deps.db, org_id),
+      ]);
+      return reply.code(200).send({ org: org ?? null, branches });
+    } catch (error: unknown) {
+      request.log.error({ err: error }, "tenancy: database read failed");
+      return reply.code(500).send({ error: databaseFailure("tenancy", error) });
     }
   });
 

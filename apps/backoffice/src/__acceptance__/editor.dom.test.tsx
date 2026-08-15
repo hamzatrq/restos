@@ -1,12 +1,65 @@
 /**
- * **THE SEAM TESTS.** Everything here asserts what the SHIPPED editor sends, not what a helper
- * returns — because this wave's recurring defect is a correct module the application never reaches,
- * and `price-grid.test.ts` passing proves nothing about whether `EntryEditor` calls it.
+ * **THE SEAM TESTS — ADJUDICATED AND PARTLY RETIRED, 16 August 2026 (`24 §3`, `24-F5`).**
  *
- * `14-F29` (the grid + fill-across), `01-F60` (completeness and the free-modifier zero),
- * `14-F28` (the timing default and the explicit apply-now), `03-F50` (station), `14-F7` (archive),
- * Commandment 3 (rupees in, paisa out) — each with the request the screen actually made as the
- * evidence.
+ * Everything here asserts what the SHIPPED editor sends, not what a helper returns — because this
+ * wave's recurring defect is a correct module the application never reaches, and
+ * `price-grid.test.ts` passing proves nothing about whether `EntryEditor` calls it. That premise
+ * is unchanged and is why the file survives at all.
+ *
+ * ---------------------------------------------------------------------------------------------
+ * THE RETIREMENT, AND WHAT IT DOES NOT COVER
+ * ---------------------------------------------------------------------------------------------
+ *
+ * *What changed:* `14-F32`..`14-F38` (`specs/14-backoffice.md`, August 2026) reshaped this
+ * surface after the founder's own review — *"this is so hard to use. I cant understand a single
+ * thing."* Creating an entry now begins with a **task** named in the owner's vocabulary
+ * (`14-F32`), the kind discriminator is gone, the identifier is generated rather than typed
+ * (`14-F33`), and the timing choice moved into the commit region (`14-F36`). Fifteen tests in
+ * this file drove the old form — `getByLabelText("Type")`, `getByLabelText("ID")`, a grid present
+ * on mount — and every one of them failed at the FIRST `getByLabelText`, before it reached its
+ * own assertion. **They failed as DRIVERS, not as claims**, which is the distinction that decides
+ * each verdict below: a driver that no longer fits is retired only where the claim it carried is
+ * held somewhere else, and re-pointed at the new surface where it is not.
+ *
+ * *Which FR decides it:* `14-F32` (the task chooser), `14-F33` (no id control), `14-F36` (timing
+ * in the commit region). None of them amends `14-F28`, `14-F29`, `01-F60` or `03-F50` — the
+ * behaviour is identical; only the way an owner reaches it moved.
+ *
+ * **RETIRED HERE, because `__acceptance__/task-editor.dom.test.tsx` — the oracle written from
+ * `14-F32`..`14-F38` (35 tests, 30 mutants, 0 survivors) — now carries the same claim:**
+ *
+ * | retired test | who holds the claim now |
+ * |---|---|
+ * | renders a cell for every enabled (branch, channel) pair | its `cell(branch, channel)` throws by name, on ~15 tests |
+ * | does not send a save when an enabled pair is unpriced | *14-F37/14-F29 — pressing commit names EVERY missing pair and sends nothing* |
+ * | names the branch and the channel it refused for | the same test, strengthened: EVERY missing pair, measured on the INSERTED text |
+ * | sends the save once every cell is priced | *14-F29/Commandment 3 — a typed 450 reaches the wire as 45000 integer paisa* |
+ * | sends 45000 paisa for a typed 450 | the same test |
+ * | defaults to day end · sends day_end when the owner changes nothing | *14-F36 — apply-now is never pre-selected, and a save that changes nothing lands at day end* |
+ * | states BOTH consequences on the control | *14-F36 — apply-now's consequence is rendered BEFORE it can be chosen* + *the resting state states the default outcome* |
+ * | sends now only when the owner explicitly chooses it | *14-F36 — apply-now is not remembered between edits* (asserts `now` on the wire, then `day_end` on the next edit) |
+ * | sends null for a blank station | *03-F50 — a station the owner never touched is sent as null* |
+ *
+ * **NOT RETIRED — re-pointed at the new surface below, because the new oracle does not hold
+ * them.** This was measured, not assumed, and it is the reason this file was not retired whole:
+ *
+ * - **fill-across, and an override typed on top of it** (`14-F29`: *"one number fills the grid and
+ *   overrides are typed on top"*). `task-editor.dom.test.tsx` prices every pair BY HAND on purpose
+ *   — *"so setup never depends on the fill-across control"* — which is correct for that oracle and
+ *   leaves the control itself unasserted at the seam. The old mutation matrix's **M9** (fill-across
+ *   fills only the first channel column) would survive it.
+ * - **a menu section sends NO `prices` key on the wire** (`01-F60`). The new oracle asserts the
+ *   section form draws no grid; that a grid is absent and that the request omits the field are two
+ *   claims, and `prices: []` satisfies the first while failing the second.
+ * - **a free add-on sends an explicit `0` on every pair** (`01-F60`). The new oracle asserts the
+ *   `14-F37` READOUT reads complete for a zero-priced item; the wire claim — 25 zeros, never an
+ *   omission — is the old **M2**, and a mutant that drops zero cells from the request passes a
+ *   readout assertion.
+ * - **a typed station reaches the wire** (`03-F50`). The new oracle holds only the blank case, so
+ *   an implementation that always sends `null` passes it.
+ *
+ * Nothing was deleted silently. The four tests that never failed — the price prefill and `14-F7`'s
+ * three archive tests — are untouched below.
  */
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -36,6 +89,10 @@ const mount = (initial: CatalogEntry | null): CallLog => {
     <Harness
       log={log}
       handlers={{
+        // `14-F33`'s section chooser and `14-F35`'s resolved station read the published menu; an
+        // empty one is the honest fixture for a creation with no parent chosen.
+        "catalog.published": () => ({ version: 7, entries: [] }),
+        "catalog.pending": () => [],
         "catalog.save": () => receipt,
         "catalog.archive": () => receipt,
         "catalog.history": () => [],
@@ -54,34 +111,47 @@ const type = (input: HTMLElement, value: string): void => {
   fireEvent.change(input, { target: { value } });
 };
 
+/**
+ * `14-F32` — a creation starts at the task chooser, so every create-path test states which JOB it
+ * is doing before it can touch a field. The task is named in the owner's vocabulary; the internal
+ * kind string is deliberately not reachable from here, which is the FR working.
+ */
+const startTask = async (task: string): Promise<void> => {
+  await waitFor(() => screen.getByRole("button", { name: task }));
+  fireEvent.click(screen.getByRole("button", { name: task }));
+  await waitFor(() => screen.getByLabelText("Name"));
+};
+
 const fillAll = (value: string): void => {
   type(screen.getByLabelText("Price for every cell"), value);
   fireEvent.click(screen.getByRole("button", { name: "Fill across" }));
 };
 
+/** `14-F32`'s two commit controls on a creation; *finish* is the one that closes the form. */
+const commit = (): void => {
+  fireEvent.click(screen.getByRole("button", { name: "Save and finish" }));
+};
+
 const saved = (log: CallLog): { entry: CatalogEntry; apply_when: string } =>
   (log.find((call) => call.path === "catalog.save")?.input ?? null) as never;
 
-describe("14-F29 — the grid the editor draws", () => {
-  it("renders a cell for every enabled (branch, channel) pair", () => {
-    mount(null);
-    for (const branch of FIVE.branches) {
-      for (const channel of FIVE.channels) expect(cell(branch, channel)).toBeTruthy();
-    }
-  });
-
-  it("fills all 25 cells from one number in one action", () => {
+describe("14-F29 — one number fills the grid, and overrides are typed on top", () => {
+  it("fills all 25 cells from one number in one action", async () => {
     // The fill-across is *"not a convenience, it is what makes the honest schema usable"*. Without
-    // it an owner types 25 numbers per item and routes around the editor instead.
+    // it an owner types 25 numbers per item and routes around the editor instead. Held HERE and
+    // nowhere else: the `14-F32` oracle prices every pair by hand so that its own setup does not
+    // depend on this control.
     mount(null);
+    await startTask("Add a dish");
     fillAll("450");
     for (const branch of FIVE.branches) {
       for (const channel of FIVE.channels) expect(cell(branch, channel).value).toBe("450");
     }
   });
 
-  it("keeps an override typed on top of the fill", () => {
+  it("keeps an override typed on top of the fill", async () => {
     mount(null);
+    await startTask("Add a dish");
     fillAll("450");
     type(cell("dha", "foodpanda"), "520");
     expect(cell("dha", "foodpanda").value).toBe("520");
@@ -103,146 +173,52 @@ describe("14-F29 — the grid the editor draws", () => {
   });
 });
 
-describe("01-F60 — the editor refuses at the point of the mistake", () => {
-  it("does not send a save when an enabled pair is unpriced", async () => {
-    // THE assertion this screen exists for. The server refuses this too, and that refusal arrives
-    // after a round trip an owner may not be watching — possibly at 05:00, from a scheduler.
-    const log = mount(null);
-    fillAll("450");
-    type(cell("cantt", "foodpanda"), "");
-    type(screen.getByLabelText("ID"), "tikka");
-    type(screen.getByLabelText("Name"), "Chicken Tikka");
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    await waitFor(() => expect(screen.getByText(/cannot be saved yet/)).toBeTruthy());
-    expect(log.filter((call) => call.path === "catalog.save")).toHaveLength(0);
-  });
-
-  it("names the branch and the channel it refused for", () => {
-    mount(null);
-    fillAll("450");
-    type(cell("cantt", "foodpanda"), "");
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    const message = screen.getByText(/cannot be saved yet/).textContent ?? "";
-    expect(message).toContain("cantt");
-    expect(message).toContain("foodpanda");
-  });
-
-  it("sends the save once every cell is priced", async () => {
-    const log = mount(null);
-    fillAll("450");
-    type(screen.getByLabelText("ID"), "tikka");
-    type(screen.getByLabelText("Name"), "Chicken Tikka");
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(log.some((call) => call.path === "catalog.save")).toBe(true));
-    expect(saved(log).entry.prices).toHaveLength(25);
-  });
-
-  it("sends a free modifier as an explicit 0 on every pair, never as an omission", async () => {
+describe("01-F60 — what the WIRE carries, which is a different claim from what the screen draws", () => {
+  it("sends a free add-on as an explicit 0 on every pair, never as an omission", async () => {
     // `01-F60`'s free add-on. A screen that treated `0` as "nothing entered" would send 25 fewer
     // prices, and "this costs nothing" would arrive indistinguishable from "somebody forgot".
+    // `14-F32` renamed the task — the kind `modifier` is vendor vocabulary under `14-F38` and is
+    // no longer a control — but the wire still carries `modifier`, and that is what is asserted.
     const log = mount(null);
-    type(screen.getByLabelText("Type"), "modifier");
+    await startTask("Add an add-on");
     fillAll("0");
-    type(screen.getByLabelText("ID"), "extra-raita");
     type(screen.getByLabelText("Name"), "Extra Raita");
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    commit();
 
     await waitFor(() => expect(log.some((call) => call.path === "catalog.save")).toBe(true));
     const prices = saved(log).entry.prices ?? [];
+    expect(saved(log).entry.kind).toBe("modifier");
     expect(prices).toHaveLength(25);
     expect(prices.every((price) => price.price_paisa === 0)).toBe(true);
   });
 
-  it("sends no prices for a category, which nothing prices", async () => {
+  it("sends no prices for a menu section, which nothing prices", async () => {
+    // The section form draws no grid, which `task-editor.dom.test.tsx` asserts. This is the other
+    // half: the REQUEST omits the field. `prices: []` would satisfy the render claim and publish a
+    // priced kind with an empty price set.
     const log = mount(null);
-    type(screen.getByLabelText("Type"), "category");
-    type(screen.getByLabelText("ID"), "grill");
+    await startTask("Add a menu section");
     type(screen.getByLabelText("Name"), "From the Grill");
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    commit();
     await waitFor(() => expect(log.some((call) => call.path === "catalog.save")).toBe(true));
     expect(saved(log).entry.prices).toBeUndefined();
   });
 });
 
-describe("Commandment 3 — rupees in, integer paisa out", () => {
-  it("sends 45000 paisa for a typed 450", async () => {
-    // The factor of 100, asserted on the WIRE rather than on the helper. A screen that forwarded
-    // the typed rupees would publish a menu at one hundredth of its price, frozen by `01-F53`.
-    const log = mount(null);
-    fillAll("450");
-    type(screen.getByLabelText("ID"), "tikka");
-    type(screen.getByLabelText("Name"), "Chicken Tikka");
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(log.some((call) => call.path === "catalog.save")).toBe(true));
-    expect(saved(log).entry.prices?.[0]?.price_paisa).toBe(45000);
-  });
-});
-
-describe("14-F28 — the timing control", () => {
-  it("defaults to day end", () => {
-    // `27-F4` makes a moving grid a breaking change against a cashier's muscle memory, so the
-    // default is the 05:00 boundary. An apply-now default is a hidden breaking change per edit.
-    mount(null);
-    expect((screen.getByLabelText("At day end (05:00)") as HTMLInputElement).dataset.state).toBe(
-      "checked",
-    );
-    expect((screen.getByLabelText("Apply now") as HTMLInputElement).dataset.state).toBe(
-      "unchecked",
-    );
-  });
-
-  it("states BOTH consequences on the control, before either is chosen", () => {
-    // *"a deliberate act with the consequence stated on the control, not a hidden default"*.
-    mount(null);
-    expect(screen.getByText(/keep today's menu until 05:00/)).toBeTruthy();
-    expect(screen.getByText(/changes as soon as this saves/)).toBeTruthy();
-  });
-
-  it("sends day_end when the owner changes nothing", async () => {
-    const log = mount(null);
-    fillAll("450");
-    type(screen.getByLabelText("ID"), "tikka");
-    type(screen.getByLabelText("Name"), "Chicken Tikka");
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(log.some((call) => call.path === "catalog.save")).toBe(true));
-    expect(saved(log).apply_when).toBe("day_end");
-  });
-
-  it("sends now only when the owner explicitly chooses it", async () => {
-    const log = mount(null);
-    fillAll("450");
-    type(screen.getByLabelText("ID"), "tikka");
-    type(screen.getByLabelText("Name"), "Chicken Tikka");
-    fireEvent.click(screen.getByLabelText("Apply now"));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(log.some((call) => call.path === "catalog.save")).toBe(true));
-    expect(saved(log).apply_when).toBe("now");
-  });
-});
-
 describe("03-F50 — the station travels with the entry", () => {
   it("sends the typed station", async () => {
+    // The POSITIVE case, held here because the `14-F32` oracle asserts only the blank one — and an
+    // implementation that always sends `null` passes that. `14-F35` puts this field in a collapsed
+    // group; happy-dom performs no layout, so an owner's act of opening it is not reproducible
+    // here and is not what this test claims. What it claims is that a typed value reaches the wire.
     const log = mount(null);
+    await startTask("Add a dish");
     fillAll("450");
-    type(screen.getByLabelText("ID"), "tikka");
     type(screen.getByLabelText("Name"), "Chicken Tikka");
     type(screen.getByLabelText("Kitchen station"), "grill");
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    commit();
     await waitFor(() => expect(log.some((call) => call.path === "catalog.save")).toBe(true));
     expect(saved(log).entry.station).toBe("grill");
-  });
-
-  it("sends null for a blank station, because absence is inheritance", async () => {
-    // `03-F50`: an entry with no station takes its parent's through the `01-F21` chain. `""` would
-    // be a station NAMED empty string, which resolves to nothing and drops the item off a ticket.
-    const log = mount(null);
-    fillAll("450");
-    type(screen.getByLabelText("ID"), "tikka");
-    type(screen.getByLabelText("Name"), "Chicken Tikka");
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(log.some((call) => call.path === "catalog.save")).toBe(true));
-    expect(saved(log).entry.station).toBeNull();
   });
 });
 

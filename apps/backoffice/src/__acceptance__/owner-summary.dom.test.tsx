@@ -1019,12 +1019,43 @@ describe("J · 12-F12 — the narrative is absent, and the screen says so", () =
    * blocks of *numbers*. The statement is therefore the client's to make, and it must be made:
    * a summary with no prose and no explanation reads as a summary whose analyst had nothing to say.
    */
-  it("names the missing narrative rather than leaving a silent gap", async () => {
+  /**
+   * ⚠ **RETIRED ASSERTION, 16 August 2026 — `expect(page).toMatch(/12-F12/)`.**
+   *
+   * *What changed:* this test required the FR id `12-F12` to be RENDERED, as the proof that the
+   * statement was the reasoned one and not a decorative apology. `14-F38` (August 2026) forbids
+   * exactly that: *"No rendered string contains an FR id … The citation does not disappear — it
+   * moves. It belongs in the string catalog's comment beside the sentence, where commandment 9
+   * and `14-F2`'s traceability are served and no owner reads it."* To a restaurant owner reading
+   * his own takings, `12-F12` is an error code on a report.
+   *
+   * *Which FR decides it:* `14-F38`, whose scope clause binds this module — and `14-F31` is what
+   * puts this screen in it (the Wave-1 owner summary ships as a read-only desk view in the back
+   * office). The citation now lives in the comment above `strings.summary.noNarrative`.
+   *
+   * *What is kept, because the ruling does not touch it:* the screen must still NAME the absence
+   * rather than leave a silent gap. That half is strengthened here rather than merely preserved —
+   * the negative direction is now asserted on the sentence itself, so the mutant this file was
+   * written against (a screen with no statement at all) still dies, and so does the mutant that
+   * puts the id back. The sweep is deliberately scoped to the leaf carrying the sentence: the
+   * fixture's own `omissions` reasons are SERVER text quoting `12-F11` and `13-F5`, and a
+   * page-wide id sweep would fail on a string this client does not author.
+   */
+  it("names the missing narrative rather than leaving a silent gap, in an owner's words", async () => {
     mount(ANSWER);
     await settled();
     const page = (document.body.textContent ?? "").replace(/\s+/g, " ");
     expect(page).toMatch(/narrative/i);
-    expect(page).toMatch(/12-F12/);
+
+    const carriers = Array.from(document.querySelectorAll<HTMLElement>("*")).filter(
+      (el) => el.children.length === 0 && /narrative/i.test(el.textContent ?? ""),
+    );
+    expect(carriers.length).toBeGreaterThan(0);
+    const sentence = (carriers[0]?.textContent ?? "").replace(/\s+/g, " ");
+    // It says the brief does not exist and that nothing was invented in its place (`00 §5.7`).
+    expect(sentence).toMatch(/not built|no brief|none is written|nothing/i);
+    // `14-F38` — no FR id, on the sentence an owner actually reads.
+    expect(sentence).not.toMatch(/\b(?:[0-9]{2}|[A-Z])-[FNT][0-9]+[a-z]?\b/);
   });
 
   it("invents no prose — the block still carries its numbers", async () => {

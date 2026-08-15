@@ -24,6 +24,12 @@
  *     by the name assertions rather than by a "no handler" error. `apps/backoffice/CLAUDE.md`
  *     records the round where a mutant's kill was unattributable because the test file failed to
  *     load — read the failure message, not the count.
+ *
+ * ⚠ **The IDENTITY's spelling changed on 16 August 2026 and two assertions here were re-pointed**
+ * (`14-F32`/`14-F38`, adjudicated by the test-owning session). The demoted identity read
+ * `item / <id>` — a raw `01-F21` kind string — and reads `Dish · Reference code <id>` now. Nothing
+ * this file owns moved: the NAME still leads, the identity is still present and still below it, and
+ * the two axes are still not joined. The retired literal is now asserted as an absence.
  */
 
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -86,16 +92,32 @@ describe("14-F28 — the pending row renders the draft's own name", () => {
     // The identity is kept — two entries can share a display name, and this row's control cancels
     // one of them — but it is no longer what the row is called. An implementation that appended the
     // name after the identifier would satisfy "the name is on screen" and still leave an owner
-    // reading `item / item-chicken-karahi` first.
+    // reading the identity first.
+    //
+    // ⚠ **RE-POINTED 16 August 2026 by the test-owning session (`24 §3` step 2, `24-F5`).** This
+    // asserted the identity was spelled `item / item-chicken-karahi`, and `14-F32` overruled that
+    // spelling after this file was written: *"the internal kind strings are vendor vocabulary under
+    // `14-F38` and are not rendered; the task noun is this surface's name for a kind EVERYWHERE."*
+    // The raw `01-F21` kind string is now banned from this row, so the literal is retired and the
+    // identity is read in the vocabulary `14-F32`/`14-F33` require — the task noun plus the editor's
+    // own `Reference code` label. **What this test OWNS is unchanged and still asserted here**: the
+    // identity is PRESENT (the tie-breaker between two entries sharing a name) and it sits BELOW the
+    // name. Only the spelling moved; nothing about hierarchy was weakened, and mutant P4 (name and
+    // identity swapped, `apps/backoffice/CLAUDE.md`) still fails both of the last two assertions.
     mount({
       "catalog.pending": () => [row("item-chicken-karahi", "Chicken Karahi")],
       "catalog.published": publishedWithOldName,
     });
     await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(1));
     const text = screen.getByRole("listitem").textContent ?? "";
+    const identity = "Dish · Reference code item-chicken-karahi";
     expect(text.startsWith("Chicken Karahi")).toBe(true);
-    expect(text).toContain("item / item-chicken-karahi");
-    expect(text.indexOf("Chicken Karahi")).toBeLessThan(text.indexOf("item / item-chicken-karahi"));
+    expect(text).toContain(identity);
+    expect(text.indexOf("Chicken Karahi")).toBeLessThan(text.indexOf(identity));
+    // The retired form, asserted as an ABSENCE so the banned string cannot come back unnoticed —
+    // the same negative-assertion move `shell.dom.test.tsx` makes against `14-F3`'s retired
+    // apology. Without it, retiring the assertion above would leave `14-F38` defended by nothing.
+    expect(text).not.toContain("item / item-chicken-karahi");
   });
 
   it("shows the NEW name for a rename, never the published one", async () => {
@@ -117,7 +139,12 @@ describe("14-F28 — the pending row renders the draft's own name", () => {
       "catalog.published": publishedWithOldName,
     });
     await waitFor(() => expect(screen.getByText("Seekh Kebab")).toBeTruthy());
-    expect(screen.queryByText("item / item-seekh-kebab")).toBeTruthy();
+    // ⚠ **RE-POINTED 16 August 2026 (`14-F32`, test-owning session).** This read
+    // `queryByText("item / item-seekh-kebab")`; the kind string is now vendor vocabulary and is not
+    // rendered. The claim this line makes is unchanged — a never-published entry still carries its
+    // demoted identifier, so the row degrades to neither a bare id nor a nameless row — and the
+    // FIRST assertion, which is the one a joining implementation dies on, is untouched.
+    expect(screen.queryByText("Dish · Reference code item-seekh-kebab")).toBeTruthy();
   });
 
   it("never asks for the published catalog at all — the two axes are not joined", async () => {

@@ -17,12 +17,28 @@ import type { OrderChannel } from "@restos/domain";
 import { ArrowRightToLine } from "lucide-react";
 import { useState } from "react";
 import type { EnabledPairs, GridDraft, GridFault } from "../lib/price-grid";
-import { cellKey } from "../lib/price-grid";
+import { cellKey, cellsOf } from "../lib/price-grid";
 import { strings } from "../lib/strings";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
-import { Field, Input, Label } from "./ui/field";
+import { Field, helpId, Input, Label } from "./ui/field";
 import { Note } from "./ui/surface";
+
+/**
+ * **`14-F34` — one help sentence, nine controls.** The FR is satisfied by a single description
+ * several controls point at; nine identical sentences under nine boxes would be noise, and the
+ * thing an owner needs explained is the RULE (every pair, no fallback), which is a property of the
+ * grid rather than of any one cell.
+ */
+const GRID_HELP_ID = "price-grid-help";
+
+/** A cell counts as priced when the owner has put SOMETHING in it — `"0"` included (`01-F60`). */
+const unpricedCount = (enabled: EnabledPairs, draft: GridDraft): number =>
+  cellsOf(enabled).filter((pair) => (draft[cellKey(pair.branch_id, pair.channel)] ?? "") === "")
+    .length;
+
+const fill = (template: string, values: Readonly<Record<string, string>>): string =>
+  template.replace(/\{(\w+)\}/g, (whole, key: string) => values[key] ?? whole);
 
 /**
  * `27-F23` — *"Money format: `Rs`, symbol-first."* On the money, at the keystroke where it
@@ -70,6 +86,16 @@ export const PriceGrid = ({
     faults.map((fault) => [cellKey(fault.branch_id, fault.channel), fault.reason]),
   );
 
+  /**
+   * **`14-F37` — the count, recomputed on every render and therefore on every keystroke.**
+   *
+   * Not memoised and not held in state: the draft IS the source, and a count kept beside it is a
+   * second copy that can disagree with the grid an owner is looking at. Nine cells is nine string
+   * comparisons.
+   */
+  const missing = unpricedCount(enabled, draft);
+  const total = enabled.branches.length * enabled.channels.length;
+
   return (
     /*
       **THE SIGNATURE ELEMENT OF THIS APP.**
@@ -95,8 +121,29 @@ export const PriceGrid = ({
         <h3 className="text-label uppercase tracking-wider text-foreground">
           {strings.grid.heading}
         </h3>
-        <p className="max-w-3xl text-xs leading-relaxed text-muted-foreground">
+        <p id={GRID_HELP_ID} className="max-w-3xl text-xs leading-relaxed text-muted-foreground">
           {strings.grid.help}
+        </p>
+        {/*
+          **`14-F37`'s running count, and it is deliberately the quietest thing here.**
+
+          `01-F60` refuses an incomplete set at the writer and `resolveGrid` refuses it at the
+          press; both of those are answers to a question the owner has already committed to. This
+          states the same fact while he is still typing — *"the fact moved earlier, because a
+          refusal is a poor way to learn what a screen wanted"*.
+
+          No colour and no tone (`27-F16`): a half-typed new dish is the NORMAL state of a form,
+          and a screen that is red from the first keystroke has spent the alarm channel before the
+          alarm. Colour arrives with the refusal below, which is a different sentence in a
+          different element.
+        */}
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          {missing === 0
+            ? strings.grid.everyPriceSet
+            : fill(strings.grid.stillNeeded, {
+                missing: String(missing),
+                total: String(total),
+              })}
         </p>
       </div>
 
@@ -121,6 +168,7 @@ export const PriceGrid = ({
                 <Input
                   id="fill"
                   inputMode="numeric"
+                  aria-describedby={helpId("fill")}
                   className="text-right"
                   value={fillValue}
                   onChange={(event) => setFillValue(event.target.value)}
@@ -132,7 +180,8 @@ export const PriceGrid = ({
             <ArrowRightToLine aria-hidden="true" className="size-4" />
             {strings.grid.fillAcross}
           </Button>
-          <p className="max-w-xs text-xs leading-relaxed text-muted-foreground">
+          {/* Bound to the fill box by `helpId`, not merely sitting beside it (`14-F34`). */}
+          <p id={helpId("fill")} className="max-w-xs text-xs leading-relaxed text-muted-foreground">
             {strings.grid.fillAcrossHelp}
           </p>
         </div>
@@ -221,6 +270,8 @@ export const PriceGrid = ({
                           <Input
                             id={id}
                             inputMode="numeric"
+                            // `14-F34`, one sentence for all nine cells — see `GRID_HELP_ID`.
+                            aria-describedby={GRID_HELP_ID}
                             aria-invalid={reason !== undefined}
                             placeholder={strings.grid.unpriced}
                             className={cn(
@@ -257,13 +308,30 @@ export const PriceGrid = ({
         </div>
       </div>
 
-      {faults.length === 0 ? null : (
-        <Note tone="fault">
-          {`${strings.grid.incomplete} ${faults
-            .map((fault) => `${fault.branch_id} / ${fault.channel} — ${fault.reason}`)
-            .join("; ")}`}
-        </Note>
-      )}
+      {/*
+        **THE REFUSAL IS NOT RENDERED HERE ANY MORE, AND THAT IS THE FIX RATHER THAN A TIDY-UP.**
+
+        It was a `Note tone="fault"` in this position — inside the grid, which is the middle of the
+        form. Measured in Chromium at 1366×768, the size `27 §1a` promises a counter: editing an
+        existing dish makes the page 2318 px tall, and an owner who scrolls to the foot to reach
+        `Save` puts this note at **y = −532**, half a screen ABOVE the viewport. `anyInView: false`.
+        A refused save was then indistinguishable from a dead button — the founder's *"I press it
+        and nothing happens"*, and `00 §5.7` broken by geometry rather than by wording.
+
+        `27-F5` puts the consequence where the act is, and the till already answers this exact
+        shape the same way: `Counter.tsx`'s refused *Save caller* states its refusal ON the card the
+        control lives on rather than in a band elsewhere. So `entry-editor.tsx` renders it in the
+        COMMIT region, beside the button that was pressed, next to the server's own refusal which
+        was already there. The faults still arrive here — they mark the cells (`aria-invalid`, a red
+        boundary through `ui/field.tsx`), which is what lets the owner find the cell once the
+        sentence at the button has told him a cell is wrong.
+
+        ⚠ **No gate in this repo can see this.** `pnpm layout:check` measures the till's
+        `BrowserWindow` and never these screens, and the `.dom.test.tsx` suites run under happy-dom,
+        which performs no layout — every `getBoundingClientRect` is zeroes, so "the banner is in the
+        document" and "the banner is on the screen" are the same assertion there. It was found by
+        running the product and measuring, and that is the only way it could have been found.
+      */}
 
       {/*
         The grid's two standing footnotes, together and demoted.

@@ -18,6 +18,22 @@ export type DeviceRegistration = {
   branch_id: string;
   device_id: string;
   device_class: string;
+  /**
+   * `01-F70` — the device's HUMAN NAME ("Counter till", "Kitchen screen"), on the registry row
+   * because `14-F12`'s device list and `15-F11`'s fleet dashboard are lists of devices nobody is
+   * holding. A LABEL and never an identifier: `device_id` stays the sole key for admission,
+   * fan-out, watermarks and `01-F64`'s store binding, and two devices may share a name.
+   *
+   * ⚠ **OPTIONAL HERE AND REQUIRED AT THE COMMAND, and the split is deliberate rather than a
+   * softening of the FR.** `01-F70` puts the refusal *at registration*, and the product's only
+   * registration path is `provision-device`, which requires `--name` and refuses without it. This
+   * seam's other callers are test fixtures registering rows for auth and fan-out assertions that
+   * predate the column; making it required here would have changed dozens of fixtures to satisfy a
+   * rule none of them is about, and the FR's refusal would still have lived at the command. The
+   * column is nullable (`0010`) for the same reason — rows provisioned before the migration have no
+   * name, and inventing one would invent a fact about a physical device nobody looked at.
+   */
+  display_name?: string;
   /** Optional issuance expiry (01-F47); defaults to the standard lifetime when absent. */
   token_expires_at?: number;
 };
@@ -81,9 +97,9 @@ export const registerDevice = async (
     // DR replay, the rewound-clock pin, every deterministic test — a seeded device can
     // read as permanently not-due and never renew. Pass the value.
     sql`insert into kernel.device_registry
-          (org_id, branch_id, device_id, device_class, revoked_at, token_expires_at)
+          (org_id, branch_id, device_id, device_class, display_name, revoked_at, token_expires_at)
         values (${registration.org_id}, ${registration.branch_id}, ${registration.device_id},
-          ${registration.device_class}, null,
+          ${registration.device_class}, ${registration.display_name ?? null}, null,
           coalesce(${registration.token_expires_at ?? null}::bigint,
                    (extract(epoch from now()) * 1000)::bigint + ${DEVICE_TOKEN_TTL_MS}))`,
   );
@@ -141,6 +157,16 @@ export const revokeDevice = async (
  * `token_expires_at` IS carried, because it is real and it is the one liveness fact this table
  * honestly has (`01-F47`).
  *
+ * **`display_name` is carried too, and it is `01-F70`'s whole point** — the FR's own measured
+ * complaint is that this list "can name a till only by its UUID, and the operator reading either is
+ * by construction not standing in front of it". It is **nullable on the way out** because `0010`
+ * added the column nullable and deliberately did not backfill: a row provisioned before that
+ * migration has no name, and inventing one would invent a fact about a physical device nobody looked
+ * at. `21-F15` decides what a screen does with the null — a stated *unnamed* treatment, never a
+ * blank and never the identifier wearing the name's slot. **`01-F70`'s "required at REGISTRATION" is
+ * CLOSED as of August 2026** — `provision-device` requires `--name` and refuses without it (`15-F27`)
+ * — so a null here means a row provisioned *before* that landed, and never a device admitted since.
+ *
  * Ordered by `(branch_id, device_id)` so the list is stable between visits: without it the planner
  * decides the order and a `14-F12` list re-shuffles under an owner between two reads of the same
  * unchanged fleet.
@@ -148,9 +174,9 @@ export const revokeDevice = async (
 export const listDevices = async (
   executor: SqlExecutor,
   orgId: string,
-): Promise<readonly (DeviceRegistryRow & { device_id: string })[]> => {
+): Promise<readonly (DeviceRegistryRow & { device_id: string; display_name: string | null })[]> => {
   const rows = await executor.execute(
-    sql`select device_id, branch_id, device_class, revoked_at, token_expires_at
+    sql`select device_id, branch_id, device_class, display_name, revoked_at, token_expires_at
         from kernel.device_registry
         where org_id = ${orgId}
         order by branch_id asc, device_id asc`,
@@ -159,6 +185,8 @@ export const listDevices = async (
     device_id: String(row.device_id),
     branch_id: String(row.branch_id),
     device_class: String(row.device_class),
+    // `01-F70`. Null is UNNAMED and is carried as null — see this function's header.
+    display_name: row.display_name === null ? null : String(row.display_name),
     revoked_at: row.revoked_at === null ? null : Number(row.revoked_at),
     token_expires_at: row.token_expires_at === null ? null : Number(row.token_expires_at),
   }));
@@ -182,6 +210,49 @@ export const readRegistryRow = async (
     revoked_at: row.revoked_at === null ? null : Number(row.revoked_at),
     token_expires_at: row.token_expires_at === null ? null : Number(row.token_expires_at),
   };
+};
+
+/**
+ * `01-F70`'s name as stored: `undefined` = no such row, `null` = the row exists and is UNNAMED.
+ *
+ * A separate read rather than a field on `DeviceRegistryRow`, because that type is what the
+ * ADMISSION checks consume (`18 §5`: the registry decides) and a label is not an admission fact —
+ * `01-F70` is explicit that nothing may key on the name. Widening the auth row would put a value
+ * that must never be read in front of every reader that must not read it.
+ */
+export const readDeviceName = async (
+  executor: SqlExecutor,
+  orgId: string,
+  deviceId: string,
+): Promise<string | null | undefined> => {
+  const rows = await executor.execute(
+    sql`select display_name from kernel.device_registry
+        where org_id = ${orgId} and device_id = ${deviceId}`,
+  );
+  const row = [...rows][0];
+  if (row === undefined) return undefined;
+  return row.display_name === null ? null : String(row.display_name);
+};
+
+/**
+ * Name a registry row that has none — `01-F70`'s backfill, and **only** that.
+ *
+ * The `and display_name is null` clause is the whole safety story: this cannot rename. A rename is
+ * `14-F30`'s `device.manage` from `14-F12`'s list, made by an authenticated human whose identity the
+ * change is attributed to; a provisioning command re-run with a typo must not be able to perform one
+ * (`15-F27`). Naming a row that `0010` left null is not a rename — `01-F68`'s reconciliation
+ * argument, applied to a device.
+ */
+export const recordDeviceName = async (
+  executor: SqlExecutor,
+  orgId: string,
+  deviceId: string,
+  displayName: string,
+): Promise<void> => {
+  await executor.execute(
+    sql`update kernel.device_registry set display_name = ${displayName}
+        where org_id = ${orgId} and device_id = ${deviceId} and display_name is null`,
+  );
 };
 
 /**

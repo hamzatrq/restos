@@ -28,6 +28,23 @@ export type UserRecord = {
    */
   readonly org_id: string;
   readonly email: string;
+  /**
+   * `11-F20` — the person's name, and `21-F15`'s only permitted value in a person's name slot.
+   *
+   * **OPTIONAL here although `11-F20` makes it REQUIRED, and that is a stated stopgap rather than a
+   * disagreement with the FR.** The FR puts the requirement on "the one record both planes read",
+   * and its writer is `14-F14`'s user CRUD (`15-F26` creates the first one) — neither of which
+   * exists. The only writer this service has is `bootstrapUsers`, which `15-F26` itself names as
+   * "a development seed … a stopgap standing in a provisioning step's place". So the requirement is
+   * enforced where a person is CREATED, and this record carries what it honestly has.
+   *
+   * **Absent is `null` at the surface and never a default.** "Owner", "User" or the email's local
+   * part would each be a name the product invented for a human being, and `21-F15` forbids exactly
+   * that: where the record has no name, the slot says what is missing and where it is set. This is
+   * the same posture `0010` took for `device_registry.display_name` — nullable in storage, required
+   * at a writer that is OWED — and it is deliberately the same, so both close the same way.
+   */
+  readonly display_name?: string;
   /** Argon2id PHC string from `domain`'s `hashPin`. Never the password. */
   readonly password_hash: string;
   readonly assignments: readonly RoleAssignment[];

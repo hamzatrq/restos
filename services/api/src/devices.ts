@@ -42,6 +42,20 @@ export type DeviceRecord = {
   readonly device_id: string;
   readonly branch_id: string;
   readonly device_class: string;
+  /**
+   * `01-F70` — the till's human name ("Counter till", "Kitchen screen"), off the cloud registry row.
+   *
+   * **This is the field that makes `14-F12` usable at all**, and the FR's own measured complaint is
+   * why: without it the list "can name a till only by its UUID, and the operator reading either is
+   * by construction not standing in front of it". `21-F15` decides the null case — a stated
+   * *unnamed* treatment naming where it is set, never a blank and never the `device_id` promoted
+   * into the name's slot.
+   *
+   * ⚠ **Null for every row in this deployment, and that is a WRITER gap rather than a read gap.**
+   * `0010` added the column nullable with no backfill, and `01-F70`'s "required at REGISTRATION" is
+   * owed at `provision-device`, which takes no `--name`. Nothing here may invent one.
+   */
+  readonly display_name: string | null;
   /** `01-F25`/`01-F48`. Null ⇔ active. This is the field eviction reads. */
   readonly revoked_at: number | null;
   /** `01-F47`. The one honest liveness fact this table carries. */
