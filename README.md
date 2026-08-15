@@ -546,6 +546,29 @@ back to its last checkpoint, so a restore silently reinstates an older staff reg
 catalog too. **Never judge a till backup by whether it opens.** Count `events` in it and compare
 against the till it came from.
 
+⚠ **AND THE SAME EDGE CUTS ON THE WAY BACK IN: A TILL RESTORE THAT LEAVES THE STALE `-wal` IN
+PLACE DOES NOTHING, LOUDLY REPORTING SUCCESS.** This README stated no till restore procedure at all
+and [`ops/README.md`](ops/README.md#restoring-the-till--delete-the-sidecars-first-or-the-restore-silently-does-not-happen)
+stated one that did not restore. `ops/sqlite-backup.mjs` produces **one self-contained file with no
+sidecars** (`22-F21` mechanism (a)), so copying it over `device.db` leaves the *live* store's
+`device.db-wal` beside it and SQLite replays that WAL over the file just restored — the store opens,
+`integrity_check` says `ok`, and it reports a healthy-looking event count that is the state the
+operator was trying to discard. Measured 2026-08-15, 500 sales backed up and 200 more rung
+afterwards:
+
+| restore procedure | `integrity_check` | events |
+|---|---|---|
+| copy `device.db` back, sidecars left in place | ok | **700** — the restore did nothing |
+| the same, after `device.db` was overwritten with random bytes | ok | **700** — the stale WAL rebuilt even the corruption |
+| **remove `-wal` and `-shm` first, then copy** | ok | **500** — the sales the backup held |
+
+The rule, and it is the only difference between those rows: **nothing belonging to the store you are
+replacing may survive the copy.** Move `device.db`, `device.db-wal` and `device.db-shm` aside
+together (never delete — the old store is append-only and may hold unsynced sales, `01-F1`), copy in
+the backup, take *its* sidecars only if it has them, and **count `events` in the result before
+starting the app** — `22-F8`'s principle at one-restaurant scale: a restore is not proven by
+opening. The full procedure is in [`ops/README.md`](ops/README.md).
+
 ### What exists
 
 - Three services that start from TypeScript source via `tsx`, each refusing to boot on bad config with

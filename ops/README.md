@@ -118,9 +118,21 @@ Check each one actually came up, and read its boot lines rather than trusting `a
 journalctl -u restos-sync-gateway -n 20 --no-pager
 ```
 
-You want four things from the gateway: the port, the (redacted) database it will use, the schema
-state, and **`publish: enabled (PUBLISH_TOKEN configured)`**. If publish says DISABLED, the API
-will get a 503 on every publish and no menu will ever ship.
+You want four lines from the gateway — the port, the (redacted) database it will use, whether
+`/internal` can accept a menu, and the schema state. They read (⚠ *this said to look for
+`publish: enabled (PUBLISH_TOKEN configured)`, which the gateway has never printed; the prefix is
+`publish surface`, and an operator grepping the exact string found nothing and had no way to tell
+that from a gateway that did not print it*):
+
+```
+@restos/sync-gateway listening on http://0.0.0.0:8080
+@restos/sync-gateway database postgres://gateway:*****@127.0.0.1:5432/restos (opened lazily …)
+@restos/sync-gateway publish surface enabled (PUBLISH_TOKEN configured)
+@restos/sync-gateway schema up to date — all 10 migrations applied
+```
+
+If the third reads `publish surface DISABLED — no PUBLISH_TOKEN`, the API gets a 503 on every
+publish and no menu will ever ship. If the fourth reads `NOT MIGRATED`, go back to step 3.
 
 The API prints one line, `@restos/api listening on ...`. If it did not boot, `journalctl` has the
 reason and it will name the variable.
@@ -176,10 +188,46 @@ Two BIOS/Windows settings are not optional in a load-shedding city:
 **What the `.bat` files actually check** (⚠ this said *"the two settings … `RESTOS_STATION_ROUTES`
 and `RESTOS_DEV_PIN`"*, which was true of neither file by the time it was read):
 
-| | refuses to start without | warns only |
+| | holds and retries without | warns only |
 |---|---|---|
-| `restos-counter.bat` | the env file, `RESTOS_ORG_ID`, `RESTOS_BRANCH_ID`, `RESTOS_DEVICE_ID`, `RESTOS_STATION_ROUTES`, `RESTOS_DEV_PIN`, `RESTOS_DEV_PIN_HINA` | `RESTOS_DEV_PIN_BILAL` (one cashier and one manager is a workable shift) |
-| `restos-kitchen.bat` | the env file, `RESTOS_ORG_ID`, `RESTOS_BRANCH_ID`, `RESTOS_DEVICE_ID`, `RESTOS_DEV_PIN` | — |
+| `restos-counter.bat` | the env file, `RESTOS_ORG_ID`, `RESTOS_BRANCH_ID`, `RESTOS_DEVICE_ID`, `RESTOS_STATION_ROUTES`, `RESTOS_DEV_PIN_HINA` | `RESTOS_DEV_PIN`, `RESTOS_DEV_PIN_BILAL` (one manager alone is a workable till) |
+| `restos-kitchen.bat` | the env file, `RESTOS_ORG_ID`, `RESTOS_BRANCH_ID`, `RESTOS_DEVICE_ID`, and **all three** PIN keys being unset at once | any one or two PIN keys unset |
+
+⚠ **`RESTOS_DEV_PIN` USED TO BLOCK BOTH LAUNCHERS AND ITS REASON HAD STOPPED BEING TRUE.** Both
+files refused without it, saying *"the staff grid will be EMPTY and nobody can sign in"*. That was
+correct while one PIN seeded the whole roster and false from the moment `01-F28`'s
+one-credential-per-user split landed: `RESTOS_DEV_PIN` is **Ayesha's PIN alone** now. A till with
+`RESTOS_DEV_PIN_HINA` set has a branch manager who can sign in, open the day, ring and settle
+(`permissions.ts` gives `branch_manager` `allow` on `order.create`, `payment.settle` and
+`day.open_close`), and a pass screen needs no particular role at all (`03-F53`). So both launchers
+were refusing to start a **working** machine, on an unattended box, behind a keypress. Corrected
+August 2026: on the counter it is a warning beside Bilal's, and the manager's key is the refusal
+that matters (`02-F22` — no manager, no day, no sale); on the kitchen the gate now asks the true
+question, *is every one of the three unset*.
+
+⚠ **NO REFUSAL IN EITHER FILE WAITS FOR A KEYPRESS ANY MORE, AND NEITHER ONE EXITS.** Every gate
+used to end in `pause` + `exit /b 2`. On an auto-logon machine with nobody in front of it `pause`
+is a till that never starts — the shape `01-F67` forbids inside the app (*"a refusal … does neither
+of those by waiting for a human"*) — and `exit /b` closes the console holding the only copy of the
+message. A refusal now **prints, holds, re-reads the env file and retries every 10 minutes**. That
+keeps the sentence on screen and means an operator who fixes `counter.env` over remote desktop gets
+a till without walking to the machine.
+
+⚠ **AND THE RESTART LOOP NO LONGER SWALLOWS THE APP'S OWN REFUSALS.** It restarted unconditionally
+every 10 s. Since `01-F67` the apps *return* non-zero rather than hanging when they will not start
+— a store bound to a different identity (`01-F64`), a blank or padded id (`01-F65`), a second
+instance on one store (`01-F66`), a missing `rebuild:native` — and each of those is permanent, so
+the loop turned every one into a console redrawing six times a minute all night with the sentence
+naming the fix scrolling past faster than anyone can read it.
+
+**The exit code cannot tell a configuration refusal from a crash, and that was checked rather than
+assumed.** Every start-time refusal in both apps is `app.exit(1)`, and `01-F67` closes by saying it
+*"does not decide the wording, the channel, or the code beyond 'non-zero'"* — so there is no code to
+branch on and inventing one would be a product change, not an ops one. What is available is the
+**shape**: a refusal returns immediately and returns again every time, while a machine that served a
+shift and fell over comes back on the next try. Both loops therefore count **consecutive** failures
+— three quick retries (30 s) recover the transient case, and after that the diagnosis is printed,
+left on screen, and the retry drops to ten minutes. Neither loop ever stops retrying.
 
 **Both gates check all three identity keys now, and the reason each file needs it is different.**
 `apps/pass-kds` calls `requireDeviceIdentity`, which refuses an absent key outright (`01-F65`), so
@@ -200,10 +248,24 @@ executed. Run each `.bat` by hand on the real machine before relying on the star
 
 Open `http://<cloud-box>:3000`, log in as the owner, author the menu, publish.
 
-**Read both traps below before typing the first item.** Then check it landed: on the till, the
-tiles should show names *and prices*. A tile reading `no price set` means the price for this
-branch and channel is missing — that is `ENABLED_BRANCHES` not containing the till's branch, or
-Trap 1.
+**Read both traps below before typing the first item.** Then check it landed, and check it on the
+**till's boot line**, not by looking at the grid (⚠ *this said "the tiles should show names and
+prices" — **a tile renders the item's name and nothing else**. There is no price on a menu tile,
+priced or not, so "names and prices" describes a screen this product does not draw and an operator
+following it would have reported a healthy till as broken*):
+
+```
+@restos/pos catalog v2 — 20 tile(s), 0 unsellable
+```
+
+Three states, and only one is a fault. `0 tile(s)` means the menu has not arrived at all — check
+the till's `org` against the API's `BOOTSTRAP_ORG_ID`. `n unsellable (no price set)` means the
+tiles arrived and the prices did not — that is `ENABLED_BRANCHES` not containing this till's
+branch, or Trap 1. **`n tile(s), 0 unsellable` is the line you want.**
+
+What the *grid* shows is the same fact from the other side: a sellable tile carries the item name
+alone, and an unsellable one carries the name with `no price set` under it and will not add a line.
+So the check on the glass is the **absence** of that phrase, never the presence of a number.
 
 ### 8. Train
 
@@ -352,9 +414,53 @@ self-contained file while the app is running. Where that is not possible it copi
 closed. If it can do neither it **fails and writes nothing** — a backup file that cannot be
 restored is worse than a missing one, because it stops anyone looking.
 
-**Restoring the till:** stop the app, copy the backed-up `device.db` (and its sidecars, if the
-fallback produced them) back into the app's data directory, start the app. It re-syncs from the
-gateway on connect.
+### Restoring the till — DELETE THE SIDECARS FIRST, OR THE RESTORE SILENTLY DOES NOT HAPPEN
+
+⚠ **This procedure used to read *"stop the app, copy the backed-up `device.db` (and its sidecars,
+if the fallback produced them) back into the app's data directory, start the app"*, and following
+it exactly reinstates the state you were trying to discard.** The backup written by the online path
+is **one self-contained file with no sidecars**, so copying it over `device.db` leaves the live
+store's stale `device.db-wal` beside it — and SQLite replays that WAL over the file you just
+restored. Nothing signals it: the store opens, `integrity_check` says `ok`, and it reports a
+plausible event count. It is the exact mirror of the hazard the two tables above spend their length
+warning about, on the way back in.
+
+**Measured, not reasoned** (2026-08-15, on stores written the way the device store is — WAL,
+`synchronous = FULL`, never closed; `ops/sqlite-backup.mjs` took the backup):
+
+| | 500 sales backed up, 200 more rung, then restored | result |
+|---|---|---|
+| the old procedure — copy `device.db`, leave the sidecars | `integrity_check` **ok** | **700 events — the restore did nothing** |
+| the old procedure, after the main file was overwritten with random bytes | `integrity_check` **ok** | **700 events** — the stale WAL rebuilt even the corruption you were escaping |
+| **delete `-wal` and `-shm` first, then copy** | `integrity_check` ok | **500 events — the sales the backup held** |
+
+**The procedure, on the machine, with the app CLOSED:**
+
+1. **Close the app** — both of them if this machine runs the till and the pass screen. A running
+   app holds the store open and will write over whatever you put there.
+2. **Move the current store aside; do not delete it.** It is an append-only ledger (`01-F1`) and it
+   may hold sales that never reached the cloud, which exist nowhere else.
+   ```
+   move "%APPDATA%\RestOS Counter\device.db"     "%APPDATA%\RestOS Counter\device.db.before-restore"
+   move "%APPDATA%\RestOS Counter\device.db-wal" "%APPDATA%\RestOS Counter\device.db-wal.before-restore"
+   move "%APPDATA%\RestOS Counter\device.db-shm" "%APPDATA%\RestOS Counter\device.db-shm.before-restore"
+   ```
+   The `-wal` and `-shm` may not exist; that is fine. **What must not survive is a `-wal` or `-shm`
+   belonging to the store you are replacing** — that is the whole defect.
+3. **Copy the backup in.** From `till-<stamp>/<AppName>/`: `device.db`, plus `device.db-wal` and
+   `device.db-shm` **only if that backup has them** (it does only if `backup.sh` fell back to the
+   file copy). Never mix: the sidecars that go in are the backup's or none at all.
+4. **Do the same for `print-spool.db`** if you are restoring queued kitchen tickets (`03-F4`).
+5. **Count before you start the app.** `RESTOS_TILL_DATA_DIR` is not enough of a check and
+   "it opened" is worth nothing:
+   ```
+   node ops/sqlite-backup.mjs "<restored device.db>" "%TEMP%\verify.db"
+   ```
+   then count `events` in the copy and compare against what that till should hold. A restored store
+   reporting **zero** sales is the failure this whole section exists for and it looks like a quiet
+   day.
+6. **Start the app.** It re-syncs from the gateway on connect; anything the cloud already acked
+   comes back down on its own.
 
 **Restoring the cloud:** `pg_restore --clean --if-exists -d <DSN> cloud-<stamp>.dump`. Devices
 re-push anything the restored database is missing on their next connect.
@@ -452,6 +558,7 @@ Stated so the next person knows which parts are proven and which are asserted.
 | refusal paths | no `RESTOS_BACKUP_DIR` → exit 2 · data dir not found → exit 1 · corrupt store → exit 1, empty directory removed, **no file left behind** · `pg_dump` absent → exit 1 · bad argument → exit 2 |
 | retention | a 2020-dated backup is pruned at `KEEP_DAYS=30`; today's is kept; pruning is skipped entirely when the run failed |
 | **multi-store discovery** (2026-08-15) | a simulated upgraded till — `Electron/device.db` (40 rows), `RestOS Counter/device.db` (500) + `print-spool.db` (7), `RestOS Pass/device.db` (120) — gives **3 directories found**, four backup files under three labelled subdirectories, every row count intact, exit 0. `RESTOS_TILL_DATA_DIR` still overrides to exactly one. One directory ⇒ no upgrade warning. Corrupt one store of three ⇒ **exit 1**, its subdirectory removed with nothing left behind, and the other two still backed up |
+| **the till RESTORE** (2026-08-15) | the procedure above, run end to end. 500 rows written to a WAL store that is never closed → `sqlite-backup.mjs` → 200 more rows rung → restore. **Copying `device.db` back over the stale `-wal`/`-shm` gives `integrity_check` ok and 700 events — the state the operator was discarding, reinstated, with nothing signalling it.** Repeated with the main file first overwritten by 4 KB of `/dev/urandom`: **still 700**, because the stale WAL rebuilt even the corruption. Removing `-wal` and `-shm` before the copy gives **500** in both scenarios. That is the only difference between the two procedures |
 | the WAL claim | 500 committed rows: main file 4 KB, `-wal` 2 MB, and a copy of the main file alone opens with *"no such table"*. Overwriting the main file with random bytes still restored all 500 rows from the `-wal` — the same fact from the other side. ⚠ **That is the NEVER-CHECKPOINTED shape and it is the loud one.** Re-measured 2026-08-15 against two REAL till stores: one behaved exactly as above (no tables at all), the other — `device.db` 135 KB, `-wal` 45 KB — opened **clean, passed `integrity_check`, showed the full schema, and reported `events` = 0** with a *stale* staff snapshot. A copy that opens fine and shows zero sales reads as a quiet day, not as a destroyed backup. **Judge a till backup by counting `events`, never by whether it opens.** |
 
 **Mutation, one branch at a time**, because a script that runs is not a script that protects:
@@ -473,12 +580,20 @@ Stated so the next person knows which parts are proven and which are asserted.
   they were read against `resolveDeviceIdentity` / `requireDeviceIdentity` and never executed.
   **Run each `.bat` by hand on the real machine before relying on the startup shortcut**, and check
   the till's boot line says `kitchen routes: configured`.
-  - ⚠ **Every refusal in both files ends in `pause`, which WAITS FOR A KEYPRESS.** On an
-    auto-logon machine with nobody in front of it that is a window that never returns and a till
-    that never starts — the shape `01-F67` names one layer down (*"a refusal … does neither of
-    those by waiting for a human"*). It is deliberate for a person doing the install by hand and
-    wrong for the unattended restart these files exist for. **Reported, not changed here**: which
-    way it should go is a judgement about the install ritual, not a doc correction.
+  - ⚠ **THE `pause` IS GONE AND ITS REPLACEMENT IS ALSO UNRUN.** This bullet used to report that
+    every refusal ended in `pause`, waiting for a keypress on a machine with nobody in front of it,
+    and left the decision open. It is decided (August 2026, §6 above): a refusal prints, holds,
+    re-reads the env file and retries every ten minutes, and the restart loop backs off to ten
+    minutes after three consecutive failures. **None of that has been executed either.** The new
+    constructs are `:start` / `:refused` labels, `set /a FAILS+=1`, `if %FAILS% LSS 3` and
+    `timeout /t 600` — all ordinary `cmd`, all reasoned. Two things to check on the real machine
+    before trusting the shortcut: that `timeout` works in the console a `shell:startup` shortcut
+    opens (it fails when stdin is redirected), and that a refusal's text is still on screen after
+    the ten-minute wait rather than scrolled away.
+  - ⚠ **The `.bat` files no longer exit at all.** They used to `exit /b 2` on a gate refusal; they
+    now hold. Nothing on Windows reads a startup shortcut's exit code, so no caller was relying on
+    it — but if you wrap these in a service or a Task Scheduler job, that job will never see the
+    process end.
 - **the systemd units** — no systemd here. Syntax is conventional; `systemd-analyze verify
   /etc/systemd/system/restos-*.service` on the cloud box is the check.
 - **`pg_dump` / `pg_restore`** — neither binary is on this box, so the cloud half of `backup.sh`

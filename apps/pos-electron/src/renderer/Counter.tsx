@@ -24,6 +24,7 @@ import type {
   DeviceState,
   EscalationOffer,
   EscalationRefusal,
+  KitchenState,
   MenuItem,
   OpenOrder,
   RosterMember,
@@ -169,8 +170,14 @@ export const isAlreadySettled = (order: Pick<OpenOrder, "total_paisa" | "paid_pa
  *
  * `none` nothing has been told · `sent` the kitchen has it and owes nothing · `owed` it has
  * been told once and lines have landed since (`03-F55`'s addendum).
+ *
+ * ⚠ **This was a PRIVATE copy of the union until August 2026 and is now imported** from
+ * `shared/ipc.ts`, where `OpenOrderSchema` declares the field it types. One fact with two
+ * declarations is `03-F40`'s two sensor bit layouts — the corpus's own worked example — and the
+ * hazard here was concrete: this copy and the producer could drift a state apart with every gate
+ * green, because the renderer's cast (below, now gone) would have silently accepted a value this
+ * union did not list.
  */
-type KitchenState = "none" | "sent" | "owed";
 
 /**
  * The projected kitchen state for an order, degrading to `none`.
@@ -188,16 +195,19 @@ type KitchenState = "none" | "sent" | "owed";
  * the tempting shape, since it already crosses the bridge — passes every idempotence case and
  * silently loses the naan.
  *
- * ⚠ **THE HOST DOES NOT SUPPLY THIS FIELD YET AND THAT IS REPORTED, NOT PAPERED OVER.**
- * `main/gateway.ts` builds the open-order row and is outside this task's allowlist, so on the
- * shipped till this resolves to `none` for every order today. `01-F54` fixes the degrade
- * direction and `02-F55` states it: an absent value must leave the control PRESSABLE, because a
- * duplicate row is a smaller harm than a dish nobody cooks. What survives the absence is the
- * in-flight guard below (the measured triple-tap); what waits on the projection is the glass
- * being able to say the kitchen HAS it.
+ * ✅ **THE HOST SUPPLIES THIS FIELD AS OF AUGUST 2026, and this note used to say it did not.**
+ * `main/printing.ts`'s `kitchenFor` computes it from the same `owedChits` walk `confirmed()`
+ * sends from — so the state reads `sent` exactly when a press would enqueue nothing — and
+ * `main/gateway.ts` projects it onto this row. The cast that used to sit here is gone: the field
+ * is declared on `OpenOrderSchema` and parsed at the plane boundary like every other.
+ *
+ * **The `?? "none"` is NOT dead code and must not be tidied away.** `02-F55` fixes the degrade
+ * direction for a host that supplies no projector — *"degrades to state (ii) — pressable —
+ * because `01-F54` says degrade to what you know and a duplicate row is a smaller harm than a
+ * naan nobody cooks"* — and the gateway omits the key rather than sending `"none"`, precisely so
+ * this branch carries that meaning. It is also what an older host's row hits (`01-F54`).
  */
-const kitchenOf = (order: OpenOrder): KitchenState =>
-  (order as OpenOrder & { readonly kitchen?: KitchenState }).kitchen ?? "none";
+const kitchenOf = (order: OpenOrder): KitchenState => order.kitchen ?? "none";
 
 /**
  * `02-F51` — **WHICH of the branch's open orders this terminal is working on.**

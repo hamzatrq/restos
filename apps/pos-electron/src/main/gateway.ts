@@ -12,6 +12,7 @@ import {
   type CustomerLookup,
   type DeviceState,
   DeviceStateSchema,
+  type KitchenState,
   type KitchenTicket,
   KitchenTicketSchema,
   MenuChannelSchema,
@@ -197,6 +198,39 @@ export type GatewayDeps = {
    * `__acceptance__/orders-aging.test.ts` §E reads the shipped call site.
    */
   aging: (order_type: string | null) => { amberAt: number; redAt: number };
+  /**
+   * `02-F55` — **whether the kitchen has an order's lines, projected off `03-F4`'s durable spool.**
+   *
+   * `main/printing.ts`'s `kitchenFor`, narrowed to the one method this file calls. Narrow rather
+   * than the whole `KotPrinter` because a gateway that could reach `confirmed()` or `resend()`
+   * would be a gateway that could PRINT from a read path; the type is the guarantee that
+   * `openOrders()` only asks a question.
+   *
+   * ── OPTIONAL, against this type's own three REQUIRED precedents, for two stated reasons ──────
+   *
+   * **1. `02-F55` instructs this degrade by name** — *"a host that does not supply it degrades to
+   * state (ii) — pressable — because `01-F54` says degrade to what you know and a duplicate row is
+   * a smaller harm than a naan nobody cooks."* So absence has a specified meaning here, which is
+   * exactly what `catalogRefusal`, `panelPpi`, `panelFit` and `aging` lack and why those are
+   * required. The projected field is OMITTED when this is absent rather than sent as `"none"`,
+   * keeping `01-F54`'s distinction between *"this host did not say"* and *"said, and the kitchen
+   * has not been told"* — both render pressable, and only one of them is a claim.
+   *
+   * **2. Required would be a compile error in ~18 files this session may not edit.** Every
+   * `main/__acceptance__/*.test.ts` that builds a gateway constructs `GatewayDeps` as an object
+   * literal, and `24 §3` step 2 makes those oracles read-only to an implementing session. That is
+   * the same constraint `shared/ipc.ts` records for the five optional projected fields, and it is
+   * a fixture debt rather than a design preference: **required is where this belongs once those
+   * harnesses carry it.**
+   *
+   * **The optionality is not a hole, and this is the compensating property:** an optional member
+   * that no call site passes is precisely `seams:check` Rule B's shape, and Rule B walks
+   * app-declared factories since August 2026 — so `main/index.ts` dropping this argument reddens
+   * the rail BY NAME, which a required member could never do. What the rail still cannot see is a
+   * host supplying a LITERAL (`kot: { kitchenFor: () => "none" }` is a supply), and that case is
+   * held by `__acceptance__/confirm-kitchen-durability.test.ts` and by nothing else.
+   */
+  kot?: { kitchenFor: (order_id: string) => KitchenState };
 };
 
 /**
@@ -498,6 +532,24 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
                   ...deps.aging(row.order_type),
                 }
               : null,
+          /*
+            `02-F55` — whether the kitchen has this order, PROJECTED and never derived here.
+
+            The fact is `main/printing.ts`'s, computed off `03-F4`'s durable spool by the same
+            walk `confirmed()` sends from, so the control is greyed exactly when a press would
+            enqueue nothing. This function passes it through and decides nothing about it — the
+            same rule the four `C19`/`C31` facts above follow, and for a sharper reason: the
+            separating fact is "lines this device has not yet committed to paper", which is spool
+            state this file cannot see and must not guess at.
+
+            **Spread rather than defaulted, and that is `01-F54` rather than style.** A host with
+            no projector says NOTHING here, which is not the same claim as `"none"` ("said, and
+            the kitchen has not been told"). Both leave the control pressable — `02-F55` fixes
+            that degrade direction explicitly, because a duplicate row is a smaller harm than a
+            naan nobody cooks — so the behaviour is identical and only the honesty differs. It is
+            the distinction `confirmed_at` already draws two fields up.
+          */
+          ...(deps.kot === undefined ? {} : { kitchen: deps.kot.kitchenFor(row.order_id) }),
         },
         `open order ${row.order_id}`,
       ),

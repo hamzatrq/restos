@@ -217,6 +217,24 @@ export const RosterMemberSchema = z.object({
 });
 export type RosterMember = z.infer<typeof RosterMemberSchema>;
 
+/**
+ * `02-F55` — **the three states the kitchen handoff has, declared ONCE for both planes.**
+ *
+ * > 02-F55 "The surface distinguishes THREE states … (i) nothing to send; (ii) the kitchen has
+ * > not been told; (iii) the kitchen has it and owes nothing."
+ *
+ * `none` the kitchen has not been told · `sent` it has this order and owes nothing (state iii) ·
+ * `owed` it has been told once and lines have landed since (`03-F55`'s addendum).
+ *
+ * **It lives here because one fact must not have two vocabularies.** The producer is
+ * `main/printing.ts`, the projector is `main/gateway.ts` and the reader is `renderer/Counter.tsx`
+ * — three files across the `18 §9` plane boundary — and `03-F40`'s two incompatible bit layouts
+ * for one sensor is this corpus's own worked example of what a second declaration costs. The
+ * renderer held a private copy of this union until August 2026 and imports it now.
+ */
+export const KITCHEN_STATES = ["none", "sent", "owed"] as const;
+export type KitchenState = (typeof KITCHEN_STATES)[number];
+
 /** One open order, as the fold projects it. The renderer never assembles this itself. */
 export const OpenOrderSchema = z.object({
   order_id: z.string(),
@@ -323,6 +341,34 @@ export const OpenOrderSchema = z.object({
     })
     .nullable()
     .optional(),
+  /**
+   * `02-F55` — **whether the kitchen has this order's lines, projected by MAIN off `03-F4`'s
+   * durable spool.**
+   *
+   * > 02-F55 "The separating fact is 'lines this device has not yet committed to paper for this
+   * > order', and it is projected by MAIN … The renderer may not re-derive it: a renderer flag is
+   * > defeated by a relaunch and by `02-F11`'s second terminal … It crosses `18 §9`'s bridge as a
+   * > projected field on the open-order row beside `confirmed_at`."
+   *
+   * **`confirmed_at` above is NOT this field and cannot stand in for it**, which is `03-F55`'s
+   * whole finding: an order can carry a confirm anchor AND still owe the kitchen a chit. Keying
+   * the guard on the anchor — the tempting shape, since it already crosses this bridge — passes
+   * every idempotence case and silently loses the naan.
+   *
+   * **`.optional()`, and here the degrade is the FR's own instruction rather than the fixture
+   * concession the five fields above it record.** `02-F55`: *"a host that does not supply it
+   * degrades to state (ii) — pressable — because `01-F54` says degrade to what you know and a
+   * duplicate row is a smaller harm than a naan nobody cooks."* So an absent value must leave the
+   * control live, which is exactly what `Counter.tsx`'s `?? "none"` does. The gateway OMITS the
+   * key when its host supplied no projector rather than writing `"none"`, keeping `01-F54`'s
+   * distinction between *"this host did not say"* and *"said, and the kitchen has not been told"*
+   * — the same distinction `confirmed_at` draws four fields up.
+   *
+   * It is held by `main/__acceptance__/confirm-kitchen-durability.test.ts`, which `seams:check`
+   * structurally cannot express: a field on a mapping is neither an unreached export nor an
+   * unsupplied optional.
+   */
+  kitchen: z.enum(KITCHEN_STATES).optional(),
 });
 export type OpenOrder = z.infer<typeof OpenOrderSchema>;
 

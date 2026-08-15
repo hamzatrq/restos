@@ -775,6 +775,20 @@ const counterBoot = app.whenReady().then(async () => {
    */
   const quickTags = resolveQuickTags(process.env[QUICK_TAGS_ENV]);
 
+  /**
+   * `01-F46` via `domain`, and computed from BRANCH time (`01-F43`), not the device clock: a till
+   * whose clock is an hour fast must not roll the business day an hour early. The offset is 0
+   * until a hub is contacted, which the strip reports honestly as `down`.
+   *
+   * **ONE declaration, because two readers now need it and they must not disagree.** It was
+   * inline in `GatewayDeps.businessDay`; `03-F59` gives `createKotPrinter` the same question (does
+   * this restored `failed` chit belong to TODAY), and a second copy of this expression is
+   * `03-F40`'s two sensor bit layouts — one fact, two readings, the drift invisible from both
+   * sides. `DEC-ARCH-001`'s extract-on-a-second-consumer rule, at the smallest scale it has.
+   */
+  const businessDay = (): string =>
+    businessDate(wallClock.now() + store.branchTimeStatus().offset_ms);
+
   const gateway = createGateway({
     store,
     // T-C6 — all three read the device catalog the uplink fills, and all three live in
@@ -827,10 +841,9 @@ const counterBoot = app.whenReady().then(async () => {
      * this line from that one, because no rail in this repo can.
      */
     catalogRefusal: uplink.catalogRefusal,
-    // 01-F46 via `domain`, and computed from BRANCH time (01-F43), not the device clock: a
-    // till whose clock is an hour fast must not roll the business day an hour early. The
-    // offset is 0 until a hub is contacted, which the strip reports honestly as `down`.
-    businessDay: () => businessDate(wallClock.now() + store.branchTimeStatus().offset_ms),
+    // 01-F46 via `domain`, off BRANCH time (01-F43) — declared once above, because `03-F59`'s
+    // band restore asks the same question and two derivations of one day would drift.
+    businessDay,
     /**
      * `27-F68` / `00 §7` layer 3 — the density of the glass, and the input that makes a dp a
      * physical size instead of a CSS pixel. A GETTER, so a till moved to another display resizes
@@ -865,6 +878,30 @@ const counterBoot = app.whenReady().then(async () => {
      * §E is the hand-written assertion that separates this line from that one.
      */
     aging: aging.thresholdsFor,
+    /**
+     * `02-F55` — **THE SEAM.** Whether the kitchen has an order, off `03-F4`'s durable spool.
+     *
+     * Without this argument the projected field is absent, `Counter.tsx` degrades to `"none"`, and
+     * the counter's only guard against a second `order.confirmed` is one React variable — which a
+     * relaunch, an order switch and a shift handover each defeat. That is the measured defect:
+     * **11 `order.confirmed` rows for 6 orders**, every one permanent (`01-F1`), and *Send to
+     * kitchen* reading identically before and after a successful send.
+     *
+     * **The indirection is a construction cycle, not a style choice.** `kot` is built ~490 lines
+     * below because it appends THROUGH this gateway (`03-F5`'s `kot.print_failed`, `02-F31`'s
+     * `kot.printed`), while the gateway reads the printer's projection — the two objects are
+     * mutually dependent exactly as `confirm-kitchen-durability.test.ts`'s fixture records. A
+     * closure resolves it at call time; `openOrders()` is only ever reached from an IPC handler,
+     * long after both exist. Hoisting the printer above the gateway instead would need `append` to
+     * become the deferred half, which moves the same cycle onto the ledger path.
+     *
+     * Passing the REAL projection and not a literal is the point, and the rails cannot tell:
+     * `kot: { kitchenFor: () => "none" }` compiles, keeps `seams:check` clean (a stub is a supply)
+     * and ships the defect intact. DELETING the argument *is* caught — Rule B walks `apps/` since
+     * 2026-08-10 — and `__acceptance__/confirm-kitchen-durability.test.ts` is what separates this
+     * line from the stub.
+     */
+    kot: { kitchenFor: (order_id) => kot.kitchenFor(order_id) },
   });
 
   /**
@@ -1282,6 +1319,14 @@ const counterBoot = app.whenReady().then(async () => {
     // a supply; `__acceptance__/station-routing-seam.test.ts` §E, which reads this construction,
     // is still the only guard on that.
     routesToPaper: (at) => stationRouting().routesToPaper(at),
+    // `03-F59` — **THE SEAM.** Without this argument `createKotPrinter` restores no band at launch
+    // and `03-F57`'s durable resend has no control to press: the ticket is eligible, the spool
+    // holds its bytes, and a power cut still strands a billed order the kitchen never heard about.
+    // It is the SAME function `GatewayDeps.businessDay` above takes, declared once, so the day the
+    // band is bounded to and the day the strip shows can never be two different days.
+    // `seams:check` Rule B walks `apps/` since 2026-08-10, so DELETING this reddens the rail by
+    // name; **no rail can see it stubbed**, which is why `03-F59`'s evidence is a launched till.
+    businessDay,
     capability: kotCapability(),
     // 03-F5's `kot.print_failed` and 02-F31's `kot.printed`, through the gateway so the envelope
     // is stamped exactly like every other append (02-F41's read-at-append attribution included).

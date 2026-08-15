@@ -23,7 +23,7 @@ import {
 } from "@restos/escpos";
 import type { DeviceStore } from "@restos/sync-client";
 import { billedEffectiveFromJsonLines } from "@restos/sync-client";
-import type { Alarm } from "../shared/ipc";
+import type { Alarm, KitchenState } from "../shared/ipc";
 import type { CatalogResolver } from "./gateway";
 
 /**
@@ -111,6 +111,37 @@ export type KotPrinterDeps = {
    *     construction, is still the only guard on the difference between the resolver and a literal.
    */
   routesToPaper?: PaperRouteResolver;
+  /**
+   * **`03-F59` — TODAY, as `01-F46`'s business day (Asia/Karachi, 05:00 cutover).**
+   *
+   * The ONE input `restoreBands` needs and the only thing that bounds it. A relaunch re-raises
+   * `03-F5`'s band for a chit that is still genuinely unrecovered, and `03-F59` bounds that to the
+   * CURRENT business day — because staff who arrive to yesterday's alarms learn to dismiss the band
+   * without reading it, which defeats `03-F5` rather than serving it.
+   *
+   * **The host's own resolution, not a second one.** `main/index.ts` already computes this for
+   * `GatewayDeps.businessDay` (`businessDate(wallClock.now() + store.branchTimeStatus().offset_ms)`
+   * — branch time per `01-F43`, never the raw device clock, which `01-F45` bans from a timing read)
+   * and passes the SAME function here. A second derivation in this file would be `03-F40`'s two
+   * sensor bit layouts: one fact, two readings, and the disagreement invisible from both sides.
+   *
+   * **OPTIONAL, and absent means NO BAND IS RESTORED**, for `24 §3` step 2's reason exactly as
+   * `routesToPaper` above: `__acceptance__/kot-printing.test.ts`, `print-ack-audit.test.ts` and
+   * `resend-durability.test.ts` all construct this printer and all predate this dep; they are
+   * oracles this session may not edit, so a REQUIRED member would redden three suites.
+   *
+   * **The default is the QUIET one and that is the opposite choice from `routesToPaper`'s** — say
+   * so rather than let it read as a copy. There the loud fallback is a chit a branch may not be
+   * able to print, which `03-F5` reports in 45 s; here the loud fallback is *"re-raise everything
+   * the spool ever failed"*, which is the behaviour a previous fix deliberately removed (see the
+   * cash printer's `seen` below) and which `03-F57` (a) names as the way `03-F5`'s loudest signal
+   * is taught to be ignored. An omission therefore leaves the pre-`03-F59` product exactly as it
+   * was, and `pnpm seams:check` Rule B is what stops the omission being permanent: it walks
+   * `apps/` since 2026-08-10, so deleting this argument from `main/index.ts` reddens the rail by
+   * name. What no rail can see is a STUB (`() => "1970-01-01"` is a supply) — that is this repo's
+   * documented blind spot, and here the manual launch in `03-F59`'s evidence is what covers it.
+   */
+  businessDay?: () => string;
   /** `03 §7` layer 3. `03-F49`'s column floor is checked against this, inside `render()`. */
   capability: PrinterCapability;
   /**
@@ -130,13 +161,53 @@ export type KotPrinter = {
    * would be watching a spinner over a socket timeout with a customer in front of her.
    */
   confirmed: (order_id: string) => void;
+  /**
+   * **`02-F55` — does the kitchen have this order, and does it owe anything?**
+   *
+   * The projection behind the counter's *Send to kitchen* control, answered from **durable state
+   * only**: this device's own converged fold plus `03-F4`'s spool. No process memory, no clock, no
+   * peer, no network — so the answer is the same in the next process, which is the whole point.
+   * The measured defect it closes is 11 `order.confirmed` rows for 6 orders, because the only
+   * guard was one React variable and a relaunch, an order switch or a shift handover each defeated
+   * it (`01-F1` keeps every one of those rows for ever).
+   *
+   * **It is the SAME `owedChits` walk `confirmed()` sends from**, and that identity is the design
+   * rather than a convenience: the state must read `owed` exactly when a press would create a job,
+   * and two readings of one fact is `03-F40`'s two sensor bit layouts — the corpus's own worked
+   * example of a document that looks right in one place and wrong in the other.
+   *
+   * The three answers, and what decides each:
+   *
+   *   * **`none`** — no such order, or no confirm anchor yet. The kitchen has never been told, so
+   *     the control is live. This is `02-F55`'s state (ii), and its resting state (i) as well;
+   *     the surface tells them apart by whether there is a cart at all, not by this field.
+   *   * **`owed`** — told once, and at least one station is still owed a chit (`03-F55`'s
+   *     addendum, or a chit `03-F34` refused for want of columns — no job was created, so those
+   *     lines are still owed and the next press renders them again).
+   *   * **`sent`** — told, and no station owes anything. State (iii), the one that did not exist.
+   *
+   * **The confirm anchor gates "has been told" and decides NOTHING else**, which is not the
+   * `confirmed_at` alias `03-F55` warns about: a confirmed order with an owed station reads
+   * `owed`, so an implementation keyed on the anchor alone fails. It is read rather than "does a
+   * chit exist" so that `03-F51`'s screen-only branch works — a station routed to a screen creates
+   * no paper ever, and keying on paper would leave such an order pressable for ever, which is the
+   * duplicate-confirm defect surviving in exactly the configuration `03-F22` ships for.
+   */
+  kitchenFor: (order_id: string) => KitchenState;
   /** Advance every live job by at most one transport interaction. Never rejects. */
   pump: () => Promise<void>;
   /** `03-F5`'s unacknowledged S1s, oldest first (`27-F11d` renders the head plus a count). */
   alarms: () => readonly Alarm[];
   acknowledge: (alarm_id: string) => void;
   /**
-   * **`03-F6`/`03-F48` — send a failed kitchen ticket again, from the alert it raised.**
+   * **`03-F6`/`03-F48`/`03-F57` — send a failed kitchen ticket again.**
+   *
+   * **⚠ THE HANDLE IS THE DURABLE JOB ID AND THE ELIGIBILITY TEST IS THE DURABLE ROW.** It used to
+   * be *"a band this process is holding"*, which is `03-F57`'s measured defect: `raised` is a
+   * process-lifetime `Map`, so a relaunch left a `failed` chit on `03-F4`'s spool — bytes,
+   * coverage and all — with nothing able to reach it, and a power cut therefore stranded a billed
+   * order the kitchen had never heard about, permanently. `alarm_id` IS the job id, which is why
+   * the parameter did not have to change: the band carried the spool's own key throughout.
    *
    * Until August 2026 this did not exist and the consequence was measured on a running till, not
    * predicted: once a chit exhausted `03-F4`'s three attempts the spooler's job was TERMINAL
@@ -164,6 +235,18 @@ export type KotPrinter = {
    * **A refusal is not silent and is not a code**: the band stays up, its subject is rewritten in
    * this process with the reason, and it loses its resend control so the operator is not invited
    * to press a button that has already said no (`27-F5`, `00 §5.7`).
+   *
+   * **⚠ THE REACH HALF IS NOW CLOSED FOR TODAY'S TICKETS AND OPEN FOR EVERY OLDER ONE — `03-F59`
+   * (August 2026). This paragraph said the reach half was NOT closed, and it was true until
+   * `restoreBands` landed.** `refuseResend` rewrites a band and a fresh process held none, so a
+   * resend after a relaunch was unreachable *and* its refusal was silent — one missing surface
+   * hiding both halves. `restoreBands` below re-raises `03-F5`'s band at launch for a chit that is
+   * still genuinely unrecovered **on the current business day**, so the control and its refusal
+   * wording are both back on the one surface `03-F6` puts them on. What is still OWED, and it is
+   * `03-F57` (c) unchanged: a chit that failed on an EARLIER business day is eligible with no
+   * button, because `03-F59` deliberately declines to shout about yesterday — `03-F48`'s one-tap
+   * reprint on the counter's order list is the corpus's answer for it and does not exist. The same
+   * gap covers a band the operator dismissed and then relaunched past on a later day.
    *
    * **The chit is re-rendered with `reprint: true` (`03-F3`/`03-F37`), so the paper says REPRINT.**
    * A resent chit is one the kitchen may or may not already hold: three transmits reported no
@@ -402,6 +485,9 @@ export const createKotPrinter = ({
   // branch whose configuration never arrived gets paper it may not be able to print, which
   // `03-F5` reports within 45 s, rather than silence nothing can report.
   routesToPaper = () => true,
+  // `03-F59` — see `KotPrinterDeps.businessDay`. NO default: absent means no band is restored at
+  // launch, which is the pre-`03-F59` product. A default here would be a made-up date.
+  businessDay,
   capability,
   append,
 }: KotPrinterDeps): KotPrinter => {
@@ -540,17 +626,37 @@ export const createKotPrinter = ({
     };
   };
 
-  const confirmed = (order_id: string): void => {
-    // The queue projection's own rule is "row exists iff confirmed", and its `age_basis` IS the
-    // confirm anchor — which is what `27-F62` wants stamped on the chit ("print what was true at
-    // APPEND time, stamped with `branch_created_at`"). Reading branch time here instead would
-    // stamp the moment the printer got round to it.
-    const queued = store.kitchenQueue().find((row) => row.order_id === order_id);
-    if (queued === undefined) return;
-    const order = store.openOrders().find((row) => row.order_id === order_id);
-    if (order === undefined) return;
+  /**
+   * One station's unprinted work: which chit it would be, and the lines it would carry.
+   *
+   * `addendum` is the ordinal `03-F55` puts on the paper — `0` opens the station, `n ≥ 1` is its
+   * nth addition.
+   */
+  type OwedChit = {
+    readonly station: string;
+    readonly addendum: number;
+    readonly lines: readonly { line_id: string; line: KotData["lines"][number] }[];
+  };
 
-    const table = tableOf(order.table_ids_json, order.channel);
+  /**
+   * **`03-F55` — per station, exactly what this order still owes the paper.** Pure: it reads the
+   * fold row and the spool and writes nothing.
+   *
+   * **Extracted in August 2026 so that `confirmed()` and `02-F55`'s `kitchenFor()` cannot
+   * disagree.** The counter's control has to be greyed precisely when a press would enqueue
+   * nothing, and the only way to guarantee that is for the two to be one function — a second
+   * implementation of "what is owed" would drift the instant either changed, and the drift is
+   * invisible from both sides (the glass says sent, the spool says owed, and the dish is lost).
+   *
+   * `spooler.jobs()` is read ONCE here rather than once per station, which it was until this
+   * extraction. That is a behaviour-preserving change and not a shortcut: `confirmed()` enqueues
+   * only AFTER this returns, and even interleaved the ids it writes carry this station's prefix,
+   * which `isChitOf` excludes from every other station's `prior`. The cost matters because
+   * `02-F55` puts this on the renderer's read path — `openOrders()` is re-read on every ledger
+   * push and on `03-F25`'s 1 Hz age tick — and `03-F4` has no compaction clause, so `jobs()`
+   * grows for the life of the device.
+   */
+  const owedChits = (order: { order_id: string; json_lines: string }): OwedChit[] => {
     // `03-F2`'s fan-out. `03-F50`: a line whose station resolves nowhere lands on the default
     // station's ticket rather than vanishing — the resolver owns that fallback, not this loop.
     //
@@ -568,8 +674,10 @@ export const createKotPrinter = ({
       byStation.set(at, lines);
     }
 
+    const all = spooler.jobs();
+    const owed: OwedChit[] = [];
     for (const [at, group] of byStation) {
-      // ── `03-F51`'s ROUTING SEAM, and its position in this loop is the whole design ────────────
+      // ── `03-F51`'s ROUTING SEAM, and its position in this walk is the whole design ────────────
       //
       // A station configured screen-only makes NO JOB: no bytes, no `spooler.enqueue`, no attempt,
       // no retry budget, no exhaustion, no `03-F5` band, no `kot.print_failed`. There is nothing to
@@ -585,6 +693,11 @@ export const createKotPrinter = ({
       // `03-F34`'s refusal is likewise unreachable here and that is correct: a document that was
       // never rendered cannot be refused for want of columns, and a 58 mm printer at a screen-only
       // station is not a fact about anything (`03-F49`).
+      //
+      // It also decides `02-F55`'s glass, now that this walk feeds it: a screen-only station is
+      // owed nothing BY THE PAPER, so a fully screen-routed order reads `sent` and its control is
+      // greyed. That is the honest answer — `03-F51` routes those lines to the branch queue
+      // projection instead, so the kitchen HAS been told; the press would enqueue nothing.
       if (!routesToPaper(at)) continue;
 
       // ── `03-F55` — WHAT THIS STATION IS STILL OWED ────────────────────────────────────────────
@@ -601,7 +714,7 @@ export const createKotPrinter = ({
       // repeating its lines on the next addendum would put one dish on two chits in a kitchen that
       // has been told to expect exactly one. A document `03-F34` REFUSED is the opposite — no job
       // was created, so nothing was committed and the next press renders those lines again.
-      const prefix = chitPrefix(order_id, at);
+      const prefix = chitPrefix(order.order_id, at);
       // A FILTER over every job and not an ordinal probe (`spooler.job(`${prefix}::1`)`, `::2`, …
       // until one is missing), which would be O(1) per chit instead of O(all jobs on this device).
       // The probe is refused because it rests on the ordinals being CONTIGUOUS, and a single gap
@@ -612,7 +725,7 @@ export const createKotPrinter = ({
       // what already ships — `reconcile` here and in both cash/receipt printers each walk `jobs()`
       // on every pump — so the thing that would actually need fixing is the unbounded spool
       // (`22`/`25`'s retention question), not this filter.
-      const prior = spooler.jobs().filter((job) => isChitOf(job.job_id, prefix));
+      const prior = all.filter((job) => isChitOf(job.job_id, prefix));
       // A row written before `03-F55` kept no coverage and there is nothing to reconstruct it
       // from. DECLARED INTERPRETATION (`24 §3b`): unknown coverage HONOURS THE PAPER — this
       // station behaves exactly as it did before this FR, which is `03-F55`'s own phrase for the
@@ -621,21 +734,61 @@ export const createKotPrinter = ({
       // — `03-F41` calls that a real kitchen error, and it would fire on every open order the
       // moment a till updates. The residual harm is stated rather than hidden: for orders that
       // were already confirmed when this version was installed, an addition still does not print.
+      // Since August 2026 the glass agrees with that silence instead of inviting a press against
+      // it — such a station is owed nothing here, so the order reads `sent` (`02-F55`).
       if (prior.some((job) => job.covers === undefined)) continue;
       const committed = new Set(prior.flatMap((job) => job.covers ?? []));
-      const owed = group.filter((entry) => !committed.has(entry.line_id));
+      const stillOwed = group.filter((entry) => !committed.has(entry.line_id));
       // `03-F55`: "where a station has nothing uncommitted, NOTHING is created — no bytes, no
       // spooled job, no attempt, no retry budget, no band, no `kot.print_failed`". That silence is
       // the correct answer and not a degraded one, and it is decided HERE — before a job exists,
       // from what the paper already carries — for `03-F51`'s reason one door along: absence is
       // decided before a job exists, failure after one does. Neither may turn a transport outcome
       // into silence (`03-F5`).
-      if (owed.length === 0) continue;
+      if (stillOwed.length === 0) continue;
       // The nth chit at this station carries ordinal n: `0` opened it, `n ≥ 1` is the nth addition
       // (`03-F55`). It counts CHITS AT A STATION and not additions to an order — "a tandoor that
       // has never seen this ticket is not being handed an addition to anything", so a station
       // reached for the first time by an addition gets an ordinary KOT.
-      const addendum = prior.length;
+      owed.push({ station: at, addendum: prior.length, lines: stillOwed });
+    }
+    return owed;
+  };
+
+  /**
+   * `02-F55`'s projection. See `KotPrinter.kitchenFor` for what each answer means and why the
+   * confirm anchor gates "has been told" without deciding anything else.
+   */
+  const kitchenFor = (order_id: string): KitchenState => {
+    const order = store.openOrders().find((row) => row.order_id === order_id);
+    if (order === undefined) return "none";
+    // `typeof … === "number"` and not a truthiness test, matching `gateway.ts`'s aging block one
+    // projection over: an order with no confirm anchor has never been handed to the kitchen, and
+    // a row from a fold predating the column carries the key as absent rather than null
+    // (`01-F54` — degrade, never drop). Either way the control stays live, which is the direction
+    // `02-F55` fixes: a duplicate row is a smaller harm than a naan nobody cooks.
+    if (typeof order.confirmed_at !== "number") return "none";
+    return owedChits(order).length === 0 ? "sent" : "owed";
+  };
+
+  const confirmed = (order_id: string): void => {
+    // The queue projection's own rule is "row exists iff confirmed", and its `age_basis` IS the
+    // confirm anchor — which is what `27-F62` wants stamped on the chit ("print what was true at
+    // APPEND time, stamped with `branch_created_at`"). Reading branch time here instead would
+    // stamp the moment the printer got round to it.
+    const queued = store.kitchenQueue().find((row) => row.order_id === order_id);
+    if (queued === undefined) return;
+    const order = store.openOrders().find((row) => row.order_id === order_id);
+    if (order === undefined) return;
+
+    const table = tableOf(order.table_ids_json, order.channel);
+
+    // `03-F2`'s fan-out and `03-F55`'s coverage, computed by the SAME walk `02-F55`'s `kitchenFor`
+    // answers from — see `owedChits` above for why that identity is the design and not a tidy-up.
+    // A station owed nothing yields no entry here at all, which is `03-F55`'s "where a station has
+    // nothing uncommitted, NOTHING is created".
+    for (const { station: at, addendum, lines: owed } of owedChits(order)) {
+      const prefix = chitPrefix(order_id, at);
       const job_id = addendum === 0 ? prefix : `${prefix}::${addendum}`;
       const lines = owed.map((entry) => entry.line);
 
@@ -783,6 +936,20 @@ export const createKotPrinter = ({
       }
       // `stalled` is deliberately absent (`03-F41`): the printer TOOK the bytes and is holding
       // them until the roll is replaced. A band here is the duplicate KOT arriving by a human.
+      //
+      // ⚠ **THAT IS RIGHT ABOUT THE BAND AND IT IS NOT THE WHOLE ANSWER — `03-F58` (August 2026).**
+      // A stall reaching here raises nothing, appends nothing and shows nothing, so the ticket is
+      // held and **no human is asked to replace the roll**. Measured on a real till against a
+      // listener answering `03-F40`'s paper-out bits: job `stalled`, `attempts: 0`, `alarms()` `[]`
+      // throughout, five ledger rows and none about the printer — while the counter's `02-F55`
+      // control read *the kitchen has this order*, which is false; the PRINTER has it.
+      // `03-F58` decides where it is said and it is deliberately **not here**: it belongs on the
+      // honesty strip beside `CatalogHealth` (amber, no control, silent when healthy), because a
+      // stall is a STATE and an attributed acknowledgement would take a live condition off the
+      // screen (`00 §5.7`). It appends nothing for the reason `03-F54` gives one door over.
+      // **Owed, and the FR names the five files.** `kot-printing.test.ts`'s *"a stalled printer
+      // raises NO band, emits NOTHING"* stays correct and must stay green — reaching the glass
+      // through `alarms()` is the cheap version `03-F58` forbids by name.
     }
   };
 
@@ -804,11 +971,28 @@ export const createKotPrinter = ({
     reconcile(before);
   };
 
-  /** `03-F6`/`03-F48` — see `KotPrinter.resend` for the whole argument. */
+  /** `03-F6`/`03-F48`/`03-F57` — see `KotPrinter.resend` for the whole argument. */
   const resend = (alarm_id: string): void => {
-    // A band this printer does not hold is not this printer's business — the IPC handler is free
-    // to call every printer for one tap, exactly as `acknowledge` is.
-    if (!raised.has(alarm_id)) return;
+    // ── `03-F57` — ELIGIBILITY IS THE DURABLE JOB, NEVER THIS PROCESS'S BAND MAP ────────────────
+    //
+    // This opened `if (!raised.has(alarm_id)) return;` until August 2026, and `raised` is a
+    // process-lifetime `Map`. So after a relaunch the durable spool still held the `failed` chit,
+    // its bytes and its `03-F55` coverage, and the only control that could reach them had
+    // evaporated — a power cut PERMANENTLY stranded a billed order the kitchen was never told
+    // about. `03-F4` persists the job "before the first transmit attempt" and never drops it, so
+    // everything the resend needs is on the disk; the band was the one thing that was not.
+    //
+    // What replaces it is the SAME question asked of the durable row: is this one of MY jobs, and
+    // is it in a state that may be sent again. The state ladder below is unchanged and is what
+    // keeps `03-F41` intact across a restart exactly as it was inside one — `printed` refused,
+    // `stalled` refused, an unfinished budget refused.
+    //
+    // The deny-list is `reconcile`'s, for `CASH_JOB_PREFIX`'s stated reason: all four document
+    // types share this device's ONE spooler (`03-F42`), the IPC handler calls every printer for
+    // one tap, and `raised.has` used to be what kept this printer's hands off a cash slip's band.
+    // A KOT job id carries no marker of its own, so "is this mine" can only be asked as "is it
+    // none of the others" — and every new namespaced document type must extend it.
+    if (isCashJob(alarm_id) || isReceiptJob(alarm_id)) return;
 
     const job = spooler.job(alarm_id);
     if (job === undefined) {
@@ -930,8 +1114,133 @@ export const createKotPrinter = ({
     queueMicrotask(() => void pump());
   };
 
+  /**
+   * **`03-F59` — the band a relaunch owes the counter, and NOTHING else.**
+   *
+   * `03-F57` closed the ELIGIBILITY half: `resend` asks `03-F4`'s durable spool instead of this
+   * process's band map, so a chit that failed before a power cut is still sendable in the next
+   * process. Its own clause (c) records what that leaves: **a resend that is eligible with no
+   * button leaves the ticket just as stranded.** `03-F6` puts the recovery *"from the failure
+   * alert"* and `03-F5` puts that alert on the counter, so the resend control has exactly one home
+   * in this product — and `pump()`'s `reconcile(before)` takes its baseline from `spooler.jobs()`,
+   * which means a restored `failed` row differs from nothing, transitions nowhere, and raises
+   * nothing. Measured on the running till: the spool held the chit, its bytes and its `03-F55`
+   * coverage, `resend(job_id)` would have sent it, and no surface on the glass could call it.
+   *
+   * ── THE FOUR NARROWINGS, and each one is why this is not the fix that was already removed ────
+   *
+   * A previous fix stopped historic failed jobs re-raising at launch on purpose (the cash
+   * printer's `seen` below is that fix), because a band staff arrive to every morning is how
+   * `03-F5`'s loudest signal is taught to be dismissed unread. `03-F59` re-raises a strictly
+   * smaller set:
+   *
+   *   1. **`failed` only.** `printed`, `stalled` and a job still inside `03-F4`'s budget are all
+   *      untouched — the same three refusals `resend` makes, so a band is raised only where the
+   *      control behind it can act (`27-F5`: a control that cannot act is not a control).
+   *   2. **The lines are still not on paper at that station.** *Unrecovered* is a claim about
+   *      LINES, not about a row's state: this job's `03-F55` coverage minus everything a `printed`
+   *      chit at the same station has since carried. **Measured, and stated because a guard whose
+   *      dangerous case cannot arise is worth naming rather than hiding:** under `03-F55`'s own
+   *      rule a later chit never re-covers a committed line, so today the only chit that can carry
+   *      these lines is this row — and it is `failed`. It is written as the property anyway,
+   *      because `03-F6`'s reroute to a second printer and `03-F48`'s owed per-chit reprint are
+   *      both chits the corpus already names that WOULD carry them, and the sentence `03-F59`
+   *      makes is about paper rather than about a state machine.
+   *   3. **A row with no `covers` is skipped.** `resend` refuses it by name (*"kept no record of
+   *      which lines it carried"*), so its band would be a `SEND AGAIN` that has already said no.
+   *   4. **The CURRENT business day only** (`01-F46`, Asia/Karachi, 05:00). The date is the
+   *      ORDER's confirm anchor — `03-F14`'s timer basis, branch time stamped at APPEND
+   *      (`01-F43`) — read through `domain`'s own `businessDate` via `onBusinessDate`, the same
+   *      helper `dayClosed` below uses. Never the spool row (`JobRecord` carries no time at all)
+   *      and never this device's clock (`01-F45`). **This does not give a spooled job a lifetime**
+   *      — `03-F57` (b) leaves that open and this FR does not close it. Friday's chit is still
+   *      *eligible* on Monday; it just does not shout.
+   *
+   * The deny-list is `reconcile`'s and `resend`'s, for `CASH_JOB_PREFIX`'s stated reason: all four
+   * document types share this device's ONE spooler (`03-F42`), a KOT job id carries no marker of
+   * its own, and without it a restored cash slip would come back wearing a KOT band with a resend
+   * control `01 §4` has no act for.
+   *
+   * **IT APPENDS NOTHING** (`03-F57`, `01-F1`, `15-F14`): `raise` is memory-only and no `emit` is
+   * reachable from here. A second `kot.print_failed` per launch would forge a rising failure rate
+   * out of one dead printer and one `ops/startup/*.bat` `:loop`, permanently.
+   *
+   * **DECLARED INTERPRETATION (`24 §3b`), and it is the one thing here the corpus does not
+   * resolve: a band the operator ALREADY dismissed comes back.** Acknowledgement is persisted
+   * nowhere — `01-F5`'s closed `audit.*` subtypes have no member for it — so no implementation can
+   * tell an unacknowledged band from a dismissed one across a relaunch. Narrowing 4 is what bounds
+   * the cost to one business day. Persisting the acknowledgement is the correct closure and is
+   * OWED, exactly as the cash printer's `seen` note already records for the same missing fact.
+   */
+  const restoreBands = (): void => {
+    // No day, no restore. See `KotPrinterDeps.businessDay` for why this is the quiet default.
+    if (businessDay === undefined) return;
+    const today = businessDay();
+    const jobs = spooler.jobs();
+    const orders = store.openOrders();
+    for (const job of jobs) {
+      // The deny-list FIRST, as `resend` opens with it: every new namespaced document type must
+      // extend both, or a restored slip is misread as a KOT.
+      if (isCashJob(job.job_id)) continue;
+      if (isReceiptJob(job.job_id)) continue;
+      if (job.state !== "failed") continue;
+      // Narrowing 3. A pre-`03-F55` row cannot say which lines it carried, so `resend` refuses it.
+      if (job.covers === undefined || job.covers.length === 0) continue;
+      // Which station's chit series this row belongs to, read BACK off the durable id — the same
+      // `chitOf` the resend uses, because a station kept in this process is what the power cut took.
+      const chit = chitOf(job.job_id, job.order_ref);
+      if (chit === null) continue;
+      // Narrowing 4. The order is also what `resend` needs (it re-renders from the fold), so an
+      // order this till no longer holds has no sendable chit either — no band for it.
+      const order = orders.find((row) => row.order_id === job.order_ref);
+      if (order === undefined) continue;
+      // `typeof … === "number"` and not truthiness, matching `kitchenFor` above: a row from a fold
+      // predating the column carries the key as absent rather than null (`01-F54`).
+      if (typeof order.confirmed_at !== "number") continue;
+      if (!onBusinessDate(order.confirmed_at, today)) continue;
+      // Narrowing 2. `printed` siblings at this station, and what they put on paper.
+      const prefix = chitPrefix(job.order_ref, chit.station);
+      const onPaper = new Set(
+        jobs
+          .filter((other) => other.state === "printed" && isChitOf(other.job_id, prefix))
+          .flatMap((other) => other.covers ?? []),
+      );
+      if (job.covers.every((line_id) => onPaper.has(line_id))) continue;
+      // The SAME sentence `reconcile` raises, deliberately: this is the same band about the same
+      // failure, restored — not a second, differently-worded notice about a restart. `attempts` is
+      // on the durable row, so the number a cashier reads is the one the failure actually spent.
+      raise(
+        job.job_id,
+        job.order_ref,
+        job.printer_name,
+        `printing failed after ${job.attempts} attempts`,
+        { label: RESEND_LABEL },
+      );
+    }
+  };
+
+  // **THE SEAM, and it is inside the factory on purpose.** A `restore()` method the host had to
+  // remember to call is the wave's named defect waiting to happen — a correct subsystem the
+  // product forgets to reach — and no suite in this package can import `main/index.ts` to check
+  // that it did. Here the only thing a host can omit is `businessDay`, which `seams:check` Rule B
+  // reports by name (measured: deleting that argument from `main/index.ts` is exit 1, *"1 optional
+  // seam NEVER SUPPLIED"*, naming `createKotPrinter({ businessDay })`).
+  //
+  // ⚠ **THIS LINE ITSELF IS GUARDED BY NOTHING, AND THE NUMBER IS MEASURED RATHER THAN FEARED
+  // (2026-08-15).** Replacing this call with `void restoreBands;` leaves **all 1188 tests in this
+  // package green and `pnpm seams:check` exit 0 and CLEAN** — the whole of `03-F59` dead, every
+  // rail quiet. The only instrument that separates the two is a launch, or a harness that
+  // constructs this printer over a durable spool and reads `alarms()` at construction; the
+  // acceptance suite for `03-F57` deliberately asserts nothing about the band in either direction
+  // (its own pin 2), so it cannot see this and is not at fault. **A `03-F59` rung is OWED to a
+  // test session** — `alarms()` after a second construction over one spool directory, with the
+  // printed job and the out-of-day job as the two controls. It is three assertions and the
+  // existing `bench()` fixture already builds the state.
+  restoreBands();
+
   return {
     confirmed,
+    kitchenFor,
     pump,
     resend,
     alarms: () => [...raised.values()].map((band) => band.alarm),
@@ -1055,6 +1364,20 @@ export const createCashPrinter = ({
    * defect: its `reconcile(before)` takes its baseline from `spooler.jobs()` at the top of every
    * `pump()`, so a restored terminal row differs from nothing and raises nothing. One file, two
    * behaviours, and one of them had to be wrong.
+   *
+   * **⚠ THAT LAST SENTENCE IS NO LONGER THE WHOLE TRUTH AND IS KEPT RATHER THAN QUIETLY EDITED,
+   * because the reasoning above is exactly why the KOT's exception had to be argued.** `03-F59`
+   * (August 2026) makes the KOT printer re-raise at launch after all — but for a strictly smaller
+   * set than the state this note replaced: `failed`, with `03-F55` coverage no later chit has put
+   * on paper, on the CURRENT business day only. See `restoreBands` above for the four narrowings
+   * and for the acknowledgement gap this note already names, which `03-F59` does not close either.
+   *
+   * **The cash and receipt printers are deliberately NOT given the same treatment** (`03-F59`, and
+   * `24 §3b` forbids the drive-by regardless). Neither band carries a control: `01 §4` has no
+   * reprint act for a slip or a receipt, `02-F16` makes a second receipt a named fraud vector, and
+   * a cash slip's reprint is owed with the surface that offers it. A restored band there would be
+   * a full-width red interrupt whose only control is `I SAW THIS`, with nothing to recover —
+   * `27-F5`'s failure mode, bought at the cost this whole note exists to avoid.
    *
    * **DECLARED INTERPRETATION (`24 §3b`).** `03-F5` says the alert repeats "until acknowledged"
    * and acknowledgement is not persisted anywhere, so a band the operator never dismissed is lost

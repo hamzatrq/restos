@@ -138,6 +138,13 @@ const REALTIME_DEADLINE_MS = 1_000;
  * ever, with no band, because `03-F41` takes a stall out of `03-F4`'s budget by design. That is the
  * safe direction — holding never double-prints — and closing it needs an FR about how long a stall
  * may last, which the corpus does not have.
+ *
+ * ⚠ **`03-F58` (August 2026) records this same residual and does NOT close it** — it decides that a
+ * held ticket is SAID on the counter's honesty strip, which makes the difference between *held with
+ * nobody told* and *held and named*. The FR's clause (a) is this paragraph: the till cannot tell
+ * *no roll* from *no printer* through a link that has gone silent, `paper_out: true` is the only
+ * thing a two-valued `PaperStatus` can say about that, and no stall lifetime exists to bound it.
+ * **The surface `03-F58` names is OWED**, so today a stall is still silent on every link.
  */
 const CANNOT_SAY: PaperStatus = { paper_out: true, near_end: "unsupported" };
 
