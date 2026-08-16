@@ -314,6 +314,13 @@ describe("the guard suite actually covers the package", () => {
         "components/AlarmBand.tsx",
         "components/AppShell.stories.tsx",
         "components/AppShell.tsx",
+        // ADDED with `27-F69`/`27-F70`/`27-F74`/`27-F75` — the Order grid's menu item, and the
+        // component the price defect was filed against (36 tiles, no price on any of them). It
+        // paints a `27-F14` status fill for sold-out, so the outline guard applies to it; it is
+        // the only component reading the `27-F74` identity palette, so the "bgColor- as a
+        // foreground" guard is what stops a plate tint becoming text.
+        "components/ItemTile.stories.tsx",
+        "components/ItemTile.tsx",
         "components/Cart.stories.tsx",
         "components/Cart.tsx",
         // ADDED with `01-F56`/`DEC-SYNC-011`'s catalog-health surface — a refused menu, said out
