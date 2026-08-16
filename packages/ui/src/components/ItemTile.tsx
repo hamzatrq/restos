@@ -85,6 +85,15 @@ import { formatPaisa } from "./MoneyValue";
  * 14.2 mm on the 141-PPI panel `27 §1a` also lists. The dp→px conversion is `PanelRoot`'s and is
  * never done here (`27-F68` (a)).
  */
+/**
+ * Re-exported so a consumer types a category against the SAME union the manifest generates,
+ * rather than hand-copying twelve slugs. `K-3`'s recorded failure is what this prevents: an
+ * oracle that declared the interface it existed to deliver and then asserted against a hand-copy,
+ * leaving both symbols dead. A type that is imported from the component it constrains cannot
+ * drift from it.
+ */
+export type { CategoryName };
+
 export type ItemTileProps = {
   posture: Posture;
   name: string;
