@@ -235,8 +235,8 @@ describe("02-F37 — settling with no shift open SUCCEEDS", () => {
 
     await waitFor(() => expect(appended).toHaveLength(1));
     expect(appended[0]?.type).toBe("payment.recorded");
-    expect(appended[0]?.payload["amount_paisa"]).toBe(DUE_PAISA);
-    expect(appended[0]?.payload["method"]).toBe("cash");
+    expect(appended[0]?.payload.amount_paisa).toBe(DUE_PAISA);
+    expect(appended[0]?.payload.method).toBe("cash");
   });
 
   it("carries a NULL shift reference — present in the payload, not omitted", async () => {
@@ -254,7 +254,7 @@ describe("02-F37 — settling with no shift open SUCCEEDS", () => {
     await waitFor(() => expect(appended).toHaveLength(1));
     const payload = appended[0]?.payload ?? {};
     expect(Object.hasOwn(payload, "shift_id"), "shift_id was omitted, not nulled").toBe(true);
-    expect(payload["shift_id"]).toBeNull();
+    expect(payload.shift_id).toBeNull();
   });
 
   it("never a MODAL — nothing is put between the cashier and the customer", async () => {
@@ -462,7 +462,7 @@ describe("02-F22 — with a shift OPEN, the settlement BINDS to it", () => {
 
     await waitFor(() => expect(appended).toHaveLength(1));
     expect(appended[0]?.type).toBe("payment.recorded");
-    expect(appended[0]?.payload["shift_id"], "the settlement did not bind to the open shift").toBe(
+    expect(appended[0]?.payload.shift_id, "the settlement did not bind to the open shift").toBe(
       "shift-open",
     );
   });
@@ -485,7 +485,7 @@ describe("02-F22 — with a shift OPEN, the settlement BINDS to it", () => {
     await takeCash();
 
     await waitFor(() => expect(appended).toHaveLength(1));
-    expect(appended[0]?.payload["shift_id"]).toBe("shift-open");
+    expect(appended[0]?.payload.shift_id).toBe("shift-open");
   });
 
   it("a shift that has CLOSED leaves the settlement unbound — 02-F37's path is still reachable", async () => {
@@ -500,7 +500,7 @@ describe("02-F22 — with a shift OPEN, the settlement BINDS to it", () => {
     await takeCash();
 
     await waitFor(() => expect(appended).toHaveLength(1));
-    expect(appended[0]?.payload["shift_id"]).toBeNull();
+    expect(appended[0]?.payload.shift_id).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
@@ -528,7 +528,7 @@ describe("02-F22 — with a shift OPEN, the settlement BINDS to it", () => {
 
     await waitFor(() => expect(appended).toHaveLength(1));
     const payload = appended[0]?.payload ?? {};
-    expect(payload["shift_id"]).toBe("shift-open");
+    expect(payload.shift_id).toBe("shift-open");
     const identityish = Object.keys(payload).filter((k) =>
       /user|cashier|actor|staff|operator|pin/i.test(k),
     );

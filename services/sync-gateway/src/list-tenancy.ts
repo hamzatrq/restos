@@ -54,11 +54,29 @@ type Args = {
 const USAGE = "list-tenancy [--org <org_id>]";
 
 export const parseListTenancyArgs = (argv: readonly string[]): Args => {
-  const { values } = parseArgs({
-    args: [...argv],
-    options: { org: { type: "string" } },
-    strict: true,
-  });
+  /**
+   * `strict: true` throws on an unknown flag, and Node's message names the flag without ever
+   * saying what this command accepts. Every sibling command here prints `USAGE` on a bad
+   * argument (`create-org.ts:107` is the pattern) and this one did not — it declared `USAGE`
+   * and used it nowhere, which is how an operator who mistypes `--orgs` gets a bare
+   * `Unknown option '--orgs'` from a command whose whole job is to tell him what is there.
+   *
+   * Found by `noUnusedVariables`, and worth recording because the autofix was the wrong fix:
+   * renaming it `_USAGE` silences the rule and keeps the defect. An unused constant is a
+   * question about intent, not a naming problem.
+   */
+  let values: { org?: string | undefined };
+  try {
+    ({ values } = parseArgs({
+      args: [...argv],
+      options: { org: { type: "string" } },
+      strict: true,
+    }));
+  } catch (cause) {
+    throw new Error(`${cause instanceof Error ? cause.message : String(cause)}\n${USAGE}`, {
+      cause,
+    });
+  }
   return { org: values.org === undefined || values.org === "" ? undefined : values.org };
 };
 

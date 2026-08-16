@@ -253,7 +253,7 @@ const boot = async (): Promise<void> => {
       widthPx: display.size.width * display.scaleFactor,
       heightPx: display.size.height * display.scaleFactor,
     },
-    configured: env["RESTOS_PANEL_PPI"],
+    configured: env.RESTOS_PANEL_PPI,
     physicalWidthMm: measurePhysicalWidthMm(process.platform, (command, args) => {
       try {
         // Deliberately narrow: `panel-density.ts` owns which commands are run and how their
@@ -302,8 +302,8 @@ const boot = async (): Promise<void> => {
 
   const uplink = createPassUplink({
     store,
-    url: env["RESTOS_CLOUD_URL"],
-    token: env["RESTOS_DEVICE_TOKEN"],
+    url: env.RESTOS_CLOUD_URL,
+    token: env.RESTOS_DEVICE_TOKEN,
     onChanged: notifyChanged,
   });
 
@@ -506,7 +506,7 @@ const boot = async (): Promise<void> => {
    * branch mesh will never meet. Each of those looks exactly like working.
    */
   process.stdout.write(
-    [
+    `${[
       "RestOS pass screen (03-F13 · apps/pass-kds)",
       `  ${describeDeviceIdentity(identity, env)}`,
       identity.device_id === DEV_IDENTITY.device_id
@@ -520,11 +520,11 @@ const boot = async (): Promise<void> => {
       `  ${describeReadySignal(readySignal)}`,
       `  ${describeServeSignal(serveSignal)}`,
       `  ${describeLanMesh(lan)}`,
-      env["RESTOS_CLOUD_URL"] === undefined
+      env.RESTOS_CLOUD_URL === undefined
         ? "  uplink: cloud OFFLINE (RESTOS_CLOUD_URL unset). 01-F12/01-F13/01-F15 put the " +
           "counter's orders on the LAN mesh above, so with that configured this screen works " +
           "with no internet at all (00 §5.1). With BOTH off it shows an empty queue forever."
-        : `  uplink: cloud ${env["RESTOS_CLOUD_URL"]}. Orders reach this screen over the LAN mesh ` +
+        : `  uplink: cloud ${env.RESTOS_CLOUD_URL}. Orders reach this screen over the LAN mesh ` +
           "above when the branch has one, and over the cloud otherwise — a WAN outage no longer " +
           "stops this screen learning about new orders while the counter goes on selling.",
       /**
@@ -552,7 +552,7 @@ const boot = async (): Promise<void> => {
           "is on the act.",
     ]
       .filter((line) => line !== "")
-      .join("\n") + "\n",
+      .join("\n")}\n`,
   );
 
   window = new BrowserWindow({

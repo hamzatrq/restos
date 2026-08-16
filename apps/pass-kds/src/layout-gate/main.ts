@@ -104,7 +104,7 @@ const PANELS = [
  */
 const STATES = ["owner", "readonly", "empty", "empty-roster", "locked-out"] as const;
 
-const SHOT_DIR = process.env["RESTOS_LAYOUT_SHOTS"];
+const SHOT_DIR = process.env.RESTOS_LAYOUT_SHOTS;
 
 /**
  * `27-F8`'s **kitchen** row — 96 dp = 15 mm, *"standing, wet or greasy hands, 1–2 m"*, and it is

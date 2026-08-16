@@ -493,7 +493,7 @@ const COMPOSITION_EXEMPT_Y: readonly string[] = ["Order"];
  * beside an ugly screenshot is exactly the state this whole exercise started from. It is evidence
  * for a *human*, which is the only reader that can answer the question the founder is asking.
  */
-const SHOT_DIR = process.env["RESTOS_LAYOUT_SHOTS"];
+const SHOT_DIR = process.env.RESTOS_LAYOUT_SHOTS;
 
 const shoot = async (window: BrowserWindow, name: string): Promise<void> => {
   if (SHOT_DIR === undefined || SHOT_DIR === "") return;

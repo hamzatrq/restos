@@ -308,9 +308,9 @@ describe("01-F5 §3 — outcome, attempted user, and a chain the STORE owns", ()
     const [success, failure] = h.logins();
     // "Somebody logged in on this device four times" is not an audit trail if three of them
     // were wrong. Without an outcome the whole family collapses into one indistinguishable row.
-    expect(success?.payload["outcome"]).toBe("success");
-    expect(failure?.payload["outcome"]).toBe("failure");
-    expect(success?.payload["outcome"]).not.toBe(failure?.payload["outcome"]);
+    expect(success?.payload.outcome).toBe("success");
+    expect(failure?.payload.outcome).toBe("failure");
+    expect(success?.payload.outcome).not.toBe(failure?.payload.outcome);
   });
 
   it("§3b the ATTEMPTED user_id is recorded, including on a refusal", async () => {
@@ -319,7 +319,7 @@ describe("01-F5 §3 — outcome, attempted user, and a chain the STORE owns", ()
     await h.unlock(WRONG_PIN);
 
     // Which identity was being guessed at is the fact that makes a failure investigable.
-    expect(h.logins()[0]?.payload["user_id"]).toBe(CASHIER_ID);
+    expect(h.logins()[0]?.payload.user_id).toBe(CASHIER_ID);
   });
 
   it("§3c prev_audit_hash is STAMPED BY THE STORE and the chain verifies (01-F5)", async () => {
@@ -332,8 +332,8 @@ describe("01-F5 §3 — outcome, attempted user, and a chain the STORE owns", ()
     // The sink must NOT supply it — the store rejects a caller-supplied value outright, so a
     // sink that stamped its own would append NOTHING and §1a would already be red. What this
     // asserts is the other half: the store DID stamp it, and the links chain.
-    expect(logins[0]?.payload["prev_audit_hash"]).toBeNull();
-    expect(typeof logins[1]?.payload["prev_audit_hash"]).toBe("string");
+    expect(logins[0]?.payload.prev_audit_hash).toBeNull();
+    expect(typeof logins[1]?.payload.prev_audit_hash).toBe("string");
     expect(verifyAuditChain(h.store.readAllEvents())).toEqual({ ok: true });
     expect(h.store.auditChainHead()).not.toBeNull();
   });

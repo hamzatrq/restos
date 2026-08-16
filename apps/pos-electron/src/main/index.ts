@@ -252,6 +252,12 @@ const AGE_TICK_MS = 1_000;
  * model") would survive any spelling.
  */
 const kotCapability = () => {
+  // biome-ignore lint/complexity/useLiteralKeys: `printer-default.test.ts:50` greps THIS SOURCE
+  // with /RESTOS_KOT_PRINTER"\]\s*\?\?\s*"([^"]*)"/ to read the shipped default, and its 24-F14
+  // empty-match guard fails when the pattern matches nothing. Dot access is semantically
+  // identical and silently blinds that guard — measured: the guard failed the moment this line
+  // was rewritten, which is the tripwire doing exactly its job. The coupling is documented above
+  // and is deliberate; the style rule loses to the correctness guard.
   const configured = (process.env["RESTOS_KOT_PRINTER"] ?? "no printer configured").trim();
   return printerCapability(configured === "" ? "no printer configured" : configured);
 };
@@ -303,7 +309,7 @@ const panelDensity = (): PanelDensity => {
       widthPx: display.size.width * display.scaleFactor,
       heightPx: display.size.height * display.scaleFactor,
     },
-    configured: process.env["RESTOS_PANEL_PPI"],
+    configured: process.env.RESTOS_PANEL_PPI,
     physicalWidthMm: measurePhysicalWidthMm(process.platform, (command, args) => {
       try {
         return execFileSync(command, [...args], { encoding: "utf8", timeout: 4_000 });
@@ -481,7 +487,7 @@ const createWindow = (): BrowserWindow => {
 };
 
 const load = (window: BrowserWindow): void => {
-  const devServer = process.env["ELECTRON_RENDERER_URL"];
+  const devServer = process.env.ELECTRON_RENDERER_URL;
   if (devServer) {
     void window.loadURL(devServer);
     return;
@@ -748,8 +754,8 @@ const counterBoot = app.whenReady().then(async () => {
 
   const uplink = createUplink({
     store,
-    url: process.env["RESTOS_CLOUD_URL"],
-    token: process.env["RESTOS_DEVICE_TOKEN"],
+    url: process.env.RESTOS_CLOUD_URL,
+    token: process.env.RESTOS_DEVICE_TOKEN,
     onChanged: notifyChanged,
   });
   app.on("will-quit", () => uplink.stop());

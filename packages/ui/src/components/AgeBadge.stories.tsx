@@ -40,7 +40,7 @@ export const DeliveryThresholds: Story = { args: { minutes: 17, amberAt: 15, red
 export const Greyscale: Story = {
   args: { minutes: 27 },
   decorators: [
-    (Story) => (
+    () => (
       <div style={{ filter: "grayscale(1)", display: "flex", gap: 12 }}>
         <AgeBadge minutes={4} amberAt={10} redAt={20} />
         <AgeBadge minutes={12} amberAt={10} redAt={20} />

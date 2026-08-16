@@ -149,7 +149,7 @@ export const createLanMesh = (opts: {
     transport,
     clock: wallClock,
     device_class: DEVICE_CLASS,
-    token: nonEmpty(process.env["RESTOS_DEVICE_TOKEN"]) ?? LAN_HELLO_PLACEHOLDER,
+    token: nonEmpty(process.env.RESTOS_DEVICE_TOKEN) ?? LAN_HELLO_PLACEHOLDER,
   });
   session.start();
 
