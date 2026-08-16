@@ -24,7 +24,11 @@ document below is written against. **A plan that contradicts one of these is wro
 | R9 | Honesty strip | **One status area that escalates only when blocking.** Honest and always present (`00 §5.7` holds), but it stops dominating the panel and stops speaking developer. |
 | R10 | UI language | **English-only stands.** The new Order screen carries the low-literacy load through images, categories, colour and search rather than translated chrome. Urdu item names already render as user content. Reversible later. |
 | R11 | Hosting region | **Deferred — lowest priority.** Stay on the current server; revisit when there are real customers. See the carve-out below. |
-| R12 | Brand | **Invent it.** No name, logo or palette exists beyond "RestOS". D1 proposes a full identity. |
+| R12 | Brand | **Invent it.** No name, logo or palette exists beyond "RestOS". D1 proposes a full identity. **RestOS stays as the internal name**; rename before paid launch, not now. |
+| R13 | Order-grid overflow | **Density fits the category; overflow SCROLLS** (overruling lateral paging). The all-items view renders under fixed category section headers and scrolls. `27-F2`, `27-F72`. |
+| R14 | Menu photography | **Optional per item, three coverage states, mixing PERMITTED within a category.** `27-F70`. |
+| R15 | Build order | **Counter first, built for real** — `packages/ui` rebuilt **in place**, tests **ported suite by suite** as each component lands, coverage never dropping. KDS, then control plane / signup / back office. |
+| R16 | Theme | **Light only on every surface**, KDS dark opt-in deferred (`27-F19`). Tokens stay structurally two-polarity — `27-F67`'s training inversion requires it — so dark is later a values change, never a rewrite. |
 
 **Consequences that follow automatically and are not separate decisions:** pooled multi-tenancy
 (R1+R5 economics); vendor-operated onboarding rather than self-serve signup (R1); no RN workspace
@@ -211,3 +215,22 @@ input, not an engineering ticket, and `services/tax` is 2 lines today.
   is salvageable. It carries forward unchanged.
 - **Touch `packages/domain`.** 3,183 production lines, 543 tests, three runtime dependencies, and
   almost no coupling to the deviation. It is the crown jewel and this plan leaves it alone.
+
+---
+
+## §6 — The arbitration rule (delegated to the implementer, August 2026)
+
+A measured gate and a design intention fought twice in one sitting, and both times the
+measurement was right. The standing rule, so it is not re-litigated per conflict:
+
+1. **A measured gate wins, always, and I adapt without asking.** Contrast ratios, ΔE00 separation,
+   millimetres of touch, angular cap-height. **A gate is never weakened to fit a design** — if the
+   design cannot pass, the design changes.
+2. **I bring you anything whose adaptation is VISIBLE to an owner or a cashier.** Darkening a label
+   grey by 4% to clear AA is mine. *Pay* turning from petrol teal to electric blue is yours.
+3. **I bring you anything whose fix needs a spec amendment**, because commandment 9 makes a law
+   change a founder decision and not an implementer's.
+4. **When a gate makes a request impossible, I measure it and show the number before proposing an
+   alternative** — never "that cannot be done". The sold-out colour is the worked example: the
+   amber→red arc was swept exhaustively, the best achievable was 13.7 against a floor of 20, and
+   that number is what made the alternative persuasive rather than merely obedient.
