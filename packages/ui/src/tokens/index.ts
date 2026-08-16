@@ -153,4 +153,36 @@ export const capHeightMm = (
   distanceMm: number = must(kds, "kds-reference-distance-mm"),
 ): number => 2 * distanceMm * Math.tan(arcmin / 60 / 2 / (180 / Math.PI));
 
+/**
+ * `27-F74` — the closed set of category identities, DERIVED from the manifest rather than
+ * declared beside it.
+ *
+ * Two copies of one closed set is the defect this repo has already paid for twice
+ * (`SELLABLE_KINDS` was three copies, each commenting that the others existed). So the source of
+ * truth is the token names, and adding `bgColor-identity-soup` is what adds `"soup"` here — there
+ * is no second list to forget.
+ *
+ * **The cap is the point, not an implementation detail.** `27-F74` (e) closes the set at 12 and
+ * allocates it here precisely so an owner cannot pick a hue: he names his categories, and the
+ * product maps them onto colours that have been through `27-F21` and SC 1.4.11. A per-tenant
+ * colour is an ungated colour on a paying customer's screen.
+ */
+type IdentityFill = Extract<ColorName, `bgColor-identity-${string}`>;
+export type CategoryName = IdentityFill extends `bgColor-identity-${infer C}` ? C : never;
+
+/**
+ * The two roles an identity colour has, as functions rather than as string concatenation at the
+ * call site — `27-F40`'s prefix only helps if the property is chosen by NAME, and
+ * `` `bgColor-identity-${c}` `` written inline in a component is exactly how a fill ends up on a
+ * border. Both are typed to `ColorName`, so a category that has no token fails to compile.
+ */
+export const identityFill = (c: CategoryName): ColorName => `bgColor-identity-${c}` as ColorName;
+export const identityRule = (c: CategoryName): ColorName =>
+  `borderColor-identity-${c}` as ColorName;
+
+/** Every category, in manifest order. The Order grid's rail renders exactly this. */
+export const CATEGORIES = Object.keys(manifest.color)
+  .filter((k): k is IdentityFill => k.startsWith("bgColor-identity-"))
+  .map((k) => k.slice("bgColor-identity-".length) as CategoryName);
+
 export { manifest as tokens };

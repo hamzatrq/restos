@@ -49,11 +49,42 @@ Ask **what the operator must conclude**, not what looks right:
 | "something is broken / this action destroys" | `bgColor-status-fault` |
 | "that worked" — **transient only, never a resting state** | `bgColor-status-confirmed` |
 | "I may press this" | `bgColor-interactive` |
+| "this is the Karahi section" — wayfinding, never a state | `bgColor-identity-*` / `borderColor-identity-*` |
 | none of the above | **no colour.** Use shape, position or a number (27-F12) |
 
 There are **three status colours and one accent, allocated platform-wide** (27-F14). A
 fourth hue is an amendment to doc 27, never a local decision. If your state does not fit
 the table, that is the system working — encode it structurally.
+
+### The identity palette is NOT a fifth status colour (27-F74)
+
+Twelve category tints exist — `rice`, `karahi`, `bbq`, `bread`, `drinks`, `sweet`, `sides`,
+`soup`, `snacks`, `cold`, `combo`, `extra` — and they are the one licensed exception to the
+paragraph above. **The licence is narrow and each clause is a rule you can break by accident:**
+
+- An identity colour **means only *which category***. The moment one encodes availability,
+  urgency, error or any condition, it is in breach of `27-F14` — not of `27-F74`.
+- It is **always rendered beside the category's name**, so it is never the only signal (`27-F12`).
+- It **never tints a status surface** — no badge, band, alarm or any control whose meaning is a
+  state. This is what keeps the `27-F15` ΔE00 floor computed over the `27-F14` set alone: the two
+  palettes do not co-occur as signals, so identity hues are excluded from that measurement *by
+  construction*, and putting one on a status surface silently invalidates the floor.
+- Both roles exist because `27-F40` requires the name to say which property it belongs to: a
+  **plate** is `bgColor-identity-*`, a **rule** is `borderColor-identity-*`. They currently hold
+  the same value; that is not a licence to use one for the other.
+- A plate's foreground is `fgColor-on-identity` and **never** a hand-picked colour: it is white on
+  light and INK on dark (8.28:1 against 2.26:1 — white on a dark plate fails AA outright).
+- **The set is closed at 12 and allocated here.** An owner names his categories; he does not pick
+  their colours. A per-tenant hue would put an ungated colour on a paying customer's screen.
+
+### `borderColor-decorative` may never bound a control
+
+It exists for rules between rows and inside cards. `27-F66` requires anything bounding a
+**control** to meet 3:1, which is `borderColor-default`'s job (3.44:1 light). The decorative rule
+is deliberately lighter than that floor, so using it on a button, tile or input is a real
+accessibility defect that no type checker will catch. It was nearly named `borderColor-subtle`,
+which `27-F39` bans by name — `subtle` is a relative modifier, and Atlassian's `bold` became the
+`subtle` token with the name unchanged and the meaning inverted.
 
 **Never colour money by default** (27-F16). Colour on a number means *this number is
 abnormal*; colouring the commonest number on screen spends the entire preattentive channel
