@@ -176,11 +176,23 @@ export type CategoryName = IdentityFill extends `bgColor-identity-${infer C}` ? 
  * `` `bgColor-identity-${c}` `` written inline in a component is exactly how a fill ends up on a
  * border. Both are typed to `ColorName`, so a category that has no token fails to compile.
  */
+// @unreached-owed `plans/saas-pivot/plan-of-record.md` W1 — the `27-F74` identity palette's
+// only shipping consumer is the Order grid, which is `ItemGrid` and is not rebuilt yet.
+// `ItemTile` reads all three today and is itself unreached, so the whole identity chain is
+// proven and unwired. DELETE all three markers together when `ItemGrid` lands.
 export const identityFill = (c: CategoryName): ColorName => `bgColor-identity-${c}` as ColorName;
+// @unreached-owed `plans/saas-pivot/plan-of-record.md` W1 — the `27-F74` identity palette's
+// only shipping consumer is the Order grid, which is `ItemGrid` and is not rebuilt yet.
+// `ItemTile` reads all three today and is itself unreached, so the whole identity chain is
+// proven and unwired. DELETE all three markers together when `ItemGrid` lands.
 export const identityRule = (c: CategoryName): ColorName =>
   `borderColor-identity-${c}` as ColorName;
 
 /** Every category, in manifest order. The Order grid's rail renders exactly this. */
+// @unreached-owed `plans/saas-pivot/plan-of-record.md` W1 — the `27-F74` identity palette's
+// only shipping consumer is the Order grid, which is `ItemGrid` and is not rebuilt yet.
+// `ItemTile` reads all three today and is itself unreached, so the whole identity chain is
+// proven and unwired. DELETE all three markers together when `ItemGrid` lands.
 export const CATEGORIES = Object.keys(manifest.color)
   .filter((k): k is IdentityFill => k.startsWith("bgColor-identity-"))
   .map((k) => k.slice("bgColor-identity-".length) as CategoryName);

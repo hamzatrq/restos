@@ -107,6 +107,13 @@ export type ItemTileProps = {
   onPress?: (() => void) | undefined;
 };
 
+// @unreached-owed `plans/saas-pivot/plan-of-record.md` W1 — `ItemGrid` is the caller and is the
+// next component in the rebuild. Recorded rather than hidden, and the timing is the point: this
+// package's own guide names "a correct subsystem with no seam to the product" as the wave's
+// recurring defect, and the rail caught this one within an hour of that paragraph being edited.
+// A component proven by 45 acceptance tests and reached by no screen is exactly the shape — the
+// tests are the seam to the SUITE, never to the product. DELETE this marker when `ItemGrid`
+// renders it; a marker on something reached fails the rail by design.
 export const ItemTile = ({
   posture,
   name,
