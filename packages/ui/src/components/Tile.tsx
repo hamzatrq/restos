@@ -140,10 +140,10 @@ export const Tile = ({
           : destructive
             ? color["fgColor-on-status-fault"]
             : color["fgColor-default"],
-        // NO opacity. A 0.45 wash puts the reason text at 1.89:1 — far under AA — which
+        // NO opacity. A 0.45 wash puts the reason text at 1.88:1 — far under AA — which
         // defeats 27-F4's entire purpose: the tile is disabled IN PLACE so the operator can
         // read WHY. "Disabled" is carried by the sunken fill (27-F15: the fill carries it),
-        // and the reason stays fully legible at 5.22:1.
+        // and the reason stays fully legible at 4.76:1.
         // 27-F64 — a STATUS fill takes its own outline; a neutral fill takes the neutral one
         // (27-F66). A destructive tile was rendering `borderColor-default` over a fault fill,
         // which is the boundary for the surface it is NOT on.

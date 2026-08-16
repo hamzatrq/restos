@@ -135,7 +135,7 @@ export const TabRail = ({ tabs, activeId, onSelect }: TabRailProps) => {
                 : active
                   ? color["bgColor-surface-raised"]
                   : "transparent",
-              // No opacity wash — see Tile: it makes the reason unreadable (1.89:1) and the
+              // No opacity wash — see Tile: it makes the reason unreadable (1.88:1) and the
               // reason is the only thing that makes disabling-in-place useful.
               color: tab.unavailable ? color["fgColor-disabled"] : color["fgColor-default"],
               border: "none",

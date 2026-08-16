@@ -100,7 +100,7 @@ export const NumericKeypad = ({ value, onChange, max, maxDigits = 7 }: NumericKe
                 : color["bgColor-surface-raised"],
               // A blocked key stays READABLE — the operator must be able to see that the 9
               // is still a 9 and simply refused, not that the keypad has gone blank. An
-              // opacity wash measured 2.12:1 and made the digit ambiguous, which is a worse
+              // opacity wash measured 2.22:1 and made the digit ambiguous, which is a worse
               // failure than the mis-entry the block exists to prevent.
               color: blocked ? color["fgColor-disabled"] : color["fgColor-default"],
               // 27-F66 — blocked is a STATE, and the sunken/raised fill step that used to

@@ -20,7 +20,7 @@ it("has components to check", () => expect(sources.length).toBeGreaterThan(5));
 describe("27-F4 — a disabled control still shows its reason, so it stays legible", () => {
   it("never expresses state with an opacity wash", () => {
     // CAUGHT IN REVIEW: Tile used opacity 0.45, TabRail 0.5, NumericKeypad 0.35. The reason
-    // text measured 1.89:1 — under AA and under the 3:1 non-text floor — which defeats the
+    // text measured 1.88:1 — under AA and under the 3:1 non-text floor — which defeats the
     // entire point of disabling in place rather than hiding. State is carried by FILL
     // (27-F15), which is legible by construction.
     for (const [name, src] of sources) {

@@ -46,6 +46,18 @@ export const PAIRING = {
   "bgColor-status-confirmed": "fgColor-on-status-confirmed",
   "bgColor-interactive": "fgColor-on-interactive",
   "bgColor-inverse": "fgColor-on-inverse",
+  "bgColor-identity-rice": "fgColor-on-identity",
+  "bgColor-identity-karahi": "fgColor-on-identity",
+  "bgColor-identity-bbq": "fgColor-on-identity",
+  "bgColor-identity-bread": "fgColor-on-identity",
+  "bgColor-identity-drinks": "fgColor-on-identity",
+  "bgColor-identity-sweet": "fgColor-on-identity",
+  "bgColor-identity-sides": "fgColor-on-identity",
+  "bgColor-identity-soup": "fgColor-on-identity",
+  "bgColor-identity-snacks": "fgColor-on-identity",
+  "bgColor-identity-cold": "fgColor-on-identity",
+  "bgColor-identity-combo": "fgColor-on-identity",
+  "bgColor-identity-extra": "fgColor-on-identity",
 } as const satisfies Partial<Record<ColorName, ColorName>>;
 
 export type PairedFill = keyof typeof PAIRING;
