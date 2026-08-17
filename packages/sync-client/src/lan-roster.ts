@@ -264,8 +264,31 @@ export const createLanRoster = (db: Db): LanRoster => {
     writeState.run(d.version, at);
   });
 
+  /**
+   * ⚠ **"Never throws" was a CLAIM this code did not honour, and a teardown race proved it.**
+   * `admit`'s declaration has always promised it — it runs on an inbound TLS handshake off an
+   * untrusted wire, and an exception unwinding through the transport is a stopped LAN
+   * (`01-F17`). But a prepared statement on a CLOSED database throws `The database connection is
+   * not open`, and a socket event can outlive `store.close()`: observed as an unhandled error in
+   * `apps/pass-kds`'s mesh suite, where all 25 assertions passed and the process still exited
+   * non-zero.
+   *
+   * On a real till the same race is shutdown — `will-quit` closes the store while a peer's last
+   * frame is in flight. Refusing is the right answer in that window (the device is going away)
+   * and it is `01-F48`'s fail-closed direction, so this narrows nothing. What it removes is a
+   * comment promising a protection the code did not have, which this corpus records as worse
+   * than no comment because it retires the assertion the next reader would write.
+   */
+  const refuseOnUnreadable = <T>(read: () => T, whenUnreadable: T): T => {
+    try {
+      return read();
+    } catch {
+      return whenUnreadable;
+    }
+  };
+
   return {
-    version: () => state().version,
+    version: () => refuseOnUnreadable(() => state().version, 0),
 
     apply: (update, received_at) => {
       const { version: held } = state();
@@ -307,55 +330,61 @@ export const createLanRoster = (db: Db): LanRoster => {
       }
     },
 
-    admit: (cert_sha256) => {
-      // ⚠ NOT normalised — REFUSED. An earlier draft of this comment said "normalised on the way
-      // in", which the code has never done, and a comment claiming a protection that does not
-      // exist is worse than no comment: it retires the assertion the next reader would write.
-      // Lowercase is the shape `createHash().digest("hex")` produces on both ends, so a mixed-case
-      // fingerprint means a hand-built roster or a hand-built handshake, and `isEntry` refuses the
-      // same shape at `apply` — so the failure is a LOUD `malformed` on arrival rather than a
-      // silent never-admits at every handshake afterwards. Case-folding here would make the two
-      // ends disagree quietly, which is the one outcome this file must not produce.
-      if (!isFingerprint(cert_sha256)) return null;
-      const row = readByCert.get(cert_sha256) as
-        | { device_id: string; device_class: string; revoked: number }
-        | undefined;
-      if (row === undefined) return null;
-      // `01-F48` — presence is not admission. A revoked device is in the roster precisely so an
-      // operator can see it on `14-F12`'s list; it is refused here.
-      if (row.revoked !== 0) return null;
-      return { device_id: row.device_id, device_class: row.device_class };
-    },
+    admit: (cert_sha256) =>
+      refuseOnUnreadable(() => {
+        // ⚠ NOT normalised — REFUSED. An earlier draft of this comment said "normalised on the way
+        // in", which the code has never done, and a comment claiming a protection that does not
+        // exist is worse than no comment: it retires the assertion the next reader would write.
+        // Lowercase is the shape `createHash().digest("hex")` produces on both ends, so a mixed-case
+        // fingerprint means a hand-built roster or a hand-built handshake, and `isEntry` refuses the
+        // same shape at `apply` — so the failure is a LOUD `malformed` on arrival rather than a
+        // silent never-admits at every handshake afterwards. Case-folding here would make the two
+        // ends disagree quietly, which is the one outcome this file must not produce.
+        if (!isFingerprint(cert_sha256)) return null;
+        const row = readByCert.get(cert_sha256) as
+          | { device_id: string; device_class: string; revoked: number }
+          | undefined;
+        if (row === undefined) return null;
+        // `01-F48` — presence is not admission. A revoked device is in the roster precisely so an
+        // operator can see it on `14-F12`'s list; it is refused here.
+        if (row.revoked !== 0) return null;
+        return { device_id: row.device_id, device_class: row.device_class };
+      }, null),
 
     subscribe: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
 
-    ageMs: (now) => {
-      const { received_at } = state();
-      // `null` ⇔ never received, and it is NOT zero. `00 §5.7` is about facts whose being wrong
-      // looks like being right: a roster this device has never held, reporting an age of 0 ms,
-      // is the freshest-looking number on the strip.
-      if (received_at === null) return null;
-      // Clamped at 0 rather than reported negative: a receipt stamped ahead of `now` is a clock
-      // artefact, and a negative age on an honesty surface reads as a bug in the surface.
-      return Math.max(0, now - received_at);
-    },
+    ageMs: (now) =>
+      refuseOnUnreadable(() => {
+        const { received_at } = state();
+        // `null` ⇔ never received, and it is NOT zero. `00 §5.7` is about facts whose being wrong
+        // looks like being right: a roster this device has never held, reporting an age of 0 ms,
+        // is the freshest-looking number on the strip.
+        if (received_at === null) return null;
+        // Clamped at 0 rather than reported negative: a receipt stamped ahead of `now` is a clock
+        // artefact, and a negative age on an honesty surface reads as a bug in the surface.
+        return Math.max(0, now - received_at);
+      }, null),
 
     list: () =>
-      (
-        readAll.all() as {
-          device_id: string;
-          device_class: string;
-          cert_sha256: string;
-          revoked: number;
-        }[]
-      ).map((r) => ({
-        device_id: r.device_id,
-        device_class: r.device_class,
-        cert_sha256: r.cert_sha256,
-        revoked: r.revoked !== 0,
-      })),
+      refuseOnUnreadable(
+        () =>
+          (
+            readAll.all() as {
+              device_id: string;
+              device_class: string;
+              cert_sha256: string;
+              revoked: number;
+            }[]
+          ).map((r) => ({
+            device_id: r.device_id,
+            device_class: r.device_class,
+            cert_sha256: r.cert_sha256,
+            revoked: r.revoked !== 0,
+          })),
+        [],
+      ),
   };
 };

@@ -95,7 +95,7 @@ export const createOrgIssuer = async (
   ])) as unknown as CryptoKeyPair;
   const cert = await x509.X509CertificateGenerator.createSelfSigned({
     serialNumber: "01",
-    name: `CN=${org_id} LAN issuer,O=${org_id}`,
+    name: new x509.Name([{ CN: [`${org_id} LAN issuer`] }, { O: [org_id] }]),
     notBefore: new Date(now - DAY_MS),
     notAfter: new Date(now + days * DAY_MS),
     keys,
@@ -151,7 +151,23 @@ export const issueDeviceCertificate = async (
       .update(`${device.org_id}|${device.branch_id}|${device.device_id}`)
       .digest("hex")
       .slice(0, 32),
-    subject: `CN=${device.device_id},OU=${device.branch_id},O=${device.org_id}`,
+    /**
+     * ⚠ **A STRING SUBJECT DOES NOT PARSE INTO THREE ATTRIBUTES HERE, AND THE FIRST DRAFT SHIPPED
+     * ONE THAT DID NOT.** `` `CN=${id},OU=${branch},O=${org}` `` came back out of the issued
+     * certificate as `CN=id\,OU=branch` + `O=org` — the library escaped the first comma instead of
+     * splitting on it, so the branch was glued into the COMMON NAME and `01-F73` (b)'s "three
+     * facts" were two, one of them a concatenation. Nothing noticed until a consumer parsed the
+     * `CN` and compared it (`01-F72` (b)); a certificate is not self-checking, and a malformed DN
+     * validates and chains perfectly.
+     *
+     * The structured form is unambiguous by construction — each attribute is its own object, so
+     * there is no delimiter for anything to escape.
+     */
+    subject: new x509.Name([
+      { CN: [device.device_id] },
+      { OU: [device.branch_id] },
+      { O: [device.org_id] },
+    ]),
     issuer: new x509.X509Certificate(issuer.certPem).subject,
     notBefore: new Date(now - DAY_MS),
     notAfter: new Date(now + days * DAY_MS),

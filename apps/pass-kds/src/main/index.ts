@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { LanMeshConfig } from "@restos/device-config";
 import {
   AGING_THRESHOLDS_ENV,
   DEV_IDENTITY,
@@ -37,6 +38,7 @@ import {
 } from "../shared/ipc";
 import { describeCapacity } from "../shared/ticket-capacity";
 import { createLanMesh } from "./mesh";
+import type { LanMesh } from "./mesh.js";
 import { createPassIdentity } from "./pass-identity";
 import { passQueue } from "./pass-queue";
 import { createReadyMark } from "./ready-mark";
@@ -85,6 +87,22 @@ import { passWindowOptions } from "./window-options";
  * envelope. A gate here would be a gate no suite can drive (nothing in this file is importable —
  * it pulls `electron` at module scope) and two reads of one fact (`02-F45`).
  */
+
+/**
+ * `00 §5.7` — what the mesh ACTUALLY did, never what its configuration hoped for.
+ *
+ * ⚠ Found by the `20 §4.4` review lane, measured on a real boot: this line called
+ * `describeLanMesh(lan)`, which reads the CONFIG, so an unpaired device printed
+ * `LAN mesh: listening on 0.0.0.0:7311, dialing …` while nothing was listening and nothing was
+ * dialling. `01-F72` made refusing-to-mesh an ordinary outcome, so the config description stopped
+ * being a report and became a claim — the exact shape `00 §5.7` exists to forbid, on the surface
+ * an operator reads first.
+ */
+const describeMeshOutcome = (config: LanMeshConfig | null, mesh: LanMesh): string =>
+  mesh.why === undefined
+    ? describeLanMesh(config)
+    : `LAN mesh: NOT RUNNING — ${mesh.why}. This device sells and persists locally either way ` +
+      "(01-F17, 00 §5.1); what it does not do is reach the rest of the branch.";
 
 const require_ = createRequire(import.meta.url);
 const HERE = fileURLToPath(new URL(".", import.meta.url));
@@ -519,7 +537,7 @@ const boot = async (): Promise<void> => {
       `  ${describeAging(aging)}`,
       `  ${describeReadySignal(readySignal)}`,
       `  ${describeServeSignal(serveSignal)}`,
-      `  ${describeLanMesh(lan)}`,
+      `  ${describeMeshOutcome(lan, mesh)}`,
       env.RESTOS_CLOUD_URL === undefined
         ? "  uplink: cloud OFFLINE (RESTOS_CLOUD_URL unset). 01-F12/01-F13/01-F15 put the " +
           "counter's orders on the LAN mesh above, so with that configured this screen works " +

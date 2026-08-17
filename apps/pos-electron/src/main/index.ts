@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { LanMeshConfig } from "@restos/device-config";
 /**
  * The `00 §7` configuration this host shares with `apps/pass-kds` — `03-F14`/`03-F47`'s threshold
  * table, `03-F52`'s serve-signal assignment, the device's three ids, the density of its glass, and
@@ -67,6 +68,7 @@ import {
 import { openJobStore } from "./job-store";
 import { createLineAdvance } from "./line-advance";
 import { createLanMesh } from "./mesh";
+import type { LanMesh } from "./mesh.js";
 import {
   describePrinterLink,
   PRINTER_LINK_ENV,
@@ -109,6 +111,23 @@ import { refuseZeroTender } from "./zero-tender-guard";
  * ESM accordingly, where `__dirname` does not exist. It builds cleanly either way — the
  * failure is at load, and it takes the whole app down before a window is ever created.
  */
+
+/**
+ * `00 §5.7` — what the mesh ACTUALLY did, never what its configuration hoped for.
+ *
+ * ⚠ Found by the `20 §4.4` review lane, measured on a real boot: this line called
+ * `describeLanMesh(lan)`, which reads the CONFIG, so an unpaired device printed
+ * `LAN mesh: listening on 0.0.0.0:7311, dialing …` while nothing was listening and nothing was
+ * dialling. `01-F72` made refusing-to-mesh an ordinary outcome, so the config description stopped
+ * being a report and became a claim — the exact shape `00 §5.7` exists to forbid, on the surface
+ * an operator reads first.
+ */
+const describeMeshOutcome = (config: LanMeshConfig | null, mesh: LanMesh): string =>
+  mesh.why === undefined
+    ? describeLanMesh(config)
+    : `LAN mesh: NOT RUNNING — ${mesh.why}. This device sells and persists locally either way ` +
+      "(01-F17, 00 §5.1); what it does not do is reach the rest of the branch.";
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 /**
@@ -1013,7 +1032,7 @@ const counterBoot = app.whenReady().then(async () => {
    * So the line names the port this hub is listening on and every peer it will dial, and says out
    * loud when there are none.
    */
-  console.log(describeLanMesh(lan));
+  console.log(describeMeshOutcome(lan, mesh));
 
   /**
    * **Say what the grid will actually show, at boot.** Without this the till renders item names

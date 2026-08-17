@@ -10,7 +10,7 @@
 // Determinism is NOT required here (real time, real sockets) — the sim leg's virtual
 // clock owns that. All time still flows through the injected Clock so dial/reconnect
 // retries are driven by the wallClock adapter (X10) and never by bare timers.
-import { createHash } from "node:crypto";
+import { createHash, X509Certificate } from "node:crypto";
 import { createServer as createHttpsServer, type Server as HttpsServer } from "node:https";
 import type { AddressInfo } from "node:net";
 import {
@@ -31,6 +31,23 @@ import { type RawData, WebSocket, WebSocketServer } from "ws";
 const DEFAULT_RECONNECT_MS = 1_000;
 /** LAN dial-retry cadence — fast enough to reconnect to a respawned hub promptly (X10). */
 const LAN_DIAL_RETRY_MS = 250;
+/**
+ * Retry cadence after an ADMISSION refusal, as distinct from a connection failure.
+ *
+ * ⚠ Found and MEASURED by the `20 §4.4` review lane: a peer whose roster and ours disagree
+ * redialled at `LAN_DIAL_RETRY_MS` for ever — 20 `onPeerVisible`/`onPeerLost` pairs in 5 s at the
+ * acceptor, which is ~8 `recompute()`/`electHub` runs a second on the Electron main process,
+ * indefinitely, from one mis-rostered device. Roster skew is ORDINARY (a newly paired peer, a
+ * rotated certificate, a revocation applied at one end first), so this is a normal state and not
+ * an exotic one.
+ *
+ * The two cases want different cadences and that is the whole point: a REFUSED connection means
+ * "not up yet", where 250 ms is right and the peer is expected imminently; a REFUSED ADMISSION
+ * means "we disagree about who you are", which no amount of retrying fixes — it is fixed by a
+ * roster update, and a roster update calls `revalidate` and re-dials anyway. Backing off does not
+ * delay recovery; it stops a disagreement being a busy-loop.
+ */
+const LAN_ADMISSION_RETRY_MS = 5_000;
 /**
  * Every interface, because `01-F12` places discovery ON THE LAN and a branch's devices are separate
  * machines. Not exported, and deliberately not shared with `@restos/device-config`'s
@@ -128,6 +145,31 @@ export type LanAdmission = {
 const fingerprintOf = (der: Buffer): string => createHash("sha256").update(der).digest("hex");
 
 /**
+ * The `CN` of a certificate's subject, parsed from the DER.
+ *
+ * ⚠ **NOT `getPeerCertificate().subject.CN`, and that is a measurement rather than a preference.**
+ * Node's legacy peer-certificate object mis-splits a multi-attribute DN: for a certificate whose
+ * subject is `CN=b,OU=branch-test,O=org-test` it reports `{ CN: "b,OU=branch-test", O: "org-test" }`
+ * — the `CN` silently carries the next attribute with it. A comparison against that field is
+ * therefore false for every real certificate this product issues, which is a fail-CLOSED bug and
+ * so would have looked like "authentication is working" while refusing the whole branch.
+ * `X509Certificate` is the modern parser and returns one attribute per line.
+ */
+const subjectCommonName = (der: Buffer): string | null => {
+  try {
+    const line = new X509Certificate(der).subject
+      .split("\n")
+      .find((entry) => entry.startsWith("CN="));
+    return line === undefined ? null : line.slice(3);
+  } catch {
+    // Unparseable DER cannot be trusted, and it must not throw into the handshake path
+    // (`01-F17`): a peer that can crash the till by presenting a malformed certificate is a
+    // worse defect than the one this check closes.
+    return null;
+  }
+};
+
+/**
  * The authenticated identity behind a socket, or `null` to refuse.
  *
  * ⚠ **`getPeerCertificate()` returns `{}` — not `undefined` — when there is no peer certificate**,
@@ -142,7 +184,24 @@ const peerFromSocket = (
   if (der === undefined || der.length === 0) return null;
   const fingerprint = fingerprintOf(der);
   const peer = admission.admit(fingerprint);
-  return peer === null ? null : { peer, fingerprint };
+  if (peer === null) return null;
+  /**
+   * `01-F72` (b) says the session's identity is the PEER CERTIFICATE's subject, and the roster
+   * lookup alone does not read it — so `device_id` was written twice (the `CN` the issuer signed,
+   * and the roster row beside the fingerprint) with nothing comparing them. Found by the
+   * `20 §4.4` review lane, and it is the same two-writes-of-one-fact this change cites to justify
+   * keeping `device_class` OUT of the certificate.
+   *
+   * The cost of the mismatch is not cosmetic: a roster builder that mis-joins one fingerprint to
+   * another device's row makes this transport attribute one till's `push` and `event_batch` to a
+   * different origin — `01-F3` attribution and `01-F8`'s per-origin checkpoint both wrong,
+   * permanently, in an append-only ledger (`01-F1`), with every gate green.
+   *
+   * Refusing rather than preferring one: the two disagree, this device cannot know which is
+   * right, and admitting under either is admitting an identity nobody vouched for twice.
+   */
+  if (subjectCommonName(der) !== peer.device_id) return null;
+  return { peer, fingerprint };
 };
 
 /**
@@ -194,8 +253,6 @@ export const createWsLanTransport = (config: {
   const peerSockets = new Map<string, WebSocket>();
   // Every open/pending socket (dialed or accepted) — closed en masse on stop().
   const liveSockets = new Set<WebSocket>();
-  // Per-socket remote device_id, established at the handshake and never from a frame.
-  const socketDevice = new Map<WebSocket, string>();
   const dialTimers = new Set<ReturnType<Clock["setTimeout"]>>();
   // Live sockets keyed by the certificate fingerprint they were admitted on, so a roster change
   // can re-ask the SAME question that admitted them. Keyed by fingerprint rather than by
@@ -231,7 +288,6 @@ export const createWsLanTransport = (config: {
   ): void => {
     liveSockets.add(ws);
     socketFingerprint.set(ws, fingerprint);
-    socketDevice.set(ws, peer.device_id);
     peerSockets.set(peer.device_id, ws);
     ws.on("message", (raw: RawData) => {
       let frame: unknown;
@@ -260,7 +316,6 @@ export const createWsLanTransport = (config: {
     ws.on("error", () => undefined);
     ws.on("close", () => {
       liveSockets.delete(ws);
-      socketDevice.delete(ws);
       socketFingerprint.delete(ws);
       if (peerSockets.get(peer.device_id) === ws) {
         peerSockets.delete(peer.device_id);
@@ -294,11 +349,14 @@ export const createWsLanTransport = (config: {
        */
       checkServerIdentity: (() => undefined) as unknown as (s: string, c: unknown) => boolean,
     });
-    const redial = (): void => {
-      const timer = clock.setTimeout(() => {
-        dialTimers.delete(timer);
-        dialPeer(peer); // retry on drop / refused connection (01-F12 fallback dial loop)
-      }, LAN_DIAL_RETRY_MS);
+    const redial = (afterRefusal = false): void => {
+      const timer = clock.setTimeout(
+        () => {
+          dialTimers.delete(timer);
+          dialPeer(peer); // retry on drop / refused connection (01-F12 fallback dial loop)
+        },
+        afterRefusal ? LAN_ADMISSION_RETRY_MS : LAN_DIAL_RETRY_MS,
+      );
       dialTimers.add(timer);
     };
     /**
@@ -320,7 +378,7 @@ export const createWsLanTransport = (config: {
     ws.on("open", () => {
       if (certified === null) {
         // Refused: the acceptor is not in this device's roster. Closing rather than throwing —
-        // 01-F17: nothing about the LAN may take the till down.
+        // 01-F17: nothing about the LAN may take the till down. The close handler backs off.
         ws.close();
         return;
       }
@@ -331,7 +389,11 @@ export const createWsLanTransport = (config: {
     // simply not up yet certainly will be.
     ws.on("error", () => undefined);
     ws.on("close", () => {
-      if (certified === null && redial !== null && running) redial();
+      // `certified === null` covers both refusal directions: this device refused the acceptor
+      // (above), and the acceptor refused this device — which under TLS 1.3 arrives as a fatal
+      // alert AFTER our handshake completed, so it reaches us as a close and never as an `open`
+      // (`01-F72` (e·i)). Both are disagreements, not outages, and both back off.
+      if (certified === null && running) redial(true);
     });
   };
 
@@ -389,7 +451,6 @@ export const createWsLanTransport = (config: {
       for (const ws of liveSockets) ws.close();
       liveSockets.clear();
       peerSockets.clear();
-      socketDevice.clear();
       socketFingerprint.clear();
       server?.close();
       server = null;

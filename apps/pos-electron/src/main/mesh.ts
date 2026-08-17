@@ -85,16 +85,48 @@ const ARRIVAL_POLL_MS = 250;
 const NO_CLOUD_TOKEN = "no-cloud-token-configured";
 
 /**
- * `01-F13`'s first-ranked hub-eligible class, declared ONCE and read twice below.
+ * `01-F13`'s hub-eligible class for THIS build.
  *
- * ⚠ **It has to be one declaration, and a mutant is why.** The transport announces this to peers and
- * the session elects on it, so it is written in two places in this file — and changing only ONE of
- * them leaves a device that announces itself as a counter and elects as a kitchen. Measured: that
- * mutant fails six delivery assertions and **passes the election assertion**, because the election
- * reads the announce. Two writes of one fact disagreeing silently is `01-F60`'s enabled-set drift
- * inside a single function.
+ * ⚠ **This comment used to say "declared ONCE and read twice below … the transport announces this
+ * to peers and the session elects on it", with a mutation measurement attached. Both halves died
+ * with `01-F72`:** the announce frame is deleted, so this constant is read exactly once, and a
+ * peer's class now comes from the ROSTER (`01-F73` (b)) rather than from anything the peer says.
+ *
+ * That closed one two-writes-of-one-fact problem and opened another, which the `20 §4.4` review
+ * lane caught and MEASURED: this build constant and the roster's row for this same device can
+ * disagree, and under the deleted announce they could not. If the roster calls this device
+ * `kitchen` while the build says `counter_electron`, `electHub` runs on different inputs at each
+ * end — measured, each device elects the OTHER, so the branch gets no hub, no fan-out and no
+ * error anywhere. `reconcileClass` below is what refuses that.
  */
 const DEVICE_CLASS: DeviceClass = "counter_electron";
+
+/**
+ * `01-F13`/`01-F39` — refuse to mesh when this device's build disagrees with its own roster row.
+ *
+ * The roster is the authority (`01-F73` (b) put class there precisely so re-purposing a device
+ * does not need a re-issued credential), so the honest options were "trust the roster over the
+ * build" or "refuse". Refusing is chosen because the disagreement means one of the two is stale
+ * and this device cannot tell which — and a device that silently adopts a class it was not built
+ * for is `02-F31`'s tier confusion one layer down: a counter build serving as `kitchen` still
+ * prints, still sells, and is now hub-ineligible on a branch that may have no other candidate.
+ *
+ * It is `01-F17`-safe by construction: this returns a REASON, the caller turns it into an
+ * unmeshed device, and the till goes on selling with the degradation named (`00 §5.7`).
+ *
+ * A device absent from its own roster is NOT this failure — that is an unpaired or newly-revoked
+ * device, which `admit` already refuses at every handshake, and refusing to construct the mesh
+ * over it would give a revoked device a different observable state than `01-F48` specifies.
+ */
+const reconcileClass = (store: DeviceStore, built: DeviceClass): string | null => {
+  const mine = store.lanRoster.list().find((entry) => entry.device_id === store.identity.device_id);
+  if (mine === undefined) return null;
+  return mine.device_class === built
+    ? null
+    : `this build is ${built} but the branch roster calls this device ${mine.device_class} — ` +
+        "one of the two is stale, and meshing under a class the branch does not agree on gives " +
+        "the branch no hub at all (01-F13/01-F39). Re-pair the device or correct the roster.";
+};
 
 const nonEmpty = (raw: string | undefined): string | null => {
   const trimmed = (raw ?? "").trim();
@@ -141,6 +173,9 @@ export const createLanMesh = (opts: {
    */
   const credential = store.lanCredential();
   if (credential === null) return unmeshed("not paired — no LAN credential (01-F73)");
+
+  const classConflict = reconcileClass(store, DEVICE_CLASS);
+  if (classConflict !== null) return unmeshed(classConflict);
 
   /**
    * The port the socket ACTUALLY bound, or `null` while it has not.
