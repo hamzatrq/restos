@@ -657,7 +657,10 @@ const counterBoot = app.whenReady().then(async () => {
   // member out of `DEV_STAFF_PIN_ENV`, so the credential of the branch manager this till
   // authorizes against (`02-F22`, `main/authorize.ts`) is not the digits both cashiers type 20–60×
   // a shift. Handing a single `pin` here is the hole itself, whatever the package does downstream.
-  await seedDevStaff({
+  // The return is CONSUMED, not discarded — it is what the boot line below reports as `seeded`.
+  // `staff.ts` REFUSES rather than throwing (`01-F17`), so a discarded `false` is a till that
+  // wrote nothing and said nothing about it.
+  const staffSeeded = await seedDevStaff({
     registry: store.staff,
     branch_id: store.identity.branch_id,
     env: process.env,
@@ -1022,8 +1025,28 @@ const counterBoot = app.whenReady().then(async () => {
    * The line exists at all because this variable set CHANGED (August 2026): one `RESTOS_DEV_PIN`
    * used to open every row including the manager's, and a till upgraded without its two new keys
    * now seeds ONE CASHIER. That is the correct behaviour and it must not be a surprise.
+   *
+   * ⚠ **The DEVICE, not only the environment (2026-08-17).** `seedDevStaff` stands down on a device
+   * holding a roster it RECEIVED (R21/R28), and this line was decided entirely from `process.env` —
+   * so a pilot till would have gone on printing `staff: 3 seeded — Ayesha, Bilal, Hina` while the
+   * seed wrote nothing and none of the three was on it. It is read AFTER the seed above, which is
+   * the order that makes it true, and it now carries all three facts the package needs:
+   *
+   *   - `registry` — who is actually on this device (`00 §5.7`: report the device, not the request);
+   *   - `identity` — WHERE it stands, because `01-F26` makes a role a per-(user, location)
+   *     assignment and `02-F22`'s day-open clause is decided through `@restos/domain`'s `can()`,
+   *     which refuses a manager assigned to another branch;
+   *   - `seeded` — what the seed just REPORTED. ⚠ This return value was discarded here, and that is
+   *     how a refused write stayed silent: `staff.ts` refuses rather than throwing (`01-F17`), so a
+   *     till whose snapshot was rejected looked exactly like one whose snapshot landed.
    */
-  console.log(describeDevStaff(process.env));
+  console.log(
+    describeDevStaff(process.env, {
+      registry: store.staff,
+      identity: store.identity,
+      seeded: staffSeeded,
+    }),
+  );
 
   /**
    * `00 §5.7` a fifth time, and this one is the sharpest of them: **a branch with no LAN mesh looks

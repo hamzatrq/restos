@@ -234,7 +234,10 @@ const boot = async (): Promise<void> => {
    * the counter authorizes against — so a shared secret here is the counter's `02-F22` hole,
    * written from the kitchen.
    */
-  await seedDevStaff({
+  // The return is CONSUMED, not discarded — it is what the boot line reports as `seeded`.
+  // `staff.ts` REFUSES rather than throwing (`01-F17`), so a discarded `false` is a screen that
+  // wrote nothing and said nothing about it.
+  const staffSeeded = await seedDevStaff({
     registry: store.staff,
     branch_id: store.identity.branch_id,
     env,
@@ -556,8 +559,17 @@ const boot = async (): Promise<void> => {
        * missing member is discovered only when somebody needs them. The variable set CHANGED in
        * August 2026 — one `RESTOS_DEV_PIN` used to open every row — so a screen upgraded without
        * the two new keys seeds ONE CASHIER, which is correct and must not be a surprise.
+       *
+       * ⚠ **The DEVICE, not only the environment (2026-08-17).** `seedDevStaff` stands down on a
+       * device holding a roster it RECEIVED (R21/R28), and this line was decided entirely from
+       * `env` — so a pilot screen would have gone on printing `staff: 3 seeded — Ayesha, Bilal,
+       * Hina` while the seed wrote nothing. The line below already reads `store.staff`; this one
+       * now reads it too, plus WHERE this screen stands (`01-F26`'s per-location assignment, which
+       * `02-F22`'s day-open clause is decided against through `@restos/domain`'s `can()`) and what
+       * the seed REPORTED — a value both hosts discarded, which is how a write refused by
+       * `staff.ts` (`01-F17`: it refuses, it never throws) stayed invisible at boot.
        */
-      `  ${describeDevStaff(env)}`,
+      `  ${describeDevStaff(env, { registry: store.staff, identity: store.identity, seeded: staffSeeded })}`,
       store.staff.list().length === 0
         ? "  identity: 01-F26's PIN session runs here (03-F53), and THE STAFF REGISTRY IS EMPTY — " +
           "nobody can sign in, so no ready-mark and no handover can be written. See the staff " +

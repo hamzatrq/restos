@@ -24,6 +24,7 @@ export {
   DEV_PIN_ENV,
   DEV_STAFF,
   DEV_STAFF_PIN_ENV,
+  type DevStaffDevice,
   type DevStaffRegistry,
   describeDevStaff,
   seedDevStaff,

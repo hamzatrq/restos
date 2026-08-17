@@ -357,9 +357,22 @@ not corpus.
 
 Steps 0–2 are unblocked today. Steps 3+ require the rulings named.
 
-**Step 0 — stop the seed destroying a real roster.** Changes `packages/device-config/src/dev-staff.ts`
-(add the version guard `catalog.ts:241` already ships) and corrects the comment at `:207-211` to name
-the class it closes and the case it does not. Closes nothing; it is a prerequisite for every later
+**Step 0 — stop the seed destroying a real roster.** ✅ **LANDED 2026-08-17.** Changes
+`packages/device-config/src/dev-staff.ts` (~~add the version guard `catalog.ts:241` already ships~~ —
+⚠ **that instruction was WRONG and its own acceptance suite is what caught it**: R28 draws the line
+at RECEIVED vs NEVER-RECEIVED and not at a version number, and `staff.ts:231` refuses a snapshot only
+when `update.version < held`, so a roster published at **v0** applies, leaves `version()` at `0`, and
+is invisible to a `version() > 0` guard — which would then wipe it. The shipped guard stands down
+when the registry holds a member `DEV_STAFF` does not name, and the seed writes at the HELD version
+— ⚠ **this said *"a fixed `version: 0` so `01-F56`'s own monotonicity refuses it on any device a
+publisher has advanced"*, which described an answer that stood for one day and was measured wrong by
+an adversarial review**: every device the previous build ever ran holds `>= 1` because that build
+applied at `version() + 1`, so a `0` snapshot was refused `stale` there for ever and silently, a
+changed `RESTOS_DEV_PIN_*` never took effect again, and a till whose last old-build boot was the
+pre-August shared-PIN build kept one credential across all three rows unrepairably. It also was not
+the protection it looked like: a publisher emptying a roster at v0 leaves `version()` at `0`, so the
+fixture people landed anyway) and
+corrects the comment at `:207-211` to name the class it closes and the case it does not. Closes nothing; it is a prerequisite for every later
 step being observable. **Not protected** (`device-config` is not in `20 §4.4`'s list). **Preconditions:
 none.** ⚠ The guard alone leaves the seed's inflated version in place on existing dev tills — the
 step must also decide what a device holding v5 of fiction does when a real v1 arrives, which is the
@@ -571,29 +584,46 @@ Two acceptance suites were authored from spec text by separate sessions, each mu
 third, and the pair read by a completeness critic. What follows is what they found in **shipped code
 and in this plan** and were correctly forbidden from fixing. Each names its owner.
 
-1. **`describeDevStaff` takes an environment and no registry, and both hosts discard the seed's return
+1. ✅ **CLOSED 2026-08-17 by step 0.** `describeDevStaff(env, device?)` taking `{ registry, identity, seeded }` — both hosts pass
+   `store.staff`, read AFTER the seed, and a device holding a received roster prints that roster and
+   the fact that the seed stood down. `seedDevStaff` also consumes its `apply` result now
+   (`return registry.apply(…).applied`), which is the other half of the `catalog.ts:247` precedent.
+   The finding as filed:
+   **`describeDevStaff` takes an environment and no registry, and both hosts discard the seed's return
    value.** `apps/pos-electron/src/main/index.ts:660` and `apps/pass-kds/src/main/index.ts:237` are
    bare `await seedDevStaff({…})`; the boot line is `describeDevStaff(process.env)` at
    `index.ts:1026` / `:560`. So **after step 0's guard lands, a pilot till holding a real roster still
    prints `staff: 3 seeded — Ayesha, Bilal, Hina`** while the seed silently stood down and none of the
    three is on the device. The refusal becomes correct and stays invisible — which is trap 3's
    *"nothing on the glass will say so"* surviving trap 3's fix. **The precedent the plan names already
-   solves this half:** `apps/pos-electron/src/main/catalog.ts:248` is `return result.applied`, i.e.
+   solves this half:** `apps/pos-electron/src/main/catalog.ts:247` is `return result.applied`, i.e.
    `seedDevMenu` *consumes* the apply result, while `dev-staff.ts:137` types it `unknown`. Copying only
    the guard copies half the function. **Owner: step 0's implementer** (both changes are signatures,
    which is why no oracle could assert past the implication).
-2. **The same root cause produces an actively FALSE warning, and it is the loudest line on the boot
+2. ✅ **CLOSED 2026-08-17 by step 0**, in the same change as (1): on a device holding a received
+   roster the `02-F22` clause is decided from the DEVICE's assignments (manager **or** owner —
+   `02-F22` says *"manager/owner permission"*, and the env-path check used only `branch_manager`),
+   so the warning fires when it is true and is silent when it is not. The finding as filed:
+   **The same root cause produces an actively FALSE warning, and it is the loudest line on the boot
    output.** `describeDevStaff` decides its `02-F22` clause from `configured.some(m => m.role ===
    "branch_manager")` — the environment. A till holding a real roster *with* a manager, launched
    without `RESTOS_DEV_PIN_HINA`, prints *"⚠ NO BRANCH MANAGER IS SEEDED … no shift can open and no
    sale can be recorded"*. **Owner: step 0's implementer**, same change as (1).
-3. **`packages/device-config/CLAUDE.md:9` describes a retired credential shape.** It says *"`DEV_PIN_ENV`
+3. ✅ **CLOSED 2026-08-17 by step 0** — that bullet now states the live contract and says what it
+   used to say and why that was dangerous, rather than being quietly replaced. The finding as filed:
+   **`packages/device-config/CLAUDE.md:9` describes a retired credential shape.** It says *"`DEV_PIN_ENV`
    (`RESTOS_DEV_PIN`) carries it"* — one key for the whole roster. The live contract is
    `DEV_STAFF_PIN_ENV`, **one key per member, pairwise distinct, no fallback** (`dev-staff.ts:38-61`,
    `:114-118`) — precisely the authorization hole closed in August 2026. A session routed by that
    bullet configures one variable and gets one cashier while believing it has a roster. **Owner:
    step 0's implementer** (it is that package's guide).
-4. **Two shipped comments argue for the behaviour step 0 removes.** `dev-staff.ts:145-150` (*"`version()
+4. ✅ **CLOSED 2026-08-17 by step 0** — both now say what was true, what changed, and since when.
+   Two more were found in the same sweep and corrected the same way: the zero-member guard's own
+   comment at `dev-staff.ts:207-211`, which described the whole class (*"a launch that forgot the
+   variables would wipe a roster a real transport had delivered"*) while guarding one case of it,
+   and `CLAUDE.md`'s `01-F52` citation, which the oracle's header had already ruled wrong. The
+   finding as filed:
+   **Two shipped comments argue for the behaviour step 0 removes.** `dev-staff.ts:145-150` (*"`version()
    + 1`, never a literal, and this is the restart case rather than a style point"*) and
    `packages/device-config/CLAUDE.md:9` repeating it. Both are *correct about the failure they
    describe* and both become false the moment a guard lands. Left in place they are the class this
