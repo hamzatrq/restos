@@ -4,8 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "test": "vitest run",
-    "build": "echo 'no build yet — scaffold stub'"
+    "test": "echo 'No suite HERE. Issuance is exercised through its consumers, on the device-config precedent: packages/sync-client/src/__acceptance__/lan-admission.test.ts drives real certificates from this package over real TLS. A admits one, C refuses a foreign issuer, D refuses an expired one, E refuses a CN/roster mismatch. A is what now pins the SUBJECT: a certificate whose CN carries the branch attribute fails it, which is the defect that shipped here. OWED: a suite of this package own, for what a consumer cannot see - key algorithm and curve, serial derivation, validity arithmetic, basicConstraints and EKU. 24 section 3 puts it with a session that did not write this package.'",
+    "build": "echo 'no build yet \u2014 scaffold stub'"
   },
   "exports": {
     ".": "./src/index.ts"

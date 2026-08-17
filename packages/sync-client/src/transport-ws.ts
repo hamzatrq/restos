@@ -254,11 +254,23 @@ export const createWsLanTransport = (config: {
   // Every open/pending socket (dialed or accepted) — closed en masse on stop().
   const liveSockets = new Set<WebSocket>();
   const dialTimers = new Set<ReturnType<Clock["setTimeout"]>>();
-  // Live sockets keyed by the certificate fingerprint they were admitted on, so a roster change
-  // can re-ask the SAME question that admitted them. Keyed by fingerprint rather than by
-  // device_id because the fingerprint is what `admit` takes: re-deriving it from a stored
-  // device_id would be a second interpretation of admission, and two interpretations diverge.
-  const socketFingerprint = new Map<WebSocket, string>();
+  /**
+   * Live sockets and the WHOLE admission verdict each was adopted under — the fingerprint it was
+   * pinned on and the identity that pin resolved to.
+   *
+   * ⚠ **The verdict, not just the fingerprint, and a probe is why.** This held the fingerprint
+   * alone, so `revalidate` re-asked only *"is this certificate still admissible"*. `applyDelta`
+   * deliberately supports handing one certificate from a retired `device_id` to a new one
+   * (removals run before upserts precisely so that is expressible), and after such a delta the
+   * live socket was KEPT while `admit` had begun answering with a different device: measured, a
+   * ping arriving after the delta was attributed to a `device_id` the roster no longer contained
+   * at all, while a FRESH handshake with the same certificate was refused. That asymmetry is the
+   * `01-F3`/`01-F8` mis-attribution the CN check exists to prevent, surviving a roster change —
+   * one till's events landing under another origin's identity, permanently, in an append-only
+   * ledger. `device_class` had the same shape: captured at admission, never refreshed, so
+   * `electHub` could run on a class `01-F39` no longer assigns.
+   */
+  const socketAdmission = new Map<WebSocket, { fingerprint: string; peer: PeerInfo }>();
   let unsubscribeRoster: (() => void) | null = null;
 
   /**
@@ -271,8 +283,19 @@ export const createWsLanTransport = (config: {
    * exactly right — both mean "that device is no longer reachable on this branch".
    */
   const revalidate = (): void => {
-    for (const [ws, fingerprint] of [...socketFingerprint]) {
-      if (admission.admit(fingerprint) === null) ws.close();
+    for (const [ws, adopted] of [...socketAdmission]) {
+      const now = admission.admit(adopted.fingerprint);
+      // Refused outright, OR still admissible under a DIFFERENT identity or class than the one
+      // this socket was adopted under. The second is not a weaker case than the first: a session
+      // whose identity changed underneath it is attributing events to the wrong origin, which is
+      // worse than one that was simply cut off.
+      if (
+        now === null ||
+        now.device_id !== adopted.peer.device_id ||
+        now.device_class !== adopted.peer.device_class
+      ) {
+        ws.close();
+      }
     }
   };
 
@@ -287,7 +310,7 @@ export const createWsLanTransport = (config: {
     redial: (() => void) | null,
   ): void => {
     liveSockets.add(ws);
-    socketFingerprint.set(ws, fingerprint);
+    socketAdmission.set(ws, { fingerprint, peer });
     peerSockets.set(peer.device_id, ws);
     ws.on("message", (raw: RawData) => {
       let frame: unknown;
@@ -316,7 +339,7 @@ export const createWsLanTransport = (config: {
     ws.on("error", () => undefined);
     ws.on("close", () => {
       liveSockets.delete(ws);
-      socketFingerprint.delete(ws);
+      socketAdmission.delete(ws);
       if (peerSockets.get(peer.device_id) === ws) {
         peerSockets.delete(peer.device_id);
         handlers?.onPeerLost(peer.device_id); // visibility loss (socket closed)
@@ -451,7 +474,7 @@ export const createWsLanTransport = (config: {
       for (const ws of liveSockets) ws.close();
       liveSockets.clear();
       peerSockets.clear();
-      socketFingerprint.clear();
+      socketAdmission.clear();
       server?.close();
       server = null;
       httpsServer?.close();

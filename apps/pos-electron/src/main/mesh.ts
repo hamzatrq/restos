@@ -174,6 +174,25 @@ export const createLanMesh = (opts: {
   const credential = store.lanCredential();
   if (credential === null) return unmeshed("not paired — no LAN credential (01-F73)");
 
+  /**
+   * `01-F72` (d)'s OTHER half — *"a host that cannot present a credential, **or cannot read a
+   * roster**, does not listen and does not dial"*. Found by the admission suite's author: the
+   * credential half was enforced and this one was not, so a device with no roster bound a
+   * listener, dialled every peer and refused all of them.
+   *
+   * That was fail-closed in EFFECT and dishonest in report: the strip said `degraded`
+   * ("configured, and nobody answered"), which is the description of a branch whose other
+   * devices are switched off — not of a device that has never been told who its branch is.
+   * `00 §5.7` is about exactly that difference.
+   *
+   * ⚠ A never-received roster is `01-F74` (d)'s **absent**, which refuses. An OLD roster is not:
+   * it admits, because refusing the LAN because the internet is down is the offline-first breach
+   * `00 §5.1` forbids in its first sentence. `ageMs` returning `null` is the one case here.
+   */
+  if (store.lanRoster.ageMs(Date.now()) === null) {
+    return unmeshed("no branch roster received yet — this device knows of no peers (01-F74)");
+  }
+
   const classConflict = reconcileClass(store, DEVICE_CLASS);
   if (classConflict !== null) return unmeshed(classConflict);
 
