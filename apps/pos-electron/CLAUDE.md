@@ -178,6 +178,48 @@ have been **wrong** — driving a headless page you *set* the viewport to 1366x7
 it. Main is deliberately **not** real: it would drag in `better-sqlite3` and make a layout check
 cost a native rebuild.
 
+## ⚠ THE GATE IS RED ON `main` RIGHT NOW — 23 violations, and it is the rail WORKING (2026-08-17)
+
+Measured three consecutive times on `main` at `ec20faf`, deterministic at **23 fatal violations**,
+and re-measured on a stashed-clean tree at the same commit for attribution: **also 23**. Not caused
+by whatever you are about to do.
+
+**22 of the 23 are one thing: `tab:Sold out` on all eleven panels, two verdicts each.** The first is
+`EMPTY MATCH — the work area contains no INKED element at all`; the second is `02-F7's Sold-out grid
+drew no 86'd tile and no 01-F58 disputed tile, so this sweep measured a grid of plain tiles that says
+nothing about the state it exists to show`. **That is `24-F14` doing exactly its job.** The gate is
+not saying the tab is broken — it is refusing to report a green it did not measure, because the
+fixture never 86's anything, so the surface under test never enters the state it exists for. **The
+fixture is the coverage boundary, not the assertions**, and this is that sentence arriving as a red.
+Whoever owns `02-F7`'s toggle owns the fixture state; adding it is the fix, and silencing the row
+would be the one change that must not be made.
+
+**The 23rd is real and small:** `tablet-10.1 tab:Cash` `OVERFLOW y` — `main` holds 570 px of content
+in a 567 px box, 3 px clipped. `tablet-10.1` is `ships: true` and 125.7 mm tall is the height-binding
+panel the floor sits just under, so 3 px there is the floor being touched, not slack.
+
+**Why nobody noticed: `layout:check` is not in CI.** `.github/workflows/ci.yml` runs
+`docs:lint → typecheck → lint → test → build`. `tokens:check`, `strings:check`, `seams:check` and
+`layout:check` are `verify`-only, so this rail can sit red on the trunk indefinitely while every push
+is green. A rail that gates nothing is a rail that rots.
+
+### ⚠ AND A MEASUREMENT TRAP THAT COST TWO RUNS: DO NOT RUN THIS GATE ON AN UNDERSIZED DISPLAY
+
+Headless, the obvious command is `xvfb-run -a pnpm layout:check`. **`xvfb-run`'s default screen is
+1280x1024**, so a 1366-wide `BrowserWindow` is clamped by the X server and the gate reports
+`THE RENDERER DID NOT GET THE PANEL IT IS DESIGNED FOR: 1280x768 css px` — which is the gate
+correctly describing a defect that exists **only in your test rig**, and which reads exactly like the
+`useContentSize` defect this file spends a section on.
+
+Worse, it is **not deterministic**. Four runs on two trees at 1280 gave **38 / 24 / 24 / 24**
+violations with **18 / 4 / 0 / 0** `27-F4`/`27-F5` BROKEN verdicts on `tab:Orders1`, accusing the
+Orders tab of carrying a different SET of controls on `counter-1366` than on nine other panels. At
+`-screen 0 2560x1600x24` all of that vanishes and three runs agree at 23 with zero BROKEN. So a
+clamped window makes the gate flaky **and** makes it accuse a real FR of a violation that is an
+artifact — the most expensive possible failure mode for a rail, because the verdict text is
+persuasive and cites the right FR. **Run it on a display larger than the largest panel** (`ultrawide-32`
+is 1920 CSS px wide, so 2560x1600 clears everything), or on a real desktop session.
+
 ## ⚠ THE GATE JUDGED EVERY CONTROL AGAINST THE VIEWPORT ALONE — CLOSED (August 2026)
 
 `AppShell`'s `<main>` and `index.html`'s `html, body, #root` all set `overflow: hidden`, so there
