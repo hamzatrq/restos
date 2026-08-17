@@ -43,7 +43,7 @@ Restaurant OS for Pakistani restaurants. TypeScript monorepo (planned per `specs
 7. **English-only UI; user content is Unicode** and renders/prints faithfully (`00 §5.6`).
 8. **Server-side authorization always** via the `domain` permission matrix; client role claims are never trusted (`18 §5`).
 9. **Spec change before behavior change.** Behavior-carrying code changes cite their FR ID (e.g. `02-F9`) in tests/commits; no matching FR = write the spec PR first (`20 §4.1`).
-10. **Protected paths need senior review:** `domain`, `sync-client`, `sync-protocol`, `escpos`, tax, auth (`20 §4.4`).
+10. **Protected paths need an adversarial review in a SEPARATE agent context** — `domain`, `sync-client`, `sync-protocol`, `escpos`, tax, auth (`20 §4.4`). ⚠ This said *"senior review"* until August 2026; a founder ruling retired that leg because **there is no senior**, and the standing `20 §4.4` leg (1) — adversarial AI review in a fresh context, prompted to find why the change is wrong — became the binding gate rather than a precursor to one. Hand the reviewer the FR IDs and the diff, never your reasoning: the frame that produced a blind spot is the frame that hides it. `20 §4.4` records what is knowingly weaker about this than a human senior; read it before treating a SHIP verdict as clearance.
 
 ## Routing — read the owning spec before touching its area
 

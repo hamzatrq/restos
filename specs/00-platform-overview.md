@@ -91,7 +91,7 @@ flowchart TB
 
 | Concern | Choice | Notes |
 |---|---|---|
-| Language | TypeScript everywhere, `strict` | One language the whole team reviews deeply; AI-generated code, senior-reviewed |
+| Language | TypeScript everywhere, `strict` | One language the whole team reviews deeply; AI-generated code, reviewed per `20 §4.4` |
 | Monorepo | pnpm workspaces + Turborepo | Single repo for all apps/services/packages |
 | Backend runtime | Node.js (current LTS) | Fastify HTTP; WebSocket for sync + realtime |
 | Internal APIs | tRPC (shared types end-to-end) | REST + webhooks only where third parties require (foodpanda, WhatsApp, payments, FBR) |
@@ -129,7 +129,7 @@ restos/
   specs/       these documents
 ```
 
-- **Spec-driven, one module at a time.** A module's document is the contract; work is broken into tasks from it; AI writes the code; a senior reviews against the spec. Spec changes are edits to the document first.
+- **Spec-driven, one module at a time.** A module's document is the contract; work is broken into tasks from it; AI writes the code; `20 §4.4`'s review lane reads it against the spec. Spec changes are edits to the document first.
 - **Vertical slice first.** The first runnable milestone is a thread through the whole architecture, not a finished module: order entered on POS → kernel event persisted locally → replicated over LAN to a second device → KOT prints → syncs to cloud when WAN returns → visible in a trivial owner view. Every module then thickens an already-working spine.
 - **Testing strategy:**
   - *Durability:* automated crash/kill tests + physical plug-pull protocol on reference hardware (a confirmed order survives power loss, mid-print).

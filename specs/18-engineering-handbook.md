@@ -20,7 +20,7 @@
 | Dependency pinning | Exact versions (`save-exact=true` in `.npmrc`) | No `^`/`~` ranges; upgrades arrive only as Renovate PRs (weekly batch), reviewed like code |
 | Licenses | Allowlist: MIT, Apache-2.0, BSD-2/3, ISC, 0BSD, **SIL OFL 1.1 (font assets only)** | GPL/AGPL/SSPL NEVER in shipped code; CI license check blocks merge. OFL 1.1 is scoped to embedded FONT files because its reciprocity binds derivative *fonts* and never the software that renders them; it is not a licence for code and must not be read as one. Its one operative condition here is the Reserved Font Name: a modified copy may not keep the name, so a subset or re-hint of a bundled face must be renamed — which is also why `packages/ui/src/fonts` ships the upstream binaries unmodified. |
 | Secrets | `.env` local only (gitignored); platform secret store in cloud | Secrets NEVER in code, config files in repo, or logs; env access only through the validated env module (§5) |
-| Commits | Conventional Commits (`feat:`, `fix:`, `chore:`…), scope = package/app name | Enforced by commitlint in CI; trunk-based, short-lived branches, PR + senior review always |
+| Commits | Conventional Commits (`feat:`, `fix:`, `chore:`…), scope = package/app name | Enforced by commitlint in CI; trunk-based, short-lived branches, PR + review always — the review lane is `20 §4.4`'s and is declared only there |
 
 ## 2. Monorepo structure
 
@@ -68,7 +68,7 @@ restos/
 
 **Dependency direction (MUST):** `apps → packages`, `services → packages`, `packages → packages` (acyclic; `domain` imports no internal package). Apps NEVER import services or other apps; services NEVER import apps. Cross-module calls go through tRPC/events, never through direct imports across service boundaries. Enforced with Biome/dependency-cruiser check in CI.
 
-**`packages/domain` is sacred:** every event payload, entity, config schema, and permission rule lives there once. Apps and services import types and validators from it; nobody redeclares a domain type locally. A PR touching `domain` requires senior review, always.
+**`packages/domain` is sacred:** every event payload, entity, config schema, and permission rule lives there once. Apps and services import types and validators from it; nobody redeclares a domain type locally. A PR touching `domain` requires review, always — `domain` is a `20 §4.4` protected path and that section is the single declaration of what the lane is (as of August 2026 an adversarial agent review in a fresh context; there is no senior).
 
 ## 3. TypeScript rules
 
@@ -188,7 +188,7 @@ Anything not listed (or not added via §15) is not allowed. Grouped; exact pins 
 
 1. Check it isn't already solvable with an allowed package or 50 lines of our own code — bias: fewer dependencies; a small utility is written, not installed.
 2. License on the allowlist (§1); maintained (commits within 6 months) or trivially vendorable; no install scripts doing anything surprising.
-3. PR adds it to §14 with one line of justification; senior approves. Lockfile diff reviewed.
+3. PR adds it to §14 with one line of justification; the `20 §4.4` review lane approves. Lockfile diff reviewed — **and a dependency is one of the cases where the reviewer's job is not the diff**: it is the transitive tree, the install scripts and whether step 1's "or 50 lines of our own code" was answered honestly.
 4. Native-module deps (RN/Electron) additionally require a build-on-reference-hardware check before merge.
 
 ## 16. Open questions
