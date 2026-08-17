@@ -98,6 +98,7 @@ import {
   openStore,
   wallClock,
 } from "@restos/sync-client";
+import { createTestBranchPki } from "@restos/testing/lan-credentials";
 import { afterEach, describe, expect, it } from "vitest";
 
 // ── the identities under test ────────────────────────────────────────────────────────────────
@@ -111,6 +112,42 @@ const ORG = "00000000-0000-7000-8000-000000000001";
 const BRANCH = "00000000-0000-7000-8000-000000000002";
 const COUNTER_ID = "zzzz-counter-till-1";
 const KITCHEN_ID = "aaaa-kitchen-pass-1";
+
+/**
+ * `01-F72` — the LAN is mutually authenticated now, so a transport cannot be constructed without a
+ * credential. This is FIXTURE WIRING only: no assertion in this file was changed, added or removed
+ * (`24 §3`, oracle protection). One issuer, both devices, so they admit each other.
+ */
+const PKI = await createTestBranchPki([
+  { device_id: COUNTER_ID, device_class: "counter_electron" },
+  { device_id: KITCHEN_ID, device_class: "kitchen" },
+]);
+
+/**
+ * `01-F72`/`01-F73`/`01-F74` — PAIR the device. A store with no credential does not mesh at
+ * all (`01-F72` (d), fail closed) and a store with no roster admits nobody, so without this
+ * every convergence assertion below would fail for the right reason at the wrong layer.
+ *
+ * FIXTURE WIRING ONLY: no assertion in this file was changed, added or removed (`24 §3`).
+ */
+const pairDevice = (s: DeviceStore, device_id: string): void => {
+  const me = PKI.devices.find((d) => d.device_id === device_id);
+  if (me === undefined) throw new Error(`no test credential for ${device_id}`);
+  s.setLanCredential(me.credential);
+  s.lanRoster.apply(
+    {
+      kind: "snapshot",
+      version: 1,
+      entries: PKI.devices.map((d) => ({
+        device_id: d.device_id,
+        device_class: d.device_class,
+        cert_sha256: d.cert_sha256,
+        revoked: false,
+      })),
+    },
+    Date.now(),
+  );
+};
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -335,6 +372,7 @@ const openTempStore = (device_id: string): { store: DeviceStore; dir: string } =
     path: join(dir, "device.db"),
     identity: { org_id: ORG, branch_id: BRANCH, device_id },
   });
+  pairDevice(store, device_id);
   cleanups.push(() => {
     try {
       store.close();
@@ -349,7 +387,7 @@ const openTempStore = (device_id: string): { store: DeviceStore; dir: string } =
 const startKitchenPeer = (host: string, port: number): Peer => {
   const { store, dir } = openTempStore(KITCHEN_ID);
   const transport = createWsLanTransport({
-    self: { device_id: KITCHEN_ID, device_class: "kitchen" },
+    admission: PKI.admissionFor(KITCHEN_ID),
     listen_port: 0,
     peers: [{ device_id: COUNTER_ID, host, port }],
     clock: wallClock,

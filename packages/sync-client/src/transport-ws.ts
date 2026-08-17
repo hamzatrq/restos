@@ -10,6 +10,8 @@
 // Determinism is NOT required here (real time, real sockets) — the sim leg's virtual
 // clock owns that. All time still flows through the injected Clock so dial/reconnect
 // retries are driven by the wallClock adapter (X10) and never by bare timers.
+import { createHash } from "node:crypto";
+import { createServer as createHttpsServer, type Server as HttpsServer } from "node:https";
 import type { AddressInfo } from "node:net";
 import {
   type Clock,
@@ -56,20 +58,106 @@ const toBytes = (raw: RawData): Uint8Array =>
       : new Uint8Array(Buffer.from(raw as ArrayBuffer));
 
 // ── LAN transport ────────────────────────────────────────────────────────────
-// Every socket payload is wrapped so a transport-level PeerInfo announce (out-of-band,
-// NOT a PROTOCOL.md message — the closed set stays untouched, T-01-06 contract (f))
-// and a wire ProtocolMessage share one connection, distinguished by `t`. A single
-// WebSocket is used bidirectionally: the dialer and the acceptor both talk over it.
-type LanFrame = { t: "announce"; peer: PeerInfo } | { t: "wire"; message: ProtocolMessage };
+// A single mutually-authenticated WebSocket per peer, used bidirectionally: the dialer and the
+// acceptor both talk over it. Every payload is a wire ProtocolMessage — the PROTOCOL.md closed set
+// stays untouched (T-01-06 contract (f)) and this adapter still adds no message kind.
+//
+// (This paragraph used to describe an out-of-band `PeerInfo` announce sharing the connection with
+// wire messages, "distinguished by `t`". See `LanFrame` for why that frame is gone.)
+/**
+ * The one frame kind left on this wire.
+ *
+ * ⚠ **The `announce` frame is GONE (`01-F72` (b), August 2026).** It carried
+ * `{device_id, device_class}` and the transport believed it: `socketDevice.set(ws, info.device_id)`
+ * meant a peer's identity was whatever it typed, and `device_class` — which `01-F39` makes hub
+ * eligibility turn on — was self-declared, so anything on the shop Wi-Fi could announce itself
+ * `counter_electron` and win the election. Both facts now come from the peer CERTIFICATE and the
+ * roster it is pinned in, established during the TLS handshake before a byte of application data
+ * moves. Deleting the frame is the fix; validating it harder would have kept a self-declared
+ * identity and made it look defended.
+ *
+ * The discriminant survives with exactly one member so the shape can grow again without a format
+ * change. Identity does not come through it and may never again.
+ */
+type LanFrame = { t: "wire"; message: ProtocolMessage };
 
+/**
+ * `01-F73` — this device's own LAN credential. All three are PEM.
+ *
+ * The private key is generated on-device at pairing and never leaves it, so this type is only
+ * ever populated from local storage — nothing in this package transmits `key`, and nothing may.
+ */
+export type LanCredential = {
+  readonly cert: string;
+  readonly key: string;
+  /** The org's LAN issuer (`01-F73` (b)) — the chain half of `01-F74` (c)'s two-part test. */
+  readonly ca: string;
+};
+
+/**
+ * `01-F74` — the admission seam.
+ *
+ * **Required, never optional**, and that is the load-bearing property of this whole change: an
+ * optional credential is a credential a host can forget, and a host forgetting it is precisely
+ * what shipped (both Electron apps passed the literal `"lan-member-unauthenticated"`). A required
+ * parameter makes an unauthenticated LAN transport *unconstructable* rather than merely
+ * discouraged — which is also why it is not the kind of seam `seams:check` Rule B can miss.
+ */
+export type LanAdmission = {
+  readonly credential: LanCredential;
+  /**
+   * The decision, given the lowercase-hex SHA-256 of the peer certificate's DER. `null` refuses.
+   * Backed by `lan-roster.ts`; declared here as a function so this module depends on the
+   * *decision*, never on the store that makes it.
+   */
+  admit(cert_sha256: string): PeerInfo | null;
+  /**
+   * `01-F74` (e) — *"the authority drops the peer's session on applying it rather than at that
+   * peer's next voluntary contact"*. Called when the roster has changed; the transport re-runs
+   * `admit` for every live socket and closes the ones now refused.
+   *
+   * **Required, for the same reason `credential` is.** An optional eviction hook is one a host
+   * forgets, and the failure is invisible: everything keeps working, revocation just silently
+   * stops taking effect until a restart. That is `01-F48`'s bound quietly becoming unbounded —
+   * the shape of the very defect this FR was written against. Returns its unsubscribe.
+   */
+  subscribe(listener: () => void): () => void;
+};
+
+/** Lowercase hex SHA-256 of a DER certificate — the roster's key on both sides of the wire. */
+const fingerprintOf = (der: Buffer): string => createHash("sha256").update(der).digest("hex");
+
+/**
+ * The authenticated identity behind a socket, or `null` to refuse.
+ *
+ * ⚠ **`getPeerCertificate()` returns `{}` — not `undefined` — when there is no peer certificate**,
+ * so a truthiness check on the object admits an anonymous peer. The `raw` buffer is what is
+ * actually tested here, and its absence is a refusal.
+ */
+const peerFromSocket = (
+  socket: { getPeerCertificate?: (d?: boolean) => { raw?: Buffer } | null },
+  admission: LanAdmission,
+): { peer: PeerInfo; fingerprint: string } | null => {
+  const der = socket.getPeerCertificate?.()?.raw;
+  if (der === undefined || der.length === 0) return null;
+  const fingerprint = fingerprintOf(der);
+  const peer = admission.admit(fingerprint);
+  return peer === null ? null : { peer, fingerprint };
+};
+
+/**
+ * ⚠ `self` is GONE (August 2026). Its only use was building the `announce` frame, which is
+ * deleted — this device's identity now reaches a peer as its CERTIFICATE, which the peer
+ * resolves through its own roster. Keeping the field would have meant a device still declaring
+ * an identity nobody reads, and the next reader would reasonably assume something used it.
+ */
 export const createWsLanTransport = (config: {
-  self: PeerInfo;
   listen_port: number;
   /**
    * The interface to bind the listen socket to. Defaults to every interface (`0.0.0.0`) because
    * `01-F12` places discovery **on the LAN**.
    *
-   * ⚠ **PROTECTED PATH CHANGE, August 2026 (`20 §4.4` — senior review).** This argument did not
+   * ⚠ **PROTECTED PATH CHANGE, August 2026 (`20 §4.4` — review lane).** This argument did not
    * exist and the bind was the literal `"127.0.0.1"`, which made the whole LAN leg unreachable from
    * any other machine: measured with a control, a `127.0.0.1` listener refuses a connection to its
    * own host's LAN IPv4 with `ECONNREFUSED` while the identical listener on `0.0.0.0` accepts it.
@@ -82,30 +170,69 @@ export const createWsLanTransport = (config: {
    * rather than loopback on purpose — a default of `127.0.0.1` would silently reproduce the defect
    * in the next host that forgets the argument, and the failure mode is a mesh that starts, reports
    * itself listening, and is never reached.
+   *
+   * ⚠ Binding every interface is only safe **because** admission is mutual TLS against a pinned
+   * roster (`01-F72`). Before that, this default put an unauthenticated read-write port onto the
+   * branch money ledger on every interface. The two lines belong together and must move together.
    */
   listen_host?: string;
   peers: { device_id: string; host: string; port: number }[];
   clock: Clock;
+  /** `01-F72`/`01-F74`. REQUIRED — see `LanAdmission`. */
+  admission: LanAdmission;
   on_listening?: (port: number) => void;
 }): MeshTransport => {
-  const { self, listen_port, peers, clock } = config;
+  const { listen_port, peers, clock, admission } = config;
   const listenHost = config.listen_host ?? DEFAULT_LISTEN_HOST;
+  const { cert, key, ca } = admission.credential;
 
   let handlers: TransportHandlers | null = null;
   let running = false;
   let server: WebSocketServer | null = null;
-  // The live socket to reach each peer, keyed by its ANNOUNCED device_id.
+  let httpsServer: HttpsServer | null = null;
+  // The live socket to reach each peer, keyed by its CERTIFIED device_id.
   const peerSockets = new Map<string, WebSocket>();
   // Every open/pending socket (dialed or accepted) — closed en masse on stop().
   const liveSockets = new Set<WebSocket>();
-  // Per-socket remote device_id, learned when its announce frame lands.
+  // Per-socket remote device_id, established at the handshake and never from a frame.
   const socketDevice = new Map<WebSocket, string>();
   const dialTimers = new Set<ReturnType<Clock["setTimeout"]>>();
+  // Live sockets keyed by the certificate fingerprint they were admitted on, so a roster change
+  // can re-ask the SAME question that admitted them. Keyed by fingerprint rather than by
+  // device_id because the fingerprint is what `admit` takes: re-deriving it from a stored
+  // device_id would be a second interpretation of admission, and two interpretations diverge.
+  const socketFingerprint = new Map<WebSocket, string>();
+  let unsubscribeRoster: (() => void) | null = null;
 
-  const announceFrame = JSON.stringify({ t: "announce", peer: self } satisfies LanFrame);
+  /**
+   * `01-F74` (e). Re-ask admission for every live socket and close the refused ones — a device
+   * revoked mid-service loses its session now, not at its next voluntary contact.
+   *
+   * The peer's own `close` handler does the bookkeeping and fires `onPeerLost`, so the session
+   * learns about it through the path it already handles. That is why this needs no session
+   * change at all: eviction and an unplugged network cable look identical from above, which is
+   * exactly right — both mean "that device is no longer reachable on this branch".
+   */
+  const revalidate = (): void => {
+    for (const [ws, fingerprint] of [...socketFingerprint]) {
+      if (admission.admit(fingerprint) === null) ws.close();
+    }
+  };
 
-  const wireSocket = (ws: WebSocket, redial: (() => void) | null): void => {
+  /**
+   * Adopt an ADMITTED socket. Called only after the peer's certificate has been resolved through
+   * the roster, so `peer` is certified and `wireSocket` never learns an identity from the wire.
+   */
+  const wireSocket = (
+    ws: WebSocket,
+    peer: PeerInfo,
+    fingerprint: string,
+    redial: (() => void) | null,
+  ): void => {
     liveSockets.add(ws);
+    socketFingerprint.set(ws, fingerprint);
+    socketDevice.set(ws, peer.device_id);
+    peerSockets.set(peer.device_id, ws);
     ws.on("message", (raw: RawData) => {
       let frame: unknown;
       try {
@@ -118,51 +245,55 @@ export const createWsLanTransport = (config: {
       if (frame === null || typeof frame !== "object" || Array.isArray(frame) || !("t" in frame)) {
         return;
       }
-      const kind = (frame as { t: unknown }).t;
-      if (kind === "announce") {
-        const peer = (frame as { peer?: unknown }).peer;
-        if (
-          peer === null ||
-          typeof peer !== "object" ||
-          typeof (peer as { device_id?: unknown }).device_id !== "string" ||
-          typeof (peer as { device_class?: unknown }).device_class !== "string"
-        ) {
-          return; // an unvalidated PeerInfo announce is dropped, never trusted
-        }
-        const info = peer as PeerInfo;
-        socketDevice.set(ws, info.device_id);
-        peerSockets.set(info.device_id, ws);
-        handlers?.onPeerVisible(info);
-        return;
-      }
-      if (kind !== "wire") return;
-      const from = socketDevice.get(ws);
-      if (from === undefined) return;
+      if ((frame as { t: unknown }).t !== "wire") return;
       let message: ProtocolMessage;
       try {
         message = parseMessage((frame as { message?: unknown }).message);
       } catch {
         return; // a malformed wire message is dropped, never handed up (K-02)
       }
-      handlers?.onMessage(from, message);
+      // `from` is the CERTIFIED identity. Nothing in the frame can change it, which is what
+      // closes the forged-origin class across every session arm at once (`01-F72` (b)).
+      handlers?.onMessage(peer.device_id, message);
     });
     // 'error' is always followed by 'close' for ws — swallow so Node doesn't throw.
     ws.on("error", () => undefined);
     ws.on("close", () => {
       liveSockets.delete(ws);
-      const device_id = socketDevice.get(ws);
       socketDevice.delete(ws);
-      if (device_id !== undefined && peerSockets.get(device_id) === ws) {
-        peerSockets.delete(device_id);
-        handlers?.onPeerLost(device_id); // visibility loss (socket closed)
+      socketFingerprint.delete(ws);
+      if (peerSockets.get(peer.device_id) === ws) {
+        peerSockets.delete(peer.device_id);
+        handlers?.onPeerLost(peer.device_id); // visibility loss (socket closed)
       }
       if (redial !== null && running) redial();
     });
+    handlers?.onPeerVisible(peer);
   };
 
   const dialPeer = (peer: { device_id: string; host: string; port: number }): void => {
     if (!running) return;
-    const ws = new WebSocket(`ws://${peer.host}:${peer.port}`);
+    const ws = new WebSocket(`wss://${peer.host}:${peer.port}`, {
+      cert,
+      key,
+      ca: [ca],
+      /**
+       * A branch LAN has no DNS and no stable hostnames — devices are reached by IP out of
+       * `@restos/device-config`. Hostname verification would therefore fail on every legitimate
+       * connection, and the identity check it would have performed is done properly below,
+       * against the roster, on the certificate itself. Skipping it here is not a weakening: a
+       * hostname proves nothing about a device, and the fingerprint proves everything.
+       *
+       * ⚠ **THE CAST IS LOAD-BEARING AND THE PUBLISHED TYPE IS WRONG.** `@types/ws` declares
+       * this returning `boolean`; Node's `tls` treats ANY truthy return as the verification
+       * ERROR. Returning `true` to satisfy the type therefore refuses every connection —
+       * measured on a real `wss` server: with `() => true` both a rostered peer and an
+       * unrostered one failed identically, `ECONNRESET` at the acceptor, which reads as a
+       * network fault rather than as a type mistake. `undefined` is the correct runtime value;
+       * the cast moves the lie to the TYPE, where it is visible, instead of to the behaviour.
+       */
+      checkServerIdentity: (() => undefined) as unknown as (s: string, c: unknown) => boolean,
+    });
     const redial = (): void => {
       const timer = clock.setTimeout(() => {
         dialTimers.delete(timer);
@@ -170,8 +301,38 @@ export const createWsLanTransport = (config: {
       }, LAN_DIAL_RETRY_MS);
       dialTimers.add(timer);
     };
-    ws.on("open", () => ws.send(announceFrame)); // announce our identity on connect
-    wireSocket(ws, redial);
+    /**
+     * The upgrade response carries the TLS socket, which is where the SERVER's certificate is.
+     * The dialer authenticates the acceptor here — `01-F72` says *mutually*, and a client that
+     * only proved itself would happily hand its branch's events to any listener holding a
+     * roster-issued cert for some other device.
+     *
+     * ⚠ `configured` peers name a `device_id`; this deliberately does NOT check that the
+     * certified id equals it. A branch that re-images a till gets a new `device_id`
+     * (`01-N5`/`01-F64`) while `device-config` may still name the old one, and refusing there
+     * would take the LAN down over a configuration lag. The roster is the authority on WHO may
+     * be admitted; the peer list is only where to look.
+     */
+    let certified: { peer: PeerInfo; fingerprint: string } | null = null;
+    ws.on("upgrade", (res: { socket: unknown }) => {
+      certified = peerFromSocket(res.socket as Parameters<typeof peerFromSocket>[0], admission);
+    });
+    ws.on("open", () => {
+      if (certified === null) {
+        // Refused: the acceptor is not in this device's roster. Closing rather than throwing —
+        // 01-F17: nothing about the LAN may take the till down.
+        ws.close();
+        return;
+      }
+      wireSocket(ws, certified.peer, certified.fingerprint, redial);
+    });
+    // A handshake the acceptor refuses lands here (its fatal alert), never in `open`. Both
+    // outcomes must redial: a peer that was revoked may be re-admitted, and a peer that was
+    // simply not up yet certainly will be.
+    ws.on("error", () => undefined);
+    ws.on("close", () => {
+      if (certified === null && redial !== null && running) redial();
+    });
   };
 
   return {
@@ -181,14 +342,39 @@ export const createWsLanTransport = (config: {
       handlers = h;
       // Node's net server sets SO_REUSEADDR by default, so the freed port rebinds
       // promptly after a SIGKILL+respawn (X10) — the listen socket the contract needs.
-      const wss = new WebSocketServer({ port: listen_port, host: listenHost });
+      //
+      // `requestCert` + `rejectUnauthorized` are the CHAIN half of `01-F74` (c); the roster
+      // fingerprint pin below is the other half, and neither may be dropped as redundant. The
+      // chain alone admits anything the issuer ever signed, including a device revoked an hour
+      // ago — there is no CRL on a branch LAN and there is not going to be.
+      const https = createHttpsServer({
+        cert,
+        key,
+        ca: [ca],
+        requestCert: true,
+        rejectUnauthorized: true,
+      });
+      httpsServer = https;
+      const wss = new WebSocketServer({ server: https });
       server = wss;
-      wss.on("connection", (ws: WebSocket) => {
-        ws.send(announceFrame); // announce to the dialer, then talk bidirectionally
-        wireSocket(ws, null); // accepted sockets never redial — the dialer owns retry
+      wss.on("connection", (ws: WebSocket, req: { socket: unknown }) => {
+        const peer = peerFromSocket(req.socket as Parameters<typeof peerFromSocket>[0], admission);
+        if (peer === null) {
+          ws.close(); // not in the roster, or revoked in it — accepted sockets never redial
+          return;
+        }
+        wireSocket(ws, peer.peer, peer.fingerprint, null); // the dialer owns retry
       });
       wss.on("error", () => undefined);
-      wss.on("listening", () => config.on_listening?.((wss.address() as AddressInfo).port));
+      // A refused handshake reaches the HTTPS server, not the ws server. Swallowed for
+      // `01-F17`'s reason and because it is the EXPECTED path for an unrostered device: an
+      // attacker on the shop Wi-Fi must not be able to crash the till by dialling it.
+      https.on("tlsClientError", () => undefined);
+      https.on("error", () => undefined);
+      https.on("listening", () => config.on_listening?.((https.address() as AddressInfo).port));
+      https.listen(listen_port, listenHost);
+      // 01-F74 (e): a roster change re-asks admission for every live socket.
+      unsubscribeRoster = admission.subscribe(revalidate);
       for (const peer of peers) dialPeer(peer);
     },
 
@@ -196,14 +382,19 @@ export const createWsLanTransport = (config: {
       if (!running) return;
       running = false;
       handlers = null; // no onPeerLost / onMessage after stop
+      unsubscribeRoster?.();
+      unsubscribeRoster = null;
       for (const timer of dialTimers) clock.clearTimeout(timer);
       dialTimers.clear();
       for (const ws of liveSockets) ws.close();
       liveSockets.clear();
       peerSockets.clear();
       socketDevice.clear();
+      socketFingerprint.clear();
       server?.close();
       server = null;
+      httpsServer?.close();
+      httpsServer = null;
     },
 
     send(to, message) {

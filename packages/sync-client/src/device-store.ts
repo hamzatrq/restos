@@ -59,6 +59,8 @@ import {
   type UnboundDrawerRow,
   type UnboundRow,
 } from "./folds/shift-cash.js";
+import { LAN_CREDENTIAL_SCHEMA, readLanCredential, writeLanCredential } from "./lan-credential.js";
+import { createLanRoster, type LanRoster, ROSTER_SCHEMA } from "./lan-roster.js";
 import {
   createPinAttemptStore,
   PIN_ATTEMPTS_SCHEMA,
@@ -66,6 +68,7 @@ import {
 } from "./pin-attempts.js";
 import { createStaffRegistry, STAFF_SCHEMA, type StaffRegistry } from "./staff.js";
 import type { StorageAdapter } from "./storage.js";
+import type { LanCredential } from "./transport-ws.js";
 
 export class AckBeyondAppendedError extends Error {
   constructor(watermark: number, ownHighWater: number | null) {
@@ -241,6 +244,14 @@ export type DeviceStore = {
    */
   readonly staff: StaffRegistry;
   /**
+   * `01-F74` — the branch roster: who may be admitted to the LAN. Reference data on the same
+   * `01-F21` chain as the catalog and the staff registry, and never read by a fold for the same
+   * reason. It is DURABLE because the thing it replaces was not: `isRevokedPeer` was an in-memory
+   * `Set` of observed cloud refusals that died with the process, so a restarted hub re-admitted
+   * every revoked device on the branch — `01-F48`'s fail-closed rule inverted by its own cache.
+   */
+  readonly lanRoster: LanRoster;
+  /**
    * The durable PIN failure counter (01-F61), scoped per (device, user). Handed to
    * `createPinSession` by the host: a counter that lives only in the process is defeated by
    * relaunching the app, by the attacker standing at the device.
@@ -251,6 +262,13 @@ export type DeviceStore = {
    * cloud has issued, or null before any renewal — in which case the caller uses the
    * token it was constructed with.
    */
+  /**
+   * `01-F73` — the device's own LAN credential, or `null` if it has never been paired. Read at
+   * mesh construction; `01-F72` (d) makes `null` a device whose mesh does not run.
+   */
+  lanCredential(): LanCredential | null;
+  /** Store the credential pairing issued (`01-F73`). */
+  setLanCredential(credential: LanCredential): void;
   deviceToken(): string | null;
   /** Persist a renewal received from the cloud. Silent by design — no host involvement. */
   setDeviceToken(token: string): void;
@@ -280,16 +298,12 @@ export type DeviceStore = {
   /** Cloud session records a renewal the cloud issued FOR a relayed origin (01-F47) —
    * the origin's token never reaches the cloud, so this is its only delivery path. */
   noteRelayedRenewal(device_id: string, token: string): void;
-  /**
-   * Record that the CLOUD refused a relayed origin as revoked (01-F48 LAN half). The
-   * hub already learns this — the gateway quarantines that origin's events
-   * `origin_revoked` — but until now it only stopped RELAYING them while continuing to
-   * fan branch events back to that device over LAN. Revocation blocks READS as well as
-   * writes, so the mesh reads this set to evict the peer.
-   */
-  noteRevokedPeer(device_id: string): void;
-  /** Peers the cloud has refused as revoked; the mesh refuses them on LAN. */
-  isRevokedPeer(device_id: string): boolean;
+  // ⚠ `noteRevokedPeer`/`isRevokedPeer` are DELETED (01-F74 (c), August 2026). They were an
+  // in-memory `Set` of cloud refusals this process happened to observe — so a restarted hub
+  // re-admitted every revoked device on the branch, which is 01-F48's fail-closed rule inverted
+  // by its own cache, in the direction that grants access. `lanRoster` is the authority now: a
+  // durable ALLOW-list, complete by construction, whose failure direction is refusal. A durable
+  // copy of a negative cache would not have been the fix.
   /** Pending renewal for an origin; the mesh forwards it over LAN on the next beat. */
   relayedRenewal(device_id: string): string | null;
   /**
@@ -323,6 +337,8 @@ export type DeviceStore = {
 const SCHEMA = `
 ${CATALOG_SCHEMA}
 ${STAFF_SCHEMA}
+${ROSTER_SCHEMA}
+${LAN_CREDENTIAL_SCHEMA}
 ${PIN_ATTEMPTS_SCHEMA}
 CREATE TABLE IF NOT EXISTS events (
   id TEXT PRIMARY KEY,
@@ -557,6 +573,8 @@ export const createDeviceStore = (options: {
   // event permanent and therefore unrotatable. 01-F61: the PIN failure counter is durable
   // because an in-memory one is defeated by relaunching the app.
   const staff = createStaffRegistry(db as never);
+  // 01-F74: same chain again, and durable for the reason the field's own note gives.
+  const lanRoster = createLanRoster(db as never);
   const pinAttempts = createPinAttemptStore(db as never);
 
   const byId = db.prepare<[string], { envelope: string }>(
@@ -1196,7 +1214,6 @@ export const createDeviceStore = (options: {
   const relayCancelListeners = new Set<() => void>();
   const relayedCloudAcks = new Map<string, number>();
   const relayedRenewals = new Map<string, string>();
-  const revokedPeers = new Set<string>();
   // Per-origin cloud quarantine notices awaiting LAN forward (T-01-08): volatile
   // like the rest of the seam — the durable at-least-once guarantee lives in the
   // GATEWAY's kernel.quarantine_notices outbox (DEC-SYNC-008); this map only
@@ -1367,6 +1384,14 @@ export const createDeviceStore = (options: {
       writeBranchTime.run(offset_ms);
     },
 
+    lanCredential() {
+      return readLanCredential(db as never);
+    },
+
+    setLanCredential(credential) {
+      writeLanCredential(db as never, credential);
+    },
+
     deviceToken() {
       return readCredential.get()?.token ?? null;
     },
@@ -1380,6 +1405,7 @@ export const createDeviceStore = (options: {
 
     catalog,
     staff,
+    lanRoster,
     pinAttempts,
     branchTimeStatus() {
       const { offset_ms, acquired } = branchTime();
@@ -1439,17 +1465,6 @@ export const createDeviceStore = (options: {
 
     clearRelayedRenewal(device_id) {
       relayedRenewals.delete(device_id);
-    },
-
-    noteRevokedPeer(device_id) {
-      revokedPeers.add(device_id);
-      // A revoked device must not be handed a credential (the review's finding that
-      // B1 raised the severity of this gap). Drop any pending renewal for it.
-      relayedRenewals.delete(device_id);
-    },
-
-    isRevokedPeer(device_id) {
-      return revokedPeers.has(device_id);
     },
 
     noteRelayedQuarantineNotice(device_id, notice) {

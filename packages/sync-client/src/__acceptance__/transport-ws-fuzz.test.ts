@@ -14,10 +14,19 @@
 // inside the listener → uncaught → the run dies, RED. Post-fix: each malformed
 // frame is dropped, no peer registers, and a subsequent VALID announce still
 // registers — proving the handler stayed alive and selective, GREEN.
+
 import type { PeerInfo, TransportHandlers } from "@restos/sync-protocol";
+import { createTestBranchPki } from "@restos/testing/lan-credentials";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { createWsLanTransport, wallClock } from "../index.js";
+
+/**
+ * `01-F72` — a LAN transport cannot be constructed without a credential. FIXTURE WIRING only:
+ * this file fuzzes malformed FRAMES, and every frame it sends still arrives over an admitted
+ * socket, which is what the malformed-frame path is about.
+ */
+const PKI = await createTestBranchPki([{ device_id: "hub-k02", device_class: "counter_electron" }]);
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -51,7 +60,8 @@ describe("K-02 malformed LAN frames never crash the ws transport (01-F12)", () =
       resolvePort = resolve;
     });
     const transport = createWsLanTransport({
-      self,
+      // `01-F72` fixture wiring only — no assertion in this file changed (`24 §3`).
+      admission: PKI.admissionFor(self.device_id),
       listen_port: 0,
       peers: [],
       clock: wallClock,

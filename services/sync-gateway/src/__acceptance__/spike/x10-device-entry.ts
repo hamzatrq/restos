@@ -55,6 +55,34 @@ const main = (): void => {
   const cfg = parseArgv(process.argv.slice(2));
   const self: PeerInfo = { device_id: cfg.device_id, device_class: cfg.device_class };
 
+  /**
+   * `01-F72` — the credential and roster the parent minted for THIS child. Read here rather than
+   * passed through `ChildConfig` because they are PEM blobs and `toArgv` is a positional argv
+   * encoding; an environment variable is what the shipped hosts read too.
+   */
+  const pki = (() => {
+    const cert = process.env.RESTOS_LAN_CERT ?? "";
+    const key = process.env.RESTOS_LAN_KEY ?? "";
+    const ca = process.env.RESTOS_LAN_CA ?? "";
+    const roster = JSON.parse(process.env.RESTOS_LAN_ROSTER ?? "[]") as {
+      device_id: string;
+      device_class: PeerInfo["device_class"];
+      cert_sha256: string;
+    }[];
+    return {
+      admissionFor: (_self: string) => ({
+        credential: { cert, key, ca },
+        admit: (cert_sha256: string): PeerInfo | null => {
+          const found = roster.find((r) => r.cert_sha256 === cert_sha256);
+          return found === undefined
+            ? null
+            : { device_id: found.device_id, device_class: found.device_class };
+        },
+        subscribe: () => () => {},
+      }),
+    };
+  })();
+
   const store = openStore({
     path: cfg.db,
     identity: { org_id: cfg.org, branch_id: cfg.branch, device_id: cfg.device_id },
@@ -78,7 +106,10 @@ const main = (): void => {
   };
 
   const lanTransport = createWsLanTransport({
-    self,
+    // `01-F72` — the spike mints its own branch PKI at start-up (see `pki` above). Fixture
+    // wiring: the spike proves LAN convergence between real processes, and it now proves it
+    // over an authenticated channel, which is what the product does.
+    admission: pki.admissionFor(cfg.device_id),
     listen_port: cfg.lan_role === "hub" ? cfg.lan_port : 0,
     peers: cfg.lan_peers,
     clock: wallClock,

@@ -33,6 +33,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DeviceClass } from "@restos/domain";
+import { createTestBranchPki } from "@restos/testing/lan-credentials";
 import type { FastifyInstance } from "fastify";
 import { afterAll, describe, expect, it } from "vitest";
 import { buildServer } from "../../server.js";
@@ -69,6 +70,37 @@ const HUB = { id: "dev-a", cls: "counter_electron" as DeviceClass };
 const F1 = { id: "dev-b", cls: "counter_rn" as DeviceClass };
 const F2 = { id: "dev-c", cls: "kitchen" as DeviceClass };
 
+/**
+ * `01-F72` — one branch issuer for all three children (see the `env` note at the spawn site).
+ * Top-level await: the spike's devices are real processes and they have to admit each other
+ * before any of this file's convergence assertions can mean anything.
+ */
+const LAN_PKI = await createTestBranchPki([
+  { device_id: HUB.id, device_class: HUB.cls },
+  { device_id: F1.id, device_class: F1.cls },
+  { device_id: F2.id, device_class: F2.cls },
+]);
+
+const lanCredentialEnvFor = (device_id: string): Record<string, string> => {
+  const device = LAN_PKI.devices.find((d) => d.device_id === device_id);
+  if (device === undefined) throw new Error(`x10: no LAN credential for ${device_id}`);
+  return {
+    RESTOS_LAN_CERT: device.credential.cert,
+    RESTOS_LAN_KEY: device.credential.key,
+    RESTOS_LAN_CA: device.credential.ca,
+    // The whole branch roster, so a child can admit its peers. In the product this arrives as
+    // signed reference data (`01-F74`); here it is handed down, because the spike is about LAN
+    // CONVERGENCE and not about roster distribution.
+    RESTOS_LAN_ROSTER: JSON.stringify(
+      LAN_PKI.devices.map((d) => ({
+        device_id: d.device_id,
+        device_class: d.device_class,
+        cert_sha256: d.cert_sha256,
+      })),
+    ),
+  };
+};
+
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 // ── a spawned device child, with a bounded IPC inbox ─────────────────────────
@@ -90,7 +122,15 @@ class Child {
     this.proc = spawn(process.execPath, ["--import", "tsx", ENTRY, ...toArgv(config)], {
       cwd: GATEWAY_CWD,
       stdio: ["ignore", "pipe", "pipe", "ipc"],
-      env: process.env,
+      /**
+       * `01-F72` — every child's LAN transport needs a credential from the SAME branch issuer,
+       * or they cannot admit each other. The parent mints the branch PKI once and hands each
+       * child its own certificate through the environment; a child minting its own issuer would
+       * produce N branches of one device each, which converges trivially and proves nothing.
+       *
+       * FIXTURE WIRING ONLY — no assertion in this spike changed (`24 §3`).
+       */
+      env: { ...process.env, ...lanCredentialEnvFor(config.device_id) },
     });
     this.proc.stderr?.on("data", (d: Buffer) => {
       this.stderr += d.toString();

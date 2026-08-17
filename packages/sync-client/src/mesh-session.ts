@@ -311,12 +311,6 @@ export const createMeshSession = (options: {
         dropFollower(device_id); // HEARTBEAT_MISSED_LIMIT unanswered → heartbeats stop
         return;
       }
-      // Re-check every beat, not only at hello: revocation can land mid-session, and
-      // the ≤30 s bound of 01-F48 is about wherever a path reaches the device.
-      if (store.isRevokedPeer(device_id)) {
-        dropFollower(device_id);
-        return;
-      }
       live.missed += 1;
       // BRANCH time, not this device's raw clock (01-F43). The hub SERVES the branch
       // clock rather than defining it, so what it publishes must be the branch's time —
@@ -385,14 +379,15 @@ export const createMeshSession = (options: {
   /** Re-run the pure election over (visible ∖ suspects) ∪ self and adopt the result. */
   const recompute = (): void => {
     if (!running) return;
-    // A revoked peer is not a candidate. Without this the eviction survives only until
-    // the next election: the revoked device is typically a `counter_electron`, which
-    // electHub ranks highest, so on any hub reboot it WINS — and every device,
-    // including the one that evicted it, then hellos to it, pushes to it, and takes its
-    // fan-out. Revocation's read block was fully reversed by a routine re-election.
-    const peers = [...visible.values()].filter(
-      (p) => !suspects.has(p.device_id) && !store.isRevokedPeer(p.device_id),
-    );
+    // ⚠ The revocation filter that stood here is GONE, and it is not a weakening (01-F72/F74,
+    // August 2026). `visible` now contains only peers the TRANSPORT admitted against the pinned
+    // roster, so a revoked device has no socket to be visible through — and when a revocation
+    // lands mid-session the transport closes that socket, which removes it from `visible` by the
+    // path this session already handles. The defect the old comment described (a revoked
+    // `counter_electron` winning the next election, because electHub ranks it highest) is closed
+    // one layer down and closed harder: it cannot connect at all, so it cannot be a candidate,
+    // and it also cannot push, read, or be relayed to.
+    const peers = [...visible.values()].filter((p) => !suspects.has(p.device_id));
     const winner = electHub([...peers, self]);
     if (winner === self.device_id) {
       if (state === "follower" || state === "candidate") teardownFollower();
@@ -440,14 +435,11 @@ export const createMeshSession = (options: {
     if (suspects.delete(from)) recompute();
     switch (message.kind) {
       case "hello": {
-        // 01-F48 LAN half: revocation blocks READS as well as writes. A peer the cloud
-        // has refused as revoked is not admitted, so it receives no fan-out and no
-        // window replay over LAN. Without this the hub kept feeding the branch's events
-        // to a device the cloud had already cut off.
-        if (store.isRevokedPeer(from)) {
-          dropFollower(from);
-          return;
-        }
+        // 01-F48's LAN half is enforced at the TRANSPORT now (01-F72/F74): `from` is the
+        // peer's CERTIFIED identity and the socket only exists because the roster admitted that
+        // certificate. A revoked device never reaches this arm — which is stronger than the
+        // check that stood here, because that one could only refuse peers this hub had happened
+        // to observe the cloud refusing.
         if (state === "hub" || state === "solo") admitFollower(from);
         return;
       }
@@ -468,11 +460,9 @@ export const createMeshSession = (options: {
       case "push": {
         // Ingest from any device while acting as hub — id-dedupe keeps the mesh
         // converging even when session bookkeeping is mid-repair.
-        // Revocation blocks WRITES too (01-F48). A dropped follower keeps draining on
-        // its own 2 s tick until its loss timer trips, and without this the hub ingested
-        // those events, acked them, and fanned them to every other device — putting a
-        // revoked device's events in every local ledger on the branch.
-        if (store.isRevokedPeer(from)) return;
+        // The write half of the same law, enforced at the same place: a revoked device holds
+        // no admitted socket, so it cannot reach this arm to have its events ingested, acked
+        // and fanned to every local ledger on the branch.
         if (state === "hub" || state === "solo") handlePush(from, message.events);
         return;
       }
@@ -555,8 +545,11 @@ export const createMeshSession = (options: {
       // is un-renewable until the registry's recorded expiry comes due again — across
       // its own real expiry. A waiter tablet leaving range is the normal case, not the
       // edge case. Retention is bounded by branch size, the token is that peer's own
-      // and valid, and the security case that mattered — a REVOKED peer — is handled
-      // by `noteRevokedPeer`, which drops it.
+      // and valid, and the security case that mattered — a REVOKED peer — is handled by
+      // `cloud-session.ts` dropping the pending renewal on an `origin_revoked` refusal.
+      // (That line used to read `noteRevokedPeer`, which no longer exists: `01-F74` replaced
+      // the in-memory revocation cache with the durable roster, and the renewal drop is the
+      // one thing the old call did that the roster does not.)
       dropFollower(device_id);
       if (device_id === hubTarget) {
         onHubLoss(false);

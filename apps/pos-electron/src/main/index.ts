@@ -252,12 +252,18 @@ const AGE_TICK_MS = 1_000;
  * model") would survive any spelling.
  */
 const kotCapability = () => {
-  // biome-ignore lint/complexity/useLiteralKeys: `printer-default.test.ts:50` greps THIS SOURCE
-  // with /RESTOS_KOT_PRINTER"\]\s*\?\?\s*"([^"]*)"/ to read the shipped default, and its 24-F14
+  // `printer-default.test.ts:50` greps THIS SOURCE with
+  // /RESTOS_KOT_PRINTER"\]\s*\?\?\s*"([^"]*)"/ to read the shipped default, and its 24-F14
   // empty-match guard fails when the pattern matches nothing. Dot access is semantically
   // identical and silently blinds that guard — measured: the guard failed the moment this line
-  // was rewritten, which is the tripwire doing exactly its job. The coupling is documented above
-  // and is deliberate; the style rule loses to the correctness guard.
+  // was rewritten, which is the tripwire doing exactly its job. The coupling is deliberate; the
+  // style rule loses to the correctness guard.
+  //
+  // ⚠ The suppression must be the line IMMEDIATELY above the statement — Biome applies it to the
+  // next line only, so the explanation cannot sit between them. It did, and biome reported the
+  // suppression itself as unused while still reporting the rule: a suppression far enough from
+  // its statement is not a suppression, it is a comment.
+  // biome-ignore lint/complexity/useLiteralKeys: see the note above — a 24-F14 grep reads this line
   const configured = (process.env["RESTOS_KOT_PRINTER"] ?? "no printer configured").trim();
   return printerCapability(configured === "" ? "no printer configured" : configured);
 };

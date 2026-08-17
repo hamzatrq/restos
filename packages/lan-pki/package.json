@@ -1,0 +1,19 @@
+{
+  "name": "@restos/lan-pki",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "build": "echo 'no build yet — scaffold stub'"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@peculiar/x509": "1.12.3"
+  },
+  "devDependencies": {
+    "vitest": "3.2.4"
+  }
+}

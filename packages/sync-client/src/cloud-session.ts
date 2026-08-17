@@ -607,12 +607,13 @@ export const createCloudSession = (options: {
             suppressedOrigins.add(held.device_id);
           }
           // 01-F48's LAN half, as far as the hub can observe it: the cloud has told us
-          // this origin is REVOKED. Suppressing relay only stopped its writes; the
-          // device was still receiving the branch's events over LAN. Revocation blocks
-          // READS too, so the mesh evicts it. (A revoked device that never pushes is
-          // still invisible here — closing that needs registry distribution over LAN,
-          // which remains the filed gap.)
-          if (message.reason === "origin_revoked") store.noteRevokedPeer(held.device_id);
+          // This origin is REVOKED. LAN eviction is no longer this line's job — the roster
+          // owns it (01-F74) and the transport enforces it — but one thing still is: a revoked
+          // device must not be handed a CREDENTIAL. The hub re-forwards a pending relayed
+          // renewal on every heartbeat by design (01-F47, so a tablet that was off the LAN can
+          // still renew), so without this drop a token minted moments before its device was
+          // revoked would keep being offered to it.
+          if (message.reason === "origin_revoked") store.clearRelayedRenewal(held.device_id);
           store.noteRelayedQuarantineNotice(held.device_id, {
             event_id: message.event_id,
             reason: message.reason,

@@ -1,6 +1,7 @@
 import type { LanMeshConfig } from "@restos/device-config";
 import type { DeviceClass } from "@restos/domain";
 import {
+  createLanAdmission,
   createMeshSession,
   createWsLanTransport,
   type DeviceStore,
@@ -45,6 +46,12 @@ import type { DeviceState } from "../shared/ipc";
 /** `00 §5.7`'s two mesh facts. `cloud` is `main/sync.ts`'s and is never decided here. */
 export type LanMesh = {
   reachability: () => Pick<DeviceState, "lan" | "hub">;
+  /**
+   * Why this device is not meshing, or `null` when it is. `00 §5.7`: "no LAN configured" and
+   * "configured, but this device has never been paired" are the two states an operator most
+   * needs told apart, and both render as `lan: down`.
+   */
+  why?: string;
   /** `01-F15`'s host-app fast path: an event was durably appended — propagate now. */
   notifyAppended: () => void;
   stop: () => void;
@@ -62,21 +69,20 @@ export type LanMesh = {
 const ARRIVAL_POLL_MS = 250;
 
 /**
- * ⚠ **AN EMPTY TOKEN SILENTLY EXCLUDES THIS DEVICE FROM ITS OWN BRANCH.**
+ * The `hello` message carries `token: z.string().min(1)` (`packages/sync-protocol/src/messages.ts`),
+ * so an EMPTY token fails `parseMessage` and the frame is dropped in a bare `catch` — a device that
+ * dials, appears in `peers`, computes a hub, reports itself healthy and receives nothing, for ever,
+ * with no error anywhere. This is the filler for a device that legitimately holds no cloud token
+ * (`01-F47`): LAN-only tills exist, and a branch may run with the WAN never configured at all.
  *
- * `hello` carries `token: z.string().min(1)` (`packages/sync-protocol/src/messages.ts`), so an
- * empty one fails `parseMessage` and `transport-ws.ts` drops the frame in a bare `catch`. The
- * device then dials, announces, appears in `peers`, computes a hub, reports `{lan: "ok", hub: "ok"}`
- * — and receives **nothing, forever, with no error anywhere**. It was measured, on this shape, by
- * the session that wrote this file's acceptance suite.
- *
- * So an unconfigured `RESTOS_DEVICE_TOKEN` must not become `""`. It becomes this, and that invents
- * no admission policy: the corpus does not rule on LAN admission at all, and `mesh-session.ts`'s
- * own hello arm *"inspects no token"* — this is a wire-schema minimum, not a credential. Where the
- * device HAS a token (`01-F47`, including a silently renewed one) `mesh-session.ts` prefers it over
- * whatever is passed here. **LAN peer authentication is an open gap and is reported, not invented.**
+ * ⚠ **This constant used to be `"lan-member-unauthenticated"`, and the name was accurate: LAN
+ * admission was an open gap and this string was what a peer presented instead of a credential.**
+ * It is not a credential now either — but it is no longer standing in for one. Admission happens
+ * at the TLS handshake against the pinned roster (`01-F72`/`01-F74`) before this message exists,
+ * so what rides here is only the cloud credential a hub may relay upward for renewal, and its
+ * absence means "nothing to relay" rather than "nobody checked".
  */
-const LAN_HELLO_PLACEHOLDER = "lan-member-unauthenticated";
+const NO_CLOUD_TOKEN = "no-cloud-token-configured";
 
 /**
  * `01-F13`'s first-ranked hub-eligible class, declared ONCE and read twice below.
@@ -103,8 +109,11 @@ const nonEmpty = (raw: string | undefined): string | null => {
  * sells all day either way. This is the ONE honest constant pair in this file; every other answer
  * below is computed.
  */
-const unmeshed = (): LanMesh => ({
+const unmeshed = (why: string): LanMesh => ({
+  // `00 §5.7` — the REASON is carried so the boot line can name it. Both facts stay `down`
+  // because both are true: this device is on no branch wire and in contact with no hub.
   reachability: () => ({ lan: "down", hub: "down" }),
+  why,
   notifyAppended: () => {},
   stop: () => {},
 });
@@ -117,7 +126,21 @@ export const createLanMesh = (opts: {
   onChanged: () => void;
 }): LanMesh => {
   const { store, lan, onChanged } = opts;
-  if (lan === null || lan === undefined) return unmeshed();
+  if (lan === null || lan === undefined) return unmeshed("no LAN configured");
+
+  /**
+   * `01-F72` (d) — **fail closed, and closed is SILENT rather than degraded.** A device with no
+   * pairing-issued credential does not listen and does not dial. There is no unauthenticated mode
+   * to fall back to, because an unauthenticated mode is exactly what shipped: this file used to
+   * hand the transport the literal string `"lan-member-unauthenticated"` and open a read-write
+   * port onto the branch money ledger on every interface.
+   *
+   * `01-F72` (e) — and it never blocks a sale. An unpaired device is a solo till: it persists
+   * locally (`01-F2`) and drains to cloud when it has WAN. What it loses is the branch LAN, and
+   * `00 §5.7` requires that loss to be NAMED rather than left looking like a quiet branch.
+   */
+  const credential = store.lanCredential();
+  if (credential === null) return unmeshed("not paired — no LAN credential (01-F73)");
 
   /**
    * The port the socket ACTUALLY bound, or `null` while it has not.
@@ -132,13 +155,16 @@ export const createLanMesh = (opts: {
   let boundPort: number | null = null;
 
   const transport = createWsLanTransport({
-    self: { device_id: store.identity.device_id, device_class: DEVICE_CLASS },
     // `01-F12` places discovery ON THE LAN. Passed explicitly rather than defaulted so the two
     // ends of one branch read the same declaration (`@restos/device-config`) and cannot drift.
     listen_host: lan.listen_host,
     listen_port: lan.listen_port,
     peers: lan.peers.map((peer) => ({ ...peer })),
     clock: wallClock,
+    // `01-F72` — REQUIRED. There is no unauthenticated construction of this transport, which is
+    // the whole point: the credential cannot be forgotten, only absent, and absent is handled
+    // above by not building a mesh at all.
+    admission: createLanAdmission(credential, store.lanRoster),
     on_listening: (port) => {
       boundPort = port;
     },
@@ -149,7 +175,7 @@ export const createLanMesh = (opts: {
     transport,
     clock: wallClock,
     device_class: DEVICE_CLASS,
-    token: nonEmpty(process.env.RESTOS_DEVICE_TOKEN) ?? LAN_HELLO_PLACEHOLDER,
+    token: nonEmpty(process.env.RESTOS_DEVICE_TOKEN) ?? NO_CLOUD_TOKEN,
   });
   session.start();
 

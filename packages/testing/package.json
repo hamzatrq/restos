@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "build": "echo 'no build yet — scaffold stub'"
+    "build": "echo 'no build yet \u2014 scaffold stub'"
   },
   "dependencies": {
     "@restos/domain": "workspace:*",
     "@restos/escpos": "workspace:*",
+    "@restos/lan-pki": "workspace:*",
     "@restos/sync-protocol": "workspace:*"
   },
   "devDependencies": {
@@ -17,6 +18,7 @@
     "vitest": "4.1.10"
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./lan-credentials": "./src/lan-credentials.ts"
   }
 }

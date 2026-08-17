@@ -67,6 +67,20 @@ export type {
 export { billedEffectiveFromJsonLines } from "./folds/merge.js";
 export { electHub } from "./hub-election.js";
 export {
+  createLanAdmission,
+  LAN_CREDENTIAL_SCHEMA,
+  readLanCredential,
+  writeLanCredential,
+} from "./lan-credential.js";
+export type {
+  LanRoster,
+  RosterApplyResult,
+  RosterDelta,
+  RosterEntry,
+  RosterSnapshot,
+  RosterUpdate,
+} from "./lan-roster.js";
+export {
   createMeshSession,
   HEARTBEAT_INTERVAL_MS,
   HEARTBEAT_MISSED_LIMIT,
@@ -114,5 +128,6 @@ export { createOpSqliteStorageAdapter, type OpSqliteDb } from "./storage-op-sqli
 // `{ path }` to it. The RN half is `./rn` — deliberately NOT re-exported here, because reaching
 // it through this entry would put `better-sqlite3` back in a phone's bundle.
 export { type OpenStoreOptions, openStore } from "./store.js";
+export type { LanAdmission, LanCredential } from "./transport-ws.js";
 export { createWsCloudTransport, createWsLanTransport } from "./transport-ws.js";
 export { wallClock } from "./wall-clock.js";
