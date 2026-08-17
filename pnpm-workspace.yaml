@@ -3,6 +3,19 @@ packages:
   - "services/*"
   - "packages/*"
 
-# better-sqlite3 needs its install script (prebuilt native binding, 18 §4 device DB)
+# pnpm 10 blocks every postinstall script unless it is named here. Both entries are REQUIRED and
+# each fails in a way that does not look like a missing install script:
+#
+#   better-sqlite3 — the prebuilt native binding for the device DB (18 §4). Without it the store
+#     cannot open at all, which at least fails loudly at the first test that opens one.
+#
+#   electron — downloads the platform binary. ⚠ Blocked, `require("electron")` still returns a
+#     PATH, so nothing fails at install or at import; the npm shim then tries to fetch the binary
+#     when a test SPAWNS it. Measured in CI 2026-08-17: `apps/pass-kds`'s real-Electron CONTROL row
+#     failed with "the configured launch never printed its boot line", and the only clue anywhere
+#     in the log was one line reading `Downloading Electron binary...`. It passed on every dev
+#     machine, because a 220 MB binary fetched once stays fetched — so this is invisible to anyone
+#     who does not install from scratch, which is exactly what CI does and nobody else does.
 onlyBuiltDependencies:
   - better-sqlite3
+  - electron
