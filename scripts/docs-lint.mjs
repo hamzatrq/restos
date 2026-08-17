@@ -172,6 +172,15 @@ if (agents.split("\n").length > 120)
       // — `customer.created` and `customer.address_added`, both already in the `01 §4` catalog.
       // So this name can never become an emission and listing it costs the rule nothing.
       "customer.record",
+      // `14-F39`'s action, passing this block's own test the same way: `user.manage` is the
+      // infinitive of an act, while the event beside it in the family is 00 §6's
+      // `noun.verb_past` — `user.changed`, already catalogued — so this name can never become
+      // an emission. Counted rather than asserted, because "third" was written here first and
+      // is off by one: the pattern `14-F30` named is `device.manage` versus `device.revoked`,
+      // and the entries above are `availability.toggle` (02-F46) and `customer.record`
+      // (02-F47) — so `user.manage` is the FOURTH instance, not the third. It is listed by
+      // name rather than wildcarded so a real `user.*` event landing later is still caught.
+      "user.manage",
       "order.create",
       "shift.open_close",
       "cash.count",
