@@ -486,7 +486,7 @@ describe("§B — `01-F76`: an artifact is (resource, scope), and a version is m
     expect(ids(b)).toEqual([fx.sana]);
   });
 
-  it("B3 treats one branch's version number as meaningless for another: A's v3 is not B's base", async () => {
+  it("B3 treats one branch's version number as meaningless for another: A's v3 is neither B's base nor B's bytes", async () => {
     // "Two devices both at 'staff v7' hold different bytes when they are at different branches —
     // safe ONLY because the key travels with the number and is compared." A device holding branch
     // A's version 3 that asked branch B's artifact must not be handed a delta from a base B never
@@ -497,6 +497,76 @@ describe("§B — `01-F76`: an artifact is (resource, scope), and a version is m
     const page = await api.staffPage(db, fx.scopeB, 3, 0);
     expect(page.form).toBe("snapshot");
     expect(ids(page)).toEqual([fx.sana]);
+
+    // ⚠ AND THE HALF THAT FIXTURE CANNOT REACH, WHICH IS THE ONE `01-F76`'s SENTENCE IS ABOUT.
+    // Branch B is at version 1 there, so what refuses above is "3 is a base nobody published" —
+    // C5's claim, not this one. MEASURED: a delta-base check that keeps its version predicate and
+    // drops its SCOPE predicate passes every assertion above, because `have_version <= current`
+    // refuses first and the scope is never reached. The FR is about a number BOTH branches have
+    // REACHED, so the rest of this test carries two branches to the same version, where the scope
+    // of the query is the only thing left that can keep them apart.
+    //
+    // It is B3's OWN fixture and not an extension of the main one, because B1 asserts branch B is
+    // at version ONE ("three publishes to A leave B at one, not at four") — publishing B further
+    // would move another test's expected value.
+    const org = `org-b3-${newId()}`;
+    const left = `branch-b3-left-${newId()}`;
+    const right = `branch-b3-right-${newId()}`;
+    await addOrg(org);
+    await addBranch(org, left);
+    await addBranch(org, right);
+    const scopeLeft: StaffScope = { org_id: org, branch_id: left };
+    const scopeRight: StaffScope = { org_id: org, branch_id: right };
+    // ONE hash for the four of them, computed once — `hashPin` is deliberately ~0.4 s (`01-F61`'s
+    // floor) and nothing here reads a hash (D2/D6 own that claim). Every one of them still CARRIES
+    // a credential row: whether an `active` member with no credential may be published at all is
+    // unruled (§6 of the header), and a fixture that took a side would red a correct implementation.
+    const pin = await hashPin("7391");
+    const person = async (branch: string, name: string, ordinal: number): Promise<string> => {
+      const user_id = await addPerson({
+        org_id: org,
+        display_name: name,
+        email: null,
+        grid_ordinal: ordinal,
+        assignments: [{ role: "cashier", branch_id: branch }],
+      });
+      await api.setPinCredential(db, { org_id: org, user_id, pin_hash: pin, now: T });
+      return user_id;
+    };
+    // No ordinal repeats ACROSS the two branches: `01-F75` leaves a wider uniqueness rule to
+    // storage (§4 of the header), so a stricter choice than per-artifact must pass this too.
+    const leftOne = await person(left, "Left One", 10);
+    const leftTwo = await person(left, "Left Two", 20);
+    const rightOne = await person(right, "Right One", 110);
+    const rightTwo = await person(right, "Right Two", 120);
+    // Both rosters carried to FOUR versions, so 3 is a number both branches have reached — the
+    // `have_version <= current` guard cannot be what answers, and version 4 gives the delta from
+    // base 3 something to carry.
+    const publishFour = async (scope: StaffScope, one: string, two: string): Promise<void> => {
+      expect(await api.publishStaffRoster(db, scope, [one], { now: T })).toBe(1);
+      expect(await api.publishStaffRoster(db, scope, [two], { now: T + 1 })).toBe(2);
+      expect(await api.publishStaffRoster(db, scope, [one], { now: T + 2 })).toBe(3);
+      expect(await api.publishStaffRoster(db, scope, [two], { now: T + 3 })).toBe(4);
+    };
+    await publishFour(scopeLeft, leftOne, leftTwo);
+    await publishFour(scopeRight, rightOne, rightTwo);
+
+    // One number, two artifacts, different bytes — the FR's own sentence, at a version both hold.
+    const leftAtThree = await api.staffPage(db, scopeLeft, 0, 0, 3);
+    const rightAtThree = await api.staffPage(db, scopeRight, 0, 0, 3);
+    expect(leftAtThree.version).toBe(3);
+    expect(rightAtThree.version).toBe(3);
+    expect(ids(leftAtThree)).toEqual([leftOne, leftTwo].sort());
+    expect(ids(rightAtThree)).toEqual([rightOne, rightTwo].sort());
+
+    // And a device at 3 is continued from the log of the branch it ASKED: the delta carries what
+    // that branch published at 4 and never what the other branch did. A device that applied the
+    // other branch's edits onto its own roster would be holding people it must never authenticate
+    // — R25's blast radius, crossed by a missing predicate rather than by a missing check.
+    const delta = await api.staffPage(db, scopeRight, 3, 0);
+    expect(delta.form).toBe("delta");
+    expect(delta.base_version).toBe(3);
+    expect(ids(delta)).toEqual([rightTwo]);
   });
 
   it("B4 keys the artifact STRUCTURALLY: ('X-ab','c') and ('X-a','bc') are different artifacts", async () => {
