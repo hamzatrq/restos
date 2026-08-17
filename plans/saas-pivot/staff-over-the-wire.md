@@ -391,6 +391,31 @@ protected-path review wants; and the schema lands in the same PR as the procedur
 which is `audit.print_acknowledged`'s recorded shape (a key in a registry with no producer) and the
 blind spot `seams:check` names as *"a missing PRODUCER for an event type"*.
 
+**Step 2b — the authorization subject reads the participation status (`11-F22`). ⚠ NEW, added
+2026-08-17, and it is a FAIL-OPEN sitting between two steps that were sequenced without it.**
+Changes `packages/domain/src/permissions.ts` — `AuthSubject` is `{ user_id, org_id, assignments }`
+(`:63-67`) and has **no status field**, so it cannot express the clause `11-F22` spends a paragraph
+writing the wide way on purpose: *"the authorization subject reads the status too, so an inactive
+person authorizes nothing even from a session that predates her deactivation."*
+**PROTECTED — `packages/domain`.** **Preconditions:** none beyond `11-F22`, which is written.
+**`24 §3` acceptance suite from a separate session.**
+
+**Why it is a step and not a clause inside step 7.** Today `subjectOf` (`apps/pos-electron/src/main/authorize.ts:254`)
+builds `can()`'s subject from the roster row, so **hard removal is the mechanism that currently ends a
+person's authority** — the row goes, `assignments` becomes `[]`, the next write fails closed. R26 and
+`11-F22` retain the row. So the instant step 7 lands the retained-row shape, every deactivated
+person gets her full assignments back and goes on recording payments, pay-outs and refunds into an
+append-only ledger (`01-F1`, `02-F41`), permanently and uncorrectably. `11-F22` states this outcome
+itself: *"removing the mechanism that fails closed without replacing it is not a smaller change than
+the defect it fixes."*
+
+**The ordering constraint, stated as a constraint rather than left to the reader:** 2b lands **before**
+step 7, and step 7 must not ship the retained-row shape until it has. Sequencing them the other way
+is green at every gate and is a live authorization hole for the length of the gap. It was found by the
+step-2 oracle author, who correctly asserted **nothing** about it rather than inventing the field's
+shape — it is `11-F22`'s change, not `14-F39`'s, and taking it as a drive-by inside step 2 would put a
+second protected-path change to the matrix under a review scoped to a permission row.
+
 **Step 3 — the cloud version axis and the PIN credential.** Changes `services/sync-gateway/drizzle/`
 (a new migration: the `user_versions`/`user_entries` publication pair on `catalog_versions`'s shape at
 `schema.ts:191,217`, the PIN credential per S1, a deactivation representation per S4), `schema.ts`,
@@ -537,6 +562,71 @@ relaying hub can carry reference data without forging it.
 14. **`grep` under a C locale.** Every file quoted here contains `—`, `⚠`, `₨`. Without `-a` you get
     `Binary file … matches` **instead of** the matching lines, and a live call site reads as a dead
     export. Reproduced in this repo on `apps/backoffice/src/components/catalog-screen.tsx`.
+
+---
+
+## Findings from the oracle round (2026-08-17) — reported, not fixed
+
+Two acceptance suites were authored from spec text by separate sessions, each mutation-proved by a
+third, and the pair read by a completeness critic. What follows is what they found in **shipped code
+and in this plan** and were correctly forbidden from fixing. Each names its owner.
+
+1. **`describeDevStaff` takes an environment and no registry, and both hosts discard the seed's return
+   value.** `apps/pos-electron/src/main/index.ts:660` and `apps/pass-kds/src/main/index.ts:237` are
+   bare `await seedDevStaff({…})`; the boot line is `describeDevStaff(process.env)` at
+   `index.ts:1026` / `:560`. So **after step 0's guard lands, a pilot till holding a real roster still
+   prints `staff: 3 seeded — Ayesha, Bilal, Hina`** while the seed silently stood down and none of the
+   three is on the device. The refusal becomes correct and stays invisible — which is trap 3's
+   *"nothing on the glass will say so"* surviving trap 3's fix. **The precedent the plan names already
+   solves this half:** `apps/pos-electron/src/main/catalog.ts:248` is `return result.applied`, i.e.
+   `seedDevMenu` *consumes* the apply result, while `dev-staff.ts:137` types it `unknown`. Copying only
+   the guard copies half the function. **Owner: step 0's implementer** (both changes are signatures,
+   which is why no oracle could assert past the implication).
+2. **The same root cause produces an actively FALSE warning, and it is the loudest line on the boot
+   output.** `describeDevStaff` decides its `02-F22` clause from `configured.some(m => m.role ===
+   "branch_manager")` — the environment. A till holding a real roster *with* a manager, launched
+   without `RESTOS_DEV_PIN_HINA`, prints *"⚠ NO BRANCH MANAGER IS SEEDED … no shift can open and no
+   sale can be recorded"*. **Owner: step 0's implementer**, same change as (1).
+3. **`packages/device-config/CLAUDE.md:9` describes a retired credential shape.** It says *"`DEV_PIN_ENV`
+   (`RESTOS_DEV_PIN`) carries it"* — one key for the whole roster. The live contract is
+   `DEV_STAFF_PIN_ENV`, **one key per member, pairwise distinct, no fallback** (`dev-staff.ts:38-61`,
+   `:114-118`) — precisely the authorization hole closed in August 2026. A session routed by that
+   bullet configures one variable and gets one cashier while believing it has a roster. **Owner:
+   step 0's implementer** (it is that package's guide).
+4. **Two shipped comments argue for the behaviour step 0 removes.** `dev-staff.ts:145-150` (*"`version()
+   + 1`, never a literal, and this is the restart case rather than a style point"*) and
+   `packages/device-config/CLAUDE.md:9` repeating it. Both are *correct about the failure they
+   describe* and both become false the moment a guard lands. Left in place they are the class this
+   repo names as worse than no comment — a shipped comment stating a rule that no longer holds retires
+   the assertion the next session would otherwise write. **Owner: step 0's implementer, in the same
+   change.**
+5. **`packages/domain/src/__acceptance__/device-permission.test.ts` has a vacuity hole, and its own
+   published mutation table proves it arithmetically.** Six of its refusal tests never assert
+   `device.manage` is IN `PERMISSION_ACTIONS`, so they are satisfied by `can()`'s unknown-action
+   fallback and **survive the mutant that deletes the action they are about** — `packages/domain/CLAUDE.md`'s
+   row D3 reports 5 of 15 killed, and the 5 are exactly the allow-expecting assertions plus the two
+   declaration tests. Not a defect in the shipped matrix, and **not this round's to fix — it is another
+   session's oracle (`24 §3`)**. It generalises to every FR-decided action: `device.manage`,
+   `availability.toggle`, `customer.record` and now `user.manage` all have the shape. **Owner: that
+   suite's test session.**
+6. **Nothing asserts `user.manage` ever acquires a production caller** — trap 1, and `seams:check` is
+   structurally blind because *an added member of an existing array is not a new export*, so Rule A
+   gains no candidate and Rule B gains no seam. A matrix row with no caller is the wave's recurring
+   defect, instance sixteen. **Owner: step 4's suite**, which builds the procedure — recorded here so
+   it is not discovered as a clean run.
+7. **`14-F39` gives no reason for `deny` rather than `escalate`, where `14-F30` did.** `14-F30` argued
+   it (`02-F20` enumerates the escalating actions and this is not among them; the cloud plane cannot
+   collect a second credential anyway). `14-F39` writes the word three times. The cells are
+   transcribable so the assertions are safe, but the argument is one block up — and it is *stronger*
+   here, since `14-F14` is a back-office surface with no second credential to collect. **Owner: doc 14,
+   one clause, next time it is edited.**
+8. **Trap 6's remaining legs are unowned.** Step 0 covers the seed collision and the not-stale
+   direction; `needs_snapshot` and a removal are exercised by no oracle in the tree. Correctly outside
+   step 0's declared scope — **tracked here rather than closed**, and step 7's suite is the natural home.
+9. **`readFileSync` at `describe` scope takes a whole file down as `Tests: no tests` rather than as a
+   named failure.** Found and fixed inside the step-2 suite before it shipped. It is still red so
+   nothing passes silently, but this repo's own record is that a `no tests` line gets misread inside a
+   big turbo run. The pattern appears in several suites here. **Owner: nobody yet; a rail could see it.**
 
 ---
 
