@@ -422,12 +422,46 @@ append-only ledger (`01-F1`, `02-F41`), permanently and uncorrectably. `11-F22` 
 itself: *"removing the mechanism that fails closed without replacing it is not a smaller change than
 the defect it fixes."*
 
-**The ordering constraint, stated as a constraint rather than left to the reader:** 2b lands **before**
-step 7, and step 7 must not ship the retained-row shape until it has. Sequencing them the other way
-is green at every gate and is a live authorization hole for the length of the gap. It was found by the
-step-2 oracle author, who correctly asserted **nothing** about it rather than inventing the field's
-shape — it is `11-F22`'s change, not `14-F39`'s, and taking it as a drive-by inside step 2 would put a
-second protected-path change to the matrix under a review scoped to a permission row.
+~~**The ordering constraint:** 2b lands **before** step 7~~ ⚠ **CORRECTED 2026-08-17, and the
+correction is this plan's error rather than an implementer's. 2b lands WITH its producers, and there
+is no slot in the sequence as written where it is both safe and shippable.** It was BUILT — oracle
+45/45, `packages/domain` 610/610, mutation-proved out-of-tree with `permissions.ts` byte-identical
+after — reviewed, and **REJECTED for landing alone**, on `feat/step-2b-participation-status`
+(`4edc2d2`), with the oracle moved there beside it.
+
+**Why, measured on both planes rather than argued:** there are exactly **two** `AuthSubject`
+construction sites — `apps/pos-electron/src/main/authorize.ts:251`, which builds from `StaffMember`
+(no status field), and `services/api/src/trpc.ts:221`, which builds from the cloud user row (no
+person status column exists at all; `15-F25`'s `status` is on `orgs`). `11-F22` forecloses defaulting
+an absent status to `active` **by name**, and `01-F48` says where state cannot be read participation
+is refused. Both are correct, and together they mean every subject the product assembles today is
+refused: **`apps/pos-electron` 1188 passed → 63 failed, `services/api` 287 passed → 98 failed**, with
+failing titles that are the product — *"order → line → confirm → settle, all allowed"*, *"a manager's
+`day.opened` lands in the ledger"*, *"a CASHIER may 86, which is the cell that makes the feature
+exist at all"*. That is `01-F17` and commandment 4: a restaurant that cannot sell.
+
+**The original constraint was necessary and not sufficient**, and the missing half is the shape of
+this whole wave's named defect seen from the other side. This plan wrote *"Preconditions: none beyond
+`11-F22`, which is written"* — true of the SPEC and false of the PRODUCT, because a guard needs a
+producer as surely as a subsystem needs a caller. **A fail-closed guard shipped ahead of the fact it
+reads is not a partial fix; it is an outage.** So: 2b's real precondition is **step 3** (the cloud
+column, for `trpc.ts`) **and step 7** (the roster field, for `authorize.ts`), and it merges in the
+same change as the second of those. Landing it for one plane only is worse than either — half the
+product enforcing and half not, with no gate able to see which.
+
+The original reasoning stands and is why 2b exists at all: today **hard removal** is what ends a
+person's authority, `11-F22` and R26 **retain** the row, so step 7 must not ship the retained-row
+shape without 2b — the authorization hole is real, it is just latent until the producer lands, which
+is exactly what makes the two inseparable. It was found by the step-2 oracle author, who correctly
+asserted **nothing** about it rather than inventing the field's shape — it is `11-F22`'s change, not
+`14-F39`'s, and taking it as a drive-by inside step 2 would have put a second protected-path change
+to the matrix under a review scoped to a permission row.
+
+⚠ **One thing the branch is owed before it merges**, flagged by its implementer rather than
+discovered later: `permission-matrix.test.ts` declares its own structural `AuthSubject` mirror, so
+setting `status` in its builder is `TS2353` until the mirror carries the field. Nothing reads the
+member and no assertion moved, but that edit is beyond the sanctioned builder-only scope and wants
+the oracle owner's sign-off.
 
 **Step 3 — the cloud version axis and the PIN credential.** Changes `services/sync-gateway/drizzle/`
 (a new migration: the `user_versions`/`user_entries` publication pair on `catalog_versions`'s shape at
