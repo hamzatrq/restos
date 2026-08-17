@@ -261,3 +261,141 @@ describe("§E 00 §5.7 — the boot line stops claiming a gap that has closed", 
     }
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// §F 00 §5.7 — AND IT REPORTS THE DEVICE RATHER THAN THE REQUEST.
+//
+// ⚠ ADDED 2026-08-17. §E above stops the boot line claiming a gap that has closed; this stops it
+// claiming a ROSTER that is not here. `seedDevStaff` stands down on a device holding a roster it
+// RECEIVED (R21) and `staff.ts` REFUSES rather than throwing (`01-F17`), so both are states in
+// which the seed writes nothing — and a line drawn from `env` alone announces three fixture people
+// over a door nobody can open. `describeDevStaff`'s own header carries the measurement: a pilot
+// till "went on printing `staff: 3 seeded — Ayesha, Bilal, Hina` while none of the three was on it".
+//
+// The cost lands hardest on THIS app. The counter's operator meets `02-F22` at 09:00 when the day
+// will not open; here the surface is a door with an empty grid, which looks exactly like a door
+// waiting for a cook to press it — and with nobody able to sign in, `03-F53` makes every ready-mark
+// and every handover unwritable, so the queue fills and nothing leaves it.
+//
+// **Two mutants an out-of-tree run reported as surviving every gate** are what this is pointed at:
+// `seedDevStaff` returning a bare `true` instead of its `apply` result, and `describeDevStaff`
+// ignoring its `device` argument. Neither is reachable from a host source read — both are edits to
+// `packages/device-config` — so what is owned here is the SEAM beneath them: the registry this
+// screen wrote into, the seed's own report, and the order the two happen in. The package half of
+// the first is a behavioural assertion against a REFUSING registry and belongs to
+// `packages/device-config/src/__acceptance__/dev-staff-seed.test.ts` (`24 §3` keeps that oracle
+// byte-identical); it is reported as a finding rather than smuggled in here.
+//
+// ⚠ `apps/pos-electron`'s `__acceptance__/dev-staff-credentials.test.ts` §E asserts the same three
+// properties across BOTH hosts, and the overlap is deliberate — §C above states the rule: "a rule
+// two files assert is a rule neither can quietly drop". These are source reads for §A's stated
+// reason, with §A's stated limit: a string cannot fail on a call that is present and wrong, and it
+// can fail on one that is absent, mis-supplied or out of order.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The text of `name(…)`, bounded by its OWN closing parenthesis rather than by a character window.
+ *
+ * This host writes its whole boot line as one template literal, so the roster call closes `})}` and
+ * a brace-bounded window would either stop short or run into the next line of the block. A balance
+ * walk is indifferent to formatting, which is what stops this file going RED against a correct
+ * implementation that reflowed the call.
+ */
+const callTo = (source: string, name: string): string | null => {
+  const at = source.indexOf(`${name}(`);
+  if (at === -1) return null;
+  let depth = 0;
+  for (let i = at + name.length; i < source.length; i += 1) {
+    if (source[i] === "(") depth += 1;
+    else if (source[i] === ")") {
+      depth -= 1;
+      if (depth === 0) return source.slice(at, i + 1);
+    }
+  }
+  return null;
+};
+
+/** The expression a call passes for `member:`, or `undefined` if it passes none. */
+const argumentFor = (call: string, member: string): string | undefined =>
+  new RegExp(`\\b${member}:\\s*([^,\\n}]+)`).exec(call)?.[1]?.trim();
+
+describe("§F 00 §5.7 — the roster line is drawn from this DEVICE, after the seed", () => {
+  const SOURCE = code(MAIN);
+
+  it("the line is handed the registry this screen SEEDED, not the environment alone", () => {
+    const seed = callTo(SOURCE, "seedDevStaff");
+    const line = callTo(SOURCE, "describeDevStaff");
+    expect(seed, "main does not call seedDevStaff").not.toBeNull();
+    expect(line, "main does not call describeDevStaff").not.toBeNull();
+
+    const seeded = argumentFor(seed ?? "", "registry");
+    const reported = argumentFor(line ?? "", "registry");
+    expect(seeded, "main does not hand seedDevStaff a registry").toBeDefined();
+    // `seams:check` is blind to this by construction — the device bag is REQUIRED, so Rule B is
+    // satisfied by any supply, and `DevStaffRegistry` is structurally typed, so `{ list: () => [] }`
+    // typechecks. That is `AGENTS.md`'s "port supplied with a STUB", measured invisible to every
+    // rail in the repo.
+    expect(
+      reported,
+      "the roster boot line is drawn with no registry, so it can only report what an operator " +
+        "ASKED for — a different fact from what is on this device (00 §5.7)",
+    ).toBeDefined();
+    expect(
+      reported,
+      "the line reports a DIFFERENT registry from the one this screen seeded — two readings of " +
+        "one fact is how a surface and the code it describes come to disagree (03-F40)",
+    ).toBe(seeded);
+    // The SHAPE, not the literal `store.staff`: renaming the store must not redden a correct host,
+    // while a literal or any other projection still fails.
+    expect(
+      /^[A-Za-z_$][\w$]*\.staff$/.test(reported ?? ""),
+      `main passes \`${reported}\` as the registry — not the device's own staff registry`,
+    ).toBe(true);
+  });
+
+  it("it is drawn AFTER the seed, so it reports the roster as it IS", () => {
+    // Order is what makes the line true, so the order is what is asserted. §A already pins the
+    // seed BEFORE the window for `27-F4`'s reason; this pins the report after the seed, and the
+    // two together fix the whole sequence: seed, report, paint.
+    const seededAt = SOURCE.indexOf("seedDevStaff(");
+    const reportedAt = SOURCE.indexOf("describeDevStaff(");
+    expect(seededAt, "main does not call seedDevStaff").toBeGreaterThan(-1);
+    expect(reportedAt, "main does not call describeDevStaff").toBeGreaterThan(-1);
+    expect(
+      reportedAt,
+      "the roster line is drawn BEFORE the seed, so it reports the device as it was rather than " +
+        "as it is",
+    ).toBeGreaterThan(seededAt);
+  });
+
+  it("01-F17 — what seedDevStaff RETURNED is what the line reports as `seeded`", () => {
+    // `staff.ts` refuses rather than throwing, so a discarded return is a screen that wrote
+    // nothing and said nothing about it. The registry cannot recover the fact:
+    // `describeDevStaff` says so in terms — an empty grid because nobody was configured and an
+    // empty grid because the registry REFUSED look identical from `list()`.
+    // ⚠ The declaration keyword is OPTIONAL: a host that declares `let staffSeeded` and assigns it
+    // later still hands the boot line what the seed returned, and a test that reddens a correct
+    // implementation is as damaging as a vacuous one. What has no binding at all — `await
+    // seedDevStaff({…});` as a bare statement — is the discarded return this owns.
+    const binding = /(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=\s*await\s+seedDevStaff\(/.exec(
+      SOURCE,
+    )?.[1];
+    expect(
+      binding,
+      "main discards seedDevStaff's return — a refused write is then indistinguishable from a " +
+        "successful one on the one line the person setting this screen up reads (01-F17, 00 §5.7)",
+    ).toBeDefined();
+
+    const line = callTo(SOURCE, "describeDevStaff");
+    expect(line, "main does not call describeDevStaff").not.toBeNull();
+    const call = line ?? "";
+    // THE DANGEROUS CASE: `seeded: true`. It typechecks, it reads like the happy path, and it makes
+    // the boot line assert a write the registry rejected.
+    expect(
+      new RegExp(`\\bseeded:\\s*${binding}\\b`).test(call) ||
+        (binding === "seeded" && /\bseeded\s*[,}]/.test(call)),
+      `main reports \`${argumentFor(call, "seeded")}\` as the seeded fact rather than the ` +
+        `\`${binding}\` seedDevStaff returned`,
+    ).toBe(true);
+  });
+});
