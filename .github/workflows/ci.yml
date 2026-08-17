@@ -40,23 +40,20 @@ jobs:
       # run failed with "the configured launch never printed its boot line".
       - name: install xvfb (real-Electron acceptance suites spawn their own)
         run: sudo apt-get update && sudo apt-get install -y xvfb
-      # TEMPORARY diagnostic — remove once the Electron binary question is settled. Four CI rounds
-      # have been spent on hypotheses about why `apps/pass-kds`'s real-Electron CONTROL row cannot
-      # boot; this answers it with facts instead. Prints and does not fail, so it cannot mask the
-      # real result.
-      - name: diagnose electron availability
-        run: |
-          set +e
-          echo "=== resolved path ==="
-          node -e "console.log(require.resolve('electron'))" 2>&1
-          node -e "console.log(require('electron'))" 2>&1
-          echo "=== path.txt ==="
-          find node_modules/.pnpm -maxdepth 4 -name path.txt -path '*electron*' -exec sh -c 'echo "{}: $(cat {})"' \;
-          echo "=== dist present? ==="
-          find node_modules/.pnpm -maxdepth 5 -type d -name dist -path '*electron*' -exec ls -la {} \; 2>&1 | head -20
-          echo "=== pass-kds resolution ==="
-          cd apps/pass-kds && node -e "console.log(require('electron'))" 2>&1
-          echo "=== exit 0 regardless ==="
+      # ⚠ `electron`'s postinstall does NOT run on a from-scratch install here, and the
+      # allowlist is not the lever. Measured in CI 2026-08-17 with a diagnostic step: the installed
+      # `electron/package.json` has `scripts: undefined` — the field is stripped — so the package
+      # appears in NEITHER pnpm's "ran" list (only `better-sqlite3` does) nor its "Ignored build
+      # scripts" list. Adding `electron` to `onlyBuiltDependencies` changed nothing for that reason.
+      #
+      # The consequence is silent and specific: `path.txt` is never written and `dist/` never
+      # exists, but `require("electron")` STILL returns a plausible path — it triggers a download at
+      # require time and returns the path regardless. So nothing fails at install or import, and the
+      # only symptom is a real-Electron test whose child never prints a boot line.
+      #
+      # `pnpm rebuild` invokes the build explicitly rather than relying on install-time inference.
+      - name: fetch the Electron binary (its postinstall does not run on a clean install)
+        run: pnpm rebuild electron
       - name: test
         run: pnpm test
       - name: build
