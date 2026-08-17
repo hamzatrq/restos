@@ -24,17 +24,24 @@ jobs:
         run: pnpm lint
       # ⚠ `xvfb` is REQUIRED, not a convenience. Several acceptance suites spawn a REAL Electron
       # binary — `apps/pass-kds`'s `startup-refusal-returns.test.ts` CONTROL row asserts that a
-      # correctly-configured pass screen actually COMES UP — and with no display that row fails
-      # while every refusal row beside it passes, which reads as a product defect and is not one.
+      # correctly-configured pass screen actually COMES UP — and without it that row fails while
+      # every refusal row beside it passes, which reads as a product defect and is not one.
       #
       # It had never run: that suite landed in `b23b9ad`, and CI failed at `lint` on both pushes
       # since, so the `test` step was never reached and the gap was invisible. Per `T-01-07` a
-      # missing environment prerequisite here must fail LOUDLY rather than skip, so the fix is to
-      # supply the display, never to make the suite tolerate its absence.
-      - name: install xvfb (real-Electron acceptance suites)
+      # missing environment prerequisite must fail LOUDLY rather than skip, so the fix is to
+      # supply the dependency, never to make the suite tolerate its absence.
+      #
+      # ⚠ **INSTALL IT AND DO NOT WRAP THE STEP IN IT.** The suite detects headless itself —
+      # `HEADLESS = linux && !process.env.DISPLAY` — and then spawns `xvfb-run` with its own
+      # `--server-args=-screen 0 1366x768x24`, because the panel size is part of what it measures.
+      # Running `xvfb-run -a pnpm test` SETS `DISPLAY`, which flips that detection to false and
+      # takes the suite off the path built for exactly this environment. Measured: the wrapped
+      # run failed with "the configured launch never printed its boot line".
+      - name: install xvfb (real-Electron acceptance suites spawn their own)
         run: sudo apt-get update && sudo apt-get install -y xvfb
       - name: test
-        run: xvfb-run -a pnpm test
+        run: pnpm test
       - name: build
         run: pnpm build
 
