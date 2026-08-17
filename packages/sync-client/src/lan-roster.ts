@@ -17,13 +17,28 @@
  * as what one process saw; an allow-list is complete by construction, and the failure direction of
  * an incomplete allow-list is refusal (`01-F48` fail-closed) rather than admission.
  *
- * ## Reference data, on `01-F52`'s exact pattern
+ * ## Reference data, on `01-F52`'s SHAPE — and ⚠ NOT, yet, on its CHANNEL
  *
- * Versioned snapshots and deltas over the same sync channel the catalog and `staff.ts` ride, with
- * the same refusal vocabulary (`01-F56`) — deliberately one chain, not a third bespoke one for
- * credentials. And, for `01-F52`'s reason: **nothing here is an input to any fold.** A projected
- * value that read admission state would depend on roster sync state at fold time, which is the
- * `01-F34` break law 1 exists to prevent.
+ * Versioned snapshots and deltas with the catalog's own refusal vocabulary (`01-F56`), so a reader
+ * who knows one knows all three.
+ *
+ * ⚠ **This paragraph claimed more than that and was FALSE when written (corrected August 2026).**
+ * It said these ride *"the same sync channel the catalog and `staff.ts` ride … one chain, not a
+ * third bespoke one for credentials"*. There is no such shared chain: `packages/sync-protocol`'s
+ * message set is 14 kinds and **only the catalog has a wire** (`catalog_request`/`_response`/
+ * `_notice` plus `hello_ack.catalog_version`). `staff.ts` has no wire at all — its only writer in
+ * the entire product is the dev seed — and neither does this roster. So what was shared is the
+ * SHAPE; the channel was aspiration written in the present tense.
+ *
+ * That is the defect class this repo records as worse than no comment: a protection claimed in
+ * prose is read as a protection that exists, and it retires the assertion the next session would
+ * otherwise write. Whether the three converge onto one generalised frame or get their own kinds is
+ * an open founder question — `plans/saas-pivot/staff-over-the-wire.md` S2 — and this comment must
+ * not pre-empt it by describing the answer it prefers as though it had already happened.
+ *
+ * And, for `01-F52`'s reason: **nothing here is an input to any fold.** A projected value that read
+ * admission state would depend on roster sync state at fold time, which is the `01-F34` break law 1
+ * exists to prevent.
  *
  * ## ⚠ THIS STORE IS NOT THE SIGNATURE CHECK, AND MUST NOT BE READ AS ONE
  *
