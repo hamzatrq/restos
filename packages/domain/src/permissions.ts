@@ -134,10 +134,23 @@ export const PERMISSION_ACTIONS = [
   // request at all — and `14-F13` puts an immediate, irreversible kill switch on an
   // authenticated back-office screen. Commandment 8 has to have something to refuse against.
   "device.manage",
+  // ── User management (`14-F39`, which decides it alone). ─────────────────────────────────
+  // Appendix A carries no user, person or role row either, so before `14-F39` this matrix could
+  // not answer a request about the staff roster at all — and `authorized()` takes its action from
+  // this closed list while the API host refuses at boot to serve a procedure naming none, so
+  // `14-F14` (user CRUD, role × per-location assignment, PIN set/reset, deactivation) and
+  // `14-F15` (per-user login and audit history) "cannot be built *or* booted". Fourth instance of
+  // the shape `device.manage` introduced — an action Appendix A has no row for, decided by the FR
+  // that owns the surface. Stated by NAME and not by line distance: the review that landed this
+  // block caught two neighbouring comments whose "three lines above" and "directly above" had been
+  // falsified by inserting an entry between them, which is a comment that goes quietly wrong every
+  // time this list grows.
+  "user.manage",
   // ── The counter's 86 (`02-F46`, which decides it alone). ───────────────────────────────
   // Appendix A has no availability row either, so before `02-F46` the matrix could not answer
   // a toggle request and `authorize.ts`'s fail-closed default denied every one of them —
-  // `02-F7`'s control could not be built. Same shape as `device.manage` directly above.
+  // `02-F7`'s control could not be built. Same shape as `device.manage` and `user.manage` — named
+  // rather than pointed at, because "directly above" stopped being true when `user.manage` landed.
   "availability.toggle",
   // ── The caller's file (`02-F47`, which decides it alone). ───────────────────────────────
   // Appendix A has no customer row either, so before `02-F47` the matrix could not answer a
@@ -406,6 +419,57 @@ const VERDICTS: Readonly<Record<VerdictAction, Readonly<Record<Role, AuthOutcome
   // is identical — two actions differing in no cell differ in nothing an implementation can
   // observe. It becomes a real question the day a role is widened into the list.
   "device.manage": {
+    cashier: "deny",
+    branch_manager: "deny",
+    storekeeper: "deny",
+    owner: "allow",
+  },
+  // No Appendix A row — `14-F39` decides it, and like `14-F30` directly above it records itself
+  // as a PINNED INTERPRETATION, CONTESTABLE, rather than a transcription. The label is not
+  // borrowed here: doc 14 §9's first open question names `users` BY NAME — "whether managers get
+  // a scoped back-office slice on phones (thresholds, users) or stay manager-console-only until
+  // pilots demand it" — so this is the one axis the corpus has explicitly left open, and no
+  // founder ruling and no `DECISIONS.md` row touches it.
+  //
+  // Owner-only because no FR puts a manager, a cashier or a storekeeper on user administration,
+  // so a widening here would answer §9.1 by accident. The failure directions are not symmetric:
+  // widening later is additive and safe, while the wrong guess in the permissive direction is a
+  // self-promotion path into an append-only ledger — a manager who may write users may make
+  // herself an owner, or reset the owner's PIN, and `01-F1`/`02-F41` make both permanent. The pin
+  // resolves when §9.1 does, and it is not evidence for how §9.1 should go.
+  //
+  // **`deny`, not `escalate`.** `02-F20` enumerates the escalating actions — "void after KOT,
+  // comp, discount above org threshold, price override" — and user administration is not among
+  // them, so an `escalate` cell would put a "get a manager" affordance on a back-office screen
+  // with no second credential to collect and no PIN path to close it.
+  //
+  // **ONE action covering `14-F14`'s writes AND `14-F15`'s read** — `14-F39` RAN `14-F30`'s test
+  // rather than assuming it: under these cells every cell of both halves is identical, so the two
+  // actions would differ in nothing an implementation can observe. ⚠ Unlike the device row above,
+  // this one carries a NAMED trigger for the split: if any role is ever widened into this block,
+  // the read/write split is the edit to make IN THE SAME CHANGE as the widening, never after it.
+  //
+  // The LOCATION axis is `01-F26`'s and is resolved by `rolesAt`, not by this row: `14-F39`
+  // states its cells by ROLE and qualifies none of them by location, so `branch_id: null` widens
+  // WHERE a role reaches and never WHICH row is read — an org-wide cashier is still a cashier.
+  //
+  // ⚠ **THE NEIGHBOUR THIS ROW DOES NOT CLOSE, NAMED BECAUSE THE OTHERS ARE: a DEACTIVATED owner
+  // is `allow` here, and this is the action that writes the status.** `11-F22` puts the check at
+  // the matrix — *"the authorization subject reads the status too, so an inactive person authorizes
+  // nothing even from a session that predates her deactivation"* — and `14-F39`'s own "what it
+  // gates" clause lists `11-F22`'s status change among the acts. `AuthSubject` carries no status,
+  // so a subject holding `{role: "owner", branch_id: null}` whose person row is retained-but-
+  // `inactive` gets `allow` from this row. **Every other action's fail-open ends when a corrected
+  // roster arrives; this one can rewrite the roster** — re-activating its own holder, permanently
+  // under `01-F1`. It is LATENT, not live: nothing yet carries a person status on any plane (the
+  // `status` column on the cloud users table is `15-F25`'s ORG status, not a person's). Closing it
+  // is step 2b, `11-F22`'s change and not `14-F39`'s, and it is named here rather than left silent
+  // because a comment that lists every neighbour but one retires the assertion the next session
+  // would otherwise write (AGENTS.md instance 15: state the class you closed, name the one you
+  // did not). A second, smaller neighbour: R29 owes a change-my-PIN path at the till, and a cashier
+  // is `deny` here — so that surface needs its own FR-decided action or a self-scope arm on
+  // `02-F38`'s `requested_by_user_id` precedent, and inventing either now would be commandment 2.
+  "user.manage": {
     cashier: "deny",
     branch_manager: "deny",
     storekeeper: "deny",
