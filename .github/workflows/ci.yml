@@ -22,8 +22,19 @@ jobs:
         run: pnpm typecheck
       - name: lint
         run: pnpm lint
+      # ⚠ `xvfb` is REQUIRED, not a convenience. Several acceptance suites spawn a REAL Electron
+      # binary — `apps/pass-kds`'s `startup-refusal-returns.test.ts` CONTROL row asserts that a
+      # correctly-configured pass screen actually COMES UP — and with no display that row fails
+      # while every refusal row beside it passes, which reads as a product defect and is not one.
+      #
+      # It had never run: that suite landed in `b23b9ad`, and CI failed at `lint` on both pushes
+      # since, so the `test` step was never reached and the gap was invisible. Per `T-01-07` a
+      # missing environment prerequisite here must fail LOUDLY rather than skip, so the fix is to
+      # supply the display, never to make the suite tolerate its absence.
+      - name: install xvfb (real-Electron acceptance suites)
+        run: sudo apt-get update && sudo apt-get install -y xvfb
       - name: test
-        run: pnpm test
+        run: xvfb-run -a pnpm test
       - name: build
         run: pnpm build
 

@@ -34,6 +34,22 @@ export default defineConfig({
           // which both support, and happy-dom starts in a fraction of the time on a suite that
           // will grow with every screen.
           globals: false,
+          /**
+           * ⚠ **Raised from vitest's 5 s default because CI is slower than any dev machine here,
+           * and the 5 s default is a documented flake source in this repo** (`AGENTS.md`: four
+           * subprocess-spawning oracle suites have flaked on it across two packages).
+           *
+           * Measured 2026-08-17: `item-tile.dom.test.tsx` renders a 6,912-cell cross-product and
+           * takes ~46 s for its 45 tests on a GitHub `ubuntu-latest` runner, where two of the
+           * heavier sweeps crossed 5 s and failed as TIMEOUTS — not assertions. The same file is
+           * comfortably green locally, which is exactly the shape that gets read as a regression.
+           *
+           * 20 s and not `0`: an unbounded timeout turns a genuine hang into a job that runs
+           * until the runner's own limit, and turns a real performance regression into silence.
+           * If a single `.dom` test ever needs more than 20 s, that is a finding about the test.
+           */
+          testTimeout: 20_000,
+          hookTimeout: 20_000,
         },
       },
     ],
