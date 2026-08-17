@@ -316,6 +316,16 @@ founder question**. Note the shipped precedent for the *location*: `device.revok
 declared locally in `services/api/src/devices.ts:83-96` because `domain` ships no org-scoped schemas
 — follow it or state why not.
 
+**RESOLVED 2026-08-17 by following the precedent, and re-measured rather than inherited:**
+`grep -an "device.revoked\|config.changed" packages/domain/src/registry.ts` is empty, so `domain`
+really does ship none — the precedent is the whole rule, not one exception. The payload is therefore
+declared in `services/api` beside its emitter, which moves it **out of step 2 and into step 4**. The
+content of the payload is the part still open, and it is open on one axis only: `14 §2` says PINs are
+*"never present in payloads"*, so what remains is which of create / role change / deactivation /
+PIN-reset are distinguishable in the event and whether the before-state is carried. `01-F1` argues for
+carrying enough that the row is legible long after the record it describes has changed — the reasoning
+`DeviceRevokedPayload` states for carrying `branch_id` and `device_class` it does not strictly need.
+
 ### S8 — Does a till-only cashier need an email?
 **Document:** doc 11 (the person record's required minimum) — `11-F20:57` lists the minimum and does
 not include email.
@@ -361,12 +371,25 @@ registry cannot see it.
 `apps/pos-electron/src/layout-gate/preload.ts:64` only by *documenting* that it is fixture data (or
 moving it under a test-named path). Closes nothing. Not protected. No suite.
 
-**Step 2 — the permission action (`14-F39`) and the `user.changed` payload schema.** Changes
-`packages/domain/src/permissions.ts:109` (+1 action, + its Appendix-A-precedent cells) and either
-`packages/domain/src/registry.ts` or a local declaration per `devices.ts:83`. Closes **S6**, **S7**,
-and unblocks every procedure. **PROTECTED — `packages/domain`.** **Preconditions:** S6 ruled.
+**Step 2 — the permission action (`14-F39`).** Changes `packages/domain/src/permissions.ts:109` only
+(+1 action, + its Appendix-A-precedent cells). Closes **S6** and unblocks every procedure.
+**PROTECTED — `packages/domain`.** **Preconditions:** S6 ruled.
 **`24 §3` acceptance suite from a separate session**, and it must include the 55-cell-sweep shape
 `permissions.ts` already carries plus a mutant that widens the action to `branch_manager`.
+
+⚠ **correction — S7 does NOT belong in this step, and coupling them was wrong.** This step read *"the
+permission action **and** the `user.changed` payload schema"* and offered `packages/domain/src/registry.ts`
+as one of two homes for the schema. Re-measured 2026-08-17: `grep -an "device.revoked\|config.changed"
+packages/domain/src/registry.ts` is **empty** — `domain` ships **no** org-scoped payload schema at all,
+and `services/api/src/devices.ts:83-96` records why in its own doc comment (`01 §4` puts payload schemas
+in `domain`, `domain` ships none for the org-scoped family, so re-declaring one there for a single
+reader would be the larger change). S7's own text already said *"follow it or state why not"*. So the
+`user.changed` payload is declared beside its **emitter**, which is **step 4**, and it is moved there.
+Two things follow: step 2 is now a single-concern change to one protected file, which is what a
+protected-path review wants; and the schema lands in the same PR as the procedure that emits it, so
+`01-F4`'s unemittable-without-a-schema gap cannot be closed on paper by a declaration nothing produces —
+which is `audit.print_acknowledged`'s recorded shape (a key in a registry with no producer) and the
+blind spot `seams:check` names as *"a missing PRODUCER for an event type"*.
 
 **Step 3 — the cloud version axis and the PIN credential.** Changes `services/sync-gateway/drizzle/`
 (a new migration: the `user_versions`/`user_entries` publication pair on `catalog_versions`'s shape at
@@ -381,8 +404,13 @@ because `01-F61`'s ordinal and `01-F71`'s isolation both become live the moment 
 Changes `services/sync-gateway/src/tenancy.ts` and `publish-http.ts` (a ninth and tenth route beside
 the eight at `:260-411`), `services/api/src/` (a `UserDirectory` port + gateway adapter + router,
 copying `device-router.ts:33` / `devices.ts:98` / `gateway-client.ts:388` verbatim in shape), and
-`apps/backoffice/src/components/workspace.tsx:32` (+1 tab). Closes **`14-F14`** and unblocks R21.
-Not protected. **Preconditions:** steps 2 and 3. **`24 §3` suite from a separate session.**
+`apps/backoffice/src/components/workspace.tsx:32` (+1 tab). Closes **`14-F14`**, **S7** — the
+`user.changed` payload schema is declared here, beside its emitter, on `DeviceRevokedPayload`'s
+precedent (`devices.ts:83-96`), moved out of step 2 for the reason recorded there — and unblocks R21.
+Not protected. **Preconditions:** steps 2 and 3. **`24 §3` suite from a separate session**, and it must
+assert a **producer** for `user.changed`, not merely that the schema parses: a payload schema with
+nothing emitting it is `audit.print_acknowledged`'s shape and `seams:check` is blind to it by
+construction.
 ⚠ `UserStore` (`services/api/src/users.ts:53`) cannot express this; do not widen it — it is the
 login-time port. And do not "fix" `setAssignments`: it has zero shipping callers and fixing it
 changes nothing.
