@@ -72,8 +72,15 @@ jobs:
         run: pnpm -C apps/pos-electron rebuild:native
       - name: restore the Node ABI build that the rebuild overwrote
         run: |
-          cd "$(dirname "$(node -e "console.log(require.resolve('better-sqlite3/package.json'))")")"
-          npm run build-release
+          set -euo pipefail
+          # The literal store path, as `apps/pos-electron/CLAUDE.md` prescribes. NOT
+          # `require.resolve` from the repo root: `better-sqlite3` is not a root dependency there,
+          # so the resolve throws, `cd` lands nowhere useful, and the failure surfaces as
+          # `npm error Missing script: "build-release"` — which reads as the script being gone
+          # rather than as the directory being wrong. Verified: the script exists.
+          dir=$(ls -d node_modules/.pnpm/better-sqlite3@*/node_modules/better-sqlite3 | head -1)
+          echo "restoring the Node-ABI build in $dir"
+          cd "$dir" && npm run build-release
       - name: test
         run: pnpm test
       - name: build
