@@ -112,6 +112,14 @@ type AuthSubject = {
   readonly user_id: string;
   readonly org_id: string;
   readonly assignments: readonly RoleAssignment[];
+  /**
+   * `11-F22`, mirrored EXACTLY as production declares it (optional, closed at two). This local
+   * type is this file's structural mirror of `packages/domain`'s — it exists so the suite compiles
+   * against a `domain` that might not export `can` at all — and a mirror that omits a member the
+   * real type carries is a mirror that lies. It is here only so the builder below can state the
+   * member; nothing reads it, and no assertion in this file mentions a status.
+   */
+  readonly status?: "active" | "inactive";
 };
 
 type AuthScope = {
@@ -169,6 +177,12 @@ const subject = (assignments: readonly RoleAssignment[]): AuthSubject => ({
   user_id: newId(),
   org_id: ORG,
   assignments,
+  // `11-F22` — the participation status the authorization subject now reads. Every fixture in
+  // this file is a person who is CURRENTLY EMPLOYED, which is what every assertion below already
+  // assumed and could not say; absent no longer means `active` (the FR forbids that default by
+  // name, citing `01-F48`), so it is said. Nothing else here moves: no assertion, no cell, no
+  // role, no assignment — this restates the same subject under a widened type.
+  status: "active",
 });
 
 const CASHIER = subject([{ role: "cashier", branch_id: BRANCH_A }]);

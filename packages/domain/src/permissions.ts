@@ -64,6 +64,24 @@ export type AuthSubject = {
   readonly user_id: string;
   readonly org_id: string;
   readonly assignments: readonly RoleAssignment[];
+  /**
+   * `11-F22` — the participation status of the ACCOUNT, and the field's name is `01 §4`'s: the
+   * `staff` row names it "`status` (`11-F22`)". The set is CLOSED at two — *"The statuses are
+   * `active` and `inactive` … Widening the set is a spec act"* — and it is deliberately not an
+   * employment lifecycle: *suspended*, *on leave*, *probation* and *notice period* are doc 11's
+   * own list of what this field is NOT, and would be a different field on a different plane.
+   *
+   * **OPTIONAL on the type, and REFUSED at every reader** — the two halves are one decision.
+   * `11-F20` retains a person record for ever so a let-go cashier's name still renders, so the
+   * host that assembles this subject may hold a row written before the field existed, which is
+   * `11-F22`'s own named migration case. Making the member required would force each of those
+   * hosts to write a value it does not have, and the value it would reach for is `"active"` —
+   * `11-F22` forecloses exactly that by name (*"not a licence to default an absent status to
+   * `active`"*). So the type admits the unreadable row and `participates` below refuses it:
+   * `01-F48`, which `11-F22` cites as what participation means here — *"where state cannot be
+   * read, participation is refused, not granted"*.
+   */
+  readonly status?: "active" | "inactive";
 };
 
 /**
@@ -457,16 +475,26 @@ const VERDICTS: Readonly<Record<VerdictAction, Readonly<Record<Role, AuthOutcome
   // is `allow` here, and this is the action that writes the status.** `11-F22` puts the check at
   // the matrix — *"the authorization subject reads the status too, so an inactive person authorizes
   // nothing even from a session that predates her deactivation"* — and `14-F39`'s own "what it
-  // gates" clause lists `11-F22`'s status change among the acts. `AuthSubject` carries no status,
-  // so a subject holding `{role: "owner", branch_id: null}` whose person row is retained-but-
-  // `inactive` gets `allow` from this row. **Every other action's fail-open ends when a corrected
-  // roster arrives; this one can rewrite the roster** — re-activating its own holder, permanently
-  // under `01-F1`. It is LATENT, not live: nothing yet carries a person status on any plane (the
-  // `status` column on the cloud users table is `15-F25`'s ORG status, not a person's). Closing it
-  // is step 2b, `11-F22`'s change and not `14-F39`'s, and it is named here rather than left silent
-  // because a comment that lists every neighbour but one retires the assertion the next session
-  // would otherwise write (AGENTS.md instance 15: state the class you closed, name the one you
-  // did not). A second, smaller neighbour: R29 owes a change-my-PIN path at the till, and a cashier
+  // gates" clause lists `11-F22`'s status change among the acts. The hazard it named: a subject
+  // holding `{role: "owner", branch_id: null}` whose person row is retained-but-`inactive` would
+  // get `allow` from this row, and **every other action's fail-open ends when a corrected roster
+  // arrives while this one can rewrite the roster** — re-activating its own holder, permanently
+  // under `01-F1`.
+  //
+  // ✅ **CLOSED by step 2b (`11-F22`), which is why this paragraph is rewritten rather than
+  // deleted — the cell below is unchanged and the refusal is upstream of it.** `AuthSubject` now
+  // carries `status` and `participates` refuses a non-`active` subject before any row is read, so
+  // this row can no longer be reached by a deactivated owner. What that change did NOT close, and
+  // what makes the neighbour worth keeping: **no shipping caller supplies the fact yet** — the
+  // cloud `users` table has NO status column at all — `15-F25`'s status is on `orgs`, and it is an
+  // ORG status, not a person's — and
+  // `packages/sync-client`'s `StaffMember` has no such field — so the refusal here currently
+  // catches every subject rather than the deactivated one, and the producers are owed. Named
+  // rather than left silent because a comment that lists every neighbour but one retires the
+  // assertion the next session would otherwise write (AGENTS.md instance 15: state the class you
+  // closed, name the one you did not).
+  //
+  // A second, smaller neighbour, still open: R29 owes a change-my-PIN path at the till, and a cashier
   // is `deny` here — so that surface needs its own FR-decided action or a self-scope arm on
   // `02-F38`'s `requested_by_user_id` precedent, and inventing either now would be commandment 2.
   "user.manage": {
@@ -533,6 +561,55 @@ const REACH_RANK: Readonly<Record<ReportReach, number>> = {
  * An org-wide assignment (`branch_id: null`) carries into every branch; a branch assignment
  * carries into that branch only, so a cashier at branch A is a stranger at branch B.
  */
+/**
+ * `11-F22` — *"Only `active` PARTICIPATES … and the authorization subject reads the status too, so
+ * an inactive person authorizes nothing even from a session that predates her deactivation."*
+ *
+ * **A WHITELIST OF ONE VALUE, never a blacklist of `inactive`.** The set is closed at two by the
+ * FR, so `status !== "inactive"` would admit every third token a wire, a migration or a collapsed
+ * boolean can produce — `"suspended"` (which is `15-F25`'s ORG axis one join away), `"ACTIVE"`,
+ * `" active"`, `1`, `true`, `null`, absent — and each of those is `01-F48`'s unreadable state
+ * ADMITTED. Widening the set is a spec act; this predicate is where that would have to happen.
+ *
+ * **Declared ONCE for the three readers below**, on this file's own rule about the matrix: three
+ * copies of a security predicate is three things that can drift, and a status check that reached
+ * `can` but not `canPayOut` would leave *pay-outs* — one of the three harms `11-F22` names in its
+ * own sentence — completely live, because `can(subject, "cash.paid_out", scope)` refuses by design
+ * so `05-F19`'s threshold cannot be skipped.
+ *
+ * **It ADDS a refusal and replaces none.** `01-F26`'s org check and `01-F27`'s no-assignment
+ * default are untouched: a guard written so that it stands in for either would pass every
+ * inactive-subject sweep while opening two holes that are closed today.
+ *
+ * ⚠ **WHAT THIS CLOSES AND WHAT IT DOES NOT, stated as a pair** (AGENTS.md instance 15: a comment
+ * that claims the class when it closed the instance retires the assertion the next session would
+ * have written).
+ *   * CLOSED: the authorization SUBJECT. `can`, `canPayOut` and `reportScope` — every reader of
+ *     this matrix — refuse a subject who is not `active`. That is the half `11-F22` says the
+ *     narrow reading would leave a fail-open behind, and commandment 8 puts it here.
+ *   * NOT CLOSED, and neither is in this package: the PIN check (*"An inactive person does not
+ *     unlock, on any device, WAN or no WAN"*, with `11-F22`'s own `not_active` refusal reason, in
+ *     `packages/sync-client`'s `unlock()`); `01-F61`'s identification grid, the ONE rendering
+ *     surface status governs; R27's live session, which is a session and not a subject; and — added
+ *     after an adversarial review caught the omission — **`services/api`'s `login` procedure**,
+ *     which is the cloud analogue of that PIN check and reads no status either, so an inactive
+ *     person still authenticates and still receives a session token. Not a fail-open today, because
+ *     every authorized procedure below denies her; it becomes one the moment the producers land and
+ *     `can()` is the only reader of the fact. Listing four neighbours and missing the fifth is the
+ *     instance-15 failure happening inside the comment that cites instance 15.
+ *   * NOT CLOSED AND LOUDER THAN BOTH: **nothing on either plane supplies this fact yet.**
+ *     `StaffMember` (`packages/sync-client`) carries no status and the cloud `users` table has no
+ *     status COLUMN at all — ⚠ this said *"the cloud users table's `status` column is `15-F25`'s ORG
+ *     status"*, which describes a column on the wrong table and would send a reader to repurpose it:
+ *     `15-F25`'s status is on `orgs`, and `users` declares `user_id, org_id, email, display_name,
+ *     password_hash, assignments, grid_ordinal, created_at` and nothing else. So every subject the
+ *     product assembles today is statusless and is therefore refused here. That is `01-F48`'s direction and it is NOT a
+ *     working authorization path — the producers are steps 3–7 of `plans/saas-pivot/staff-over-the-wire.md`,
+ *     and defaulting a call site to `active` to keep a surface alive is the same fail-open one
+ *     file over.
+ */
+const participates = (subject: AuthSubject): boolean => subject.status === "active";
+
 const rolesAt = (subject: AuthSubject, branch_id: string | null): readonly Role[] =>
   subject.assignments
     .filter((assignment) => assignment.branch_id === null || assignment.branch_id === branch_id)
@@ -544,6 +621,10 @@ const rolesAt = (subject: AuthSubject, branch_id: string | null): readonly Role[
  * reconciliation view needs — `can` decides one request, this decides what to fetch.
  */
 export const reportScope = (subject: AuthSubject, scope: AuthScope): ReportReach => {
+  // `11-F22` — a claim about the SUBJECT, so it binds every reader of one. This is not optional
+  // coverage: `02-F23`'s reconciliation narrows through this seam, so a status check that stopped
+  // at `can` would leave a deactivated manager reading her branch's shift cash.
+  if (!participates(subject)) return "none";
   if (subject.org_id !== scope.org_id) return "none";
   return rolesAt(subject, scope.branch_id).reduce<ReportReach>((widest, role) => {
     const reach = REPORT_REACH[role];
@@ -567,6 +648,20 @@ export const can = (
   // authorization on EVERY operation — so the answer that cannot be right is `allow`. Typed
   // callers cannot reach this; the untyped edges (sync payloads, tRPC input) can.
   if (!KNOWN_ACTIONS.has(action)) return { outcome: "deny", action };
+
+  // `11-F22` — "an inactive person authorizes nothing even from a session that predates her
+  // deactivation". First of the subject checks because it is the only one that depends on neither
+  // the action nor the scope; the three fail-closed guards return the same shape, so their order
+  // is a reading choice and not an observable one.
+  //
+  // `deny`, never `escalate`, and the FR's own harm sentence is the derivation rather than a
+  // preference: it names "recording payments, pay-outs and **refunds**" as what the narrow reading
+  // would leave live, and `refund.issue` is an `escalate` cell for a cashier. `02-F20`'s local path
+  // collects a MANAGER's PIN while the actor stays the requester (`02-F41`), so an `escalate` any
+  // manager in the building can close is precisely a deactivated cashier recording a refund under
+  // her own name into an append-only ledger (`01-F1`). An offer no longer exists for someone who
+  // may not act, so no `satisfied_by` is returned either.
+  if (!participates(subject)) return { outcome: "deny", action };
 
   // Assignments are held within one org (`01-F26`). Nothing carries across.
   if (subject.org_id !== scope.org_id) return { outcome: "deny", action };
@@ -636,6 +731,13 @@ export const canPayOut = (
   request: PaidOutRequest,
 ): AuthDecision => {
   const action = "cash.paid_out" as const;
+  // `11-F22`, and this reader is the one the FR's own sentence makes mandatory rather than
+  // thorough: `can()` refuses `cash.paid_out` by design, so this is the ONLY route to the drawer,
+  // and *pay-outs* is one of the three acts `11-F22` names as what a PIN-only status check would
+  // leave live. Above the threshold it must refuse rather than escalate for `can`'s reason — an
+  // approver would close the offer and `05-F19`'s withdrawal would be attributed to the
+  // deactivated person.
+  if (!participates(subject)) return { outcome: "deny", action };
   if (subject.org_id !== scope.org_id) return { outcome: "deny", action };
 
   const verdicts = VERDICTS[action];

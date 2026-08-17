@@ -102,6 +102,11 @@ const subjectIn = (org_id: string, role: Role, branch_id: string | null): AuthSu
   user_id: USER_A,
   org_id,
   assignments: [{ role, branch_id }],
+  // `11-F22` — every fixture here is a currently-employed person, which is what these assertions
+  // already assumed and could not say. Absent no longer means `active` (the FR forbids that
+  // default by name), so the builder states it. The isolation axis this file owns is untouched:
+  // both orgs' subjects are stated identically, so an org refusal is still an org refusal.
+  status: "active",
 });
 
 /**

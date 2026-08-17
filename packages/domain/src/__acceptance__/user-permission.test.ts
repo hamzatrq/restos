@@ -159,7 +159,10 @@ const BRANCH_B = newId();
 const subject = (
   assignments: readonly { role: Role; branch_id: string | null }[],
   org_id: string = ORG,
-): AuthSubject => ({ user_id: newId(), org_id, assignments });
+  // `11-F22` — every fixture here is a currently-employed person, which is what these assertions
+  // already assumed and could not say. Absent no longer means `active` (the FR forbids that
+  // default by name), so the builder states it; no assertion, cell or assignment moves.
+): AuthSubject => ({ user_id: newId(), org_id, assignments, status: "active" });
 
 /** The `14-F39` actor: an owner, org-wide, which is how Appendix A gives them "everything". */
 const OWNER = subject([{ role: "owner", branch_id: null }]);
