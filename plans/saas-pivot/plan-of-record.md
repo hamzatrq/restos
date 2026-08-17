@@ -8,7 +8,11 @@ This document says **what must be planned and in what order**. It is not itself 
 
 ## §0 — Rulings taken
 
-Eight decisions, all founder-ruled during the reconciliation review. They are the premises every
+Sixteen decisions founder-ruled during the reconciliation review, plus **R17–R22 ruled August 2026**
+when the founder was asked what an MVP had to reach. ⚠ **R17–R22 were given in conversation and
+existed nowhere in this repo for a day**, during which `specs/28` cited one of them to supersede a
+shipped FR — caught by an adversarial review, not by a rail, and recorded here because a ruling the
+corpus cannot cite is a ruling that cannot be checked. They are the premises every
 document below is written against. **A plan that contradicts one of these is wrong, not creative.**
 
 | # | Question | Ruling |
@@ -29,10 +33,19 @@ document below is written against. **A plan that contradicts one of these is wro
 | R14 | Menu photography | **Optional per item, three coverage states, mixing PERMITTED within a category.** `27-F70`. |
 | R15 | Build order | **Counter first, built for real** — `packages/ui` rebuilt **in place**, tests **ported suite by suite** as each component lands, coverage never dropping. KDS, then control plane / signup / back office. |
 | R16 | Theme | **Light only on every surface**, KDS dark opt-in deferred (`27-F19`). Tokens stay structurally two-polarity — `27-F67`'s training inversion requires it — so dark is later a values change, never a rewrite. |
+| R17 | Pilot scale & onboarding | **5–10 free pilot restaurants on ONE pooled deployment, with SELF-SERVE signup.** ⚠ This **overrules** two earlier positions and they are named so nobody re-derives them: §0's own consequence list said *"vendor-operated onboarding rather than self-serve signup (R1)"*, and `reconciliation.md` FORK 4 recommended *"no self-service signup in v1; build the vendor console"* at high confidence. Both are superseded. The reason is that at 5–10 tenants the founder is otherwise the onboarding process for each one, which is the thing that made the original deviation invisible. `28-F12` implements this and `15-F26` is amended by name. |
+| R18 | Commercial model, staged | **Billing is DEFERRED — pilots are free.** Metering, invoicing, payment collection and tiers are out of scope for the pilot. The **shape** billing will later attach to (a plan, an entitlement record, a subscription state) is IN scope, because retrofitting it into a live multi-tenant deployment is the failure this whole pivot exists to avoid repeating. `28-F6` owns the shape; §9 of doc 28 keeps every commercial number open. |
+| R19 | Design scope before pilots | **All seven surfaces on the new design language before any restaurant uses it** — counter, KDS, back office, control plane, signup, **owner app and manager console**. The last two are two-line stubs today, so they are designed and built from nothing rather than restyled. This is the largest single addition to the critical path (~6–8 weeks over the five-surface option) and was chosen deliberately over shipping pilots on the UI the founder has already rejected. |
+| R20 | Where the design work lives | **Build the screens runtime-agnostically in `packages/ui`, and move the host later.** `packages/ui` is plain React and host-independent, so R3's browser+edge-agent move changes the host process and the IPC boundary, not the screens. Pilots therefore run on the Electron shell without gating on a runtime rewrite, and almost none of the design work is done twice. R3 is **not** withdrawn; it is sequenced after the pilots. |
+| R21 | What pilot data IS | **Real business records.** Pilots close their day on this and trust the numbers. Consequences that are therefore hard blockers rather than deferrable, each named: staff identity distributed over the wire (`01-F28` — attribution is permanent and unfixable under `01-F1`, so every day sold under the dev roster is a day of ledger nobody can correct); the corrective acts (`void`/`comp`/`discount`/`refund` producers, which have schemas, permissions and folds and **no emitter**); per-tenant backup and export (doc 22); and eventually doc 16. |
+| R22 | Manager surface | **A BROWSER console with push notifications**, superseding `05-F29`'s Expo React Native device app. ⚠ `05-F29` rejected the browser on a MEASURED kernel reason — only a process holding a `01-F26` PIN session can legally stamp `approval.granted`'s envelope (`01-F62`), and `gateway.ts` stamped `actor_user_id` unconditionally from the live session, so a till recording a remote grant would name the **cashier**. **That reason has since dissolved**: `apps/pos-electron/src/main/authorize.ts:522/568` now accepts an explicitly verified approver and `index.ts:1199` wires it, and `verifyApprover` deliberately does not move the session. So this is delivered by `05-F28`'s resolution **(c)** — the console DECIDES and the requesting POS RECORDS — which needs one new `packages/sync-protocol` message kind and **no amendment to `01-F62` or `02-F41`**. Rendering alarms and pushing notifications needed no ruling at all: `05-F29`'s own graft clause already permits a cloud-plane console to render `05-F1`..`05-F4` from a `01-F7` read model. What stays forbidden is the browser ACKNOWLEDGING an alarm, because `05-F2`'s acknowledgment is `audit.*` and `01-F62` names that as its worked example of a branch-scoped type. **Owed:** the `05-F29` amendment, and the fact that nothing yet emits `approval.requested` under any resolution. |
 
 **Consequences that follow automatically and are not separate decisions:** pooled multi-tenancy
-(R1+R5 economics); vendor-operated onboarding rather than self-serve signup (R1); no RN workspace
-(R3); `apps/pos-rn`, `apps/waiter`, `apps/rider`, `apps/storefront`, `services/foodpanda`,
+(R1+R5 economics); ~~vendor-operated onboarding rather than self-serve signup (R1)~~ **— OVERRULED
+by R17, which is the whole point of recording consequences separately from decisions: this one was
+derived, not ruled, and it was reversed without anyone noticing until an adversarial review of
+`specs/28` found a shipped FR superseded on the strength of a ruling the repo did not contain**;
+no RN workspace (R3), ⚠ **and R22 does not reopen it — a browser console is not an RN workspace**; `apps/pos-rn`, `apps/waiter`, `apps/rider`, `apps/storefront`, `services/foodpanda`,
 `services/whatsapp`, `services/intelligence` stay stubs until their wave (R1).
 
 ---

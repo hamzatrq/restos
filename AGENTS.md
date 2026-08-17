@@ -64,6 +64,7 @@ All docs in `specs/` (`NN-name.md`). `restaurant-os.md` = product vision + seed 
 | Staff: attendance, advances, memory | `11` | — |
 | Owner app · Intelligence/analyst/alerts | `12` · `13` | each other |
 | Back office (layer-2 config) · Platform admin (layer-1) | `14` · `15` | `00 §7` |
+| Tenancy: what an org is as a tenant, entitlement, suspension/closure, self-serve signup, vendor identity, isolation at the serving layer | `28` | `01-F68`..`01-F71`, `15`, `00 §7` |
 | Tax / fiscalization | `16` | `01` money |
 | Marketing & loyalty | `17` | `07` |
 | Stack, packages, monorepo layout, code rules | `18` | — |
