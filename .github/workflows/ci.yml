@@ -54,6 +54,26 @@ jobs:
       # `pnpm rebuild` invokes the build explicitly rather than relying on install-time inference.
       - name: fetch the Electron binary (its postinstall does not run on a clean install)
         run: pnpm rebuild electron
+      # ⚠ **`better-sqlite3` must exist for BOTH ABIs, and building the second one CLOBBERS the
+      # first.** `apps/pos-electron/CLAUDE.md` states this at length and calls `rebuild:native`
+      # "not optional and not a workaround": Electron 43 uses V8 ABI 148 while the Node that
+      # installed the module uses 127, so the counter's main process cannot open its device store
+      # until an Electron-ABI build exists. That is the measured CI symptom — `startup-integrity`'s
+      # first launch "never reached its last boot line", while `apps/pass-kds` (which has no
+      # `rebuild:native` script) passes.
+      #
+      # The two steps are ordered and BOTH are required. `@electron/rebuild` writes the Electron
+      # copy to `bin/<platform>-<arch>-<abi>/`, which is what the app resolves at runtime from
+      # `process.versions.modules` — but it also overwrites `build/Release/`, which is where
+      # `bindings` looks FIRST and is the copy every Node-side suite needs. Restoring it is the
+      # remedy that package guide prescribes by name; without it `pnpm test` dies with
+      # `NODE_MODULE_VERSION 148 … requires 127` across every suite that opens a store.
+      - name: build better-sqlite3 for the Electron ABI (real-Electron launch tests)
+        run: pnpm -C apps/pos-electron rebuild:native
+      - name: restore the Node ABI build that the rebuild overwrote
+        run: |
+          cd "$(dirname "$(node -e "console.log(require.resolve('better-sqlite3/package.json'))")")"
+          npm run build-release
       - name: test
         run: pnpm test
       - name: build
