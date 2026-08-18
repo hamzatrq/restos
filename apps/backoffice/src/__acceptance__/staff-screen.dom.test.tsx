@@ -97,7 +97,9 @@
  * that is never empty and a caller who is always an owner. So the roster carries **four** people
  * across **three** role kinds; one has **no email** (R30) and one has **two branches**; one is
  * **departed** (`11-F22`) and one is **org-wide** (`branch_id: null`); the roster is also driven
- * **empty**, **refused** and **forbidden**; and the branch directory is driven both populated and
+ * **empty**, **refused** and **forbidden**; and the branch directory is driven populated, partial
+ * (one branch named and one not — round 3, and the only one of the three that catches the repair an
+ * implementer reaches for first, see §H) and
  * **empty**, which is the state every real tenant is in today (`services/api/src/tenancy.ts`:
  * "NOTHING WRITES EITHER TABLE YET … `branches` is `[]` for every tenant").
  *
@@ -164,6 +166,57 @@
  * STRING diff of what appeared, and a name rendered in its own element is a string already on her
  * row, so it failed a correct implementation. It reads nodes now, and the control proves the
  * requirement is *that she is named* rather than *how she is composed*.
+ *
+ * **Round 3 — an adversarial review of the SHIPPED screen, and it found two states this file drove
+ * past.** Both were invisible to all 46 tests here: the suite was **46/46 green** against an
+ * implementation that renders `branch-gulberg` in three name slots and that duplicates a person
+ * permanently on a failed PIN. Nine tests were added (§0 one, §B three, §H five) and the file went
+ * 46 → 55.
+ *
+ *   | the gap | mutant, one branch | kills | which test |
+ *   |---|---|---|---|
+ *   | `21-F15` — the id in the name slot | N1 the shipped `?? branch_id` fallback restored | **3** | §H empty · row treatment · partial |
+ *   | …the repair that is one case narrow | N2 the treatment only when the directory is EMPTY | **1** | §H **partial only** |
+ *   | …the treatment that retires the question | N3 the "where it is set" statement deleted | **1** | §H says-WHERE |
+ *   | …exception (b) without its label | N4 the demoted id keeps its place, loses its label | **2** | §H empty · partial |
+ *   | …a slot that never asks `placeLabel` | N6 the row prints `branch_id` on EVERY row | **3** | §H empty · **populated** · partial |
+ *   | the partial hire, unspoken | P1 the notice becomes a bare failure | **1** | §B told |
+ *   | …and repeated | P2 the still-open form re-runs `create` (shipped) | **1** | §B second person |
+ *   | …on a roster that never re-read | P3 invalidate only when the task completes | **1** | §B re-read |
+ *   | **CONTROL** | N5 the row's two metadata facts swap order | **0** | — |
+ *   | **CONTROL** | P4 the notice keeps its words, changes tone and gains a wrapper | **0** | — |
+ *
+ * Every row is one branch, run against the FULL `apps/backoffice` suite (16 files, 329 tests) with
+ * `REAL_EXIT` read from a marker written inside each log, against an out-of-tree probe repaired to
+ * a plausible correct implementation — **which takes all 55 green**, because a test that stays RED
+ * under a correct implementation is as damaging as a vacuous one. **In every row the only failing
+ * file was this one, and inside it only the named test**: the 46 that existed before round 3 fired
+ * zero times across ten mutants, which is the measurement that says why both defects shipped.
+ *
+ * ⚠ **THE PROBE WAS BUILT OUT-OF-TREE FOR A REASON THAT IS NOT THE USUAL ONE.** `staff-screen.tsx`
+ * was UNTRACKED and `strings.ts` MODIFIED in the working tree while this ran — another session's
+ * uncommitted work — so an in-tree mutate-and-revert would have restored over a file somebody was
+ * still writing. AGENTS.md's rule about not staging another agent's half-written files has a
+ * mutation-shaped twin: **do not mutate a file you did not write while its author is still in the
+ * tree.** The probe is a copy of `apps/backoffice` with `node_modules` symlinked back; the shipped
+ * files were verified byte-identical (md5) before and after.
+ *
+ * ⚠ **N3 WAS A SURVIVOR ON ITS FIRST RUN, AND ITS CAUSE IS THIS WAVE'S NAMED DEFECT COMMITTED
+ * INSIDE THE SECTION WRITTEN TO CLOSE IT.** The "says where the name is set" assertion swept every
+ * leaf on the screen and was satisfied by `"Branch manager · Branch not named"` — a ROW LABEL, six
+ * "words" once the `·` is counted, both matchers happy. That is §F's own recorded failure ("a
+ * `/till|device/i` sweep satisfied by an unrelated row label") reproduced one section over, and
+ * **reading the assertion would never have found it**; only deleting the statement did. Fixed with
+ * §F's remedy — the rows are excluded, because a row cannot be the statement about itself.
+ *
+ * ⚠ **THE SHIPPED `placeLabel` CARRIES AN ARGUMENT AGAINST §H, AND §H IS BUILT TO ANSWER IT RATHER
+ * THAN TO OVERRULE IT.** Its comment says the fallback is the identifier "rather than a sentence"
+ * because *"an owner with two branches has to be able to tell one departure from the other, and
+ * 'unnamed branch' twice on one row cannot"*. That concern is real and `21-F15` already answers it:
+ * exception (b) is a **secondary, explicitly labelled technical id offered for support beside** the
+ * name — this app's own twice-shipped shape — and the sweep permits exactly that (`declaredTechnical`).
+ * So the road is open; what is closed is the id occupying the slot. N4 is the mutant that proves the
+ * exception is not a hole: strip the label, keep the demotion, and the sweep still fires.
  *
  * ⚠ **ONE PRE-EXISTING TEST FAILS THE MOMENT THE FOURTH TAB LANDS, AND IT IS NOT THIS FILE'S TO
  * FIX.** `owner-summary.dom.test.tsx:414` clicks EVERY navigation control in order and then asserts
@@ -610,6 +663,112 @@ const inputsTo = (sent: readonly Sent[], path: string): readonly Record<string, 
   sent.filter((call) => call.path === path).map((call) => call.input as Record<string, unknown>);
 
 // ───────────────────────────────────────────────────────────────────────────────────────────────
+// The deactivation helpers. **Declared here rather than inside §D (a mechanical hoist, August
+// 2026)** because §H arms the same act on a different fixture, and two copies of `DEACTIVATE`
+// drift — `K-3`'s recorded defect, which `phrases` above already carries a warning about.
+// ───────────────────────────────────────────────────────────────────────────────────────────────
+
+const DEACTIVATE = /deactivate|let go|no longer|remove from|end (her|his)|leave/i;
+
+/** Declined, in every wording an implementation might choose. Declared once, spent three times. */
+const DECLINE = /no,|keep|cancel|not now|back|never/i;
+
+const arm = async (personName: string, branchName?: string): Promise<void> => {
+  const row = rowOf(personName);
+  const controls = buttonsNamed(DEACTIVATE, row);
+  if (controls.length === 0) {
+    throw new Error(`no deactivation control on ${personName}'s row (14-F14)`);
+  }
+  const scoped =
+    branchName === undefined
+      ? controls[0]
+      : (controls.find((control) => {
+          let element: HTMLElement | null = control;
+          while (element !== null && element !== row) {
+            if (textOf(element).includes(branchName)) return true;
+            element = element.parentElement;
+          }
+          return controls.length === 1;
+        }) ?? controls[0]);
+  fireEvent.click(scoped as HTMLElement);
+  if (branchName !== undefined) {
+    const places = choicesFor(/branch|location|where/i);
+    const place = places.find((choice) => choice.label.includes(branchName));
+    if (place !== undefined) place.choose();
+  }
+};
+
+const confirm = (before: readonly string[]): void => {
+  const fresh = buttons().filter((button) => !before.includes(textOf(button)));
+  const yes = fresh.find((button) => !DECLINE.test(textOf(button)));
+  if (yes === undefined) throw new Error("the confirmation offers nothing to confirm with");
+  fireEvent.click(yes);
+};
+
+// ───────────────────────────────────────────────────────────────────────────────────────────────
+// `21-F15`, THE NAMING LAW — its machinery, declared here because §0 proves it bites before §H
+// spends it, and because the same sweep is spent on three different directories.
+// ───────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Every machine identifier this fixture carries. `21-F15` defines the term itself — "any value
+ * whose only purpose is to be a key: org, branch, device and user ids, event and entity ids" — so
+ * the sweep does not stop at the branch ids the review measured on the glass. A sweep narrowed to
+ * the one id someone has already seen on a screen is the same guard pointed one case away.
+ */
+const MACHINE_IDS: readonly string[] = [
+  GULBERG,
+  DHA,
+  ORG.org_id,
+  ...ROSTER.map((person) => person.user_id),
+];
+
+/**
+ * `21-F15` exception (b): "a secondary, explicitly labelled **technical id** offered for support
+ * beside a name, copyable". This app ships that twice — `Problem`'s demoted `<details>` under
+ * *Technical detail*, and the pending row's demoted identity — so the exception is real here and
+ * the sweep honours it.
+ *
+ * ⚠ **Read WITHOUT climbing the tree, and that is the load-bearing half.** An ancestor walk finds
+ * *some* `<summary>`, or the word "id" in *some* heading, on any screen large enough to matter, and
+ * would exempt the whole document. What counts is the element's own words, its `aria-label`, the
+ * sibling that labels it, or the `<details>` it is demoted inside — nothing further away, because
+ * nothing further away is what an owner reads as the label of THIS value.
+ */
+const TECHNICAL_LABEL = /\btechnical\b|\bidentifiers?\b|\bids?\b|for support|\breference\b/i;
+
+const declaredTechnical = (element: Element): boolean => {
+  if (TECHNICAL_LABEL.test(ownText(element))) return true;
+  if (TECHNICAL_LABEL.test(flat(element.getAttribute("aria-label")))) return true;
+  const previous = element.previousElementSibling;
+  if (previous !== null && TECHNICAL_LABEL.test(ownText(previous))) return true;
+  const details = element.closest("details");
+  const summary = details === null ? null : details.querySelector("summary");
+  return summary !== null && TECHNICAL_LABEL.test(textOf(summary));
+};
+
+/**
+ * Every element whose OWN words carry a machine identifier without declaring it one — that is,
+ * every place on the screen where a key is standing in a name's slot.
+ *
+ * Per element, for the reason `phrases` carries in full: read over a glued `textContent` this
+ * would be a claim about where the implementation put its element boundaries.
+ */
+const idsInNameSlots = (root: HTMLElement = document.body): readonly string[] =>
+  [root, ...Array.from(root.querySelectorAll("*"))]
+    .filter((element) => MACHINE_IDS.some((id) => ownText(element).includes(id)))
+    .filter((element) => !declaredTechnical(element))
+    .map((element) => `<${element.tagName.toLowerCase()}> ${ownText(element)}`);
+
+/**
+ * `21-F15`'s compliant shape for a record the product has no name for: "a stated **unnamed**
+ * treatment that says what is missing and where it is set … it is never blank — a blank is the
+ * same lie with less information."
+ */
+const UNNAMED_TREATMENT =
+  /not named|no name\b|unnamed|nameless|needs a name|name (?:is )?(?:not set|missing)|without a name/i;
+
+// ───────────────────────────────────────────────────────────────────────────────────────────────
 
 describe("0 · the suite's own patterns bite before they are used as evidence", () => {
   /**
@@ -665,6 +824,62 @@ describe("0 · the suite's own patterns bite before they are used as evidence", 
     expect(ownText(sentence)).toBe("Nadia Khan — she stops");
 
     row.remove();
+  });
+
+  it("the 21-F15 sweep fires on the row review measured, and not on a compliant one", () => {
+    /**
+     * The three rows below are the law's three states, and the sweep has to separate them or §H is
+     * decoration. The first is **verbatim from the review** that sent this session: the roster row,
+     * the deactivate control and the consequence sentence each rendered `branch-gulberg` where a
+     * name belongs, on the only deployment state that exists today.
+     */
+    const rowOfSpans = (contents: readonly string[]): HTMLElement => {
+      const element = document.createElement("div");
+      element.append(
+        ...contents.map((value) => {
+          const span = document.createElement("span");
+          span.textContent = value;
+          return span;
+        }),
+      );
+      document.body.append(element);
+      return element;
+    };
+
+    const measured = rowOfSpans([
+      "Nadia Khan",
+      "Cashier · branch-gulberg",
+      "Working",
+      "Deactivate at branch-gulberg",
+    ]);
+    expect(idsInNameSlots(measured)).toHaveLength(2);
+    measured.remove();
+
+    // The same row with the name the directory knows. Nothing here may fire, or §H fails every
+    // implementation including the correct one.
+    const named = rowOfSpans([
+      "Nadia Khan",
+      "Cashier · Gulberg",
+      "Working",
+      "Deactivate at Gulberg",
+    ]);
+    expect(idsInNameSlots(named)).toEqual([]);
+    named.remove();
+
+    // The unnamed treatment, with `21-F15` exception (b) demoted beside it — the shape this app
+    // already ships twice. Both halves must read as compliant, and the treatment must be findable.
+    const treated = rowOfSpans([
+      "Nadia Khan",
+      "Cashier · branch not named",
+      "Technical id",
+      "branch-gulberg",
+    ]);
+    expect(idsInNameSlots(treated)).toEqual([]);
+    expect(phrases(treated).some((phrase) => UNNAMED_TREATMENT.test(phrase))).toBe(true);
+    // …and the treatment matcher does not fire on a row that simply names its branch, or the
+    // "says what is missing" half of §H would be satisfied by every screen.
+    expect(phrases(named).some((phrase) => UNNAMED_TREATMENT.test(phrase))).toBe(false);
+    treated.remove();
   });
 });
 
@@ -1013,6 +1228,159 @@ describe("B · 14-F14 — the hire is an owner's task, not the record's fields (
     );
   });
 
+  /**
+   * ⚠ **THE HIRE IS TWO CALLS AND NOTHING IN THIS FILE DROVE THE INSTANT BETWEEN THEM.** §B tested
+   * the happy path (`create` then `setPin`, in that order, against the minted id) and the refusal
+   * with no PIN typed at all. The state it never reached is the one that costs an owner a permanent
+   * duplicate: **`users.create` succeeds and `users.setPin` fails.**
+   *
+   * Measured in review on the shipped screen:
+   *
+   *     PROBE: creates-after-first=1  creates-after-second=2
+   *     PATHS: users.create → users.create
+   *     FORM STILL OPEN: true
+   *
+   * Every FR needed to call that a defect is already cited above. `11-F20` never deletes a person
+   * record, so the first one is **permanent** — a correction here is a second row, never an undo
+   * (commandment 1). She is left `active` with no credential, which is `11-F23`/R32's named defect
+   * verbatim, *"a tile that cannot be unlocked … `01-F17`'s stopped till arriving through the
+   * identity path"*, and R32's rule for the skipped second step is that it *"must fail LEGIBLY
+   * rather than silently"*. And `00 §5.7` decides the honesty half: a screen that reports the hire
+   * as failed, when a person was in fact created, is stating something it knows to be false — and
+   * that false statement is the **mechanism** of the duplicate, because the only sane response to
+   * "it failed" is to do it again.
+   *
+   * `users.setPin` is overridden here rather than wrapped, so it is not in `sent`; the harness's
+   * own `log` records every call at the instant it is made and is what these three read.
+   */
+  const HIRED = "Bilal Ahmed";
+
+  const partialHire = async (): Promise<{
+    log: CallLog;
+    said: ReadonlySet<string>;
+    buttonsBefore: readonly string[];
+    readsBefore: number;
+  }> => {
+    const { log } = mount({
+      extra: {
+        "users.setPin": () => {
+          // Deliberately carries none of the vocabulary the assertions below read for. A message
+          // like "credential store unavailable" would let a screen that merely echoes the server
+          // satisfy an assertion about what the screen UNDERSTANDS.
+          throw new Error("upstream write timed out");
+        },
+      },
+    });
+    await settled();
+    await openHireTask();
+    fill(/name/i, HIRED);
+    (requireChoices(/role|job/i, "role")[0] as Choice).choose();
+    const branches = requireChoices(/branch|location/i, "branch");
+    const gulberg = branches.find((choice) => choice.label.includes("Gulberg"));
+    if (gulberg === undefined) {
+      throw new Error("the branch control does not offer Gulberg");
+    }
+    gulberg.choose();
+    fill(/pin/i, "4821");
+    const said = new Set(phrases());
+    const buttonsBefore = buttons().map((button) => textOf(button));
+    const readsBefore = log.filter((call) => call.path === "users.list").length;
+    commitFrom(/name/i);
+    // The partial state, reached rather than assumed: the person EXISTS on the server and holds no
+    // credential. If either wait times out the fixture never got there and the tests below are
+    // about nothing.
+    await waitFor(() => expect(inputsTo(log, "users.create")).toHaveLength(1));
+    await waitFor(() => expect(inputsTo(log, "users.setPin")).toHaveLength(1));
+    await settleSends();
+    return { log, said, buttonsBefore, readsBefore };
+  };
+
+  it("11-F23 — a create that lands with a FAILED PIN says she exists and cannot sign in yet", async () => {
+    const { said } = await partialHire();
+    /**
+     * Read from the phrases the COMMIT added, for §B's own recorded reason one test up: over the
+     * whole body this vocabulary is matched by the PIN field's own label and by a sentence §F
+     * requires to be on this screen, and an assertion another requirement guarantees will pass is
+     * worse than no assertion.
+     *
+     * Two halves, and they are different claims. **exists** — the person is a fact now, so a
+     * notice that speaks only of failure is false (`00 §5.7`); either naming her or saying she was
+     * added carries it, because both tell an owner the act partly landed. **gap** — what is
+     * missing, at sentence length rather than label length, so a re-rendered field label cannot
+     * supply it.
+     */
+    const appeared = phrases().filter((phrase) => !said.has(phrase));
+    const exists = appeared.some(
+      (phrase) =>
+        phrase.includes(HIRED) || /added|created|exists|saved|hired|on the roster/i.test(phrase),
+    );
+    const gap = appeared.some(
+      (phrase) => /pin|sign in|unlock|credential/i.test(phrase) && wordCount(phrase) >= 5,
+    );
+    const said_ = appeared.join(" | ");
+    expect(
+      `exists=${exists} gap=${gap} → ${exists && gap ? "told" : "NOT told"}; it said: ${said_}`,
+    ).toBe(`exists=${exists} gap=${gap} → told; it said: ${said_}`);
+  });
+
+  it("11-F20 — a second attempt after a failed PIN does not create a SECOND person", async () => {
+    const { log, buttonsBefore } = await partialHire();
+    /**
+     * The owner does what the screen leaves her to do — a fresh control that finishes the job, or
+     * the form it left open holding her values. Both are pressed the way an owner would press
+     * them; which one exists is the implementation's business, and the invariant is the same
+     * either way: **the second attempt must not mint a second person.**
+     *
+     * `11-F20` is why this is permanent rather than merely untidy — nothing in this product deletes
+     * a person record, so the duplicate outlives every later correction, and the FIRST of the two
+     * is the one left `active` with no credential.
+     */
+    const fresh = buttons().filter((button) => !buttonsBefore.includes(textOf(button)));
+    const finish = fresh.find(
+      (button) =>
+        /try again|retry|set|finish|save|create|hire|done|confirm|update|apply/i.test(
+          textOf(button),
+        ) && !DECLINE.test(textOf(button)),
+    );
+    let attempted = "nothing";
+    if (finish !== undefined) {
+      fireEvent.click(finish);
+      attempted = `pressed "${textOf(finish)}"`;
+    } else if (screen.queryByLabelText(/name/i) !== null) {
+      commitFrom(/name/i);
+      attempted = "re-committed the form it left open";
+    }
+    await settleSends();
+
+    // A zero is only evidence if the owner had something to press — the control §D's decline test
+    // records in full. A screen offering neither a way to finish nor a form to re-commit has
+    // stranded the hire, which is `11-F23`'s tile-that-cannot-be-unlocked with no way out at all.
+    expect(`the owner can still finish: ${attempted !== "nothing"}`).toBe(
+      "the owner can still finish: true",
+    );
+    expect(`${attempted} → creates=${inputsTo(log, "users.create").length}`).toBe(
+      `${attempted} → creates=1`,
+    );
+  });
+
+  it("00 §5.7 — the roster is re-read, because she exists whatever the PIN did (PINNED)", async () => {
+    const { log, readsBefore } = await partialHire();
+    /**
+     * ⚠ **PINNED INTERPRETATION, contestable — a finding for this file's session cited by FR id, not
+     * a line to soften.** §B already requires the roster to be re-read after a hire ("the authority
+     * for who works here is the server: invalidate, never splice"), and the reading applied here is
+     * that a `create` which ANSWERED is what triggers it, not a task which completed. The reasons:
+     * the roster on screen omits a person the server now holds, which is `00 §5.7`'s stale-as-live
+     * exactly; and it is the only path by which an owner reaches her row to set the PIN that failed,
+     * so without it the recovery from this state is a second hire — the defect this section is
+     * about. The simpler alternative, rejected: invalidate only when the whole task succeeds, which
+     * leaves the screen knowingly wrong for as long as the credential store is down.
+     */
+    await waitFor(() =>
+      expect(log.filter((call) => call.path === "users.list").length).toBeGreaterThan(readsBefore),
+    );
+  });
+
   it("commandment 2 — no per-user permission override is invented", async () => {
     mount();
     await settled();
@@ -1095,43 +1463,6 @@ describe("C · 01-F26 — role × per-location assignment, edited", () => {
 });
 
 describe("D · 14-F14 — deactivation preserves the person, and names the place", () => {
-  const DEACTIVATE = /deactivate|let go|no longer|remove from|end (her|his)|leave/i;
-
-  const arm = async (personName: string, branchName?: string): Promise<void> => {
-    const row = rowOf(personName);
-    const controls = buttonsNamed(DEACTIVATE, row);
-    if (controls.length === 0) {
-      throw new Error(`no deactivation control on ${personName}'s row (14-F14)`);
-    }
-    const scoped =
-      branchName === undefined
-        ? controls[0]
-        : (controls.find((control) => {
-            let element: HTMLElement | null = control;
-            while (element !== null && element !== row) {
-              if (textOf(element).includes(branchName)) return true;
-              element = element.parentElement;
-            }
-            return controls.length === 1;
-          }) ?? controls[0]);
-    fireEvent.click(scoped as HTMLElement);
-    if (branchName !== undefined) {
-      const places = choicesFor(/branch|location|where/i);
-      const place = places.find((choice) => choice.label.includes(branchName));
-      if (place !== undefined) place.choose();
-    }
-  };
-
-  /** Declined, in every wording an implementation might choose. Declared once, spent twice. */
-  const DECLINE = /no,|keep|cancel|not now|back|never/i;
-
-  const confirm = (before: readonly string[]): void => {
-    const fresh = buttons().filter((button) => !before.includes(textOf(button)));
-    const yes = fresh.find((button) => !DECLINE.test(textOf(button)));
-    if (yes === undefined) throw new Error("the confirmation offers nothing to confirm with");
-    fireEvent.click(yes);
-  };
-
   /**
    * The words the arming ADDED: the own-text of every element that was not in the document before
    * the control was pressed.
@@ -1507,5 +1838,140 @@ describe("G · the section is REACHABLE from the shipped shell (14-F31, 27-F4)",
     await waitFor(() => expect(log.length).toBeGreaterThan(0));
     // `workspace.tsx`: "Mounted, not hidden: the inactive section's queries should not run."
     expect(log.some((call) => call.path === "users.list")).toBe(false);
+  });
+});
+
+describe("H · 21-F15 — the naming law, on the deployment state that exists", () => {
+  /**
+   * ⚠ **§B's `21-F15` ASSERTION READS THE HIRE FORM'S SELECT LABELS ON A FIXTURE WHERE EVERY BRANCH
+   * IS NAMED — which is the one state in which the law has nothing to catch.** The FR predicts its
+   * own survival in those words: a screen showing an id where a name belongs *"passes typecheck,
+   * passes its story, passes its `.dom.test.tsx` assertion that the label is present, and is
+   * nonsensical to the only person who matters"*. An assertion pointed at the named fixture is that
+   * `.dom.test.tsx` assertion.
+   *
+   * **Where it bites is the empty directory, and that is not an edge case — it is the only
+   * deployment state this product has.** Nothing writes the directory tables, so `tenancy.directory`
+   * answers `[]` for every real tenant, and the review that sent this section measured all three
+   * name slots on the shipped screen rendering the key:
+   *
+   *     Nadia KhanCashier · branch-gulbergWorkingDeactivate at branch-gulbergEdit where she works
+   *     Nadia Khan stops working at branch-gulberg as soon as you confirm, and nothing on this
+   *     screen brings her back.
+   *
+   * A roster row, a control, and the sentence an owner reads before an irreversible act — `21-F15`'s
+   * own definition of a name slot names all three ("a heading, a list row, a tile label, a report
+   * axis, a printed document field, a spoken or logged sentence a staff member reads").
+   *
+   * **THREE DIRECTORIES, AND THE THIRD IS THE ONE THAT MATTERS.** Empty proves the law is met at
+   * all; populated proves the sweep is not passing on silence; and **partial** — a directory that
+   * names DHA and not Gulberg — is the fixture no cheap fix survives. `branches.length === 0 ?
+   * treatment : id` is the repair an implementer reaches for first, it satisfies the empty case
+   * completely, and it puts the key back on the glass the day the directory gets its first row.
+   * That is this wave's named defect (a guard pointed one case away) and choosing the fixture is
+   * the only thing that catches it.
+   */
+  const armIfOffered = async (personName: string): Promise<boolean> => {
+    const controls = buttonsNamed(DEACTIVATE, rowOf(personName));
+    if (controls.length === 0) return false;
+    fireEvent.click(controls[0] as HTMLElement);
+    // The consequence renders after the click; nothing is sent by arming (§D asserts that).
+    await settleSends();
+    return true;
+  };
+
+  const sweep = async (personName: string): Promise<readonly string[]> => {
+    const resting = idsInNameSlots();
+    await armIfOffered(personName);
+    return [...new Set([...resting, ...idsInNameSlots()])];
+  };
+
+  it("EMPTY directory — no name slot renders an identifier the product has no name for", async () => {
+    mount({ branches: [] });
+    await rosterShown();
+    expect(await sweep(NADIA.display_name)).toEqual([]);
+  });
+
+  it("EMPTY directory — the slot that names a branch when it can says what is missing when it cannot", async () => {
+    /**
+     * `21-F15`'s counterpart half: the treatment "says what is missing and where it is set … it is
+     * never blank — a blank is the same lie with less information". So a screen cannot satisfy the
+     * sweep above by deleting the place from the row.
+     *
+     * **The control is inside the test**, and it is what keeps this from binding an implementation
+     * the FR does not bind: a screen that never puts a place on a person's row has no name slot
+     * there to treat, and is asked for nothing. The requirement fires only against a screen that
+     * showed a branch when it had one — read from the populated fixture, in the same test, so the
+     * two halves cannot drift apart.
+     */
+    mount();
+    await rosterShown();
+    const namedWhenItCould = phrases(rowOf(NADIA.display_name)).some((phrase) =>
+      phrase.includes("Gulberg"),
+    );
+    cleanup();
+
+    mount({ branches: [] });
+    await rosterShown();
+    const row = phrases(rowOf(NADIA.display_name));
+    const treated = row.some((phrase) => UNNAMED_TREATMENT.test(phrase));
+    const verdict =
+      namedWhenItCould && !treated
+        ? `the row named a branch when it could and says nothing when it cannot; it says: ${row.join(" | ")}`
+        : "ok";
+    expect(verdict).toBe("ok");
+  });
+
+  it("EMPTY directory — and the screen says WHERE the missing name is set (00 §5.7)", async () => {
+    /**
+     * The half of `21-F15` that changes what gets built: "an unnamed record is a **missing field
+     * upstream**, so the fix is the required field on the record, never a prettier fallback". A
+     * treatment that says only *unnamed* has retired the question; one that says where the name is
+     * set has filed it. Matched as §F matches the same shape — a leaf STATEMENT rather than a word,
+     * because `21-F15`'s own worked failure is a word that satisfied a matcher.
+     *
+     * ⚠ **AND THE FIRST DRAFT OF THIS ASSERTION WAS SATISFIED BY A ROW LABEL — MEASURED, 0 KILLS
+     * AGAINST THE MUTANT THAT DELETES THE STATEMENT ALTOGETHER.** Without the row filter below the
+     * statement it accepted was `"Branch manager · Branch not named"`: six "words" once the `·`
+     * separator is counted as one, both matchers satisfied, and it is the SLOT rather than a
+     * statement about it. That is §F's recorded failure one section down — *"a `/till|device/i`
+     * sweep satisfied by an unrelated row label"* — reproduced inside the section written to close
+     * the same class of gap, and found by mutating rather than by reading. The rows are excluded
+     * because a row cannot be the statement: it is the thing the statement is about.
+     */
+    mount({ branches: [] });
+    await rosterShown();
+    const rows = PEOPLE_NAMES.map(rowOf);
+    const leaves = Array.from(document.querySelectorAll("*"))
+      .filter((element) => element.children.length === 0)
+      .filter((element) => !rows.some((row) => row.contains(element)))
+      .map(textOf);
+    const statements = leaves.filter(
+      (text) => wordCount(text) >= 6 && /name/i.test(text) && /branch|location/i.test(text),
+    );
+    const candidates = leaves.filter((text) => /name|branch|location/i.test(text));
+    expect(
+      statements.length === 0
+        ? `nothing states where a branch name is set; the screen's naming words are: ${candidates.join(" | ")}`
+        : "stated",
+    ).toBe("stated");
+  });
+
+  it("POPULATED directory — the same sweep, so no slot keeps the key beside the name", async () => {
+    // §B checks the hire form's option labels only. A row, a control and a consequence sentence are
+    // name slots the form never touches, and on this fixture the product knows every name — so an
+    // identifier appearing here is the law broken in the state it is easiest to get right.
+    mount();
+    await rosterShown();
+    expect(await sweep(NADIA.display_name)).toEqual([]);
+  });
+
+  it("PARTIAL directory — one branch named and one not, which no `is the directory empty` fix survives", async () => {
+    // Nadia is at Gulberg, which this directory does not name; Ayesha is at DHA, which it does.
+    // Both people are on the screen at once, so the treatment and the name have to coexist — the
+    // state a screen that switches on `branches.length` renders as a key.
+    mount({ branches: [BRANCHES[1] as BranchListing] });
+    await rosterShown();
+    expect(await sweep(NADIA.display_name)).toEqual([]);
   });
 });
