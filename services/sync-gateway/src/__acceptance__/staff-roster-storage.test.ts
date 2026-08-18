@@ -66,11 +66,18 @@
 // `plans/saas-pivot/staff-over-the-wire.md`: *"Copying `catalogPage`'s SQL onto `kernel.users`."*
 // The catalog's storage is an append-per-version publication log; `kernel.users` is CURRENT STATE
 // with no version column, so a `distinct on … order by version desc` snapshot has nothing to run
-// against. The fixture is therefore a roster **edited three times**, and §C asks for versions that
-// are neither 0 nor the latest. The single assertion that costs the most to fake is C6: at
-// `at_version` 2 a member reads `active` and at version 3 the same member reads `inactive`. An
-// implementation that serves current state — the shape trap 8 predicts — answers `inactive` to both
-// and is green on every other test in this file.
+// against. The fixture is therefore a roster **edited three times**. The single assertion that costs
+// the most to fake is C6: a status that has been WRITTEN but not PUBLISHED is not in the artifact.
+// An implementation that serves current state — the shape trap 8 predicts — answers the unpublished
+// word and is green on every other test in this file.
+//   ⚠ **AMENDED 2026-08-18.** That sentence read: "§C asks for versions that are neither 0 nor the
+//   latest … at `at_version` 2 a member reads `active` and at version 3 the same member reads
+//   `inactive`." `01-F75`'s continuation clause (`b47dcbe`, see below) forbids that REQUEST — a first
+//   page is served the CURRENT version whatever it asks for — so C6 would now red a CORRECT
+//   implementation. The CLAIM was re-homed, not dropped: the difference between a publication log and
+//   today's rows is reachable at the current version through an edit that was never published, which
+//   costs a current-state implementation exactly as much and depends on no `at_version` at all. The
+//   historical fold is still asserted, on the continuation `at_version` still reaches (§M3).
 //
 // ── ⚠ WHAT MOVED UNDER THIS SUITE (amended 2026-08-18) ──────────────────────────────────────────
 //
@@ -101,6 +108,34 @@
 //     leaves the person `inactive` holding a live credential — and the next re-activation then
 //     restores her OLD PIN and publishes it to every till at the branch … Nothing queries for that
 //     state, so it is found by the cashier who still gets in."*
+//  4. **`01-F75`: `at_version` IS A CONTINUATION, NEVER A SELECTOR** (`b47dcbe`, amended into the FR
+//     after an adversarial review measured what the other reading costs *on this resource*). The
+//     rule, verbatim: *"`at_version` is honoured only on a CONTINUATION (`from > 0`), and a first
+//     page is served the CURRENT version whatever it asks for."* **This suite was authored against
+//     the forward-only clamp the catalog ships** (`at_version <= current`), which the FR now names as
+//     the defect — *"correct for a menu, and this is the FR that made the same vocabulary carry
+//     credentials"* — so three tests asked for a historical version on a FIRST page and would red a
+//     correct implementation: **C6** (trap 8's assertion), **B3**'s "one number, two artifacts" pair
+//     and **F4**'s sweep. Each records what moved and what did not. **§M is what the clause owns**,
+//     including the half no assertion here reached: a departed cashier's Argon2id hash, frozen into
+//     version 1 of the publication log and served to a brand-new till that asked for version 1.
+//  5. **`01-F75`: A DELTA CARRIES THE FOLD AT ITS TARGET, NEVER THE INTERMEDIATE LOG ROWS**
+//     (`6e30636`, amended into the FR after the same adversarial review re-measured item 4's leak
+//     and found it still open through a different field). The rule, verbatim: *"a delta carries ONE
+//     entry per changed id, the greatest version ≤ the target — the same fold a snapshot at that
+//     version is, restricted to the ids that changed."* It supersedes the catalog's inherited
+//     description of a delta as *"every published row with `A < version <= B`"*, which **C2's comment
+//     quoted** — corrected there in the same change as this note, because a comment restating an
+//     overruled rule is how the next session reintroduces it.
+//     **Nothing in this suite could see the door it closes, and the reason is a FIXTURE property
+//     rather than a missing assertion** — which is why it is written down here instead of being
+//     quietly fixed: the main roster publishes bilal at v1 and at v3, so a window of
+//     `1 < version <= 3` never contains his `active` row; §C2/§C3 assert a delta's IDS, which the
+//     row-replay reading gets right, and never its entry COUNT; and §M's sweep varies `at_version`
+//     with `have_version` pinned at **0**, so every page it inspects is a SNAPSHOT and no assertion
+//     in it has ever crossed the delta path at all. **§N is what the clause owns**, on the first
+//     fixture in this file with a publication STRICTLY BETWEEN a claimed base and the current
+//     version.
 //
 // **§J (the transfer), §K (the departure) and §L (atomicity) are what those three now own.** Two
 // notes on how they are written, both of which constrain a reader:
@@ -129,6 +164,20 @@
 //     publishes an org-wide (`branch_id: null`) person into a branch artifact, and no test asserts
 //     that a person assigned only to branch B is refused from branch A's artifact. §G asserts only
 //     the CROSS-ORG refusal, which `01-F71` decides outright.
+//     ⚠ **AMENDED 2026-08-18 — §G6/§G7 ATTEMPT exactly the publish that sentence says no test makes,
+//     and both are REFUSALS.** Neither asserts what a branch artifact CONTAINS, and no test anywhere
+//     here accepts an org-wide publish, so §9.7 stays open in both directions. The org-wide assignee
+//     is **forced** rather than chosen: `01-F26`'s null location is the only way a person has a
+//     participation value at a branch id that names nothing, and a branch-assigned person is refused
+//     one step earlier — for a §9.7-adjacent reason — so a probe built on her measures a different
+//     guard and reports the wrong one as protected. That mis-attribution is why the refusals below
+//     are matched on FR id and not merely on "it threw".
+//     ⚠ **AMENDED again 2026-08-18 — §G8 inserts a person holding TWO assignments, which this
+//     sentence otherwise forbids.** It is forced for the same reason §J/§K's transfer is: the claim
+//     is *"every assignment, not the first"* (`01-F26`), and a one-assignment fixture cannot express
+//     a LATER one. Its refusal legs write nothing at all, and its acceptance control is never
+//     published into any artifact, so nothing here asserts what a branch artifact CONTAINS and §9.7
+//     is untouched in both directions.
 //  2. **Whether a row carries ALL of a person's assignments or only this artifact's** — the second
 //     half of §9.7, same clause. For a single-branch person the two readings are identical, which is
 //     why §I3 is assertable at all.
@@ -148,8 +197,11 @@
 //     … deleting the row is the obvious implementation and is not obviously right"), so §D3 asserted
 //     the PROJECTION (an inactive member's entry carries no hash) and never the row, and §C6 was
 //     deliberately about `status` and not about a hash so that either answer passed. **Both of those
-//     assertions are still CORRECT and are untouched** — the projection rule is `11-F21`'s and R32
-//     did not move it. What changed is that the ROW is now decided, and §K2 asserts it: the only
+//     assertions are still CORRECT** — the projection rule is `11-F21`'s and R32 did not move it.
+//     ⚠ §D3 is untouched; **§C6 was rewritten on 2026-08-18** for a different reason entirely
+//     (item 4 below), and the `status`-not-hash scoping it recorded here is exactly the gap §M was
+//     written to close — see §M's header, which reads that scoping as archaeology rather than as a
+//     rule. What changed is that the ROW is now decided, and §K2 asserts it: the only
 //     surface this contract has for observing a credential row's existence is a re-activation, which
 //     is also exactly the act R32 exists to protect.
 //  6. ~~**Whether an ACTIVE member with no credential row may be published at all**~~ **ANSWERED by
@@ -429,6 +481,8 @@ type MainFixture = {
   danish: string;
   sana: string;
   ayeshaPin: string;
+  /** Bilal's PIN before his departure. R32 deletes the credential row at v3; §M2 is what that means. */
+  bilalPin: string;
   bilalPinHash: string;
 };
 
@@ -476,7 +530,8 @@ const buildMain = async (): Promise<MainFixture> => {
   });
 
   const ayeshaPin = "8461";
-  const bilalPinHash = await hashPin("2793");
+  const bilalPin = "2793";
+  const bilalPinHash = await hashPin(bilalPin);
   await api.setPinCredential(db, {
     org_id: org,
     user_id: ayesha,
@@ -539,6 +594,7 @@ const buildMain = async (): Promise<MainFixture> => {
     danish,
     sana,
     ayeshaPin,
+    bilalPin,
     bilalPinHash,
   };
 };
@@ -658,12 +714,19 @@ describe("§B — `01-F76`: an artifact is (resource, scope), and a version is m
     await publishFour(scopeRight, rightOne, rightTwo);
 
     // One number, two artifacts, different bytes — the FR's own sentence, at a version both hold.
-    const leftAtThree = await api.staffPage(db, scopeLeft, 0, 0, 3);
-    const rightAtThree = await api.staffPage(db, scopeRight, 0, 0, 3);
-    expect(leftAtThree.version).toBe(3);
-    expect(rightAtThree.version).toBe(3);
-    expect(ids(leftAtThree)).toEqual([leftOne, leftTwo].sort());
-    expect(ids(rightAtThree)).toEqual([rightOne, rightTwo].sort());
+    //
+    // ⚠ **AMENDED 2026-08-18 — the two calls below asked `at_version: 3` and expected `version: 3`.**
+    // `01-F75`'s continuation clause (`b47dcbe`) serves a FIRST page (`from: 0`) the CURRENT version
+    // whatever it asks for, so the old form would red a correct implementation at `version: 4`. **The
+    // claim this test owns is untouched** — it needs *a number both branches have reached*, and 4 is
+    // one: both were carried to four versions eight lines above, precisely so no `have_version <=
+    // current` guard can be what keeps them apart. The clause itself is §M's, not B3's.
+    const leftAtFour = await api.staffPage(db, scopeLeft, 0, 0);
+    const rightAtFour = await api.staffPage(db, scopeRight, 0, 0);
+    expect(leftAtFour.version).toBe(4);
+    expect(rightAtFour.version).toBe(4);
+    expect(ids(leftAtFour)).toEqual([leftOne, leftTwo].sort());
+    expect(ids(rightAtFour)).toEqual([rightOne, rightTwo].sort());
 
     // And a device at 3 is continued from the log of the branch it ASKED: the delta carries what
     // that branch published at 4 and never what the other branch did. A device that applied the
@@ -765,8 +828,16 @@ describe("§C — `01-F75`: snapshot or delta, per key, from an actual publicati
   });
 
   it("C2 answers a device at version 2 with a DELTA that is one member, not the roster", async () => {
-    // The money assertion. "A delta from version A to B is `A < version <= B`" — only what changed
-    // at v3 travels. An implementation that always answers a snapshot passes C1 and dies here.
+    // The money assertion. Only what changed at v3 travels: an implementation that always answers a
+    // snapshot passes C1 and dies here.
+    //
+    // ⚠ **COMMENT AMENDED 2026-08-18 — THE ASSERTION IS UNTOUCHED.** This read: *"A delta from
+    // version A to B is `A < version <= B`"*, the catalog's inherited description, which `01-F75`
+    // OVERRULED at `6e30636` — a delta is the fold at its target restricted to the changed ids, and
+    // the row-replay reading it describes is a credential leak on this resource (§N). The two
+    // readings agree on this test's `ids()` and differ only in the entry COUNT, which is why nothing
+    // here went red and why the sentence had to be corrected by hand: a green test whose comment
+    // states an overruled rule is the trap AGENTS.md names by ID.
     const fx = await main();
     const api = await staff();
     const page = await api.staffPage(db, fx.scopeA, 2, 0);
@@ -806,22 +877,62 @@ describe("§C — `01-F75`: snapshot or delta, per key, from an actual publicati
     expect(ids(page)).toEqual([fx.ayesha, fx.bilal, fx.danish, fx.hina].sort());
   });
 
-  it("C6 folds a HISTORICAL version: at v2 the departed member still reads `active`", async () => {
+  it("C6 serves the PUBLISHED row and never today's storage: an unpublished edit is not in the artifact", async () => {
     // ⚠ TRAP 8 IN ONE ASSERTION. `kernel.users` is current state; the artifact is a publication log.
-    // An implementation that reads current state answers `inactive` here and `inactive` at C7, and
-    // is otherwise green. `at_version` is `01-F75`'s pinned continuation version — the field that
-    // "makes a paged fetch atomic in the version dimension".
-    const fx = await main();
+    // `01-F75`: "a write that changes an artifact **mints the next version**" — so a write that has
+    // minted no version has not changed the artifact, and a device holding the current version must
+    // be holding the bytes that were published under that number. An implementation that reads
+    // current state serves the unpublished word under an unchanged version, which `01-F56`'s
+    // monotonic apply cannot detect **because the number it compares is right** — the device never
+    // re-fetches a version it holds, so the divergence is silent and permanent.
+    //
+    // ⚠ **AMENDED 2026-08-18 — this test asked for `at_version: 2` and `at_version: 1` on a FIRST
+    // page and asserted the historical fold.** `01-F75` gained a clause at `b47dcbe` forbidding that
+    // request outright ("a first page is served the CURRENT version whatever it asks for"), so the
+    // old form would now red a CORRECT implementation on its first assertion. **The claim is
+    // unchanged** and is asserted where the clause cannot reach it; the historical fold itself is
+    // §M3's, on the continuation `at_version` still serves. See the header's item 4.
     const api = await staff();
-    const atTwo = await api.staffPage(db, fx.scopeA, 0, 0, 2);
-    expect(atTwo.version).toBe(2);
-    expect(ids(atTwo)).toEqual([fx.ayesha, fx.bilal, fx.danish, fx.hina].sort());
-    expect(byId(atTwo, fx.bilal)?.status).toBe("active");
+    const org = `org-c6-${newId()}`;
+    const branch = `branch-c6-${newId()}`;
+    await addOrg(org);
+    await addBranch(org, branch);
+    const scope: StaffScope = { org_id: org, branch_id: branch };
+    const person = await addPerson({
+      org_id: org,
+      display_name: "Unpublished Edit",
+      email: null,
+      grid_ordinal: 8,
+      assignments: [{ role: "cashier", branch_id: branch, status: "active" }],
+    });
+    await api.setPinCredential(db, {
+      org_id: org,
+      user_id: person,
+      pin_hash: await hashPin("4471"),
+      now: T,
+    });
+    expect(await api.publishStaffRoster(db, scope, [person], { now: T })).toBe(1);
 
-    const atOne = await api.staffPage(db, fx.scopeA, 0, 0, 1);
-    expect(atOne.version).toBe(1);
-    expect(ids(atOne)).toEqual([fx.ayesha, fx.bilal, fx.hina].sort());
-    expect(byId(atOne, fx.danish)).toBeUndefined();
+    // The edit lands in storage and NOTHING publishes it. (Nothing here asserts a hash: R32 deletes
+    // her credential row on this flip, and whether the published row froze its copy or joins at
+    // serve time is a storage choice `11-F23` leaves open — D3 and §L3 own the hash rule.)
+    await api.setUserStatus(db, {
+      org_id: org,
+      user_id: person,
+      branch_id: branch,
+      status: "inactive",
+    });
+    const held = await api.staffPage(db, scope, 0, 0);
+    expect(held.version).toBe(1);
+    expect(entryOf(held, person, "C6 unpublished").status).toBe("active");
+
+    // ⚠ THE ANTI-VACUITY LEG. Without it, "still `active`" is satisfied by a `setUserStatus` that
+    // wrote nothing at all. One publish later the same read moves, so the assertion above is about
+    // PUBLICATION and not about a writer that does nothing.
+    expect(await api.publishStaffRoster(db, scope, [person], { now: T + 1 })).toBe(2);
+    const published = await api.staffPage(db, scope, 0, 0);
+    expect(published.version).toBe(2);
+    expect(entryOf(published, person, "C6 published").status).toBe("inactive");
   });
 
   it("C7 folds the CURRENT version to the departed member's latest row", async () => {
@@ -1180,10 +1291,17 @@ describe("§F — `01-F61`: an explicit `grid_ordinal`, unique within the artifa
   });
 
   it("F4 holds the invariant across every version of the main fixture's artifact", async () => {
+    // ⚠ **AMENDED 2026-08-18.** The first call in each pair used to be this test's whole reach and it
+    // no longer has any: `01-F75`'s continuation clause (`b47dcbe`) serves a first page the CURRENT
+    // version whatever it asks for, so the three of them are now three reads of version 3. They are
+    // kept — the invariant is still true of them and asking is still legal — and the historical reach
+    // this test claims in its own title is restored by the CONTINUATION beside each, which is the one
+    // request the clause still honours at a version that is not current (§M3 owns the rule itself).
     const fx = await main();
     const api = await staff();
     for (const version of [1, 2, 3]) {
       expectNoDuplicateOrdinals(await api.staffPage(db, fx.scopeA, 0, 0, version));
+      expectNoDuplicateOrdinals(await api.staffPage(db, fx.scopeA, 0, 1, version));
     }
   });
 });
@@ -1307,6 +1425,206 @@ describe("§G — `01-F26`/`01-F71`: an assignment names a branch of THAT org, o
     await expect(
       api.publishStaffRoster(db, { org_id: org, branch_id: null }, [person], { now: T }),
     ).rejects.toThrow(/01-F76|R25/);
+  });
+
+  /* ── the BRANCH half of the artifact key (added 2026-08-18) ──────────────────────────────────
+   *
+   * G4 checks the PERSON's org and G5 checks the SCOPE's shape; **neither checks the scope's
+   * BRANCH**, and until now nothing in this file did — a roster carrying Argon2id hashes of real
+   * people could be published under a key naming a branch that does not exist, or one belonging to
+   * another tenant, and every assertion in this suite stayed green.
+   *
+   * `01-F76` makes the artifact `(org_id, branch_id)` and `01-F71` (d) makes it a STRUCTURED key;
+   * `01-F71` opens by saying isolation's enforcement points are named "so a later edit is visible",
+   * and this is one of them. **It is enforced HERE OR NOWHERE**: `01-F68` forbids a foreign key from
+   * any ledger table *ever* and `schema.ts` extends that restraint to the directory's own edges, so
+   * Postgres cannot answer it, and `15-F27` already puts exactly this completeness rule at this
+   * writer (`create-branch` refuses a branch under an org no record names). `01-F71` (e)'s
+   * session-derived key is the OTHER enforcement point and is not a substitute: it is a serve-path
+   * rule about what a device may ASK for, and it does not exist yet — the publisher is reached from
+   * the back office, not from a device session.
+   *
+   * ⚠ **BOTH FIXTURES USE AN ORG-WIDE ASSIGNEE, AND THAT IS FORCED — see exclusion 1 in the header.**
+   * A person assigned only to branch X has no participation value at a branch id that names nothing,
+   * so a publish naming a ghost branch is refused one step earlier, for a §9.7-adjacent reason, and
+   * a probe built on her would report the participation lookup as the branch guard. `01-F26`'s null
+   * location gives an owner a value at any branch id, which is the only shape that reaches the key
+   * check. Neither test asserts what a branch artifact CONTAINS, and neither ACCEPTS an org-wide
+   * publish, so §9.7 is untouched.
+   *
+   * ⚠ **THE REFUSALS ARE MATCHED ON FR ID, AND `01-F76` IS DELIBERATELY NOT IN THE PATTERN.** A
+   * refusal citing `01-F76`/§9.7 would be the row-SELECTION answer nobody has ruled; letting it
+   * satisfy these tests is exactly the mis-attribution the paragraph above is guarding against.
+   */
+
+  it("G6 refuses to publish a roster into a branch NO RECORD NAMES, and mints no version", async () => {
+    const api = await staff();
+    const org = `org-g6-${newId()}`;
+    const branch = `branch-g6-${newId()}`;
+    await addOrg(org);
+    await addBranch(org, branch);
+    const ghost = `branch-never-created-${newId()}`;
+    const ghostScope: StaffScope = { org_id: org, branch_id: ghost };
+
+    const ownerPin = "6624";
+    const owner = await addPerson({
+      org_id: org,
+      display_name: "Org Wide Owner",
+      email: null,
+      grid_ordinal: 1,
+      assignments: [{ role: "owner", branch_id: null }],
+    });
+    const ownerHash = await hashPin(ownerPin);
+    await api.setPinCredential(db, { org_id: org, user_id: owner, pin_hash: ownerHash, now: T });
+
+    await expect(api.publishStaffRoster(db, ghostScope, [owner], { now: T })).rejects.toThrow(
+      /01-F68|01-F69|01-F71|15-F27/,
+    );
+
+    // Refused means NOTHING WAS WRITTEN — `15-F27`'s writer discipline. A partial publish here is an
+    // artifact under a key that can never be reconciled against a branch record, holding credentials.
+    expect(await api.staffVersion(db, ghostScope)).toBe(0);
+    const served = await api.staffPage(db, ghostScope, 0, 0);
+    expect(served.entries).toEqual([]);
+    expect(JSON.stringify(served)).not.toContain(ownerHash);
+
+    // ⚠ THE OVER-STRICTNESS CONTROL, one field away. A publisher that refused every scope — or every
+    // fixture of this shape — passes the refusal above and can publish nothing at all. This is the
+    // single-branch person into her own branch, which is exclusion 1's one uncontested case.
+    const real = await addPerson({
+      org_id: org,
+      display_name: "Real Branch Cashier",
+      email: null,
+      grid_ordinal: 2,
+      assignments: [{ role: "cashier", branch_id: branch }],
+    });
+    await api.setPinCredential(db, {
+      org_id: org,
+      user_id: real,
+      pin_hash: await hashPin("7735"),
+      now: T,
+    });
+    expect(
+      await api.publishStaffRoster(db, { org_id: org, branch_id: branch }, [real], { now: T }),
+    ).toBe(1);
+  });
+
+  it("G7 refuses to publish a roster into ANOTHER ORG's branch, and leaves both artifacts at 0", async () => {
+    // `01-F71`: "org data isolation is absolute" and the branch is half the artifact key. The branch
+    // here EXISTS — so "no record names it" cannot be the reason — and belongs to another tenant.
+    // Under R25 the roster's scope IS its credential blast radius, so this is one org's Argon2id
+    // hashes filed under another org's branch: the leak has no error in it and nothing to reconcile
+    // it against, exactly `01-F71` (d)'s separator-less-key defect reached through a missing check.
+    const api = await staff();
+    const orgOne = `org-g7a-${newId()}`;
+    const orgTwo = `org-g7b-${newId()}`;
+    const branchOne = `branch-g7a-${newId()}`;
+    const branchTwo = `branch-g7b-${newId()}`;
+    await addOrg(orgOne);
+    await addOrg(orgTwo);
+    await addBranch(orgOne, branchOne);
+    await addBranch(orgTwo, branchTwo);
+
+    const owner = await addPerson({
+      org_id: orgOne,
+      display_name: "One Org Owner",
+      email: null,
+      grid_ordinal: 1,
+      assignments: [{ role: "owner", branch_id: null }],
+    });
+    const ownerHash = await hashPin("3308");
+    await api.setPinCredential(db, { org_id: orgOne, user_id: owner, pin_hash: ownerHash, now: T });
+
+    const foreignScope: StaffScope = { org_id: orgOne, branch_id: branchTwo };
+    await expect(api.publishStaffRoster(db, foreignScope, [owner], { now: T })).rejects.toThrow(
+      /01-F68|01-F69|01-F71|15-F27/,
+    );
+
+    expect(await api.staffVersion(db, foreignScope)).toBe(0);
+    expect(JSON.stringify(await api.staffPage(db, foreignScope, 0, 0))).not.toContain(ownerHash);
+
+    // …and the branch's OWN tenant is untouched. `01-F76` keys the artifact by the pair, so the
+    // victim's device asks `(orgTwo, branchTwo)` and would never see this — which is what makes the
+    // row silent rather than loud, and is why the assertion is on both keys.
+    const victimScope: StaffScope = { org_id: orgTwo, branch_id: branchTwo };
+    expect(await api.staffVersion(db, victimScope)).toBe(0);
+    expect(JSON.stringify(await api.staffPage(db, victimScope, 0, 0))).not.toContain(ownerHash);
+  });
+
+  it("G8 checks EVERY assignment and not the first: a foreign branch named second is refused too", async () => {
+    // `01-F26` reads *"every assignment names a branch of THIS org"* — **every**, and G1/G2 above
+    // can only ever probe the first, because every person they build holds exactly one. A writer
+    // that validated `assignments[0]` and stopped passes both of them, passes every other test in
+    // this file, and writes a row whose SECOND assignment crosses `01-F71`'s absolute isolation
+    // boundary — after which that row is `authorize.ts`'s `can()` subject on every till the roster
+    // reaches. **It is refused here or nowhere**: `01-F68` forbids a foreign key from any ledger
+    // table *ever* and `0010` extends the restraint to the directory's own edges, so Postgres cannot
+    // answer it and this service is `18 §4`'s ONE writer of `kernel.users`.
+    //
+    // ⚠ **THE POSITION IS THE CLAIM, so the first assignment is deliberately VALID in both refusal
+    // legs.** A fixture whose first assignment were also wrong would be G1/G2 with an extra element,
+    // and would be satisfied by exactly the implementation this test exists to kill. `01-F26`'s two
+    // failure modes are kept apart on purpose (E2's lesson — a refusal for a neighbouring reason
+    // reports the wrong debt), so the branch belonging to another org and the branch no record names
+    // are separate legs matched on separate FR ids.
+    const orgOne = `org-g8a-${newId()}`;
+    const orgTwo = `org-g8b-${newId()}`;
+    const branchOne = `branch-g8a-${newId()}`;
+    const branchTwo = `branch-g8b-${newId()}`;
+    await addOrg(orgOne);
+    await addOrg(orgTwo);
+    await addBranch(orgOne, branchOne);
+    await addBranch(orgTwo, branchTwo);
+
+    // Leg one — the second assignment names ANOTHER TENANT's branch (`01-F71`).
+    await expect(
+      addPerson({
+        org_id: orgOne,
+        display_name: "Second Assignment Crosses",
+        email: null,
+        grid_ordinal: 1,
+        assignments: [
+          { role: "cashier", branch_id: branchOne },
+          { role: "cashier", branch_id: branchTwo },
+        ],
+      }),
+    ).rejects.toThrow(/01-F26|01-F71/);
+
+    // Leg two — the second assignment names a branch NO RECORD names (`01-F26`).
+    await expect(
+      addPerson({
+        org_id: orgOne,
+        display_name: "Second Assignment Is A Ghost",
+        email: null,
+        grid_ordinal: 2,
+        assignments: [
+          { role: "cashier", branch_id: branchOne },
+          { role: "cashier", branch_id: `branch-never-created-${newId()}` },
+        ],
+      }),
+    ).rejects.toThrow(/01-F26|01-F71/);
+
+    // Refused means NOTHING WAS WRITTEN — `15-F27`'s writer discipline. A row that landed with only
+    // its legal assignments kept would be the same violation wearing a repair.
+    expect(await listUsers(db, orgOne)).toEqual([]);
+
+    // ⚠ THE OVER-STRICTNESS CONTROL, one field away, and it is what keeps this test about the ORG
+    // rather than about holding two assignments at all: the same shape with a second assignment that
+    // is `01-F26`'s org-wide null is ACCEPTED. Without it a writer that refused every multi-assignment
+    // person would pass both legs above and make every owner-plus-branch person unstorable.
+    await expect(
+      addPerson({
+        org_id: orgOne,
+        display_name: "Second Assignment Is Org Wide",
+        email: null,
+        grid_ordinal: 3,
+        assignments: [
+          { role: "cashier", branch_id: branchOne },
+          { role: "owner", branch_id: null },
+        ],
+      }),
+    ).resolves.toBeTruthy();
+    expect(await listUsers(db, orgOne)).toHaveLength(1);
   });
 });
 
@@ -1894,5 +2212,464 @@ describe("§L — `11-F23`: the status flip and the credential delete are ONE un
     // ⚠ ANTI-VACUITY. A sweep over a set with no non-`active` entry in it asserts nothing, and this
     // suite has been through one amendment already; nine are reachable from the pages above.
     expect(nonActiveSeen).toBeGreaterThanOrEqual(8);
+  });
+});
+
+/* ── §M `at_version` is a CONTINUATION, never a SELECTOR (01-F75) ─────────────────────────────── */
+
+/**
+ * ⚠ **ADDED 2026-08-18, AND IT IS A CREDENTIAL LEAK BEFORE IT IS A PROTOCOL RULE.**
+ *
+ * `01-F75` verbatim: *"`at_version` is honoured only on a CONTINUATION (`from > 0`), and a first page
+ * is served the CURRENT version whatever it asks for."* The FR states its own measurement, which is
+ * why this section exists rather than reading as a hardening: *"a brand-new till — a `01-N5`
+ * replacement that has never held any roster — asked for `at_version: 1` and was served a departed
+ * cashier's entry `active`, **with the Argon2id hash R32 had deleted, and her old PIN verified
+ * against it**."*
+ *
+ * **The main fixture is already that database.** Bilal is `inactive` at v3 and R32 deleted his
+ * credential row on that flip; versions 1 and 2 of the publication log still carry the entry he had
+ * while `active`. So the leak needs no fixture of its own — it needs an assertion, and the honest
+ * reason there was none is worth writing down, because it is a shape rather than an oversight:
+ *
+ *   · **C6** asked for `at_version: 2` and asserted `status`, saying in its own note that it was
+ *     "deliberately about `status` and not about a hash" so that either answer to `11-F23`'s then-open
+ *     credential question passed. It reached the page and declared the hash out of scope.
+ *   · **§L3** sweeps every page this file produces for a hash on a non-`active` entry — and the leaked
+ *     entry reads `active`, because at version 1 he was. It reached the entry and declared it out of
+ *     scope.
+ *
+ * Two correct assertions, each excluding what the other covered, and the leak sat in the gap. **The
+ * assertions below are therefore written the other way round**: M1 is about the request, M2 is about
+ * the bytes regardless of any entry's status, and M2 greps the WHOLE response rather than the
+ * declared `pin_hash` field, because a leak through a field this suite's types do not name would
+ * satisfy every per-field assertion in this file.
+ *
+ * ⚠ **WHAT IS DELIBERATELY NOT ASSERTED — the residual, reported rather than papered over.** The FR
+ * rules the FIRST page and honours `at_version` on a continuation, so a caller that passes
+ * `from > 0` **is** served the historical fold, hash and all (M3 is that leg, and it is the control
+ * that stops the clause being implemented as "ignore `at_version`"). The FR's own ground for
+ * accepting that is *"no device has a reason to open a page run at a version it does not hold"* —
+ * a reachability argument about clients, not a bound the server enforces. Asserting a refusal there
+ * would invent policy (commandment 2) and would red a correct implementation; it is carried to the
+ * session's report as a finding for `01-F71` (e)'s serve path, which is where a request is authorized
+ * at all.
+ */
+describe("§M — `01-F75`: `at_version` is a CONTINUATION, never a SELECTOR", () => {
+  it("M1 serves a FIRST page the CURRENT version whatever it asks for", async () => {
+    // Every label below is inside the expectation string on purpose: a bare `toBe(3)` inside a loop
+    // reports "expected 3, received 1" with no way to tell which request produced it.
+    const fx = await main();
+    const api = await staff();
+    const current = [fx.ayesha, fx.bilal, fx.danish, fx.hina].sort().join(",");
+    for (const at of [1, 2, 3, 77] as const) {
+      const label = `first page asking at_version ${at}`;
+      const page = await api.staffPage(db, fx.scopeA, 0, 0, at);
+      expect(`${label}: version ${page.version}`).toBe(`${label}: version 3`);
+      expect(`${label}: form ${page.form}`).toBe(`${label}: form snapshot`);
+      // ⚠ AND THE BYTES, not just the number. A clamp that fixed the reported `version` and went on
+      // folding to the asked one would answer "3" over version 1's roster — one artifact under two
+      // numbers, which is worse than the leak it was meant to close, and `01-F56` cannot see it.
+      // At v1 danish is absent and at v2 bilal reads `active`, so both legs separate the folds.
+      expect(`${label}: ${ids(page).join(",")}`).toBe(`${label}: ${current}`);
+      expect(`${label}: bilal ${entryOf(page, fx.bilal, label).status}`).toBe(
+        `${label}: bilal inactive`,
+      );
+    }
+  });
+
+  it("M2 serves a departed cashier's deleted credential to NOBODY, at any version a first page asks", async () => {
+    // R32 (`11-F23`): the credential row "does not outlive her employment in the database". `01-F75`
+    // records that a read defeated it — the row was gone and the publication log still carried the
+    // copy frozen at v1. `11-F21`'s named failure is the same one from the other end: "the set grows
+    // monotonically with turnover until a branch till holds the Argon2id hash of everyone who has
+    // ever worked there", reached here by a till that never held any of them.
+    const fx = await main();
+    const api = await staff();
+
+    // ⚠ ANTI-VACUITY, and it is the leg that makes every "false" below mean something: this publisher
+    // DOES carry a working credential on this very page, for a member who still has one. Without it,
+    // an implementation that never carried a hash at all would pass M2 and fail nobody until a
+    // cashier could not sign in. (D2 owns the rule; this owns the attribution.)
+    const now = await api.staffPage(db, fx.scopeA, 0, 0);
+    expect(
+      await verifyPin(entryOf(now, fx.ayesha, "M2 anti-vacuity").pin_hash ?? "", fx.ayeshaPin),
+    ).toBe(true);
+
+    for (const at of [undefined, 1, 2, 3, 77] as const) {
+      const label = `first page asking at_version ${String(at)}`;
+      const page = await api.staffPage(db, fx.scopeA, 0, 0, at);
+      // He is IN the artifact — a departure is a marked entry, never an absence (§E1) — so every
+      // assertion below is about a row that exists rather than about one that is missing.
+      const entry = entryOf(page, fx.bilal, label);
+      // ⚠ THE CREDENTIAL LEGS COME FIRST, DELIBERATELY. M1 already owns the version, and this test's
+      // first failure must name the LEAK rather than repeat that — the `status` legs at the bottom
+      // are corroboration, and a run that reported them first would read as a protocol nit.
+      //
+      // The deleted bytes appear NOWHERE in the response: not on his entry, not on anyone else's,
+      // and not under a field these types do not declare.
+      expect(
+        `${label}: response contains the deleted hash ${JSON.stringify(page).includes(fx.bilalPinHash)}`,
+      ).toBe(`${label}: response contains the deleted hash false`);
+      // …the FR's own measurement — his old PIN verifies against nothing that was served…
+      for (const served of page.entries) {
+        expect(
+          `${label}/${served.user_id}: departed PIN verifies ${await verifyPin(served.pin_hash ?? "", fx.bilalPin)}`,
+        ).toBe(`${label}/${served.user_id}: departed PIN verifies false`);
+      }
+      // …and his own entry carries no hash and is marked departed (`11-F21`, `11-F22`).
+      expect(`${label}: bilal carries a hash ${carriesHash(entry)}`).toBe(
+        `${label}: bilal carries a hash false`,
+      );
+      expect(`${label}: bilal ${entry.status}`).toBe(`${label}: bilal inactive`);
+    }
+  });
+
+  it("M3 CONTROL: a CONTINUATION is still honoured, at a version that is not the current one", async () => {
+    // ⚠ THE OVER-STRICTNESS CONTROL, one branch away from M1, and the reason the clause is not
+    // "ignore `at_version`". `PROTOCOL.md` makes the field **required on every continuation**:
+    // without it "the server re-reads the current version per page, so a publish landing mid-fetch
+    // changes both the version and the ordering the offset indexes into, and the device commits a
+    // mixture of two menus under one number (`01-F56`, and it is silent and permanent)". An
+    // implementation that closed M1/M2 by dropping the field entirely passes both and reintroduces
+    // exactly that, on a resource carrying credentials.
+    //
+    // ⚠ **PINNED READING: `from: 1` is a continuation.** The FR keys the rule on `from > 0` and on
+    // nothing else, and `PROTOCOL.md` calls `from` "the paging cursor, echoed from
+    // `catalog_response.next_from`". This suite cannot echo a real cursor — the fold is four entries
+    // and comes back `complete` (C1), so no page run here ever produces a non-zero `next_from` to
+    // echo — and constructing one would mean asserting a page SIZE that no FR states. The
+    // alternative reading (a cursor is only a continuation if the server issued it) would make the
+    // clause unassertable and is named here rather than assumed away.
+    //
+    // Two legs, both independent of page size and of entry ordering, so neither can red a correct
+    // implementation: the version is the one asked for, and danish — who joined at v2 — is in no
+    // slice of the v1 fold under any cursor interpretation.
+    const fx = await main();
+    const api = await staff();
+    const cont = await api.staffPage(db, fx.scopeA, 0, 1, 1);
+    expect(cont.version).toBe(1);
+    expect(ids(cont)).not.toContain(fx.danish);
+  });
+});
+
+/* ── §N a DELTA is the fold at its target, never the intermediate log rows (01-F75) ───────────── */
+
+/**
+ * ⚠ **ADDED 2026-08-18, AND IT IS THE SAME CREDENTIAL LEAK THROUGH A DIFFERENT FIELD.**
+ *
+ * `01-F75` verbatim (`6e30636`): *"a delta carries ONE entry per changed id, the greatest version ≤
+ * the target — the same fold a snapshot at that version is, restricted to the ids that changed."*
+ * It supersedes the catalog's inherited *"every published row with `A < version <= B`"*, and the FR
+ * states its own measurement: *"a cashier published `active` with a hash at v2 and departed at v3 is
+ * served her v2 row, hash and all, to any caller that says `have_version: 1`. Measured after the
+ * `at_version` clause landed and with the suite green — the deleted PIN still verified against the
+ * served bytes."*
+ *
+ * **WHY §M DID NOT CATCH IT, which is the part that generalises.** §M was written for the
+ * `at_version` door and closed exactly that door: M1 and M2 sweep `at_version` with `have_version`
+ * pinned at **0**, so every page they inspect is a SNAPSHOT and no assertion in §M has ever crossed
+ * the delta path. §C does cross it — and asserts `ids()`, which the row-replay reading gets right,
+ * never the entry COUNT. And no fixture above this line could have shown it anyway: the leak needs a
+ * publication **strictly between** the base a caller claims and the current version, and the main
+ * roster publishes bilal at v1 and v3 with nothing in between. So three correct things — a sweep, an
+ * id assertion and a fixture — left one gap between them, which is how the first door survived too.
+ *
+ * **The assertions below are therefore written to be door-independent.** N2's property is *no
+ * response ever carries a credential that was deleted*, swept over `have_version` × `from` ×
+ * `at_version` rather than asserted at one point of it, matched against the **whole JSON body**
+ * (a leak through a field these types do not declare satisfies every per-field assertion in this
+ * file) and against `verifyPin` on every credential the sweep actually served. N1 and N3 assert the
+ * SHAPE — one entry per changed id, byte-identical to the snapshot at the same target — because a
+ * fix that merely stripped hashes from the intermediate rows would pass a leak test while still
+ * replaying a person's history to every device that reconnects.
+ *
+ * ⚠ **WHAT IS DELIBERATELY NOT ASSERTED.** The sweep covers every request whose TARGET is the
+ * current version. A continuation naming a HISTORICAL version is served that historical fold, hash
+ * and all — §M's own recorded residual, on the FR's ground that *"no device has a reason to open a
+ * page run at a version it does not hold"* — so including one here would red a correct
+ * implementation. That residual belongs to `01-F71` (e)'s serve path, which does not exist yet, and
+ * it is unchanged by this section: `have_version` is a BASE and cannot name a target, so nothing
+ * below narrows what M3 protects.
+ */
+
+/**
+ * §N's fixture — one branch published THREE times, with two people whose rows change at a version
+ * strictly INSIDE the window a delta from version 1 covers.
+ *
+ *   v1  zara   `active`, credential Z    — never published again, so she is in NO delta from 1
+ *   v2  nadia  `active`, credential N    · farah `inactive`, no credential (`11-F21`)
+ *   v3  nadia  `inactive`, R32 DELETES N · farah re-activated with a NEW credential F
+ *
+ * From base 1 the changed ids are {nadia, farah}; each has TWO published rows inside the window and
+ * is owed exactly ONE entry. **They move in opposite directions on purpose** — a credential
+ * disappears, a credential appears — so "the greatest version ≤ the target" is pinned rather than
+ * merely "one row per id": a dedup keeping the FIRST row serves nadia's deleted hash *and* farah's
+ * departed row, and both are named failures below.
+ */
+type ReplayFixture = {
+  org: string;
+  branch: string;
+  scope: StaffScope;
+  zara: string;
+  nadia: string;
+  farah: string;
+  /** A credential the current fold still carries — N2's anti-vacuity leg. */
+  zaraPin: string;
+  /** The credential R32 deleted at v3, and the bytes it was frozen into version 2 as. */
+  nadiaPin: string;
+  nadiaPinHash: string;
+  farahPin: string;
+};
+
+let replayFixture: Promise<ReplayFixture> | undefined;
+
+const buildReplay = async (): Promise<ReplayFixture> => {
+  const api = await staff();
+  const org = `org-replay-${newId()}`;
+  const branch = `branch-replay-${newId()}`;
+  await addOrg(org);
+  await addBranch(org, branch);
+  const scope: StaffScope = { org_id: org, branch_id: branch };
+
+  const zaraPin = "1122";
+  const nadiaPin = "3344";
+  const farahPin = "5566";
+
+  const zara = await addPerson({
+    org_id: org,
+    display_name: "Zara Malik",
+    email: null,
+    grid_ordinal: 10,
+    assignments: [{ role: "cashier", branch_id: branch, status: "active" }],
+  });
+  await api.setPinCredential(db, {
+    org_id: org,
+    user_id: zara,
+    pin_hash: await hashPin(zaraPin),
+    now: T,
+  });
+  const v1 = await api.publishStaffRoster(db, scope, [zara], { now: T });
+  if (v1 !== 1) throw new Error(`fixture: replay v1 minted version ${v1}, expected 1`);
+
+  const nadia = await addPerson({
+    org_id: org,
+    display_name: "Nadia Sheikh",
+    email: null,
+    grid_ordinal: 20,
+    assignments: [{ role: "cashier", branch_id: branch, status: "active" }],
+  });
+  const nadiaPinHash = await hashPin(nadiaPin);
+  await api.setPinCredential(db, {
+    org_id: org,
+    user_id: nadia,
+    pin_hash: nadiaPinHash,
+    now: T + 1,
+  });
+  // farah is published at v2 as a non-`active` member with no credential — the specified shape
+  // (`01-F75`: "a missing `pin_hash` on a non-`active` member is NOT `malformed`"), and the row a
+  // first-wins dedup would hand back at v3.
+  const farah = await addPerson({
+    org_id: org,
+    display_name: "Farah Javed",
+    email: null,
+    grid_ordinal: 30,
+    assignments: [{ role: "cashier", branch_id: branch, status: "inactive" }],
+  });
+  const v2 = await api.publishStaffRoster(db, scope, [nadia, farah], { now: T + 1 });
+  if (v2 !== 2) throw new Error(`fixture: replay v2 minted version ${v2}, expected 2`);
+
+  await api.setUserStatus(db, {
+    org_id: org,
+    user_id: nadia,
+    branch_id: branch,
+    status: "inactive",
+  });
+  // R32's two-step re-activation, in the order the ruling states it: flip the status, then set a PIN.
+  await api.setUserStatus(db, {
+    org_id: org,
+    user_id: farah,
+    branch_id: branch,
+    status: "active",
+  });
+  await api.setPinCredential(db, {
+    org_id: org,
+    user_id: farah,
+    pin_hash: await hashPin(farahPin),
+    now: T + 2,
+  });
+  const v3 = await api.publishStaffRoster(db, scope, [nadia, farah], { now: T + 2 });
+  if (v3 !== 3) throw new Error(`fixture: replay v3 minted version ${v3}, expected 3`);
+
+  return { org, branch, scope, zara, nadia, farah, zaraPin, nadiaPin, nadiaPinHash, farahPin };
+};
+
+const replay = (): Promise<ReplayFixture> => {
+  replayFixture ??= buildReplay();
+  return replayFixture;
+};
+
+describe("§N — `01-F75`: a delta is the FOLD at its target, never the intermediate log rows", () => {
+  it("N1 carries ONE entry per changed id — not one per intervening publish — and it is the LATEST", async () => {
+    const fx = await replay();
+    const api = await staff();
+    const page = await api.staffPage(db, fx.scope, 1, 0);
+
+    expect(page.form).toBe("delta");
+    expect(page.base_version).toBe(1);
+    expect(page.version).toBe(3);
+
+    // ── "restricted to the ids that changed": zara was published at v1 and never again.
+    expect(ids(page)).toEqual([fx.farah, fx.nadia].sort());
+    expect(ids(page)).not.toContain(fx.zara);
+
+    // ── "ONE entry per changed id". Stated per person as well as in total, so a run names WHO was
+    // replayed rather than reporting a length. Both have two rows in `1 < version <= 3`, so the
+    // superseded reading answers four entries here and the FR's answer is two.
+    expect(page.entries).toHaveLength(2);
+    for (const [who, user_id] of [
+      ["nadia", fx.nadia],
+      ["farah", fx.farah],
+    ] as const) {
+      const count = page.entries.filter((entry) => entry.user_id === user_id).length;
+      expect(`${who}: entries in the delta ${count}`).toBe(`${who}: entries in the delta 1`);
+    }
+
+    // ── "the greatest version ≤ the target", in BOTH directions, so a first-wins dedup dies here
+    // too and not only on the credential. Nadia's v2 row is `active` carrying the hash R32 has
+    // since deleted; farah's v2 row is `inactive` carrying none.
+    const nadia = entryOf(page, fx.nadia, "N1 nadia");
+    expect(`nadia: ${nadia.status}`).toBe("nadia: inactive");
+    expect(`nadia: carries a hash ${carriesHash(nadia)}`).toBe("nadia: carries a hash false");
+    const farah = entryOf(page, fx.farah, "N1 farah");
+    expect(`farah: ${farah.status}`).toBe("farah: active");
+    expect(await verifyPin(farah.pin_hash ?? "", fx.farahPin)).toBe(true);
+  });
+
+  it("N2 serves a DELETED credential to nobody, under every combination of have_version/from/at_version", async () => {
+    // The property, stated so no fix aimed at one field can close it: **no response whose target is
+    // the current version carries a credential the database no longer holds** (R32/`11-F23` — it
+    // "does not outlive her employment in the database"), whatever combination of `have_version`,
+    // `from` and `at_version` produced it. The first door was `at_version` and the second was
+    // `have_version`; `01-F75`'s own generalisation is that *"every client-supplied version field is
+    // a request to read [the publication] log, so each one needs its own answer"*, and this sweeps
+    // them together rather than trusting that the list of fields is closed.
+    const fx = await replay();
+    const mainFx = await main();
+    const api = await staff();
+
+    type Artifact = {
+      label: string;
+      scope: StaffScope;
+      current: number;
+      /** what R32 deleted: the exact bytes, and the PIN they were made from */
+      deleted: { who: string; hash: string; pin: string };
+      /** a PIN the CURRENT fold still verifies — the anti-vacuity leg */
+      livePin: string;
+    };
+    const artifacts: readonly Artifact[] = [
+      {
+        label: "replay branch",
+        scope: fx.scope,
+        current: 3,
+        deleted: { who: "nadia", hash: fx.nadiaPinHash, pin: fx.nadiaPin },
+        livePin: fx.zaraPin,
+      },
+      {
+        // The main roster carries the same rule through a different history (bilal is published at
+        // v1 and v3 with nothing between), so a fix that special-cased one publication pattern is
+        // visible as a difference between these two rows rather than as a single green tick.
+        label: "main branch A",
+        scope: mainFx.scopeA,
+        current: 3,
+        deleted: { who: "bilal", hash: mainFx.bilalPinHash, pin: mainFx.bilalPin },
+        livePin: mainFx.ayeshaPin,
+      },
+    ];
+
+    // Every request whose TARGET is the current version. A FIRST page is served the current version
+    // whatever `at_version` it names (§M), and a continuation naming the current one targets it
+    // explicitly; the historical continuation is the FR's own residual and is excluded — see the
+    // section header.
+    const requests = (
+      current: number,
+    ): readonly { have: number; from: number; at?: number | undefined }[] => {
+      const out: { have: number; from: number; at?: number | undefined }[] = [];
+      for (const have of [0, 1, 2, 3, 4, 99]) {
+        for (const at of [undefined, 1, 2, 3, 77]) out.push({ have, from: 0, at });
+        for (const at of [undefined, current]) out.push({ have, from: 1, at });
+      }
+      return out;
+    };
+
+    // Argon2id PHC strings, matched out of the RAW BODY rather than off the declared field: a
+    // credential smuggled into a member these types do not name would satisfy every `pin_hash`
+    // assertion in this file, and this is the only assertion here that could see it.
+    const phc = /\$argon2id\$[^"]+/g;
+
+    for (const artifact of artifacts) {
+      const served = new Set<string>();
+      const combos = requests(artifact.current);
+      for (const { have, from, at } of combos) {
+        const label = `${artifact.label} have_version ${have} from ${from} at_version ${String(at)}`;
+        const page = await api.staffPage(db, artifact.scope, have, from, at);
+        const body = JSON.stringify(page);
+        // ── the exact deleted bytes appear NOWHERE in the response.
+        expect(
+          `${label}: contains ${artifact.deleted.who}'s deleted hash ${body.includes(artifact.deleted.hash)}`,
+        ).toBe(`${label}: contains ${artifact.deleted.who}'s deleted hash false`);
+        for (const found of body.match(phc) ?? []) served.add(found);
+      }
+
+      // ── and the FR's own measurement, against every credential the sweep actually served: the
+      // departed PIN verifies against none of them. (Deduplicated across the sweep because
+      // `verifyPin` runs at `01-F61`'s cost floor and the same bytes recur on every page; the set is
+      // the union of every entry of every response above, which is strictly more than the declared
+      // `pin_hash` of each.)
+      let live = false;
+      for (const hash of served) {
+        expect(
+          `${artifact.label}: ${artifact.deleted.who}'s departed PIN verifies ${await verifyPin(hash, artifact.deleted.pin)}`,
+        ).toBe(`${artifact.label}: ${artifact.deleted.who}'s departed PIN verifies false`);
+        if (!live) live = await verifyPin(hash, artifact.livePin);
+      }
+
+      // ⚠ ANTI-VACUITY, and it is what makes every `false` above mean something. Without it an
+      // implementation that carried no credential at all — or one that answered every request with
+      // an empty page — passes this test and fails nobody until a cashier cannot sign in.
+      expect(`${artifact.label}: requests swept ${combos.length}`).toBe(
+        `${artifact.label}: requests swept 42`,
+      );
+      expect(`${artifact.label}: distinct credentials served ${served.size >= 2}`).toBe(
+        `${artifact.label}: distinct credentials served true`,
+      );
+      expect(`${artifact.label}: a live PIN still verifies ${live}`).toBe(
+        `${artifact.label}: a live PIN still verifies true`,
+      );
+    }
+  });
+
+  it("N3 makes each delta entry BYTE-IDENTICAL to the snapshot's at the same target", async () => {
+    // *"The same fold a snapshot at that version is, restricted to the ids that changed"* — so the
+    // device *"reaches the identical state either way"*, which is the FR's own reason for saying the
+    // intermediate rows were never information it needed. This is the assertion a hash-stripping
+    // repair cannot pass: strip `pin_hash` from the replayed v2 rows and the leak test goes quiet,
+    // while the delta still carries two entries per person and neither extra one equals the fold.
+    const fx = await replay();
+    const api = await staff();
+    const snapshot = await api.staffPage(db, fx.scope, 0, 0);
+    const delta = await api.staffPage(db, fx.scope, 1, 0);
+
+    expect(snapshot.form).toBe("snapshot");
+    expect(delta.form).toBe("delta");
+    for (const entry of delta.entries) {
+      expect(entry).toEqual(entryOf(snapshot, entry.user_id, `N3 ${entry.user_id}`));
+    }
+
+    // ⚠ ANTI-VACUITY. The loop above is satisfied by an empty delta, and a delta of the WHOLE
+    // roster satisfies it too — the first is C4's shape at the wrong base, the second is the
+    // "always answer a snapshot" implementation C2 kills. Both counts are stated.
+    expect(`snapshot entries ${snapshot.entries.length}`).toBe("snapshot entries 3");
+    expect(`delta entries ${delta.entries.length}`).toBe("delta entries 2");
   });
 });
