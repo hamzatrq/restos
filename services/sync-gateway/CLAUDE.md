@@ -13,7 +13,7 @@
       @restos/sync-gateway listening on http://0.0.0.0:8080
       @restos/sync-gateway database postgres://gateway:*****@127.0.0.1:5432/restos (opened lazily …)
       @restos/sync-gateway publish surface enabled (PUBLISH_TOKEN configured)
-      @restos/sync-gateway schema up to date — all 12 migrations applied
+      @restos/sync-gateway schema up to date — all 13 migrations applied
 
   **The first line is load-bearing** — `__acceptance__/startable.test.ts` spawns the declared script
   with `PORT=0` and finds the ephemeral port by reading it. The other three exist because each
@@ -37,7 +37,7 @@
     dependency). `pendingMigrations` runs **after `listen` and is not awaited**: an unroutable host
     waits out `postgres-js`'s 30 s connect timeout, so awaiting it would trade a fast boot for
     exactly the stall the lazy connection exists to avoid. Unmigrated reads `schema NOT MIGRATED —
-    12 of 12 migrations are unapplied. Run ...`; an unreachable database reads `schema could not be
+    13 of 13 migrations are unapplied. Run ...`; an unreachable database reads `schema could not be
     checked — the database did not answer (… ← connect ECONNREFUSED …)`, on ONE line and with no
     DSN in it.
   - **Idempotency and partial application, MEASURED against a real Postgres.** drizzle 0.45.2 runs
@@ -45,7 +45,7 @@
     transactional, so a failed run is all-or-nothing: verified by planting a colliding
     `kernel.events` before migrating — the run failed on `CREATE SCHEMA "kernel"` and left **zero**
     journal rows and no new tables. A second run on a migrated database applies nothing (journal
-    row count unchanged — 11 when that was the count, 12 since `0011`) and says `nothing to apply`.
+    row count unchanged — 11 when that was the count, 13 since `0012`) and says `nothing to apply`.
   - ⚠ **What the boot check does NOT prove — the honest boundary.** It answers *"has this build's
     journal been applied"*, **not** *"is the schema intact"*. drizzle keeps ONE `created_at`
     watermark and never re-checks the objects, so dropping `kernel.org_events` by hand while
@@ -361,6 +361,501 @@
   outside `01-F62`'s set — **including `audit.*`, the FR's own worked example**: `audit.login` is
   emitted by a *device* at a PIN unlock, so the admin family does not split cleanly and the EMITTER
   does. Append-only, like `kernel.events`.
+- **`kernel.staff_versions` + `kernel.staff_entries` + `kernel.user_credentials` — THE STAFF
+  ROSTER'S CLOUD STORAGE (`0012`, `staff.ts`), tables thirteen to fifteen.** `01-F28` requires PIN
+  verification to work **on-device against synced credential hashes**; measured August 2026 there
+  was no source — the cloud user row was eight columns with no credential, no status and no version
+  axis, and the only roster any till had held was a dev seed of three fictional people. `staff.ts`
+  is the storage half: `staffVersion` / `publishStaffRoster` / `staffPage` / `setPinCredential` /
+  `setUserStatus`. **⚠ It has no shipping caller yet and carries a file-header debt marker naming
+  the two steps that land one** — the wire is a BREAKING change (`01-F77` bumps `v: 1` → `v: 2`)
+  and cannot be made until there is something to serve, so the sequencing is deliberate rather than
+  this wave's recurring defect. Oracle: `__acceptance__/staff-roster-storage.test.ts` (**66** —
+  amended August 2026 for `11-F22`'s per-(person, branch) disambiguation, again for `01-F75`'s
+  continuation clause, again for its delta clause (§N) plus `01-F26`'s every-assignment leg
+  (§G8), and again for `01-F78`'s two halves (§O) and `01-F77`'s version-0 shape (§P); it was 39 as
+  authored, 50 after the first amendment, 55 after the second and 59 after the third). Package
+  total **424/424**.
+  - **`01-F78` IS IMPLEMENTED — BOTH HALVES (2026-08-18).** Half one (who is in the artifact) was
+    already right by accident of the participation lookup: `participationAt` returns `undefined` for
+    a person no assignment of whose reaches this branch, and `publishStaffRoster` refuses her by
+    name, so an own-branch assignee and an org-wide owner are publishable and a person assigned only
+    elsewhere is not. **Half two was NOT**: the published row carried **every** assignment the person
+    held, so branch A's artifact told every till at A the org's whole branch structure — `01 §9.7`'s
+    own named cost, `01-F71`'s isolation boundary crossed by reference data rather than by a query,
+    and R25's purchase spent (the roster was made branch-scoped to narrow the credential blast
+    radius). The row is now filtered by the reach predicate **at publish time**, so the log holds the
+    narrow bytes and all three serve paths inherit it from one place.
+    - ⚠ **THE PREDICATE IS A SECOND COPY AND `packages/domain` DOES NOT EXPORT THE FIRST — a
+      recorded DEBT.** `01-F78` names the rule as *"exactly `rolesAt`'s existing predicate in
+      `packages/domain`"*, and `rolesAt` (`permissions.ts:536`) is a module-private `const`;
+      measured 2026-08-18 over that package's `src/index.ts` there is no exported equivalent. So
+      `staff.ts` declares `reachesBranch` and says so at the declaration. **What `18 §2` wants is
+      the export** — `rolesAt` filtering through a shared predicate both call — and that is OWED on
+      a SACRED path (spec PR + `20 §4.4` review). Until it lands, `can()`'s "may she act HERE" and
+      the roster's "is she in this artifact" are two copies of one rule.
+    - **Measured by hand, out of suite, against a real Postgres**, 84 requests over
+      `have_version × from × at_version`, one org, two branches, a person holding
+      cashier@A + cashier@B + owner@org-wide: **42 of 84 responses named the OTHER branch before,
+      0 after** — same fixture, the filter as the only difference.
+  - **THE PUBLISHER'S PEOPLE READ IS SERIALIZED AGAINST `setUserStatus` NOW — `for update of u`,
+    the SAME row lock that writer already takes (2026-08-18).** It was an unlocked read, so a
+    participation write could commit between this publisher's read and its write and the publisher
+    would then mint `{status: "active", pin_hash: <the hash R32 had just deleted>}` as the version
+    every till reconciles to on `hello_ack`. That is `11-F23`'s own named state — *"`inactive`
+    holding a live credential"* — reaching every device at the branch from a publish that COMMITTED
+    AFTER the departure, and **it is not `01-F71` (e)'s disclosed residual**: that residual is a
+    historical version a continuation asks for, this is the CURRENT one.
+    - **Not live today** (`staff.ts` has no shipping caller); it becomes reachable the moment
+      `14-F14`'s CRUD lands, which is the surface that calls both functions on one request.
+    - **Measured out of suite against a real Postgres, control and fix differing in exactly the one
+      SQL clause** (the pre-fix copy rebuilt beside the tree, nothing mutated in place), two
+      deterministic arms, each run twice with identical output:
+
+          ARM A  a deactivation already queued when the publisher reads
+            control  served v1 status=active  carriesHash=true   departedPinVerifiesAgainstServedBytes=TRUE
+            fixed    served v1 status=inactive carriesHash=false departedPinVerifiesAgainstServedBytes=FALSE
+          ARM B  the deactivation lands INSIDE the publisher's read -> write window
+            control  publishedStateAlreadySupersededWhenItCommitted=TRUE
+            fixed    publishedStateAlreadySupersededWhenItCommitted=FALSE
+
+      `credentialRowsForHer` is **0** and `currentUsersStatus` is **inactive** in every cell, which
+      is what makes ARM A's control row a leak and not an empty page. The window is a LOCK and not a
+      sleep: ARM A holds her `kernel.users` row from a third connection, ARM B holds
+      `kernel.staff_entries` in EXCLUSIVE mode — which conflicts with the publisher's INSERT and not
+      with its SELECTs, so the publisher provably gets past its people read before it stops, and
+      `pg_locks` is polled until it is provably waiting (the anti-vacuity guard).
+    - **ARM B's `asPublished` is `active` + hash under BOTH builds, and that is the fix working, not
+      a residual.** Fixed, the publish WON the race — the deactivation could not settle inside the
+      window — so those bytes were true when they committed, and the CRUD's own follow-up publish
+      mints v2 `inactive` with no hash (measured under both builds: the advisory lock forces it
+      last). What the lock buys is that the two acts are TOTALLY ORDERED; what it does not buy is a
+      caller that forgets to publish after a status change.
+    - **`of u` and not a bare `for update`**: Postgres refuses a row lock on the nullable side of an
+      outer join (`0A000`). **`order by u.user_id` is the deadlock half** — two publishes for
+      DIFFERENT branches of one org may name overlapping people and the advisory lock does not
+      serialize them (different keys). `EXPLAIN (costs off)` on the shipped query: `LockRows -> Sort
+      -> Nested Loop Left Join`, so the sorted order IS the lock order.
+    - ⚠ **TWO NEIGHBOURING CASES ARE RECORDED IN THE MODULE AND DELIBERATELY NOT CLOSED**, on this
+      file's own rule that a fix should name the class it closed and the case one keystroke away
+      that it did not. (i) **A person who loses her branch ASSIGNMENT rather than her participation**
+      keeps an `active` row with her hash in that branch's last published version, and
+      `publishStaffRoster` then REFUSES to publish the correction because nothing of hers reaches
+      the branch — the only repair is to re-add the assignment and deactivate it. `01-F78`'s cost
+      clause says this cannot happen, which is true of the membership RULE and false of the
+      published LOG. **Unreachable today — nothing in this service removes an assignment** — so it
+      is recorded rather than asserted, and it lands with the CRUD that can. (ii) `setPinCredential`
+      takes no lock on `kernel.users` at all, so a PIN set concurrent with a publish can be missed
+      by it: a freshness loss, never a stale credential.
+  - **`01-F77`'s VERSION NUMBER IS A FACT ABOUT THE KEY NOW: a POPULATED key can no longer answer
+    `version: 0` (2026-08-18).** `staffPage` resolves its version before it reads a row, and the
+    continuation clause honoured any `at_version <= current` — including **0**, which `01-F52` and
+    `01-F77` give exactly one meaning (*"published nothing"*, *"omitted, never sent as `0`"*). So
+    `from: 1, at_version: 0` over a key at version 3 returned `{ form: "snapshot", version: 0,
+    entries: [], complete: true }` at ANY `have_version`, and the comment at that early return
+    ("nothing published for this key") was false in exactly that case. **Wire-reachable, which is
+    what makes it a defect rather than an argument**: `packages/sync-protocol/src/messages.ts:230`
+    declares `at_version: seq.optional()` with `seq = z.number().int().nonnegative()`, so every
+    negative value is unreachable and **0 is legal**. The repair is `at_version > 0` and nothing
+    more — a value naming no version leaves nothing to honour, so the request is served exactly as
+    the two neighbouring cases already are (a first page, and a continuation stating no
+    `at_version`). Refusing it, or serving the device's base, are equally defensible and **unwritten**,
+    so choosing one would invent policy (commandment 2). Same sweep as above: **6 of 84 responses
+    stated version 0 over a populated key before, 0 after.**
+    - ⚠ **The `at_version: -1` example in `staffPage`'s "no input validation happens here"
+      paragraph is now WRONG and has been corrected in place** rather than deleted: the `> 0` guard
+      swallows a negative the same way. That paragraph was also aimed at the wrong half of the
+      range — the negative was unreachable and 0 was wire-legal, and it was the reachable value that
+      shipped the defect.
+  - **`01-F75`'s CONTINUATION CLAUSE IS IMPLEMENTED (August 2026) — the two red tests are green and
+    the credential leak is closed.** The clause landed at `b47dcbe` — *"`at_version` is honoured
+    only on a CONTINUATION (`from > 0`), and a first page is served the CURRENT version whatever it
+    asks for"* — while `staffPage` still clamped forward-only (`at_version <= current`), which the
+    FR names as the defect it was amended to close. The fix is one predicate (`from > 0 &&`), and
+    the suite was **413/413** at that moment (**417/417** now — see the delta bullet below, which is
+    also why this bullet's "the credential leak is closed" was true of one door and not of the
+    class). The reviewer's own probe, re-run by hand against a real Postgres with
+    the two predicates as the only difference (the pre-fix copy built outside the tree, in a
+    gitignored directory, so nothing was mutated in place):
+
+        pre-fix   at_version 1 → served version 1  bilal active    deleted hash in response true
+        post-fix  at_version 1 → served version 3  bilal inactive  deleted hash in response false
+
+    …with `kernel.user_credentials` holding **0** rows for him under both, which is the point: R32's
+    deletion was correct and a READ defeated it. The continuation leg is untouched — `from: 1,
+    at_version: 1` still serves version 1 under both — so the clause is not implemented as *"ignore
+    `at_version`"*.
+  - **`01-F75`'s DELTA CLAUSE IS IMPLEMENTED TOO (2026-08-18) — THE SAME LEAK HAD A SECOND DOOR,
+    THROUGH `have_version`, AND THE BULLET ABOVE DECLARED IT CLOSED WITH THAT DOOR OPEN.** The
+    clause landed at `6e30636`: *"a delta carries ONE entry per changed id, the greatest version ≤
+    the target — the same fold a snapshot at that version is, restricted to the ids that changed."*
+    `staffPage` shipped the catalog's inherited reading — every published row in
+    `have_version < version <= target` — so a cashier published `active` with a hash at v2 and
+    departed at v3 was served her v2 row, hash and all, to any caller saying `have_version: 1`.
+    Measured on the tree with the `at_version` fix in place and **417 tests green**:
+    `have_version: 1, from: 0`, no `at_version` → `departedPinVerifies=true`. The repair is the
+    snapshot's own query with one extra predicate (`version > have_version`), so the delta and the
+    snapshot are ONE interpretation of the log rather than two.
+    - **Re-probed by hand across the WHOLE request space**, outside vitest, against a real Postgres,
+      with the row-replay delta as the only difference (`have_version` ∈ {0,1,2,3,4,99} × `from` ∈
+      {0,1} × `at_version` ∈ {–,1,2,3,77} = 42 requests, `kernel.user_credentials` holding **0** rows
+      for the departed cashier throughout):
+
+          pre-fix   42 swept · 7 responses carried the deleted hash · departedPinVerifies TRUE
+                    have_version 1 → form delta version 3 entries 4   (two rows for each of two ids)
+          post-fix  42 swept · 0 responses carried the deleted hash · departedPinVerifies FALSE
+                    have_version 1 → form delta version 3 entries 2   (the fold)
+
+      Both runs served ≥2 distinct credentials and a live PIN still verified, so the `false` is a
+      measurement and not an empty page. **All seven leaking rows are `have_version: 1`** — the base
+      the FR names — and they leak at every `at_version` including none, which is the point of
+      sweeping the fields together rather than one at a time.
+    - ⚠ **NOTHING IN THE SUITE COULD SEE IT, AND THE REASON WAS A FIXTURE PROPERTY.** The leak needs
+      a publication **strictly between** the claimed base and the target; the main roster publishes
+      bilal at v1 and v3 with nothing between, so `1 < version <= 3` never contains his `active`
+      row. §C2/§C3 assert a delta's `ids()`, which the row-replay reading gets right, and never its
+      entry COUNT; §M sweeps `at_version` with `have_version` pinned at **0**, so every page it
+      inspects is a SNAPSHOT. Three correct things left one gap between them — which is how the
+      FIRST door survived too, and is why `01-F75` now says in terms that **every** client-supplied
+      version field is a request to read the publication log and each needs its own answer.
+    - **The residual is unchanged and is `01-F71` (e)'s.** A CONTINUATION (`from > 0`) naming a
+      historical `at_version` is still served that historical fold, hash and all, on the FR's own
+      ground that *"no device has a reason to open a page run at a version it does not hold"*. §N's
+      sweep excludes exactly that case, deliberately, so asserting a refusal there would red a
+      correct implementation.
+    - **RE-SWEPT BY HAND AFTER the `01-F78` row narrowing (2026-08-18), because that edit is inside
+      the same query the leak lived in** — 84 requests, `have_version` ∈ {0,1,2,3,4,99} × `from` ∈
+      {0,1} × `at_version` ∈ {–,0,1,2,3,77,current}, against a real Postgres, with the pre-change
+      file rebuilt beside it as the control (both behaviour edits reverted, nothing else):
+
+          control (pre)  84 swept · 9 carried the deleted hash · 42 named the other branch · 6 stated version 0
+          shipped (post) 84 swept · 9 carried the deleted hash ·  0 named the other branch · 0 stated version 0
+
+      **The 9 are identical in both runs and are the residual above, not a regression**: every one
+      is `from: 1` with `at_version` ∈ {1,2} — a continuation naming a historical version, which is
+      the case the FR leaves open and §N excludes by name. Anti-vacuity held throughout (2 distinct
+      credentials served, a live PIN still verified, the branch's own id served, the two-branch
+      person's row inspected 45 times). So the narrowing moved the two things it was aimed at and
+      moved the credential surface **not at all**, which is the claim worth having.
+  - **THE SCOPE PREDICATE IS `=` NOW, AND THE INDEX IS THE WHOLE REASON** (`scopedTo`). It was
+    `is not distinct from`, whose recorded justification had been corrected once already to *"on
+    THIS resource the operator buys nothing at all"* — true of the ROWS and false of the PLAN.
+    `is not distinct from` is not an indexable operator, so the branch column drops out of every
+    access path — every plan below becomes a Seq Scan. (⚠ *This sentence went on to say the operator
+    made `schema.ts`'s "both access paths in one index" comment describe an index the queries could
+    not use. **That comment was false for a second, independent reason and has been rewritten**, so
+    the quotation is retired — see the index bullet below.*) Measured 2026-08-18 with
+    `EXPLAIN (analyze, buffers)` against a real
+    Postgres (20 branches × 50 versions × 20 people = 20 000 entries, freshly `ANALYZE`d):
+
+        staffVersion    is not distinct from → Seq Scan, 950 rows removed, 8 buffers
+                        =                    → Index Only Scan Backward on the PK, 1 row, 3 buffers
+        snapshot fold   is not distinct from → Seq Scan, 19 000 rows removed, 273 buffers
+                        =                    → Bitmap Index Scan on the entries index, 0 removed, 78
+        delta fold      is not distinct from → Seq Scan, 19 800 rows removed, 267 buffers
+                        =                    → Index Scan on the PK, 0 removed, 44 buffers
+
+    `staffVersion` is the one that matters: `hello_ack` reconciles this artifact on **every**
+    reconnection (`01-F77`), so the old predicate cost a whole-table scan per reconnect, growing
+    with the ORG rather than with the branch being served. `=` is provably equivalent here —
+    `branch_id` is `NOT NULL` in both tables and `publishStaffRoster` refuses `branch_id: null` by
+    name — and the forward-looking note survives **as a note**: the day a resource on `01-F76`'s
+    shared scope shape publishes a real `branch_id: null` artifact it needs its own predicate, and
+    reaching for `scopedTo` then is the mistake the comment now names. ⚠ **The suite cannot see this
+    change at all** (mutant S1 below, 0 killed) — it is a plan change, not a behaviour change, and
+    the numbers above are the only evidence there is.
+  - ⚠ **THE DELTA SCAN USES THE PRIMARY KEY, NOT `staff_entries_org_branch_user_version_idx` — the
+    "both access paths in one index" comment was false and is now what `EXPLAIN` said (2026-08-18).**
+    It stood in `schema.ts` and in `0012_staff_roster.sql`, and **the table three bullets up already
+    contradicted it in this very file** (`delta fold … → Index Scan on the PK`): two numbers for one
+    plan, one screen apart. Re-measured on Postgres 16, freshly `ANALYZE`d, 20 branches × 50 versions
+    × 20 people = 20 000 entries, one branch served:
+
+        snapshot fold  (version <= N)        → Bitmap Index Scan on THIS index          84 buffers
+        delta fold     (version > A and <= B) → Index Scan using the PRIMARY KEY         36 buffers
+        staffVersion   max(version)          → Index Only Scan Backward on the PK         3 buffers
+
+    The planner is right and the reason is column order: the PK is `(org_id, branch_id, version,
+    user_id)`, so a version RANGE is a leading index condition there; this index puts `user_id`
+    third and can only carry the range as a non-leading condition inside a bitmap. **What the index
+    buys is the snapshot fold, and narrowly** — dropping it re-plans that query onto the PK's bitmap
+    at **89** buffers against 84, same rows. It is KEPT (an index change is its own migration, and
+    one machine at 20 000 rows is not the evidence for one) and only the CLAIM moved.
+    - ⚠ **The claim was inherited, and its source is still false and still shipped.**
+      `0012`'s comment says *"as `catalog_entries_org_kind_entry_version_idx` already is"*, copied
+      from `0007_catalog_publication.sql:51` and `schema.ts:246` — and
+      `plans/wave-1/oracle-round-2-findings.md` **A19 had already measured that one false**, on the
+      snapshot path outright (*"an all-ASC index cannot serve `ORDER BY kind ASC, entry_id ASC,
+      version DESC`, so the planner uses the PK and sorts; the migration comment claiming 'both
+      access paths in one index' is false"*). **Those two catalog copies are NOT corrected here** —
+      out of this task's diff, and A19's finding is about `catalogPage`'s quadratic paging, which is
+      a change with behaviour in it. **A comment copied from a comment carries its errors**, which
+      is the fourth round running that a claim at this table was falsified by the change that
+      restated it.
+  - ⚠ **`catalogPage` STILL CLAMPS FORWARD-ONLY *AND* STILL REPLAYS ITS INTERMEDIATE ROWS, AND
+    `01-F75` MAKES BOTH RULES UNIFORM ACROSS RESOURCES.** That is a REPORTED divergence, not an
+    oversight: the catalog is a shipped serve path with its own oracle and its own callers, and it
+    was out of scope for the session that closed `staffPage` — twice now, once per door. Measured
+    while reporting it, so the next session has the numbers rather than an impression:
+    - **No in-repo caller would change behaviour.** Every 5-argument call site already passes
+      `at_version` only on a real continuation — `publish-http.ts:191` pages from `page.next_from`,
+      `catalog-transport.test.ts:277` writes `from === 0 ? undefined : v`, `:309` echoes
+      `first.next_from`. So the predicate can be added without redefining any existing expectation,
+      which is the trap `01-F75`'s own amendment was caught by on the staff suite (two green tests
+      defending the overruled rule, found only by running the clause).
+    - **A DEVICE can still ask, because `handleCatalog` forwards the wire fields verbatim**
+      (`gateway.ts`: `message.have_version`, `message.from ?? 0`, `message.at_version`). That is
+      exactly the reachability the staff leak had.
+    - **The cost of the catalog case is FRESHNESS and redundancy, not a credential** — a menu
+      carries no hash, and `01-F53` freezes a line's price into the event at line-add — which is why
+      this is reported as a uniformity debt and not as a second leak. The delta half costs a device
+      a longer page run and nothing else: `catalogPage`'s delta hands over every published row in
+      the window, so a menu edited ten times between two reconnects travels ten times.
+  - ⚠ **IT IS NOT `catalogPage`'s SQL POINTED AT `kernel.users`, AND THAT IS THE WHOLE DESIGN.**
+    `kernel.users` is CURRENT STATE with no version column; the catalog's storage is an
+    append-per-version publication log. Assembling a served roster from today's rows compiles,
+    passes almost everything, and hands a device that fetched v3 last week **today's people
+    labelled as last week's version** — which `01-F56`'s monotonic apply cannot detect, because the
+    number it compares is right. Measured: that mutant fails **exactly one test of 408** (C6).
+  - **The artifact key is `(org_id, branch_id)` as TWO COLUMNS.** `01-F52` keeps the catalog
+    ORG-scoped; `01-F76` + R25 make the roster BRANCH-scoped, because "the roster's scope IS its
+    credential blast radius". `01-F71` (d) bans the concatenation — including in the publish
+    advisory lock, which takes `pg_advisory_xact_lock(hashtext(org), hashtext(branch))`, the
+    two-integer form, rather than hashing `org || branch`.
+  - **`11-F23`: the PIN hash is a TABLE, not a ninth column on `users`.** The login lookup cannot
+    return the credential **because it does not join to it** — a structural bound rather than a
+    discipline — and `11-F21`'s active-only rule becomes an ABSENCE rather than a NULL. The hash is
+    a COPY frozen into the published row, not a serve-time join, because a delta must be
+    constructible from an exact base.
+  - ⚠ **PARTICIPATION IS PER-(PERSON, BRANCH) AND THE FIRST BUILD MADE IT A COLUMN — the largest
+    thing this bullet block got wrong.** `11-F22` carried both readings; the FR now names its
+    TRANSFER clause the operative one, because a cashier moving A→B must be *"`inactive` in A's
+    roster and `active` in B's at the same moment"* and no per-person value can express that. An
+    adversarial review measured the cost against a real database: deactivating her at A destroyed
+    the credential B's artifact needs (an `active` member with no hash — the defect `11-F23`
+    names), and any later republish at A re-copied her CURRENT status and **silently returned a
+    departed cashier to `active` with a working PIN hash on her old branch's tills**. So the status
+    rides `01-F26`'s assignment (`packages/domain`'s `PersonAssignment`), `setUserStatus` takes a
+    `branch_id`, and `publishStaffRoster` reads THIS branch's participation per person — the
+    assignment naming this branch, else her org-wide one (a stated READING where she holds both;
+    neither is refused BY NAME rather than defaulted, because `inactive` invents a departure and
+    `active` invents employment). ⚠ *That refusal used to be justified here and in the thrown
+    message by `01 §9.7` being **open**; `01-F78` closed it and the refusal is now ENDORSED rather
+    than provisional — half one puts in a branch roster exactly the people whose assignments REACH
+    it, and a person whose assignments are all elsewhere is "absent from this artifact entirely",
+    so there is no row to publish for her and no ruling still owed.*
+  - **The WIRE row did not move, and I3 pins it.** `01-F75` declares one `status` on the `staff`
+    row and `01-F76` already makes the artifact branch-scoped, so an entry's single `status` IS
+    that branch's participation; the published `assignments` carry `01-F26`'s two members with the
+    status STRIPPED. A per-assignment status on the wire is two representations of one fact.
+  - **R32 is transcribed, not reasoned: `setUserStatus` DELETES the credential row when a person
+    stops being `active` — keyed to the LAST ACTIVE ASSIGNMENT and never to one branch's.** Keyed
+    per-branch it destroys the PIN the RECEIVING branch needs (`11-F23`, following `11-F22`).
+    **Both writes are ONE transaction, by name and not by style** (`11-F23`): between two
+    autocommit statements a dropped connection leaves her `inactive` holding a live credential, and
+    the next re-activation restores her OLD PIN and publishes it to every till at the branch — no
+    error anywhere, nothing queries for it, found by the cashier who still gets in. The status word
+    is parsed BEFORE the transaction opens, so a refused word destroys nothing.
+    **R32's second half is NOT closed here**: re-activation is a two-step act and the skipped
+    second step must fail *legibly*, which belongs to `14-F14`'s surface and the device unlock
+    flow. Publishing an `active` member with no credential is deliberately still ACCEPTED — R29 has
+    the owner set the first PIN, so that window exists, and §F's fixtures publish exactly it.
+  - **BOTH HALVES OF THE ARTIFACT KEY ARE CHECKED, and the branch half was MISSING.** Measured:
+    publishing into a branch **no record names** and into **another org's branch** were both
+    accepted and minted version 1 — an artifact carrying Argon2id hashes of real people, keyed to a
+    branch that does not exist. `01-F68` forbids a foreign key, so it is refused here or nowhere
+    (`15-F27`, and the rule `create-branch` and `insertUser` already enforce). ⚠ Containment was
+    NOT what made this safe: `01-F71` (e) has the serve path derive the key from the SESSION, and
+    that path is step 6 and does not exist.
+  - **`grid_ordinal` uniqueness is enforced at the PUBLISHER against the folded artifact, and NOT
+    by an index.** `01-F75` scopes it "within the artifact" and says in terms that a wider rule "is
+    a storage choice this FR does not make"; the plan asked for an org-wide unique index and it is
+    deliberately not built, because it would forbid two branches from both starting their grid at
+    position 1. A departed member's ordinal stays reserved — a READING, since `11-F22` keeps her in
+    the artifact and nothing rules on whether a new hire may take her tile.
+  - **`kernel.users` gained NO column and lost one constraint** — `email` relaxed to NULLABLE
+    (R30), plus a jsonb BACKFILL that puts `11-F22`'s status inside each element of `assignments`.
+    ⚠ *This bullet said "gained two columns", naming a `users.status` that the reshape above
+    deleted; there is no status COLUMN and its absence is the FR.* **`users_email_lower_uq`
+    survives untouched**: Postgres permits multiple NULLs in a unique index, and dropping it "to
+    make NULLs work" is the migration mutant the oracle's §H3 exists to kill. The backfill is
+    guarded by `? 'status'` and `coalesce`, so it is idempotent and cannot destroy an empty array's
+    NOT NULL; jsonb has no defaults, so the requirement lives entirely at the writer, in Zod.
+  - ⚠ **`PersonRecord` (`packages/domain`, SACRED) changed shape, so this service is not the only
+    caller that had to move.** Its `assignments` are `PersonAssignment[]` now.
+    `services/api/src/users-postgres.ts` selects the same columns it always did — the field rides
+    the jsonb — which is QUIETER than a column: nothing in a select changes, so the reader that
+    breaks is the one whose ROWS predate the backfill, with a `ZodError` on the first login and a
+    green typecheck, because `parse` takes `unknown`. Nothing downstream READS it yet:
+    `UserRecord`/`AuthSubject` carry no status, so `11-F22`'s *"the authorization subject reads the
+    status too"* is **not enforced on either plane** — that is the plan's step 2b, which lands on
+    both planes in one change.
+
+### Mutation matrix — `staff-roster-storage.test.ts` (round-3 law), control **408/408** green
+
+In-tree with a byte-exact backup and an md5 restore trap (`staff.ts` verified `93ec8626…` after
+every row); no security constant is touched — each mutant reds a test rather than downgrading a
+credential, which is the narrow case AGENTS.md's out-of-tree rule leaves in-tree. Every row is the
+FULL package suite (408 = 358 pre-existing + the oracle's 50), `REAL_EXIT` read from a marker
+written INSIDE the log. **In EVERY killing row the failing FILE was `staff-roster-storage.test.ts`
+alone, so all 358 pre-existing tests stayed green under every mutant** — the kills are attributable.
+
+The earlier matrix here was measured against the pre-`11-F22`-disambiguation build (control
+397/397, 39-test oracle). Its two rows are kept below the new ones because both still bind.
+
+| # | mutant (exactly one branch) | killed | which tests |
+|---|---|---|---|
+| M1 | **`participationAt` returns `assignments[0]` — ONE answer for every branch, i.e. the per-person column's observable behaviour** | **6** | J1, J2, J3, J5, K2, K3 |
+| M2 | the wire's `assignments` keep the status (the strip removed) | 1 | I3 |
+| M3 | the entry's hash gated on **ANY** active assignment instead of THIS branch's | 4 | J1, J3, J4, L3 |
+| M4b | **the credential DELETE escapes to a connection the caller cannot roll back** | **1** | L1 |
+| M5 | R32's deletion keyed to **this branch's** flip (`status !== "active"`) instead of the LAST active assignment | 2 | J3, J5 |
+| M6b | the status word validated LAST **and** the delete escaped (two branches, labelled) | 2 | L1, L2 |
+| M7 | **the BRANCH half of the artifact key unchecked — the shipped behaviour before this change** | ~~**0 — SURVIVES**~~ **2 — CLOSED August 2026** | §G G6, G7 (see the second matrix) |
+| M4 | the two writes NOT in a transaction, run on the handle passed in | **0 — SURVIVES, mis-designed** | — |
+| M6 | the status word validated LAST, inside the transaction | **0 — SURVIVES, mis-designed** | — |
+| M9 | **NEGATIVE CONTROL: every refusal reworded, same states, same writes, same FR ids** | **0** | — |
+| M-DELTA | the delta ROW query loses its branch scope | 1 | §B B3 |
+| M-TRAP8 | **the snapshot fold reads `status` from CURRENT `kernel.users` instead of the published row** | **1** | §C C6 |
+
+**M1, M4b and M7 are the three to re-run after any change here.** M1 is the disambiguation itself:
+it reproduces exactly what a per-person column does — one word for both artifacts — and six
+assertions separate it from a correct build. M9 is what makes those counts mean anything: a real
+edit to every sentence in this file reddens nothing.
+
+⚠ **M7 SURVIVED THE ENTIRE SUITE AND WAS A LIVE COVERAGE HOLE — CLOSED August 2026 by the oracle's
+owning session (§G6/§G7), and the paragraph is kept because the SHAPE recurs.** With
+`assertBranchIsThisOrgs` deleted, all 408 tests passed. Measured by hand against a real Postgres in
+the same session: an **org-wide assignee** (every owner — `01-F26`'s null location gives her a
+participation value at any branch id) published into a branch **no record names** and into
+**another org's branch** is ACCEPTED under M7 and mints **version 1** in both, and is refused by
+name under the fix. So the guard was real and **nothing in CI would have caught its removal** — the
+`01-F71` shape AGENTS.md already records for the API's login seam. ⚠ A probe that uses a person with
+only BRANCH assignments proves nothing here: the per-branch participation lookup refuses her first,
+for a different reason, and that mis-attribution was measured before it was fixed — **the oracle's
+fixtures use the org-wide assignee for exactly this reason and say so**, and the refusals are matched
+on FR id (`01-F68|01-F69|01-F71|15-F27`, deliberately NOT `01-F76`) so a §9.7-flavoured refusal
+cannot satisfy them. Under M7 today both new tests report `promise resolved "1" instead of
+rejecting` — the mutant mints the version by hand-measured behaviour and by assertion now.
+
+⚠ **M4 AND M6 SURVIVE BECAUSE THEY DO NOT PRODUCE THE DANGEROUS BEHAVIOUR — check what a mutant
+does before recording what its survival means** (`migratable`'s N5 and `summary`'s S4x record the
+same lesson). §L1 hands `setUserStatus` the caller's OWN transaction, so an implementation that
+merely runs both statements on the handle it was given is *already* atomic — dropping `db.transaction`
+changes nothing observable there (M4), and validating late still rolls back (M6). The reachable
+torn state is one half escaping to another connection, which is M4b/M6b, and both die. **What no
+test in this repo can see is `11-F23`'s literal case — two autocommits on ONE connection with a
+process kill between them** — and the oracle's §L header says so in terms rather than papering it
+over.
+
+⚠ **M-BASE (the delta-BASE `exists()` losing its scope predicate) SURVIVES, and it is a property of
+the implementation rather than a hole in the code.** The base decision is
+`have_version > 0 && have_version <= current && exists(base)` where `current` is already scoped, and
+the delta query is scoped too — so under this variant the predicate is genuinely redundant and no
+test can see it. On a variant that decides the base from the `exists()` ALONE (no
+`have_version <= current` guard) the same mutant **is** killed by B3's retained leg, so it is kept
+as defence in depth against exactly that refactor.
+
+### Second matrix — the two holes an adversarial review found in the oracle above (control **413/413**)
+
+Both holes were found by measuring what the suite CANNOT see, not by reading it. **Run OUT OF TREE**
+(a `git worktree` off `b47dcbe` plus this tree's uncommitted state), because hole 1's fix did not
+exist when the matrix was measured and the honest control is a build that HAS it: `01-F75`'s
+continuation clause — the single predicate `from > 0 &&` on `staffPage`'s clamp — takes the amended
+suite to **413/413, `REAL_EXIT=0`**. ⚠ *That predicate is now the SHIPPED file (see the bullet block
+above), so H1 has stopped being "the tree as it stands" and become an ordinary one-branch mutant;
+the control it was measured against is the tree.* Every row is the FULL package suite, `REAL_EXIT` read from a
+marker written INSIDE the log, `staff.ts` restored byte-exact (`cmp`) after each row. **In every
+killing row the failing FILE was `staff-roster-storage.test.ts` alone**, so all 358 pre-existing
+tests stayed green under every mutant. The rows in the matrix above were measured at control 408/408;
+only M7 and M-TRAP8 were re-measured at 413.
+
+| # | mutant (exactly one branch) | killed | which tests |
+|---|---|---|---|
+| H1 | **the forward-only clamp restored (`at_version <= current`) — what this file shipped until the clause landed** | **2** | §M M1, M2 |
+| H2a | **`assertBranchIsThisOrgs` never called — M7 above, the whole branch half** | **2** | §G G6, G7 |
+| H2b | only the *no such branch* leg deleted | 1 | §G G6 |
+| H2c | only the *another org's branch* leg deleted | 1 | §G G7 |
+| M-TRAP8 | **re-measured against the REWRITTEN C6** (see below) | **1** | §C C6 |
+| CTRL | **NEGATIVE CONTROL: every refusal reworded, same states, same writes, same FR ids** | **0** | — |
+
+**H1 is the row that matters and it was not hypothetical: when it was measured, the mutant WAS the
+shipped file.** Its two kills are the FR's own measurement — `first page asking at_version 1:
+version 1` where the clause requires 3, and `response contains the deleted hash true` where R32
+deleted the row — and both were re-observed by hand on a live database, outside vitest, before and
+after the predicate landed (the bullet block above carries that output). **It is the row to re-run
+after any change to `staffPage`**: the leak is one keystroke away in a line whose remaining half
+(`at_version <= current`) is correct and must stay.
+
+⚠ **THE OLD ORACLE REDS UNDER A CORRECT IMPLEMENTATION, AND THAT IS WHY TWO TESTS MOVED.** Measured:
+the suite exactly as committed at `05a444e` (408 tests) against the clause-implementing build fails
+**2 — B3 and C6** — both of which asked for a historical version on a FIRST page, which is the
+request `01-F75` now forbids. That is AGENTS.md's named trap (a ruling lands, nobody greps the suites
+that encode the old rule) caught in the window rather than a fortnight later. Neither test lost its
+claim: B3 makes the same "one number, two artifacts, different bytes" assertion at version **4**,
+which both branches have equally reached, and **C6 asserts the publication-log property at the
+CURRENT version through an edit that was written and never published** — which is why M-TRAP8 was
+re-run rather than assumed, and it still dies at C6 alone.
+
+⚠ **H2b kills for a CRASH, not a refusal, and that is a mutant artefact worth stating.** With the
+*no such branch* leg deleted the org-comparison leg dereferences `undefined`, so G6 reports
+`Cannot read properties of undefined` instead of a missing refusal. It still attributes G6 to that
+leg; it is not evidence that a partial implementation fails legibly.
+
+⚠ **WHAT §M DELIBERATELY DOES NOT ASSERT.** `01-F75` honours `at_version` on a CONTINUATION, so a
+caller passing `from > 0` **is** served the historical fold, hash and all. The FR's ground for that
+is *"no device has a reason to open a page run at a version it does not hold"* — a reachability
+argument about clients, not a bound the server enforces — so asserting a refusal there would invent
+policy. §M3 is the control that keeps the clause from being implemented as *"ignore `at_version`"*,
+and the residual belongs to `01-F71` (e)'s serve path, which does not exist yet.
+
+### Third matrix — `01-F75`'s DELTA clause and the scope predicate (control **417/417**)
+
+The second door. In-tree with a byte-exact backup and an md5 restore trap (`staff.ts` verified
+`fc33afdd…` after every row); nothing here is a security constant, so a stranded mutant reds a test
+rather than downgrading a credential. Every row is the FULL package suite, `REAL_EXIT` read from a
+marker written INSIDE the log. **In every killing row the failing FILE was
+`staff-roster-storage.test.ts` alone (`Test Files 1 failed | 53 passed`)**, so all 358 pre-existing
+tests stayed green under every mutant.
+
+| # | mutant (exactly one branch) | killed | which tests |
+|---|---|---|---|
+| D1 | **the row-replay delta restored — what this file shipped until the clause landed** | **3** | §N N1, N2, N3 |
+| D2 | the fold's tiebreak reversed (`version asc`) — a FIRST-wins dedup | **3** | §N N1, N2, N3 |
+| D3 | **the leak-only repair: row replay + `pin_hash` stripped from every superseded row** (2 branches, labelled) | **2 — N2 SURVIVES** | §N N1, N3 |
+| S2 | the delta query loses its branch scope (M-DELTA re-measured against the fold) | 1 | §B B3 |
+| H1 | the `from > 0 &&` continuation predicate deleted — re-measured at 417 | **3** | §M M1, M2 **+ §N N2** |
+| S1 | **`is not distinct from` restored on `scopedTo` — the index change** | **0 — SURVIVES BY DESIGN** | — |
+| CTRL | **NEGATIVE CONTROL: five refusal sentences reworded, same states, same writes, same FR ids** | **0** | — |
+
+⚠ **THIS MATRIX IS A DATED RECORD AND ITS CONTROL HAS MOVED: 417 → 424, and `staff.ts` is no longer
+`fc33afdd…`.** `01-F78`'s row filter and `01-F77`'s `at_version > 0` guard landed on 2026-08-18 and
+neither row above was re-measured against them — **do not restore a mutant against that md5**, and
+re-take a control before quoting any count here. Nothing in the rows is retracted: each one names a
+branch that still exists, and H1's `from > 0 &&` predicate now sits beside the new `at_version > 0`
+one in the same expression, so a session deleting "the guard" has two to be careful of, not one.
+
+**D1 and D3 are the two to re-run after any change to `staffPage`'s delta.** D1 is the row that
+matters and it was not hypothetical: when it was measured, the mutant WAS the shipped file, at
+417 tests green with the `at_version` fix already in. **D3 is the row that justifies N1 and N3
+existing at all** — it is the repair a session reaching only for the leak would write, and it takes
+the credential assertion green (N2 survives) while replaying every intermediate row to every
+reconnecting device. A suite holding only N2 would have blessed it.
+
+⚠ **H1's kill count moved from 2 to 3 and the third kill is the interesting one.** §N's N2 sweeps
+`have_version` × `from` × `at_version` together rather than asserting at one point, so it catches
+the `at_version` door as well as its own — which is what the section header means by
+door-independent. The two doors are now covered by two sections and by one sweep across both, and
+`01-F75`'s generalisation is why: *"every client-supplied version field is a request to read [the
+publication] log, so each one needs its own answer"*.
+
+⚠ **S1 SURVIVES AND THAT IS THE RESULT, NOT A GAP.** `=` and `is not distinct from` return
+identical ROWS on this resource — `branch_id` is `NOT NULL` in both tables and the publisher refuses
+a null branch by name — so no test can distinguish them and none should try. The change is to the
+PLAN, and its evidence is the `EXPLAIN` block in the bullets above and nowhere else. **A mutant that
+survives because it does not change behaviour proves nothing about the suite** (`migratable`'s N5,
+`summary`'s S4x, and the M4/M6 rows in the first matrix here record the same lesson); it is listed
+so nobody reads the survival as a coverage hole and writes a test that pins an operator.
 
 ## Mutation matrix for `startable.test.ts` (round-3 law) — control 9/9 new + 271 pre-existing green
 

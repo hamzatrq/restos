@@ -95,19 +95,23 @@ DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/restos' \
 Healthy — one line, and the DSN is password-redacted (`18 §5`):
 
 ```
-@restos/sync-gateway migrate applied 12 of 12 migrations · postgres://postgres:*****@127.0.0.1:5432/restos
+@restos/sync-gateway migrate applied 13 of 13 migrations · postgres://postgres:*****@127.0.0.1:5432/restos
 ```
 
-and twelve tables in `kernel`:
+and fifteen tables in `kernel`:
 
 ```sh
 docker exec restos-pg psql -U postgres -d restos -c '\dt kernel.*'
 # branches · catalog_entries · catalog_versions · device_registry · device_watermarks
-# events · org_events · org_sequences · orgs · quarantine · quarantine_notices · users
+# events · org_events · org_sequences · orgs · quarantine · quarantine_notices
+# staff_entries · staff_versions · user_credentials · users
 ```
 
-`orgs` and `branches` arrived at `0010` (`01-F68`/`01-F69` — the tenancy directory) and `users` at
-`0011` (`11-F20`/`15-F26`). ⚠ **This paragraph said "nothing fills them yet" and that stopped being
+`orgs` and `branches` arrived at `0010` (`01-F68`/`01-F69` — the tenancy directory), `users` at
+`0011` (`11-F20`/`15-F26`), and `staff_entries`/`staff_versions`/`user_credentials` at `0012`
+(`01-F75`/`01-F76` — the staff roster's publication log per artifact key; `11-F23` — the
+device-plane PIN credential in its own table, which nothing writes or serves yet: the wire and the
+CRUD are steps 4–6 of `plans/saas-pivot/staff-over-the-wire.md`). ⚠ **This paragraph said "nothing fills them yet" and that stopped being
 true in August 2026** — §2b's four declared commands are the writer. They are still empty on a fresh
 stack, and a run that skips §2b still comes up: `01-F68` makes an org with events and no record
 **UNNAMED, not invalid**, no ledger table references any of the three, and `\d kernel.events` shows
@@ -117,7 +121,7 @@ owner all render as UUIDs (`21-F15`).
 **It is idempotent.** A second run says so and changes nothing:
 
 ```
-@restos/sync-gateway migrate nothing to apply — all 12 migrations were already present · postgres://…
+@restos/sync-gateway migrate nothing to apply — all 13 migrations were already present · postgres://…
 ```
 
 ⚠ **Postgres `NOTICE` objects on the second run are not errors.** `42P06 schema "drizzle" already
@@ -133,8 +137,8 @@ a fourth boot line reports the schema state, so forgetting this step is a senten
 bringing the stack up rather than a `500` somewhere else later.
 
 ```
-@restos/sync-gateway schema up to date — all 12 migrations applied
-@restos/sync-gateway schema NOT MIGRATED — 12 of 12 migrations are unapplied. Run `pnpm -C services/sync-gateway migrate`; …
+@restos/sync-gateway schema up to date — all 13 migrations applied
+@restos/sync-gateway schema NOT MIGRATED — 13 of 13 migrations are unapplied. Run `pnpm -C services/sync-gateway migrate`; …
 ```
 
 ---
@@ -222,7 +226,7 @@ pnpm -C services/sync-gateway start          # `dev` to watch
 @restos/sync-gateway listening on http://0.0.0.0:8080
 @restos/sync-gateway database postgres://postgres:*****@127.0.0.1:5432/restos (opened lazily …)
 @restos/sync-gateway publish surface enabled (PUBLISH_TOKEN configured)
-@restos/sync-gateway schema up to date — all 12 migrations applied
+@restos/sync-gateway schema up to date — all 13 migrations applied
 ```
 
 **Read the fourth line too.** `schema NOT MIGRATED — …` means you skipped §2; the gateway is up and

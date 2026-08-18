@@ -359,7 +359,19 @@ describe("services/sync-gateway can provision a TENANT (15-F27 — the seam to a
     expect(user?.display_name).toBe("Ayesha Khan");
     // `15-F26`/`01-F26`: org-wide owner is `branch_id: null`, which is how Appendix A's
     // "everything" is held.
-    expect(user?.assignments).toEqual([{ role: "owner", branch_id: null }]);
+    //
+    // ⚠ **AMENDED 2026-08-18 — the assignment RECORD gained a field; this test's claim did not
+    // change.** `11-F22` was disambiguated in August 2026: participation is per-(person, branch)
+    // and rides `01-F26`'s assignment, because a cashier transferring A→B must be "`inactive` in
+    // A's roster and `active` in B's at the same moment" and no per-person value can express that.
+    // So `PersonAssignment` requires a `status` and this exact-equality pin had to move with it —
+    // the `branch_id: null` claim above is untouched and is still asserted exactly as strongly.
+    // `active` is the only value a first owner could be given: she is created in order to sign in.
+    // ⚠ Amended by the session IMPLEMENTING `11-F22`, which normally may not edit an oracle
+    // (`24 §3`, `24-F5`). Recorded rather than done quietly: a green test defending an overruled
+    // rule is AGENTS.md's named trap, and the alternative was to leave a pin that no correct
+    // implementation of `11-F22` can satisfy.
+    expect(user?.assignments).toEqual([{ role: "owner", branch_id: null, status: "active" }]);
     // `01-F61`: an EXPLICIT grid position, so a later hire appends instead of reshuffling tiles.
     expect(user?.grid_ordinal).toBe(0);
 

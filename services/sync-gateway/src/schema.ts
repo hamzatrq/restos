@@ -1,8 +1,9 @@
 // T-01-07 Postgres data contract (binding — plans/wave-0/kernel-tasks.md T-01-07;
 // owning spec 01 §3/§5): the four original kernel-schema tables, plus the
 // T-01-08 quarantine-notice outbox (DEC-SYNC-008), the T-01-09 device
-// registry, the T-C2 catalog pair, 01-F62's org-scoped store and 01-F68/01-F69/11-F20's
-// tenancy directory — TWELVE in all. sync-gateway is the sole writer of all twelve (18 §4).
+// registry, the T-C2 catalog pair, 01-F62's org-scoped store, 01-F68/01-F69/11-F20's
+// tenancy directory and 01-F75/01-F76/11-F23's staff-roster publication log with its
+// credential table — FIFTEEN in all. sync-gateway is the sole writer of all fifteen (18 §4).
 // (`kernel.users` has a second READER, `services/api`'s login path, and exactly one writer —
 // this service. See the table's own comment; `0011`'s header states the split in full.)
 // (This header read "six in all" while the file declared nine: a count in a comment rots
@@ -471,8 +472,15 @@ export const users = kernel.table(
      * the authenticated subject, so a per-org index would admit two rows one lookup cannot choose
      * between. One human in two orgs therefore needs two emails; that is
      * `backoffice-catalog.md` Q3's open multi-org question, not this table's to answer.
+     *
+     * **NULLABLE since `0012` (founder ruling R30):** a cashier who only uses the till needs no
+     * email — `11-F21` gives her a PIN as her working credential, and an owner made to invent an
+     * address puts a wrong one permanently into a directory `11-F20` never deletes from. The
+     * unique index below **survives unchanged**, because Postgres permits multiple NULLs in one:
+     * R30 removes the requirement to *have* an address, not the rule about two people sharing one.
+     * `findByEmail` simply does not find a till-only person, which is correct rather than a gap.
      */
-    email: text("email").notNull(),
+    email: text("email"),
     /** `11-F20`: required, non-empty. Non-empty is the writer's (Zod `DisplayName`). */
     display_name: text("display_name").notNull(),
     /**
@@ -483,7 +491,27 @@ export const users = kernel.table(
      * that does not exist yet (`15-F27` names the gap, and relaxing this later is additive).
      */
     password_hash: text("password_hash").notNull(),
-    /** `01-F26`'s `(role, branch_id|null)` pairs. `branch_id: null` is org-wide (`15-F26`). */
+    /**
+     * `01-F26`'s `(role, branch_id|null)` pairs, each carrying `11-F22`'s PARTICIPATION status.
+     * `branch_id: null` is org-wide (`15-F26`).
+     *
+     * ⚠ **THERE IS NO `status` COLUMN ON THIS TABLE, AND ITS ABSENCE IS THE FR** (`11-F22`,
+     * disambiguated August 2026). Participation is per-(person, branch): a cashier transferring
+     * from A to B is *"`inactive` in A's roster and `active` in B's at the same moment"*, which no
+     * single column can hold. `0012`'s first draft added the column, and the measured cost was the
+     * defect `11-F23` names — deactivating her at A destroyed the credential B needs, and a later
+     * republish at A re-copied her CURRENT status and returned a departed cashier to `active` with
+     * a working PIN hash on her old branch's tills. It decides whether she may act at a location
+     * and decides **nothing** about rendering: her row is retained forever (`11-F20`: "a person
+     * record is never deleted") so her name still resolves on last month's orders.
+     *
+     * The status is required with **no default** — `11-F22` refuses one by name ("not a licence to
+     * default an absent status to `active`") and `01-F75` makes the field required at the writer.
+     * jsonb has no defaults to refuse, so the requirement lives entirely at the writer, in Zod,
+     * through `packages/domain`'s `PersonAssignment`; `0012` backfills pre-existing rows to
+     * `active` in one statement, which is `01-F68`'s reconciliation and not a standing licence.
+     * No CHECK, for the same reason every other closed set in this file carries none.
+     */
     assignments: jsonb("assignments").notNull(),
     /**
      * `01-F61` — the identification grid's explicit position. Not derived: ordering by `user_id`,
@@ -499,5 +527,172 @@ export const users = kernel.table(
     uniqueIndex("users_email_lower_uq").on(sql`lower(${t.email})`),
     // The only other read path: one org's people.
     index("users_org_idx").on(t.org_id),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * THE STAFF ROSTER'S CLOUD STORAGE (`0012`) — `01-F75`, `01-F76`, `11-F21`,
+ * `11-F22`, `11-F23`, and founder rulings R25/R32.
+ *
+ * ⚠ READ THIS BEFORE REACHING FOR `kernel.users`: the artifact is a PUBLICATION
+ * LOG and the user table is CURRENT STATE. Serving a roster by selecting today's
+ * `kernel.users` rows compiles, passes almost everything, and hands a device that
+ * fetched v3 last week today's people labelled as last week's version — which
+ * `01-F56`'s monotonic apply cannot detect, because the number it compares is
+ * right. The two tables below are `catalog_versions`/`catalog_entries`' shape for
+ * exactly `0007`'s reasons; what is NOT copied is the KEY, because the catalog is
+ * org-scoped (`01-F52`) and this is branch-scoped (`01-F76`, R25).
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * `11-F23` — THE DEVICE-PLANE PIN CREDENTIAL, IN ITS OWN TABLE.
+ *
+ * `services/api`'s login reads the user row by email; on a ninth column it would hold every
+ * logged-in owner's *cashiers'* PIN hashes in the memory of a request that has no use for them.
+ * A separate table means the login lookup cannot return the credential **because it does not join
+ * to it** — a structural bound rather than a discipline. It also expresses `11-F21`'s active-only
+ * rule as an ABSENCE rather than a NULL: no row, and the publisher's `left join` produces
+ * `01-F75`'s specified shape without a branch.
+ *
+ * Keyed `(org_id, user_id)` although `user_id` is already globally unique, so that every read is
+ * org-scoped by construction (`01-F71`). Its rows are UPDATEd (a `14-F14` PIN reset) and DELETEd
+ * (R32 — a deactivated person's credential does not outlive her employment); neither is `01-F1`,
+ * which reaches the ledger and not a credential.
+ *
+ * ⚠ **CORRECTED TWICE, AND THE SECOND CORRECTION IS WHY BOTH ARE RECORDED.** The sentence first
+ * said "the one table in this file whose rows are updated … and deleted"; that was false when
+ * written — `kernel.users` is declared one screen up and `staff.ts`'s `setUserStatus` UPDATEs its
+ * `assignments` in the same transaction that deletes the row below. The repair then claimed *"every
+ * other table in this file is append-only"*, **which is false for SIX of the fifteen** (re-measured
+ * comment-blind 2026-08-18 by grepping the shipping writers for `update kernel.` /
+ * `delete from kernel.` / `on conflict … do update`, with block and line comments stripped first):
+ *
+ *   · `kernel.device_registry` — `revoked_at`, `display_name`, `token_expires_at` (`registry.ts`)
+ *   · `kernel.device_watermarks` — the acked cursor, upserted per push (`gateway.ts`)
+ *   · `kernel.quarantine` — `superseded_at` (`gateway.ts`)
+ *   · `kernel.quarantine_notices` — `delivered_at` (`gateway.ts`)
+ *   · `kernel.org_sequences` — `next_global_seq`, the per-org counter (`gateway.ts`)
+ *   · `kernel.users` — `assignments`, rewritten per participation flip (`staff.ts`'s
+ *     `setUserStatus`) — the very table the sentence two paragraphs up names, and the one the
+ *     repair's own count left out
+ *
+ * ⚠ **THIRD CORRECTION, AND IT WAS THE SAME NUMBER WRONG IN THE SAME DIRECTION EACH TIME.** The
+ * headline said FIVE while the accounting below it already read `kernel.users` into its second
+ * group, so one comment carried two counts of one set. Both earlier attempts are kept rather than
+ * quietly overwritten, because the failure is a shape and not a typo: each sentence generalised
+ * from the tables its own author had open, and the count is the part a reader trusts without
+ * re-running anything.
+ *
+ * **What is true, and it is narrower than every attempt.** Commandment 1's append-only law is
+ * about HISTORY, and the six history tables here — `events`, `org_events`, `catalog_versions`,
+ * `catalog_entries`, `staff_versions`, `staff_entries` — are append-only. Everything else in this
+ * file is current state rather than history: five of the six above are registry, cursor and counter
+ * rows; the sixth, `kernel.users`, is written and rewritten by `staff.ts` alongside this table; and
+ * `kernel.orgs` / `kernel.branches` are insert-only today only because `create-org` /
+ * `create-branch` refuse to rename (`14-F2`), which is a writer's rule and not a property of the
+ * table. That is 6 + 5 + 2 + 2 = 15. **If you need to know whether a given table is mutated, read
+ * its writers — do not read a sentence in this file that counts them.**
+ */
+export const userCredentials = kernel.table(
+  "user_credentials",
+  {
+    org_id: text("org_id").notNull(),
+    user_id: text("user_id").notNull(),
+    /** An Argon2id PHC string from `domain`'s `hashPin` (`01-F61`'s floor) — **never a PIN**. */
+    pin_hash: text("pin_hash").notNull(),
+    updated_at: bigint("updated_at", { mode: "number" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.org_id, t.user_id] })],
+);
+
+/**
+ * `01-F75`/`01-F76` — the roster's publication VERSION axis, per `(resource, scope)` key.
+ *
+ * The resource is `staff` (this table); the scope is `(org_id, branch_id)` as **two columns and
+ * never a concatenation** — `01-F71` (d): `("ab","c")` and `("a","bc")` are distinct tenants and a
+ * separator-less key maps both to one delivery set, "a cross-tenant leak with no error in it".
+ *
+ * A row here is the COMMIT POINT exactly as `catalog_versions` is: entries first, this last, so a
+ * reader that sees version N sees every entry of version N. Versions increase per KEY and mean
+ * nothing across keys (`01-F76`: two devices at "staff v7" hold different bytes at different
+ * branches). `branch_id` is NOT NULL because a primary key requires a value and the roster has no
+ * org-scoped artifact — `publishStaffRoster` refuses a null branch **by name**, so the refusal is
+ * a sentence rather than a constraint violation.
+ */
+export const staffVersions = kernel.table(
+  "staff_versions",
+  {
+    org_id: text("org_id").notNull(),
+    branch_id: text("branch_id").notNull(),
+    version: bigint("version", { mode: "number" }).notNull(),
+    published_at: bigint("published_at", { mode: "number" }).notNull(),
+    /** The authenticated human behind the change, where one exists (`14-F14`). */
+    actor_user_id: text("actor_user_id"),
+  },
+  (t) => [primaryKey({ columns: [t.org_id, t.branch_id, t.version] })],
+);
+
+/**
+ * What CHANGED at each roster version — `01-F75`'s `staff` row, never a full roster per version.
+ *
+ * `status` is stored PER VERSION rather than read from `kernel.users` at serve time, and that is
+ * the whole point of the log: at version 2 a member later deactivated still reads `active`,
+ * because that is what was published. **A departure is a marked entry and never an absence** (R26,
+ * `01-F75`) — there is no removals list and no tombstone column, because dropping her degrades a
+ * past order, a reprint, a shift report and `02-F23`'s reconciliation to a raw UUID.
+ *
+ * `pin_hash` is NULLABLE and its absence is the **specified shape** (`11-F21`, `01-F75`): the hash
+ * rides only an `active` entry, because a hash on a non-`active` one is a credential no verifier
+ * can reach — pure blast radius with no function. It is a COPY as it stood at publication and not
+ * a join, because a delta must be constructible from an exact base.
+ *
+ * `grid_ordinal` is `01-F61`'s explicit position, unique **within the artifact** and enforced at
+ * the publisher against the folded artifact. Whether the cloud enforces it more widely "is a
+ * storage choice this FR does not make", and no index here makes it — an org-wide unique index
+ * would forbid two branches from both starting their grid at position 1, which `01-F75` permits.
+ */
+export const staffEntries = kernel.table(
+  "staff_entries",
+  {
+    org_id: text("org_id").notNull(),
+    branch_id: text("branch_id").notNull(),
+    version: bigint("version", { mode: "number" }).notNull(),
+    user_id: text("user_id").notNull(),
+    display_name: text("display_name").notNull(),
+    grid_ordinal: bigint("grid_ordinal", { mode: "number" }).notNull(),
+    /** `11-F22`'s `active | inactive`, as published. No CHECK — the writer validates the set. */
+    status: text("status").notNull(),
+    /** `01-F26`'s `(role, branch_id|null)` pairs, carried so `can()` has a subject on the till. */
+    assignments: jsonb("assignments").notNull(),
+    pin_hash: text("pin_hash"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.org_id, t.branch_id, t.version, t.user_id] }),
+    // ⚠ **THE DELTA SCAN USES THE PRIMARY KEY, NOT THIS INDEX — measured, because this comment
+    // claimed "both access paths in one index" and `EXPLAIN` says otherwise.** `EXPLAIN (analyze,
+    // buffers)` against a real Postgres 16, 2026-08-18, freshly `ANALYZE`d, 20 branches × 50
+    // versions × 20 people = 20 000 entries, one branch served:
+    //
+    //   · snapshot fold (`version <= 50`) → Bitmap Index Scan on THIS index, all three of
+    //     `org_id`/`branch_id`/`version` in the Index Cond, 1000 rows, 84 shared buffers.
+    //   · delta fold (`version > 40 and version <= 50`) → **Index Scan using
+    //     `staff_entries_org_id_branch_id_version_user_id_pk`**, 200 rows, 36 buffers. The planner
+    //     is right: the PK orders `version` THIRD, so a version RANGE is a leading index condition
+    //     there and here it is not — this index puts `user_id` third and can only carry the range
+    //     as a non-leading condition inside a bitmap.
+    //   · `staffVersion`'s `max(version)` → Index Only Scan Backward on that same PK, 1 row.
+    //
+    // So what this index actually buys is the snapshot fold, and only just: dropping it re-plans
+    // that query onto the PK's bitmap at **89** buffers against 84 (same rows, same result). Kept
+    // rather than dropped — an index change is a migration and 20 000 rows on one machine is not
+    // the evidence for one — but the CLAIM is now what was measured. `catalog_entries`' index is
+    // still the shape this follows, one axis wider for the scope; that similarity is not a
+    // prediction about either query's plan, which is how the old sentence went wrong.
+    index("staff_entries_org_branch_user_version_idx").on(
+      t.org_id,
+      t.branch_id,
+      t.user_id,
+      t.version,
+    ),
   ],
 );

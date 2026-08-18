@@ -35,6 +35,14 @@
  * and `01-F68`/`01-F69`/`11-F20` each state that these records are never deleted. A provisioning
  * command that could rewrite a name would rewrite it by accident on a re-run, which is exactly the
  * failure `15-F27` refuses.
+ *
+ * ⚠ **That sentence is about THIS FILE and is no longer true of `kernel.users` THE TABLE.**
+ * `staff.ts` ships `setUserStatus`, which UPDATEs `assignments` — the jsonb carrying `11-F22`'s
+ * participation status per location, whose whole point is that it changes — and R32's deletion of
+ * the departed person's credential row in the same transaction. The writer service is still one
+ * (`18 §4`); the claim a reader might carry away from the paragraph above ("nothing ever updates a
+ * user") would be false, and a comment promising a property that does not hold retires the
+ * assertion the next session would otherwise write.
  */
 
 import {
@@ -59,7 +67,12 @@ type SqlExecutor = Pick<GatewayDb, "execute">;
  * a password hash on every device roster row.
  */
 export type UserRow = PersonRecordT & {
-  readonly email: string;
+  /**
+   * **NULL for a till-only cashier** (founder ruling R30): email is required only for BACK-OFFICE
+   * access, and `11-F21` gives her a PIN as her working credential. An owner made to invent an
+   * address puts a wrong one permanently into a directory `11-F20` never deletes from.
+   */
+  readonly email: string | null;
   /** An Argon2id PHC string (`domain`'s `hashPin`). Never a password. */
   readonly password_hash: string;
   readonly created_at: number;
@@ -191,6 +204,7 @@ const rowToBranch = (row: Record<string, unknown>): BranchRecordT =>
  */
 export const insertUser = async (db: GatewayDb, row: UserRow): Promise<boolean> => {
   const person = PersonRecord.parse(row);
+  await assertAssignedBranchesAreThisOrgs(db, person);
   const rows = await db.execute(
     sql`insert into kernel.users
           (user_id, org_id, email, display_name, password_hash, assignments, grid_ordinal,
@@ -205,6 +219,59 @@ export const insertUser = async (db: GatewayDb, row: UserRow): Promise<boolean> 
 };
 
 /**
+ * `01-F26`/`01-F71` — every assignment names a branch of THIS org, or is org-wide (`branch_id:
+ * null`), or the person is not written at all.
+ *
+ * **It is refused HERE OR NOWHERE.** `01-F68` forbids a foreign key from any ledger table ever and
+ * `0010` extends the restraint to the directory's own edges, so Postgres cannot answer this — a
+ * user row whose assignment names another org's branch is `00 §5.4`'s isolation boundary crossed in
+ * storage, and it becomes `authorize.ts`'s `can()` subject on every till the moment the roster
+ * carries it. `15-F27` already puts exactly this completeness rule at this writer: `create-branch`
+ * refuses a branch under an unnamed org, for the same reason and in the same shape.
+ *
+ * **A null branch is `01-F26`'s org-wide assignment and is accepted** — it is how every owner is
+ * stored (`15-F26`), so refusing it would make an owner unstorable.
+ *
+ * ⚠ **PLACEMENT IS A READING, stated so a later session does not read it as the only option.** It
+ * could instead sit in `14-F14`'s procedure, where a human is authenticated. It is here because
+ * `18 §4` makes this service the ONE writer of `kernel.users`, and a check in one caller leaves
+ * every other caller unguarded — two interpretations of one boundary, which is `03-F40`'s two
+ * sensor bit layouts on the isolation edge. `01-F71` says adding an enforcement point adds a clause
+ * to that FR; this is a WRITER completeness rule rather than a matrix decision, so no clause is
+ * claimed here and the reading is recorded instead.
+ */
+const assertAssignedBranchesAreThisOrgs = async (
+  db: GatewayDb,
+  person: PersonRecordT,
+): Promise<void> => {
+  const named = [
+    ...new Set(
+      person.assignments
+        .map((assignment) => assignment.branch_id)
+        .filter((branch_id): branch_id is string => branch_id !== null),
+    ),
+  ];
+  for (const branch_id of named) {
+    const branch = await readBranch(db, branch_id);
+    if (branch === undefined) {
+      throw new RangeError(
+        `user ${person.user_id} is assigned to branch ${branch_id}, which no record names — ` +
+          "nothing was written (01-F26). This directory carries no foreign key (01-F68), so " +
+          "nothing else would ever have told you the id was wrong.",
+      );
+    }
+    if (branch.org_id !== person.org_id) {
+      throw new RangeError(
+        `user ${person.user_id} is in org ${person.org_id} and is assigned to branch ` +
+          `${branch_id}, which belongs to org ${branch.org_id} — nothing was written (01-F71: ` +
+          "org data isolation is absolute and fail-closed; 01-F26's assignment is per-location " +
+          "and a location of another tenant is not one).",
+      );
+    }
+  }
+};
+
+/**
  * One org's people, `grid_ordinal` first — `01-F61`'s explicit order, which is the order the
  * identification grid renders and therefore the only one a reader should ever see.
  *
@@ -216,7 +283,7 @@ export const listUsers = async (
   executor: SqlExecutor,
   orgId: string,
 ): Promise<
-  readonly (PersonRecordT & { readonly email: string; readonly created_at: number })[]
+  readonly (PersonRecordT & { readonly email: string | null; readonly created_at: number })[]
 > => {
   const rows = await executor.execute(
     sql`select user_id, org_id, email, display_name, assignments, grid_ordinal, created_at
@@ -228,10 +295,15 @@ export const listUsers = async (
       user_id: String(row.user_id),
       org_id: String(row.org_id),
       display_name: String(row.display_name),
+      // `11-F22`'s participation status rides INSIDE each of these (`PersonAssignment`), so this
+      // reader gains no column and loses none: the jsonb it already selected carries the field.
       assignments: row.assignments,
       grid_ordinal: Number(row.grid_ordinal),
     }),
-    email: String(row.email),
+    // **A NULL EMAIL STAYS NULL** (R30): `String(null)` is the four-letter string `"null"`, which
+    // reads as an address, survives every type check, and is the exact shape a till-only cashier
+    // must not acquire on the way out of this reader.
+    email: row.email === null ? null : String(row.email),
     created_at: Number(row.created_at),
   }));
 };

@@ -135,7 +135,15 @@ const ownerAssignment = (): PersonRecordT["assignments"] => [
   // Typed through `PersonRecord`'"'"'s own inferred shape rather than re-stated, so the drift tripwire
   // in `packages/domain/src/tenancy.ts` — which makes `RoleAssignment` and its wire form agree at
   // COMPILE time — is the thing this depends on, and a change to either stops compiling here.
-  { role: "owner", branch_id: null },
+  //
+  // `11-F22`'s participation status is stated rather than defaulted: the FR refuses a default by
+  // name and `01-F75` makes the field required at the writer, so the one person this command
+  // creates says what she is. A provisioned owner is `active` — she is being created in order to
+  // sign in (`15-F26`), and there is no other value a first owner could be given. It sits on the
+  // ASSIGNMENT because participation is per-(person, branch) (`11-F22`, August 2026); an org-wide
+  // assignment is `01-F26`'s own encoding of "every location", so one status here covers her at
+  // every branch, which is exactly what an owner's `null` location already means.
+  { role: "owner", branch_id: null, status: "active" },
 ];
 
 /**
