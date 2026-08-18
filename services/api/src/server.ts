@@ -24,6 +24,7 @@ import {
   createGatewayDeviceDirectory,
   createGatewayLedgerAppender,
   createGatewayTenancyDirectory,
+  createGatewayUserDirectory,
 } from "./gateway-client.js";
 import { type DayLedger, unconfiguredDayLedger } from "./ledger.js";
 import {
@@ -36,6 +37,7 @@ import {
 import { appRouter, assertEveryProcedureIsGated } from "./router.js";
 import { type TenancyDirectory, unconfiguredTenancyDirectory } from "./tenancy.js";
 import type { ApiContext } from "./trpc.js";
+import { type UserDirectory, unconfiguredUserDirectory } from "./user-directory.js";
 import { createMemoryUserStore, type UserRecord, type UserStore } from "./users.js";
 import { createPostgresUserStore } from "./users-postgres.js";
 
@@ -96,6 +98,17 @@ export type ApiServerOptions = {
    * green.
    */
   readonly tenancy?: TenancyDirectory;
+  /**
+   * `14-F14`'s user CRUD. Optional here for `devices`' reason — suites that predate it still have
+   * to boot — and REQUIRED once resolved.
+   *
+   * **The fallback is `unconfiguredUserDirectory`, which refuses every call**, not a memory stub.
+   * A stub here is the shape AGENTS.md measures as invisible to every rail ("a stub is a supply"),
+   * and on this surface it means an owner told she created a cashier who exists nowhere, or shown
+   * an empty roster for a restaurant that has staff — a claim about who may sell, under `11-F20`,
+   * which never deletes a person record.
+   */
+  readonly users?: UserDirectory;
 };
 
 /**
@@ -141,6 +154,7 @@ export const createApiServer = async (options: ApiServerOptions): Promise<Fastif
   const devices = options.devices ?? unconfiguredDeviceDirectory();
   const ledger = options.ledger ?? unconfiguredDayLedger();
   const tenancy = options.tenancy ?? unconfiguredTenancyDirectory();
+  const users = options.users ?? unconfiguredUserDirectory();
 
   await app.register(fastifyTRPCPlugin, {
     prefix: "/trpc",
@@ -155,6 +169,7 @@ export const createApiServer = async (options: ApiServerOptions): Promise<Fastif
         devices,
         ledger,
         tenancy,
+        users,
       }),
     },
   });
@@ -470,6 +485,16 @@ const start = async (): Promise<FastifyInstance> => {
   // directory tables yet. That mutant is `tenancy-names.test.ts`'s N3.
   const tenancy: TenancyDirectory = createGatewayTenancyDirectory(link);
 
+  // `14-F14`. Same `/internal` link again. Swap it for `unconfiguredUserDirectory()` and the
+  // process still starts, still serves, still gates — and every act on the staff roster refuses
+  // loudly instead of reporting a cashier this deployment never wrote. ⚠ **This one is NOT the
+  // login store**, which is `resolveUserStore` below: that reads `kernel.users` directly for
+  // `01-F27`'s per-request subject lookup and must keep working with the gateway down
+  // (`startable.test.ts` boots this service against a CLOSED gateway port and drives `whoami`).
+  // This writes the same table THROUGH the gateway, because `18 §4` gives it exactly one writer
+  // service and that service is not this one.
+  const userDirectory: UserDirectory = createGatewayUserDirectory(link);
+
   // **WHO CAN LOG IN** (`15-F26`/`15-F27`). `DATABASE_URL` set ⇒ `kernel.users`, the rows
   // `pnpm -C services/sync-gateway create-owner` writes; absent ⇒ the `BOOTSTRAP_OWNER_*` seed that
   // dies with this process. Both set is refused at boot — see `resolveUserStore`. Swap this back to
@@ -486,6 +511,7 @@ const start = async (): Promise<FastifyInstance> => {
     devices,
     ledger,
     tenancy,
+    users: userDirectory,
   });
 
   // `14-F28`'s day-end landing, in production, **for every tenant on this host** — and this is the

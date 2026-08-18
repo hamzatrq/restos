@@ -239,10 +239,22 @@ export const insertUser = async (db: GatewayDb, row: UserRow): Promise<boolean> 
  * sensor bit layouts on the isolation edge. `01-F71` says adding an enforcement point adds a clause
  * to that FR; this is a WRITER completeness rule rather than a matrix decision, so no clause is
  * claimed here and the reading is recorded instead.
+ *
+ * **EXPORTED as of step 4a, and that is the reading above being honoured rather than abandoned.**
+ * `14-F14`'s re-assignment (`user-crud.ts`) UPDATEs `assignments` and therefore does not pass
+ * through `insertUser` at all — so without this, editing a person's locations could put another
+ * org's branch on her record by a route the create path refuses. It is the SAME function reached
+ * from the second writer, never a copy of it. The parameter is structural (`org_id`, `user_id` and
+ * the assignments' `branch_id`s are all it ever read) so a caller holding `01-F26`'s wire pairs,
+ * with no `status` yet decided, can ask it before it builds a record.
  */
-const assertAssignedBranchesAreThisOrgs = async (
+export const assertAssignedBranchesAreThisOrgs = async (
   db: GatewayDb,
-  person: PersonRecordT,
+  person: {
+    readonly org_id: string;
+    readonly user_id: string;
+    readonly assignments: readonly { readonly branch_id: string | null }[];
+  },
 ): Promise<void> => {
   const named = [
     ...new Set(

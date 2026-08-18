@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { DisplayName, PersonAssignment } from "@restos/domain";
 import { CatalogEntryWire } from "@restos/sync-protocol";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -9,7 +10,8 @@ import { listDevices } from "./registry.js";
 // `revoke-device.ts` carries a main-module entry guard, so importing it runs nothing. Reaching for
 // the CLI's own function is the point — see the route below.
 import { revokeRegisteredDevice } from "./revoke-device.js";
-import { listBranches, readOrg } from "./tenancy.js";
+import { listBranches, listUsers, readOrg } from "./tenancy.js";
+import { createPerson, setPersonAssignments, setPersonPin, setPersonStatus } from "./user-crud.js";
 
 /**
  * **THE SEAM THE FOUNDER RULED INTO EXISTENCE: the API publishes, the gateway serves**
@@ -94,6 +96,126 @@ const OrgQuery = z.object({ org_id: z.string().min(1) });
 const DeviceRevokeRequest = z.strictObject({
   org_id: z.string().min(1),
   device_id: z.string().min(1),
+});
+
+/* ── `14-F14`'s USER CRUD, arriving from `services/api` on behalf of an AUTHENTICATED owner ───── */
+
+/**
+ * `01-F26`'s `(role, location)` pair as a caller states it.
+ *
+ * **No `status`, and `strictObject` refuses one BY NAME.** Participation is `11-F22`'s and the
+ * writer decides it — `active` where she is newly assigned, carried over where she already was —
+ * because a caller that could state it could create a cashier who is `inactive` on her first shift,
+ * and could silently return a departed one to `active` by re-sending her old assignment.
+ *
+ * ⚠ **THE ROLE IS `packages/domain`'s OWN DECLARATION, REACHED ONE LAYER EARLIER — AND IT WAS A
+ * BARE STRING UNTIL A TYPO CAME BACK AS A `500` (August 2026).** This comment used to argue that
+ * *"the role is a bare string HERE and is judged by `PersonRecord.shape.assignments` at the
+ * writer"*, because a second `z.enum` at the wire would be a second copy of a closed set (`18 §2`).
+ * The premise is right and the conclusion did not follow: `PersonAssignment.shape.role` **is** that
+ * one declaration — the same schema object, not a copy — so reaching it here costs no second
+ * interpretation and buys the class of the refusal. Left as a bare string, `cashierr` parsed
+ * happily, travelled to `PersonRecord.shape.assignments.parse` inside the writer, and threw a
+ * `ZodError`, which `refusalStatus` maps to **500** — an owner told her back office had an internal
+ * fault when she had mistyped a role. This is exactly the move `display_name` below already makes
+ * with `DisplayName`, and its recorded reason ("a `400` naming the field instead of a `500`
+ * carrying a `ZodError` from inside `insertUser`") is this one verbatim.
+ *
+ * **`refusalStatus` was deliberately NOT widened to map every `ZodError` to 400**, which is the
+ * one-line alternative: the writer also parses **stored rows** through the same schemas
+ * (`assignmentsOf`, `lockedAssignments`, `publishStaffRoster`), so a row that predates `0012`'s
+ * backfill would then be reported to the caller as a bad request. A storage fault told as a caller
+ * mistake sends the operator to fix the wrong thing, which is `00 §5.7`'s complaint about the
+ * unnamed 500 with the sign flipped.
+ */
+const AssignmentWire = z.strictObject({
+  role: PersonAssignment.shape.role,
+  branch_id: z.union([z.string().min(1), z.null()]),
+});
+
+/**
+ * `now` and `actor_user_id` on every write, and they are not decoration.
+ *
+ * `now` is the CALLER's instant for `/internal/catalog/publish`'s recorded reason — `services/api`
+ * takes ONE reading per act and uses it for the write and for `14-F2`'s ledger record, so one act
+ * cannot be split into two instants. `actor_user_id` is what `kernel.staff_versions` stores as the
+ * publisher of the version; it is nullable because that column is, and because a caller with no
+ * authenticated human (a future operator command) must not be forced to invent one.
+ */
+const actOf = {
+  now: z.number().int(),
+  actor_user_id: z.union([z.string().min(1), z.null()]),
+};
+
+/**
+ * `14-F14`'s create.
+ *
+ * `display_name` is `packages/domain`'s `DisplayName` — the SAME declaration `PersonRecord` parses
+ * through, reached one layer earlier so an empty or unrenderable name comes back as a `400` naming
+ * the field instead of a `500` carrying a `ZodError` from inside `insertUser` (`refusalStatus`'s own
+ * rule: a caller's mistake returns 400 with the message intact). `email` is nullable because R30
+ * says a till-only cashier needs none, and `min(1)` because `""` is an invented address rather than
+ * an absent one.
+ *
+ * ⚠ **`user_id` and `grid_ordinal` are ABSENT and `strictObject` refuses them by name.** `01-F61`
+ * bans a derived grid order and requires new members to APPEND, so only the writer — reading the
+ * org's current maximum inside the same transaction — can assign one; two owners in two browser
+ * tabs supplying their own would collide, and `listUsers`'s fallback to `user_id asc` is the exact
+ * derived ordering the FR forbids.
+ */
+const UserCreateRequest = z.strictObject({
+  org_id: z.string().min(1),
+  display_name: DisplayName,
+  email: z.union([z.string().min(1), z.null()]),
+  assignments: z.array(AssignmentWire),
+  ...actOf,
+});
+
+const UserAssignmentsRequest = z.strictObject({
+  org_id: z.string().min(1),
+  user_id: z.string().min(1),
+  assignments: z.array(AssignmentWire),
+  ...actOf,
+});
+
+/**
+ * `14-F14`'s PIN set/reset.
+ *
+ * ⚠ **IT TAKES `pin_hash` AND `strictObject` REFUSES A `pin` BY NAME.** `11-F21`: *"a PIN exists in
+ * exactly two places for exactly as long as each takes — the keypad it is typed on and the argument
+ * to a verify call"*, and `setPinCredential`'s header puts the Argon2id call at the caller so this
+ * service grows no second hashing site and no second parameter set. The plaintext therefore stops
+ * at `services/api`. The refusal is structural rather than a convention: widening this route "for
+ * convenience" fails to parse instead of quietly accepting a credential over the wire.
+ */
+const UserPinRequest = z.strictObject({
+  org_id: z.string().min(1),
+  user_id: z.string().min(1),
+  pin_hash: z.string().min(1),
+  ...actOf,
+});
+
+/**
+ * `11-F22`'s participation transition, per `(person, branch)`.
+ *
+ * `branch_id: null` addresses `01-F26`'s org-wide assignment, which is how every owner is stored —
+ * not "all branches".
+ *
+ * **The status word is `PersonAssignment.shape.status`, the SAME declaration the writer parses
+ * through, moved here for `AssignmentWire`'s reason and in the same change.** It was a bare string
+ * with the note that the writer parses it *"BEFORE it opens its transaction … a refused word that
+ * destroys no credential"* — both properties are untouched (the writer's parse stays, and it is
+ * still the only declaration; this is the same object, not a copy), and what changes is that
+ * `on_leave` now comes back as a `400` carrying `11-F22`'s own sentence instead of a `500` carrying
+ * a `ZodError`. It is moved **with** the role rather than after it because leaving one field behind
+ * is this repo's recorded pattern of closing an instance and not its class (`01-F66`).
+ */
+const UserStatusRequest = z.strictObject({
+  org_id: z.string().min(1),
+  user_id: z.string().min(1),
+  branch_id: z.union([z.string().min(1), z.null()]),
+  status: PersonAssignment.shape.status,
+  ...actOf,
 });
 
 /**
@@ -390,6 +512,107 @@ export const registerPublishRoutes = (app: FastifyInstance, deps: PublishDeps): 
       return reply.code(200).send(outcome);
     } catch (error: unknown) {
       return reply.code(refusalStatus(error)).send({ error: messageOf(error) });
+    }
+  });
+
+  /**
+   * **`14-F14`'s USER CRUD — five routes, one writer, and the first shipping caller `staff.ts` has
+   * ever had.**
+   *
+   * They sit beside the seven above (⚠ this said EIGHT; counted off the `app.post`/`app.get` calls
+   * registered before this block, it is seven — catalog publish, catalog published, org-events in
+   * and out, tenancy, devices, device revoke) and behind the same `PUBLISH_TOKEN` and the same
+   * fail-closed
+   * `503`, on `/internal/devices/revoke`'s recorded terms and with the same honest limit: **this
+   * service authorizes SERVICES, never people.** The person-level gate is `14-F39`'s
+   * `can("user.manage")`, owner-only, in `services/api` — so a holder of this credential bypasses
+   * the matrix entirely here, exactly as it can for the device kill switch. What makes that
+   * defensible on this surface is the same three-part argument recorded for revocation, and its
+   * FIRST leg is what does the work: `services/api` refuses at boot to host an ungated procedure,
+   * so every path a human can reach passes `can()` first.
+   *
+   * **They emit no event, and that is the split `device.revoked` already ships** (T-01-09,
+   * `01-F62`): `user.changed` is org-scoped, its only legitimate emitter is the cloud plane, and
+   * this seam has no authenticated user to attribute one to — `revoke-device.ts` and `tenancy.ts`
+   * both record that an unattributed row in an append-only store *"is worse than none because it
+   * reads like one"*. `services/api` appends it through `/internal/org-events` above, with
+   * `14-F2`'s actor on it.
+   *
+   * **The writer never re-implements a rule this service already owns.** `user-crud.ts` composes
+   * `insertUser` (`01-F26` completeness), `setPinCredential` (`11-F21`), `setUserStatus` (`11-F22`
+   * + R32) and `publishStaffRoster` (`01-F75`, `01-F78`); nothing about a person is decided in this
+   * file, exactly as nothing about a menu is.
+   */
+  app.post("/internal/users", async (request, reply) => {
+    const parsed = UserCreateRequest.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: `create user: ${z.prettifyError(parsed.error)}` });
+    }
+    try {
+      return reply.code(200).send(await createPerson(deps.db, parsed.data));
+    } catch (error: unknown) {
+      return reply.code(refusalStatus(error)).send({ error: messageOf(error) });
+    }
+  });
+
+  app.post("/internal/users/assignments", async (request, reply) => {
+    const parsed = UserAssignmentsRequest.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: `set assignments: ${z.prettifyError(parsed.error)}` });
+    }
+    try {
+      await setPersonAssignments(deps.db, parsed.data);
+      return reply.code(200).send({});
+    } catch (error: unknown) {
+      return reply.code(refusalStatus(error)).send({ error: messageOf(error) });
+    }
+  });
+
+  app.post("/internal/users/pin", async (request, reply) => {
+    const parsed = UserPinRequest.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: `set pin: ${z.prettifyError(parsed.error)}` });
+    }
+    try {
+      await setPersonPin(deps.db, parsed.data);
+      return reply.code(200).send({});
+    } catch (error: unknown) {
+      return reply.code(refusalStatus(error)).send({ error: messageOf(error) });
+    }
+  });
+
+  app.post("/internal/users/status", async (request, reply) => {
+    const parsed = UserStatusRequest.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: `set status: ${z.prettifyError(parsed.error)}` });
+    }
+    try {
+      await setPersonStatus(deps.db, parsed.data);
+      return reply.code(200).send({});
+    } catch (error: unknown) {
+      return reply.code(refusalStatus(error)).send({ error: messageOf(error) });
+    }
+  });
+
+  /**
+   * `14-F14`'s read — one org's people in `01-F61`'s explicit grid order.
+   *
+   * `listUsers` directly, with no projection of its own: that reader already declines to select
+   * `password_hash` (*"a credential that never leaves the row it lives in cannot be printed by
+   * accident"*) and already keeps a null email null rather than the four-letter string `"null"`
+   * (R30). A second SELECT here would be a second chance to get both wrong. It never joins to
+   * `kernel.user_credentials` either — `11-F23` chose a separate table precisely so a lookup
+   * *cannot* return a PIN hash "because it does not join to it", and spending that structural bound
+   * on a list surface is what makes it a discipline again.
+   */
+  app.get("/internal/users", async (request, reply) => {
+    const parsed = OrgQuery.safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ error: "users: org_id required" });
+    try {
+      return reply.code(200).send({ users: await listUsers(deps.db, parsed.data.org_id) });
+    } catch (error: unknown) {
+      request.log.error({ err: error }, "users: database read failed");
+      return reply.code(500).send({ error: databaseFailure("users", error) });
     }
   });
 

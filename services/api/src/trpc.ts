@@ -43,6 +43,7 @@ import type { DayLedger } from "./ledger.js";
 import type { CatalogRuntime } from "./publish.js";
 import { verifySessionToken } from "./session.js";
 import type { TenancyDirectory } from "./tenancy.js";
+import type { UserDirectory } from "./user-directory.js";
 import type { UserStore } from "./users.js";
 
 /**
@@ -82,6 +83,13 @@ export type ApiContext = {
    * provisioning landed. See `unconfiguredTenancyDirectory`.
    */
   readonly tenancy: TenancyDirectory;
+  /**
+   * `14-F14`. Required for `catalog`'s reason and one sharper: the fallback `createApiServer`
+   * resolves REFUSES every call rather than answering emptily or minting, so an unconfigured host
+   * cannot render a roster that says "nobody works here" or report a person it never wrote. See
+   * `unconfiguredUserDirectory`.
+   */
+  readonly users: UserDirectory;
 };
 
 /**

@@ -41,6 +41,7 @@ export {
   createGatewayCatalogPublisher,
   createGatewayDeviceDirectory,
   createGatewayLedgerAppender,
+  createGatewayUserDirectory,
   type GatewayLink,
 } from "./gateway-client.js";
 export {
@@ -69,4 +70,15 @@ export {
 export { type ApiServerOptions, createApiServer } from "./server.js";
 export { SESSION_TTL_MS } from "./session.js";
 export { type ApiContext, AuthzRefusal, authorized, sessionProcedure } from "./trpc.js";
+// `14-F14`'s port, `14-F2`'s payload, and the fallback that REFUSES (see `user-directory.ts`).
+export {
+  type PersonAssignmentListing,
+  type PersonListing,
+  type UserAssignmentInput,
+  UserChangedPayload,
+  type UserChangeRecord,
+  type UserDirectory,
+  unconfiguredUserDirectory,
+} from "./user-directory.js";
+export { userProcedures } from "./user-router.js";
 export { createMemoryUserStore, type UserRecord, type UserStore } from "./users.js";

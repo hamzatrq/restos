@@ -25,6 +25,7 @@ import {
   scopeInput,
   sessionProcedure,
 } from "./trpc.js";
+import { userProcedures } from "./user-router.js";
 
 /** Reachable with no credential at all. Exactly one, and it is how you get a credential. */
 export const PUBLIC_PROCEDURES: ReadonlySet<string> = new Set(["auth.login"]);
@@ -194,6 +195,14 @@ const deviceRouter = router(deviceProcedures);
  */
 const summaryRouter = router(summaryProcedures);
 
+/**
+ * `14-F14`, gated on `14-F39`'s `user.manage` — **owner-only**. All five procedures are built with
+ * `authorized(...)`, so `assertEveryProcedureIsGated` sees them and **neither exemption list
+ * changed**: a restaurant's staff roster is not the caller's own identity, and putting a PIN-reset
+ * button on `PUBLIC_PROCEDURES` needs no explanation.
+ */
+const userRouter = router(userProcedures);
+
 export const appRouter = router({
   auth: authRouter,
   session: sessionRouter,
@@ -201,6 +210,7 @@ export const appRouter = router({
   devices: deviceRouter,
   summary: summaryRouter,
   tenancy: tenancyRouter,
+  users: userRouter,
   ops: opsRouter,
 });
 

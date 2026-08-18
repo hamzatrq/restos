@@ -11,13 +11,19 @@
  * socket and the back-office CRUD are steps 5, 6 and 4 of
  * `plans/saas-pivot/staff-over-the-wire.md` and are deliberately not here.
  *
- * @unreached-owed NO SHIPPING CALLER REACHES THIS MODULE YET — steps 4 and 6 of
- * `plans/saas-pivot/staff-over-the-wire.md` land them, and this file is step 3. `publishStaffRoster`
- * and `setPinCredential`/`setUserStatus` acquire callers when `14-F14`'s user CRUD lands its
- * `/internal/users*` routes; `staffVersion`/`staffPage` acquire theirs when `gateway.ts` gains the
- * `handleStaff` arm and the `hello_ack` version set (`01-F77`). Storage before either would
- * normally be the wave's recurring defect; it is sequenced this way because the wire change is
- * BREAKING (`01-F77` bumps `v: 1` → `v: 2`) and cannot be made until there is something to serve.
+ * ⚠ **THE FILE-HEADER DEBT MARKER IS GONE (step 4a, August 2026), AND ITS DELETION IS THE POINT.**
+ * It read "NO SHIPPING CALLER REACHES THIS MODULE YET", naming `14-F14`'s `/internal/users*` routes
+ * and `gateway.ts`'s `handleStaff` arm as the two landings that would close it. The FIRST of those
+ * has landed — `user-crud.ts` calls `publishStaffRoster`, `setPinCredential`, `setUserStatus` and
+ * `reachesBranch`; every act of that CRUD reaches this module, and each SYMBOL is reached by the
+ * acts that need it (⚠ this said all four are called *"on every act of the CRUD"*, which is false of
+ * `createPerson`: it calls neither `setPinCredential` nor `setUserStatus`, because a person is
+ * created `active` and her PIN is a separate act — R29 has the owner set it) — so a header marker,
+ * which covers **every export in the
+ * module**, would now be re-muting three symbols that are reached and would fail `seams:check` as
+ * STALE. The remaining debt is recorded at the DECLARATION of each symbol that still carries it
+ * (`staffVersion`, `staffPage`), which is the shape `provision-device.ts` and `tenancy.ts` in
+ * `packages/domain` both record as the one that cannot rot.
  *
  * ── ⚠ WHAT THIS IS *NOT*: `catalogPage`'s SQL POINTED AT `kernel.users` ─────────────────────────
  *
@@ -225,6 +231,16 @@ const scopedTo = (scope: StaffScope) =>
  * The artifact's current version. `0` means nothing has ever been published **for this key** —
  * `catalog.ts`'s meaning of 0, which `01-F75` keeps verbatim and `01-F77` keeps PER KEY ("an
  * artifact for which the org has published nothing is omitted, never sent as `0`").
+ *
+ * ⚠ **IT CARRIES NO DEBT MARKER AND THAT IS THE RAIL'S ANSWER RATHER THAN A CLAIM ABOUT THE
+ * PRODUCT — stated because a clean `seams:check` line here means less than it looks like.** Step 4a
+ * gave this MODULE a shipping caller (`user-crud.ts` reaches `publishStaffRoster`,
+ * `setPinCredential`, `setUserStatus` and `reachesBranch`), and Rule A counts an export as reached
+ * when shipping code reaches it *or* when it is used inside its own reached module. This one is the
+ * second: its only non-test caller is `staffPage`, three declarations down, which is itself owed a
+ * caller. The rail's own report files that as a *"redundant export … 24-F15's knip metric, not this
+ * rail's question"* — so a marker here fails as STALE (measured), and its absence must not be read
+ * as *"a device asks this service for a roster version"*. Nothing does yet; step 6 does.
  */
 export const staffVersion = async (db: Db, scope: StaffScope): Promise<number> => {
   const rows = await db.execute(
@@ -251,9 +267,18 @@ export const staffVersion = async (db: Db, scope: StaffScope): Promise<number> =
  * this file imports, so the rule has ONE declaration. Until that lands, two copies of one rule are
  * live and the hazard is the corpus's most-repeated one (`03-F40`'s two sensor bit layouts) — if you
  * change either, change both.
+ *
+ * **EXPORTED as of step 4a, so the count of copies did not go to three.** `14-F14`'s CRUD has to
+ * ask the same question from the other end — *which* branch artifacts does an assignment set reach,
+ * which are `01-F75`'s "each affected `(resource, scope)` key" — and a second expression of it in
+ * `user-crud.ts` would have put half one's rule in two files inside one service, on top of the
+ * `packages/domain` copy above. The parameter is the assignment's `branch_id` and nothing else, so
+ * a caller holding `01-F26`'s wire pair (no `status`) can ask it too.
  */
-const reachesBranch = (assignment: PersonAssignmentT, branch_id: string): boolean =>
-  assignment.branch_id === null || assignment.branch_id === branch_id;
+export const reachesBranch = (
+  assignment: { readonly branch_id: string | null },
+  branch_id: string,
+): boolean => assignment.branch_id === null || assignment.branch_id === branch_id;
 
 /**
  * `11-F22`'s participation for ONE person at ONE branch: the assignment naming that branch, else her
@@ -723,6 +748,10 @@ const assertOrdinalsUniqueInArtifact = async (
  * was a leak there. Until it moves, one FR has two implementations one function apart, which is the
  * shape the FR amendment names ("a per-resource carve-out is a rule someone reproduces incorrectly
  * the next time the set grows"), arrived at from the other direction.
+ *
+ * @unreached-owed step 6 of `plans/saas-pivot/staff-over-the-wire.md` — the device serve path, which
+ * is `gateway.ts`'s `handleStaff` arm over `01-F75`'s `reference_*` frames. Step 4a landed the WRITE
+ * half's callers (`user-crud.ts`); nothing on the read half has one yet.
  */
 export const staffPage = async (
   db: Db,
@@ -975,6 +1004,53 @@ export const setPinCredential = async (
  * the winner's assignment with a stale copy — a deactivation that reports success and did not
  * happen.
  *
+ * ⚠ **EVERY ASSIGNMENT NAMING THE BRANCH MOVES, NOT ONE — AND FLIPPING ONE WAS A CREDENTIAL
+ * RESURRECTION WITH NO RACE IN IT (fixed August 2026, `11-F22`, `11-F23`/R32).** This function used
+ * to `findIndex` the FIRST assignment naming `branch_id` and rewrite that one, while R32's deletion
+ * three statements down scans **all** of them (`some`). `01-F26` is *"User × Role × per-location
+ * assignment"* and states **no cardinality on either axis**, so a cashier promoted to branch manager
+ * who goes on ringing orders holds two assignments naming one branch — a shape `packages/domain`
+ * already resolves, because `rolesAt` returns a LIST of roles for one location and `can`/
+ * `reportScope` each reduce over it. On that person, deactivating at her branch flipped one row and
+ * left the other `active`, so:
+ *
+ *   · every READER agreed she had left — `participationAt` finds the flipped carrier first, the
+ *     published entry says `inactive` and carries no hash (`11-F21`), and `listUsers` shows the
+ *     departure — while
+ *   · the only scan that reads ALL of them, R32's, still saw an `active` assignment and **declined
+ *     to delete her credential**, so a later re-activation republished her OLD PIN to every till at
+ *     the branch.
+ *
+ * That is `11-F23`'s own named end state — *"the next re-activation then restores her OLD PIN and
+ * publishes it to every till at the branch, defeating R32's stated purpose without a single error
+ * anywhere … found by the cashier who still gets in"* — reached with **no torn transaction, no
+ * dropped connection and no race**, on a request that answered 200. The FR wrote that sentence about
+ * a process kill between two autocommits; a single-carrier flip produced it on the happy path.
+ *
+ * **WHAT "DEACTIVATE HER AT BRANCH A" MEANS, STATED BECAUSE THE TWO HALVES MUST NOT DISAGREE
+ * (commandment 2): every assignment naming A goes `inactive`.** `11-F22` does not leave this open —
+ * *"THE FIELD IS THEREFORE PER-(PERSON, BRANCH)"*, and `01-F78` restates it for the artifact (*"the
+ * status a row carries is THIS branch's"*). One fact per `(person, branch)` means two assignments
+ * naming one branch are two CARRIERS of that fact and cannot hold different values; a per-assignment
+ * flip is the per-assignment field `11-F22` explicitly did not take. The FR's transfer argument
+ * distinguishes BRANCHES and says nothing that would let two rows naming the SAME branch disagree,
+ * and its departure clause — *"a person is departed when she is `inactive` in **every** branch that
+ * names her"* — is read by R32 across all assignments, so reading one axis at the flip and the other
+ * at the delete is what produced the defect. `branch_id: null` is `01-F26`'s org-wide row and is one
+ * key like any other: two org-wide roles are two carriers of the org-wide fact and move together.
+ *
+ * **THE CLASS THIS CLOSES AND THE NEIGHBOURING CASES IT DOES NOT — named, because a fix's prose
+ * retires the assertion the next session would have written.** Closed: no shipping writer can leave
+ * two carriers of one branch's participation disagreeing (`createPerson` writes them all `active`,
+ * `setPersonAssignments` carries one status per branch onto every wanted row, and this function
+ * moves all of them). NOT closed: (i) nothing **refuses** two assignments naming one branch — the
+ * shape is legal under `01-F26` and is accepted, so `14-F14`'s editing surface can create it; (ii)
+ * `participationAt` still reads the FIRST carrier, which is correct only because carriers now agree
+ * — a row written by hand, or by the build this defect shipped in, can still hold two disagreeing
+ * carriers and this writer will not repair one it is not asked about; and (iii) a person holding
+ * several roles at several branches still moves **one branch per call**, which is `11-F22` working
+ * and not a gap.
+ *
  * ⚠ **R32's second half is NOT closed here and must not be read as closed.** It makes re-activation
  * a TWO-STEP act — flip the status, then set a PIN — and requires the skipped second step to fail
  * **legibly**: an `active` member with no credential row is a tile that cannot be unlocked, which
@@ -1008,8 +1084,11 @@ export const setUserStatus = async (
     }
 
     const assignments = PersonRecord.shape.assignments.parse(row.assignments);
-    const target = assignments.findIndex((assignment) => assignment.branch_id === args.branch_id);
-    if (target === -1) {
+    // ONE declaration of "this is a carrier of the branch's participation", used by the refusal and
+    // by the write, so the two cannot come to disagree about which rows the act is about.
+    const namesThisBranch = (assignment: PersonAssignmentT): boolean =>
+      assignment.branch_id === args.branch_id;
+    if (!assignments.some(namesThisBranch)) {
       // The same lesson one axis further in: participation is per-(person, branch), so a branch she
       // is not assigned to has no status to set, and silently creating one would invent `01-F26`'s
       // relationship — which is `14-F14`'s CRUD, made by an authenticated human.
@@ -1021,8 +1100,11 @@ export const setUserStatus = async (
           "reads exactly like a status that was set.",
       );
     }
-    const next = assignments.map((assignment, index) =>
-      index === target ? { ...assignment, status } : assignment,
+    // EVERY carrier, never the first one found — see the header. `11-F22` makes participation one
+    // fact per (person, branch); R32's scan below reads all of them, and a flip that read fewer is
+    // how an `inactive` cashier kept a live credential.
+    const next = assignments.map((assignment) =>
+      namesThisBranch(assignment) ? { ...assignment, status } : assignment,
     );
 
     await tx.execute(

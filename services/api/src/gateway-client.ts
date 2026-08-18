@@ -46,6 +46,7 @@ import { IntegrationError } from "./errors.js";
 import type { DayLedger } from "./ledger.js";
 import type { CatalogPublisher, LedgerAppender, LedgerRecord } from "./publish.js";
 import type { TenancyDirectory } from "./tenancy.js";
+import type { UserDirectory } from "./user-directory.js";
 
 /**
  * Where the gateway is and how to prove we may talk to it.
@@ -434,6 +435,54 @@ export const createGatewayDeviceDirectory = (link: GatewayLink): DeviceDirectory
 });
 
 /**
+ * `14-F14`'s roster as the gateway's `kernel.users` answers it. Parsed, for `OrgEventResponse`'s
+ * reason — this crosses a service boundary, and an unparsed body would let a gateway-side rename
+ * reach an owner's staff screen as `undefined` in a name slot, which reads as data rather than as a
+ * bug.
+ *
+ * **`z.object` strips, and the strip is load-bearing here.** `listUsers` also returns `org_id` and
+ * `created_at`; neither belongs on this plane (`created_at` is registry bookkeeping on the
+ * provisioning clock, which `packages/domain`'s `tenancy.ts` says in terms *"no fold may read"*),
+ * and dropping them at the boundary is `createGatewayTenancyDirectory`'s established posture. There
+ * is deliberately no `pin_hash` or `password_hash` member to strip — the gateway never selects
+ * either (`11-F23`), so this schema's silence about them is the second half of a bound rather than
+ * a first line of defence.
+ */
+const UserListResponse = z.object({
+  users: z.array(
+    z.object({
+      user_id: z.string(),
+      display_name: z.string(),
+      /**
+       * `.nullable()` and never `.optional()`, for `DeviceListResponse.display_name`'s reason: a
+       * gateway that stopped SENDING the field would satisfy `.optional()` silently and every
+       * till-only cashier would look like an ordinary one. R30's absent address is present-and-null.
+       */
+      email: z.union([z.string(), z.null()]),
+      grid_ordinal: z.number().int().nonnegative(),
+      assignments: z.array(
+        z.object({
+          role: z.string(),
+          branch_id: z.union([z.string(), z.null()]),
+          status: z.string(),
+        }),
+      ),
+    }),
+  ),
+});
+
+/**
+ * What `14-F14`'s create answers. **Both fields are the WRITER's** (`01-F61`): a client that minted
+ * its own would collide the moment two owners saved at once, reintroducing the derived tiebreak the
+ * FR forbids. Parsed rather than cast so a gateway that stopped returning one is a loud failure
+ * here and not an `undefined` reaching a screen.
+ */
+const UserCreatedResponse = z.object({
+  user_id: z.string().min(1),
+  grid_ordinal: z.number().int().nonnegative(),
+});
+
+/**
  * `TenancyDirectory`, bound to the gateway's `01-F68`/`01-F69` directory tables.
  *
  * **The org id is the CALLER'S, resolved from the authenticated subject before this is ever
@@ -467,6 +516,103 @@ export const createGatewayTenancyDirectory = (link: GatewayLink): TenancyDirecto
         branch_class: branch.branch_class,
       })),
     };
+  },
+});
+
+/**
+ * `UserDirectory`, bound to the gateway — `14-F14`'s CRUD and `14-F2`'s ledger record.
+ *
+ * **Two endpoint families on two stores, deliberately, and the split is `01-F62`'s** — the same one
+ * `createGatewayDeviceDirectory` already draws. The five writes and the read reach
+ * `/internal/users*`, which is `kernel.users` plus the roster publication log a till reconciles
+ * against; `recordChange` reaches `/internal/org-events`, because T-01-09 puts `user.changed`'s
+ * EMISSION on this doc-14 emitter rather than on the gateway's writer seam — a shell or a service
+ * credential has no authenticated user, and `14-F2`'s actor has nowhere else to live.
+ *
+ * **`setPin` sends a HASH.** `11-F21` keeps a PIN to *"the keypad it is typed on and the argument
+ * to a verify call"*, so `user-router.ts` is where the plaintext stops and this adapter never sees
+ * one — the route it posts to refuses a `pin` field by name, so a future widening fails to parse
+ * rather than putting a credential on the wire.
+ */
+export const createGatewayUserDirectory = (link: GatewayLink): UserDirectory => ({
+  list: async (org_id) => {
+    const body = await getJson(link, "/internal/users", org_id, "user list");
+    return UserListResponse.parse(body).users;
+  },
+  create: async (args) => {
+    const body = await postJson(
+      link,
+      "/internal/users",
+      {
+        org_id: args.org_id,
+        display_name: args.display_name,
+        email: args.email,
+        assignments: args.assignments,
+        now: args.now,
+        actor_user_id: args.actor_user_id,
+      },
+      "create user",
+    );
+    return UserCreatedResponse.parse(body);
+  },
+  setAssignments: async (args) => {
+    await postJson(
+      link,
+      "/internal/users/assignments",
+      {
+        org_id: args.org_id,
+        user_id: args.user_id,
+        assignments: args.assignments,
+        now: args.now,
+        actor_user_id: args.actor_user_id,
+      },
+      "set user assignments",
+    );
+  },
+  setPin: async (args) => {
+    await postJson(
+      link,
+      "/internal/users/pin",
+      {
+        org_id: args.org_id,
+        user_id: args.user_id,
+        pin_hash: args.pin_hash,
+        now: args.now,
+        actor_user_id: args.actor_user_id,
+      },
+      "set user pin",
+    );
+  },
+  setStatus: async (args) => {
+    await postJson(
+      link,
+      "/internal/users/status",
+      {
+        org_id: args.org_id,
+        user_id: args.user_id,
+        branch_id: args.branch_id,
+        status: args.status,
+        now: args.now,
+        actor_user_id: args.actor_user_id,
+      },
+      "set user status",
+    );
+  },
+  recordChange: async (record) => {
+    await postJson(
+      link,
+      "/internal/org-events",
+      {
+        org_id: record.org_id,
+        // Sent rather than assumed, so the gateway's `01-F62` scope check is the one that decides
+        // and not this client's confidence — `createGatewayLedgerAppender`'s recorded rule.
+        type: "user.changed",
+        actor_user_id: record.actor_user_id,
+        server_received_at: record.server_received_at,
+        payload: record.payload,
+      },
+      "user change record",
+    );
   },
 });
 
