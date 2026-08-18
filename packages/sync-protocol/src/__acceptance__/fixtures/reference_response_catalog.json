@@ -1,0 +1,38 @@
+{
+  "v": 2,
+  "kind": "reference_response",
+  "resource": "catalog",
+  "scope": {
+    "org_id": "01980000-0000-7000-8000-0000000000a1",
+    "branch_id": null
+  },
+  "form": "delta",
+  "version": 9,
+  "base_version": 7,
+  "entries": [
+    {
+      "kind": "item",
+      "id": "019fa8c4-0000-7000-8000-000000000001",
+      "name": "Chapli Kebab",
+      "kitchen_name": "Chapli",
+      "parent_id": null,
+      "sort": 1,
+      "prices": [
+        {
+          "branch_id": "01980000-0000-7000-8000-00000000b001",
+          "channel": "counter",
+          "price_paisa": 45000
+        }
+      ],
+      "station": "grill"
+    },
+    {
+      "kind": "item",
+      "id": "019fa8c4-0000-7000-8000-000000000002",
+      "name": "Daal Mash",
+      "deleted": true
+    }
+  ],
+  "complete": true,
+  "next_from": 0
+}

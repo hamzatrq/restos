@@ -1,0 +1,30 @@
+{
+  "v": 2,
+  "kind": "reference_response",
+  "resource": "staff",
+  "scope": {
+    "org_id": "01980000-0000-7000-8000-0000000000a1",
+    "branch_id": "01980000-0000-7000-8000-00000000b001"
+  },
+  "form": "snapshot",
+  "version": 9,
+  "entries": [
+    {
+      "user_id": "01980000-0000-7000-8000-00000000u001",
+      "display_name": "Hina Raza",
+      "grid_ordinal": 1,
+      "status": "active",
+      "assignments": [{ "role": "cashier", "branch_id": "01980000-0000-7000-8000-00000000b001" }],
+      "pin_hash": "$argon2id$v=19$m=19456,t=2,p=1$YWNjZXB0YW5jZXNhbHQx$3Yt0RkFpbnNhY2NlcHRhbmNlZml4dHVyZWhhc2g"
+    },
+    {
+      "user_id": "01980000-0000-7000-8000-00000000u002",
+      "display_name": "Bilal Ahmed",
+      "grid_ordinal": 2,
+      "status": "inactive",
+      "assignments": [{ "role": "cashier", "branch_id": "01980000-0000-7000-8000-00000000b001" }]
+    }
+  ],
+  "complete": false,
+  "next_from": 500
+}
