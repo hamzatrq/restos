@@ -44,9 +44,15 @@
 //       PIN (`11-F21`: "a PIN exists in exactly two places … the keypad it is typed on and the
 //       argument to a verify call").
 //
-//   setUserStatus(db, { org_id, user_id, status }): Promise<unknown>
-//       `11-F22`'s participation transition. Needed here because the version axis cannot be tested
-//       without a roster that CHANGES — `tenancy.ts` today says "NOTHING HERE UPDATES OR DELETES".
+//   setUserStatus(db, { org_id, user_id, branch_id, status }): Promise<unknown>
+//       `11-F22`'s participation transition, keyed by (PERSON, BRANCH). Needed here because the
+//       version axis cannot be tested without a roster that CHANGES — `tenancy.ts` today says
+//       "NOTHING HERE UPDATES OR DELETES".
+//       ⚠ **AMENDED 2026-08-18.** This read `{ org_id, user_id, status }` when the suite was
+//       authored at `b448975` — the per-PERSON reading `11-F22` has since ruled superseded (see
+//       "WHAT MOVED UNDER THIS SUITE" below). `branch_id: null` addresses `01-F26`'s org-wide
+//       assignment, which is already `01-F76`'s encoding for this axis; no test here supplies it,
+//       because §9.7 is open (exclusion 1).
 //
 // The local `type` declarations below exist to give this file types and to state the contract in one
 // place. **They are not oracle targets** — every assertion runs against the loaded PRODUCTION module
@@ -65,6 +71,51 @@
 // `at_version` 2 a member reads `active` and at version 3 the same member reads `inactive`. An
 // implementation that serves current state — the shape trap 8 predicts — answers `inactive` to both
 // and is green on every other test in this file.
+//
+// ── ⚠ WHAT MOVED UNDER THIS SUITE (amended 2026-08-18) ──────────────────────────────────────────
+//
+// This file was authored at `b448975` and sharpened at `1586dad`. **Two founder rulings and one FR
+// disambiguation landed after both**, and AGENTS.md names by ID the trap that follows — a ruling
+// lands, nobody greps the suites that encode the old rule, and a GREEN test goes on defending an
+// overruled one. So the three are carried in here, each with what it displaced:
+//
+//  1. **`11-F22`: participation is per-(PERSON, BRANCH), not a column on the person row.** The FR
+//     carried both readings — its heading says *"a PERSON RECORD carries a participation status"*
+//     and its transfer clause requires a cashier moving A→B to be *"`inactive` in A's roster and
+//     `active` in B's at the same moment"*, which a single per-person column cannot express. The
+//     transfer clause is now stated as **the operative one** and the field lives where `01-F26`
+//     already carries the relationship: **with the ASSIGNMENT**. What this displaced here is the
+//     SHAPE of two writers, not the content of any rule — `setUserStatus` gains `branch_id`, and
+//     an assignment carries the status that `insertUser` used to take once per row (§E2, §E3).
+//     **The WIRE row is unchanged, and that is the point worth stating rather than assuming:**
+//     `01-F75`'s `staff` row still carries exactly one `status`, because `01-F76` already makes the
+//     artifact branch-scoped — so an entry's `status` IS that branch's participation, and the
+//     per-(person, branch) reading costs the transport nothing. §C, §D, §E1 and §I are therefore
+//     untouched by this amendment and are not weakened by it.
+//  2. **R32 / `11-F23`: a deactivated person's PIN credential is DELETED**, the owner sets a new
+//     one on re-activation — and the deletion is keyed to **the LAST active assignment going
+//     inactive**, never to one branch's, *"or a transfer destroys the PIN the receiving branch
+//     needs"*. This overrules exclusion 5 below, which recorded the question as open.
+//  3. **`11-F23`: the status flip and the credential delete commit in ONE TRANSACTION.** *"A
+//     dropped connection, statement timeout or process kill between two autocommit statements
+//     leaves the person `inactive` holding a live credential — and the next re-activation then
+//     restores her OLD PIN and publishes it to every till at the branch … Nothing queries for that
+//     state, so it is found by the cashier who still gets in."*
+//
+// **§J (the transfer), §K (the departure) and §L (atomicity) are what those three now own.** Two
+// notes on how they are written, both of which constrain a reader:
+//
+//   · §J/§K's person holds **two** assignments, which every other fixture in this file deliberately
+//     avoids (exclusion 1). It is forced: `11-F22`'s worked example is a person in two artifacts at
+//     one moment, so a one-assignment fixture cannot express the thing being tested. §9.7 is
+//     respected by never asserting her `assignments` ARRAY — exclusion 2 is about that field, and it
+//     is why §I3 asserts assignments only for a single-branch member.
+//   · The contract carries **no assignment-creation surface**, and inventing one would be inventing
+//     policy (commandment 2). So the transfer fixture creates both assignments at insert time, B's
+//     starting `inactive`, and the TRANSFER is the pair of status flips. `11-F22` constrains the
+//     STATE — *"at the same moment"* — and says nothing about how the second assignment arose; an
+//     assignment that exists and is `inactive` is the departed-at-that-branch shape the FR requires
+//     to exist anyway.
 //
 // ── WHAT THIS SUITE DELIBERATELY DOES NOT ASSERT, AND WHY (commandment 2) ────────────────────────
 //
@@ -90,14 +141,27 @@
 //     not make." So §F asserts the INVARIANT (no published artifact ever contains two entries at one
 //     ordinal) rather than which layer refuses, and no fixture ever needs two branches to reuse an
 //     ordinal — the ids are globally distinct, so a stricter storage choice passes too.
-//  5. **What happens to the credential row when status leaves `active`** — `11-F23` names this as
-//     undecided ("deleted, retained, or retained-and-unreachable … deleting the row is the obvious
-//     implementation and is not obviously right"). §D3 therefore asserts the PROJECTION (an inactive
-//     member's entry carries no hash) and never the row, and §C6's historical-version assertion is
-//     deliberately about `status` and not about a hash, so that either retention answer passes.
-//  6. **Whether an ACTIVE member with no credential row may be published at all** (R29 has the owner
-//     set the first PIN, so the window exists). No fixture contains such a person and nothing here
-//     asserts accept or refuse.
+//  5. ~~**What happens to the credential row when status leaves `active`**~~ **SUPERSEDED 2026-08-18
+//     by founder ruling R32, transcribed into `11-F23`: the row is DELETED and the owner sets a new
+//     PIN on re-activation.** What this entry said, kept because it is what §D3 and §C6 were written
+//     against: `11-F23` named the question undecided ("deleted, retained, or retained-and-unreachable
+//     … deleting the row is the obvious implementation and is not obviously right"), so §D3 asserted
+//     the PROJECTION (an inactive member's entry carries no hash) and never the row, and §C6 was
+//     deliberately about `status` and not about a hash so that either answer passed. **Both of those
+//     assertions are still CORRECT and are untouched** — the projection rule is `11-F21`'s and R32
+//     did not move it. What changed is that the ROW is now decided, and §K2 asserts it: the only
+//     surface this contract has for observing a credential row's existence is a re-activation, which
+//     is also exactly the act R32 exists to protect.
+//  6. ~~**Whether an ACTIVE member with no credential row may be published at all**~~ **ANSWERED by
+//     R32's own sentence, 2026-08-18, and now asserted (§K2).** R32 makes re-activation *"a two-step
+//     act (flip the status, then set a PIN)"*, and `11-F23` describes the skipped second step as
+//     *"a member who is `active` with no credential row is a tile that cannot be unlocked"* — a tile
+//     exists, so `01-F61`'s grid was served her, so the artifact carried her. A publisher that
+//     refused would make step one unpublishable and the two-step act unperformable in the order the
+//     ruling states. §F's fixtures (F2, F3) already required this and this entry did not say so.
+//     ⚠ **Still NOT asserted, and deliberately: WHERE that state fails legibly.** `11-F23` requires
+//     it to "fail LEGIBLY rather than silently" and names no surface; the tile and the unlock flow
+//     are doc 02's and doc 14's, not this storage layer's.
 //  7. **Whether publication is immediate or staged to `01-F46`'s boundary** — `01-F75` (i) leaves it
 //     to `01 §9.5`, and R27 rules the POLICY while explicitly leaving the MECHANISM open. Every
 //     publish here is called directly, and no test asserts anything about when it happens.
@@ -161,7 +225,7 @@ type StaffStorage = {
   ): Promise<unknown>;
   setUserStatus(
     db: Db,
-    args: { org_id: string; user_id: string; status: string },
+    args: { org_id: string; user_id: string; branch_id: string | null; status: string },
   ): Promise<unknown>;
 };
 
@@ -236,22 +300,33 @@ const password = async (): Promise<string> => {
   return backOfficeHash;
 };
 
+/**
+ * `01-F26`'s assignment as this suite supplies it. **`status` sits HERE and not on the person row
+ * (`11-F22`, amended 2026-08-18)** — participation is per-(person, branch) and is carried "where
+ * `01-F26` already carries the relationship". `addPerson` defaults it to `active`, so only the
+ * fixtures that are ABOUT participation have to state it.
+ */
+type AssignmentInput = { role: string; branch_id: string | null; status?: string };
+
 type PersonInput = {
   user_id?: string;
   org_id: string;
   display_name: string;
   email?: string | null;
   grid_ordinal: number;
-  status?: string;
-  assignments: readonly { role: string; branch_id: string | null }[];
+  assignments: readonly AssignmentInput[];
 };
 
 /**
  * Insert one person through the PRODUCTION writer (`18 §4`: `kernel.users` has exactly one writer
  * service and this is its function). The cast is `publishCatalog`'s own precedent — "the check is
  * written through a cast, which is the only honest way to ask a question the type says cannot
- * arise": `UserRow.email` is `string` and `PersonRecord` carries no `status` TODAY, and both change
- * under R30 and `11-F22`.
+ * arise": `UserRow.email` is `string` and `PersonRecord`'s assignment carries no `status` TODAY,
+ * and both change under R30 and `11-F22`.
+ *
+ * ⚠ **AMENDED 2026-08-18.** This helper used to take a per-person `status` and write it as a column
+ * on the row. `11-F22` has since ruled the per-(person, branch) reading operative, so the status
+ * travels on each assignment.
  *
  * **An OMITTED email means "give her one"; only an explicit `null` is R30's till-only cashier.**
  * The default is deliberately not `null`: every §E/§F/§G fixture would then depend on R30's
@@ -267,9 +342,12 @@ const addPerson = async (person: PersonInput): Promise<string> => {
     display_name: person.display_name,
     email: person.email === undefined ? `person-${user_id}@example.com` : person.email,
     password_hash: await password(),
-    assignments: person.assignments,
+    assignments: person.assignments.map((assignment) => ({
+      role: assignment.role,
+      branch_id: assignment.branch_id,
+      status: assignment.status ?? "active",
+    })),
     grid_ordinal: person.grid_ordinal,
-    status: person.status ?? "active",
     created_at: T,
   };
   const written = await insertUser(db, row as unknown as UserRow);
@@ -303,6 +381,26 @@ const byId = (page: StaffPage, user_id: string): StaffEntry | undefined =>
 const ids = (page: StaffPage): string[] => page.entries.map((entry) => entry.user_id).sort();
 
 /**
+ * `byId` that FAILS rather than returning `undefined`. Every §J/§K/§L assertion about an entry's
+ * shape — above all `Object.hasOwn(entry, "pin_hash") === false` — passes vacuously against a
+ * missing entry, which is the "guard never pointed at the dangerous case" pattern this repo's
+ * round-3 law exists to catch. Going through this helper makes an absent member a named failure.
+ */
+const entryOf = (page: StaffPage, user_id: string, label: string): StaffEntry => {
+  const entry = byId(page, user_id);
+  if (entry === undefined) {
+    throw new Error(
+      `${label}: the artifact does not contain ${user_id} — a departure is a MARKED ENTRY and ` +
+        "never an absence (`01-F75`, `11-F22`, R26)",
+    );
+  }
+  return entry;
+};
+
+/** `11-F21`'s active-only rule as a predicate: the hash is ABSENT on a non-`active` entry, not null. */
+const carriesHash = (entry: StaffEntry): boolean => Object.hasOwn(entry, "pin_hash");
+
+/**
  * THE MAIN FIXTURE — one org, two branches, and branch A's roster **edited three times**.
  *
  * Built once and memoized rather than in `beforeAll`, so that a missing contract fails each test
@@ -310,7 +408,10 @@ const ids = (page: StaffPage): string[] => page.entries.map((entry) => entry.use
  *
  *   v1  ayesha (10), bilal (20), hina (30)   — three people, all active, all with a PIN credential
  *   v2  danish (40) joins                    — one changed member, not the whole roster
- *   v3  bilal goes `inactive` (`11-F22`)     — a departure is a MARKED ENTRY, never an absence
+ *   v3  bilal goes `inactive` AT BRANCH A     — a departure is a MARKED ENTRY, never an absence.
+ *       (`11-F22`)                             Branch A is bilal's ONLY assignment, so this is also
+ *                                              his last active one and R32's credential deletion
+ *                                              fires here; §J/§K own the case where it must NOT.
  *
  * Branch B holds one person and is published ONCE, so its version number (1) is a number branch A
  * also has and means different bytes — `01-F76`'s whole point, and the thing an org-wide counter
@@ -409,7 +510,12 @@ const buildMain = async (): Promise<MainFixture> => {
   const v2 = await api.publishStaffRoster(db, scopeA, [danish], { now: T + 1 });
   if (v2 !== 2) throw new Error(`fixture: second publish minted version ${v2}, expected 2`);
 
-  await api.setUserStatus(db, { org_id: org, user_id: bilal, status: "inactive" });
+  await api.setUserStatus(db, {
+    org_id: org,
+    user_id: bilal,
+    branch_id: branchA,
+    status: "inactive",
+  });
   const v3 = await api.publishStaffRoster(db, scopeA, [bilal], { now: T + 2 });
   if (v3 !== 3) throw new Error(`fixture: third publish minted version ${v3}, expected 3`);
 
@@ -864,19 +970,24 @@ describe("§E — `11-F22`: a participation status, closed at two, and a departu
     // is org policy nobody has ruled, and inventing one here would be inventing policy." This schema
     // validates closed sets at the WRITER (`schema.ts`: no CHECK constraints, "so a closed set has
     // exactly one interpretation").
+    //
+    // ⚠ **AMENDED 2026-08-18 — this test encoded the SUPERSEDED per-person reading.** It asserted
+    // the identical closed set against a `status` passed as a COLUMN ON THE PERSON ROW
+    // (`addPerson({ …, status: word })`). `11-F22`'s per-(person, branch) clause overrules that
+    // placement: the field is carried "with the ASSIGNMENT". **The RULE this test owns is unchanged
+    // and is not weakened** — two words, no third, refused at the writer with the FR named; only
+    // where the word sits moved.
     const org = `org-status-${newId()}`;
     const branch = `branch-status-${newId()}`;
     await addOrg(org);
     await addBranch(org, branch);
-    const assignments = [{ role: "cashier" as const, branch_id: branch }];
 
     await expect(
       addPerson({
         org_id: org,
         display_name: "Active One",
         grid_ordinal: 1,
-        status: "active",
-        assignments,
+        assignments: [{ role: "cashier", branch_id: branch, status: "active" }],
       }),
     ).resolves.toBeTruthy();
     await expect(
@@ -884,8 +995,7 @@ describe("§E — `11-F22`: a participation status, closed at two, and a departu
         org_id: org,
         display_name: "Inactive One",
         grid_ordinal: 2,
-        status: "inactive",
-        assignments,
+        assignments: [{ role: "cashier", branch_id: branch, status: "inactive" }],
       }),
     ).resolves.toBeTruthy();
 
@@ -899,8 +1009,7 @@ describe("§E — `11-F22`: a participation status, closed at two, and a departu
           org_id: org,
           display_name: `Bad ${word || "empty"}`,
           grid_ordinal: 10 + index,
-          status: word,
-          assignments,
+          assignments: [{ role: "cashier", branch_id: branch, status: word }],
         }),
       ).rejects.toThrow(/11-F22/);
     }
@@ -908,26 +1017,49 @@ describe("§E — `11-F22`: a participation status, closed at two, and a departu
     expect(await listUsers(db, org)).toHaveLength(2);
   });
 
-  it("E3 refuses a person record with no status at all, rather than defaulting her to `active`", async () => {
+  it("E3 refuses an assignment with no status at all, rather than defaulting her to `active`", async () => {
     // `01-F75` makes the field "**required at the writer** … so nothing on the wire lacks it", and
     // `11-F22` refuses the default by name: an absent status is "not a licence to default an absent
     // status to `active`". ⚠ PINNED READING — that sentence is written about a DEVICE's older stored
     // rows; the alternative (default at the cloud writer) is named in the session's report.
+    //
+    // ⚠ **AMENDED 2026-08-18 — this test encoded the SUPERSEDED per-person reading.** It built a row
+    // with no top-level `status` key and asserted the refusal. `11-F22`'s per-(person, branch)
+    // clause moves the required field onto the assignment, so the row this test now builds is the
+    // same defect in the shape the FR ruled operative. **The claim it owns — required at the writer,
+    // never defaulted — is unchanged.** The second leg is new and is what the amended rule actually
+    // says: the field is required **per assignment**, so one supplied status does not cover a
+    // sibling that lacks one.
     const org = `org-nostatus-${newId()}`;
     const branch = `branch-nostatus-${newId()}`;
+    const other = `branch-nostatus-b-${newId()}`;
     await addOrg(org);
     await addBranch(org, branch);
-    const row = {
+    await addBranch(org, other);
+    const hash = await password();
+    const row = (assignments: readonly unknown[]): unknown => ({
       user_id: newId(),
       org_id: org,
       display_name: "No Status",
       email: `no-status-${newId()}@example.com`,
-      password_hash: await password(),
-      assignments: [{ role: "cashier", branch_id: branch }],
+      password_hash: hash,
+      assignments,
       grid_ordinal: 1,
       created_at: T,
-    };
-    await expect(insertUser(db, row as unknown as UserRow)).rejects.toThrow(/11-F22|01-F75/);
+    });
+    await expect(
+      insertUser(db, row([{ role: "cashier", branch_id: branch }]) as UserRow),
+    ).rejects.toThrow(/11-F22|01-F75/);
+    // PER ASSIGNMENT: a status on the first does not stand in for the second.
+    await expect(
+      insertUser(
+        db,
+        row([
+          { role: "cashier", branch_id: branch, status: "active" },
+          { role: "cashier", branch_id: other },
+        ]) as UserRow,
+      ),
+    ).rejects.toThrow(/11-F22|01-F75/);
     expect(await listUsers(db, org)).toEqual([]);
   });
 });
@@ -1226,7 +1358,9 @@ describe("§H — R30: a till-only cashier has no email, and the index survives 
     await addOrg(org);
     await addBranch(org, branch);
     const shared = `shared-${newId()}@example.com`;
-    const assignments = [{ role: "cashier" as const, branch_id: branch }];
+    // `status` sits on the ASSIGNMENT here (`11-F22`, amended 2026-08-18) — it used to be a column
+    // on the row literal below. H3's claim is the email index and is untouched by that move.
+    const assignments = [{ role: "cashier" as const, branch_id: branch, status: "active" }];
     await addPerson({
       org_id: org,
       display_name: "First Claim",
@@ -1242,7 +1376,6 @@ describe("§H — R30: a till-only cashier has no email, and the index survives 
       password_hash: await password(),
       assignments,
       grid_ordinal: 2,
-      status: "active",
       created_at: T,
     } as unknown as UserRow);
     expect(second).toBe(false);
@@ -1289,6 +1422,15 @@ describe("§I — `01-F75`'s `staff` row, which is what a golden fixture will be
     // assignments or only this artifact's is `01 §9.7` and is OPEN — for a person with exactly one
     // assignment, to this branch, both readings give the same answer, which is why this is the only
     // assignment assertion in this file.
+    //
+    // ⚠ **This test also pins the WIRE half of `11-F22`'s per-(person, branch) amendment, and that
+    // was incidental before 2026-08-18 — it is stated now so the next reader does not weaken it by
+    // accident.** Participation moved onto the assignment in STORAGE; it did not move onto the
+    // assignment on the WIRE. `01-F75` declares the `staff` row with exactly one `status` field, and
+    // `01-F76` already makes the artifact branch-scoped, so an entry's single `status` IS this
+    // branch's participation and needs no second carrier. A per-assignment status on the row would
+    // be two representations of one fact with nothing ruling which wins — `11-F20`'s "ONE name, not
+    // one per plane" argument on a different field. Hence `toEqual` on `01-F26`'s two members.
     const fx = await main();
     const api = await staff();
     const page = await api.staffPage(db, fx.scopeA, 0, 0);
@@ -1298,5 +1440,459 @@ describe("§I — `01-F75`'s `staff` row, which is what a golden fixture will be
     expect(byId(page, fx.ayesha)?.assignments).toEqual([
       { role: "cashier", branch_id: fx.branchA },
     ]);
+  });
+});
+
+/* ── §J/§K/§L the transfer, the departure, the transaction (11-F22, 11-F23, R32) ─────────────── */
+
+const TRANSFER_NAME = "Rabia Sattar";
+/** Her PIN before the departure, and the one she is given on re-activation. R32 makes them differ. */
+const PIN_BEFORE = "9142";
+const PIN_AFTER = "5087";
+
+/**
+ * THE TRANSFER ARC — ONE person, TWO branches, six acts, and both artifacts read after each.
+ *
+ * `11-F22`'s worked example is a state held in two artifacts **at the same moment**, so it cannot be
+ * asserted from a single page; and R32's credential rule is about the SEQUENCE (one branch's
+ * deactivation must not fire it, the last one must). The arc therefore runs once and captures every
+ * page it produces, and each test asserts one act. That is deliberate over `it`-to-`it` mutation:
+ * a suite whose tests must run in order fails as a cascade, and only the first failure is legible.
+ *
+ *   act 0  hired at A, holds an assignment at B that is not yet `active`; credential set
+ *   act 1  THE TRANSFER — `inactive` at A and `active` at B
+ *   act 2  a REPEATED deactivation at A while B is still `active`
+ *   act 3  ordinary republishes at each branch (`11-F22`'s measured defect: the resurrection)
+ *   act 4  THE DEPARTURE — `inactive` at B too, so `inactive` everywhere
+ *   act 5  re-activation, STEP ONE ONLY (R32: flip the status, then set a PIN)
+ *   act 6  step two
+ */
+type TransferArc = {
+  org: string;
+  branchA: string;
+  branchB: string;
+  scopeA: StaffScope;
+  scopeB: StaffScope;
+  rabia: string;
+  hiredA: StaffPage;
+  hiredB: StaffPage;
+  movedA: StaffPage;
+  movedB: StaffPage;
+  repeatedB: StaffPage;
+  republishedA: StaffPage;
+  republishedB: StaffPage;
+  departedA: StaffPage;
+  departedB: StaffPage;
+  reactivatedB: StaffPage;
+  recredentialedB: StaffPage;
+};
+
+let transferFixture: Promise<TransferArc> | undefined;
+
+const buildTransfer = async (): Promise<TransferArc> => {
+  const api = await staff();
+  const org = `org-transfer-${newId()}`;
+  const branchA = `branch-t-a-${newId()}`;
+  const branchB = `branch-t-b-${newId()}`;
+  await addOrg(org);
+  await addBranch(org, branchA);
+  await addBranch(org, branchB);
+  const scopeA: StaffScope = { org_id: org, branch_id: branchA };
+  const scopeB: StaffScope = { org_id: org, branch_id: branchB };
+
+  // TWO assignments from the start, A `active` and B not. See the header: the contract carries no
+  // assignment-creation surface and `11-F22` constrains the STATE, not how the second assignment
+  // arose. She is the ONLY member of either artifact, so no `grid_ordinal` question arises (§F).
+  const rabia = await addPerson({
+    org_id: org,
+    display_name: TRANSFER_NAME,
+    email: null,
+    grid_ordinal: 12,
+    assignments: [
+      { role: "cashier", branch_id: branchA, status: "active" },
+      { role: "cashier", branch_id: branchB, status: "inactive" },
+    ],
+  });
+  await api.setPinCredential(db, {
+    org_id: org,
+    user_id: rabia,
+    pin_hash: await hashPin(PIN_BEFORE),
+    now: T,
+  });
+
+  let versionA = 0;
+  let versionB = 0;
+  const publishA = async (now: number): Promise<StaffPage> => {
+    versionA += 1;
+    const minted = await api.publishStaffRoster(db, scopeA, [rabia], { now });
+    if (minted !== versionA) {
+      throw new Error(`transfer fixture: A minted version ${minted}, expected ${versionA}`);
+    }
+    return api.staffPage(db, scopeA, 0, 0);
+  };
+  const publishB = async (now: number): Promise<StaffPage> => {
+    versionB += 1;
+    const minted = await api.publishStaffRoster(db, scopeB, [rabia], { now });
+    if (minted !== versionB) {
+      throw new Error(`transfer fixture: B minted version ${minted}, expected ${versionB}`);
+    }
+    return api.staffPage(db, scopeB, 0, 0);
+  };
+  const setStatus = async (branch_id: string, status: string): Promise<void> => {
+    await api.setUserStatus(db, { org_id: org, user_id: rabia, branch_id, status });
+  };
+
+  const hiredA = await publishA(T);
+  const hiredB = await publishB(T);
+
+  // ⚠ **THE ORDER OF THESE TWO CALLS IS LOAD-BEARING AND WAS FOUND BY RUNNING, NOT BY READING.**
+  // The receiving branch is activated FIRST. Deactivating A first passes through a moment in which
+  // she is `inactive` in every branch that names her — which is exactly R32's trigger — so her
+  // credential is deleted and B's roster is served an `active` member with no hash, the defect
+  // `11-F23` names. That is `11-F23`'s rule applied literally and is **not** asserted either way
+  // here: the corpus rules on the trigger (`inactive` everywhere) and is silent on whether a
+  // two-step transfer performed in the unsafe order should be protected, so pinning either answer
+  // would be inventing policy (commandment 2). It is carried to the session's report as a finding.
+  await setStatus(branchB, "active");
+  await setStatus(branchA, "inactive");
+  const movedA = await publishA(T + 1);
+  const movedB = await publishB(T + 1);
+
+  await setStatus(branchA, "inactive");
+  const repeatedB = await publishB(T + 2);
+
+  const republishedA = await publishA(T + 3);
+  const republishedB = await publishB(T + 4);
+
+  await setStatus(branchB, "inactive");
+  const departedA = await publishA(T + 5);
+  const departedB = await publishB(T + 6);
+
+  await setStatus(branchB, "active");
+  const reactivatedB = await publishB(T + 7);
+
+  await api.setPinCredential(db, {
+    org_id: org,
+    user_id: rabia,
+    pin_hash: await hashPin(PIN_AFTER),
+    now: T + 8,
+  });
+  const recredentialedB = await publishB(T + 8);
+
+  return {
+    org,
+    branchA,
+    branchB,
+    scopeA,
+    scopeB,
+    rabia,
+    hiredA,
+    hiredB,
+    movedA,
+    movedB,
+    repeatedB,
+    republishedA,
+    republishedB,
+    departedA,
+    departedB,
+    reactivatedB,
+    recredentialedB,
+  };
+};
+
+const arc = (): Promise<TransferArc> => {
+  transferFixture ??= buildTransfer();
+  return transferFixture;
+};
+
+describe("§J — `11-F22`: participation is per-(PERSON, BRANCH), and a TRANSFER is its worked example", () => {
+  it("J1 gives ONE person two different answers in two artifacts at ONE moment", async () => {
+    // The clause: "THE FIELD IS THEREFORE PER-(PERSON, BRANCH) AND NOT A COLUMN ON THE PERSON ROW …
+    // the transfer clause is the operative one." A per-person column answers the same word to both
+    // artifacts and cannot be told from a correct build by any other test in this file.
+    //
+    // The credential rides the same axis, which is the second half and is not a separate rule:
+    // `11-F21` carries the hash "only on an `active` entry", and `active` is now per artifact — so
+    // ONE credential row is present in one artifact and absent in the other, simultaneously.
+    const fx = await arc();
+    expect(entryOf(fx.hiredA, fx.rabia, "J1 A").status).toBe("active");
+    expect(entryOf(fx.hiredB, fx.rabia, "J1 B").status).toBe("inactive");
+    expect(await verifyPin(entryOf(fx.hiredA, fx.rabia, "J1 A").pin_hash ?? "", PIN_BEFORE)).toBe(
+      true,
+    );
+    expect(carriesHash(entryOf(fx.hiredB, fx.rabia, "J1 B"))).toBe(false);
+  });
+
+  it("J2 TRANSFERS her: `inactive` in A's roster and `active` in B's, at the same moment", async () => {
+    // `11-F22` verbatim: "A cashier who moves from branch A to branch B is not a departure and R25
+    // makes the roster branch-scoped, so the case has to be answerable in two artifacts: she is
+    // `inactive` in A's roster and `active` in B's." **This is the assertion the amendment exists
+    // for**, and it is the exact inverse of J1's pair — same person, same publisher, one act apart.
+    const fx = await arc();
+    expect(entryOf(fx.movedA, fx.rabia, "J2 A").status).toBe("inactive");
+    expect(entryOf(fx.movedB, fx.rabia, "J2 B").status).toBe("active");
+    // She is dropped from NEITHER (R26): "she is not dropped from A, because … her name renders on
+    // last month's orders and those orders are resolved by A's tills from A's artifact."
+    expect(entryOf(fx.movedA, fx.rabia, "J2 A").display_name).toBe(TRANSFER_NAME);
+    expect(entryOf(fx.movedB, fx.rabia, "J2 B").display_name).toBe(TRANSFER_NAME);
+  });
+
+  it("J3 keeps her credential across the transfer — the deletion is keyed to the LAST active assignment", async () => {
+    // `11-F23`: "a deletion fired by A's deactivation destroys the credential B's roster needs and
+    // produces an `active` member with no hash … A person's credential goes when she is `inactive`
+    // **everywhere**, which is what R32 means by 'does not outlive her employment': employment ends
+    // at the org, not at a branch."
+    const fx = await arc();
+    expect(await verifyPin(entryOf(fx.movedB, fx.rabia, "J3 B").pin_hash ?? "", PIN_BEFORE)).toBe(
+      true,
+    );
+    // …and A's tills stop holding it in the same act, which is `11-F21`'s bound doing its work.
+    expect(carriesHash(entryOf(fx.movedA, fx.rabia, "J3 A"))).toBe(false);
+    // A REPEATED deactivation at A does not fire it either: the trigger is the last ACTIVE
+    // assignment going inactive, not any call whose argument is the word `inactive`.
+    expect(
+      await verifyPin(entryOf(fx.repeatedB, fx.rabia, "J3 repeat").pin_hash ?? "", PIN_BEFORE),
+    ).toBe(true);
+  });
+
+  it("J4 does not return her to `active` at A on a later republish, and restores no hash there", async () => {
+    // The measured defect `11-F22` names: "any later republish at A re-copied her CURRENT status and
+    // **silently returned a departed cashier to `active` with a working PIN hash on her old branch's
+    // tills**. That is the state this FR exists to forbid, reached through the mechanism it exists to
+    // describe." Under a per-person column her current status after the transfer is `active`, so a
+    // republish at A is exactly how the defect arrives — with no error anywhere.
+    const fx = await arc();
+    expect(entryOf(fx.republishedA, fx.rabia, "J4").status).toBe("inactive");
+    expect(carriesHash(entryOf(fx.republishedA, fx.rabia, "J4"))).toBe(false);
+  });
+
+  it("J5 CONTROL: a later republish at B does not deactivate her there either", async () => {
+    // ⚠ THE OVER-STRICTNESS CONTROL, one branch away from J4. A publisher that hard-coded a
+    // transferred person to `inactive`, or that dropped the credential from every republish, passes
+    // J2/J3/J4 and makes the receiving branch unable to sign her in — which is the same stopped till
+    // as the defect, wearing the fix. F3 is this file's existing precedent for the pattern.
+    const fx = await arc();
+    expect(entryOf(fx.republishedB, fx.rabia, "J5").status).toBe("active");
+    expect(
+      await verifyPin(entryOf(fx.republishedB, fx.rabia, "J5").pin_hash ?? "", PIN_BEFORE),
+    ).toBe(true);
+  });
+});
+
+describe("§K — R32/`11-F23`: a DEPARTURE is `inactive` everywhere, and only then is the credential gone", () => {
+  it("K1 marks her departed in EVERY branch that names her, and drops her from neither artifact", async () => {
+    // `11-F22`: "A person is departed when she is `inactive` in **every** branch that names her, not
+    // when one branch deactivates her." R26 keeps the row in both artifacts for ever, so both still
+    // render her name — `11-F20`'s render-time rule, which is the half a `removals` list destroys.
+    const fx = await arc();
+    for (const [label, page] of [
+      ["A", fx.departedA],
+      ["B", fx.departedB],
+    ] as const) {
+      const entry = entryOf(page, fx.rabia, `K1 ${label}`);
+      expect(entry.status).toBe("inactive");
+      expect(entry.display_name).toBe(TRANSFER_NAME);
+      expect(carriesHash(entry)).toBe(false);
+    }
+  });
+
+  it("K2 DELETED the credential row: re-activation without a new PIN publishes an `active` member with NO hash", async () => {
+    // **R32, and the only surface this contract has for observing a credential ROW.** The projection
+    // rule (`11-F21`) hides the row while she is non-`active` — under DELETED and under RETAINED her
+    // entry looks identical — so the question is only answerable after step one of R32's two-step
+    // re-activation: "flip the status, then set a PIN". Under RETAINED she comes back holding her old
+    // working PIN, which is precisely what `11-F23` says the torn state produces: "the next
+    // re-activation then restores her OLD PIN and publishes it to every till at the branch."
+    const fx = await arc();
+    const entry = entryOf(fx.reactivatedB, fx.rabia, "K2");
+    expect(entry.status).toBe("active");
+    expect(entry.pin_hash).toBeUndefined();
+    expect(await verifyPin(entry.pin_hash ?? "", PIN_BEFORE)).toBe(false);
+  });
+
+  it("K3 CONTROL / step two: a new PIN yields a WORKING credential, and it is the new one", async () => {
+    // ⚠ THE ANTI-VACUITY LEG FOR K2, and it is what stops "no hash" being read as "this publisher
+    // never carries a hash". One act later the same person at the same branch verifies again — so
+    // K2's absence is attributable to the deletion and not to a broken join. It is also R32's own
+    // second step, and the `verifyPin(PIN_BEFORE) === false` line is the ruling's whole purpose:
+    // the departed credential does not come back.
+    const fx = await arc();
+    const hash = entryOf(fx.recredentialedB, fx.rabia, "K3").pin_hash ?? "";
+    expect(await verifyPin(hash, PIN_AFTER)).toBe(true);
+    expect(await verifyPin(hash, PIN_BEFORE)).toBe(false);
+  });
+});
+
+describe("§L — `11-F23`: the status flip and the credential delete are ONE unit of work", () => {
+  /**
+   * ⚠ **WHAT THESE TWO PROBES DO AND DO NOT ESTABLISH — read before adding a third.** `11-F23`'s
+   * clause is about a *"dropped connection, statement timeout or process kill between two autocommit
+   * statements"*, and this suite cannot kill a process mid-statement. What it can do is assert **the
+   * invariant an interruption would break — there is no state in which a person is `inactive` while
+   * her credential is still live** — on the two interruptions it CAN produce deterministically:
+   *
+   *   L1  the caller's transaction ABORTS after `setUserStatus` returns. Kills a delete issued on a
+   *       connection the caller cannot roll back, and a half that commits eagerly on its own.
+   *   L2  the transition is REFUSED for an illegal status word. Kills a writer that deletes the
+   *       credential BEFORE it validates — the same torn state reached through a bad argument
+   *       instead of a bad night.
+   *
+   * **Neither can see two autocommits issued back-to-back on ONE connection with nothing failing
+   * between them**, because no external observer can be scheduled inside that window without a
+   * storage-level lock, and taking one would require naming the credential table — a storage choice
+   * `11-F23` deliberately leaves to the implementation. That gap is REPORTED rather than papered
+   * over with a weaker assertion that reads like it covers it. The observable half of the invariant
+   * is swept unconditionally by L3.
+   */
+  type AtomicFixture = {
+    org: string;
+    scope: StaffScope;
+    branch: string;
+    person: string;
+    pin: string;
+  };
+
+  const freshPerson = async (label: string, pin: string): Promise<AtomicFixture> => {
+    const api = await staff();
+    const org = `org-${label}-${newId()}`;
+    const branch = `branch-${label}-${newId()}`;
+    await addOrg(org);
+    await addBranch(org, branch);
+    const scope: StaffScope = { org_id: org, branch_id: branch };
+    const person = await addPerson({
+      org_id: org,
+      display_name: `Atomic ${label}`,
+      email: null,
+      grid_ordinal: 4,
+      assignments: [{ role: "cashier", branch_id: branch, status: "active" }],
+    });
+    await api.setPinCredential(db, {
+      org_id: org,
+      user_id: person,
+      pin_hash: await hashPin(pin),
+      now: T,
+    });
+    await api.publishStaffRoster(db, scope, [person], { now: T });
+    return { org, scope, branch, person, pin };
+  };
+
+  it("L1 leaves BOTH facts unchanged when the caller's transaction aborts, and moves BOTH when it commits", async () => {
+    const api = await staff();
+    const fx = await freshPerson("l1", "3608");
+
+    // ── the ABORT. `setUserStatus` runs on the handle the test controls, and the test then throws
+    // out of the transaction. If both writes are one unit of work, nothing survives this; if the
+    // credential delete escaped to another connection, it committed and she comes back `active`
+    // holding no hash — `11-F23`'s "`active` member with no credential row", reached in one second
+    // instead of one power cut.
+    const abort = new Error("L1: the test aborts this transaction on purpose");
+    let caught: unknown;
+    try {
+      await db.transaction(async (tx) => {
+        await api.setUserStatus(tx as unknown as Db, {
+          org_id: fx.org,
+          user_id: fx.person,
+          branch_id: fx.branch,
+          status: "inactive",
+        });
+        throw abort;
+      });
+    } catch (cause) {
+      caught = cause;
+    }
+    expect(caught).toBe(abort);
+
+    await api.publishStaffRoster(db, fx.scope, [fx.person], { now: T + 1 });
+    const afterAbort = entryOf(await api.staffPage(db, fx.scope, 0, 0), fx.person, "L1 abort");
+    expect(afterAbort.status).toBe("active");
+    expect(await verifyPin(afterAbort.pin_hash ?? "", fx.pin)).toBe(true);
+
+    // ── the COMMIT, which is the control: the same call outside a transaction moves BOTH facts, so
+    // the paragraph above is about atomicity and not about a `setUserStatus` that does nothing.
+    await api.setUserStatus(db, {
+      org_id: fx.org,
+      user_id: fx.person,
+      branch_id: fx.branch,
+      status: "inactive",
+    });
+    await api.publishStaffRoster(db, fx.scope, [fx.person], { now: T + 2 });
+    const afterCommit = entryOf(await api.staffPage(db, fx.scope, 0, 0), fx.person, "L1 commit");
+    expect(afterCommit.status).toBe("inactive");
+    expect(carriesHash(afterCommit)).toBe(false);
+
+    // …and the ROW went with it (§K2's probe: this was her last active assignment).
+    await api.setUserStatus(db, {
+      org_id: fx.org,
+      user_id: fx.person,
+      branch_id: fx.branch,
+      status: "active",
+    });
+    await api.publishStaffRoster(db, fx.scope, [fx.person], { now: T + 3 });
+    expect(
+      entryOf(await api.staffPage(db, fx.scope, 0, 0), fx.person, "L1 row").pin_hash,
+    ).toBeUndefined();
+  });
+
+  it("L2 leaves BOTH facts unchanged when the transition is REFUSED", async () => {
+    // `11-F22` closes the vocabulary at two and E2 asserts that at `insertUser`; this asserts the
+    // same clause at the OTHER writer of the same field, and asserts what a refusal costs. A writer
+    // that deleted the credential and then validated the word would refuse loudly and still have
+    // destroyed her PIN — the torn state with an error message on top, which is worse than the
+    // silent one because it looks handled.
+    const api = await staff();
+    const fx = await freshPerson("l2", "7714");
+    await expect(
+      api.setUserStatus(db, {
+        org_id: fx.org,
+        user_id: fx.person,
+        branch_id: fx.branch,
+        status: "suspended",
+      }),
+    ).rejects.toThrow(/11-F22/);
+
+    await api.publishStaffRoster(db, fx.scope, [fx.person], { now: T + 1 });
+    const entry = entryOf(await api.staffPage(db, fx.scope, 0, 0), fx.person, "L2");
+    expect(entry.status).toBe("active");
+    expect(await verifyPin(entry.pin_hash ?? "", fx.pin)).toBe(true);
+  });
+
+  it("L3 INVARIANT: no artifact this suite ever published carries a hash on a non-`active` entry", async () => {
+    // The observable half of "`inactive` holding a live credential", swept across every page this
+    // file produces rather than asserted once. D3 owns one member on the SNAPSHOT path; this walks
+    // the delta path and the `at_version` path too, where a publisher that applied `11-F21`'s
+    // active-only join on one code path and not another is otherwise invisible.
+    const fx = await arc();
+    const mainFx = await main();
+    const api = await staff();
+    const pages: readonly (readonly [string, StaffPage])[] = [
+      ["arc hiredA", fx.hiredA],
+      ["arc hiredB", fx.hiredB],
+      ["arc movedA", fx.movedA],
+      ["arc movedB", fx.movedB],
+      ["arc repeatedB", fx.repeatedB],
+      ["arc republishedA", fx.republishedA],
+      ["arc republishedB", fx.republishedB],
+      ["arc departedA", fx.departedA],
+      ["arc departedB", fx.departedB],
+      ["arc reactivatedB", fx.reactivatedB],
+      ["arc recredentialedB", fx.recredentialedB],
+      ["main A snapshot", await api.staffPage(db, mainFx.scopeA, 0, 0)],
+      ["main A delta from 2", await api.staffPage(db, mainFx.scopeA, 2, 0)],
+      ["main A at_version 3", await api.staffPage(db, mainFx.scopeA, 0, 0, 3)],
+      ["main B snapshot", await api.staffPage(db, mainFx.scopeB, 0, 0)],
+    ];
+    let nonActiveSeen = 0;
+    for (const [label, page] of pages) {
+      for (const entry of page.entries) {
+        if (entry.status === "active") continue;
+        nonActiveSeen += 1;
+        expect(`${label}/${entry.user_id}: ${carriesHash(entry)}`).toBe(
+          `${label}/${entry.user_id}: false`,
+        );
+      }
+    }
+    // ⚠ ANTI-VACUITY. A sweep over a set with no non-`active` entry in it asserts nothing, and this
+    // suite has been through one amendment already; nine are reachable from the pages above.
+    expect(nonActiveSeen).toBeGreaterThanOrEqual(8);
   });
 });
