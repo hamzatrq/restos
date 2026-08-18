@@ -1,5 +1,5 @@
-// Acceptance tests — THE CLOUD STORAGE HALF OF THE STAFF ROSTER (`01-F75`, `01-F76`, `11-F21`,
-// `11-F22`, `11-F23`, `01-F61`, R25/R26/R30).
+// Acceptance tests — THE CLOUD STORAGE HALF OF THE STAFF ROSTER (`01-F75`, `01-F76`, `01-F77`,
+// `01-F78`, `11-F21`, `11-F22`, `11-F23`, `01-F61`, R25/R26/R30).
 //
 // ⚠ **AUTHORED FROM SPEC TEXT ONLY, BY A SESSION THAT WROTE NO IMPLEMENTATION AND WILL NOT WRITE
 // ONE** (`24 §3`). Every assertion below is traceable to a quoted clause in `specs/01-kernel-sync.md`
@@ -158,12 +158,30 @@
 // implementer — an oracle that stays red under a correct implementation blocks them indefinitely
 // (three shipped last round, `oracle-round-2-findings.md` §C).
 //
-//  1. **WHICH PEOPLE a branch's artifact contains** — `01 §9.7`, open, and `01-F76` says it "BLOCKS
-//     the build rather than annotating it". So every fixture person here has EXACTLY ONE assignment,
-//     to her own branch, which is the one case all three candidate readings agree on. No test
-//     publishes an org-wide (`branch_id: null`) person into a branch artifact, and no test asserts
-//     that a person assigned only to branch B is refused from branch A's artifact. §G asserts only
-//     the CROSS-ORG refusal, which `01-F71` decides outright.
+//  1. ~~**WHICH PEOPLE a branch's artifact contains**~~ **ANSWERED 2026-08-18 by `01-F78`
+//     (`67e9885`), and now asserted (§O1, §O2, §O3).** Every person holding an assignment that
+//     REACHES this branch — her own-branch assignments plus `01-F26`'s org-wide ones — on
+//     `rolesAt`'s existing predicate; a person assigned to two branches is in BOTH artifacts and a
+//     person assigned only elsewhere is in NEITHER of this one's. **The FR is a PINNED
+//     INTERPRETATION and says so**, so it is overturned by amending the FR and not by writing the
+//     other shape in a publisher — which is exactly what this entry's blocking language failed to
+//     stop the first time (`01 §9.7`'s own note: the sentence "was right and unenforceable; only an
+//     FR the code can cite is either"). What this entry said, kept because it is why §A–§I are
+//     shaped the way they are: `01 §9.7`, open, and `01-F76` says it "BLOCKS the build rather than
+//     annotating it". So every fixture person here has EXACTLY ONE assignment, to her own branch,
+//     which is the one case all three candidate readings agree on. No test publishes an org-wide
+//     (`branch_id: null`) person into a branch artifact, and no test asserts that a person assigned
+//     only to branch B is refused from branch A's artifact. §G asserts only the CROSS-ORG refusal,
+//     which `01-F71` decides outright.
+//     ⚠ **Every one of those assertions is still CORRECT and none is weakened**: a person with one
+//     own-branch assignment is in her own branch's artifact under `01-F78` exactly as she was under
+//     all three candidate readings. §O supplies the fixture shape they could not have — two
+//     branches plus an org-wide assignment on one person — because neither half of `01-F78` is
+//     visible through a person who holds one assignment.
+//     ⚠ **Still NOT decided, and deliberately not asserted:** whether a publisher REFUSES an
+//     out-of-reach person or drops her from the artifact. `01-F78` rules the artifact's CONTENT
+//     ("absent from this artifact entirely") and says nothing about the writer's failure mode, so
+//     §O3 asserts the content and passes under either mechanism.
 //     ⚠ **AMENDED 2026-08-18 — §G6/§G7 ATTEMPT exactly the publish that sentence says no test makes,
 //     and both are REFUSALS.** Neither asserts what a branch artifact CONTAINS, and no test anywhere
 //     here accepts an org-wide publish, so §9.7 stays open in both directions. The org-wide assignee
@@ -178,9 +196,15 @@
 //     a LATER one. Its refusal legs write nothing at all, and its acceptance control is never
 //     published into any artifact, so nothing here asserts what a branch artifact CONTAINS and §9.7
 //     is untouched in both directions.
-//  2. **Whether a row carries ALL of a person's assignments or only this artifact's** — the second
-//     half of §9.7, same clause. For a single-branch person the two readings are identical, which is
-//     why §I3 is assertable at all.
+//  2. ~~**Whether a row carries ALL of a person's assignments or only this artifact's**~~
+//     **ANSWERED 2026-08-18 by `01-F78`, and now asserted (§O4, §O5): only the assignments that
+//     reach this branch, never all of them.** This is the half `01 §9.7` said was decided inside a
+//     query, and the FR names what the other answer costs — *"a row carrying every branch's
+//     assignment also tells every till the org's branch structure"*, `01-F71`'s isolation boundary
+//     crossed by a reference-data artifact, and *"the half R25 was bought for"*. What this entry
+//     said: the second half of §9.7, same clause; for a single-branch person the two readings are
+//     identical, which is why §I3 is assertable at all. **§I3 is untouched and still correct** —
+//     see its own note.
 //  3. **Whether a non-`active` member's `grid_ordinal` stays reserved.** `01-F75` makes the ordinal
 //     unique "within the artifact" and `11-F22` keeps departed members in it, but nothing says
 //     whether a new hire may take a departed cashier's position. Every ordinal-collision fixture in
@@ -1740,6 +1764,13 @@ describe("§I — `01-F75`'s `staff` row, which is what a golden fixture will be
     // assignments or only this artifact's is `01 §9.7` and is OPEN — for a person with exactly one
     // assignment, to this branch, both readings give the same answer, which is why this is the only
     // assignment assertion in this file.
+    //   ⚠ **AMENDED 2026-08-18: §9.7's second half is ANSWERED by `01-F78` — only the assignments
+    //   that reach this branch — and §O4/§O5 assert it, so this is no longer the only assignment
+    //   assertion here. The TEST is unchanged and is not weakened by the ruling:** hina and ayesha
+    //   each hold one assignment, to branch A, which reaches branch A, so `01-F78`'s filter returns
+    //   it and the `toEqual` above is the same under both readings — which is precisely why it was
+    //   authorable while the question was open. The two claims below (the wire's single `status`,
+    //   and the strip) are `01-F75`'s and `11-F22`'s and are untouched by `01-F78`.
     //
     // ⚠ **This test also pins the WIRE half of `11-F22`'s per-(person, branch) amendment, and that
     // was incidental before 2026-08-18 — it is stated now so the next reader does not weaken it by
@@ -2671,5 +2702,532 @@ describe("§N — `01-F75`: a delta is the FOLD at its target, never the interme
     // "always answer a snapshot" implementation C2 kills. Both counts are stated.
     expect(`snapshot entries ${snapshot.entries.length}`).toBe("snapshot entries 3");
     expect(`delta entries ${delta.entries.length}`).toBe("delta entries 2");
+  });
+});
+
+/* ── §O `01-F78`: WHO a branch's roster contains, and WHAT her row carries ────────────────────── */
+
+/**
+ * ⚠ **ADDED 2026-08-18. `01-F78` (`67e9885`) ANSWERS `01 §9.7`, WHICH THIS FILE HAS CARRIED AS
+ * EXCLUSIONS 1 AND 2 SINCE IT WAS AUTHORED** — both are amended in the header rather than deleted,
+ * because what they said is why §I3 is scoped the way it is. **The code predates the FR**, and the
+ * FR says so in its own first sentence: `01 §9.7` said in terms that *"nothing selects a roster's
+ * rows until this is ruled"* and *"a first implementation selected them anyway and decided the
+ * second half in a query, which is the case this FR exists to stop being decided silently"*.
+ *
+ * **BOTH HALVES, VERBATIM, BECAUSE THEY ARE TWO CLAIMS AND NOT ONE.**
+ *
+ *   · **Half one — who is in it:** *"every person holding an assignment that REACHES this branch.
+ *     That is her own-branch assignments plus `01-F26`'s org-wide ones (`branch_id: null`), which is
+ *     how an owner holds Appendix A's 'everything' and therefore how she unlocks a till at a branch
+ *     she does not staff. A person assigned to two branches appears in **both** artifacts … The rule
+ *     is exactly `rolesAt`'s existing predicate in `packages/domain` — `branch_id === null ||
+ *     branch_id === this branch` — which matters more than its content: `can()` already answers 'may
+ *     she act HERE' that way, so a roster built on any other rule would populate a grid with people
+ *     the matrix then refuses, and the till would offer a tile that cannot do anything."*
+ *   · **Half two — what her row carries:** *"only the assignments that reach this branch, never all
+ *     of them."* `01 §9.7` names the cost of the other answer and the FR quotes it — *"a row
+ *     carrying every branch's assignment also tells every till the org's branch structure"* — which
+ *     is `01-F71`'s isolation boundary crossed *"by a reference-data artifact rather than by a
+ *     query"*. And: *"It is also the half R25 was bought for: making the roster branch-scoped to
+ *     narrow the credential blast radius, and then shipping the org's whole assignment graph inside
+ *     it, spends the purchase."*
+ *
+ * **THE FIXTURE IS THE THING TO GET RIGHT, AND THIS FILE ALREADY PROVED WHY.** Every person in §A–§I
+ * holds exactly ONE assignment, to her own branch — the case all three candidate readings of §9.7
+ * agreed on, which is what made those sections authorable while it was open. **Neither half of
+ * `01-F78` is visible through such a person**: half one needs someone whose reach comes from
+ * somewhere other than her own-branch assignment, and half two needs a row with a second assignment
+ * to keep OUT of it. It is the same shape as this package's own `M1` mutant, where a
+ * `participationAt` returning `assignments[0]` passed 55 tests because no fixture person had a
+ * second assignment to disagree with the first. So §O's people are built the other way round:
+ *
+ *   naila  cashier@A + cashier@B + owner@org-wide  — in BOTH artifacts; her A row must name A and
+ *                                                    org-wide and must NOT name B
+ *   uzma   owner@org-wide ONLY                     — in both artifacts, staffing neither branch
+ *   sadia  cashier@B ONLY                          — absent from A's artifact ENTIRELY
+ *
+ * **WHAT THIS SECTION DELIBERATELY DOES NOT ASSERT (commandment 2).**
+ *
+ *  1. **WHETHER an out-of-reach person is REFUSED at the publisher or silently dropped from the
+ *     artifact.** `01-F78` rules what the artifact CONTAINS — *"absent from this artifact
+ *     entirely"* — and says nothing about the writer's failure mode, so O3 asserts the content and
+ *     accepts either mechanism by construction. Pinning a refusal would red an implementation that
+ *     filters, and pinning a filter would red the one that refuses; one of those two is shipped and
+ *     an oracle that guesses which blocks the implementer either way (`oracle-round-2-findings.md`
+ *     §C's third pattern).
+ *  2. **WHICH status a row carries when a person holds BOTH a branch assignment here and an
+ *     org-wide one.** `01-F78`'s last clause makes the status *"THIS branch's"* per `11-F22`, and
+ *     for a person with one reaching assignment that is unambiguous (§J owns it). Where she holds
+ *     two reaching assignments, nothing in the corpus says which supplies the word — it is a
+ *     READING, recorded as one in this service's guide — so naila's three assignments are all
+ *     `active`, and no assertion here can tell the readings apart. That is deliberate: an oracle
+ *     that pinned one would be ruling `01 §9.7`'s successor question by test.
+ *  3. **Whether the artifact's membership is recomputed at publish time for people the caller did
+ *     not name.** The contracted surface takes `changed_user_ids` (see the header), so who is in
+ *     the artifact is the fold of what has been published for the key; `01-F78` is about which
+ *     people may be in it, not about when a publisher notices a new assignment. That is §9.5's
+ *     question and is untouched here.
+ */
+type PublishOutcome = { refused: false; version: number } | { refused: true; message: string };
+
+/** A publish whose outcome is the assertion rather than the fixture's precondition. */
+const attemptPublish = async (publish: () => Promise<number>): Promise<PublishOutcome> => {
+  try {
+    return { refused: false, version: await publish() };
+  } catch (cause) {
+    return { refused: true, message: String(cause).split("\n")[0] ?? String(cause) };
+  }
+};
+
+/** `published` or `refused: <message>` — so a failing assertion prints WHY, not just that it did. */
+const outcomeLabel = (outcome: PublishOutcome): string =>
+  outcome.refused ? `refused: ${outcome.message}` : "published";
+
+/** `01-F26`'s pair as a sortable label: the ORDER of a person's assignments is specified nowhere. */
+const assignmentLabels = (entry: StaffEntry): string[] =>
+  entry.assignments.map((one) => `${one.role}@${one.branch_id ?? "org-wide"}`).sort();
+
+/**
+ * §O's fixture — TWO branches of one org, and three people chosen so that each leg of `01-F78`
+ * separates a correct implementation from a plausible wrong one.
+ *
+ * **The three publishes that could be refused are CAPTURED rather than awaited into the build.**
+ * A mutant that drops the org-wide leg of the reach predicate refuses to publish uzma at all, and a
+ * fixture that let that throw would take every test in this section down as one hook error naming
+ * the fixture — legible to nobody, and indistinguishable from a broken database. Captured, the same
+ * mutant fails O1 by name and leaves O2/O4/O5 reporting on their own claims.
+ */
+type ReachFixture = {
+  org: string;
+  branchA: string;
+  branchB: string;
+  scopeA: StaffScope;
+  scopeB: StaffScope;
+  /** cashier@A + cashier@B + owner@org-wide — the only shape either half of `01-F78` is visible in */
+  naila: string;
+  /** owner@org-wide ONLY — `01-F26`'s null location, and how an owner reaches a branch she does not staff */
+  uzma: string;
+  /** cashier@B ONLY — the person `01-F78` puts NOWHERE in branch A's artifact */
+  sadia: string;
+  ownerIntoA: PublishOutcome;
+  ownerIntoB: PublishOutcome;
+  sadiaIntoA: PublishOutcome;
+  pageA: StaffPage;
+  pageB: StaffPage;
+};
+
+let reachFixture: Promise<ReachFixture> | undefined;
+
+const buildReach = async (): Promise<ReachFixture> => {
+  const api = await staff();
+  const org = `org-reach-${newId()}`;
+  const branchA = `branch-reach-a-${newId()}`;
+  const branchB = `branch-reach-b-${newId()}`;
+  await addOrg(org);
+  await addBranch(org, branchA);
+  await addBranch(org, branchB);
+  const scopeA: StaffScope = { org_id: org, branch_id: branchA };
+  const scopeB: StaffScope = { org_id: org, branch_id: branchB };
+
+  const naila = await addPerson({
+    org_id: org,
+    display_name: "Naila Farooq",
+    email: null,
+    grid_ordinal: 10,
+    // All three `active` on purpose — see exclusion 2 in the section header. Two branches AND an
+    // org-wide assignment on one person is `01-F78`'s own worked shape ("plus `01-F26`'s org-wide
+    // ones"), and G8's control already pins that the writer stores it.
+    assignments: [
+      { role: "cashier", branch_id: branchA, status: "active" },
+      { role: "cashier", branch_id: branchB, status: "active" },
+      { role: "owner", branch_id: null, status: "active" },
+    ],
+  });
+  const uzma = await addPerson({
+    org_id: org,
+    display_name: "Uzma Tariq",
+    email: null,
+    grid_ordinal: 20,
+    assignments: [{ role: "owner", branch_id: null, status: "active" }],
+  });
+  const sadia = await addPerson({
+    org_id: org,
+    display_name: "Sadia Aslam",
+    email: null,
+    grid_ordinal: 30,
+    assignments: [{ role: "cashier", branch_id: branchB, status: "active" }],
+  });
+
+  // ONE hash for the three of them, computed once — `hashPin` is deliberately ~0.4 s (`01-F61`'s
+  // floor) and no assertion in this section reads a credential. They carry one because `11-F21`
+  // puts the hash on every `active` entry, so a roster with none would be an unusual artifact to
+  // make a claim about isolation on.
+  const pin = await hashPin("6473");
+  for (const user_id of [naila, uzma, sadia]) {
+    await api.setPinCredential(db, { org_id: org, user_id, pin_hash: pin, now: T });
+  }
+
+  const v1a = await api.publishStaffRoster(db, scopeA, [naila], { now: T });
+  if (v1a !== 1) throw new Error(`reach fixture: A minted version ${v1a}, expected 1`);
+  const ownerIntoA = await attemptPublish(() =>
+    api.publishStaffRoster(db, scopeA, [uzma], { now: T + 1 }),
+  );
+
+  const v1b = await api.publishStaffRoster(db, scopeB, [naila, sadia], { now: T + 2 });
+  if (v1b !== 1) throw new Error(`reach fixture: B minted version ${v1b}, expected 1`);
+  const ownerIntoB = await attemptPublish(() =>
+    api.publishStaffRoster(db, scopeB, [uzma], { now: T + 3 }),
+  );
+
+  // ⚠ **THE TWO-BRANCH PERSON IS REPUBLISHED, AND THE REASON IS §O5's, MEASURED RATHER THAN
+  // ASSUMED.** Without this she is published at version 1 of each artifact and never again, so
+  // every DELTA §O5 asks for — the changed ids after a base — carries only the org-wide owner,
+  // whose row has no other branch on it to leak. **Measured out of tree, both ways, rather than
+  // reasoned:** an implementation that filters the row on the SNAPSHOT path alone passes this whole
+  // file **66/66** with these two lines removed, and is killed by **O5 alone** with them in — on
+  // `have_version 1`, which is the delta. That is §N's recorded shape (a sweep that never crossed
+  // the delta path) reproduced inside the test written to be door-independent, caught in the hour
+  // rather than in a round.
+  // No version number is asserted for these two, deliberately: what they mint depends on whether
+  // the org-wide publish above was accepted, and THAT is O1's claim rather than this line's
+  // precondition. A fixture that hard-coded 3 here would take the whole section down as one hook
+  // error under exactly the implementation O1 exists to name.
+  await api.publishStaffRoster(db, scopeA, [naila], { now: T + 4 });
+  await api.publishStaffRoster(db, scopeB, [naila], { now: T + 5 });
+
+  // LAST, so that whichever way it goes it cannot move the version numbers the lines above assert.
+  // A publisher that refuses her writes nothing; one that drops her mints a version whose fold is
+  // unchanged. O3 is about the fold either way.
+  const sadiaIntoA = await attemptPublish(() =>
+    api.publishStaffRoster(db, scopeA, [sadia], { now: T + 6 }),
+  );
+
+  return {
+    org,
+    branchA,
+    branchB,
+    scopeA,
+    scopeB,
+    naila,
+    uzma,
+    sadia,
+    ownerIntoA,
+    ownerIntoB,
+    sadiaIntoA,
+    pageA: await api.staffPage(db, scopeA, 0, 0),
+    pageB: await api.staffPage(db, scopeB, 0, 0),
+  };
+};
+
+const reach = (): Promise<ReachFixture> => {
+  reachFixture ??= buildReach();
+  return reachFixture;
+};
+
+describe("§O — `01-F78`: a branch roster holds who can act THERE, and each row only what applies there", () => {
+  it("O1 contains the ORG-WIDE owner, who staffs neither branch and reaches both", async () => {
+    // `01-F78` half one: an org-wide assignment reaches this branch, "which is how an owner holds
+    // Appendix A's 'everything' and therefore how she unlocks a till at a branch she does not
+    // staff". `01-F26`'s null location is the encoding, and `rolesAt`'s predicate — `branch_id ===
+    // null || branch_id === this branch` — is the rule the FR says the roster must share with
+    // `can()`, "so a roster built on any other rule would populate a grid with people the matrix
+    // then refuses".
+    //
+    // ⚠ This is the leg that separates the FR from the narrowest reading of §9.7 (own-branch
+    // assignees only), and under that reading an owner cannot unlock ANY till — the whole product
+    // has one org-wide person per tenant by construction (`create-owner`).
+    const fx = await reach();
+    expect(`branch A / the org-wide owner: ${outcomeLabel(fx.ownerIntoA)}`).toBe(
+      "branch A / the org-wide owner: published",
+    );
+    expect(`branch B / the org-wide owner: ${outcomeLabel(fx.ownerIntoB)}`).toBe(
+      "branch B / the org-wide owner: published",
+    );
+    expect(`branch A contains the owner: ${ids(fx.pageA).includes(fx.uzma)}`).toBe(
+      "branch A contains the owner: true",
+    );
+    expect(`branch B contains the owner: ${ids(fx.pageB).includes(fx.uzma)}`).toBe(
+      "branch B contains the owner: true",
+    );
+    // …and she is a whole member, not a name: `01-F61`'s grid renders a tile per entry.
+    expect(entryOf(fx.pageA, fx.uzma, "O1 A").display_name).toBe("Uzma Tariq");
+    expect(entryOf(fx.pageA, fx.uzma, "O1 A").status).toBe("active");
+  });
+
+  it("O2 puts a person assigned to TWO branches in BOTH artifacts, at one moment", async () => {
+    // `01-F78` half one, verbatim: "A person assigned to two branches appears in **both**
+    // artifacts, because she works at both and `03-F53` lets any member of the branch roster
+    // identify at the pass."
+    //
+    // ⚠ This is NOT §J's transfer wearing a new name. §J is about the STATUS field being
+    // per-(person, branch) — one person, two words, at one moment — and its person is deliberately
+    // `inactive` at the branch she left. This is about MEMBERSHIP: she is `active` at both, and a
+    // reading that admitted a person to only one artifact (her "home" branch, whatever that would
+    // mean) passes every assertion in §J.
+    const fx = await reach();
+    expect(`branch A contains naila: ${ids(fx.pageA).includes(fx.naila)}`).toBe(
+      "branch A contains naila: true",
+    );
+    expect(`branch B contains naila: ${ids(fx.pageB).includes(fx.naila)}`).toBe(
+      "branch B contains naila: true",
+    );
+    expect(entryOf(fx.pageA, fx.naila, "O2 A").status).toBe("active");
+    expect(entryOf(fx.pageB, fx.naila, "O2 B").status).toBe("active");
+  });
+
+  it("O3 leaves a person assigned only ELSEWHERE out of this artifact entirely", async () => {
+    // `01-F78`'s stated cost: "a person whose ONLY assignments are at other branches is **absent
+    // from this artifact entirely**, so a `02-F41` attribution written by her at this branch is
+    // unresolvable here — which cannot happen, because she cannot unlock here either, and the two
+    // facts are the same fact by half one."
+    //
+    // ⚠ **THE PUBLISH IS ATTEMPTED, NOT AVOIDED, AND THAT IS THE WHOLE TEST.** Under the contracted
+    // surface the caller names ids, so a test that simply never names her asserts nothing: she is
+    // absent under every implementation, including one that would have admitted her. The fixture
+    // therefore names her in a publish to branch A and captures what happened; the assertion is on
+    // the artifact, which is what `01-F78` rules (exclusion 1 in the section header).
+    const fx = await reach();
+    expect(`branch A contains sadia: ${ids(fx.pageA).includes(fx.sadia)}`).toBe(
+      "branch A contains sadia: false",
+    );
+    // The whole body, not the id list: an entry smuggled under a member these types do not declare
+    // satisfies every `entries[]` assertion in this file (§M2/§N2's reasoning, one field over).
+    expect(`branch A response names sadia: ${JSON.stringify(fx.pageA).includes(fx.sadia)}`).toBe(
+      "branch A response names sadia: false",
+    );
+
+    // ⚠ ANTI-VACUITY, and it is what makes the two `false`s above mean something. The same publisher,
+    // the same artifact, the same fixture: the two people who DO reach branch A are in it. Without
+    // this leg an implementation that published nobody — or one whose publish silently no-ops —
+    // passes O3 and fails nobody until a branch has no staff grid at all.
+    expect(ids(fx.pageA)).toEqual([fx.naila, fx.uzma].sort());
+    // And she is in the artifact of the branch she IS assigned to, so what is being measured is the
+    // predicate and not the person (`01-F78` half one applied at the other end).
+    expect(`branch B contains sadia: ${ids(fx.pageB).includes(fx.sadia)}`).toBe(
+      "branch B contains sadia: true",
+    );
+  });
+
+  it("O4 carries ONLY the assignments that reach this branch on the row — never all of them", async () => {
+    // `01-F78` half two. The row is `rolesAt`'s predicate applied to the person's own assignments:
+    // her assignment naming THIS branch, plus her org-wide ones, and nothing else. Naila holds
+    // three; branch A's row carries two of them and branch B's row carries the other two, and the
+    // org-wide one is in both because it reaches both.
+    //
+    // ⚠ **THE ORG-WIDE ASSIGNMENT MUST SURVIVE THE FILTER, AND THAT IS HALF THE CLAIM.** A repair
+    // that read "only this artifact's" as "only the assignment naming this branch" strips it, and
+    // then `authorize.ts`'s `can()` subject on that till holds a cashier where an owner works —
+    // which is the mirror of the defect the FR's own reasoning names ("a roster built on any other
+    // rule would populate a grid with people the matrix then refuses"). Uzma's row is the same
+    // claim with nothing else on it: an org-wide-only person's row is her org-wide assignment.
+    //
+    // Sorted labels rather than `toEqual` on the array: `01-F26` fixes no ORDER, so asserting one
+    // would red a correct implementation that assembles the row from a different query (I3 is
+    // `toEqual` only because a single-element array has no order to get wrong).
+    const fx = await reach();
+    expect(assignmentLabels(entryOf(fx.pageA, fx.naila, "O4 A"))).toEqual(
+      [`cashier@${fx.branchA}`, "owner@org-wide"].sort(),
+    );
+    expect(assignmentLabels(entryOf(fx.pageB, fx.naila, "O4 B"))).toEqual(
+      [`cashier@${fx.branchB}`, "owner@org-wide"].sort(),
+    );
+    expect(assignmentLabels(entryOf(fx.pageA, fx.uzma, "O4 owner"))).toEqual(["owner@org-wide"]);
+  });
+
+  it("O5 never names another branch in this artifact, under any request that serves it", async () => {
+    // `01 §9.7`'s cost sentence, which `01-F78` half two quotes as its reason: "a row carrying every
+    // branch's assignment also tells every till the org's branch structure" — `01-F71`'s isolation
+    // boundary crossed by reference data rather than by a query, and "the half R25 was bought for".
+    //
+    // ⚠ **SWEPT, AND MATCHED ON THE WHOLE BODY, FOR TWO REASONS THIS FILE HAS ALREADY PAID FOR.**
+    // (i) `staffPage` has three response paths (empty delta, delta, snapshot) and O4 inspects one:
+    // §N's own header records that §M's sweep never crossed the delta path and a leak lived exactly
+    // there for a round. A filter applied at publish time covers all three; one applied on the way
+    // out may not, and only a sweep can tell them apart. (ii) The claim is that the STRING never
+    // travels — a branch id smuggled through a field these types do not declare tells the till the
+    // same thing that a declared one does.
+    const fx = await reach();
+    const api = await staff();
+    const currentA = await api.staffVersion(db, fx.scopeA);
+    const currentB = await api.staffVersion(db, fx.scopeB);
+
+    for (const [label, scope, current, own, foreign] of [
+      ["branch A", fx.scopeA, currentA, fx.branchA, fx.branchB],
+      ["branch B", fx.scopeB, currentB, fx.branchB, fx.branchA],
+    ] as const) {
+      let swept = 0;
+      let sawOwnBranch = false;
+      let nailaSeen = 0;
+      for (const have of [0, 1, 2, 99]) {
+        for (const from of [0, 1]) {
+          for (const at of [undefined, current] as const) {
+            const where = `${label} have_version ${have} from ${from} at_version ${String(at)}`;
+            const page = await api.staffPage(db, scope, have, from, at);
+            swept += 1;
+            const body = JSON.stringify(page);
+            expect(`${where}: names the OTHER branch ${body.includes(foreign)}`).toBe(
+              `${where}: names the OTHER branch false`,
+            );
+            if (body.includes(own)) sawOwnBranch = true;
+            const naila = byId(page, fx.naila);
+            if (naila === undefined) continue;
+            nailaSeen += 1;
+            expect(`${where}: naila ${assignmentLabels(naila).join(" ")}`).toBe(
+              `${where}: naila ${[`cashier@${own}`, "owner@org-wide"].sort().join(" ")}`,
+            );
+          }
+        }
+      }
+      // ⚠ ANTI-VACUITY, three ways, because "the string is absent" is exactly the claim an empty
+      // response satisfies. The sweep ran; it served this branch's OWN id at least once (so the
+      // assignments field is populated and the match above is looking at something); and it served
+      // the two-branch person's row at least once (so the row the claim is about was inspected).
+      expect(`${label}: requests swept ${swept}`).toBe(`${label}: requests swept 16`);
+      expect(`${label}: served its own branch id ${sawOwnBranch}`).toBe(
+        `${label}: served its own branch id true`,
+      );
+      expect(`${label}: naila's row inspected ${nailaSeen > 0}`).toBe(
+        `${label}: naila's row inspected true`,
+      );
+    }
+  });
+});
+
+/* ── §P a version number is a FACT about the key, and 0 is one of its values (01-F77) ─────────── */
+
+/**
+ * ⚠ **ADDED 2026-08-18. A POPULATED KEY THAT ANSWERS `version: 0`.**
+ *
+ * **The shape came from the serve path's early returns and its reachability from the wire codec —
+ * neither from a description of it nor from a reading of what the code MEANT to do.** `staffPage`
+ * resolves the version it will serve before it reads a row, and `01-F75`'s continuation clause
+ * honours `at_version` when `from > 0`; so a CONTINUATION naming `at_version: 0` resolves to 0 and
+ * takes the "nothing has ever been published for this key" branch — over a key that has published
+ * three times. It is a request a device can actually send: `packages/sync-protocol` declares
+ * `at_version: seq.optional()` with `seq = z.number().int().nonnegative()`, which makes **0
+ * wire-legal and every negative value unreachable**, so 0 is the only member of its family that
+ * needs an answer and the only one asserted below.
+ *
+ * **WHAT THE FR DECIDES, WHICH IS THE MEANING OF THE NUMBER AND NOT THE HANDLING OF THE REQUEST.**
+ * `01-F77`: an artifact for which the org has published nothing is *"omitted, never sent as `0`"* —
+ * the value has one meaning, *published nothing*, and this suite's contracted surface states it
+ * again for `staffVersion` (*"`0` = nothing has ever been published for this key"*). §A2 pins that
+ * meaning from one side: a never-published key answers 0. **§P is the same claim from the other
+ * side, and the two together are what make the number a fact about the key rather than a property
+ * of the request.** `01-F76` makes every comparison per artifact key, so the number is all a device
+ * has: a response labelled 0 over a populated key is either discarded by `01-F56`'s monotonic apply
+ * (the device holds v3 and has just been told to go backwards — the fetch achieves nothing and the
+ * device cannot tell it was answered wrongly), or applied by a device holding nothing, where
+ * `01-F75`'s snapshot form makes `entries: []` with `complete: true` the WHOLE roster and the till
+ * believes the branch has no staff. R28 is what that costs: a never-received roster *"refuses,
+ * loudly, at boot"* — *"a device that has never received a roster has nobody who can sign in, which
+ * is a **stopped till**"*.
+ *
+ * **WHAT THE FR DOES NOT DECIDE, SO NEITHER DOES THIS SECTION (commandment 2).** *Which* answer an
+ * `at_version: 0` continuation deserves. Three are defensible from the corpus and none is written
+ * down: serve the current version (0 is not a version, so the field is unset), serve the device's
+ * base, or refuse the request — `PROTOCOL.md` already says the server *"serves that exact version
+ * or refuses"*, so a refusal is inside the vocabulary. **Every assertion below therefore accepts a
+ * refusal and constrains only what a response may SAY**, and the sweep's controls are what stop
+ * that generosity from making the test vacuous: the ordinary requests beside it must still be
+ * answered, at the current version, with the roster in them.
+ */
+describe("§P — `01-F77`: the version a response states is one THIS key has published", () => {
+  it("P1 never answers a POPULATED key with version 0, the number that means 'published nothing'", async () => {
+    const fx = await main();
+    const api = await staff();
+    const current = await api.staffVersion(db, fx.scopeA);
+    expect(`branch A current version ${current}`).toBe("branch A current version 3");
+
+    let answered = 0;
+    let swept = 0;
+    for (const have of [0, 1, 2, 3, 99]) {
+      for (const from of [0, 1]) {
+        const where = `have_version ${have} from ${from} at_version 0`;
+        swept += 1;
+        let page: StaffPage | undefined;
+        try {
+          page = await api.staffPage(db, fx.scopeA, have, from, 0);
+        } catch {
+          // A refusal is one of the answers the corpus admits for a request naming a version
+          // nobody published — see the section header. It is not asserted for, and it is not
+          // asserted against.
+          continue;
+        }
+        answered += 1;
+        const stated = page.version;
+        const published = stated >= 1 && stated <= current;
+        // Both sides carry the number, so the boolean is what differs and the message names the
+        // request that produced it — a bare `toBeGreaterThan` inside a loop reports neither.
+        expect(`${where}: stated version ${stated} is one this key published ${published}`).toBe(
+          `${where}: stated version ${stated} is one this key published true`,
+        );
+        // …and the artifact it claims to be. A snapshot from offset 0 IS the whole roster
+        // (`01-F75`), and this key has four members at every version it has ever had, so an empty
+        // complete one is the second half of the same false statement: not "you are up to date",
+        // but "this branch has no staff".
+        if (page.form === "snapshot" && from === 0) {
+          expect(`${where}: snapshot from 0 carries entries ${page.entries.length > 0}`).toBe(
+            `${where}: snapshot from 0 carries entries true`,
+          );
+        }
+      }
+    }
+    expect(`requests swept ${swept}`).toBe("requests swept 10");
+
+    // ⚠ ANTI-VACUITY / THE OVER-STRICTNESS CONTROLS, and they are the reason the loop above may
+    // accept a refusal without becoming a test that passes against a serve path which refuses
+    // everything. Neither control names a version nobody published, so neither is inside the
+    // question this section asks: a first page and a continuation toward the current version are
+    // ordinary traffic and must be SERVED, at the current version, with the roster in them.
+    // (§M owns the `at_version` rule itself; these two are here so P1 cannot go quiet.)
+    const first = await api.staffPage(db, fx.scopeA, 0, 0);
+    expect(`first page: version ${first.version} entries ${first.entries.length}`).toBe(
+      `first page: version ${current} entries 4`,
+    );
+    const continuation = await api.staffPage(db, fx.scopeA, 0, 1, current);
+    expect(`continuation: version ${continuation.version}`).toBe(
+      `continuation: version ${current}`,
+    );
+    expect(`requests answered ${answered > 0}`).toBe("requests answered true");
+  });
+
+  it("P2 CONTROL: an EMPTY key still answers 0, because there 0 is TRUE", async () => {
+    // The other side of the same claim, and the reason P1 cannot be satisfied by clamping the
+    // number up. `01-F77` gives 0 one meaning; a serve path that answered 1 — or the current
+    // version, or anything else — for a key nothing has published would tell a device to fetch an
+    // artifact that does not exist, and `01-F56`'s comparison would then agree with itself forever.
+    // §A2 asserts this for a first page; the sweep below is the same key under the same requests P1
+    // sweeps, so a repair that special-cased the continuation cannot pass one and fail the other.
+    const api = await staff();
+    const scope: StaffScope = {
+      org_id: `org-empty-p2-${newId()}`,
+      branch_id: `branch-empty-p2-${newId()}`,
+    };
+    expect(await api.staffVersion(db, scope)).toBe(0);
+
+    let answered = 0;
+    for (const have of [0, 1, 2, 3, 99]) {
+      for (const from of [0, 1]) {
+        for (const at of [undefined, 0] as const) {
+          const where = `empty key have_version ${have} from ${from} at_version ${String(at)}`;
+          let page: StaffPage | undefined;
+          try {
+            page = await api.staffPage(db, scope, have, from, at);
+          } catch {
+            continue;
+          }
+          answered += 1;
+          expect(`${where}: version ${page.version}`).toBe(`${where}: version 0`);
+          expect(`${where}: entries ${page.entries.length}`).toBe(`${where}: entries 0`);
+        }
+      }
+    }
+    // ⚠ ANTI-VACUITY: the first-page request is the one §A2 already pins as SERVED, so this sweep
+    // can never be an empty set of observations however the rest of it is answered.
+    expect(`empty key: requests answered ${answered > 0}`).toBe(
+      "empty key: requests answered true",
+    );
   });
 });
