@@ -7,6 +7,44 @@
 - Money = branded integer paisas; quantities = branded integer mg/ml/units. No floats, ever.
 - **IMPLEMENTED (Wave 0).** See `README.md` for the module map. Changes here are spec-PR + senior review (SACRED path, 18 §2).
 
+## `PersonAssignment.status` — `11-F22`'s participation field, PER-(PERSON, BRANCH) (August 2026)
+
+`PERSON_STATUSES` (`active | inactive`, closed at two) and a **required** `status` on
+`PersonAssignment` — `01-F26`'s `(role, location)` pair with participation on it, which is what
+`PersonRecord.assignments` now holds. `11-F22` refuses a default by name — an absent status is "not
+a licence to default an absent status to `active`" — and `01-F75` makes the field required at the
+writer, so the enum carries a custom error naming the FR: `services/sync-gateway`'s schema
+deliberately holds no CHECK for a closed set, so this parse **is** the enforcement, and a refusal
+that does not cite the rule is one an operator cannot act on. Asserted by
+`services/sync-gateway/src/__acceptance__/staff-roster-storage.test.ts` §E (a bad word and an absent
+field are both refused, nothing is written, and the second leg is that the field is required **per
+assignment** — one supplied status does not cover a sibling that lacks one).
+
+⚠ **THE FIRST BUILD PUT IT ON `PersonRecord` AS A PER-PERSON FIELD, AND THIS SECTION SAID SO.**
+`11-F22` carried both readings — its heading says *"a PERSON RECORD carries a participation
+status"*, its transfer clause requires a cashier moving A→B to be *"`inactive` in A's roster and
+`active` in B's at the same moment"* — and the FR now names the transfer clause as the operative
+one, because no single per-person value can express it. An adversarial review measured the cost on
+the build that resolved it the other way: deactivating her at A **destroyed the credential B's
+artifact needs** (`11-F23`'s *"`active` member with no hash"*), and any later republish at A
+re-copied her CURRENT status and **silently returned a departed cashier to `active` with a working
+PIN hash on her old branch's tills**. Kept rather than rewritten away, because it is this repo's
+cheapest worked example of a spec sentence with two readings and only one of them buildable.
+
+**`RoleAssignmentWire` did NOT gain the field, deliberately.** It is pinned to `permissions.ts`'s
+`RoleAssignment` by a compile-time tripwire, and `RoleAssignment` is `can()`'s subject: `11-F22`'s
+*"the authorization subject reads the status too"* is the plan's **step 2b**, which lands on both
+planes in one change. A matrix carrying a status nothing reads is the shape that later gets read by
+accident.
+
+⚠ **A required field on a shared record moves every reader in the same change.** Two parse `PersonRecord` —
+`services/sync-gateway/src/tenancy.ts` and `services/api/src/users-postgres.ts` — and `parse` takes
+`unknown`, so a reader that forgets the new field compiles perfectly and throws on the first login
+of every deployment. That is the standing cost of the one-declaration rule, and it is the thing to
+grep for (`PersonRecord.parse`) before adding a field here. ⚠ **It bites through `assignments` now
+rather than through a top-level key**, which is quieter: nothing in a select statement changes, so
+the reader that breaks is the one whose ROWS predate `0012`'s jsonb backfill.
+
 ## Mutation matrix — `05-F7`'s approval family (round-3 law), control **338/338** green
 
 `approval.requested / granted / denied` were in the `01 §4` catalog and had **no payload schema

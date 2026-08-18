@@ -310,6 +310,14 @@ export type DeviceRecordT = z.infer<typeof DeviceRecord>;
  * it, and the `satisfies`-style bridge below makes any drift between the two a COMPILE error
  * rather than a runtime surprise. `branch_id: null` is org-wide — how an owner holds Appendix A's
  * "everything", and what `15-F26` gives the first owner at provisioning.
+ *
+ * ⚠ **`11-F22`'s participation status is deliberately NOT on this schema, and that is a decision
+ * rather than an omission (August 2026).** Participation is per-(person, branch) and rides the
+ * assignment — `PersonAssignment` below is that shape — but this declaration is pinned to
+ * `permissions.ts`'s `RoleAssignment` by the tripwire underneath, and `RoleAssignment` is `can()`'s
+ * subject. `11-F22`'s *"the authorization subject reads the status too"* is the plan's **step 2b**,
+ * which lands on both planes in one change; adding the field here would half-land it, because a
+ * matrix that carries a status nothing reads is the shape that later gets read by accident.
  */
 const RoleAssignmentWire = z.object({
   role: z.enum(ROLES),
@@ -325,6 +333,59 @@ type _RoleAssignmentAgrees =
     : never;
 const _roleAssignmentAgrees: _RoleAssignmentAgrees = true;
 void _roleAssignmentAgrees;
+
+/**
+ * `11-F22` — a person's PARTICIPATION status, closed at two (founder ruling R26).
+ *
+ * `active | inactive`, and the set is closed for `ORG_STATUSES`' reason one level down: a wider
+ * vocabulary (`suspended`, `on_leave`, `probation`) is org policy nobody has ruled, and inventing
+ * one here would be inventing policy (commandment 2). The two members answer the one question the
+ * FR asks — *may she act* — and `11-F22` separates that from *does she render*, which is
+ * unconditional: a departed cashier's name still resolves on last month's orders, so her record is
+ * retained and marked rather than deleted (`11-F20`: "a person record is never deleted").
+ *
+ * ⚠ **It is REQUIRED and there is deliberately no default.** `01-F75` makes the field required at
+ * the writer "so nothing on the wire lacks it", and `11-F22` refuses the default by name — an
+ * absent status is "not a licence to default an absent status to `active`". A default here would
+ * be the one place a status could be invented for a person nobody classified.
+ */
+export const PERSON_STATUSES = ["active", "inactive"] as const;
+export type PersonStatus = (typeof PERSON_STATUSES)[number];
+
+/**
+ * `11-F22` — `01-F26`'s assignment **with the participation status on it**, which is where the FR
+ * puts it: *"participation is carried where `01-F26` already carries the relationship — with the
+ * ASSIGNMENT"*.
+ *
+ * ⚠ **PER-(PERSON, BRANCH), AND THE FIRST BUILD PUT IT ON THE PERSON ROW.** `11-F22` carried both
+ * readings — its heading says *"a PERSON RECORD carries a participation status"* and its transfer
+ * clause requires a cashier moving A→B to be *"`inactive` in A's roster and `active` in B's at the
+ * same moment"* — and the FR now states the transfer clause as the operative one. A single column
+ * cannot hold two answers, and the cost was measured on the build that tried: deactivating her at A
+ * destroyed the credential B's artifact needs (`11-F23`'s *"`active` member with no hash"*), and any
+ * later republish at A re-copied her CURRENT status and **returned a departed cashier to `active`
+ * with a working PIN hash on her old branch's tills**.
+ *
+ * **The person record is still where participation LIVES** — that is how the heading is now to be
+ * read — so this stays a field of `PersonRecord` below rather than a second table.
+ *
+ * **It does NOT travel on `01-F75`'s wire row.** That row declares exactly one `status`, and
+ * `01-F76` already makes the staff artifact branch-scoped, so an entry's single `status` **is** that
+ * branch's participation. A per-assignment status on the wire would be two representations of one
+ * fact with nothing ruling which wins — `11-F20`'s "ONE name, not one per plane" argument on a
+ * different field.
+ */
+export const PersonAssignment = RoleAssignmentWire.extend({
+  status: z.enum(PERSON_STATUSES, {
+    error:
+      "11-F22: an assignment carries the person's participation status at that location and the " +
+      "set is closed at `active` | `inactive`. An ABSENT status is refused rather than defaulted " +
+      "to `active` (01-F75 makes the field required at the writer, so nothing on the wire lacks " +
+      "it), and the status is required PER ASSIGNMENT — a transfer is `inactive` at one branch " +
+      "and `active` at another at the same moment, which no single per-person value can express.",
+  }),
+});
+export type PersonAssignmentT = z.infer<typeof PersonAssignment>;
 
 /**
  * `11-F20` — the PERSON record: the required minimum, and no more.
@@ -371,7 +432,18 @@ export const PersonRecord = z.object({
   user_id: Id,
   org_id: Id,
   display_name: DisplayName,
-  assignments: z.array(RoleAssignmentWire),
+  /**
+   * `01-F26`'s per-location pairs, each carrying `11-F22`'s participation status at that location.
+   *
+   * **The status is required and has no default** — `01-F75` makes the field required at the writer
+   * "so nothing on the wire lacks it", and `11-F22` refuses the default by name ("not a licence to
+   * default an absent status to `active`"). **The message names the FR because the refusal IS the
+   * enforcement:** `services/sync-gateway/src/schema.ts` deliberately carries no CHECK for a closed
+   * set, so this parse is the only thing between a mistyped word and a person nothing can classify,
+   * and a refusal an operator cannot act on is the failure `insertUser`'s own doc comment already
+   * names about "duplicate key value violates unique constraint".
+   */
+  assignments: z.array(PersonAssignment),
   grid_ordinal: z.number().int().nonnegative(),
 });
 export type PersonRecordT = z.infer<typeof PersonRecord>;

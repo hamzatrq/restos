@@ -27,7 +27,27 @@ export type UserRecord = {
    * `AuthSubject` carries a single `org_id`, so one is what this store can honestly hold.
    */
   readonly org_id: string;
-  readonly email: string;
+  /**
+   * **NULL for a till-only person** (founder ruling R30, `11-F20`). Email is required only for
+   * BACK-OFFICE access; a cashier who only ever unlocks a till has `11-F21`'s PIN as her working
+   * credential, and an owner made to invent an address puts a wrong one permanently into a
+   * directory `11-F20` never deletes from. `kernel.users.email` is nullable for that reason
+   * (`0012`).
+   *
+   * ⚠ **It is `string | null` and never `String(row.email)`.** `String(null)` is the four-letter
+   * string `"null"`, which reads as an address, satisfies every type check, and is the exact shape
+   * a till-only person must not acquire on the way out of a reader.
+   *
+   * ⚠ **THIS PARAGRAPH SAID THE GATEWAY'S `listUsers` "WAS ALREADY CORRECT" WHILE
+   * `users-postgres.ts` "SHIPPED THAT BUG FOR ONE ROUND", AND BOTH HALVES WERE FALSE.**
+   * `git show HEAD:services/sync-gateway/src/tenancy.ts` is `email: String(row.email)`; the two
+   * readers carried the identical defect and were repaired in one uncommitted change, so no
+   * committed state ever had one right and the other wrong. Kept as a correction rather than
+   * deleted, because it is the third round running in which a repair introduced a new false comment
+   * about the thing it was repairing — and a comment asserting that a neighbouring reader is
+   * already correct is exactly the sentence that stops the next session from checking.
+   */
+  readonly email: string | null;
   /**
    * `11-F20` — the person's name, and `21-F15`'s only permitted value in a person's name slot.
    *
@@ -75,7 +95,14 @@ const fold = (email: string): string => email.trim().toLowerCase();
  */
 export const createMemoryUserStore = (seed: readonly UserRecord[]): UserStore => {
   const byId = new Map<string, UserRecord>(seed.map((user) => [user.user_id, user]));
-  const idByEmail = new Map<string, string>(seed.map((user) => [fold(user.email), user.user_id]));
+  // A person with no email (R30) is absent from the login index rather than indexed under some
+  // stand-in: she has no back-office credential to look up, and `""` or `"null"` would be a key a
+  // caller could type. `findByEmail` then answers `null` for her, which is what it means.
+  const idByEmail = new Map<string, string>(
+    seed.flatMap((user) =>
+      user.email === null ? [] : [[fold(user.email), user.user_id] as const],
+    ),
+  );
 
   return {
     findByEmail: async (email) => byId.get(idByEmail.get(fold(email)) ?? "") ?? null,

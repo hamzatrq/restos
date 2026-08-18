@@ -74,15 +74,47 @@ const toRecord = (row: Record<string, unknown>): UserRecord => {
     user_id: String(row.user_id),
     org_id: String(row.org_id),
     display_name: String(row.display_name),
-    // `assignments` is `jsonb`, so the driver hands back the parsed value; `RoleAssignmentWire`
-    // is what judges it, in `domain`, against `ROLES`.
+    /**
+     * `assignments` is `jsonb`, so the driver hands back the parsed value; `PersonAssignment` is
+     * what judges it, in `domain`, against `ROLES` — and since `0012` each element also carries
+     * `11-F22`'s participation status at that location.
+     *
+     * ⚠ **NO COLUMN WAS ADDED TO THIS SELECT FOR `11-F22`, AND THE FIRST BUILD ADDED ONE.** It
+     * read a `users.status` column and passed it up, because the FR's heading reads per-person;
+     * the FR's transfer clause — *"`inactive` in A's roster and `active` in B's at the same
+     * moment"* — is the operative one, so participation rides the assignment and this reader gains
+     * nothing. The hazard the deleted comment named is still real and is worth keeping in the
+     * shape it now takes: `PersonRecord.parse` takes `unknown`, so a row whose assignments were
+     * written before `0012`'s backfill throws a `ZodError` here rather than failing a typecheck.
+     * That is the standing cost of being a second reader of one declaration.
+     *
+     * ⚠ **NOTHING DOWNSTREAM READS THE STATUS YET, and that is a recorded debt rather than an
+     * oversight.** `UserRecord` and `AuthSubject` carry no status, so `11-F22`'s *"the
+     * authorization subject reads the status too"* is NOT enforced on this plane. Closing it is
+     * the plan's step 2b (`plans/saas-pivot/staff-over-the-wire.md`), which lands on both planes
+     * in one change precisely so half the product does not enforce while half does not.
+     */
     assignments: row.assignments,
     grid_ordinal: Number(row.grid_ordinal),
   });
   return {
     user_id: person.user_id,
     org_id: person.org_id,
-    email: String(row.email),
+    // **A NULL EMAIL STAYS NULL** (R30, `11-F20`). `0012` relaxes `kernel.users.email` to NULLABLE
+    // for a till-only cashier, and `String(null)` is the four-letter string `"null"`, which reads as
+    // an address, survives every type check, and would then be what `whoami` and every back-office
+    // surface believed her address to be.
+    //
+    // ⚠ **THIS COMMENT CLAIMED THE GATEWAY'S `listUsers` "ALREADY CARRIED THE NULL THROUGH" AND
+    // THAT WAS FALSE WHEN WRITTEN.** `git show HEAD:services/sync-gateway/src/tenancy.ts` is
+    // `email: String(row.email)` — the identical defect, one service over, repaired in the same
+    // uncommitted change as this line. There is no commit in which one reader was right and the
+    // other lagged. The correction matters more than the fact: the false sentence was written *by*
+    // the repair, in the same paragraph as a true one, and it would have sent the next reader to
+    // the gateway to copy a fix that was not there. `0011`'s "ONE WRITER, TWO READERS" is the
+    // standing cost — **both** readers move together, and a column relaxed in a migration is a
+    // sweep of every reader of that column, not of the one that surfaced the bug.
+    email: row.email === null ? null : String(row.email),
     display_name: person.display_name,
     password_hash: String(row.password_hash),
     assignments: person.assignments,

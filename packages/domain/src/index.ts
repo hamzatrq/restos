@@ -141,6 +141,10 @@ export {
   OrgRecord,
   type OrgRecordT,
   type OrgStatus,
+  PERSON_STATUSES,
+  PersonAssignment,
+  type PersonAssignmentT,
   PersonRecord,
   type PersonRecordT,
+  type PersonStatus,
 } from "./tenancy.js";
