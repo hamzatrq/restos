@@ -1299,4 +1299,668 @@ describe("§H — two concurrent writes in one org both land (probe)", () => {
         "the losing write's stale array still held an `active` assignment (11-F23)",
     ).toBe(0);
   });
+
+  /**
+   * ⚠ **`setAssignments` × `deactivate` — THE PAIR THE TEST ABOVE DOES NOT COVER, AND THE ONE WHERE
+   * THE TWO WRITERS ARE DIFFERENT FUNCTIONS.**
+   *
+   * The test above fires two `setUserStatus` calls. They share one writer and therefore one reading
+   * of how her `assignments` jsonb must be taken, so it can only ever prove that that writer is
+   * consistent with itself. `14-F14` puts a SECOND writer on the same value — "role × per-location
+   * assignment" is an editable fact and `/internal/users/assignments` is where it is edited — and a
+   * lock protecting a value protects nothing unless EVERY writer of that value holds it for as long
+   * as it takes to read-modify-write. One writer holding the row and another releasing it after its
+   * read is a lost update with a `200` on it.
+   *
+   * ⚠ **THE RE-ASSIGNMENT MUST DROP A BRANCH, AND THAT IS NOT AN ARBITRARY FIXTURE CHOICE — IT IS
+   * WHAT MAKES THE ACT MULTI-STEP IN THE FIRST PLACE.** `01-F78` half one leaves a departing
+   * branch's artifact publishable only while she still reaches it, and `11-F23`'s transfer clause
+   * forbids the obvious order outright: R32 deletes the credential when she stops being `active`
+   * **everywhere**, so an implementation that deactivated her at the branch she is leaving before
+   * the branch she is joining exists would pass through that state and destroy the PIN a cashier
+   * who never left the company still needs. A correct writer therefore cannot do this in one
+   * statement — and every writer that spans several has a window between reading her assignments
+   * and writing them back. A re-assignment that only ADDS is a single write with no window at all,
+   * and a suite built on one cannot see this defect (measured: that fixture passes).
+   *
+   * The fixture is therefore two owners in two browser tabs, which `14-F14` puts on one screen: one
+   * moves her off branch A, the other lets her go at branch B. Both acts are legal, both answer
+   * 200, and under EVERY serialization the end state is the SAME one — which is what makes this
+   * assertable at all rather than a race between two defensible answers:
+   *
+   *   · re-assignment first — she holds `[B active]`, then B goes inactive; she is now inactive
+   *     everywhere, so R32 takes the credential.
+   *   · deactivation first — she holds `[A active, B INACTIVE]`, then the re-assignment drops A.
+   *     It states no participation, because the route carries none (`{role, branch_id}`), so B's
+   *     `inactive` is hers to keep: `11-F22` requires a cashier to be "`inactive` in A's roster and
+   *     `active` in B's **at the same moment**", and an assignment edit that reset participation to
+   *     `active` would make that state unmaintainable — every later edit would "silently return a
+   *     departed cashier to `active` with a working PIN hash on her old branch's tills", which
+   *     `11-F22` names as "the state this FR exists to forbid". Dropping A then takes her last
+   *     `active` assignment with it, so R32 takes the credential here too.
+   *
+   * Both orders: `[{cashier, B, inactive}]`, no credential, and B's tills told she is inactive.
+   *
+   * ⚠ **THE DEACTIVATION'S STATUS CODE IS DELIBERATELY NOT ASSERTED, AND THAT IS A MEASUREMENT
+   * RATHER THAN A CONCESSION.** Measured on a defective build and on a correct one, it comes back
+   * `200` on some runs and `400` on others: its own write commits either way, and its publish is
+   * then refused at a branch the concurrent re-assignment has meanwhile taken her out of. Which of
+   * the two a given implementation produces turns on where it puts that check and how it classes
+   * the throw — `refusedByTheWriter`'s header records why even `< 500` cannot be asserted of a
+   * refusal here — and this file's contract already declines to pin whether a status write and its
+   * publish share one transaction. Pinning the pair would therefore red a CORRECT implementation on
+   * roughly half its runs, which is as damaging as asserting nothing. So the ANSWER is left alone
+   * and the EFFECT is asserted, and the effect is the same under every serialization.
+   *
+   * ⚠ **REPORTED RATHER THAN ASSERTED, because it is a third claim and not this pair's:** a
+   * deactivation that answers `400` after its own write has committed tells an owner her cashier
+   * was not let go while she was, and the sentence it answers with names a branch the owner never
+   * mentioned. That belongs to the session that owns the writer.
+   *
+   * ⚠ **THE TWO REQUESTS ARE FIRED IN ORDER AGAINST THE BARRIER, NOT TOGETHER, AND THAT IS
+   * LOAD-BEARING.** Postgres queues waiters FIFO, so firing the re-assignment first and proving it
+   * is waiting BEFORE the deactivation is fired puts the deactivation *inside* the re-assignment's
+   * read→write window rather than at one side of it by luck. Fired together, the same pair resolves
+   * benignly whenever the deactivation happens to win the row, and a red would be a coin toss
+   * rather than evidence. The waiting proof walks the blocking closure TRANSITIVELY for the reason
+   * the test above records: the second waiter queues behind the first WAITER, not behind the holder.
+   *
+   * ⚠ It deliberately asserts nothing about the ROLE the deactivation sees or the branch the
+   * re-assignment publishes: the claim is that neither write is lost, not that either act observed
+   * the other.
+   */
+  it("a RE-ASSIGNMENT concurrent with a DEACTIVATION loses neither write (14-F14, 11-F22)", async () => {
+    const PIN = "5309";
+    const org = await freshOrg();
+    const { user_id } = await mustCreate({
+      org_id: org.org_id,
+      display_name: "Two Tabs",
+      email: null,
+      assignments: [
+        { role: "cashier", branch_id: org.branchA },
+        { role: "cashier", branch_id: org.branchB },
+      ],
+    });
+    await setPinOverHttp({ org_id: org.org_id, user_id, pin_hash: await hashPin(PIN) });
+
+    /** Both answers, carried into every message below — see the note on the deactivation's code. */
+    let answered = "neither request answered";
+    const barrier = openDb();
+    let lift = (): void => {};
+    const lifted = new Promise<void>((resolve) => {
+      lift = resolve;
+    });
+    let holding: Promise<void> = Promise.resolve();
+    const blockedBy = await new Promise<number>((engaged, failed) => {
+      holding = barrier.transaction(async (tx) => {
+        const backend = [...(await tx.execute(sql`select pg_backend_pid() as pid`))][0];
+        await tx.execute(
+          sql`select 1 from kernel.users
+              where org_id = ${org.org_id} and user_id = ${user_id}
+              for update`,
+        );
+        engaged(Number(backend?.pid));
+        await lifted;
+      });
+      holding.catch(failed);
+    });
+
+    /** Backends stalled on the barrier's transaction, transitively — see the note above. */
+    const waitingOnTheBarrier = async (): Promise<number> => {
+      const rows = await db.execute(
+        sql`with recursive stalled(pid) as (
+              select pid from pg_stat_activity
+               where ${blockedBy}::int = any(pg_blocking_pids(pid))
+              union
+              select waiter.pid from pg_stat_activity waiter, stalled
+               where stalled.pid = any(pg_blocking_pids(waiter.pid))
+            )
+            select count(*)::int as waiting from stalled`,
+      );
+      return Number([...rows][0]?.waiting ?? 0);
+    };
+    const untilWaiting = async (count: number, what: string): Promise<void> => {
+      const giveUpAt = Date.now() + 15_000;
+      while ((await waitingOnTheBarrier()) < count) {
+        if (Date.now() > giveUpAt) {
+          throw new Error(
+            `the barrier never engaged: ${what} — fewer than ${count} backend(s) are waiting on ` +
+              "the row lock this fixture holds, so the two writes were never concurrent and every " +
+              "assertion below would pass against a writer that holds no lock at all",
+          );
+        }
+        await new Promise((tick) => setTimeout(tick, 25));
+      }
+    };
+
+    try {
+      const reassignment = setAssignmentsOverHttp({
+        org_id: org.org_id,
+        user_id,
+        assignments: [{ role: "cashier", branch_id: org.branchB }],
+      });
+      reassignment.catch(() => undefined);
+      await untilWaiting(1, "the re-assignment never reached her row");
+
+      const departure = setStatusOverHttp({
+        org_id: org.org_id,
+        user_id,
+        branch_id: org.branchB,
+        status: "inactive",
+      });
+      departure.catch(() => undefined);
+      await untilWaiting(2, "the deactivation never queued behind the re-assignment");
+
+      lift();
+      const [reassigned, departed] = await Promise.all([reassignment, departure]);
+      answered = `re-assignment ${reassigned.status}, deactivation ${departed.status}`;
+      // The re-assignment IS asserted: it is refusable only for a person, an org or a branch this
+      // fixture holds correct, and it is the request whose write the assertions below are about.
+      expect(
+        reassigned.status,
+        `the re-assignment answered ${reassigned.status} ${JSON.stringify(reassigned.body)} — a ` +
+          "refusal here is this act being told about the other's write, and a 500 carrying 40P01 " +
+          "is a deadlock between the two writers",
+      ).toBe(200);
+    } finally {
+      lift();
+      await holding;
+      await closeDb(barrier);
+    }
+
+    const person = (await listUsers(db, org.org_id)).find((row) => row.user_id === user_id);
+    expect(
+      person?.assignments,
+      `(${answered}) the re-assignment wrote back a copy of her assignments taken BEFORE the ` +
+        "deactivation committed, so a departure whose write LANDED was overwritten back to " +
+        "`active`. It is not only a stale word: `11-F22` has the AUTHORIZATION SUBJECT read this " +
+        "status, so a person the product says it let go goes on authorizing writes into an " +
+        "append-only ledger (01-F1)",
+    ).toEqual([{ role: "cashier", branch_id: org.branchB, status: "inactive" }]);
+
+    // R32 fires under both orders here — she ends `inactive` everywhere — so this is deterministic
+    // rather than a race between two legal outcomes, and it is the state the artifact must match.
+    expect(
+      await credentialRows(org.org_id, user_id),
+      `(${answered}) she is inactive everywhere and her credential outlived her employment ` +
+        "(R32, 11-F23)",
+    ).toBe(0);
+
+    // …and what a till at branch B is told, which is the half `11-F21` and `01-F48` care about: an
+    // `active` row whose credential has been deleted is `11-F23`'s named defect — a tile that
+    // renders, cannot be unlocked, and whose subject still authorizes (`01-F17`, `11-F22`).
+    const atB = await entryFor(org.org_id, org.branchB, user_id);
+    expect(atB?.status, `(${answered}) branch B's tills were never told she left`).toBe("inactive");
+    expect(Object.hasOwn(atB as object, "pin_hash")).toBe(false);
+    expect(
+      typeof atB?.pin_hash === "string" ? await verifyPin(atB.pin_hash as string, PIN) : false,
+      `(${answered}) branch B still serves a hash that unlocks its tills for a departed cashier ` +
+        "(11-F21, R25)",
+    ).toBe(false);
+  });
+});
+
+// ── §I — 01-F78 half one from the other side: an ORG-WIDE assignment is WITHDRAWN ─────────────
+
+describe("§I — withdrawing an org-wide assignment repairs every branch it reached (01-F78)", () => {
+  /**
+   * ⚠ **§E's re-assignment test covers a TWO-BRANCH person dropping ONE branch. This section covers
+   * the assignment `01-F78` half one singles out — `01-F26`'s org-wide one, `branch_id: null` — and
+   * the two are not the same case.**
+   *
+   * `01-F78` half one: a branch roster holds "every person holding an assignment that REACHES this
+   * branch … her own-branch assignments plus `01-F26`'s org-wide ones (`branch_id: null`), which is
+   * how an owner holds Appendix A's 'everything' and therefore how she unlocks a till at a branch
+   * she does not staff". So ONE row puts her in EVERY branch's artifact, and withdrawing that row
+   * takes her out of EVERY one: a fan-out of N artifacts from a single-row edit, where §E's case is
+   * a fan-out of one. §F already asserts the arrival half ("an ORG-WIDE person moves EVERY branch's
+   * version"); nothing asserts the departure half, and an implementation that republishes the
+   * branches NAMED in the assignment set gets the arrival right and has nothing to name here.
+   *
+   * ⚠ **Why it is its own section and not a fixture variation on §E: the repair is a PUBLISH at a
+   * branch she has just stopped reaching.** `publishStaffRoster` refuses a person no assignment of
+   * whose reaches the branch being published (`01-F78` half one, again), so the branch that most
+   * needs the correction is the one the publisher can no longer be asked to write — and when the
+   * withdrawal leaves her reaching nothing at all, that is true of every branch at once. R25's
+   * sentence is what is at stake: the roster was made branch-scoped so that its scope IS the
+   * credential blast radius, and an artifact that goes on serving an `active` row with a live
+   * Argon2id hash for a person who may no longer act there spends that purchase permanently. It is
+   * `01-F48`'s posture on the identity path — "an eviction the device never learns of is not a
+   * refusal" — arriving through an assignment edit instead of a deactivation.
+   *
+   * Both legal repairs pass, exactly as §E names them: she may leave the artifact, or she may stay
+   * in it marked `inactive` for `11-F20`'s rendering. What may not happen is the third shape — an
+   * `active` row a device will accept a PIN against.
+   */
+  const PIN = "6207";
+
+  /** A person whose ONLY assignment is org-wide, with the precondition ASSERTED, not assumed. */
+  const orgWideOwner = async (): Promise<{ org: Org; user_id: string }> => {
+    const org = await freshOrg();
+    const { user_id } = await mustCreate({
+      org_id: org.org_id,
+      display_name: "Ayesha Khan",
+      // Unique per call: `users_email_lower_uq` is GLOBAL and case-folded (`0011`, R30), so a fixed
+      // address in a fixture two tests share refuses the second create — a fixture failure that
+      // reads like a policy refusal.
+      email: `ayesha-org-wide-${newId()}@example.test`,
+      assignments: [{ role: "owner", branch_id: null }],
+    });
+    await setPinOverHttp({ org_id: org.org_id, user_id, pin_hash: await hashPin(PIN) });
+    // Without this, every assertion below passes against a person who was never in either artifact
+    // — the round-3 law's "a guard that was never pointed at the dangerous case", on a fixture
+    // whose whole point is the state the withdrawal has to undo.
+    for (const branch_id of [org.branchA, org.branchB]) {
+      const entry = await entryFor(org.org_id, branch_id, user_id);
+      expect(
+        entry?.status,
+        `she is not active at ${branch_id} BEFORE the withdrawal — 01-F78 half one puts an ` +
+          "org-wide assignee in every branch's artifact, and this section is about removing her",
+      ).toBe("active");
+      expect(await verifyPin(entry?.pin_hash as string, PIN)).toBe(true);
+    }
+    return { org, user_id };
+  };
+
+  /** The one shape no reading of `01-F78` permits: served where she cannot act, with a live hash. */
+  const noLongerServedAt = async (org: Org, branch_id: string, user_id: string): Promise<void> => {
+    const entry = await entryFor(org.org_id, branch_id, user_id);
+    const served = entry?.pin_hash;
+    expect(
+      typeof served === "string" ? await verifyPin(served, PIN) : false,
+      `branch ${branch_id}'s artifact still serves a hash that unlocks a till she can no longer ` +
+        "act at — 01-F76/R25 make the artifact's scope the credential blast radius, and this " +
+        "leaves the credential inside a scope she has left (11-F21)",
+    ).toBe(false);
+    if (entry !== undefined) {
+      // She may stay for `11-F20`'s rendering — but only as `11-F22`'s marked entry. An `active`
+      // row is the artifact claiming she may act here, which is what `01-F78` half one decides she
+      // may not, and `11-F21` then requires a hash on it.
+      expect(
+        entry.status,
+        `branch ${branch_id} still serves her as ACTIVE after her only reaching assignment was ` +
+          "withdrawn — 01-F78 half one puts in a branch roster exactly the people who can act there",
+      ).toBe("inactive");
+      expect(Object.hasOwn(entry, "pin_hash")).toBe(false);
+    }
+  };
+
+  it("withdrawn to ONE branch: the branches it no longer reaches stop serving her", async () => {
+    const { org, user_id } = await orgWideOwner();
+    const beforeB = await staffVersion(db, { org_id: org.org_id, branch_id: org.branchB });
+
+    const reply = await setAssignmentsOverHttp({
+      org_id: org.org_id,
+      user_id,
+      assignments: [{ role: "cashier", branch_id: org.branchA }],
+    });
+    expect(reply.status, JSON.stringify(reply.body)).toBe(200);
+
+    // A IS THE CONTROL, and without it this test is also satisfied by a writer that drops her
+    // everywhere: she still works at A, so A must still hold her with a credential that verifies.
+    const atA = await entryFor(org.org_id, org.branchA, user_id);
+    expect(atA?.status, "she vanished from the branch she still works at").toBe("active");
+    expect(await verifyPin(atA?.pin_hash as string, PIN)).toBe(true);
+
+    await noLongerServedAt(org, org.branchB, user_id);
+    expect(
+      await staffVersion(db, { org_id: org.org_id, branch_id: org.branchB }),
+      "branch B's artifact changed — she left it — and its version did not move, so no device " +
+        "will ever fetch the correction: hello_ack reconciles per key by VERSION (01-F75's " +
+        "producer clause, 01-F77)",
+    ).toBeGreaterThan(beforeB);
+  });
+
+  it("withdrawn ENTIRELY: she reaches no branch, and no branch may keep her credential", async () => {
+    // The case `publishStaffRoster` cannot be asked to repair: after this act no branch's people
+    // set contains her, so "republish the branches she reaches" reaches nothing. `11-F20` keeps the
+    // person record either way, which is the other half asserted below.
+    const { org, user_id } = await orgWideOwner();
+
+    const reply = await setAssignmentsOverHttp({ org_id: org.org_id, user_id, assignments: [] });
+    if (reply.status !== 200) {
+      // ⚠ Whether a person may hold NO assignment at all is not decided by the corpus — `01-F26`
+      // gives the axis and nothing makes one mandatory — so a refusal is legal and is NOT asserted
+      // against. What a refusal may not be is PARTIAL: it wrote nothing, so she still reaches both
+      // branches and both artifacts are still correct about her.
+      refusedByTheWriter(reply, "withdrawing every assignment a person holds (01-F26)");
+      const stored = (await listUsers(db, org.org_id)).find((row) => row.user_id === user_id);
+      expect(stored?.assignments).toEqual([{ role: "owner", branch_id: null, status: "active" }]);
+      for (const branch_id of [org.branchA, org.branchB]) {
+        const entry = await entryFor(org.org_id, branch_id, user_id);
+        expect(entry?.status, `${branch_id} changed under a refused write`).toBe("active");
+        expect(await verifyPin(entry?.pin_hash as string, PIN)).toBe(true);
+      }
+      return;
+    }
+
+    for (const branch_id of [org.branchA, org.branchB]) {
+      await noLongerServedAt(org, branch_id, user_id);
+    }
+    // `11-F20`: "a person record is never deleted" — the assertion that stops this being satisfied
+    // by erasing her, and `14-F14`'s historical attribution depends on it.
+    const still = (await listUsers(db, org.org_id)).find((row) => row.user_id === user_id);
+    expect(still?.display_name).toBe("Ayesha Khan");
+  });
+});
+
+// ── §J — ONE PERSON, TWO ROLES, ONE BRANCH ────────────────────────────────────────────────────
+
+/**
+ * ⚠ **EVERY FIXTURE ABOVE GIVES A PERSON AT MOST ONE ASSIGNMENT PER BRANCH, AND THAT IS A FIXTURE
+ * PROPERTY RATHER THAN A RULE OF THE CORPUS.**
+ *
+ * §E's two-branch cashier holds `cashier@A` + `cashier@B`; §H's departure holds the same; §I's
+ * owner holds one org-wide row. So every assertion in this file about *"deactivating at a branch"*
+ * has been measured against a person for whom **one** assignment names that branch — and on that
+ * fixture "flip the assignment naming this branch" and "flip every assignment naming this branch"
+ * are the same act, exactly as `staff-roster-storage.test.ts`'s single-assignment fixtures could
+ * not distinguish "delete at the last active assignment" from "delete on any deactivation"
+ * (`oracle-round-2-findings.md` §C's first pattern, which §E's own header names).
+ *
+ * ── WHY THE SHAPE IS LEGAL, since a section resting on an illegal fixture asserts nothing ──────
+ *
+ * `01-F26` is *"User × Role × per-location assignment"* and states no cardinality on either axis;
+ * nothing in the corpus says a person holds at most one role at a location. The matrix is built
+ * for the plural: `packages/domain/src/permissions.ts:536`'s `rolesAt` returns **`readonly Role[]`**
+ * for one location and `can`/`reportScope` each `reduce` over that list to the widest outcome, so a
+ * cashier promoted to branch manager who keeps ringing orders is a subject the shipped permission
+ * law already resolves. `14-F14`'s *"role × per-location assignment"* is one editable fact with two
+ * axes, not a pair of single-valued fields.
+ *
+ * ── THE PROPERTY, WHICH IS NOT A MECHANISM ────────────────────────────────────────────────────
+ *
+ * `11-F22`: **"THE FIELD IS THEREFORE PER-(PERSON, BRANCH)"**, and `01-F78` restates it for the
+ * artifact — *"the status a row carries is THIS branch's, per `11-F22`'s per-(person, branch)
+ * clause"*. So participation is **one fact per (person, branch)**, and where two assignments name
+ * one branch they are two CARRIERS of that one fact. `11-F22` puts the field on the assignment
+ * because a transfer needs her *"`inactive` in A's roster and `active` in B's at the same moment"*
+ * — that argument distinguishes BRANCHES, and says nothing that would let two rows naming the SAME
+ * branch disagree. Two carriers that disagree are not a per-(person, branch) field at all; they are
+ * a per-assignment field, which is the reading `11-F22` did not take.
+ *
+ * Two consequences, and both are asserted below rather than reasoned about:
+ *
+ *   (a) **After a deactivation at a branch, no assignment naming that branch is still `active`.**
+ *   (b) **R32's deletion is keyed to her being `inactive` EVERYWHERE** (`11-F23`: *"A person's
+ *       credential goes when she is `inactive` everywhere … employment ends at the org, not at a
+ *       branch"*), so a person whose every assignment names one branch, deactivated at it, is
+ *       departed and her credential is gone.
+ *
+ * ⚠ **(a) AND (b) LOOK LIKE ONE CLAIM AND ARE TWO, WHICH IS THE WHOLE REASON THIS SECTION EXISTS.**
+ * A writer may flip *one* assignment (the fact every reader projects) while deciding (b) by
+ * scanning *all* of them, and the two then disagree by construction on this fixture and on no
+ * other. The surviving `active` row is invisible to every reader — the artifact says `inactive`,
+ * the till says `inactive`, `listUsers` shows an `inactive` row beside it — and visible only to
+ * whatever decides R32, which then declines to delete a departed person's credential. That is
+ * `11-F23`'s own named end state reached with **no torn transaction, no dropped connection and no
+ * race**: *"the next re-activation then restores her OLD PIN and publishes it to every till at the
+ * branch, defeating R32's stated purpose without a single error anywhere … found by the cashier
+ * who still gets in."* The FR wrote that sentence about a process kill between two autocommits; a
+ * single-carrier flip produces it on a successful request that answers 200.
+ *
+ * ── WHAT THIS SECTION DELIBERATELY DOES NOT ASSERT (commandment 2) ────────────────────────────
+ *
+ *   · **That the writer must ACCEPT two assignments naming one branch.** It may refuse the shape —
+ *     nothing rules on it, and a refusal makes the divergence unreachable, which is a legal repair.
+ *     What a refusal may not be is PARTIAL or one-door: the fixture below therefore forms the shape
+ *     through **both** writers `14-F14` puts on this value (create, and `/internal/users/assignments`)
+ *     and fails BY NAME if a door stores something other than what it was given. A session that
+ *     narrows the create route owes the same narrowing to the assignment route and owes this
+ *     section a finding (`24 §3`) — never a weakened assertion.
+ *   · **What a withdrawal of every assignment does to the credential.** R32 keys the deletion to a
+ *     participation flip and §I already records that an empty assignment set is undecided, so the
+ *     re-hire below is reached by RE-ACTIVATION (`11-F23`'s own word) rather than by withdrawal.
+ *   · **`11-F22`'s authorization leg** — *"the authorization subject reads the status too"* — which
+ *     is the sharpest consequence of a surviving `active` row and is not enforced on either plane
+ *     yet (`AuthSubject` carries no status). Asserting it here would red a correct implementation
+ *     of THIS surface.
+ */
+describe("§J — participation is per-(person, BRANCH), not per-assignment (11-F22, 01-F78, R32)", () => {
+  const PIN = "9137";
+
+  /** Her assignments naming one branch — the carriers of that branch's single participation fact. */
+  const carriersAt = (
+    person: { assignments: readonly { role: string; branch_id: string | null; status: string }[] },
+    branch_id: string,
+  ): readonly { role: string; branch_id: string | null; status: string }[] =>
+    person.assignments.filter((assignment) => assignment.branch_id === branch_id);
+
+  const storedPerson = async (
+    org_id: string,
+    user_id: string,
+  ): Promise<{
+    assignments: readonly { role: string; branch_id: string | null; status: string }[];
+  }> => {
+    const person = (await listUsers(db, org_id)).find((row) => row.user_id === user_id);
+    if (person === undefined) {
+      throw new Error(
+        `fixture: ${user_id} is not in kernel.users at all — 11-F20 never deletes a person record, ` +
+          "so every assertion below is about a row that must exist",
+      );
+    }
+    return person;
+  };
+
+  /**
+   * The SUBJECT: one person, two roles, one branch — formed through a NAMED door and asserted to
+   * have been stored as given.
+   *
+   * ⚠ The assertion is the anti-vacuity guard and it is why the door is a parameter. Without it a
+   * writer that silently kept the first assignment, or de-duplicated by branch, would leave every
+   * assertion below measuring the CONTROL's shape under the subject's name — the round-3 law's
+   * "a guard that was never pointed at the dangerous case", with the guard aimed at a fixture that
+   * quietly stopped being the dangerous one.
+   */
+  const twoRolesAtOneBranch = async (
+    door: "create" | "assignments",
+  ): Promise<{ org: Org; user_id: string }> => {
+    const org = await freshOrg();
+    const both: readonly AssignmentInput[] = [
+      { role: "cashier", branch_id: org.branchA },
+      { role: "branch_manager", branch_id: org.branchA },
+    ];
+    const { user_id } = await mustCreate({
+      org_id: org.org_id,
+      display_name: "Two Roles One Branch",
+      email: null,
+      assignments: door === "create" ? both : [{ role: "cashier", branch_id: org.branchA }],
+    });
+    if (door === "assignments") {
+      const reply = await setAssignmentsOverHttp({
+        org_id: org.org_id,
+        user_id,
+        assignments: both,
+      });
+      expect(
+        reply.status,
+        `the assignment route refused a second role at a branch she already works at: ` +
+          `${reply.status} ${JSON.stringify(reply.body)} — 01-F26 states no cardinality and ` +
+          "permissions.ts's rolesAt returns a LIST of roles for one location, so this is a shape " +
+          "can() already resolves. A writer that refuses it makes this section's divergence " +
+          "unreachable, which is a legal repair — but it must then refuse it on the CREATE route " +
+          "too, and that is a finding for this suite's session (24 §3), never a weakened assertion",
+      ).toBe(200);
+    }
+    const person = await storedPerson(org.org_id, user_id);
+    expect(
+      carriersAt(person, org.branchA),
+      `the ${door} door did not store two assignments naming branch A — this section's whole ` +
+        "subject is a person for whom TWO rows carry ONE branch's participation fact, and a " +
+        "fixture that silently became the one-role CONTROL would pass every assertion below " +
+        "while measuring nothing. If the writer refuses the shape it must refuse it LOUDLY and " +
+        "on every door (see this section's header)",
+    ).toEqual([
+      { role: "cashier", branch_id: org.branchA, status: "active" },
+      { role: "branch_manager", branch_id: org.branchA, status: "active" },
+    ]);
+    await setPinOverHttp({ org_id: org.org_id, user_id, pin_hash: await hashPin(PIN) });
+    expect(await credentialRows(org.org_id, user_id)).toBe(1);
+    return { org, user_id };
+  };
+
+  /**
+   * The CONTROL: the same person with ONE role at the same branch.
+   *
+   * ⚠ **It matters exactly as much as the subject.** Every assertion below already passes on this
+   * fixture, so without it a red proves only that something in this section's fixture is different
+   * from §E's — not that the DIFFERENCE IS THE SHAPE. One role and two roles at one branch, the
+   * same act, the same assertions, is what makes the attribution a measurement.
+   */
+  const oneRoleAtOneBranch = async (): Promise<{ org: Org; user_id: string }> => {
+    const org = await freshOrg();
+    const { user_id } = await mustCreate({
+      org_id: org.org_id,
+      display_name: "One Role One Branch",
+      email: null,
+      assignments: [{ role: "cashier", branch_id: org.branchA }],
+    });
+    const person = await storedPerson(org.org_id, user_id);
+    expect(carriersAt(person, org.branchA)).toEqual([
+      { role: "cashier", branch_id: org.branchA, status: "active" },
+    ]);
+    await setPinOverHttp({ org_id: org.org_id, user_id, pin_hash: await hashPin(PIN) });
+    expect(await credentialRows(org.org_id, user_id)).toBe(1);
+    return { org, user_id };
+  };
+
+  /** `11-F22` + `01-F78` + R32, for a person whose every assignment names the branch she left. */
+  const departedAt = async (org: Org, user_id: string, who: string): Promise<void> => {
+    const person = await storedPerson(org.org_id, user_id);
+    const carriers = carriersAt(person, org.branchA);
+    expect(
+      carriers.filter((assignment) => assignment.status === "active"),
+      `${who}: an assignment naming branch A is still ACTIVE after she was deactivated there — ` +
+        "11-F22 makes participation per-(PERSON, BRANCH) and 01-F78 makes the artifact's status " +
+        "'THIS branch's', so two rows naming one branch are two carriers of ONE fact and cannot " +
+        `disagree. Stored: ${JSON.stringify(person.assignments)}`,
+    ).toEqual([]);
+
+    expect(
+      await credentialRows(org.org_id, user_id),
+      `${who}: she is inactive at every branch she reaches and her credential outlived her ` +
+        "employment — 11-F23/R32 key the deletion to being `inactive` EVERYWHERE, and a surviving " +
+        "`active` carrier is a departure that the deletion's own scan cannot see while every " +
+        "reader shows her gone",
+    ).toBe(0);
+
+    // Every reader agrees she has left, which is what makes a surviving carrier a DIVERGENCE and
+    // not simply a second opinion. ⚠ This half is the honest one: a writer that flips one carrier
+    // still satisfies it, because the artifact is projected from one participation answer — it is
+    // asserted as the fact the STORED state has to agree with, not as a kill.
+    const entry = await entryFor(org.org_id, org.branchA, user_id);
+    expect(entry?.status, `${who}: branch A's tills were never told she left`).toBe("inactive");
+    expect(Object.hasOwn(entry as object, "pin_hash")).toBe(false);
+  };
+
+  it("CONTROL — one role at branch A: deactivating there leaves nothing active and takes the PIN", async () => {
+    const { org, user_id } = await oneRoleAtOneBranch();
+    const reply = await setStatusOverHttp({
+      org_id: org.org_id,
+      user_id,
+      branch_id: org.branchA,
+      status: "inactive",
+    });
+    expect(reply.status, JSON.stringify(reply.body)).toBe(200);
+    await departedAt(org, user_id, "the one-role CONTROL");
+  });
+
+  it("two roles at branch A (created together): deactivating there leaves NO active carrier", async () => {
+    const { org, user_id } = await twoRolesAtOneBranch("create");
+    const reply = await setStatusOverHttp({
+      org_id: org.org_id,
+      user_id,
+      branch_id: org.branchA,
+      status: "inactive",
+    });
+    expect(reply.status, JSON.stringify(reply.body)).toBe(200);
+    await departedAt(org, user_id, "the two-role SUBJECT (create door)");
+  });
+
+  it("two roles at branch A (the SECOND role added by re-assignment): the same property", async () => {
+    // `14-F14` puts two writers on this value and §H's third test already establishes that a
+    // guarantee on one of them is not a guarantee on the value. The create door and the assignment
+    // door must leave the same stored shape, or a repair aimed at one leaves the other open —
+    // which is this repo's recorded pattern (`01-F66`: the class closed, the neighbouring case one
+    // keystroke away left open).
+    const { org, user_id } = await twoRolesAtOneBranch("assignments");
+    const reply = await setStatusOverHttp({
+      org_id: org.org_id,
+      user_id,
+      branch_id: org.branchA,
+      status: "inactive",
+    });
+    expect(reply.status, JSON.stringify(reply.body)).toBe(200);
+    await departedAt(org, user_id, "the two-role SUBJECT (assignment door)");
+  });
+
+  /**
+   * ⚠ **THE RE-HIRE IS THE CONSEQUENCE `11-F23` NAMES IN ITS OWN WORDS, AND IT IS ASSERTED ON BOTH
+   * SHAPES BECAUSE ONLY THE PAIR ATTRIBUTES IT.**
+   *
+   * R32: *"the credential row is DELETED, and the owner sets a new PIN on re-activation … A
+   * departed person's credential does not outlive her employment in the database."* `11-F23` then
+   * states the failure this buys protection against: *"the next re-activation then restores her OLD
+   * PIN and publishes it to every till at the branch, defeating R32's stated purpose without a
+   * single error anywhere."*
+   *
+   * So: deactivate, re-activate, and ask the artifact a till reconciles against whether her OLD PIN
+   * opens it. R29 makes *active with no credential* the specified window between the two steps of a
+   * re-activation, so the assertion is on the PIN and never on the presence of a hash — a hash the
+   * old PIN does not verify against would be a new one the owner set, which is R32 working.
+   */
+  const rehiredAt = async (org: Org, user_id: string, who: string): Promise<void> => {
+    const back = await setStatusOverHttp({
+      org_id: org.org_id,
+      user_id,
+      branch_id: org.branchA,
+      status: "active",
+    });
+    expect(back.status, `${who}: ${JSON.stringify(back.body)}`).toBe(200);
+
+    const entry = await entryFor(org.org_id, org.branchA, user_id);
+    // Anti-vacuity: without this, "her old PIN does not work" is satisfied by a re-activation that
+    // did nothing at all, and by a person branch A no longer serves.
+    expect(
+      entry?.status,
+      `${who}: she was re-activated at branch A and the artifact does not carry her as active, so ` +
+        "the assertion below would pass against a re-hire that never happened (01-F75's producer " +
+        "clause: the write that changes an artifact mints its next version)",
+    ).toBe("active");
+
+    const served = entry?.pin_hash;
+    expect(
+      typeof served === "string" ? await verifyPin(served, PIN) : false,
+      `${who}: her OLD PIN verifies against the hash branch A now serves to every till — R32 had ` +
+        "deleted that credential, and 11-F23 names this exact end state: 'the next re-activation " +
+        "then restores her OLD PIN and publishes it to every till at the branch, defeating R32's " +
+        "stated purpose without a single error anywhere … found by the cashier who still gets in'",
+    ).toBe(false);
+    expect(
+      await credentialRows(org.org_id, user_id),
+      `${who}: a credential row survived a departure and a re-hire (R32, 11-F23)`,
+    ).toBe(0);
+  };
+
+  it("CONTROL — one role: a re-hire at branch A does not restore her old PIN (R32)", async () => {
+    const { org, user_id } = await oneRoleAtOneBranch();
+    await setStatusOverHttp({
+      org_id: org.org_id,
+      user_id,
+      branch_id: org.branchA,
+      status: "inactive",
+    });
+    await rehiredAt(org, user_id, "the one-role CONTROL");
+  });
+
+  it("two roles: a re-hire at branch A must not restore her old PIN either (R32, 11-F23)", async () => {
+    const { org, user_id } = await twoRolesAtOneBranch("create");
+    await setStatusOverHttp({
+      org_id: org.org_id,
+      user_id,
+      branch_id: org.branchA,
+      status: "inactive",
+    });
+    await rehiredAt(org, user_id, "the two-role SUBJECT");
+  });
 });
