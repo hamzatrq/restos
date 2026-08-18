@@ -472,7 +472,9 @@ S8. ⚠ It must also add the two constraints Layer C found missing — org-scope
 `grid_ordinal`, and a writer-side check that an assignment's `branch_id` is a branch of that org —
 because `01-F61`'s ordinal and `01-F71`'s isolation both become live the moment users are writable.
 
-**Step 4 — user CRUD: gateway writer + `/internal/users*` + tRPC router + back-office screen.**
+**Step 4 — user CRUD. ⚠ SPLIT INTO 4a AND 4b (2026-08-18), because step 3 took SIX adversarial review rounds and three of the six findings were on the auth-data half.** 4a is the cloud WRITE PATH — gateway routes, the `services/api` port/adapter/router, the `user.changed` payload and its **producer**. 4b is the back-office SCREEN. They are separable, 4a is where the credentials are, and a screen riding an auth-data review is how a reviewer's attention gets spent on a tab. **⚠ AND R33's change-my-PIN surface is NOT in either half — see `14-F40`:** `01-F62` makes `user.changed` org-scoped, which means *the cloud plane is its only legitimate emitter*, so a till cannot emit it and commandment 5 forbids the till calling `services/api`. The shape is `05-F28`'s resolution (c) with the planes reversed — the till REQUESTS, the cloud RECORDS — which needs a new `packages/sync-protocol` kind, so **it lands with or after step 5**. R33 ruled it in rather than deferred, and that ruling stands; what moves is only where it can physically be built.
+
+**Step 4 (original scope, retained):**
 Changes `services/sync-gateway/src/tenancy.ts` and `publish-http.ts` (a ninth and tenth route beside
 the eight at `:260-411`), `services/api/src/` (a `UserDirectory` port + gateway adapter + router,
 copying `device-router.ts:33` / `devices.ts:98` / `gateway-client.ts:388` verbatim in shape), and
