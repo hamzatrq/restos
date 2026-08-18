@@ -22,17 +22,21 @@ import { cn } from "../lib/utils";
 import { CatalogScreen } from "./catalog-screen";
 import { DeviceList } from "./device-list";
 import { OwnerSummary } from "./owner-summary";
+import { StaffScreen } from "./staff-screen";
 
-type Section = "menu" | "devices" | "summary";
+type Section = "menu" | "devices" | "summary" | "staff";
 
 /**
  * `14-F31` APPENDED the third tab and did not reorder the first two. `27-F4`'s positional contract
  * binds muscle memory, so a new section goes after the sections that exist — never between them.
+ *
+ * `14-F14`'s staff section is the FOURTH and follows the same rule for the same reason.
  */
 const TABS: readonly { readonly id: Section; readonly label: string }[] = [
   { id: "menu", label: strings.nav.menu },
   { id: "devices", label: strings.nav.devices },
   { id: "summary", label: strings.nav.summary },
+  { id: "staff", label: strings.nav.staff },
 ];
 
 export const Workspace = (): ReactNode => {
@@ -54,10 +58,19 @@ export const Workspace = (): ReactNode => {
         own boundary and fill against a sunken track), never a fill step alone, so the selection
         survives a monochrome screenshot. `27-F4`'s positional contract is untouched: same tabs,
         same order.
+
+        ⚠ **`flex-wrap`, and it was added when the FOURTH tab landed rather than after a defect.**
+        This rail is `w-fit`, so it sizes to its labels and does not shrink: four of them are
+        ESTIMATED at ~324 px against ~328 px of usable width on a 360 px phone. That is an estimate
+        and not a measurement — `pnpm layout:check` runs the two Electron apps and nothing in this
+        repo renders this one at any width, and happy-dom performs no layout, so no gate here can
+        tell a wrapped rail from a clipped one. Appending to a non-wrapping rail is the shape worth
+        closing before it bites: the fifth tab is what makes it certain, and `27-F4` guarantees
+        there will be one.
       */}
       <nav
         aria-label={strings.appName}
-        className="flex w-fit gap-1 rounded-lg border border-border bg-muted p-1"
+        className="flex w-fit flex-wrap gap-1 rounded-lg border border-border bg-muted p-1"
       >
         {TABS.map((tab) => {
           const current = tab.id === section;
@@ -85,8 +98,10 @@ export const Workspace = (): ReactNode => {
         <CatalogScreen />
       ) : section === "devices" ? (
         <DeviceList />
-      ) : (
+      ) : section === "summary" ? (
         <OwnerSummary />
+      ) : (
+        <StaffScreen />
       )}
     </div>
   );

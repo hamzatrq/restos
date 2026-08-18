@@ -22,6 +22,31 @@ export const Input = ({ className, ...props }: ComponentProps<"input">): ReactNo
 );
 
 /**
+ * The `<select>` half of the same control, and it exists so the box is described ONCE.
+ *
+ * `21 §2`/commandment 6 is the reason this is a component rather than a shared class constant: the
+ * box's height, radius, border and type scale are one decision, and the day `27-F42`'s composite
+ * moves, a copy of the string is a control that silently stops matching the input beside it. Three
+ * copies of it were already in this app when this landed (`owner-summary.tsx`, `entry-editor.tsx`
+ * and a `SELECT_CLASS` constant in `staff-screen.tsx`) and the fourth is the one this replaces —
+ * **the other two are NOT migrated here**, because both are another session's files with their own
+ * oracles and a drive-by is what `24 §3b` forbids. They are a follow-up, named rather than taken.
+ *
+ * Deliberately NOT a listbox: a native `<select>` is what a screen reader, a keyboard and this
+ * app's own `.dom.test.tsx` suites can all drive, and `18 §7`'s floor is exactly those three.
+ */
+export const Select = ({ className, ...props }: ComponentProps<"select">): ReactNode => (
+  <select
+    className={cn(
+      "flex h-10 w-full rounded-md border border-input bg-background px-3 text-body",
+      "disabled:bg-muted disabled:text-muted-foreground",
+      className,
+    )}
+    {...props}
+  />
+);
+
+/**
  * `htmlFor` is REQUIRED, not optional — `18 §7`'s accessibility floor is "keyboard operability +
  * labels on all internal tools", and an unbound `<label>` is a decoration that reads as a label.
  *

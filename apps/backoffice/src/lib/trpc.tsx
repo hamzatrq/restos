@@ -55,6 +55,20 @@ export const isUnauthorized = (error: unknown): boolean =>
   error instanceof TRPCClientError && error.data?.code === "UNAUTHORIZED";
 
 /**
+ * `FORBIDDEN` — the matrix said no (`14-F39`, commandment 8). It lives here beside `isUnauthorized`
+ * and `refusalMessage` because **those three together** are this app's whole reading of the wire's
+ * error vocabulary, and a screen that spelled one of them itself would be a second declaration of
+ * the same fact. (⚠ This said *"the two together"* while the third was eight lines below it — the
+ * inaccuracy a reader would have taken as licence to write a fourth.)
+ *
+ * **It is not the same surface as either neighbour, and a screen that collapses them lies twice.**
+ * `UNAUTHORIZED` says the session is over (it is not); an outage says the service did not answer
+ * (it did, and it said no). Both invite a retry that will refuse identically for ever.
+ */
+export const isForbidden = (error: unknown): boolean =>
+  error instanceof TRPCClientError && error.data?.code === "FORBIDDEN";
+
+/**
  * A `FORBIDDEN` refusal's message. `services/api`'s `errorFormatter` lifts the whole `AuthDecision`
  * onto the error shape so a screen can route to an approval instead of printing "denied" — this
  * app has no approval surface, so it prints the server's sentence, which already names the action.

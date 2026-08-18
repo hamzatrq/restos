@@ -333,15 +333,17 @@ export const strings = {
   },
 
   /**
-   * The sections this app has. `14-F12`/`14-F13` gave it a second one; `14-F31` a third.
+   * The sections this app has. `14-F12`/`14-F13` gave it a second one; `14-F31` a third, and
+   * `14-F14` a fourth.
    *
-   * **Appended, never inserted.** `27-F4`'s positional contract is about muscle memory: the two
-   * tabs that existed keep their positions and their order, and the new one goes after them.
+   * **Appended, never inserted.** `27-F4`'s positional contract is about muscle memory: the tabs
+   * that existed keep their positions and their order, and the new one goes after them.
    */
   nav: {
     menu: "Menu",
     devices: "Devices",
     summary: "Summary",
+    staff: "Staff",
   },
 
   /**
@@ -513,6 +515,206 @@ export const strings = {
     /** The already-revoked answer, which claims no credit — see `device-router.ts`. */
     alreadyRevoked: "This device was already revoked; nothing changed and no actor was recorded.",
     refused: "The server refused this revocation:",
+  },
+
+  /**
+   * **`14-F14` — the roster, and the four acts an owner performs on it.**
+   *
+   * **Every sentence below is written to `14-F32`'s rule**, which the founder's review of the
+   * catalog editor produced: the editor is chosen by the JOB, not by the entity. The job here is
+   * *"put Nadia on the till at Gulberg and give her a PIN"*, so nothing here names a record, a
+   * position in a list or a participation state as a thing the owner sets. `14-F33`'s *"no control
+   * on this surface accepts an id"* is read across to this surface for the same reason.
+   *
+   * **Three of these exist because the honest answer is an absence** (`00 §5.7`), which is the same
+   * reason `devices.columnsOwed` exists one section over: nothing carries a roster change to a
+   * till today, no read serves a per-user history, and no procedure corrects a name once it is
+   * typed — so the screen says so rather than letting an owner assume her new cashier can sign in
+   * the moment this saves, or that a misspelling can be fixed later.
+   */
+  staff: {
+    heading: "Staff",
+    empty: "Nobody works here yet. Add the first person below.",
+    /**
+     * `14-F4` + `00 §5.7`. A first-class STATEMENT rather than a footnote, on the device list's
+     * precedent: `packages/sync-protocol` carries no roster message, so a change made here reaches
+     * a till only when that till next picks up its people, and this screen cannot observe when.
+     */
+    tillsOwed:
+      "RestOS cannot yet report which tills have this roster. Someone added here can sign in once " +
+      "her branch's till has picked the change up, and nothing on this screen can say when that " +
+      "happened.",
+    /**
+     * `14-F14` says *"User CRUD"* and there is no U: the four procedures this screen has are
+     * create, assign, set a PIN and deactivate, and none of them corrects a `11-F20` name or an
+     * address. `11-F20` never deletes a person either, so a misspelling renders on every order she
+     * ever rings — which makes this the one absence on this screen an owner can still act on, by
+     * reading it BEFORE she presses the control rather than after.
+     */
+    nameFixOwed:
+      "A name or an email typed here cannot be corrected afterwards — RestOS has no way to edit a " +
+      "person yet. Check the spelling before you add her, because her name shows on every order " +
+      "she rings from then on.",
+
+    /** `11-F22` — participation, per person and per place, in the owner's words. */
+    working: "Working",
+    departed: "No longer working here",
+    /** `01-F26`'s org-wide assignment, which is how an owner holds everything, not "all branches". */
+    everywhere: "the whole business",
+    /** `21-F15` — the branch by NAME. Composed with the place, so it reads on one line. */
+    roleAt: "Job at",
+    /**
+     * **`21-F15`'s stated UNNAMED treatment, and this screen's ONE site for it.**
+     *
+     * The law: *"a name slot renders the record's name … where the record has no name, the slot
+     * renders a stated unnamed treatment that says what is missing and where it is set. It never
+     * renders the identifier as though it were the name, and it is never blank."* Nothing writes
+     * the branch directory in any deployment, so this is what every place on this screen reads
+     * today — not an edge case.
+     *
+     * Short on purpose: it is composed into a control's name (*"Deactivate at an unnamed
+     * branch"*), and a control whose name runs to a sentence is the a11y regression this app
+     * already records from the apply-when row.
+     */
+    branchUnnamed: "an unnamed branch",
+    /**
+     * `21-F15` exception (b) — *"a secondary, explicitly labelled technical id offered for support
+     * beside a name"*. Two unnamed branches must be tellable apart, and the key is how; the
+     * exception's condition is that it is LABELLED and never occupies the name slot, which is why
+     * the label and the value render as one demoted caption beside the treatment above.
+     */
+    branchReference: "Branch reference",
+    /**
+     * `21-F15`'s counterpart half — *"an unnamed record is a missing field upstream, so the fix is
+     * the required field on the record, never a prettier fallback"*. A treatment that says only
+     * *unnamed* has retired the question; this says where the name is set, so it stays filed.
+     * `14-F38`'s rule for something the owner cannot change herself: name the ROLE that can.
+     */
+    branchNamesOwed:
+      "Whoever set up RestOS for you gives each branch its name. Until that is done a branch " +
+      "reads here as unnamed, with its reference beside it so two of them can be told apart.",
+
+    add: "Add a person",
+    /** `14-F14`'s "role × per-location assignment", named as the job it does. */
+    edit: "Edit where she works",
+    save: "Save",
+    saving: "Saving…",
+    cancel: "Cancel",
+
+    /** `01-F26`'s four roles, in the owner's vocabulary — the internal tokens never render. */
+    roles: {
+      cashier: "Cashier",
+      branchManager: "Branch manager",
+      storekeeper: "Storekeeper",
+      owner: "Owner",
+    },
+
+    name: "Name",
+    nameHelp:
+      "What everyone calls her. It is the name on her tile at the till and on every order she " +
+      "rings, so type it the way she is actually addressed.",
+    /**
+     * R30 — *"a cashier who only uses the till needs no email; email is required only for
+     * back-office access."* The help says the field is optional in the owner's terms, because an
+     * owner made to invent one puts a wrong address permanently into a record nothing deletes.
+     */
+    email: "Email",
+    emailHelp:
+      "Only needed if she signs in to the back office on a computer. Someone who only uses the " +
+      "till needs none at all, so leave this blank for her.",
+    role: "Job",
+    roleHelp:
+      "What she is allowed to do. A cashier rings up orders; a branch manager also approves and " +
+      "reads her branch's figures; an owner can do everything, everywhere.",
+    branch: "Branch",
+    branchHelp:
+      "Where she works. She signs in at that branch's tills and at no others, so pick the one she " +
+      "actually stands in.",
+    /**
+     * The state every business is in until its branches are set up. `14-F38`'s rule for something
+     * the owner cannot change herself: name the ROLE that can, never the mechanism — and `00 §5.7`
+     * still binds, so it says plainly that nobody can be added yet.
+     */
+    branchEmpty:
+      "No branch has been set up yet, so there is nowhere to put her and nobody can be added. " +
+      "Whoever set up RestOS for you has to add at least one branch first.",
+    chooseOne: "Choose one",
+    /**
+     * R29 — the owner types the first PIN and tells her. `14-F14` says a PIN is never displayed,
+     * so the box masks what is typed and nothing anywhere reads one back.
+     */
+    pin: "PIN",
+    pinHelp:
+      "The digits she taps to sign in at the till. You choose it here and tell her; it is never " +
+      "shown again anywhere, so set a new one if she forgets it.",
+
+    /**
+     * `14-F14`'s *"PIN set/reset"* — the RESET half, which the server has always had (its own act
+     * is named for it) and this screen did not. It is also the only way out of the partial hire
+     * below once that task is closed: a person who exists with no credential is `11-F23`'s tile
+     * that cannot be unlocked, and R32 requires the skipped step to be finishable rather than
+     * merely legible.
+     */
+    resetPin: "Set a new PIN",
+    newPin: "New PIN",
+    newPinHelp:
+      "The digits she taps to sign in at the till from now on. Tell her yourself; the PIN she has " +
+      "today stops working the moment this saves, and no PIN is ever shown back to you.",
+
+    /**
+     * `14-F37`'s shape, applied to a hire: the commit control is not disabled, and on press it
+     * names everything that is missing. `11-F23`/R32 is why the PIN is on that list — an active
+     * person with no credential is a tile that cannot be unlocked, and the skipped step has to
+     * fail legibly rather than silently.
+     */
+    incomplete: "She cannot be added yet:",
+    needName: "type the name she is known by",
+    needRole: "choose the job she does",
+    needBranch: "choose the branch she works at",
+    needPin: "choose the PIN she will use to sign in at the till",
+    /** A refusal from the server is the owner's business, and it names the cell (`14-F38`). */
+    refused: "The server refused this change:",
+    /**
+     * **A hire is TWO writes and the instant between them is a state an owner can be left in.**
+     * The person exists the moment the first one answers; `11-F20` never deletes her, so a screen
+     * that reported the whole act as failed would be false (`00 §5.7`) — and the false report is
+     * the MECHANISM of the damage, because the only sane response to *"it failed"* is to do it
+     * again, which mints a second permanent person.
+     *
+     * So it says both halves: she is on the roster, and she cannot sign in until the PIN lands.
+     * `{name}` is filled in by the screen, because four people can be on this screen at once and a
+     * notice about *"her"* is a notice about nobody.
+     */
+    hirePartial:
+      "{name} has been added and is on the roster, but her PIN was not set, so she cannot sign in " +
+      "at the till yet. Press save again to finish — she will not be added a second time.",
+
+    /**
+     * `14-F14`'s deactivation, which *"preserves historical attribution"* — so the sentence says
+     * both halves: she stops, and her name stays on what she has already done (`11-F20`,
+     * `11-F22`). `{name}` and `{place}` are filled in by the screen.
+     *
+     * Stated ON the control and READ before the second press, exactly as `14-F13`'s revocation is,
+     * and it NAMES her: four people can be on this screen at up to two places each, and a
+     * consequence that said only *"she"* would be a confirmation about nobody in particular.
+     */
+    deactivate: "Deactivate at",
+    deactivateConsequence:
+      "{name} stops working at {place} as soon as you confirm, and nothing on this screen brings " +
+      "her back. Her name stays on every order she has already rung.",
+    confirmYes: "Yes, deactivate her",
+    confirmNo: "Keep her on",
+    deactivating: "Working on it…",
+
+    /**
+     * `14-F39` — `user.manage` is owner-only and the SERVER decides it (commandment 8). This app
+     * reads no role and hides no control by rank; it asks, and renders the refusal that comes
+     * back. The sentence therefore names who can act, because this client cannot.
+     */
+    refusedHeading: "Only an owner can see who works here",
+    refusedBody:
+      "This sign-in is not allowed to read or change the staff of this business. Nothing is wrong " +
+      "and nothing has been lost — ask whoever owns the business to make the change.",
   },
 
   errors: {
