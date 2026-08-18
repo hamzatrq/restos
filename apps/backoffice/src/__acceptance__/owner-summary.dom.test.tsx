@@ -385,6 +385,93 @@ const flush = (): Promise<void> => new Promise((done) => setTimeout(done, 50));
 // `Workspace` and reaches the summary the way an owner does.
 
 describe("A · 14-F31 — the shipped back office reaches this screen", () => {
+  /**
+   * **Did the click just made put the summary on the screen?** Asked once per navigation control.
+   *
+   * It asks exactly the question `settled()` asks — is there a `[data-summary-block]` — so a `true`
+   * from this probe and a `settled()` below cannot disagree about what "the summary is up" means.
+   *
+   * The budget is `waitFor`'s own default, which is the budget every other read in this file
+   * already spends on the same query landing; a probe on a tighter one would be inventing a second
+   * standard for how long this screen is allowed to take. It is BOUNDED, and the bound is safe in
+   * the only direction that matters: a false POSITIVE is impossible — the block is in the document
+   * or it is not — and a false NEGATIVE reds this test by name on the `expect` below rather than
+   * passing it quietly. The cost is one budget per control that is NOT the summary's, paid once.
+   */
+  const PROBE_MS = 1_000;
+  const clickMountedTheSummary = async (): Promise<boolean> => {
+    try {
+      await waitFor(
+        () => {
+          if (document.querySelector("[data-summary-block]") === null) {
+            throw new Error("this control did not mount the summary");
+          }
+        },
+        { timeout: PROBE_MS, interval: 10 },
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  /**
+   * ⚠ **REPAIRED 18 August 2026. What this fixture used to rely on is written down here so that
+   * the next appended section does not re-break it.**
+   *
+   * *What it did:* clicked every control in the rail in DOM order and then asked, ONCE and at the
+   * end, whether the summary was on screen. `Workspace` renders one section and unmounts the
+   * others ("Mounted, not hidden: the inactive section's queries should not run"), so that single
+   * trailing question was really a question about the state left by the LAST click. It passed only
+   * because Summary happened to be the last tab on the day it was written.
+   *
+   * *Why that stopped being true:* `14-F14`'s staff section was appended as a fourth tab.
+   * `14-F31` recorded the rule when the third landed and `27-F4` is why it binds — a new section
+   * goes AFTER the sections that exist, never between them — so the final click now lands on Staff
+   * and the summary is unmounted when the assertion runs. **The tab ORDER was never part of this
+   * test's claim.** It was an accident of there being three tabs, the assertion silently depended
+   * on it, and a fifth appended section would have broken it again for the same reason.
+   *
+   * *The repair is a STRENGTHENING.* The question is now asked after EVERY click, so the test no
+   * longer cares where in the rail the summary's control sits, how many sections precede it or how
+   * many follow. The control that mounted it is then clicked AGAIN, last, from wherever the sweep
+   * ended — which additionally proves an owner can come BACK to the summary after visiting another
+   * section, a claim the old fixture could not make at all. `24-F14`'s empty-match protection moves
+   * with it: "no control in this rail mounts the summary" — the wave's recurring defect, a correct
+   * screen the product never reaches — now fails here, by name, instead of surfacing as a
+   * `settled()` timeout inside a helper that cannot say what it was waiting for.
+   *
+   * *Measured, not argued* (the round-3 law: a claim that a test bites is not evidence that it
+   * does). Five stand-in workspaces, built out of tree, differing in exactly where the summary sits
+   * in the rail — the old fixture, this one, and **the control**, which is this one minus its final
+   * re-click and nothing else:
+   *
+   * ```
+   * world                                     OLD    THIS   minus the re-click
+   * W1  summary LAST of 4 (as authored)       PASS   PASS   PASS
+   * W2  summary THIRD of 4 (shipped today)    FAIL   PASS   PASS
+   * W3  summary FIRST of 4                    FAIL   PASS   PASS
+   * W4  no tab mounts it (the defect)         FAIL   FAIL   FAIL   ← by name, both
+   * W5  reachable ONCE, not returnable        FAIL   FAIL   PASS   ← the re-click is load-bearing
+   * ```
+   *
+   * W2/W3 are the repair: the two cells that moved are exactly the order-dependent ones. **W4 is
+   * what makes it a strengthening rather than a weakening** — the defect this test exists to catch
+   * still kills it. **W5 is why the re-click is not decoration**: without it, a shell an owner can
+   * reach the summary from once and never again passes.
+   *
+   * *What is deliberately NOT asserted:* that exactly one control mounts it. The title's claim is
+   * "some control", and a stricter count would be this file's other failure mode — a test that
+   * stays red under a correct implementation — the day a second surface legitimately carries a
+   * summary block.
+   *
+   * *No local `testTimeout` override, deliberately.* The sweep's cost grows with the rail — one
+   * `PROBE_MS` per section that is not the summary — so the question was asked, and `vitest.
+   * config.ts` already answers it: 60 s per project, raised on purpose and with a warning against
+   * weakening it. A number written here would be a SMALLER budget than the one the app decided on,
+   * hidden at the bottom of one test, which is how the config file's own documented trap
+   * (a root `testTimeout` silently not inheriting) got its second life.
+   */
   it("some control in the workspace navigation mounts the summary and it asks the server", async () => {
     const log: CallLog = [];
     render(
@@ -403,16 +490,35 @@ describe("A · 14-F31 — the shipped back office reaches this screen", () => {
       </Harness>,
     );
 
-    // Deliberately copy-blind: click every navigation control there is. The claim is that the
-    // summary is REACHABLE from the shipped shell, not that a particular word sits on the tab.
+    // Deliberately copy-blind: click every navigation control there is, and identify none of
+    // them by its word, its index, or its place in the rail. The claim is that the summary is
+    // REACHABLE from the shipped shell, not that a particular word sits on a particular tab.
+    // Sections whose handlers are absent above are supposed to be clicked too — this test says
+    // nothing about them, and a rail it had to be taught the names of would be a rail it could
+    // no longer sweep blind.
     const nav = document.querySelector("nav");
     expect(nav).not.toBeNull();
     const controls = Array.from((nav as HTMLElement).querySelectorAll("button"));
     // `24-F14` empty-match protection: a navigation that lost its buttons must fail here rather
     // than pass by finding nothing to click.
     expect(controls.length).toBeGreaterThanOrEqual(3);
-    for (const control of controls) fireEvent.click(control);
 
+    const mounters: HTMLElement[] = [];
+    for (const control of controls) {
+      fireEvent.click(control);
+      if (await clickMountedTheSummary()) mounters.push(control);
+    }
+
+    // The second empty-match protection, and the one the old fixture got for free from tab
+    // order: a whole rail swept with the summary appearing NOWHERE is the recurring defect, and
+    // it must be named rather than time out somewhere else.
+    expect(
+      mounters.length,
+      "no control in the workspace navigation mounts the owner summary",
+    ).toBeGreaterThan(0);
+
+    // Back to it, last, from whichever section the sweep ended on.
+    fireEvent.click(mounters[0] as HTMLElement);
     await waitFor(() => {
       expect(log.some((call) => call.path === "summary.nightly")).toBe(true);
     });
