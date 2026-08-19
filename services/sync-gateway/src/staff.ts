@@ -21,9 +21,11 @@
  * created `active` and her PIN is a separate act — R29 has the owner set it) — so a header marker,
  * which covers **every export in the
  * module**, would now be re-muting three symbols that are reached and would fail `seams:check` as
- * STALE. The remaining debt is recorded at the DECLARATION of each symbol that still carries it
- * (`staffVersion`, `staffPage`), which is the shape `provision-device.ts` and `tenancy.ts` in
- * `packages/domain` both record as the one that cannot rot.
+ * STALE. **BOTH landings have now happened (step 6, August 2026): `gateway.ts`'s serve arm is the
+ * second**, so `staffPage`'s own declaration-level marker is gone too and this module carries none
+ * at all. The shape survives the debt and is the transferable part — a marker at the DECLARATION of
+ * each symbol that still carries one, as `provision-device.ts` and `packages/domain`'s `tenancy.ts`
+ * both record, because that is the shape that cannot rot.
  *
  * ── ⚠ WHAT THIS IS *NOT*: `catalogPage`'s SQL POINTED AT `kernel.users` ─────────────────────────
  *
@@ -233,15 +235,16 @@ const scopedTo = (scope: StaffScope) =>
  * `catalog.ts`'s meaning of 0, which `01-F75` keeps verbatim and `01-F77` keeps PER KEY ("an
  * artifact for which the org has published nothing is omitted, never sent as `0`").
  *
- * ⚠ **IT CARRIES NO DEBT MARKER AND THAT IS THE RAIL'S ANSWER RATHER THAN A CLAIM ABOUT THE
- * PRODUCT — stated because a clean `seams:check` line here means less than it looks like.** Step 4a
- * gave this MODULE a shipping caller (`user-crud.ts` reaches `publishStaffRoster`,
- * `setPinCredential`, `setUserStatus` and `reachesBranch`), and Rule A counts an export as reached
- * when shipping code reaches it *or* when it is used inside its own reached module. This one is the
- * second: its only non-test caller is `staffPage`, three declarations down, which is itself owed a
- * caller. The rail's own report files that as a *"redundant export … 24-F15's knip metric, not this
- * rail's question"* — so a marker here fails as STALE (measured), and its absence must not be read
- * as *"a device asks this service for a roster version"*. Nothing does yet; step 6 does.
+ * ⚠ **IT CARRIES NO DEBT MARKER, AND AS OF STEP 6 THAT IS FINALLY A CLAIM ABOUT THE PRODUCT.** The
+ * paragraph here used to explain that the clean line meant less than it looked like: step 4a gave
+ * this MODULE a shipping caller (`user-crud.ts`), and Rule A counts an export as reached when
+ * shipping code reaches it *or* when it is used inside its own reached module — this one was the
+ * second, its only non-test caller being `staffPage` three declarations down, which was itself owed
+ * a caller. It ended *"its absence must not be read as 'a device asks this service for a roster
+ * version'. Nothing does yet; step 6 does."* **Step 6 has**: `gateway.ts` calls this at every hello
+ * to advertise the device's own branch key on `hello_ack.reference_versions` (`01-F77` — omitted,
+ * never `0`), which is the correctness mechanism of the whole reference-data transport and the
+ * reason this read is on the reconnection path of every till.
  */
 export const staffVersion = async (db: Db, scope: StaffScope): Promise<number> => {
   const rows = await db.execute(
@@ -327,12 +330,16 @@ const participationAt = (
  * restraint to the directory's own edges, so Postgres cannot answer this. `15-F27` puts the
  * completeness rule at the writer, and `01-F60` puts the same discipline at `publishCatalog`.
  *
- * ⚠ **Containment today is NOT what makes this safe, and that is why it is a defect rather than a
+ * ⚠ **Containment is NOT what makes this safe, and that is why it is a defect rather than a
  * tidy-up.** `01-F71` (e) has the serve path derive the artifact key from the SESSION and refuse a
- * request that states another — but that path is step 6 of `plans/saas-pivot/staff-over-the-wire.md`
- * and does not exist, so nothing currently makes the containment true. A publisher is the only thing
- * standing between a mistyped `branch_id` and an artifact nothing will ever serve, or worse, one
- * another tenant's device is admitted to.
+ * request that states another. ⚠ *This paragraph said that path "is step 6 … and does not exist, so
+ * nothing currently makes the containment true" — TRUE UNTIL STEP 6 LANDED IT (August 2026), and
+ * corrected here rather than deleted because the conclusion is unchanged and the premise is not.*
+ * The serve path exists now and derives both axes from the session, so a mistyped `branch_id`
+ * produces an artifact no session's key can ever name — but that is containment by nobody being
+ * able to ASK for it, which is not the same claim as the row being right. This publisher is still
+ * the only thing standing between a mistyped `branch_id` and a version of real people's Argon2id
+ * hashes keyed to a branch that does not exist.
  */
 const assertBranchIsThisOrgs = async (
   tx: Db,
@@ -782,9 +789,13 @@ const assertOrdinalsUniqueInArtifact = async (
  * for that is *"no device has a reason to open a page run at a version it does not hold"*, which is
  * a reachability argument about clients and not something a server enforces. What authorizes a
  * request at all is `01-F71` (e)'s serve path — the artifact key derived from the SESSION — and
- * that path does not exist yet (step 6 of `plans/saas-pivot/staff-over-the-wire.md`). Refusing a
- * continuation here instead would invent policy (commandment 2) and would break `01-F56`'s atomic
- * paged fetch, which is the field's whole reason for existing.
+ * ⚠ *this sentence ended "that path does not exist yet (step 6 …)"; it LANDED at step 6 (August
+ * 2026) and the residual is unchanged rather than closed by it.* `handleReference` derives both
+ * axes of the key from the session and refuses any other, so an unrevoked device at this branch is
+ * exactly who may open a page run here — and `01-F71` (e) pins the KEY and says nothing about the
+ * VERSION, which is the whole reason this residual is the FR's and not a gap in that check.
+ * Refusing a continuation here instead would invent policy (commandment 2) and would break
+ * `01-F56`'s atomic paged fetch, which is the field's whole reason for existing.
  *
  * ── ⚠ AND THE SAME LEAK HAD A SECOND DOOR THROUGH `have_version` (`01-F75`, amended `6e30636`) ───
  *
@@ -834,9 +845,19 @@ const assertOrdinalsUniqueInArtifact = async (
  * shape the FR amendment names ("a per-resource carve-out is a rule someone reproduces incorrectly
  * the next time the set grows"), arrived at from the other direction.
  *
- * @unreached-owed step 6 of `plans/saas-pivot/staff-over-the-wire.md` — the device serve path, which
- * is `gateway.ts`'s `handleStaff` arm over `01-F75`'s `reference_*` frames. Step 4a landed the WRITE
- * half's callers (`user-crud.ts`); nothing on the read half has one yet.
+ * **⚠ THE DEBT MARKER IS GONE (step 6, August 2026), AND ITS DELETION IS PART OF THE CHANGE.** It
+ * named *"the device serve path, which is `gateway.ts`'s `handleStaff` arm over `01-F75`'s
+ * `reference_*` frames"*, and that arm has landed: `handleReference` serves `resource: "staff"`
+ * through both `01-F47`/`01-F48` read gates, on a key derived from the SESSION (`01-F71` (e)). A
+ * marker on something reached fails `seams:check` as STALE, so this deletion is what keeps the
+ * register honest rather than tidiness.
+ *
+ * ⚠ **AND THE GATEWAY FORWARDS ALL THREE CLIENT-SUPPLIED FIELDS VERBATIM — the input-validation
+ * dependency the paragraph above hands to step 6 is DISCHARGED, not inherited quietly.** They reach
+ * this function from a `parseMessage`d frame and from nowhere else, so `packages/sync-protocol`'s
+ * `nonnegative()` bound is still the one interpretation of the wire's number range (`18 §2`). The
+ * day a second caller reaches these three arguments from anywhere but a parsed frame, it brings its
+ * own refusal with it.
  */
 export const staffPage = async (
   db: Db,

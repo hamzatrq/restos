@@ -74,6 +74,14 @@ export const buildServer = (
     notifyCatalogVersion: (org_id, version) => {
       gateway.notifyCatalogVersion(org_id, version);
     },
+    // `01-F75`'s producer for the roster, wired at the SAME composition root and for the same
+    // recorded reason: the fan-out method exists on the gateway and only this file knows a gateway
+    // exists, so a `/internal/users*` write announces on the branch key it minted rather than
+    // reaching a connected till at its next reconnect. Required in the deps bag, so a build that
+    // forgets it does not compile (`publish-http.ts` carries the measurement).
+    notifyStaffVersion: (org_id, branch_id, version) => {
+      gateway.notifyStaffVersion(org_id, branch_id, version);
+    },
   });
 
   void app.register(websocket);

@@ -53,12 +53,19 @@
  * is `03-F40`'s two sensor bit layouts, which this service's own header cites. It wants an FR
  * sentence, not a comparison written into a caller (commandment 2).
  *
- * **What is NOT produced here and is owed elsewhere: `01-F75`'s `reference_notice` fan-out.** The
- * `reference_*` frames are step 5 of `plans/saas-pivot/staff-over-the-wire.md` and do not exist, so
- * a roster change reaches a connected till at its next `hello_ack` reconciliation (`01-F77`) and
- * not before. That is the catalog's pre-`catalog_notice` state on a different resource, and it is
- * recorded rather than worked around — inventing a staff notice frame would invent the wire
- * `01-F75` closes the vocabulary of.
+ * ⚠ **`01-F75`'s `reference_notice` FAN-OUT IS PRODUCED HERE NOW (step 6), AND THIS PARAGRAPH USED
+ * TO RECORD IT AS OWED ELSEWHERE.** It read that *"the `reference_*` frames are step 5 … and do not
+ * exist, so a roster change reaches a connected till at its next `hello_ack` reconciliation"* —
+ * true when written and the exact state `01-F75`'s producer clause was written against. The frames
+ * landed at step 5 and the serve path at step 6, so every `publishTo` below now announces on the
+ * key it just minted, through an `announce` its caller must supply.
+ *
+ * **The announce is a REQUIRED argument on every act, and that is the shape rather than a
+ * preference.** `publish-http.ts` records the measured reason on the catalog's own seam: an
+ * OPTIONAL member re-creates the hole one layer out, because `seams:check` asks whether an optional
+ * seam is SUPPLIED and can ask nothing about one that was never declared. Required, it is a compile
+ * error from `server.ts` down to the single `publishStaffRoster` call site — which is the only
+ * shape in which a deployment cannot forget the fan-out and still build.
  */
 
 import { randomBytes } from "node:crypto";
@@ -79,12 +86,28 @@ import { assertAssignedBranchesAreThisOrgs, insertUser, listBranches } from "./t
 export type AssignmentInput = { readonly role: string; readonly branch_id: string | null };
 
 /**
- * The two fields every act carries. `now` is the CALLER's instant — `/internal/catalog/publish`'s
- * recorded rule, unchanged: `services/api` takes ONE reading per act and uses it for the write and
- * for `14-F2`'s ledger record, so one act cannot be split into two instants. `actor_user_id` is the
- * authenticated owner (`14-F39`), and it is what `kernel.staff_versions` records as the publisher.
+ * `01-F75`'s producer, as an act supplies it: announce ONE `(staff, {org, branch})` key at the
+ * version a publish just minted (`gateway.ts`'s `notifyStaffVersion`).
+ *
+ * Declared as a function type rather than as a dependency on `gateway.ts` because this module knows
+ * nothing about sessions or sockets — the same reason `server.ts` passes the gateway's METHOD to
+ * `registerPublishRoutes` rather than the gateway.
  */
-type Act = { readonly now: number; readonly actor_user_id: string | null };
+export type AnnounceStaffVersion = (org_id: string, branch_id: string, version: number) => void;
+
+/**
+ * What the CALLER supplies about the act itself. `now` is the CALLER's instant —
+ * `/internal/catalog/publish`'s recorded rule, unchanged: `services/api` takes ONE reading per act
+ * and uses it for the write and for `14-F2`'s ledger record, so one act cannot be split into two
+ * instants. `actor_user_id` is the authenticated owner (`14-F39`), and it is what
+ * `kernel.staff_versions` records as the publisher. `announce` is `01-F75`'s producer seam, on the
+ * act rather than on the module so that every route must pass it and none can be added without one.
+ */
+type Act = {
+  readonly now: number;
+  readonly actor_user_id: string | null;
+  readonly announce: AnnounceStaffVersion;
+};
 
 /**
  * `01-F78` half one, asked of the ORG: which branch artifacts does this assignment set reach?
@@ -152,10 +175,25 @@ const publishTo = async (
   act: Act,
 ): Promise<void> => {
   for (const branch_id of branch_ids) {
-    await publishStaffRoster(db, { org_id, branch_id }, changed_user_ids, {
+    const version = await publishStaffRoster(db, { org_id, branch_id }, changed_user_ids, {
       now: act.now,
       actor_user_id: act.actor_user_id,
     });
+    // `01-F75`'s producer, at the ONE place every roster publish in this service passes through.
+    //
+    // **AFTER the publish has committed, and with the version it RETURNED.** `publishStaffRoster`
+    // resolves only once its transaction commits, so a notice sent here names a version the
+    // gateway can serve. Announcing a PREDICTED number first is the failure `journey-catalog`'s
+    // `SEAM (ORDER)` measures one resource over, and on this artifact it costs more than a stale
+    // menu: the device fetches, is served the OLD roster, stores it as current under `01-F56`'s
+    // monotonic apply, and hears nothing further until its next `hello_ack` — so a person hired
+    // seconds ago cannot sign in, or one just deactivated still can (`11-F21`, R32).
+    //
+    // **Per KEY, at that key's own version.** One write reaches several branches (`01-F78` half
+    // one puts an org-wide person in every artifact) and they are at different versions, so one
+    // number announced to the org — the catalog's shape, one resource over — is wrong for every
+    // branch but one.
+    act.announce(org_id, branch_id, version);
   }
 };
 

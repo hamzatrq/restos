@@ -290,6 +290,24 @@ type PublishDeps = {
    * and its failure cannot fail the publish.
    */
   readonly notifyCatalogVersion: (org_id: string, version: number) => void;
+  /**
+   * The same seam for the STAFF artifact (`01-F75`'s producer clause, `01-F76`'s branch key) —
+   * `gateway.ts`'s `notifyStaffVersion`, which the four `/internal/users*` routes below hand to
+   * `user-crud.ts` and which fires once per affected key after each publish COMMITS.
+   *
+   * **REQUIRED for the reason above, restated because the reason is what generalises**: the
+   * catalog's notice shipped with zero production callers and cost *Apply now* its whole promise,
+   * `seams:check` could not see it (a key in an object literal is not an export, and there was no
+   * optional member for Rule B to find unsupplied), and an OPTIONAL member here would re-create
+   * exactly that hole. On the roster the missed notice is worse than a stale menu: a person hired
+   * or deactivated seconds ago waits for the till's next reconnect to be able — or unable — to
+   * sign in (`11-F21`, R32).
+   *
+   * Correctness does not depend on it and must not: `01-F77` makes `hello_ack.reference_versions`
+   * the correctness mechanism per key and the notice "only latency", which is why it is called
+   * after the publish is committed and its failure cannot fail the write.
+   */
+  readonly notifyStaffVersion: (org_id: string, branch_id: string, version: number) => void;
 };
 
 /** Rows per internal page. Matches `CATALOG_PAGE_SIZE`, which is what `catalogPage` serves. */
@@ -549,7 +567,13 @@ export const registerPublishRoutes = (app: FastifyInstance, deps: PublishDeps): 
       return reply.code(400).send({ error: `create user: ${z.prettifyError(parsed.error)}` });
     }
     try {
-      return reply.code(200).send(await createPerson(deps.db, parsed.data));
+      // `01-F75`'s producer travels WITH the act: every one of the four writes below hands
+      // `user-crud.ts` the same gateway seam, so a roster version minted by any of them announces
+      // on its own key. It is a required member of the act, so a fifth route cannot be added
+      // without one.
+      return reply
+        .code(200)
+        .send(await createPerson(deps.db, { ...parsed.data, announce: deps.notifyStaffVersion }));
     } catch (error: unknown) {
       return reply.code(refusalStatus(error)).send({ error: messageOf(error) });
     }
@@ -561,7 +585,7 @@ export const registerPublishRoutes = (app: FastifyInstance, deps: PublishDeps): 
       return reply.code(400).send({ error: `set assignments: ${z.prettifyError(parsed.error)}` });
     }
     try {
-      await setPersonAssignments(deps.db, parsed.data);
+      await setPersonAssignments(deps.db, { ...parsed.data, announce: deps.notifyStaffVersion });
       return reply.code(200).send({});
     } catch (error: unknown) {
       return reply.code(refusalStatus(error)).send({ error: messageOf(error) });
@@ -574,7 +598,7 @@ export const registerPublishRoutes = (app: FastifyInstance, deps: PublishDeps): 
       return reply.code(400).send({ error: `set pin: ${z.prettifyError(parsed.error)}` });
     }
     try {
-      await setPersonPin(deps.db, parsed.data);
+      await setPersonPin(deps.db, { ...parsed.data, announce: deps.notifyStaffVersion });
       return reply.code(200).send({});
     } catch (error: unknown) {
       return reply.code(refusalStatus(error)).send({ error: messageOf(error) });
@@ -587,7 +611,7 @@ export const registerPublishRoutes = (app: FastifyInstance, deps: PublishDeps): 
       return reply.code(400).send({ error: `set status: ${z.prettifyError(parsed.error)}` });
     }
     try {
-      await setPersonStatus(deps.db, parsed.data);
+      await setPersonStatus(deps.db, { ...parsed.data, announce: deps.notifyStaffVersion });
       return reply.code(200).send({});
     } catch (error: unknown) {
       return reply.code(refusalStatus(error)).send({ error: messageOf(error) });

@@ -509,6 +509,24 @@ separate session**, and the fixtures are the contract, so their author must not 
 refusal on the socket — it is a disconnection — and step 6 is the step that first makes that
 reachable, because advertising `staff` on some gateways and not others is its own deployment window.
 
+**STEP 6 LANDED (August 2026), and finding 10's decision — which this plan asked for BY NAME, "as a
+stated decision in its plan rather than a default inherited from `default:`" — is that the question
+is DISSOLVED rather than answered.** The resource refusal is **deleted, not widened**: `01-F75`'s
+resource set is closed at `catalog` and `staff`, the gateway now serves both, and `resource` is a
+discriminated union over exactly those two — so a request for an unserved resource is
+**unrepresentable** rather than merely unreached, and there is no refusal left to decide the class
+of. Inventing a refusal frame would have been commandment 2 (`01-F75` declares no error member of
+the triple), and narrowing the error class would have been designing for a case that cannot occur.
+**What re-opens it is adding a THIRD member** — `01-F74`'s device roster is the expected one — to a
+fleet where some gateways serve it and some do not, which is that member's own spec act and which
+inherits a session-killing refusal by default unless it decides otherwise. The site carries the same
+paragraph. What actually shipped, against the sketch above: the arm is inside `handleReference`
+rather than a separate `handleStaff` (the two resources share `01-F75`'s response vocabulary and one
+construction of it is the FR's own point), and the hello field is `01-F77`'s
+`reference_versions` array rather than a `hello_ack.staff_version` scalar — that scalar was the
+pre-step-5 shape and `01-F77` supersedes it. `01-F71` (e)'s BRANCH half landed with it, because a
+branch-scoped resource is the first frame that can state a branch the session's identity does not.
+
 **Step 7 — the device fetch and apply.** Changes `packages/sync-client/src/` — a staff accumulator on
 `catalog-fetch.ts:113`'s shape (with its own `toMember`), a `reconcileStaff` beside
 `cloud-session.ts:258` reading `hello_ack.staff_version` at `:476`, the `staff_notice` arm, and

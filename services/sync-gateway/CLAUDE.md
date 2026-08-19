@@ -367,10 +367,13 @@
   was no source — the cloud user row was eight columns with no credential, no status and no version
   axis, and the only roster any till had held was a dev seed of three fictional people. `staff.ts`
   is the storage half: `staffVersion` / `publishStaffRoster` / `staffPage` / `setPinCredential` /
-  `setUserStatus`. **⚠ It has no shipping caller yet and carries a file-header debt marker naming
-  the two steps that land one** — the wire is a BREAKING change (`01-F77` bumps `v: 1` → `v: 2`)
-  and cannot be made until there is something to serve, so the sequencing is deliberate rather than
-  this wave's recurring defect. Oracle: `__acceptance__/staff-roster-storage.test.ts` (**66** —
+  `setUserStatus`. ⚠ *This said "**It has no shipping caller yet and carries a file-header debt
+  marker naming the two steps that land one**", with the sequencing argued as deliberate rather than
+  this wave's recurring defect — the wire being a BREAKING change (`01-F77` bumps `v: 1` → `v: 2`)
+  that could not be made until there was something to serve.* **BOTH of those steps have landed and
+  this module now carries NO debt marker at all**: step 4a gave it `user-crud.ts` and step 6 gave
+  `staffPage` the serve arm below, so the register moved 29 → 28 and `staff.ts` dropped off
+  `seams:check`'s debtor list. Oracle: `__acceptance__/staff-roster-storage.test.ts` (**66** —
   amended August 2026 for `11-F22`'s per-(person, branch) disambiguation, again for `01-F75`'s
   continuation clause, again for its delta clause (§N) plus `01-F26`'s every-assignment leg
   (§G8), and again for `01-F78`'s two halves (§O) and `01-F77`'s version-0 shape (§P); it was 39 as
@@ -406,8 +409,10 @@
     holding a live credential"* — reaching every device at the branch from a publish that COMMITTED
     AFTER the departure, and **it is not `01-F71` (e)'s disclosed residual**: that residual is a
     historical version a continuation asks for, this is the CURRENT one.
-    - **Not live today** (`staff.ts` has no shipping caller); it becomes reachable the moment
-      `14-F14`'s CRUD lands, which is the surface that calls both functions on one request.
+    - ⚠ *This said "**Not live today** (`staff.ts` has no shipping caller); it becomes reachable the
+      moment `14-F14`'s CRUD lands, which is the surface that calls both functions on one request."*
+      **That CRUD landed at step 4a, so the race is LIVE and the lock is load-bearing now** —
+      `user-crud.ts`'s `setPersonStatus` is exactly the request that calls both.
     - **Measured out of suite against a real Postgres, control and fix differing in exactly the one
       SQL clause** (the pre-fix copy rebuilt beside the tree, nothing mutated in place), two
       deterministic arms, each run twice with identical output:
@@ -666,7 +671,9 @@
     branch that does not exist. `01-F68` forbids a foreign key, so it is refused here or nowhere
     (`15-F27`, and the rule `create-branch` and `insertUser` already enforce). ⚠ Containment was
     NOT what made this safe: `01-F71` (e) has the serve path derive the key from the SESSION, and
-    that path is step 6 and does not exist.
+    ⚠ *that path "is step 6 and does not exist" — it LANDED at step 6 (August 2026)*. It still is
+    not what makes this safe: a key no session can name is an artifact nobody can ask for, which is
+    a different claim from the row being right.
   - **`grid_ordinal` uniqueness is enforced at the PUBLISHER against the folded artifact, and NOT
     by an index.** `01-F75` scopes it "within the artifact" and says in terms that a wider rule "is
     a storage choice this FR does not make"; the plan asked for an org-wide unique index and it is
@@ -690,8 +697,61 @@
     `UserRecord`/`AuthSubject` carry no status, so `11-F22`'s *"the authorization subject reads the
     status too"* is **not enforced on either plane** — that is the plan's step 2b, which lands on
     both planes in one change.
+- **THE ROSTER IS SERVED OVER THE DEVICE SOCKET NOW (step 6, August 2026) — `01-F75`/`01-F77`/
+  `01-F78`, and it is the step that connected two halves that had both been correct and unreachable.**
+  `staff.ts` had the storage and `packages/sync-protocol` had the `reference_*` triple; `gateway.ts`
+  refused a `staff` request **by name** and `hello_ack` advertised no `staff` key, so nothing
+  connected them. Four things landed together and none of them is separable:
+  - **`handleReference` serves `resource: "staff"`**, through the two read gates it already took —
+    `requireUnrevoked` (`01-F48`: revocation blocks reads as well as writes) and the `01-F47` drain
+    refusal. On this artifact those gates are what stands between a stolen tablet and the `11-F21`
+    Argon2id hash of everyone active at the branch (R25: the roster's scope IS its blast radius).
+    The three client-supplied version fields are **forwarded verbatim** to `staffPage`, which owns
+    all three (`01-F75`: every one is a request to read the publication log). The response
+    vocabulary is constructed ONCE for both resources — two copies is two chances to page one
+    resource differently from the other.
+  - **`01-F71` (e)'s BRANCH half**, which had no resource to bind to until now: a `catalog` frame is
+    pinned to `branch_id: null` by the codec, so there was no branch to mismatch. The check is on
+    the SCOPE and not per resource (`01-F76` gives every resource one scope shape). Refused as an
+    `AuthRejectedError`, never clamped.
+  - **`hello_ack.reference_versions` carries the staff key** for this DEVICE's branch — omitted,
+    never `0` (`01-F77`), which is what makes an unpublished key indistinguishable from a gateway
+    that does not serve the resource. This put `staffVersion` on **every reconnection of every
+    till**, which is what the `=` scope predicate two bullets up bought the index for.
+  - **`notifyStaffVersion` — REQUIRED in the deps bag, wired in `server.ts`, called from
+    `user-crud.ts`'s single `publishTo` after each publish COMMITS, with the version that publish
+    RETURNED.** This is `notifyCatalogVersion`'s defect refused in advance: that method shipped with
+    zero production callers and *Apply now* reached a connected till only at its next reconnect.
+    Required all the way down, so a build that forgets the fan-out does not compile. Branch-keyed,
+    so `branchSets` is an index lookup here where the catalog's is a walk.
+  - **The resource refusal is GONE rather than widened, and that is step 6's owned decision on the
+    plan's finding 10.** A refusal inside `handle` is a DISCONNECTION (`server.ts` closes the
+    socket), which is a `01-F17`-adjacent cost for what is an ordinary negotiation outcome. With
+    both members of `01-F75`'s closed set served, the case is **unrepresentable** rather than merely
+    unreached — the question is dissolved, not answered. **Adding a third member re-opens it**
+    (`01-F74`'s device roster is the expected one), and that member's spec act inherits a
+    session-killing refusal by default.
 
-### Mutation matrix — `staff-roster-storage.test.ts` (round-3 law), control **408/408** green
+### Mutation matrix — the roster serve path (step 6, round-3 law), control **499/499** green
+
+In-tree with byte-exact backups and an `md5sum -c` restore trap after every row (nothing here is a
+security constant — each mutant reds a test rather than downgrading a credential). Every row is the
+FULL package suite, `REAL_EXIT` read from a marker written INSIDE the log. **In every killing row
+the failing FILE was a single one, so the other 57 files stayed green under every mutant.**
+
+| # | mutant (exactly one branch) | killed (of 499) | which tests |
+|---|---|---|---|
+| S6-1 | **`server.ts` wires `notifyStaffVersion: () => {}`** — `notifyCatalogVersion`'s original defect, reproduced on this resource | **4** | `staff-over-the-wire` §E1, §E2, §E3, §E4 |
+| S6-2 | **`01-F71` (e)'s branch check deleted** — a device may name any branch of its own org | **2** | `tenant-isolation-reference-serve` §B (both) |
+| S6-3 | the staff arm forwards no `at_version`, so a continuation resolves at `current` | **1** | `staff-over-the-wire` §A5 |
+| S6-C | **CONTROL: both `01-F71` (e) refusal sentences reworded, same states, same writes, same FR ids** | **0** | — |
+
+**S6-1 is the row that matters and it is the reason the oracle's §E is built on `buildServer` and a
+real socket.** The catalog's equivalent seam test mounted its own wiring and **survived** this
+mutant — a test that supplies the wiring cannot observe whether the product supplies it — so the
+four kills here are evidence about the PRODUCT's composition root and not about a harness. S6-2 is
+the security row: `01-F71` requires by name that each enforcement point carry a test that fails when
+that point ALONE is removed, and this is that measurement for the branch half.
 
 In-tree with a byte-exact backup and an md5 restore trap (`staff.ts` verified `93ec8626…` after
 every row); no security constant is touched — each mutant reds a test rather than downgrading a

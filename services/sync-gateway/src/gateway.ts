@@ -29,6 +29,7 @@ import { DEVICE_TOKEN_TTL_MS, issueDeviceToken, verifyDeviceToken } from "./auth
 import { catalogPage, catalogVersion } from "./catalog.js";
 import { AuthRejectedError, ProtocolViolationError, type QuarantineReason } from "./errors.js";
 import { type DeviceRegistryRow, readRegistryRow, recordTokenExpiry } from "./registry.js";
+import { staffPage, staffVersion } from "./staff.js";
 
 /**
  * Revocation eviction bound (01-F48 / DEC-AUTH-002): a revoked device leaves the mesh
@@ -78,6 +79,22 @@ export type Gateway = {
    * Called by the back office after `publishCatalog`; never by a device.
    */
   notifyCatalogVersion(org_id: string, version: number): void;
+  /**
+   * `01-F75`'s producer for the STAFF artifact — announce a new roster version on ONE
+   * `(staff, {org, branch})` key (`01-F76`).
+   *
+   * **Branch-keyed, and that is the difference from the catalog's**, not an implementation
+   * detail: `01-F76` makes fan-out keyed by the artifact key, so *"a branch-scoped notice
+   * reaches that branch's devices and no others"*. A roster carries `11-F21` Argon2id hashes and
+   * R25 makes its scope its blast radius — a device at another branch told this key moved would
+   * fetch nothing it may hold, which is the org-scoped roster R25 refused arriving as a notice.
+   *
+   * **Freshness only, never correctness**, exactly as the catalog's: `hello_ack`'s
+   * `reference_versions` reconciles every key on every reconnection (`01-F77`), and a notice is
+   * latency on top of that. Called by the publish path after `publishStaffRoster` COMMITS, per
+   * affected key, with the version that write minted — never a predicted one; never by a device.
+   */
+  notifyStaffVersion(org_id: string, branch_id: string, version: number): void;
 };
 
 type Sink = (message: ProtocolMessage) => void;
@@ -466,6 +483,41 @@ export const createGateway = ({
     // that recovers from expiry silently stale until its next reconnect, which is the freshness
     // failure this field exists to prevent.
     const catalogVersionAtHello = await catalogVersion(db, claims.org_id);
+    // `01-F77`, the STAFF key — this DEVICE's branch and nothing else (`01-F71` (e): the org from
+    // the authenticated session, the branch from the device's own identity). A DRAINING session is
+    // told its version for the catalog's stated reason, unchanged here: a version NUMBER is not
+    // branch data, and withholding it would leave a device recovering from expiry silently stale.
+    const staffVersionAtHello = await staffVersion(db, {
+      org_id: claims.org_id,
+      branch_id: claims.branch_id,
+    });
+    // `01-F77`: OMITTED, never `0` — per KEY. An artifact this key has published nothing for is
+    // indistinguishable from a gateway that does not serve the resource, and in both the device
+    // simply never asks, which is right for both. The field itself stays absent when there is no
+    // key at all, which is what an org that has published nothing has.
+    const referenceVersions = [
+      // An ARRAY and not a map, because a map key over two fields is the concatenation `01-F76`
+      // bans; the catalog's key is its ORG with `branch_id: null` (`01-F52`), the roster's is this
+      // BRANCH (`01-F76`, R25 — its scope is its credential blast radius).
+      ...(catalogVersionAtHello > 0
+        ? [
+            {
+              resource: "catalog",
+              scope: { org_id: claims.org_id, branch_id: null },
+              version: catalogVersionAtHello,
+            },
+          ]
+        : []),
+      ...(staffVersionAtHello > 0
+        ? [
+            {
+              resource: "staff",
+              scope: { org_id: claims.org_id, branch_id: claims.branch_id },
+              version: staffVersionAtHello,
+            },
+          ]
+        : []),
+    ];
     // Silent renewal (01-F47). A DRAINING session gets one too, FORCED — its credential
     // is already expired, so a threshold comparison would be meaningless. The session
     // still stays push-only: `draining` is untouched here, so catch-up is refused and it
@@ -508,28 +560,10 @@ export const createGateway = ({
         // could not have heard any announcement. A `reference_notice` is latency on top of this,
         // never a substitute for it.
         //
-        // An ARRAY and not a map, because a map key over two fields is the concatenation
-        // `01-F76` bans; the catalog's key is its ORG with `branch_id: null` (`01-F52` keeps it
-        // org-scoped and `01-F76` re-states that rather than re-opening it).
-        //
-        // ⚠ **Only the catalog is carried today, and its ABSENCE is the same signal it always
-        // was.** `01-F77`: a key the org has published nothing for is omitted, never sent as 0,
-        // so it is indistinguishable from a gateway that does not serve that resource — in both
-        // the device simply never asks, which is right for both. That is also what makes the
-        // `staff` key's absence here honest rather than a lie: this gateway's roster serve path
-        // is the NEXT step of `plans/saas-pivot/staff-over-the-wire.md`, `staff.ts` still has no
-        // shipping caller, and a key advertised here is a key the device then asks for.
-        ...(catalogVersionAtHello > 0
-          ? {
-              reference_versions: [
-                {
-                  resource: "catalog",
-                  scope: { org_id: claims.org_id, branch_id: null },
-                  version: catalogVersionAtHello,
-                },
-              ],
-            }
-          : {}),
+        // The set is assembled above, per key. ⚠ **A key advertised here is a key the device then
+        // asks for**, so this and `handleReference`'s resource arms move together: advertising an
+        // artifact this gateway will not serve sends every device in the fleet after a refusal.
+        ...(referenceVersions.length === 0 ? {} : { reference_versions: referenceVersions }),
       }),
     );
     // T-01-08 hello-time notice drain (DEC-SYNC-008): AFTER hello_ack, this
@@ -1171,17 +1205,23 @@ export const createGateway = ({
   };
 
   /**
-   * T-C3 — serve a catalog page (`01-F9`, `01-F52`..`01-F56`).
+   * T-C3 / `01-F75` — serve a reference-data page: the ORG's catalog (`01-F52`..`01-F56`) or this
+   * DEVICE's branch roster (`01-F28`, `01-F61`, `01-F78`).
    *
-   * Scoped by ORG, not by branch, which is the one place in this gateway that is true and the
-   * reason the transport needed designing rather than falling out of the existing stream:
-   * every device read is branch-filtered (`01-F13`, and `sec-F1` closed it again), so there is
-   * no stream a device is on that carries org-scoped rows. `01-F9`'s parenthesis — "plus
-   * org-scope reference data" — promised this capability and nobody had built it.
+   * The catalog is scoped by ORG, not by branch, which is the one place in this gateway that is
+   * true and the reason the transport needed designing rather than falling out of the existing
+   * stream: every device read is branch-filtered (`01-F13`), so there is no stream a device is on
+   * that carries org-scoped rows. `01-F9`'s parenthesis — "plus org-scope reference data" —
+   * promised this capability and nobody had built it. The roster is scoped by BRANCH (`01-F76`,
+   * R25 — "the roster's scope IS its credential blast radius"), which is why the key is checked on
+   * two axes below and derived from the session on both.
    *
    * It is a READ in the `01-F47` sense, so it takes both of the read gates: refused for a
-   * revoked device (`01-F25` registry authority / `01-F48` — revocation blocks participation,
-   * and the read side of it is `requireUnrevoked`) and refused for a draining session.
+   * revoked device (`01-F25` registry authority / `01-F48` — revocation blocks reads as well as
+   * writes) and refused for a draining session. On the roster that is the sharpest instance the
+   * two gates have: the artifact carries a `11-F21` Argon2id hash per active person at the branch,
+   * so a serve path skipping either gate hands a stolen tablet the credentials of everyone who
+   * works there, after the owner revoked it.
    *
    * The earlier citation here said `sec-F1`, which greps to nothing anywhere in `specs/` — an
    * invented ID, which Commandment 2 makes a defect regardless of the behaviour being right.
@@ -1213,58 +1253,102 @@ export const createGateway = ({
           "clamped)",
       );
     }
-    // `01-F75` closes the resource set at `catalog` and `staff`, and this gateway serves one of
-    // them. The roster's serve path is the NEXT step of
-    // `plans/saas-pivot/staff-over-the-wire.md` — `staff.ts` has the storage half and no shipping
-    // caller — so a `staff` request is refused by NAME rather than answered with an empty
-    // snapshot, which would be a version number claiming an artifact exists (`00 §5.7`). It is
-    // unreachable from a shipping device: `hello_ack` advertises no `staff` key, and `01-F77`
-    // makes an absent key the signal that the device simply never asks.
+    // `01-F71` (e), THE BRANCH HALF — and it is the same sentence as the org half above: "the only
+    // keys a session may ask for are its own org with its own branch, or its own org with
+    // `branch_id: null` … anything else is REFUSED as an auth failure, never clamped". The branch
+    // comes from the DEVICE's own identity (`01-F65`; `01-F72` (b) makes the certificate name
+    // `(org_id, branch_id, device_id)`), so a stated branch is a client role claim commandment 8
+    // does not trust. Written on the SCOPE rather than per resource, because `01-F76` gives every
+    // resource ONE scope shape and a per-resource copy is a rule the next member gets wrong.
     //
-    // ⚠ **A REFUSAL HERE IS NOT A REFUSAL ON THE SOCKET — IT IS A DISCONNECTION, AND STEP 6 OWNS
-    // DECIDING WHETHER THAT IS RIGHT.** `server.ts`'s message handler catches anything `handle`
-    // throws, logs *"sync session terminated"* and calls `conn.close()` + `socket.close()`. So a
-    // device that asks for an unadvertised resource does not receive a refusal and carry on: it
-    // loses its sync session, and with it the ledger push path, until it reconnects. That is the
-    // correct posture for a protocol violation (a peer that cannot be trusted to frame) and a
-    // questionable one for a *read of a resource this build does not serve*, which is an ordinary
-    // negotiation outcome and exactly what a mid-rollout fleet produces.
-    //
-    // **Unreachable today and therefore recorded rather than changed** (commandment 2 — the
-    // alternative is a refusal frame no FR declares): `hello_ack` advertises `catalog` only and
-    // the client filters its fetches on the advertised set, so nothing in the field sends this.
-    // It becomes reachable the moment `staff` is advertised by some gateways and not others,
-    // which is step 6's own deployment window. Carried into
-    // `plans/saas-pivot/staff-over-the-wire.md` so the step-6 session meets it before it writes
-    // the `handleStaff` arm, and not after.
-    if (message.resource !== "catalog") {
-      throw new ProtocolViolationError(
-        `this gateway serves no ${message.resource} artifact — no version for that resource was ` +
-          "advertised on hello_ack, so the session was never told to ask (01-F75, 01-F77)",
+    // It became reachable with the roster: a `catalog` frame is pinned to `branch_id: null` by the
+    // codec, so until `staff` was served there was no branch to mismatch. Under R25 the roster's
+    // scope IS its credential blast radius, so a device free to name a branch would be handed the
+    // `11-F21` hashes of a branch its credential never covered — the whole ruling defeated in one
+    // field. A CLAMP is refused for the other direction: answering with the session's own artifact
+    // under the key that was asked for is the mis-routing `01-F76` says makes scope decoration.
+    if (message.scope.branch_id !== null && message.scope.branch_id !== session.branchId) {
+      throw new AuthRejectedError(
+        "reference_request states an artifact scope that is not this session's — the branch " +
+          "comes from the device's own identity, never from the frame (01-F71 (e), 01-F65; " +
+          "refused, not clamped)",
       );
     }
-    const page = await catalogPage(
-      db,
-      session.orgId,
-      message.have_version,
-      message.from ?? 0,
-      message.at_version,
-    );
+    // `01-F75` closes the resource set at `catalog` and `staff`, and this gateway now serves BOTH,
+    // so the arm that refused an unserved resource by name is gone rather than widened.
+    //
+    // ⚠ **THAT IS STEP 6's OWNED DECISION ON FINDING 10 OF `plans/saas-pivot/staff-over-the-wire.md`,
+    // AND IT DISSOLVES THE QUESTION RATHER THAN ANSWERING IT.** The finding: a refusal inside
+    // `handle` is not a refusal on the socket — `server.ts` catches it, logs "sync session
+    // terminated" and closes both the connection and the socket — so a device asking for a resource
+    // this build does not serve loses its ledger push path until it reconnects, which is a
+    // `01-F17`-adjacent cost for an ordinary negotiation outcome. It was filed unreachable because
+    // `hello_ack` advertised `catalog` only, and named step 6 as the step that would make it
+    // reachable by advertising `staff` on some gateways and not others. **With both members of the
+    // closed set served there is no unserved resource left to ask for**: `resource` is a
+    // discriminated union over exactly those two, so the case is now unrepresentable rather than
+    // merely unreached, and inventing a refusal frame `01-F75` does not declare would have been
+    // commandment 2. **What re-opens it is adding a THIRD member** (`01-F74`'s device roster is the
+    // expected one) to a fleet where some gateways serve it and some do not — that member's own
+    // spec act inherits this decision, and a session-killing refusal is what it gets by default.
+    const artifact =
+      message.resource === "staff"
+        ? {
+            // The key is DERIVED, never echoed (`01-F71` (e)) — and on this resource both halves of
+            // it are the session's, which is what makes the two-axis check above the only thing
+            // standing between a device and another branch's credentials.
+            key: {
+              resource: "staff" as const,
+              scope: { org_id: session.orgId, branch_id: session.branchId },
+            },
+            // The three client-supplied fields are FORWARDED VERBATIM and answered by `staffPage`,
+            // which owns all three (`01-F75`: "every client-supplied version field is a request to
+            // read the publication log, so each one needs its own answer"). A serve arm that
+            // resolved `at_version` itself, or paged the roster itself, would re-open both
+            // credential doors that FR was amended to close with the storage suite still green —
+            // and dropping `at_version` on a continuation breaks `01-F56`'s atomic snapshot over
+            // the wire, which is a roster served as two halves of two different versions.
+            page: await staffPage(
+              db,
+              { org_id: session.orgId, branch_id: session.branchId },
+              message.have_version,
+              message.from ?? 0,
+              message.at_version,
+            ),
+          }
+        : {
+            key: {
+              resource: "catalog" as const,
+              scope: { org_id: session.orgId, branch_id: null },
+            },
+            page: await catalogPage(
+              db,
+              session.orgId,
+              message.have_version,
+              message.from ?? 0,
+              message.at_version,
+            ),
+          };
     record.sink(
       parseMessage({
         v: 2,
         kind: "reference_response",
         // The response ECHOES the artifact key, which is what lets a device refuse one that is
         // not its own (`01-F76`). It is the SESSION's key rather than the request's, because the
-        // check above is a refusal and not a clamp — the two are equal by the time we are here.
-        resource: "catalog",
-        scope: { org_id: session.orgId, branch_id: null },
-        form: page.form,
-        version: page.version,
-        ...(page.base_version === undefined ? {} : { base_version: page.base_version }),
-        entries: page.entries,
-        complete: page.complete,
-        next_from: page.next_from,
+        // checks above are refusals and not clamps — the two are equal by the time we are here.
+        ...artifact.key,
+        // ONE construction of `01-F75`'s response vocabulary for every resource, which is the FR's
+        // own point: `form` / `version` / `base_version?` / `entries[]` / `complete` / `next_from`
+        // read the same way whatever the artifact is, and two copies of it are two chances to page
+        // one resource differently from the other.
+        form: artifact.page.form,
+        version: artifact.page.version,
+        ...(artifact.page.base_version === undefined
+          ? {}
+          : { base_version: artifact.page.base_version }),
+        entries: artifact.page.entries,
+        complete: artifact.page.complete,
+        next_from: artifact.page.next_from,
       }),
     );
   };
@@ -1373,6 +1457,29 @@ export const createGateway = ({
           if (record.session.draining) continue;
           record.sink(notice);
         }
+      }
+    },
+    notifyStaffVersion(org_id, branch_id, version) {
+      // BRANCH-keyed, so this is an index lookup where the catalog's is a walk (`01-F76`: "a
+      // branch-scoped notice reaches that branch's devices and no others"). `branchSets` is keyed
+      // by the STRUCTURED `(org, branch)` pair already — `01-F71` (d)'s rule, and the reason a
+      // notice cannot reach the wrong tenant here by string arithmetic.
+      const notice = parseMessage({
+        v: 2,
+        kind: "reference_notice",
+        resource: "staff",
+        scope: { org_id, branch_id },
+        version,
+      });
+      for (const record of branchSets.get(branchKey(org_id, branch_id)) ?? []) {
+        // A DRAINING session is skipped, on `notifyCatalogVersion`'s stated reason and one more
+        // that is specific to this build: a drain session's READ is refused (`01-F47` sole
+        // purpose), and a refusal inside `handle` closes the socket — so telling it to fetch would
+        // take down the very session `01-F47` admitted so the device could drain its backlog. It
+        // reconciles on its next hello instead (`01-F77`), which is the mechanism that makes
+        // dropping any notice cost freshness and never correctness.
+        if (!record.open || record.session === null || record.session.draining) continue;
+        record.sink(notice);
       }
     },
     async sweepRevocations() {
