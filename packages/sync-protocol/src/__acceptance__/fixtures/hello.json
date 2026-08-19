@@ -1,5 +1,5 @@
 {
-  "v": 1,
+  "v": 2,
   "kind": "hello",
   "device_id": "01980000-0000-7000-8000-00000000d001",
   "device_class": "counter_electron",

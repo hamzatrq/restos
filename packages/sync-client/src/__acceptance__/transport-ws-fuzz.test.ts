@@ -381,7 +381,7 @@ describe("K-02 malformed LAN frames never crash the ws transport (01-F12, 01-F17
 
     const MIB = 1024 * 1024;
     fuzz.send("x".repeat(MIB)); // 1 MiB of nothing: unparseable and large
-    fuzz.send(JSON.stringify({ t: "wire", message: { v: 1, kind: "ping", pad: "p".repeat(MIB) } }));
+    fuzz.send(JSON.stringify({ t: "wire", message: { v: 2, kind: "ping", pad: "p".repeat(MIB) } }));
     fuzz.send(JSON.stringify({ t: "wire", message: "m".repeat(MIB) }));
 
     await expectStillServing(fuzz, 4204);

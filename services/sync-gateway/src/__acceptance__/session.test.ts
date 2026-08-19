@@ -124,11 +124,11 @@ describe("session boundary (T-01-07 API contract)", () => {
     const { conn, helloAck } = await openSession(gateway, identity);
     const inboundIllegal = [
       helloAck, // hello_ack
-      parseMessage({ v: 1, kind: "push_ack", acked_watermark: 0 }),
-      parseMessage({ v: 1, kind: "event_batch", events: [] }),
-      parseMessage({ v: 1, kind: "catchup_response", events: [], complete: true, next_from: 0 }),
-      parseMessage({ v: 1, kind: "quarantine_notice", event_id: "x", reason: "schema_invalid" }),
-      parseMessage({ v: 1, kind: "purge_command", scope: "all" }),
+      parseMessage({ v: 2, kind: "push_ack", acked_watermark: 0 }),
+      parseMessage({ v: 2, kind: "event_batch", events: [] }),
+      parseMessage({ v: 2, kind: "catchup_response", events: [], complete: true, next_from: 0 }),
+      parseMessage({ v: 2, kind: "quarantine_notice", event_id: "x", reason: "schema_invalid" }),
+      parseMessage({ v: 2, kind: "purge_command", scope: "all" }),
     ];
     for (const message of inboundIllegal) {
       await expect(conn.handle(message)).rejects.toThrow(ProtocolViolationError);

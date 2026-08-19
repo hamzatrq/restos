@@ -141,7 +141,7 @@ export const createMeshSession = (options: {
   const sendHello = (to: string): void => {
     const st = store.status();
     send(to, {
-      v: 1,
+      v: 2,
       kind: "hello",
       device_id: self.device_id,
       device_class,
@@ -168,7 +168,7 @@ export const createMeshSession = (options: {
     const events = store.readOwnEvents(from).slice(0, PUSH_BATCH_MAX);
     const last = events.at(-1);
     if (last === undefined) return;
-    send(hubTarget, { v: 1, kind: "push", events, watermark: last.lamport_seq });
+    send(hubTarget, { v: 2, kind: "push", events, watermark: last.lamport_seq });
   };
 
   const clearFollowerTimers = (): void => {
@@ -251,7 +251,7 @@ export const createMeshSession = (options: {
   const replayWindowTo = (device_id: string): void => {
     const events = store.readAllEvents();
     if (events.length === 0) return;
-    send(device_id, { v: 1, kind: "event_batch", events });
+    send(device_id, { v: 2, kind: "event_batch", events });
   };
 
   /**
@@ -273,7 +273,7 @@ export const createMeshSession = (options: {
     // bricking every waiter tablet.
     const renewal = store.relayedRenewal(device_id);
     send(device_id, {
-      v: 1,
+      v: 2,
       kind: "push_ack",
       acked_watermark: cloudAck,
       origin_device_id: device_id,
@@ -292,7 +292,7 @@ export const createMeshSession = (options: {
   const forwardQuarantineNotices = (device_id: string): void => {
     for (const notice of store.relayedQuarantineNotices(device_id)) {
       send(device_id, {
-        v: 1,
+        v: 2,
         kind: "quarantine_notice",
         event_id: notice.event_id,
         reason: notice.reason,
@@ -316,7 +316,7 @@ export const createMeshSession = (options: {
       // clock rather than defining it, so what it publishes must be the branch's time —
       // otherwise a re-elected hub silently re-anchors every follower onto its own
       // untrusted clock and the whole branch's durations jump.
-      send(device_id, { v: 1, kind: "ping", t: clock.now() + branchOffset() });
+      send(device_id, { v: 2, kind: "ping", t: clock.now() + branchOffset() });
       replayWindowTo(device_id); // idempotent loss recovery for fan-out (01-F8)
       forwardCloudAck(device_id); // relayed cloud ack propagation (DEC-SYNC-009, F5 re-forward)
       forwardQuarantineNotices(device_id); // origin notification via relay (T-01-08, 01-F37)
@@ -329,7 +329,7 @@ export const createMeshSession = (options: {
     followers.set(device_id, { missed: 0, timer: null });
     scheduleHeartbeat(device_id);
     send(device_id, {
-      v: 1,
+      v: 2,
       kind: "hello_ack",
       // Deterministic composition (fix-round 3, 20 §2.4): no wall clock, no
       // crypto randomness — (hub, follower, seam now, per-session counter).
@@ -350,7 +350,7 @@ export const createMeshSession = (options: {
     const acked = contiguousHigh(from);
     // acked < 0 means nothing contiguously held — the wire watermark is a
     // nonnegative seq, so stay silent and let the origin's retry re-push.
-    if (acked >= 0) send(from, { v: 1, kind: "push_ack", acked_watermark: acked });
+    if (acked >= 0) send(from, { v: 2, kind: "push_ack", acked_watermark: acked });
     // DEC-SYNC-009 (T-01-12): the hub is the branch's cloud uplink for WAN-less
     // peers — signal the cloud session (store relay seam) to relay the held
     // branch window upward. Fires only while acting hub/solo (this handler's
@@ -359,7 +359,7 @@ export const createMeshSession = (options: {
     if (fresh.length === 0) return;
     for (const device_id of followers.keys()) {
       if (device_id === from) continue;
-      send(device_id, { v: 1, kind: "event_batch", events: fresh });
+      send(device_id, { v: 2, kind: "event_batch", events: fresh });
     }
   };
 
@@ -516,7 +516,7 @@ export const createMeshSession = (options: {
         // matters is that all followers take their offset from the SAME hub clock, so
         // the residual cancels in every difference (01-F43's whole argument).
         store.setBranchTimeOffset(message.t - at);
-        send(from, { v: 1, kind: "pong", t: message.t });
+        send(from, { v: 2, kind: "pong", t: message.t });
         return;
       }
       case "pong": {
@@ -603,7 +603,7 @@ export const createMeshSession = (options: {
       const events = store.readOwnEvents(hubFanCursor).slice(0, PUSH_BATCH_MAX);
       if (events.length === 0) return;
       for (const device_id of followers.keys()) {
-        send(device_id, { v: 1, kind: "event_batch", events });
+        send(device_id, { v: 2, kind: "event_batch", events });
       }
       const last = events.at(-1);
       if (last) hubFanCursor = last.lamport_seq + 1;

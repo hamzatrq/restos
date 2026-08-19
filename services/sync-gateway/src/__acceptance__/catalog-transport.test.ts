@@ -14,6 +14,7 @@
 // freshness, never correctness) and clause 5 (a catalog that cannot sync never blocks a sale)
 // are DEVICE-side properties and belong with T-C4.
 
+import type { ProtocolMessage } from "@restos/sync-protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   CATALOG_PAGE_SIZE,
@@ -64,6 +65,45 @@ const item = (id: string, name: string, extra: Record<string, unknown> = {}): Ca
     prices: PRICED,
     ...extra,
   }) as CatalogEntry;
+
+/**
+ * `01-F75`/`01-F77` — the catalog fetch as the wire carries it since the reference-data
+ * generalisation. `catalog_request` is superseded by ONE resource-discriminated
+ * `reference_request` naming the `01-F76` artifact key; the catalog stays ORG-scoped (`01-F52`),
+ * so `branch_id` is null. The org is the SESSION's, because `01-F71` (e) has the server derive the
+ * key from the session and REFUSE a request that states another rather than clamp it.
+ */
+const catalogRequest = (org_id: string, have_version = 0) =>
+  ({
+    v: 2,
+    kind: "reference_request",
+    resource: "catalog",
+    scope: { org_id, branch_id: null },
+    have_version,
+  }) as const;
+
+/**
+ * The served rows, narrowed to the CATALOG artifact. `entries[]` is typed per resource
+ * (`01-F75`), so a `reference_response` is a union and the discriminator has to be read before
+ * the rows are — which is the FR's point: the frame makes a cross-resource payload
+ * unrepresentable, and a reader that wants catalog rows must say so.
+ */
+const catalogEntriesOf = (
+  response: Extract<ProtocolMessage, { kind: "reference_response" }>,
+): readonly { name: string; id: string }[] => {
+  if (response.resource !== "catalog")
+    throw new Error(`expected a catalog artifact, got ${response.resource}`);
+  return response.entries;
+};
+
+/**
+ * `01-F77` — the catalog's version out of `hello_ack`'s per-artifact set, which superseded the
+ * single `catalog_version` field. `undefined` still means the key is OMITTED, which is what an org
+ * that has published nothing looks like.
+ */
+const ackCatalogVersion = (ack: {
+  reference_versions?: readonly { resource: string; version: number }[] | undefined;
+}): number | undefined => ack.reference_versions?.find((k) => k.resource === "catalog")?.version;
 
 describe("T-C2 — the published catalog (01-F52, founder §6 Q1: the API publishes)", () => {
   let db: Db;
@@ -326,11 +366,9 @@ describe("T-C2 — the published catalog (01-F52, founder §6 Q1: the API publis
     const gw = createGateway({ db, clock: makeClock(), auth: { token_secret: TEST_TOKEN_SECRET } });
     const session = await openSession(gw, id);
     await revokeDevice(db, { org_id: id.org_id, device_id: id.device_id });
-    await expect(
-      session.conn.handle({ v: 1, kind: "catalog_request", have_version: 0 }),
-    ).rejects.toThrow();
+    await expect(session.conn.handle(catalogRequest(id.org_id))).rejects.toThrow();
     expect(
-      ofKind(session.rec.all, "catalog_response"),
+      ofKind(session.rec.all, "reference_response"),
       "a revoked device received catalog rows",
     ).toEqual([]);
     await gw.close();
@@ -372,28 +410,28 @@ describe("T-C3 — serving it over the session (01-F9 org-scope reference data)"
       now: BASE_T,
     });
     const session = await openSession(gateway, id);
-    expect(session.helloAck.catalog_version).toBe(1);
+    expect(ackCatalogVersion(session.helloAck)).toBe(1);
   });
 
   it("omits the field entirely when the org has never published", async () => {
     // Absent must look identical to an older gateway that serves no catalog: in both cases the
     // device simply never asks, which is correct for both. Sending 0 would be a claim.
     const session = await openSession(gateway, freshIdentity());
-    expect(session.helloAck.catalog_version).toBeUndefined();
+    expect(ackCatalogVersion(session.helloAck)).toBeUndefined();
   });
 
-  it("answers catalog_request over the session", async () => {
+  it("answers reference_request over the session", async () => {
     const id = freshIdentity();
     await publishCatalog(db, id.org_id, [item("I1", "Chapli Kebab")], {
       enabled: ENABLED,
       now: BASE_T,
     });
     const session = await openSession(gateway, id);
-    await session.conn.handle({ v: 1, kind: "catalog_request", have_version: 0 });
-    const response = must(ofKind(session.rec.all, "catalog_response")[0], "catalog_response");
+    await session.conn.handle(catalogRequest(id.org_id));
+    const response = must(ofKind(session.rec.all, "reference_response")[0], "reference_response");
     expect(response.form).toBe("snapshot");
     expect(response.version).toBe(1);
-    expect(response.entries.map((e) => e.name)).toEqual(["Chapli Kebab"]);
+    expect(catalogEntriesOf(response).map((e) => e.name)).toEqual(["Chapli Kebab"]);
   });
 
   it("§5.7 — a TRAINING-branch device receives the production org's catalog", async () => {
@@ -407,10 +445,10 @@ describe("T-C3 — serving it over the session (01-F9 org-scope reference data)"
     });
     const training = { ...freshIdentity(), org_id: prod.org_id };
     const session = await openSession(gateway, training);
-    expect(session.helloAck.catalog_version).toBe(1);
-    await session.conn.handle({ v: 1, kind: "catalog_request", have_version: 0 });
-    const response = must(ofKind(session.rec.all, "catalog_response")[0], "catalog_response");
-    expect(response.entries.map((e) => e.name)).toEqual(["Chapli Kebab"]);
+    expect(ackCatalogVersion(session.helloAck)).toBe(1);
+    await session.conn.handle(catalogRequest(training.org_id));
+    const response = must(ofKind(session.rec.all, "reference_response")[0], "reference_response");
+    expect(catalogEntriesOf(response).map((e) => e.name)).toEqual(["Chapli Kebab"]);
   });
 
   it("scopes the answer by ORG — a device never sees another org's menu", async () => {
@@ -422,9 +460,9 @@ describe("T-C3 — serving it over the session (01-F9 org-scope reference data)"
       now: BASE_T + 1,
     });
     const session = await openSession(gateway, b);
-    await session.conn.handle({ v: 1, kind: "catalog_request", have_version: 0 });
-    const response = must(ofKind(session.rec.all, "catalog_response")[0], "catalog_response");
-    expect(response.entries.map((e) => e.name)).toEqual(["B-only"]);
+    await session.conn.handle(catalogRequest(b.org_id));
+    const response = must(ofKind(session.rec.all, "reference_response")[0], "reference_response");
+    expect(catalogEntriesOf(response).map((e) => e.name)).toEqual(["B-only"]);
   });
 
   it("notifyCatalogVersion reaches every live session in the ORG, across branches", async () => {
@@ -441,8 +479,8 @@ describe("T-C3 — serving it over the session (01-F9 org-scope reference data)"
 
     gateway.notifyCatalogVersion(org, 7);
 
-    expect(must(ofKind(s1.rec.all, "catalog_notice")[0], "branch one notice").version).toBe(7);
-    expect(must(ofKind(s2.rec.all, "catalog_notice")[0], "branch two notice").version).toBe(7);
-    expect(ofKind(s3.rec.all, "catalog_notice"), "another org was told").toEqual([]);
+    expect(must(ofKind(s1.rec.all, "reference_notice")[0], "branch one notice").version).toBe(7);
+    expect(must(ofKind(s2.rec.all, "reference_notice")[0], "branch two notice").version).toBe(7);
+    expect(ofKind(s3.rec.all, "reference_notice"), "another org was told").toEqual([]);
   });
 });

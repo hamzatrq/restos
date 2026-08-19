@@ -165,7 +165,7 @@ export const rawPeer = (
 // ---------------------------------------------------------------------------
 
 export const hello = (device_id: string, device_class: DeviceClass): ProtocolMessage => ({
-  v: 1,
+  v: 2,
   kind: "hello",
   device_id,
   device_class,
@@ -179,11 +179,11 @@ export const helloAck = (
   session_id: string,
   hub: boolean,
   resume_from: number,
-): ProtocolMessage => ({ v: 1, kind: "hello_ack", session_id, hub, resume_from });
+): ProtocolMessage => ({ v: 2, kind: "hello_ack", session_id, hub, resume_from });
 
-export const wirePing = (t: number): ProtocolMessage => ({ v: 1, kind: "ping", t });
+export const wirePing = (t: number): ProtocolMessage => ({ v: 2, kind: "ping", t });
 
-export const wirePong = (t: number): ProtocolMessage => ({ v: 1, kind: "pong", t });
+export const wirePong = (t: number): ProtocolMessage => ({ v: 2, kind: "pong", t });
 
 /**
  * push{events, watermark} literal for scripting the follower half by hand
@@ -194,7 +194,7 @@ export const wirePong = (t: number): ProtocolMessage => ({ v: 1, kind: "pong", t
 export const wirePush = (
   events: ReadonlyArray<ReturnType<typeof peerEnvelope>>,
   watermark: number,
-): ProtocolMessage => ({ v: 1, kind: "push", events, watermark }) as unknown as ProtocolMessage;
+): ProtocolMessage => ({ v: 2, kind: "push", events, watermark }) as unknown as ProtocolMessage;
 
 // ---------------------------------------------------------------------------
 // Revivable peer (T-01-05 fix-round additive): attaches visible but plays dead —

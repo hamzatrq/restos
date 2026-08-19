@@ -114,7 +114,7 @@ type WireEvent = Extract<ProtocolMessage, { kind: "event_batch" }>["events"][num
 type HelloMessage = Extract<ProtocolMessage, { kind: "hello" }>;
 type PushMessage = Extract<ProtocolMessage, { kind: "push" }>;
 type CatchupRequest = Extract<ProtocolMessage, { kind: "catchup_request" }>;
-type CatalogRequest = Extract<ProtocolMessage, { kind: "catalog_request" }>;
+type ReferenceRequest = Extract<ProtocolMessage, { kind: "reference_request" }>;
 
 /** 01-F40 named seam: identity at v1 — slice predicates are Wave 1. */
 const sliceFilter = (_session: SessionState, batch: readonly WireEvent[]): readonly WireEvent[] =>
@@ -424,7 +424,7 @@ export const createGateway = ({
       // 01-F42/01-F25: purge_command { scope: "all" } through the sink and NO
       // session — re-sent on EVERY hello while revoked (at-least-once; no
       // purge-ack wire kind exists in the closed PROTOCOL.md set).
-      record.sink(parseMessage({ v: 1, kind: "purge_command", scope: "all" }));
+      record.sink(parseMessage({ v: 2, kind: "purge_command", scope: "all" }));
       throw new AuthRejectedError("device is revoked (01-F25/01-F42)");
     }
     if (registry.branch_id !== claims.branch_id) {
@@ -486,7 +486,7 @@ export const createGateway = ({
     );
     record.sink(
       parseMessage({
-        v: 1,
+        v: 2,
         kind: "hello_ack",
         session_id: session.sessionId,
         hub: false,
@@ -501,16 +501,35 @@ export const createGateway = ({
         // client-side gate for relaying — absent otherwise, keeping plain
         // sessions (and the committed XP transcript) byte-identical.
         ...(relayAuthorized ? { relay_authorized: true } : {}),
-        // T-C1/T-C3 (01-F9 "plus org-scope reference data"). THE correctness mechanism of the
-        // whole catalog transport: the device compares this against its own stored version and
-        // fetches if behind, so every reconnection reconciles — including for a device that has
-        // been offline for a week and could not have heard any announcement. The
-        // `catalog_notice` push is latency on top of this, never a substitute for it.
+        // T-C1/T-C3 (01-F9 "plus org-scope reference data"), now `01-F77`'s PER-ARTIFACT set.
+        // THE correctness mechanism of the whole reference-data transport: the device compares
+        // each key against its own stored version and fetches the ones it is behind on, so every
+        // reconnection reconciles — including for a device that has been offline for a week and
+        // could not have heard any announcement. A `reference_notice` is latency on top of this,
+        // never a substitute for it.
         //
-        // Omitted at version 0 rather than sent as 0, so an org that has never published looks
-        // identical to an older gateway that serves no catalog: in both cases the device simply
-        // never asks, which is the correct behaviour for both.
-        ...(catalogVersionAtHello > 0 ? { catalog_version: catalogVersionAtHello } : {}),
+        // An ARRAY and not a map, because a map key over two fields is the concatenation
+        // `01-F76` bans; the catalog's key is its ORG with `branch_id: null` (`01-F52` keeps it
+        // org-scoped and `01-F76` re-states that rather than re-opening it).
+        //
+        // ⚠ **Only the catalog is carried today, and its ABSENCE is the same signal it always
+        // was.** `01-F77`: a key the org has published nothing for is omitted, never sent as 0,
+        // so it is indistinguishable from a gateway that does not serve that resource — in both
+        // the device simply never asks, which is right for both. That is also what makes the
+        // `staff` key's absence here honest rather than a lie: this gateway's roster serve path
+        // is the NEXT step of `plans/saas-pivot/staff-over-the-wire.md`, `staff.ts` still has no
+        // shipping caller, and a key advertised here is a key the device then asks for.
+        ...(catalogVersionAtHello > 0
+          ? {
+              reference_versions: [
+                {
+                  resource: "catalog",
+                  scope: { org_id: claims.org_id, branch_id: null },
+                  version: catalogVersionAtHello,
+                },
+              ],
+            }
+          : {}),
       }),
     );
     // T-01-08 hello-time notice drain (DEC-SYNC-008): AFTER hello_ack, this
@@ -540,7 +559,7 @@ export const createGateway = ({
     for (const row of pendingNotices) {
       record.sink(
         parseMessage({
-          v: 1,
+          v: 2,
           kind: "quarantine_notice",
           event_id: String(row.claimed_event_id),
           reason: String(row.reason),
@@ -1027,7 +1046,7 @@ export const createGateway = ({
       }
       record.sink(
         parseMessage({
-          v: 1,
+          v: 2,
           kind: "push_ack",
           acked_watermark: outcome.acked,
           ...(outcome.ackOrigin === null ? {} : { origin_device_id: outcome.ackOrigin }),
@@ -1038,7 +1057,7 @@ export const createGateway = ({
     for (const q of outcome.quarantined) {
       record.sink(
         parseMessage({
-          v: 1,
+          v: 2,
           kind: "quarantine_notice",
           event_id: q.envelope.id,
           reason: q.reason,
@@ -1091,14 +1110,14 @@ export const createGateway = ({
         );
         for (const peer of peers) {
           if (revoked.has(peer.session.deviceId)) {
-            peer.sink(parseMessage({ v: 1, kind: "purge_command", scope: "all" }));
+            peer.sink(parseMessage({ v: 2, kind: "purge_command", scope: "all" }));
             peer.open = false;
             leaveFanout(peer);
             continue;
           }
           peer.sink(
             parseMessage({
-              v: 1,
+              v: 2,
               kind: "event_batch",
               events: [...sliceFilter(peer.session, wireEvents)],
             }),
@@ -1142,7 +1161,7 @@ export const createGateway = ({
     const last = page[page.length - 1];
     record.sink(
       parseMessage({
-        v: 1,
+        v: 2,
         kind: "catchup_response",
         events,
         complete: fetched.length <= CATCHUP_PAGE_SIZE,
@@ -1167,16 +1186,61 @@ export const createGateway = ({
    * The earlier citation here said `sec-F1`, which greps to nothing anywhere in `specs/` — an
    * invented ID, which Commandment 2 makes a defect regardless of the behaviour being right.
    */
-  const handleCatalog = async (
+  const handleReference = async (
     record: ConnectionRecord,
     session: SessionState,
-    message: CatalogRequest,
+    message: ReferenceRequest,
   ): Promise<void> => {
     await requireUnrevoked(session);
     if (session.draining) {
       throw new AuthRejectedError(
         "device token expired — session is in drain mode, reads are refused until the " +
           "renewal lands (01-F47 sole purpose; push to renew)",
+      );
+    }
+    // `01-F71` (e) — **THE KEY COMES FROM THE SESSION AND A REQUEST STATING ANOTHER IS REFUSED,
+    // NEVER CLAMPED.** `catalog_request` carried no tenant at all, so the org was read from the
+    // session and there was nothing a caller could state; `01-F75`'s frame puts a tenant key in
+    // bytes a caller controls for the first time, which is what creates the exposure. Silently
+    // serving the session's own artifact instead of the one asked for is exactly the mis-routing
+    // `01-F76` says makes scope decoration, and a client-stated scope is a client role claim
+    // commandment 8 forbids trusting. The device-side `foreign_artifact` refusal is the belt to
+    // this brace and never a substitute for it.
+    if (message.scope.org_id !== session.orgId) {
+      throw new AuthRejectedError(
+        "reference_request states an artifact scope that is not this session's — the org comes " +
+          "from the authenticated session, never from the frame (01-F71 (e); refused, not " +
+          "clamped)",
+      );
+    }
+    // `01-F75` closes the resource set at `catalog` and `staff`, and this gateway serves one of
+    // them. The roster's serve path is the NEXT step of
+    // `plans/saas-pivot/staff-over-the-wire.md` — `staff.ts` has the storage half and no shipping
+    // caller — so a `staff` request is refused by NAME rather than answered with an empty
+    // snapshot, which would be a version number claiming an artifact exists (`00 §5.7`). It is
+    // unreachable from a shipping device: `hello_ack` advertises no `staff` key, and `01-F77`
+    // makes an absent key the signal that the device simply never asks.
+    //
+    // ⚠ **A REFUSAL HERE IS NOT A REFUSAL ON THE SOCKET — IT IS A DISCONNECTION, AND STEP 6 OWNS
+    // DECIDING WHETHER THAT IS RIGHT.** `server.ts`'s message handler catches anything `handle`
+    // throws, logs *"sync session terminated"* and calls `conn.close()` + `socket.close()`. So a
+    // device that asks for an unadvertised resource does not receive a refusal and carry on: it
+    // loses its sync session, and with it the ledger push path, until it reconnects. That is the
+    // correct posture for a protocol violation (a peer that cannot be trusted to frame) and a
+    // questionable one for a *read of a resource this build does not serve*, which is an ordinary
+    // negotiation outcome and exactly what a mid-rollout fleet produces.
+    //
+    // **Unreachable today and therefore recorded rather than changed** (commandment 2 — the
+    // alternative is a refusal frame no FR declares): `hello_ack` advertises `catalog` only and
+    // the client filters its fetches on the advertised set, so nothing in the field sends this.
+    // It becomes reachable the moment `staff` is advertised by some gateways and not others,
+    // which is step 6's own deployment window. Carried into
+    // `plans/saas-pivot/staff-over-the-wire.md` so the step-6 session meets it before it writes
+    // the `handleStaff` arm, and not after.
+    if (message.resource !== "catalog") {
+      throw new ProtocolViolationError(
+        `this gateway serves no ${message.resource} artifact — no version for that resource was ` +
+          "advertised on hello_ack, so the session was never told to ask (01-F75, 01-F77)",
       );
     }
     const page = await catalogPage(
@@ -1188,8 +1252,13 @@ export const createGateway = ({
     );
     record.sink(
       parseMessage({
-        v: 1,
-        kind: "catalog_response",
+        v: 2,
+        kind: "reference_response",
+        // The response ECHOES the artifact key, which is what lets a device refuse one that is
+        // not its own (`01-F76`). It is the SESSION's key rather than the request's, because the
+        // check above is a refusal and not a clamp — the two are equal by the time we are here.
+        resource: "catalog",
+        scope: { org_id: session.orgId, branch_id: null },
         form: page.form,
         version: page.version,
         ...(page.base_version === undefined ? {} : { base_version: page.base_version }),
@@ -1213,14 +1282,38 @@ export const createGateway = ({
         return handlePush(record, session, message);
       case "catchup_request":
         return handleCatchup(record, session, message);
-      case "catalog_request":
-        return handleCatalog(record, session, message);
+      case "reference_request":
+        return handleReference(record, session, message);
       case "ping":
-        record.sink(parseMessage({ v: 1, kind: "pong", t: message.t }));
+        record.sink(parseMessage({ v: 2, kind: "pong", t: message.t }));
         return;
+      case "credential_change_request":
+        // ⚠ **ITS OWN ARM BECAUSE THE DEFAULT ARM SAID THE OPPOSITE OF `01-F79`.** This kind is
+        // **device → server** — the till requests, the cloud records (`01-F79`, and that direction
+        // is the whole resolution: `01-F62` makes `user.changed` org-scoped so a till has no legal
+        // envelope for it, and commandment 5 forbids an operational screen calling
+        // `services/api`). Falling into `default:` answered *"server→device kind
+        // credential_change_request arriving inbound violates the session law"*, which names the
+        // correct kind, the correct socket and a fact that is false — and the comment there
+        // acknowledged the direction while letting it fall through anyway, so the refusal a device
+        // logs contradicted the FR that defines the frame.
+        //
+        // What is true, and is the entire refusal: the direction is legal and the CLOUD HALF IS
+        // NOT BUILT. Refused by name rather than answered with a `credential_change_result`,
+        // because every one of `01-F79`'s four outcomes is a claim about an act that was
+        // attempted — `unavailable` says the WAN was the obstacle, and a connected session
+        // reporting it would be this service telling a cashier her PIN change failed for a reason
+        // that is not the reason (`00 §5.7`).
+        throw new ProtocolViolationError(
+          "credential_change_request is device→server (01-F79) and legal on this wire, but this " +
+            "gateway has no serve path for it yet — refused by name rather than answered with a " +
+            "credential_change_result outcome it cannot honestly claim",
+        );
       default:
-        // hello_ack | push_ack | event_batch | catchup_response |
-        // quarantine_notice | purge_command — server→device kinds never inbound.
+        // hello_ack | push_ack | event_batch | catchup_response | reference_response |
+        // reference_notice | credential_change_result | quarantine_notice | purge_command —
+        // server→device kinds never inbound. Every remaining member of the union is one of those,
+        // which is what makes this sentence true of everything that reaches it.
         throw new ProtocolViolationError(
           `server→device kind ${message.kind} arriving inbound violates the session law`,
         );
@@ -1260,7 +1353,16 @@ export const createGateway = ({
       // `branchSets` as an index. Fan-out is branch-keyed because event delivery is
       // branch-scoped (01-F13, a security property); the catalog is the one thing that is
       // deliberately not (01-F52), which is exactly why it could not ride the existing stream.
-      const notice = parseMessage({ v: 1, kind: "catalog_notice", version });
+      // `01-F75` — the notice names the ARTIFACT it is about. The catalog's key is this org
+      // with `branch_id: null` (`01-F52`/`01-F76`), so a device can tell which of its keys moved
+      // without inferring it from the frame's kind.
+      const notice = parseMessage({
+        v: 2,
+        kind: "reference_notice",
+        resource: "catalog",
+        scope: { org_id, branch_id: null },
+        version,
+      });
       for (const set of branchSets.values()) {
         for (const record of set) {
           if (!record.open || record.session?.orgId !== org_id) continue;
@@ -1315,7 +1417,7 @@ export const createGateway = ({
             // 01-F42: the purge command rides a PROVEN eviction, so a device that is
             // reachable wipes now rather than at its next hello.
             if (record.open && !unreadable) {
-              record.sink(parseMessage({ v: 1, kind: "purge_command", scope: "all" }));
+              record.sink(parseMessage({ v: 2, kind: "purge_command", scope: "all" }));
             }
             // ORDER MATTERS: leaveFanout returns early when `session` is null, so
             // clearing the session first made it a no-op and the record stayed in

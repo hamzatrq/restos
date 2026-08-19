@@ -14,13 +14,18 @@ const KINDS_PER_PROTOCOL_MD = [
   "event_batch",
   "catchup_request",
   "catchup_response",
-  // T-C1 (`plans/wave-1/catalog-transport.md`, founder-approved July 2026). Additive under
-  // v:1 — PROTOCOL_VERSION is unchanged on purpose, because an old device simply never sends
-  // `catalog_request` and a new gateway never volunteers a `catalog_response` it was not
-  // asked for. `20 §2.7` makes extending this table a spec-review event, which this is.
-  "catalog_request",
-  "catalog_response",
-  "catalog_notice",
+  // T-C1 (`plans/wave-1/catalog-transport.md`, founder-approved July 2026) added
+  // `catalog_request` / `catalog_response` / `catalog_notice` additively under v:1.
+  // ⚠ **SUPERSEDED by `01-F75`'s ONE resource-discriminated triple (August 2026).** Removing
+  // kinds is not additive, so `01-F77` bumps the wire version with them — see the version test
+  // below, which moved in the same change and for the same FR. `20 §2.7` makes changing this
+  // table a spec-review event, which this is.
+  "reference_request",
+  "reference_response",
+  "reference_notice",
+  // `01-F79` — the credential-change pair, minted because `14-F40` cannot be built without it.
+  "credential_change_request",
+  "credential_change_result",
   "quarantine_notice",
   "purge_command",
   "ping",
@@ -28,8 +33,8 @@ const KINDS_PER_PROTOCOL_MD = [
 ];
 
 describe("wire message vocabulary (PROTOCOL.md)", () => {
-  it("PROTOCOL.md: MESSAGE_KINDS is exactly the 14 kinds of the message table", () => {
-    expect(MESSAGE_KINDS).toHaveLength(14);
+  it("PROTOCOL.md: MESSAGE_KINDS is exactly the 16 kinds of the message table", () => {
+    expect(MESSAGE_KINDS).toHaveLength(16);
     expect([...MESSAGE_KINDS].sort()).toEqual([...KINDS_PER_PROTOCOL_MD].sort());
   });
 
@@ -42,12 +47,18 @@ describe("wire message vocabulary (PROTOCOL.md)", () => {
 
   it("PROTOCOL.md: unknown kind throws UnknownMessageKindError (known kind anchors the harness)", () => {
     expect(parseMessage(builders.ping())).toEqual(expect.objectContaining({ kind: "ping" }));
-    expect(() => parseMessage({ v: 1, kind: "teleport", t: 1 })).toThrow(UnknownMessageKindError);
+    expect(() => parseMessage({ v: 2, kind: "teleport", t: 1 })).toThrow(UnknownMessageKindError);
   });
 
-  it("PROTOCOL.md: v must be exactly 1 (v: 2, v: 0, and missing v all reject)", () => {
-    expect(parseMessage(builders.ping())).toEqual(builders.ping()); // anchor: v: 1 is valid
-    expect(() => parseMessage({ ...builders.ping(), v: 2 })).toThrow();
+  // ⚠ **MIGRATED BY `01-F77` (August 2026), and the CLAIM is unchanged: `v` is exactly the one
+  // version this build speaks, and every other value — including the one that used to be legal —
+  // rejects.** The literal moved 1 → 2 because `01-F75` removes three kinds and removing kinds is
+  // not additive (`00 §6`). The N−1 reader is DEFERRED (founder ruling, R4 puts nothing in the
+  // field), so `v: 1` is refused here rather than half-understood.
+  it("PROTOCOL.md/01-F77: v must be exactly 2 (v: 1, v: 3, v: 0, and missing v all reject)", () => {
+    expect(parseMessage(builders.ping())).toEqual(builders.ping()); // anchor: v: 2 is valid
+    expect(() => parseMessage({ ...builders.ping(), v: 1 })).toThrow();
+    expect(() => parseMessage({ ...builders.ping(), v: 3 })).toThrow();
     expect(() => parseMessage({ ...builders.ping(), v: 0 })).toThrow();
     expect(() => parseMessage(without(builders.ping(), "v"))).toThrow();
   });

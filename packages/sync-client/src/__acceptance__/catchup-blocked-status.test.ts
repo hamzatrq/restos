@@ -140,7 +140,7 @@ const scriptedCloud = () => {
 };
 
 const helloAck = (session_id: string) => ({
-  v: 1,
+  v: 2,
   kind: "hello_ack",
   session_id,
   hub: false,
@@ -151,14 +151,14 @@ const withSeq = (envelope: object, global_seq: number) => ({ ...envelope, global
 
 /** A completed catch-up page (01-F9). `complete: true` keeps the tape free of paging noise. */
 const catchupPage = (events: readonly unknown[]) => ({
-  v: 1,
+  v: 2,
   kind: "catchup_response",
   events,
   complete: true,
   next_from: 0,
 });
 
-const eventBatch = (events: readonly unknown[]) => ({ v: 1, kind: "event_batch", events });
+const eventBatch = (events: readonly unknown[]) => ({ v: 2, kind: "event_batch", events });
 
 /** The from_global_seq of the last catchup_request the device sent (exclusive cursor, 01-F9). */
 const lastCatchupFrom = (sent: readonly ProtocolMessage[]): number =>
@@ -401,7 +401,7 @@ describe("T-01-20 — the device KEEPS OPERATING LOCALLY while blocked (DEC-SYNC
     const pushed = cloud.sent.filter((m) => m.kind === "push");
     expect(pushed.length).toBeGreaterThan(0);
     expect(must(pushed.at(-1), "the push").events.map((e) => e.id)).toContain(sale.id);
-    cloud.deliver({ v: 1, kind: "push_ack", acked_watermark: sale.lamport_seq });
+    cloud.deliver({ v: 2, kind: "push_ack", acked_watermark: sale.lamport_seq });
     expect(store.status().acked_watermark).toBe(sale.lamport_seq);
     expect(store.status().queue_depth).toBe(0);
 

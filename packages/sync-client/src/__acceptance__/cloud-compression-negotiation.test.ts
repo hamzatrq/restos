@@ -112,7 +112,7 @@ type Stub = Awaited<ReturnType<typeof startStubGateway>>;
  * sync-protocol/__acceptance__/compression-negotiation.test.ts owns that pin). */
 const helloFrom = (extra: Record<string, unknown> = {}): ProtocolMessage =>
   ({
-    v: 1,
+    v: 2,
     kind: "hello",
     device_id: "dev-z1",
     device_class: "counter_electron",
@@ -125,7 +125,7 @@ const helloFrom = (extra: Record<string, unknown> = {}): ProtocolMessage =>
 
 const ackWith = (extra: Record<string, unknown> = {}): ProtocolMessage =>
   ({
-    v: 1,
+    v: 2,
     kind: "hello_ack",
     session_id: "sess-z1",
     hub: false,
@@ -133,11 +133,11 @@ const ackWith = (extra: Record<string, unknown> = {}): ProtocolMessage =>
     ...extra,
   }) as unknown as ProtocolMessage;
 
-const ping = (t: number): ProtocolMessage => ({ v: 1, kind: "ping", t });
+const ping = (t: number): ProtocolMessage => ({ v: 2, kind: "ping", t });
 
 const eventBatch = (): ProtocolMessage =>
   ({
-    v: 1,
+    v: 2,
     kind: "event_batch",
     events: [{ ...peerEnvelope(identity(), 0), global_seq: 1 }],
   }) as unknown as ProtocolMessage;

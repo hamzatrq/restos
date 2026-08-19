@@ -32,28 +32,49 @@ sides. Changing a fixture's semantics is a wire-contract change requiring a spec
 
 | file | responsibility | key exports (from `index.ts`) |
 |---|---|---|
-| `src/messages.ts` | the closed message set (11 zod schemas), the wire envelope, and both codecs | `PROTOCOL_VERSION`, `messageSchemas`, `MESSAGE_KINDS`, `MessageKind`, `ProtocolMessage`, `WireEnvelope`, `parseMessage`, `encodeMessage`, `decodeMessage`, `encodeCompressed`, `decodeCompressed`, `UnknownMessageKindError` |
+| `src/messages.ts` | the closed message set (16 zod schemas), the wire envelope, and both codecs | `PROTOCOL_VERSION`, `messageSchemas`, `MESSAGE_KINDS`, `MessageKind`, `ProtocolMessage`, `WireEnvelope`, `CatalogEntryWire`, `StaffEntryWire`, `parseMessage`, `encodeMessage`, `decodeMessage`, `encodeCompressed`, `decodeCompressed`, `UnknownMessageKindError` |
 | `src/transport.ts` | the transport seams the mesh + cloud sessions plug into (types only) | `MeshTransport`, `CloudTransport`, `TransportHandlers`, `CloudTransportHandlers`, `PeerInfo`, `Clock`, `TimerId` |
 | `src/index.ts` | the package barrel — re-exports the above; the only public surface | — |
 | `PROTOCOL.md` | human-readable protocol spec (24-F8 artifact): direction, body, per-kind notes | — |
 
 ## `messages.ts` — the schema + codec
 
-Every message is `{ v: 1, kind, ...body }`. `PROTOCOL_VERSION = 1`. Schemas are keyed by
-`kind` in `messageSchemas` and combined into a zod **discriminated union** on `kind`.
-`MESSAGE_KINDS` is the closed list; nothing outside it is a valid message.
+Every message is `{ v: 2, kind, ...body }`. `PROTOCOL_VERSION = 2`. Schemas are keyed by
+`kind` in `messageSchemas` and combined into a zod **discriminated union** on `kind`; the three
+`reference_*` kinds are themselves discriminated on `resource` (`01-F75`), which is what types
+`entries[]` per resource and pairs each artifact with its legal scope.
+`MESSAGE_KINDS` is the closed list; nothing outside it is a valid message. A frame at any other
+`v` is refused, and the refusal **names the version this build speaks** rather than reporting an
+unknown kind (`01-F77`, `00 §5.7`) — the N−1 reader is deferred to the first pilot pairing, so the
+whole system moves in one step.
 
-**The 11 message kinds** (real names from `messageSchemas`):
+⚠ *That claim was FALSE for the three kinds it is about until 2026-08-19, and the fix is an
+ordering:* `parseMessage` tested `kind` before `v`, so a `v: 1` frame naming one of the three kinds
+`01-F75` REMOVED — the only ones for which "the kind may be perfectly well known" is the point —
+answered *unknown protocol message kind*. **`v` is checked first now and the order is the contract.**
+Every kind that survived the bump reported the version either way, which is exactly why the gap held:
+a claim that is true of thirteen cases and false of the three it was written for reads as true.
+
+**The 16 message kinds** (real names from `messageSchemas`). ⚠ *This table said **11** and listed
+eleven rows for a set that had been fourteen since T-C1 — the catalog triple was added and never
+written down here. It is 16 now and the three rows the count was missing are `01-F75`'s, so the
+old undercount is not merely corrected but is why the new rows must be read as replacing three
+that are gone rather than as five additions.*
 
 | kind | one-line role |
 |---|---|
 | `hello` | device→server auth + resume: `device_id`, `device_class`, `branch_id`, `token`, `last_global_seq`, `own_high_water` |
-| `hello_ack` | server→device: `session_id`, `hub`, `resume_from`, **`relay_authorized?`** |
+| `hello_ack` | server→device: `session_id`, `hub`, `resume_from`, **`relay_authorized?`**, **`renewed_token?`**, **`compression?`**, **`reference_versions?`** — one version per `01-F76` artifact key, which supersedes `catalog_version` (`01-F77`) |
 | `push` | device→server own events (lamport order) + `watermark`; events are bare `EventEnvelope` (not yet cloud-stamped) |
 | `push_ack` | server→device write-checkpoint: `acked_watermark`, **`origin_device_id?`** |
 | `event_batch` | server→device merged stream: `WireEnvelope[]` (may carry cloud-assigned `global_seq`) |
 | `catchup_request` | device→server range fetch: `from_global_seq` |
 | `catchup_response` | server→device paged pull: `events`, `complete`, `next_from` |
+| `reference_request` | device→server reference-data pull, ONE kind for every resource: `resource`, `scope`, `have_version`, `at_version?`, `from?` (01-F75/01-F76) |
+| `reference_response` | server→device: `resource`, `scope`, `form`, `version`, `base_version?`, `entries[]` (typed per resource), `complete`, `next_from` |
+| `reference_notice` | server→device freshness-only: `resource`, `scope`, `version` — correct if every one is dropped |
+| `credential_change_request` | device→server: `user_id`, `new_pin_hash` — the till asks the cloud to change its own operator's PIN, and NEITHER PIN travels (01-F79, 11-F21) |
+| `credential_change_result` | server→device: `result`, one of a closed four — `changed` / `wrong_old_pin` / `not_permitted` / `unavailable` |
 | `quarantine_notice` | server→origin: `event_id`, `reason` (event excluded from folds, 01-F37) |
 | `purge_command` | server→device revocation: `scope: "all"` (wipe + re-register, 01-F42) |
 | `ping` / `pong` | session liveness heartbeat: `{ t }` (hub election uses discovery pings, not these) |
@@ -107,9 +128,13 @@ cannot drift; no wire message or fixture changes (additive, 20 §2.7).
 
 ## Invariants
 
-1. **Additive-only under `v: 1`.** New optional fields/kinds are allowed; a breaking
-   change bumps `v` and ships an N−1 reader (`00 §6`). Every change on this branch has
-   been additive.
+1. **Additive within a version.** New optional fields/kinds are allowed; a breaking change bumps
+   `v` and ships an N−1 reader (`00 §6`). ⚠ *This said "every change on this branch has been
+   additive" and that stopped being true in August 2026:* `01-F75` REMOVES the three `catalog_*`
+   kinds, which is not additive, so `01-F77` bumped `v: 1` → `v: 2`. The N−1 reader is **deferred
+   to the first pilot pairing** by founder ruling — R4 puts nothing in the field — and it is
+   deferred rather than withdrawn: see `PROTOCOL.md`'s breaking-change note for what is owed and
+   why a reader alone would not be enough.
 2. **The closed message set is authoritative.** `MESSAGE_KINDS` / the discriminated union
    are the whole vocabulary; an unknown `kind` throws `UnknownMessageKindError`.
 3. **Golden fixtures must not drift.** `src/__acceptance__/fixtures/*.json` is the
@@ -137,6 +162,22 @@ cannot drift; no wire message or fixture changes (additive, 20 §2.7).
   is at-least-once by re-send (the message set stays closed).
 
 All three landed **additive under `v: 1`** — no `v` bump, no fixture-semantics drift.
+
+## What's new (Wave 1, August 2026)
+
+- **`01-F75`/`01-F76`/`01-F77` — the reference-data generalisation, and the FIRST `v` bump.**
+  `catalog_request` / `catalog_response` / `catalog_notice` are replaced by ONE
+  resource-discriminated triple keyed by an artifact `(resource, scope)`; the resource set is
+  CLOSED at `catalog` and `staff`; `hello_ack.catalog_version` becomes `reference_versions`, one
+  number per key. Six new golden fixtures (both resources on all three kinds), and every other
+  fixture re-cut at `v: 2` — including `purge_command`, which had never had one.
+- **`01-F79` — the credential-change pair.** `credential_change_request` /
+  `credential_change_result`, minted because `14-F40` cannot be built without a kind. What travels
+  is the new Argon2id hash and never either PIN; the schema constrains it to a PHC string so a
+  typed PIN in that field is unrepresentable rather than merely wrong.
+- **`StaffEntryWire` is EXPORTED**, for the reason `CatalogEntryWire` already is: a resource whose
+  row is loose at the WRITER is a resource whose bad row is discovered on a till, and for `staff`
+  that is a branch nobody can sign in to (`01-F56` `malformed`, `01-F17`).
 
 ## Layout
 

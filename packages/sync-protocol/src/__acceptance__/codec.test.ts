@@ -19,9 +19,9 @@ describe("codec round-trip (20 §2.3)", () => {
   it("PROTOCOL.md law (fast-check): decodeMessage(encodeMessage(m)) deep-equals m for arbitrary ping/push_ack/catchup_request", () => {
     const seq = fc.nat({ max: Number.MAX_SAFE_INTEGER });
     const arbitraryMessage = fc.oneof(
-      seq.map((t) => ({ v: 1, kind: "ping", t })),
-      seq.map((acked_watermark) => ({ v: 1, kind: "push_ack", acked_watermark })),
-      seq.map((from_global_seq) => ({ v: 1, kind: "catchup_request", from_global_seq })),
+      seq.map((t) => ({ v: 2, kind: "ping", t })),
+      seq.map((acked_watermark) => ({ v: 2, kind: "push_ack", acked_watermark })),
+      seq.map((from_global_seq) => ({ v: 2, kind: "catchup_request", from_global_seq })),
     );
     fc.assert(
       fc.property(arbitraryMessage, (raw) => {

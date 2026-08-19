@@ -245,9 +245,18 @@ describe("03-F50 — the wire carries the station, because it is catalog data", 
 });
 
 describe("01-F60 / 03-F50 — the fields survive the CODEC, not just the schema", () => {
+  // ⚠ **MIGRATED FROM `catalog_response` (`01-F75`/`01-F77`, August 2026) AND NOTHING BELOW
+  // CHANGED ITS CLAIM.** `01-F75` supersedes the catalog triple with ONE resource-discriminated
+  // frame and `01-F77` bumps the shared wire literal with it; the catalog stays ORG-scoped
+  // (`01-F52`/`01-F76`), so the artifact key is `{ org_id, branch_id: null }` and the body — form,
+  // version, entries, complete, next_from — is `catalog_response`'s, unchanged and now generic.
+  // Every assertion in this block is about a `prices`/`station` value surviving the codec, and
+  // each one is made on the same value through the same three calls it always was.
   const response = (entries: readonly Record<string, unknown>[]): Record<string, unknown> => ({
-    v: 1,
-    kind: "catalog_response",
+    v: 2,
+    kind: "reference_response",
+    resource: "catalog",
+    scope: { org_id: "019fa8c4-0000-7000-8000-0000000000a1", branch_id: null },
     form: "snapshot",
     version: 4,
     entries,

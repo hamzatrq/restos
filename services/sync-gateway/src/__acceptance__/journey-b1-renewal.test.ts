@@ -386,7 +386,7 @@ describe("J1/B1 end to end — the registry SEEDS token_expires_at so a relayed 
     link.transport.start({ onUp: () => {}, onDown: () => {}, onMessage: () => {} });
     link.transport.send(
       parseMessage({
-        v: 1,
+        v: 2,
         kind: "hello",
         device_id: hub.device_id,
         device_class: "counter_electron",
@@ -402,7 +402,7 @@ describe("J1/B1 end to end — the registry SEEDS token_expires_at so a relayed 
 
     link.transport.send(
       parseMessage({
-        v: 1,
+        v: 2,
         kind: "push",
         events: [
           {

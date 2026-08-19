@@ -67,7 +67,7 @@ describe("F3 — an oversized relayed cloud ack never crashes the follower (fix 
     // The poison frame: a relayed CLOUD ack claiming slots far beyond anything
     // this device ever appended (ownHigh + 1000).
     puppet.transport.send("dev-w", {
-      v: 1,
+      v: 2,
       kind: "push_ack",
       acked_watermark: 1 + 1000,
       origin_device_id: "dev-w",
@@ -84,7 +84,7 @@ describe("F3 — an oversized relayed cloud ack never crashes the follower (fix 
     // The session keeps processing subsequent messages: a GENUINE relayed
     // cloud ack for the real high water still drains the outbox.
     puppet.transport.send("dev-w", {
-      v: 1,
+      v: 2,
       kind: "push_ack",
       acked_watermark: 1,
       origin_device_id: "dev-w",

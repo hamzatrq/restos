@@ -132,7 +132,7 @@ const helloWithClass = (
   token: string,
 ): ProtocolMessage =>
   parseMessage({
-    v: 1,
+    v: 2,
     kind: "hello",
     device_id: identity.device_id,
     device_class: deviceClass,

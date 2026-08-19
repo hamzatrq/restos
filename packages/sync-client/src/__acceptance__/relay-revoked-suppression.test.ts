@@ -83,7 +83,7 @@ const startHub = () => {
 };
 
 const helloAck = {
-  v: 1,
+  v: 2,
   kind: "hello_ack",
   session_id: "hub-s-1",
   hub: false,
@@ -112,12 +112,12 @@ describe("F1(b) — an origin_revoked notice suppresses that origin's relay for 
     // The cloud acks the healthy origin and refuses the other at the origin
     // gate: an origin_revoked notice naming one of its held events (T-01-09).
     cloud.deliver({
-      v: 1,
+      v: 2,
       kind: "push_ack",
       acked_watermark: 0,
       origin_device_id: healthyOrigin.device_id,
     });
-    cloud.deliver({ v: 1, kind: "quarantine_notice", event_id: r0.id, reason: "origin_revoked" });
+    cloud.deliver({ v: 2, kind: "quarantine_notice", event_id: r0.id, reason: "origin_revoked" });
 
     // THE PIN (F1(b) ruling): the notice stops relay of THAT origin for the
     // session's life. RED today: the revoked origin's cursor never moved (its
@@ -154,7 +154,7 @@ describe("F1(b) — an origin_revoked notice suppresses that origin's relay for 
     expect(relayPushesFor(cloud.sent, phantomOrigin.device_id)).toHaveLength(1);
 
     cloud.deliver({
-      v: 1,
+      v: 2,
       kind: "quarantine_notice",
       event_id: p0.id,
       reason: "origin_unregistered",

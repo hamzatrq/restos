@@ -209,7 +209,7 @@ export const createCloudSession = (options: {
   const sendHello = (): void => {
     const st = store.status();
     transport.send({
-      v: 1,
+      v: 2,
       kind: "hello",
       device_id: store.identity.device_id,
       device_class,
@@ -229,7 +229,7 @@ export const createCloudSession = (options: {
   };
 
   const sendCatchup = (from_global_seq: number): void => {
-    transport.send({ v: 1, kind: "catchup_request", from_global_seq });
+    transport.send({ v: 2, kind: "catchup_request", from_global_seq });
   };
 
   /**
@@ -242,13 +242,34 @@ export const createCloudSession = (options: {
    */
   const requestCatalog = (have_version: number, from = 0, at_version?: number): void => {
     transport.send({
-      v: 1,
-      kind: "catalog_request",
+      v: 2,
+      kind: "reference_request",
+      // `01-F75`/`01-F76` — the frame names the ARTIFACT it is about. The catalog stays
+      // ORG-scoped (`01-F52`: "byte-identical everywhere"), so `branch_id` is null; the org comes
+      // from this store's own bound identity and never from a parameter, because `01-F71` (e)
+      // has the SERVER derive the key from the session and refuse a request stating another.
+      resource: "catalog",
+      scope: { org_id: store.identity.org_id, branch_id: null },
       have_version,
       ...(from === 0 ? {} : { from }),
       ...(at_version === undefined ? {} : { at_version }),
     });
   };
+
+  /**
+   * `01-F77` — this device's catalog version out of `hello_ack`'s per-artifact set.
+   *
+   * The set replaced the single `catalog_version` number because a version means nothing without
+   * the `(resource, scope)` it counts (`01-F76`). Absence is the same signal it always was: an
+   * artifact the org has published nothing for is OMITTED, never sent as `0`, so the device
+   * simply never asks — which is right both for an empty org and for a gateway that does not
+   * serve the resource.
+   */
+  const catalogVersionIn = (
+    keys: Extract<ProtocolMessage, { kind: "hello_ack" }>["reference_versions"],
+  ): number | undefined =>
+    keys?.find((key) => key.resource === "catalog" && key.scope.org_id === store.identity.org_id)
+      ?.version;
 
   /**
    * Compare and fetch if behind. The ONE place that decides a fetch is needed, called from both
@@ -293,7 +314,7 @@ export const createCloudSession = (options: {
     const events = store.nextBatch(CLOUD_PUSH_BATCH_MAX);
     const last = events.at(-1);
     if (last === undefined) return;
-    transport.send({ v: 1, kind: "push", events, watermark: last.lamport_seq });
+    transport.send({ v: 2, kind: "push", events, watermark: last.lamport_seq });
   };
 
   /**
@@ -307,7 +328,7 @@ export const createCloudSession = (options: {
     const pending = held.filter((e) => e.lamport_seq >= from).slice(0, CLOUD_PUSH_BATCH_MAX);
     const last = pending.at(-1);
     if (last === undefined) return;
-    transport.send({ v: 1, kind: "push", events: [...pending], watermark: last.lamport_seq });
+    transport.send({ v: 2, kind: "push", events: [...pending], watermark: last.lamport_seq });
   };
 
   /**
@@ -470,10 +491,11 @@ export const createCloudSession = (options: {
         // everything"; catchup_response pages via next_from while complete === false.
         sendCatchup(store.status().last_global_seq ?? 0);
         relayDrain(); // resume any latched relay work across a reconnect (DEC-SYNC-009)
-        // T-C4 — THE catalog correctness mechanism (01-F9). Comparing versions here is what
-        // makes every reconnection reconcile, so a device that missed every notice while it was
-        // offline still converges the moment it comes back. The push is only latency.
-        reconcileCatalog(message.catalog_version);
+        // T-C4 — THE catalog correctness mechanism (01-F9, now `01-F77`'s per-artifact set).
+        // Comparing versions here is what makes every reconnection reconcile, so a device that
+        // missed every notice while it was offline still converges the moment it comes back. The
+        // push is only latency.
+        reconcileCatalog(catalogVersionIn(message.reference_versions));
         return;
       }
       case "push_ack": {
@@ -528,15 +550,24 @@ export const createCloudSession = (options: {
         if (!message.complete) sendCatchup(message.next_from); // page onward (01-F9)
         return;
       }
-      case "catalog_notice": {
+      case "reference_notice": {
         // FRESHNESS ONLY. The system is correct if every one of these is dropped — a menu edit
         // then waits for the next reconnect instead of landing live, and `hello_ack` reconciles
         // it. That is deliberate: a notice is exactly the kind of message a lossy link loses,
         // so nothing is allowed to depend on one arriving.
-        reconcileCatalog(message.version);
+        //
+        // ⚠ **THE CATALOG IS THE ONLY RESOURCE THIS DEVICE CONSUMES TODAY** (`01-F75` closes the
+        // set at `catalog` and `staff`). The roster's fetch and apply are the NEXT step of
+        // `plans/saas-pivot/staff-over-the-wire.md`, and `01-F76`'s device-side
+        // `foreign_artifact` refusal — the belt to `01-F71` (e)'s brace, with a named reason
+        // string this session does not yet own — lands with it. Until then a `staff` frame is
+        // dropped rather than half-applied: inventing either half here would be inventing the
+        // refusal vocabulary `01-F76` reserves (commandment 2).
+        if (message.resource === "catalog") reconcileCatalog(message.version);
         return;
       }
-      case "catalog_response": {
+      case "reference_response": {
+        if (message.resource !== "catalog") return; // see `reference_notice` above
         // A frame for a fetch we did not start — a late page from a previous connection, or a
         // server volunteering one. Ignored rather than applied: applying it would splice pages
         // from two different fetches into one commit.

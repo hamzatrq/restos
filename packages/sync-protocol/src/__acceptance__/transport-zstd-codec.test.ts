@@ -53,7 +53,7 @@ const parse = (v: unknown): ProtocolMessage => protocol.parseMessage(v);
 /** A realistic catch-up page: n merged wire events (event_batch — what gets compressed). */
 const eventBatchPage = (n: number): ProtocolMessage =>
   parse({
-    v: 1,
+    v: 2,
     kind: "event_batch",
     events: Array.from({ length: n }, (_unused, i) => ({
       ...envelope(),
@@ -64,7 +64,7 @@ const eventBatchPage = (n: number): ProtocolMessage =>
 
 const catchupResponsePage = (n: number, complete: boolean): ProtocolMessage =>
   parse({
-    v: 1,
+    v: 2,
     kind: "catchup_response",
     events: Array.from({ length: n }, (_unused, i) => ({
       ...envelope(),

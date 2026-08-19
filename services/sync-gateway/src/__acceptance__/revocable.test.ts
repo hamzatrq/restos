@@ -379,7 +379,7 @@ describe("services/sync-gateway can revoke a device (01-F25/01-F48 — the kill 
     expect((await revoke(id)).code).toBe(0);
 
     await expect(
-      live.conn.handle(parseMessage({ v: 1, kind: "catchup_request", from_global_seq: 0 })),
+      live.conn.handle(parseMessage({ v: 2, kind: "catchup_request", from_global_seq: 0 })),
       "a revoked device was served a catchup between the revocation and the sweep",
     ).rejects.toThrow(AuthRejectedError);
     live.conn.close();

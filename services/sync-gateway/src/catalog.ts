@@ -263,13 +263,23 @@ export const publishCatalog = async (
 };
 
 /**
- * Answer a device's `catalog_request`.
+ * Answer a device's `reference_request` for the `catalog` artifact (`01-F75`).
  *
  * The server decides snapshot vs delta from `have_version`: a **delta** if it can construct one
  * from that exact base, a **snapshot** otherwise — including `have_version: 0` and including a
  * base whose versions have been compacted away. The device's `needs_snapshot` refusal
  * (`01-F56`) is the belt to these braces: it is what happens if this function gets it wrong,
  * and it is already implemented and tested on the device.
+ *
+ * ⚠ **`01-F75`'s TWO VERSION CLAUSES ARE UNIFORM ACROSS RESOURCES, AND THIS IS THE RESOURCE THE
+ * VOCABULARY WAS COPIED FROM (August 2026).** The FR named three ways this function diverged from
+ * the rules it states — a forward-only `at_version` clamp on a FIRST page, a delta that replays
+ * intermediate rows, and `version: 0` over a populated key — and recorded that *the roster's two
+ * credential leaks were this code, copied*. The cost HERE is freshness and redundancy rather than
+ * a credential (a menu carries no hash, and `01-F53` freezes a line's price at line-add), which
+ * is why it was filed rather than fixed mid-step; it is closed in the change that generalises the
+ * frames, because a rule stated as uniform while one resource visibly disobeys it is a rule the
+ * next author reads as advisory.
  */
 export const catalogPage = async (
   db: Db,
@@ -288,11 +298,28 @@ export const catalogPage = async (
   at_version?: number,
 ): Promise<CatalogPage> => {
   const current = await catalogVersion(db, org_id);
-  // Serve the pinned version if the device named one and we still have it. `version <= current`
-  // because a device must never be handed a version from the future — after a restore
-  // (`22`) the org can legitimately be BEHIND a device, and pinning forward would serve rows
-  // that no longer exist.
-  const version = at_version !== undefined && at_version <= current ? at_version : current;
+  /**
+   * `01-F75` — **`at_version` IS A CONTINUATION, NEVER A SELECTOR.** It is honoured only on a
+   * continuation (`from > 0`); a first page is served the CURRENT version whatever it asks for.
+   * A paged fetch states the version it is toward so that its own remaining pages are consistent
+   * — it does not entitle a caller to name any version it likes, and no device has a reason to
+   * open a page run at a version it does not hold.
+   *
+   * `at_version > 0` because `0` has exactly one meaning on this wire — "the org has published
+   * nothing" (`01-F52`), "omitted, never sent as `0`" (`01-F77`) — so a value naming no version
+   * leaves nothing to honour, and a populated key answering `version: 0` would hand the device
+   * an empty snapshot that its own monotonic apply cannot detect as wrong. Wire-reachable rather
+   * than theoretical: `at_version` is a non-negative integer on the frame, so every negative
+   * value is unreachable and 0 is legal.
+   *
+   * `at_version <= current` stays: a device must never be handed a version from the future —
+   * after a restore (`22`) the org can legitimately be BEHIND a device, and pinning forward would
+   * serve rows that no longer exist.
+   */
+  const version =
+    from > 0 && at_version !== undefined && at_version > 0 && at_version <= current
+      ? at_version
+      : current;
   if (version === 0) {
     // Nothing published. An honest empty snapshot rather than a refusal: `01-F54` says an
     // unknown item degrades to its id and never blocks a sale, so a till with no catalog is a
@@ -325,13 +352,34 @@ export const catalogPage = async (
   }
 
   if (known) {
-    // DELTA — every change strictly after the device's base. Ordered by version so a paged
-    // delta applies in publication order, which is what makes a partial page safe to apply.
+    // DELTA — `01-F75`: **ONE entry per changed id, the greatest version ≤ the target — the same
+    // fold a snapshot at that version is, restricted to the ids that changed.**
+    //
+    // It used to be *every published row in `(have_version, version]`*, which on a menu is merely
+    // redundant — an item edited ten times between two reconnects travelled ten times — and on a
+    // resource carrying credentials REPLAYS HISTORY. That is the second door `01-F75` records:
+    // deleting a row bounds what the CURRENT artifact carries and nothing else, because a
+    // publication log is by construction a record of what used to be true, so every
+    // client-supplied version field is a request to read that log and each needs its own answer.
+    // A device reaches the identical state either way; the intermediate rows were never
+    // information it needed, only history it was being handed.
+    //
+    // The query is the snapshot's own fold with ONE extra predicate, so the delta and the
+    // snapshot are one interpretation of the log rather than two — `03-F40`'s two sensor bit
+    // layouts is this corpus's own record of what a second interpretation costs. Ordering is
+    // therefore the snapshot's `(kind, entry_id)` and no longer publication order: a fold has no
+    // publication order, and `catalog-fetch.ts` accumulates every page before it applies anything
+    // (its own header records that a prefix of a delta is never applied), so nothing depended on
+    // it.
     const rows = await db.execute(
-      sql`select kind, entry_id, name, kitchen_name, parent_id, sort, deleted, prices, station
-          from kernel.catalog_entries
-          where org_id = ${org_id} and version > ${have_version} and version <= ${version}
-          order by version asc, kind asc, entry_id asc
+      sql`select kind, entry_id, name, kitchen_name, parent_id, sort, deleted, prices, station from (
+            select distinct on (kind, entry_id)
+                   kind, entry_id, name, kitchen_name, parent_id, sort, deleted, prices, station
+            from kernel.catalog_entries
+            where org_id = ${org_id} and version > ${have_version} and version <= ${version}
+            order by kind asc, entry_id asc, version desc
+          ) folded
+          order by kind asc, entry_id asc
           offset ${from} limit ${CATALOG_PAGE_SIZE + 1}`,
     );
     const fetched = [...rows];

@@ -74,7 +74,7 @@ const stubTransport = () => {
 };
 
 const HELLO_ACK: ProtocolMessage = {
-  v: 1,
+  v: 2,
   kind: "hello_ack",
   session_id: "session-audit2",
   hub: false,
@@ -83,7 +83,7 @@ const HELLO_ACK: ProtocolMessage = {
 
 /** event_batch literal; envelopes come from peerEnvelope so the shape is the real one. */
 const eventBatch = (events: readonly unknown[]): ProtocolMessage =>
-  ({ v: 1, kind: "event_batch", events }) as unknown as ProtocolMessage;
+  ({ v: 2, kind: "event_batch", events }) as unknown as ProtocolMessage;
 
 const withGlobalSeq = (envelope: object, global_seq: number) => ({ ...envelope, global_seq });
 

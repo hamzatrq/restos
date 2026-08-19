@@ -74,7 +74,7 @@ const startSession = (deviceIdentity: ReturnType<typeof identity>) => {
   return { store, cloud, session };
 };
 
-const ack = (acked_watermark: number) => ({ v: 1, kind: "push_ack", acked_watermark });
+const ack = (acked_watermark: number) => ({ v: 2, kind: "push_ack", acked_watermark });
 
 describe("F3-ext — an oversized OWN cloud ack never crashes the cloud session (t-01-12 carried item 2 / 19 §5 / 01-F8)", () => {
   it("F3-ext/19 §5/01-F8: push_ack{acked_watermark: ownHigh+1000} on the own-ack path → no throw, checkpoint never claims unappended slots, and a later genuine ack still drains the outbox", () => {
@@ -86,7 +86,7 @@ describe("F3-ext — an oversized OWN cloud ack never crashes the cloud session 
     store.append(appendInput(id));
     store.append(appendInput(id));
     expect(store.status().own_high_water).toBe(1);
-    cloud.deliver({ v: 1, kind: "hello_ack", session_id: "dr-1", hub: false, resume_from: 6 });
+    cloud.deliver({ v: 2, kind: "hello_ack", session_id: "dr-1", hub: false, resume_from: 6 });
     session.notifyAppended();
 
     // THE POISON FRAME (RED today): an own-stream cloud ack beyond own high
@@ -113,7 +113,7 @@ describe("F3-ext — an oversized OWN cloud ack never crashes the cloud session 
     const id = identity();
     const { store, cloud, session } = startSession(id);
     expect(store.status().own_high_water).toBeNull(); // wiped: nothing appended
-    cloud.deliver({ v: 1, kind: "hello_ack", session_id: "dr-2", hub: false, resume_from: 6 });
+    cloud.deliver({ v: 2, kind: "hello_ack", session_id: "dr-2", hub: false, resume_from: 6 });
 
     // RED today: on an empty store advanceTo throws for every watermark.
     expect(() => cloud.deliver(ack(5))).not.toThrow();
@@ -136,10 +136,10 @@ describe("DEC-SYNC-008 client half — duplicate quarantine notices are tolerate
   it("DEC-SYNC-008/01-F37: the same quarantine_notice delivered twice (at-least-once redelivery) neither throws nor stops the session; the notice is surfaced in status().quarantined with its reason verbatim", () => {
     const id = identity();
     const { store, cloud, session } = startSession(id);
-    cloud.deliver({ v: 1, kind: "hello_ack", session_id: "dup-1", hub: false, resume_from: 0 });
+    cloud.deliver({ v: 2, kind: "hello_ack", session_id: "dup-1", hub: false, resume_from: 0 });
 
     const notice = {
-      v: 1,
+      v: 2,
       kind: "quarantine_notice",
       event_id: "qn-dup-1",
       reason: "storage_reject",

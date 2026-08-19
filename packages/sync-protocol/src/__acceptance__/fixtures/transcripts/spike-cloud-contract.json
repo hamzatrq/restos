@@ -3,7 +3,7 @@
     "direction": "in",
     "device_id": "xp-device",
     "message": {
-      "v": 1,
+      "v": 2,
       "kind": "hello",
       "device_id": "xp-device",
       "device_class": "counter_electron",
@@ -17,7 +17,7 @@
     "direction": "out",
     "device_id": "xp-device",
     "message": {
-      "v": 1,
+      "v": 2,
       "kind": "hello_ack",
       "session_id": "cloud:xp-device:0",
       "hub": false,
@@ -28,7 +28,7 @@
     "direction": "in",
     "device_id": "xp-device",
     "message": {
-      "v": 1,
+      "v": 2,
       "kind": "push",
       "events": [
         {
@@ -79,7 +79,7 @@
     "direction": "out",
     "device_id": "xp-device",
     "message": {
-      "v": 1,
+      "v": 2,
       "kind": "push_ack",
       "acked_watermark": 1
     }
@@ -88,7 +88,7 @@
     "direction": "out",
     "device_id": "xp-device",
     "message": {
-      "v": 1,
+      "v": 2,
       "kind": "event_batch",
       "events": [
         {
@@ -140,7 +140,7 @@
     "direction": "in",
     "device_id": "xp-device",
     "message": {
-      "v": 1,
+      "v": 2,
       "kind": "push",
       "events": [
         {
@@ -191,7 +191,7 @@
     "direction": "out",
     "device_id": "xp-device",
     "message": {
-      "v": 1,
+      "v": 2,
       "kind": "push_ack",
       "acked_watermark": 1
     }
@@ -200,7 +200,7 @@
     "direction": "in",
     "device_id": "xp-device",
     "message": {
-      "v": 1,
+      "v": 2,
       "kind": "push",
       "events": [
         {
@@ -231,7 +231,7 @@
     "direction": "out",
     "device_id": "xp-device",
     "message": {
-      "v": 1,
+      "v": 2,
       "kind": "push_ack",
       "acked_watermark": 2
     }
@@ -240,7 +240,7 @@
     "direction": "out",
     "device_id": "xp-device",
     "message": {
-      "v": 1,
+      "v": 2,
       "kind": "quarantine_notice",
       "event_id": "xp-evt-2",
       "reason": "storage_reject"
@@ -250,7 +250,7 @@
     "direction": "in",
     "device_id": "xp-device",
     "message": {
-      "v": 1,
+      "v": 2,
       "kind": "catchup_request",
       "from_global_seq": 0
     }
@@ -259,7 +259,7 @@
     "direction": "out",
     "device_id": "xp-device",
     "message": {
-      "v": 1,
+      "v": 2,
       "kind": "catchup_response",
       "events": [
         {

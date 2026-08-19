@@ -93,6 +93,7 @@
  */
 
 import { PersonAssignment, type PersonAssignmentT, PersonRecord } from "@restos/domain";
+import { StaffEntryWire } from "@restos/sync-protocol";
 import { sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { readBranch } from "./tenancy.js";
@@ -580,6 +581,8 @@ export const publishStaffRoster = async (
       };
     });
 
+    for (const person of candidates) assertPublishable(person);
+
     await assertOrdinalsUniqueInArtifact(tx, scope, candidates);
 
     const current = await tx.execute(
@@ -607,6 +610,88 @@ export const publishStaffRoster = async (
     );
     return version;
   });
+};
+
+/**
+ * `01-F75`, verbatim: **"`entries[]` is typed PER RESOURCE and validated at the WRITER, never only
+ * at the device."** This is that sentence, for `staff`.
+ *
+ * ⚠ **THE SCHEMA WAS EXPORTED FOR THIS AND NOTHING CALLED IT.** `StaffEntryWire`'s own doc comment
+ * says it is *"exported so the WRITER can validate against it"*, on the precedent of
+ * `CatalogEntryWire` — which four shipping files reach, `publishCatalog` among them. Measured
+ * 2026-08-19, symbol-precise and comment-blind, `StaffEntryWire`'s only non-test reference outside
+ * `messages.ts` was the barrel re-export, which `seams:check` Rule A already says is not a use. So
+ * the FR held for `catalog` and not for `staff`, and the rail is blind to it by construction: the
+ * export is reached (by tests), the seam is not optional, and neither rule asks *"does the file the
+ * comment names actually call this"*.
+ *
+ * **The cost of the gap is the reason the catalog's schema exists at all**, one resource over: one
+ * blank `name` from a bulk import made a whole frame unserialisable, the throw landed inside
+ * dispatch where the handler closes the socket, and every device in the org entered a permanent
+ * reconnect loop. For `staff` the same row is worse — `01-F56` refuses the ENTIRE update on one
+ * unparseable member, which is a branch nobody can sign in to (`01-F17`'s stopped till arriving
+ * through a validator).
+ *
+ * **What it newly refuses, stated rather than implied** — everything below is storable today and
+ * publishable until this call:
+ *   · an **empty `display_name`**. `kernel.users.display_name` is `NOT NULL` and `schema.ts` says
+ *     in terms that *"non-empty is NOT enforced here … it is OWED at the writer"*. This is that
+ *     writer, and `11-F20` makes the name required on the wire because `01-F61`'s tile must render
+ *     something.
+ *   · a **`pin_hash` that is not an Argon2id hash** — `/internal/users/pin` takes
+ *     `pin_hash: z.string().min(1)`, so a caller that posted a typed PIN would have it stored and,
+ *     before this call, published to every till in the branch. ⚠ **The neighbouring case is NOT
+ *     closed and saying so is the point:** the STORE still accepts it. What is closed is that it
+ *     can never be SERVED — the publish refuses by name, loudly, at the writer. Its only shipping
+ *     caller (`services/api`'s `user-router.ts`) hashes with `domain`'s `hashPin`, so nothing in
+ *     the field produces one.
+ *   · a **`grid_ordinal` that is not an integer**, and a **role or status outside the closed sets**
+ *     — belt to `PersonRecord`'s parse above, which is the brace.
+ *
+ * **The null↔absent translation is the seam and is done here on purpose.** Storage writes
+ * `pin_hash: null` for a member who is not `active` here; the wire says the field is **ABSENT**,
+ * and `11-F21`'s refinement — a hash may not ride a non-`active` entry — is expressed against
+ * absence. `rowToEntry` already carries the same translation on the read side; a validator that
+ * handed the schema a `null` would refuse every inactive member and stop the publish, which is the
+ * validator-shaped stopped till the FR names.
+ *
+ * The refusal quotes **paths and messages only, never the offending value**: one of these fields is
+ * a credential, and a rejected credential in a log line is the leak the check exists to prevent.
+ */
+const assertPublishable = (person: {
+  user_id: string;
+  display_name: string;
+  grid_ordinal: number;
+  status: string;
+  assignments: readonly StaffAssignment[];
+  /**
+   * `unknown` and not `string | null`, deliberately: the candidate reads it straight off a
+   * `Record<string, unknown>` database row, so a column holding something that is not a string is
+   * a case the SCHEMA should refuse rather than one a cast should hide.
+   */
+  pin_hash: unknown;
+}): void => {
+  const parsed = StaffEntryWire.safeParse({
+    user_id: person.user_id,
+    display_name: person.display_name,
+    grid_ordinal: person.grid_ordinal,
+    status: person.status,
+    assignments: person.assignments,
+    // ABSENT, not null — `rowToEntry`'s idiom, for the reason recorded above.
+    ...(person.pin_hash === null || person.pin_hash === undefined
+      ? {}
+      : { pin_hash: person.pin_hash }),
+  });
+  if (parsed.success) return;
+  const why = parsed.error.issues
+    .map((issue) => `${issue.path.join(".") || "<row>"}: ${issue.message}`)
+    .join("; ");
+  throw new RangeError(
+    `publishStaffRoster: ${person.display_name} (${person.user_id}) is not a publishable ` +
+      `staff row and nothing was published — ${why}. 01-F75 validates entries[] at the WRITER ` +
+      "and never only at the device, because one unparseable member refuses the entire update " +
+      "(01-F56 `malformed`), which for a roster is a branch nobody can sign in to.",
+  );
 };
 
 /**

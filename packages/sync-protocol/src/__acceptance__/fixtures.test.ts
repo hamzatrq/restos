@@ -13,32 +13,39 @@ import { decodeMessage, encodeMessage } from "../index.js";
 const fixtureText = (name: string): string =>
   readFileSync(fileURLToPath(new URL(`./fixtures/${name}.json`, import.meta.url)), "utf8");
 
-// T-C1 added the three catalog kinds. `20 §2.7` makes a fixture the CONTRACT — the response
-// fixture deliberately carries a paged, tombstone-bearing snapshot, because those two are the
-// fields an evolution is most likely to drop: `deleted` silently turns a tombstone into a live
-// item, and `complete: false` is the only shape that exercises paging at all.
+// T-C1 added the three catalog kinds; `01-F75` superseded them with ONE resource-discriminated
+// triple and `01-F77` bumped the wire version with them, so the three `catalog_*` files are gone
+// and the reference frames stand in their place. `20 §2.7` makes a fixture the CONTRACT — the
+// staff response fixture deliberately carries a paged, non-`active` member, and the catalog one a
+// tombstone-bearing delta, because those are the fields an evolution is most likely to drop:
+// `deleted` silently turns a tombstone into a live item, and `complete: false` is the only shape
+// that exercises paging at all.
+//
+// ⚠ The DISCOVERED sweep over every committed file, both forms and both resources, is
+// `reference-fixtures.test.ts` (§J). This list stays hand-written on purpose: a set compared
+// against itself cannot fail, and these are the seven this file has always pinned by name.
 const FIXTURE_KINDS = [
-  "hello",
-  "push",
-  "event_batch",
-  "quarantine_notice",
-  "catalog_request",
-  "catalog_response",
-  "catalog_notice",
+  ["hello", "hello"],
+  ["push", "push"],
+  ["event_batch", "event_batch"],
+  ["quarantine_notice", "quarantine_notice"],
+  ["reference_request_catalog", "reference_request"],
+  ["reference_response_catalog", "reference_response"],
+  ["reference_notice", "reference_notice"],
 ] as const;
 
 describe("golden fixtures (20 §2.7)", () => {
-  it("20 §2.7: every fixture decodes, carries v: 1, and its kind matches its filename", () => {
-    for (const kind of FIXTURE_KINDS) {
-      const decoded = decodeMessage(fixtureText(kind)) as Record<string, unknown>;
+  it("20 §2.7/01-F77: every fixture decodes, carries v: 2, and its kind matches its filename", () => {
+    for (const [file, kind] of FIXTURE_KINDS) {
+      const decoded = decodeMessage(fixtureText(file)) as Record<string, unknown>;
       expect(decoded.kind).toBe(kind);
-      expect(decoded.v).toBe(1);
+      expect(decoded.v).toBe(2);
     }
   });
 
   it("20 §2.7: re-encoding a decoded fixture and re-decoding THAT yields a deep-equal message (semantic stability)", () => {
-    for (const kind of FIXTURE_KINDS) {
-      const decoded = decodeMessage(fixtureText(kind));
+    for (const [file] of FIXTURE_KINDS) {
+      const decoded = decodeMessage(fixtureText(file));
       expect(decodeMessage(encodeMessage(decoded))).toEqual(decoded);
     }
   });

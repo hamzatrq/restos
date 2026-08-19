@@ -1,4 +1,4 @@
-// Wire protocol v1 (PROTOCOL.md, 24-F8 artifact): one message set for LAN and
+// Wire protocol v2 (PROTOCOL.md, 24-F8 artifact): one message set for LAN and
 // cloud. Unknown keys are stripped (reject-or-drop, 01-F40 — slices are
 // sender-enforced; a client can never smuggle one in). Contract fixtures:
 // src/__acceptance__/fixtures (20 §2.7 — changing them is a spec-review event).
@@ -21,10 +21,28 @@
 // reason, as `@restos/sync-client/fold-engine`.
 //
 // Nothing here may import `node:*` again. A device that cannot parse a frame cannot sync.
-import { DEVICE_CLASSES, EventEnvelope, ORDER_CHANNELS } from "@restos/domain";
+import {
+  DEVICE_CLASSES,
+  EventEnvelope,
+  ORDER_CHANNELS,
+  PERSON_STATUSES,
+  ROLES,
+} from "@restos/domain";
 import { z } from "zod";
 
-export const PROTOCOL_VERSION = 1;
+/**
+ * `01-F77` — **`v: 1` → `v: 2`.** `01-F75` supersedes `catalog_request` / `catalog_response` /
+ * `catalog_notice`; removing kinds is not additive, so `00 §6`'s rule binds without
+ * interpretation.
+ *
+ * ⚠ **THE N−1 READER IS DEFERRED, NOT WITHDRAWN** (`01-F77`, founder ruling). R4 puts nothing in
+ * the field — no deployment has ever run `v: 1` — so a `v: 1` reader would be a compatibility
+ * target that does not exist, which is the speculative work `24 §3b` forbids by name. It lands,
+ * with the three retained `v: 1` fixtures and the per-session negotiation, before the first pilot
+ * device is paired. Until then `v` is a version the whole system moves in ONE step, and a `v: 1`
+ * frame is REFUSED rather than half-understood.
+ */
+export const PROTOCOL_VERSION = 2;
 
 const v = z.literal(PROTOCOL_VERSION);
 const seq = z.number().int().nonnegative();
@@ -121,6 +139,189 @@ export const CatalogEntryWire = z.object({
 });
 export type CatalogEntryWireT = z.infer<typeof CatalogEntryWire>;
 
+/**
+ * `01-F76` — **an artifact is `(resource, scope)`, and a version number is meaningless without
+ * it.** The scope is STRUCTURED and never a concatenation (`01-F71` (d), quoted by `01-F76`):
+ * `("ab","c")` and `("a","bc")` are different tenants, and a separator-less key maps both to one
+ * set with no error in it.
+ *
+ * **One SHAPE for every resource** — `{ org_id, branch_id }`, `branch_id: null` meaning org scope
+ * — so a reader never switches on `resource` before it can parse the key it is about to authorize
+ * (`01-F71` (e)). What narrows per resource is the legal VALUE of `branch_id`, which is why there
+ * are two constants below and not two shapes: `01-F52`/`01-F76` fix the catalog at ORG scope
+ * ("byte-identical everywhere … nothing here re-opens it") and the roster at BRANCH scope ("the
+ * reason is the credential"). Neither named refusal reaches that pairing — `01-F71` (e) compares
+ * the frame's key to the SESSION's and only on the request leg, and `01-F76`'s device-side
+ * `foreign_artifact` asks whether the key is one of this device's own, which a catalog response
+ * scoped to its own branch answers yes to. So the FRAME is where a `staff` roster at org scope
+ * (every branch's credentials in one artifact) and a branch-scoped `catalog` (one version number
+ * meaning different bytes on different devices) are made unrepresentable, on `01-F75`'s own
+ * argument for typing `entries[]` per resource.
+ */
+const OrgScope = z.object({ org_id: z.string().min(1), branch_id: z.null() });
+const BranchScope = z.object({ org_id: z.string().min(1), branch_id: z.string().min(1) });
+
+/**
+ * **A CREDENTIAL FIELD ON THIS WIRE, DECLARED ONCE.** `11-F21` puts a PIN in exactly two places
+ * for exactly as long as each takes — *"the keypad it is typed on and the argument to a verify
+ * call"* — and `14 §2` says PINs are never present in payloads. A `min(1)` string in a field
+ * NAMED for a hash accepts `"4821"` and every other assertion in a suite still passes, so
+ * `01-F75`'s argument for typing `entries[]` per resource applies to the field as well as to the
+ * row: the FRAME is where such a payload is made unrepresentable.
+ *
+ * ⚠ **ONE DECLARATION BECAUSE THE FIRST BUILD MADE TWO AND ONLY ONE WAS CONSTRAINED.** The guard
+ * landed on `credential_change_request.new_pin_hash` — the frame whose serve path is not built and
+ * which therefore has no producer — while `StaffEntryWire.pin_hash`, the field that carries a
+ * credential to **every till in a branch on every roster fetch**, stayed `z.string().min(1)` and
+ * parsed `"4821"`. Same reasoning, one field over, aimed at the case that could not happen. A
+ * shared schema is what stops the next credential field repeating it: adding one is now a choice
+ * between this name and a bare string, rather than a copy nobody notices is missing.
+ *
+ * **It is a PREFIX check and not a PHC parse**, deliberately and stated so no reader over-reads
+ * it: `"$argon2id$4821"` satisfies this. What it buys is that a typed PIN — the only credential
+ * shape a human can produce at a keypad — is unrepresentable, and that anything else is a format
+ * `packages/domain`'s `hashPin` does not mint. Parsing the parameter block would be a second
+ * interpretation of Argon2id's encoding beside `domain`'s (`18 §2`), and `verifyPin` is the one
+ * that already has to be right.
+ *
+ * Refusals never echo the offending VALUE — zod 4's issues carry the path and the pattern, not
+ * the input, which is what keeps a rejected credential out of a log line.
+ */
+const Argon2idHash = z
+  .string()
+  .min(1)
+  .regex(/^\$argon2id\$/, {
+    error:
+      "11-F21/01-F61: a credential field carries an Argon2id hash as `packages/domain`'s " +
+      "`hashPin` mints it — never a PIN, and never a credential format this product does not " +
+      "produce",
+  });
+
+/**
+ * `01-F75`'s `staff` row — **exported so the WRITER can validate against it**, for the reason
+ * `CatalogEntryWire` already records: a resource whose row is loose at the wire is a resource
+ * whose bad row is discovered on a till, and one unparseable member refuses the ENTIRE update
+ * (`01-F56` `malformed`), which for `staff` is a branch nobody can sign in to.
+ *
+ * The fields and their owners, transcribed: `user_id`; `display_name`, **required on the wire**
+ * (`11-F20` — the device type's optionality is a migration artifact and not a wire rule);
+ * `grid_ordinal` (`01-F61`, explicit because that FR bans a derived tiebreak); `status`
+ * (`11-F22`, and this artifact is branch-scoped so the single word IS this branch's
+ * participation); `assignments` (`01-F26`); and `pin_hash` **only on an `active` member**
+ * (`11-F21` — a hash on a non-active entry is a credential no verifier can ever reach, pure blast
+ * radius with no function).
+ *
+ * ⚠ **A MISSING `pin_hash` ON A NON-`active` MEMBER IS THE SPECIFIED SHAPE, NEVER `malformed`**
+ * (`01-F75`), and an `active` member with none is legal too — R29 has the owner set a person's
+ * first PIN, so "active, no credential yet" is a real published state. Both neighbours of the
+ * refinement below are one keystroke away in English and nothing alike in the code.
+ *
+ * The closed sets are `packages/domain`'s (`18 §4`) — `ROLES` and `PERSON_STATUSES` — reused here
+ * exactly as `DEVICE_CLASSES` and `ORDER_CHANNELS` already are, so the wire cannot drift from the
+ * matrix that answers "may she act".
+ */
+export const StaffEntryWire = z
+  .object({
+    user_id: z.string().min(1),
+    display_name: z.string().min(1),
+    grid_ordinal: z.number().int(),
+    status: z.enum(PERSON_STATUSES),
+    /**
+     * `01-F26`'s `(role, location)` pair, org-wide as `branch_id: null`. It carries **no status**:
+     * `11-F22`'s participation rides the assignment in STORAGE and the row's single `status` is
+     * this branch's on the wire, so a second carrier would be two representations of one fact
+     * with nothing ruling which wins.
+     *
+     * **Non-empty** — `01-F78` half one puts in a branch roster exactly the people whose
+     * assignments REACH it, and says a person whose only assignments are elsewhere is "absent
+     * from this artifact entirely". A row with none is that person published anyway, and what she
+     * costs is a tile on `01-F61`'s grid that `can()` then refuses every act to.
+     */
+    assignments: z
+      .array(
+        z.object({
+          role: z.enum(ROLES),
+          branch_id: z.union([z.string().min(1), z.null()]),
+        }),
+      )
+      .min(1),
+    /**
+     * `11-F21`'s credential, and the field this whole artifact's blast radius is measured in
+     * (`01-F76`/R25 made the roster branch-scoped for it). `Argon2idHash` rather than a bare
+     * string: see that declaration for why the constraint belongs on the FRAME, and for the
+     * measured reason it is declared once.
+     */
+    pin_hash: Argon2idHash.optional(),
+  })
+  .superRefine((entry, ctx) => {
+    if (entry.status !== "active" && entry.pin_hash !== undefined)
+      ctx.addIssue({
+        code: "custom",
+        path: ["pin_hash"],
+        message:
+          "11-F21: the PIN hash rides an `active` entry only — a hash on a non-`active` member " +
+          "is a credential no verifier can ever reach",
+      });
+  });
+export type StaffEntryWireT = z.infer<typeof StaffEntryWire>;
+
+/**
+ * `01-F75`'s triple, assembled per resource. The bodies below are `catalog_*`'s existing
+ * vocabulary, unchanged and now generic; only the `(resource, scope)` key and the per-resource
+ * `entries[]` are new.
+ */
+const referenceRequestBody = {
+  v,
+  kind: z.literal("reference_request"),
+  /** What the device has now for THIS key. `0` means "nothing", and gets a snapshot. */
+  have_version: seq,
+  /**
+   * **The version this fetch is TOWARD**, echoed from the first page's response.
+   *
+   * ⚠ `01-F75`: it is a **CONTINUATION, never a selector** — honoured only when `from > 0`, and a
+   * first page is served the CURRENT version whatever it asks for. That rule is the SERVE path's
+   * to enforce (`services/sync-gateway`); the wire carries the field, and carries it uniformly
+   * across resources so nobody reproduces a per-resource carve-out incorrectly.
+   */
+  at_version: seq.optional(),
+  /** Paging cursor, echoed from a previous response's `next_from`. */
+  from: seq.optional(),
+};
+
+const referenceResponseBody = {
+  v,
+  kind: z.literal("reference_response"),
+  form: z.enum(["snapshot", "delta"]),
+  /** The version this payload brings the device TO, for this key. */
+  version: seq,
+  /** For a delta, the exact base it applies to. A device holding anything else refuses. */
+  base_version: seq.optional(),
+  /**
+   * Paging, in `catchup_response`'s vocabulary rather than a second idiom. **A snapshot must
+   * apply ATOMICALLY** — the device must never hold half an artifact — so paged snapshot chunks
+   * accumulate and commit on `complete`.
+   */
+  complete: z.boolean(),
+  next_from: seq,
+};
+
+/**
+ * `01-F76`'s artifact key as `hello_ack` carries it (`01-F77`) — **an ARRAY of
+ * `{ resource, scope, version }` and not a map**, because a map key over two fields is the
+ * concatenation `01-F76` bans and this is the one place the ban would be easiest to break by
+ * convenience.
+ *
+ * `version` is `min(1)`, not `nonnegative`: `catalog_version`'s omitted-never-zero rule survives
+ * PER KEY (`01-F77`) — an artifact the org has published nothing for is **omitted, never sent as
+ * `0`**, so that case stays indistinguishable from a gateway that does not serve the resource. In
+ * both the device simply never asks, which is right for both, and a `0` over a key makes the two
+ * distinguishable again while looking perfectly well-formed.
+ */
+const ReferenceVersionKey = z.discriminatedUnion("resource", [
+  z.object({ resource: z.literal("catalog"), scope: OrgScope, version: z.number().int().min(1) }),
+  z.object({ resource: z.literal("staff"), scope: BranchScope, version: z.number().int().min(1) }),
+]);
+
 export const messageSchemas = {
   hello: z.object({
     v,
@@ -137,37 +338,71 @@ export const messageSchemas = {
     // whole life, which is the property that stops a new gateway stranding an old device.
     accepts_compression: z.boolean().optional(),
   }),
-  hello_ack: z.object({
-    v,
-    kind: z.literal("hello_ack"),
-    session_id: z.string().min(1),
-    hub: z.boolean(),
-    resume_from: seq,
-    // Additive under v:1 (DEC-SYNC-009, T-01-12): true iff the session's token
-    // carries the hub-relay capability — the client-side gate for relaying.
-    relay_authorized: z.boolean().optional(),
-    // Additive under v:1 (DEC-AUTH-001, T-01-18): a silently re-issued device
-    // token, present ONLY when one was actually minted (remaining life below the
-    // configured threshold). Absent on an ordinary session, so healthy sessions —
-    // and the committed golden transcript — stay byte-identical. Renewing on every
-    // hello would destroy issuance determinism, which those fixtures depend on.
-    renewed_token: z.string().min(1).optional(),
-    // Additive under v:1 (DEC-SYNC-010, T-01-19). Granted IFF the client advertised
-    // AND this server accepts — a closed vocabulary, so an unknown codec name is a
-    // parse failure rather than a silent downgrade. Absent ⇒ plain, forever.
-    compression: z.literal("zstd").optional(),
-    /**
-     * Additive under v:1 (T-C1, `01-F9` "plus org-scope reference data"). The ORG's current
-     * authoritative catalog version.
-     *
-     * **This single field is what makes the catalog transport correct**, and the push below
-     * is only latency. The device compares it against its own stored version and requests if
-     * behind, so every reconnection reconciles — including for a device that has been offline
-     * for a week and has no hope of replaying an announcement it was not connected for.
-     * Absent ⇒ an older server that serves no catalog, and the device simply never asks.
-     */
-    catalog_version: seq.optional(),
-  }),
+  hello_ack: z
+    .object({
+      v,
+      kind: z.literal("hello_ack"),
+      session_id: z.string().min(1),
+      hub: z.boolean(),
+      resume_from: seq,
+      // Additive under v:1 (DEC-SYNC-009, T-01-12): true iff the session's token
+      // carries the hub-relay capability — the client-side gate for relaying.
+      relay_authorized: z.boolean().optional(),
+      // Additive under v:1 (DEC-AUTH-001, T-01-18): a silently re-issued device
+      // token, present ONLY when one was actually minted (remaining life below the
+      // configured threshold). Absent on an ordinary session, so healthy sessions —
+      // and the committed golden transcript — stay byte-identical. Renewing on every
+      // hello would destroy issuance determinism, which those fixtures depend on.
+      renewed_token: z.string().min(1).optional(),
+      // Additive under v:1 (DEC-SYNC-010, T-01-19). Granted IFF the client advertised
+      // AND this server accepts — a closed vocabulary, so an unknown codec name is a
+      // parse failure rather than a silent downgrade. Absent ⇒ plain, forever.
+      compression: z.literal("zstd").optional(),
+      /**
+       * `01-F77` — **the per-artifact version set, which supersedes `catalog_version`.**
+       *
+       * ⚠ **This field is what makes the whole reference-data transport correct**, and every
+       * notice is only latency on top. The device compares each key against its own stored
+       * version and requests the ones it is behind on, so every reconnection reconciles —
+       * including for a device offline a week that could not have heard an announcement. A design
+       * that reconciled the roster only on a pushed notice gives a till nobody can sign in to
+       * after a lossy week.
+       *
+       * `catalog_version` is GONE rather than retained: `01-F77` keeps it only "for as long as
+       * the N−1 reader is", and that reader is deferred, so the two can never be both
+       * authoritative on one session (a `v: 2` session reads the artifact set and nothing else).
+       * An undeclared key is stripped (`01-F40`), so a gateway still emitting one cannot have it
+       * read here by accident.
+       *
+       * ABSENT is legal and meaningful — an org that has published nothing has no keys at all.
+       */
+      reference_versions: z.array(ReferenceVersionKey).optional(),
+    })
+    .superRefine((ack, ctx) => {
+      // `01-F76`: "A device holds one version *per key*, not one version" — so the array IS a
+      // map, and a map cannot hold one key twice. Two entries for one key cost `01-F56`'s named
+      // failure with no bad data anywhere: the device compares against whichever entry its reader
+      // reaches first, and picking the lower one re-fetches forever while picking the higher one
+      // never fetches again. No error is raised on either path.
+      //
+      // The key is the PAIR `(resource, scope)` and never `resource` alone: two branches' rosters
+      // are two different keys, which is the case `01-F76` exists for. `JSON.stringify` over an
+      // ARRAY is injective, so this is not the concatenation `01-F71` (d) bans (`["ab","c"]` and
+      // `["a","bc"]` do not collide).
+      const seen = new Set<string>();
+      for (const [index, entry] of (ack.reference_versions ?? []).entries()) {
+        const key = JSON.stringify([entry.resource, entry.scope.org_id, entry.scope.branch_id]);
+        if (seen.has(key))
+          ctx.addIssue({
+            code: "custom",
+            path: ["reference_versions", index],
+            message:
+              "01-F76/01-F77: one artifact key appears at most once — a key carried at two " +
+              "versions leaves the device comparing against whichever entry it happens to read",
+          });
+        seen.add(key);
+      }
+    }),
   push: z.object({ v, kind: z.literal("push"), events: z.array(EventEnvelope), watermark: seq }),
   push_ack: z.object({
     v,
@@ -199,68 +434,199 @@ export const messageSchemas = {
     next_from: seq,
   }),
   /**
-   * `T-C1` — the catalog fetch pair (`01-F9`, `01-F52`..`01-F56`).
+   * `01-F75` — **the ONE reference-data request, for every resource** (`01-F9`, `01-F52`..`F56`,
+   * `01-F28`, `01-F61`, `11-F20`). It supersedes `catalog_request`.
    *
-   * The device asks; the server decides snapshot vs delta from `have_version`. A delta if it
-   * can construct one from that EXACT base, a snapshot otherwise — including `have_version: 0`
-   * and including a base too old to reconstruct. The device's existing `needs_snapshot`
-   * refusal (`01-F56`) is then the belt to that braces: it is what happens if the server gets
-   * this wrong, and it is already implemented and tested.
+   * The device asks; the server decides snapshot vs delta from `have_version`. A delta if it can
+   * construct one from that EXACT base, a snapshot otherwise — including `have_version: 0` and a
+   * base too old to reconstruct. The device's `needs_snapshot` refusal (`01-F56`) is the belt to
+   * that brace.
+   *
+   * ⚠ **THE SERVER DERIVES THE KEY FROM THE SESSION AND REFUSES A REQUEST STATING ANOTHER**
+   * (`01-F71` (e)) — never clamps. This is the first frame that puts a tenant key in bytes a
+   * caller controls: `catalog_request` carried no tenant at all and the org was read from the
+   * session. Under R25 the roster's scope IS its credential blast radius, so a device free to
+   * name a branch defeats that ruling in one field. `01-F76`'s device-side `foreign_artifact`
+   * refusal is the belt, never a substitute (commandment 8). Neither refusal lives here: a frame
+   * can carry a key, only a session can judge it.
    */
-  catalog_request: z.object({
+  reference_request: z.discriminatedUnion("resource", [
+    z.object({ ...referenceRequestBody, resource: z.literal("catalog"), scope: OrgScope }),
+    z.object({ ...referenceRequestBody, resource: z.literal("staff"), scope: BranchScope }),
+  ]),
+  /**
+   * `01-F75`/`01-F76` — `catalog_response`'s body plus the artifact key, which the response
+   * **echoes** so a device can refuse an artifact that is not its own.
+   *
+   * **`entries[]` is typed PER RESOURCE**, and the frame is what makes a cross-resource payload
+   * unrepresentable: `CatalogEntryWire.kind` is open at the wire by design, so a row alone could
+   * never carry that guarantee. One unparseable member refuses the ENTIRE update (`01-F56`
+   * `malformed`) — for `staff` that is a branch nobody can sign in to, which is why the row
+   * schema is validated at the WRITER and not only here.
+   *
+   * **No removals list, for any resource** (`01-F55`, `11-F22`, R26): a departure is a MARKED
+   * ENTRY and never an absence. A removals list collapses *may she act* and *does she render*
+   * into one bit and answers the second by accident while answering the first.
+   */
+  reference_response: z
+    .discriminatedUnion("resource", [
+      z.object({
+        ...referenceResponseBody,
+        resource: z.literal("catalog"),
+        scope: OrgScope,
+        entries: z.array(CatalogEntryWire),
+      }),
+      z.object({
+        ...referenceResponseBody,
+        resource: z.literal("staff"),
+        scope: BranchScope,
+        entries: z.array(StaffEntryWire),
+      }),
+    ])
+    .superRefine((frame, ctx) => {
+      // `01-F56`/`01-F75`: `base_version` rides a DELTA and only a delta. A delta with no base
+      // leaves the device nothing to match, so it can neither apply the frame nor refuse it for
+      // the right reason — `01-F56`'s whole detection mechanism becomes a field that was not
+      // sent. A base on a SNAPSHOT is the mirror: a snapshot applies ATOMICALLY and REPLACES, so
+      // the value is one no reader can act on and one an implementer will eventually act on.
+      if (frame.form === "delta" && frame.base_version === undefined)
+        ctx.addIssue({
+          code: "custom",
+          path: ["base_version"],
+          message: "01-F56: a delta states the exact base it applies to, or it cannot be refused",
+        });
+      if (frame.form === "snapshot" && frame.base_version !== undefined)
+        ctx.addIssue({
+          code: "custom",
+          path: ["base_version"],
+          message: "01-F75: a snapshot REPLACES, so it applies to no base",
+        });
+      if (frame.resource !== "staff") return;
+
+      // `01-F78` half two: **only the assignments that REACH this branch.** The frame can express
+      // it because `01-F76` puts the artifact's own branch ON the frame. The cost of the other
+      // answer is the FR's own — "a row carrying every branch's assignment also tells every till
+      // the org's branch structure": `01-F71`'s isolation boundary crossed by reference data
+      // rather than by a query, and R25's purchase spent a second way. The predicate is
+      // `rolesAt`'s, verbatim, so an ORG-WIDE assignment is not another branch's and must pass —
+      // refusing it would empty every owner's row and the non-empty floor above would then refuse
+      // her outright, breaking both halves of `01-F78` with one over-wide guard.
+      //
+      // `user_id` and `grid_ordinal` are unique WITHIN THE ARTIFACT (`01-F75`). Two rows for one
+      // person make `11-F22`'s status and `11-F21`'s hash ambiguous at once and let ARRAY
+      // POSITION decide, with no error raised on either path; two rows sharing an ordinal
+      // reintroduce exactly the derived tiebreak `01-F61` bans, and `02-F41` attributes an order
+      // to whoever was tapped. A frame sees ONE page, so `01-F75`'s "unique within the artifact"
+      // is also the writer's and the device's across a paged snapshot.
+      const users = new Set<string>();
+      const ordinals = new Set<number>();
+      for (const [index, entry] of frame.entries.entries()) {
+        for (const [at, assignment] of entry.assignments.entries())
+          if (assignment.branch_id !== null && assignment.branch_id !== frame.scope.branch_id)
+            ctx.addIssue({
+              code: "custom",
+              path: ["entries", index, "assignments", at, "branch_id"],
+              message:
+                "01-F78: a row carries only the assignments that reach THIS branch — org-wide " +
+                "(null) or this branch's, never another's",
+            });
+        if (users.has(entry.user_id))
+          ctx.addIssue({
+            code: "custom",
+            path: ["entries", index, "user_id"],
+            message: "01-F75: one row per `user_id` within the artifact",
+          });
+        users.add(entry.user_id);
+        if (ordinals.has(entry.grid_ordinal))
+          ctx.addIssue({
+            code: "custom",
+            path: ["entries", index, "grid_ordinal"],
+            message: "01-F75/01-F61: `grid_ordinal` is unique within the artifact",
+          });
+        ordinals.add(entry.grid_ordinal);
+      }
+    }),
+  /**
+   * `01-F75` — server→device, keyed by the artifact, carrying ONLY a version number.
+   *
+   * Covers a version changing DURING a live session, so an edit does not wait for the next
+   * reconnect. It is a freshness optimisation and **the system is correct without it**, which is
+   * the property that must survive the generalisation: a notice is exactly the kind of message a
+   * lossy link drops, and `hello_ack.reference_versions` is what makes that cost freshness rather
+   * than correctness. Fan-out is keyed by the artifact key, so a branch-scoped notice reaches
+   * that branch's devices and no others (`01-F76`).
+   */
+  reference_notice: z.discriminatedUnion("resource", [
+    z.object({
+      v,
+      kind: z.literal("reference_notice"),
+      resource: z.literal("catalog"),
+      scope: OrgScope,
+      version: seq,
+    }),
+    z.object({
+      v,
+      kind: z.literal("reference_notice"),
+      resource: z.literal("staff"),
+      scope: BranchScope,
+      version: seq,
+    }),
+  ]),
+  /**
+   * `01-F79` — **the till asks the cloud to change its own operator's PIN, and what travels is a
+   * HASH.** `14-F40` specifies the surface and cannot be built without this pair: `01-F62` makes
+   * `user.changed` org-scoped, so a till has no legal envelope for it, and commandment 5 forbids
+   * an operational screen calling `services/api`. The resolution is `05-F28`'s (c) with the
+   * planes reversed — the till REQUESTS and the cloud RECORDS.
+   *
+   * **Deliberately NOT a reference-data frame.** `01-F75`'s triple is a PULL; this is a COMMAND
+   * with an outcome, and folding it into `reference_request` would make one frame mean two things
+   * the moment a second command appears. Narrow names over a generic `command` pair for the same
+   * reason `01-F75` closed its resource set: a generic frame invites the next author to carry
+   * something nobody ruled on.
+   *
+   * ⚠ **NEITHER PIN TRAVELS, AND THE CLOUD CANNOT RE-VERIFY THE OLD ONE BECAUSE IT NEVER
+   * RECEIVES IT.** `11-F21` says a PIN exists in exactly two places for exactly as long as each
+   * takes — "the keypad it is typed on and the argument to a verify call" — and `14 §2` says PINs
+   * are never present in payloads. So the till verifies the old PIN against its SYNCED hash
+   * (`01-F28`, which is what the roster carries one for) and hashes the new one locally at
+   * `01-F61`'s parameters from `packages/domain`'s single declaration — a device and a cloud that
+   * hash differently produce an offline refusal of a credential the owner has just set.
+   *
+   * The Argon2id prefix is asserted at the SCHEMA and not left to the fixture: a `min(1)` string
+   * in a field named for a hash accepts a typed PIN, and `01-F75`'s argument for typing
+   * `entries[]` per resource is that the FRAME is where such a payload is made unrepresentable.
+   * ⚠ **That reasoning was written here and applied here ONLY**, while `StaffEntryWire.pin_hash`
+   * — the field that actually carries credentials to devices — kept a bare `min(1)` string for a
+   * round. Both now share `Argon2idHash`; see its declaration.
+   *
+   * `user_id` is here because the cloud enforces `14-F40`'s self-only rule by comparing the named
+   * user to the SESSION's user, never to a field the device chose (`01-F71` (e) — an auth failure
+   * and not a clamp). That comparison is the serve path's; that there IS something to compare is
+   * the wire's.
+   */
+  credential_change_request: z.object({
     v,
-    kind: z.literal("catalog_request"),
-    /** What the device has now. `0` means "nothing", and gets a snapshot. */
-    have_version: seq,
-    /**
-     * **The version this fetch is TOWARD**, echoed from the first page's `catalog_response`.
-     * Absent on the first request; required on every continuation.
-     *
-     * Without it a paged fetch has no identity. The server re-reads the current version on
-     * every page, so a publish landing between page 1 and page 2 changed both the version AND
-     * the row set the offset indexes into — the device accumulated page 1's stale rows and
-     * committed them at page 2's version, after which `hello_ack` matched forever and the edit
-     * was never re-fetched. Silent, permanent, and `01-F56`'s named failure verbatim: "diverges
-     * one device's menu from every other's, undetectable at the till, surfacing days later as a
-     * mispriced item".
-     *
-     * With it the server serves that exact version or refuses; the fetch is atomic in the
-     * version dimension as well as the row dimension.
-     */
-    at_version: seq.optional(),
-    /** Paging cursor, echoed from a previous `catalog_response.next_from`. */
-    from: seq.optional(),
-  }),
-  catalog_response: z.object({
-    v,
-    kind: z.literal("catalog_response"),
-    form: z.enum(["snapshot", "delta"]),
-    /** The version this payload brings the device TO. */
-    version: seq,
-    /** For a delta, the exact base it applies to. A device holding anything else refuses. */
-    base_version: seq.optional(),
-    entries: z.array(CatalogEntryWire),
-    /**
-     * Paging, in `catchup_response`'s vocabulary rather than a second idiom. A large org's
-     * catalog will exceed one frame. **A snapshot must apply ATOMICALLY** — the device must
-     * never hold half a menu — so paged snapshot chunks accumulate and commit on `complete`.
-     */
-    complete: z.boolean(),
-    next_from: seq,
+    kind: z.literal("credential_change_request"),
+    user_id: z.string().min(1),
+    new_pin_hash: Argon2idHash,
   }),
   /**
-   * `T-C1` — server→device, org-scoped, carrying ONLY a version number.
+   * `01-F79` — the outcome, one of a CLOSED set of four, **one of which is not a failure**.
    *
-   * Covers a version changing DURING a live session, so a menu edit does not wait for the
-   * next reconnect. It is a freshness optimisation and **the system is correct without it**,
-   * which is the property that matters: a notice is exactly the kind of message that gets
-   * dropped on a lossy link, and `hello_ack.catalog_version` is what makes that cost freshness
-   * rather than correctness.
+   * `changed` · `wrong_old_pin` (the till's local verify is the first gate; this is the cloud
+   * refusing a request whose user does not match the session) · `not_permitted` · `unavailable`.
+   *
+   * ⚠ `unavailable` exists because this act REQUIRES the WAN, and that is correct rather than a
+   * `00 §5.1` breach — the rule protects service, and a cashier who cannot change her PIN during
+   * an outage still signs in with her current one and sells. The till must say WHICH of the four
+   * happened; "it did not work" is `00 §5.7`'s failure, so a schema that could not carry one of
+   * them would make that outcome unreportable.
    */
-  catalog_notice: z.object({
+  credential_change_result: z.object({
     v,
-    kind: z.literal("catalog_notice"),
-    version: seq,
+    kind: z.literal("credential_change_result"),
+    result: z.enum(["changed", "wrong_old_pin", "not_permitted", "unavailable"]),
   }),
   quarantine_notice: z.object({
     v,
@@ -294,9 +660,11 @@ const union = z.discriminatedUnion("kind", [
   messageSchemas.event_batch,
   messageSchemas.catchup_request,
   messageSchemas.catchup_response,
-  messageSchemas.catalog_request,
-  messageSchemas.catalog_response,
-  messageSchemas.catalog_notice,
+  messageSchemas.reference_request,
+  messageSchemas.reference_response,
+  messageSchemas.reference_notice,
+  messageSchemas.credential_change_request,
+  messageSchemas.credential_change_result,
   messageSchemas.quarantine_notice,
   messageSchemas.purge_command,
   messageSchemas.ping,
@@ -312,11 +680,59 @@ export class UnknownMessageKindError extends Error {
   }
 }
 
+/**
+ * `01-F77`/`00 §5.7` — a frame at any other `v` is REFUSED, and the refusal names the version
+ * THIS build speaks.
+ *
+ * Deliberately NOT an `UnknownMessageKindError`: the kind may be perfectly well known and it is
+ * the VERSION that is not, and reporting a mid-rollout fleet as "unknown kind" tells an operator
+ * the wrong thing about which end to look at. `00 §5.7` makes "it did not work" the failure.
+ *
+ * ⚠ **THAT SENTENCE IS ONLY TRUE IF `v` IS TESTED BEFORE `kind`, AND FOR ONE ROUND IT WAS NOT.**
+ * The three kinds `01-F75` REMOVED are the only ones for which "the kind may be perfectly well
+ * known" is the whole point — a `v: 1` device speaks `catalog_request`, and on this build that
+ * name is not in `messageSchemas`. Ordered kind-first, `{ v: 1, kind: "catalog_request" }`
+ * answered *unknown protocol message kind*: precisely the wrong end, precisely for the fleet this
+ * class exists to describe, while every kind that SURVIVED the bump reported the version and made
+ * the defect invisible. The order below is therefore load-bearing and not stylistic — a frame is
+ * judged at the version it claims to speak before it is judged against this build's vocabulary.
+ *
+ * Not exported: nothing outside this module has anything to do with the distinction while the
+ * N−1 reader is deferred, and an exported class no shipping code reaches is the shape
+ * `pnpm seams:check` exists to catch. The `name` is what reaches a log.
+ */
+class UnsupportedProtocolVersionError extends Error {
+  constructor(received: unknown) {
+    super(
+      `unsupported protocol version: ${String(received)} — this build speaks v: ${PROTOCOL_VERSION} ` +
+        "only (01-F77; the N−1 reader is deferred to the first pilot pairing)",
+    );
+    this.name = "UnsupportedProtocolVersionError";
+  }
+}
+
 export const parseMessage = (value: unknown): ProtocolMessage => {
-  if (typeof value === "object" && value !== null && "kind" in value) {
-    const kind = (value as { kind: unknown }).kind;
-    if (typeof kind !== "string" || !(kind in messageSchemas))
-      throw new UnknownMessageKindError(kind);
+  if (typeof value === "object" && value !== null) {
+    // ⚠ **VERSION FIRST, AND THE ORDER IS THE CONTRACT** — see `UnsupportedProtocolVersionError`.
+    // A frame is judged at the version it CLAIMS before it is judged against this build's
+    // vocabulary, because the kinds most likely to be unrecognised are exactly the ones an older
+    // version had and this one removed (`01-F75`): kind-first answered "unknown kind" for the one
+    // fleet the version error exists to describe.
+    //
+    // `v` is ONE shared literal on every kind (`01-F77`), so `ping` and `hello` are not exempt
+    // because their bodies did not change: a gateway that parsed a `v: 1` hello and answered
+    // `v: 2` would be rejected by the old device's own literal — no session, therefore no
+    // `push_ack`, therefore an outbox that never drains (`19 §5`). The whole system moves in one
+    // step. A MISSING `v` falls through to the schema, which requires it.
+    if ("v" in value) {
+      const version = (value as { v: unknown }).v;
+      if (version !== PROTOCOL_VERSION) throw new UnsupportedProtocolVersionError(version);
+    }
+    if ("kind" in value) {
+      const kind = (value as { kind: unknown }).kind;
+      if (typeof kind !== "string" || !(kind in messageSchemas))
+        throw new UnknownMessageKindError(kind);
+    }
   }
   return union.parse(value);
 };

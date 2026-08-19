@@ -21,6 +21,10 @@ export {
   PROTOCOL_VERSION,
   type ProtocolMessage,
   parseMessage,
+  // `01-F75` — the `staff` row schema, exported for the same reason `CatalogEntryWire` is: a
+  // resource whose row is loose at the WRITER is a resource whose bad row is discovered on a till.
+  StaffEntryWire,
+  type StaffEntryWireT,
   UnknownMessageKindError,
   WireEnvelope,
 } from "./messages.js";

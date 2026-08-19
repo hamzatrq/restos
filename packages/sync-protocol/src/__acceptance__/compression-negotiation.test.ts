@@ -83,7 +83,7 @@ const everyKind = (): ProtocolMessage[] => MESSAGE_KINDS.map((k) => parseMessage
 /** A realistic catch-up page — where the 26 §6.4 transfer budget actually lives. */
 const catchupPage = (n: number): ProtocolMessage =>
   parseMessage({
-    v: 1,
+    v: 2,
     kind: "catchup_response",
     events: Array.from({ length: n }, (_unused, i) => ({
       ...envelope(),
@@ -99,16 +99,21 @@ const asRecord = (m: ProtocolMessage): Record<string, unknown> =>
 
 // ─────────────────────────────────────────────────────────────────────────────
 describe("DEC-SYNC-010: the negotiation fields are ADDITIVE under v: 1", () => {
+  // ⚠ **THE LITERAL MOVED 1 → 2 AND THE CLAIM DID NOT (`01-F77`, August 2026).** These two
+  // assertions say *DEC-SYNC-010 bumped nothing* — the negotiation fields are additive, so a hello
+  // that never heard of them parses at whatever version the build speaks. `01-F75` removes three
+  // kinds, which is not additive, and `01-F77` moves the SHARED literal for that: a different FR,
+  // a different change, and this suite's claim is untouched by it.
   it("DEC-SYNC-010: an OLD-shaped hello (no accepts_compression) still parses, deep-equal and unchanged — the un-updated device is never rejected", () => {
     const old = builders.hello();
     expect(parseMessage(old)).toEqual(old);
-    expect(asRecord(parseMessage(old)).v).toBe(1); // no version bump
+    expect(asRecord(parseMessage(old)).v).toBe(2); // no bump from DEC-SYNC-010
   });
 
   it("DEC-SYNC-010: an OLD-shaped hello_ack (no compression) still parses, deep-equal and unchanged — a device on an old gateway is never rejected", () => {
     const old = builders.hello_ack();
     expect(parseMessage(old)).toEqual(old);
-    expect(asRecord(parseMessage(old)).v).toBe(1);
+    expect(asRecord(parseMessage(old)).v).toBe(2);
   });
 
   it("DEC-SYNC-010: hello.accepts_compression is CARRIED, not stripped — the advertisement is the client's half of the opt-in", () => {
@@ -299,7 +304,7 @@ describe("DEC-SYNC-010 trap 3: the negotiated path KEEPS the content checksum", 
     const codec = createFrameCodec("zstd");
     // Deterministic page (fixed ids) — the invariant must be reproducible.
     const page = parseMessage({
-      v: 1,
+      v: 2,
       kind: "event_batch",
       events: Array.from({ length: 40 }, (_unused, i) => ({
         id: `id-${i}`,

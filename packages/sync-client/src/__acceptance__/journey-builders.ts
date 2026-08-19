@@ -78,7 +78,7 @@ export const helloAck = (
   session_id: string,
   extra: Record<string, unknown> = {},
 ): Record<string, unknown> => ({
-  v: 1,
+  v: 2,
   kind: "hello_ack",
   session_id,
   hub: false,
@@ -93,7 +93,7 @@ export const withSeq = (envelope: object, global_seq: number): Record<string, un
 
 /** A completed catch-up page (01-F9). `complete: true` keeps the tape free of paging noise. */
 export const catchupPage = (events: readonly unknown[]): Record<string, unknown> => ({
-  v: 1,
+  v: 2,
   kind: "catchup_response",
   events,
   complete: true,
@@ -103,13 +103,13 @@ export const catchupPage = (events: readonly unknown[]): Record<string, unknown>
 /** LIVE fan-out (01-F8). The SAME `applyEvents` path as catch-up — that shared
  * entry point is precisely what B2 turned into silent data loss. */
 export const eventBatch = (events: readonly unknown[]): Record<string, unknown> => ({
-  v: 1,
+  v: 2,
   kind: "event_batch",
   events,
 });
 
 export const pushAck = (extra: Record<string, unknown>): Record<string, unknown> => ({
-  v: 1,
+  v: 2,
   kind: "push_ack",
   ...extra,
 });

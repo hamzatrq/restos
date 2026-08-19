@@ -245,6 +245,21 @@ type ServedEntry = { id: string; prices?: readonly Price[]; station?: string | n
 const served = (e: unknown): ServedEntry => e as unknown as ServedEntry;
 
 /**
+ * `01-F75`/`01-F77` — the catalog fetch as the wire carries it since the reference-data
+ * generalisation: one `reference_request` for every resource, naming the `01-F76` artifact key.
+ * The catalog stays ORG-scoped (`01-F52`), so `branch_id` is null, and the org is the SESSION's
+ * because `01-F71` (e) has the server refuse a request that states another.
+ */
+const catalogRequest = (org_id: string) =>
+  ({
+    v: 2,
+    kind: "reference_request",
+    resource: "catalog",
+    scope: { org_id, branch_id: null },
+    have_version: 0,
+  }) as const;
+
+/**
  * `prices` is a SET of (branch, channel) cells and no FR orders it. `01-F60` specifies which
  * cells must exist and what each must contain; it says nothing about sequence, and the entry is
  * carried as one jsonb value whose element order is an artefact of how the writer happened to
@@ -930,11 +945,11 @@ describe("01-F60 — ONE version, identical bytes for every branch", () => {
     const saddarDevice = { ...freshIdentity(), org_id: org, branch_id: SADDAR };
     const s1 = await openSession(gateway, dhaDevice);
     const s2 = await openSession(gateway, saddarDevice);
-    await s1.conn.handle({ v: 1, kind: "catalog_request", have_version: 0 });
-    await s2.conn.handle({ v: 1, kind: "catalog_request", have_version: 0 });
+    await s1.conn.handle(catalogRequest(org));
+    await s2.conn.handle(catalogRequest(org));
 
-    const r1 = must(ofKind(s1.rec.all, "catalog_response")[0], "DHA catalog_response");
-    const r2 = must(ofKind(s2.rec.all, "catalog_response")[0], "Saddar catalog_response");
+    const r1 = must(ofKind(s1.rec.all, "reference_response")[0], "DHA reference_response");
+    const r2 = must(ofKind(s2.rec.all, "reference_response")[0], "Saddar reference_response");
     expect(r2, "the two branches were served different catalogs").toEqual(r1);
     // Deep equality can be satisfied by two objects that serialise differently; the FR's word is
     // BYTES, and one version meaning one set of bytes is the whole premise of `01-F56`.
@@ -963,8 +978,8 @@ describe("01-F60 — ONE version, identical bytes for every branch", () => {
     );
     const id = { ...freshIdentity(), org_id: org, branch_id: DHA };
     const session = await openSession(gateway, id);
-    await session.conn.handle({ v: 1, kind: "catalog_request", have_version: 0 });
-    const response = must(ofKind(session.rec.all, "catalog_response")[0], "catalog_response");
+    await session.conn.handle(catalogRequest(org));
+    const response = must(ofKind(session.rec.all, "reference_response")[0], "reference_response");
     const round = decodeMessage(encodeMessage(response));
     expect(round).toEqual(response);
     // Asserting only the round trip would pass TODAY, when the frame carries nothing to lose —

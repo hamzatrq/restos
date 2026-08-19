@@ -173,7 +173,7 @@ type HelloOverrides = {
 
 export const helloMsg = (identity: Identity, overrides: HelloOverrides = {}): ProtocolMessage =>
   parseMessage({
-    v: 1,
+    v: 2,
     kind: "hello",
     device_id: overrides.device_id ?? identity.device_id,
     device_class: "counter_electron",
@@ -248,16 +248,16 @@ export const invalidPayloadEnvelope = (identity: Identity, lamportSeq: number): 
 
 export const pushMsg = (events: EventEnvelopeT[], watermark?: number): ProtocolMessage =>
   parseMessage({
-    v: 1,
+    v: 2,
     kind: "push",
     events,
     watermark: watermark ?? events.reduce((hi, e) => Math.max(hi, e.lamport_seq), 0),
   });
 
 export const catchupMsg = (fromGlobalSeq: number): ProtocolMessage =>
-  parseMessage({ v: 1, kind: "catchup_request", from_global_seq: fromGlobalSeq });
+  parseMessage({ v: 2, kind: "catchup_request", from_global_seq: fromGlobalSeq });
 
-export const pingMsg = (t: number): ProtocolMessage => parseMessage({ v: 1, kind: "ping", t });
+export const pingMsg = (t: number): ProtocolMessage => parseMessage({ v: 2, kind: "ping", t });
 
 // ── sinks & sessions ─────────────────────────────────────────────────────────
 

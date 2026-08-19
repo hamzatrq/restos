@@ -33,7 +33,7 @@ import { decodeCompressed, encodeCompressed, parseMessage } from "../index.js";
  * must be reproducible; no newId() randomness). */
 const fixedPage = (n: number): ProtocolMessage =>
   parseMessage({
-    v: 1,
+    v: 2,
     kind: "event_batch",
     events: Array.from({ length: n }, (_unused, i) => ({
       id: `id-${i}`,
@@ -104,8 +104,8 @@ describe("follow-up #4: decodeCompressed rejects corrupt frames (never mis-parse
     // unknown-kind object. It must be REJECTED, not returned as a live message.
     for (const wrong of [
       { hello: "world", v: 99 }, // no kind at all
-      { v: 1, kind: "not_a_real_kind", stuff: 1 }, // unknown kind
-      { v: 1, kind: "push" }, // known kind, missing required body (events/watermark)
+      { v: 2, kind: "not_a_real_kind", stuff: 1 }, // unknown kind
+      { v: 2, kind: "push" }, // known kind, missing required body (events/watermark)
       [1, 2, 3], // valid JSON, wrong top-level type
       42, // valid JSON scalar
     ]) {

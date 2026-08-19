@@ -35,7 +35,7 @@
 //     • renew_below_ms: the renewal threshold — injectable so tests can drive
 //       it (the trap: renewing on every hello destroys issuance determinism).
 //   hello_ack gains an OPTIONAL `renewed_token: string`; push_ack gains the
-//     same field — both additive under v: 1, the relay_authorized precedent
+//     same field — both additive under v: 2, the relay_authorized precedent
 //     (T-01-12). ABSENT unless a renewal was actually minted, so ordinary
 //     sessions stay byte-identical. Until @restos/sync-protocol carries the
 //     fields, parseMessage strips them and these tests stay red.

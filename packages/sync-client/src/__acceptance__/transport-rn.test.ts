@@ -75,7 +75,7 @@ const manualClock = (): Clock & { pending: (() => void)[] } => {
 };
 
 const HELLO: ProtocolMessage = {
-  v: 1,
+  v: 2,
   kind: "hello",
   device_id: "device-manager",
   device_class: "manager",
@@ -147,7 +147,7 @@ describe("DEC-SYNC-010 — the RN transport never advertises a codec it cannot d
     // Without this, a transport that mangled everything — or sent nothing at all — would pass.
     const h = started();
     h.socket.open();
-    const catchup: ProtocolMessage = { v: 1, kind: "catchup_request", from_global_seq: 7 };
+    const catchup: ProtocolMessage = { v: 2, kind: "catchup_request", from_global_seq: 7 };
     h.transport.send(catchup);
     expect(JSON.parse(h.socket.sent[0] as string)).toEqual(catchup);
   });
@@ -161,11 +161,11 @@ describe("01-F17 — a frame the device cannot read never takes the session down
     // something that is not a string.
     h.socket.onmessage?.({ data: new Uint8Array([40, 181, 47, 253]) });
     h.socket.onmessage?.({ data: "{ not json" });
-    h.socket.onmessage?.({ data: JSON.stringify({ v: 1, kind: "no_such_kind" }) });
+    h.socket.onmessage?.({ data: JSON.stringify({ v: 2, kind: "no_such_kind" }) });
     expect(h.seen).toEqual([]);
 
     const ack: ProtocolMessage = {
-      v: 1,
+      v: 2,
       kind: "hello_ack",
       session_id: "s1",
       hub: false,

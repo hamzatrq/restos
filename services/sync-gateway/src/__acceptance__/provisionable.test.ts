@@ -168,7 +168,7 @@ const helloWith = async (id: Identity, token: string): Promise<{ catalog_version
   try {
     await conn.handle(
       parseMessage({
-        v: 1,
+        v: 2,
         kind: "hello",
         device_id: id.device_id,
         device_class: "counter_electron",
@@ -180,7 +180,13 @@ const helloWith = async (id: Identity, token: string): Promise<{ catalog_version
     );
     const ack = ofKind(rec.all, "hello_ack")[0];
     if (ack === undefined) throw new Error("no hello_ack");
-    return { catalog_version: ack.catalog_version ?? 0 };
+    // `01-F77` — `catalog_version` was superseded by the per-artifact version set, so the number
+    // is read out of `reference_versions` by its `01-F76` key. The `?? 0` is unchanged and means
+    // what it always did: an org that has published nothing has the key OMITTED, never sent at 0.
+    return {
+      catalog_version:
+        ack.reference_versions?.find((key) => key.resource === "catalog")?.version ?? 0,
+    };
   } finally {
     conn.close();
     await gateway.close();

@@ -293,12 +293,13 @@ describe("JOURNEY — a device fetches its org's catalog over the wire (01-F9, T
         .sort(),
     ).toEqual(["i-a", "i-b"]);
     const response = must(
-      link.received.find((m) => m.kind === "catalog_response" && m.version === 2),
-      "second catalog_response",
+      link.received.find((m) => m.kind === "reference_response" && m.version === 2),
+      "second reference_response",
     );
-    expect(response.kind === "catalog_response" && response.form, "refetched the whole menu").toBe(
-      "delta",
-    );
+    expect(
+      response.kind === "reference_response" && response.form,
+      "refetched the whole menu",
+    ).toBe("delta");
   });
 
   it("§5.4 — a PAGED snapshot crosses the wire and applies as one menu", async () => {
@@ -312,7 +313,7 @@ describe("JOURNEY — a device fetches its org's catalog over the wire (01-F9, T
 
     const { store, link } = await deviceFor(id);
 
-    const responses = link.received.filter((m) => m.kind === "catalog_response");
+    const responses = link.received.filter((m) => m.kind === "reference_response");
     expect(responses.length, "a menu past the page size arrived in one frame").toBeGreaterThan(1);
     expect(store.catalog.list("item")).toHaveLength(many.length);
     expect(store.catalog.version()).toBe(1);
@@ -333,11 +334,12 @@ describe("JOURNEY — a device fetches its org's catalog over the wire (01-F9, T
 
   it("§5.5 — a device whose org has no catalog still runs, and asks for nothing", async () => {
     // 01-F17/01-F54: a catalog that cannot sync never blocks a sale. With nothing published the
-    // gateway omits `catalog_version` entirely, so the device does not even ask — and the till
+    // gateway omits the catalog key from `hello_ack.reference_versions` entirely (01-F77:
+    // omitted, never sent as 0), so the device does not even ask — and the till
     // is a working till with unnamed buttons rather than a broken one.
     const { store, link } = await deviceFor(freshIdentity());
     expect(store.catalog.version()).toBe(0);
-    expect(link.received.filter((m) => m.kind === "catalog_response")).toEqual([]);
+    expect(link.received.filter((m) => m.kind === "reference_response")).toEqual([]);
     expect(() => store.openOrders()).not.toThrow();
   });
 
@@ -359,7 +361,7 @@ describe("JOURNEY — a device fetches its org's catalog over the wire (01-F9, T
       now: BASE_T + 1,
     });
     expect(
-      link.received.filter((m) => m.kind === "catalog_notice"),
+      link.received.filter((m) => m.kind === "reference_notice"),
       "a notice was sent",
     ).toEqual([]);
     link.up();
@@ -604,8 +606,8 @@ describe("JOURNEY — a device fetches its org's catalog over the wire (01-F9, T
       // THE INVARIANT. `deps.notifyCatalogVersion(...)` sits after `await publishCatalog(...)`,
       // and this is what says so: with the commit provably held, the org has been told nothing.
       expect(
-        heard.filter((m) => m.kind === "catalog_notice"),
-        "a catalog_notice reached the device while its publish was still blocked mid-transaction " +
+        heard.filter((m) => m.kind === "reference_notice"),
+        "a reference_notice reached the device while its publish was still blocked mid-transaction " +
           "— the notice PRECEDED the commit (publish-http.ts). Every till in the org has been " +
           "sent after a version the gateway does not have, and the empty delta they get back " +
           "carries no refusal and no retry",

@@ -122,7 +122,14 @@ describe("law 8 — golden fixtures (20 §2.7)", () => {
       const decoded = decodeMessage(
         readFileSync(fileURLToPath(new URL(file, FIXTURES_DIR)), "utf8"),
       );
-      expect(decoded.kind).toBe(file.replace(/\.json$/, ""));
+      // ⚠ **THE FILENAME STILL NAMES ITS KIND; IT MAY NOW CARRY A SUFFIX (`01-F75`, August
+      // 2026).** This read `toBe(file.replace(/\.json$/, ""))`, which is one fixture per kind —
+      // and `01-F75`'s triple is discriminated by `resource`, so the golden set needs BOTH
+      // resources on all three `reference_*` kinds or the discriminator is pinned by nothing
+      // (`reference-fixtures.test.ts` §J7 asserts exactly that). The rule below is that file's
+      // §J2, transcribed rather than invented: a second fixture for one kind EXTENDS the name
+      // rather than replacing it, so a reader can still find it from the kind.
+      expect(file, file).toMatch(new RegExp(`^${String(decoded.kind)}(_[a-z0-9_]+)?\\.json$`));
       expect(decodeMessage(encodeMessage(decoded))).toEqual(decoded);
     }
   });

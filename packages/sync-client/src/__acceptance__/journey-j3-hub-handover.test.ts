@@ -160,7 +160,7 @@ describe("J3/01-F43 — branch time survives a hub HANDOVER (01-F13 re-election)
     // heartbeat carried the new hub's RAW clock the display's offset would become
     // `backup.skew − display.skew`; it must still be `counter.skew − display.skew`,
     // because branch time did not change — only who serves it did.
-    // [catches: reverting `send(device_id, { v: 1, kind: "ping", t: clock.now() +
+    // [catches: reverting `send(device_id, { v: 2, kind: "ping", t: clock.now() +
     // branchOffset() })` back to `t: clock.now()`.]
     closeTo(branchTimeStatus(display.store).offset_ms, counter.skew_ms - display.skew_ms);
     expect(

@@ -505,6 +505,10 @@ separate session**, and the fixtures are the contract, so their author must not 
 `hello_ack.staff_version` emit beside `gateway.ts:504-513`. Closes the serving half. Not protected.
 **Preconditions:** steps 3 and 5. **`24 §3` suite from a separate session.**
 
+⚠ **READ FINDING 10 BELOW BEFORE WRITING THE `handleStaff` ARM.** A refusal inside `handle` is not a
+refusal on the socket — it is a disconnection — and step 6 is the step that first makes that
+reachable, because advertising `staff` on some gateways and not others is its own deployment window.
+
 **Step 7 — the device fetch and apply.** Changes `packages/sync-client/src/` — a staff accumulator on
 `catalog-fetch.ts:113`'s shape (with its own `toMember`), a `reconcileStaff` beside
 `cloud-session.ts:258` reading `hello_ack.staff_version` at `:476`, the `staff_notice` arm, and
@@ -693,6 +697,34 @@ and in this plan** and were correctly forbidden from fixing. Each names its owne
    named failure.** Found and fixed inside the step-2 suite before it shipped. It is still red so
    nothing passes silently, but this repo's own record is that a `no tests` line gets misread inside a
    big turbo run. The pattern appears in several suites here. **Owner: nobody yet; a rail could see it.**
+
+---
+
+## Findings from the step-5 review round (2026-08-19) — this one is reported, not fixed
+
+10. **A REFUSAL INSIDE `handle` IS A DISCONNECTION, NOT A REFUSAL — and the resource check step 6
+    extends is the first place that becomes reachable.** `services/sync-gateway/src/server.ts:108-112`
+    wraps every `conn.handle(...)` in a `.catch` that logs *"sync session terminated (decode/handle
+    error)"* and then calls `conn.close()` **and** `socket.close()`. So `handleReference`'s
+    *"this gateway serves no `staff` artifact"* refusal (`gateway.ts`) does not answer the device and
+    leave it connected: it takes the whole sync session down, and with it the ledger push path, until
+    the device reconnects. Same for `credential_change_request`'s refusal one arm below it.
+    - **Correct for a protocol violation, questionable for a negotiation outcome.** A peer that
+      cannot frame a message has failed in a way the session cannot recover from; a device asking for
+      a resource this build does not serve has done something *ordinary* — it is what a mixed fleet
+      does by construction, and it is the same situation `01-F77`'s deferred N−1 reader exists for.
+      Dropping the session is a `01-F17`-adjacent cost paid for a request that was merely early.
+    - **Unreachable today, which is why it is filed and not fixed.** `hello_ack` advertises `catalog`
+      only and the client fetches only what was advertised (`01-F77` makes an absent key the signal
+      that a device never asks), so nothing in the field sends one. **Step 6 is what changes that**:
+      the moment `staff` is advertised by some gateways and not others, a device that learned the key
+      from one and reconnected to another sends exactly this frame.
+    - **What is NOT decided here, deliberately.** Whether the answer is a refusal frame, a narrower
+      error class the socket layer does not treat as fatal, or leaving it fatal on the ground that
+      `hello_ack` is the contract — no FR rules it, and inventing a refusal frame would be
+      commandment 2 (`01-F75` declares no error member of the reference triple). **Owner: step 6**,
+      as a stated decision in its plan rather than a default inherited from `default:`. The site
+      carries the same note so the decision is not made by someone who never opened this file.
 
 ---
 
