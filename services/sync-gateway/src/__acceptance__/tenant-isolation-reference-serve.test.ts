@@ -41,11 +41,21 @@
 //           the session's OWN artifact, so an assertion that only checked for the FOREIGN rows
 //           would bless it. §A therefore asserts the sink gained NOTHING AT ALL, and states the
 //           leak and the clamp as two separate string properties over the whole recorded sink.
-// §B  The RESOURCE half at the same site. `01-F71` (e): "the gateway serves `catalog` only and
-//     refuses any other resource **by name**". `01-F75` closes the resource set at `catalog` and
-//     `staff`, so `staff` is the only other member a device can legally utter — and nothing in
-//     the repo sends one. Asserted on BOTH tenants' sessions, with each naming its OWN key, so
-//     the refusal is attributable to the RESOURCE and cannot be the org check firing instead.
+// §B  The BRANCH half of (e), at the same site. ⚠ **THIS SECTION WAS THE RESOURCE REFUSAL UNTIL
+//     STEP 6 SERVED THE ROSTER, AND THE REPLACEMENT IS THE HANDOFF THIS FILE ALWAYS PROMISED**
+//     (note (v) below, and the note that stood at (i)). While the gateway served `catalog` only,
+//     the frame's key and the session's key could not differ on the branch axis at all: a
+//     `catalog` request is pinned by the codec to `branch_id: null`, so there was no branch to
+//     mismatch, and a `staff` frame died on the resource refusal first. A test aimed at the branch
+//     half then would have stayed RED under a correct implementation, which this corpus records as
+//     exactly as damaging as a vacuous one. **A `staff` request is the first frame that can state
+//     the session's OWN org and ANOTHER BRANCH of it** — `01-F71` (e): "the only keys a session may
+//     ask for are its own org with its own branch, or its own org with `branch_id: null` …
+//     anything else is REFUSED as an auth failure, never clamped". Under R25 the roster's scope IS
+//     its credential blast radius (`11-F21` hashes for everyone active at that branch), so a
+//     device free to name a branch defeats that ruling in one field — which is why §B asserts the
+//     same three claims §A does (refused · as an AUTH failure · nothing served, neither the asked
+//     -for artifact nor the session's own) and does it on TWO tenants.
 // §C  The anti-vacuity controls, without which §A and §B are worth nothing. See §C's header: a
 //     refusal test passes for free whenever the thing under test cannot parse, cannot serve, or
 //     has nothing to serve.
@@ -66,17 +76,20 @@
 //     than by matching prose.
 //
 // ── WHAT THIS FILE DELIBERATELY DOES NOT ASSERT (and why each absence is correct) ────────────
-// (i)  **The BRANCH half of (e) is OWED and is NOT asserted here.** `01-F71` (e) says so itself:
-//      "OWED: the BRANCH half has no resource to bind to yet (the roster serve path is step 6 …;
-//      the gateway serves `catalog` only and refuses any other resource by name)". It is not
-//      merely unbuilt — it is UNREACHABLE from the wire today: `catalog`'s scope is `OrgScope`
-//      (`branch_id` is `null` and nothing else parses), so a catalog request has no branch to
-//      mismatch, and a `staff` request carrying a foreign branch dies on §B's resource refusal
-//      first. A test aimed at it now would stay RED under a correct implementation, which this
-//      corpus records as being exactly as damaging as a vacuous one.
-// (ii) **The ORDER of the two refusals for a request that violates BOTH** (a `staff` frame naming
-//      a foreign org). No FR rules on it, so asserting either order would pin an implementation
-//      detail and invent policy (commandment 2). §B keeps its key clean for this reason.
+// (i)  **WHAT A SERVED ARTIFACT CONTAINS.** This file is about the KEY and never about the rows:
+//      who is in a branch roster and what each row carries is `01-F78`'s, and asserting it here
+//      would put a second copy of `staff-over-the-wire.test.ts` §A behind an isolation header,
+//      where a later edit would have to keep two suites in step. §A/§B assert only that the
+//      artifact a session was refused is REAL — populated, and servable to the session it belongs
+//      to — because a refusal over an empty artifact measures nothing.
+//      *(This note used to record the branch half as OWED and UNREACHABLE, on `01-F71` (e)'s own
+//      words. Step 6 made it reachable and §B is now it; the note is replaced rather than deleted
+//      so the handoff is legible to the next reader.)*
+// (ii) **WHICH of the two halves refuses a request that violates BOTH** (a `staff` frame naming
+//      another tenant's org AND a branch of it). No FR rules the order, and both halves are the
+//      same class by (e)'s own words — "refused as an auth failure" — so the distinction is not
+//      observable from outside and asserting it would pin an implementation detail (commandment
+//      2). §B keeps its two cases separate for this reason: each varies exactly one axis.
 // (iii) **The device-side `foreign_artifact` belt** (`01-F76`) — a different plane and step 7.
 //      `01-F76` calls it "the belt to this brace and never a substitute for it"; this file is the
 //      brace.
@@ -84,16 +97,24 @@
 //      state the same thing.** §D's header carries the measurement: on today's served path the
 //      two are the same value, so the distinction is not observable and asserting it would be
 //      asserting nothing. §D asserts the value instead. This is the one absence here that is a
-//      property of the SHIPPED SURFACE rather than of this file, and it ends at step 6.
+//      property of the SHIPPED SURFACE rather than of this file. ⚠ *It used to end "and it ends at
+//      step 6" — a prediction, and a false one: step 6 serves a BRANCH-scoped resource and the
+//      substitution still survives, because §B refuses a differing branch before anything is
+//      echoed. Measured, 0 killed of 499; the row, and what would separate the two clauses, are in
+//      §D's header. It ends when a session may legally ask for a key that is not its own, which no
+//      FR presently permits.*
 // (v)  **That `credential_change_request` is refused AT ALL, as a permanent property.** §E pins
 //      what TODAY's refusal may not say; `01-F79`'s whole point is that this frame will one day
 //      be served, and when the cloud half lands §E is retired by the same session that builds it
-//      — exactly as §B's `staff` refusal is retired by step 6. Neither section may be repaired by
-//      weakening an assertion: both die honestly, when the behaviour they describe is replaced.
+//      — exactly as §B's `staff` refusal WAS retired by step 6, and replaced by the branch-half
+//      assertion the same behaviour made reachable. Neither section may be repaired by weakening
+//      an assertion: both die honestly, when the behaviour they describe is replaced, and a
+//      retirement that leaves nothing behind is a coverage loss wearing a green suite.
 //
 // ⚠ RUNS ON REAL POSTGRES (Testcontainers, `T-01-07`): fails LOUDLY with Docker down rather than
 // skipping. Per-test isolation is BY FRESH ORG, never truncation (`helpers.ts`).
 
+import { hashPin, newId } from "@restos/domain";
 import { type ProtocolMessage, parseMessage } from "@restos/sync-protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type CatalogEntry, publishCatalog } from "../catalog.js";
@@ -103,6 +124,8 @@ import {
   type Gateway,
   ProtocolViolationError,
 } from "../index.js";
+import { publishStaffRoster } from "../staff.js";
+import { insertBranch, insertOrg, insertUser, type UserRow } from "../tenancy.js";
 import {
   BASE_T,
   closeDb,
@@ -142,6 +165,16 @@ afterAll(async () => {
 const MARKER_A = "A-ONLY Chapli Kebab";
 const MARKER_B = "B-ONLY Nihari";
 
+// The ROSTER markers §B compares. Every one is a distinct word rather than a numbered variant of
+// its neighbour, because these are asserted with `not.toContain` over the whole recorded sink and
+// a marker that is a substring of another marker would fail on a leak that never happened.
+const ROSTER_A1 = "Roster person Farida";
+const ROSTER_A2 = "Roster person Gulnaz";
+const ROSTER_B = "Roster person Kulsoom";
+const ROSTER_B1 = "Roster person Mehreen";
+const ROSTER_B2 = "Roster person Parveen";
+const ROSTER_A1_OTHER_TENANT = "Roster person Shazia";
+
 /**
  * One priced item for a tenant. `01-F60`'s enabled set is a REQUIRED input to a publish and the
  * completeness check must actually RUN, so the grid is the smallest real one — this tenant's own
@@ -166,6 +199,70 @@ const publishFor = async (identity: Identity, entryId: string, name: string): Pr
     enabled: enabledFor(identity),
     now: BASE_T,
   });
+
+// ── the BRANCH-scoped artifact §B is about (01-F76, R25) ─────────────────────────────────────
+//
+// A roster is `(staff, {org, branch})`, so a populated one is the only fixture in which "the
+// session's own branch" and "another branch" are different VALUES rather than the same `null`.
+// Each carries a marker name unique to its branch, for the same reason the catalog fixtures do:
+// §B's leak and clamp properties are string properties over the whole recorded sink, and they can
+// only distinguish two artifacts that are distinguishable.
+
+/** One back-office credential, hashed once — `hashPin` is deliberately ~0.4 s (`01-F61`'s floor). */
+let backOfficeHash: string | undefined;
+const password = async (): Promise<string> => {
+  backOfficeHash ??= await hashPin("tenant-isolation-back-office-secret");
+  return backOfficeHash;
+};
+
+/**
+ * A published roster for THIS identity's branch, holding one person named `marker`.
+ *
+ * `01-F68` forbids a foreign key, so the directory rows are written first or `publishStaffRoster`
+ * refuses the branch by name (`15-F27`) — the refusal is the writer's, here or nowhere.
+ */
+const rosterAt = async (identity: Identity, marker: string): Promise<number> => {
+  await insertOrg(db, {
+    org_id: identity.org_id,
+    display_name: `Org ${identity.org_id.slice(0, 12)}`,
+    status: "active",
+    created_at: BASE_T,
+  });
+  await insertBranch(db, {
+    branch_id: identity.branch_id,
+    org_id: identity.org_id,
+    display_name: `Branch ${identity.branch_id.slice(0, 12)}`,
+    branch_type: "branch",
+    branch_class: "production",
+    created_at: BASE_T,
+  });
+  const user_id = newId();
+  await insertUser(db, {
+    user_id,
+    org_id: identity.org_id,
+    display_name: marker,
+    // R30: a till-only cashier needs no email, and `users_email_lower_uq` is GLOBAL — inventing
+    // one per fixture would make these tests collide with each other rather than isolate.
+    email: null,
+    password_hash: await password(),
+    assignments: [{ role: "cashier", branch_id: identity.branch_id, status: "active" }],
+    grid_ordinal: 0,
+    created_at: BASE_T,
+  } as unknown as UserRow);
+  return await publishStaffRoster(
+    db,
+    { org_id: identity.org_id, branch_id: identity.branch_id },
+    [user_id],
+    { now: BASE_T },
+  );
+};
+
+/** A SIBLING branch of the same tenant — the key `01-F71` (e)'s branch half is about. */
+const siblingBranchOf = (identity: Identity): Identity => ({
+  ...identity,
+  branch_id: newId(),
+  device_id: newId(),
+});
 
 // ── the frame builders — the ones that can express a key that is not the session's ───────────
 //
@@ -274,6 +371,31 @@ const artifactKeyOf = (
   return { resource: response.resource, scope: response.scope };
 };
 
+/**
+ * The one `staff` answer this session received, narrowed the same way and for the same reason —
+ * and a NAMED failure when there is none, because every §B anti-vacuity leg passes for free
+ * against a session that was served nothing at all.
+ */
+const staffServedTo = (
+  session: Session,
+  label: string,
+): Extract<ProtocolMessage, { kind: "reference_response"; resource: "staff" }> => {
+  const frame = ofKind(session.rec.all, "reference_response").find(
+    (
+      response,
+    ): response is Extract<ProtocolMessage, { kind: "reference_response"; resource: "staff" }> =>
+      response.resource === "staff",
+  );
+  if (frame === undefined) {
+    throw new Error(
+      `${label}: no staff reference_response reached this session — the anti-vacuity leg of a ` +
+        "refusal test is what makes the refusal a measurement (01-F75 closes the resource set at " +
+        "`catalog` and `staff`, and step 6 serves both)",
+    );
+  }
+  return frame;
+};
+
 describe("§A — 01-F71 (e): the artifact key comes from the SESSION, and a request stating another org is refused", () => {
   it("01-F71 (e): org A's session asking for org B's catalog is refused as an AUTH failure, and nothing is served", async () => {
     const tenantA = freshIdentity();
@@ -353,56 +475,120 @@ describe("§A — 01-F71 (e): the artifact key comes from the SESSION, and a req
   });
 });
 
-describe("§B — 01-F71 (e) / 01-F75: the gateway serves `catalog` only and refuses any other resource BY NAME", () => {
-  // Each session names its OWN org and its OWN branch, so the only thing wrong with the request is
-  // the RESOURCE. That separation is the whole design of this section: a `staff` frame carrying a
-  // foreign org could be refused by either guard and would attribute nothing.
-  it("01-F71 (e): a `staff` request on the session's OWN key is a ProtocolViolationError naming the resource, and nothing is served", async () => {
-    const tenantA = freshIdentity();
-    await publishFor(tenantA, "IA1", MARKER_A);
-    const sessionA = await openSession(gateway, tenantA);
-    const beforeCount = sessionA.rec.all.length;
+describe("§B — 01-F71 (e), the BRANCH half: the only branch a session may name is its own", () => {
+  // The branch comes from the DEVICE's own identity (`01-F65`; `01-F72` (b) makes the certificate
+  // name `(org_id, branch_id, device_id)`), so a `staff` frame stating a different branch is a
+  // client role claim, and commandment 8 does not trust one. R25 is why it is the sharp case: the
+  // roster's scope IS its credential blast radius, so honouring a stated branch hands a device the
+  // Argon2id hashes of people at a branch its credential never covered — and CLAMPING to the
+  // session's own is the mis-routing `01-F76` says makes scope decoration. Both are refused here,
+  // by two separate assertions, because a refusal and an empty answer are different claims.
+  it("01-F71 (e): a device asking for its OWN org's OTHER branch is refused as an AUTH failure, and NEITHER roster is served", async () => {
+    // Two tenants, per `01-F71`'s own clause, and one of them has two branches — which is the
+    // shape the branch half needs and the org half cannot produce.
+    const branchA1 = freshIdentity();
+    const branchA2 = siblingBranchOf(branchA1);
+    const tenantB = freshIdentity();
+    expect(await rosterAt(branchA1, ROSTER_A1)).toBe(1);
+    expect(await rosterAt(branchA2, ROSTER_A2)).toBe(1);
+    expect(await rosterAt(tenantB, ROSTER_B)).toBe(1);
+    // Both branches are at version 1 on purpose: `01-F76`'s whole warning is that one number means
+    // different bytes at different branches, so a mis-served artifact is UNDETECTABLE by version.
+    expect(branchA1.org_id).toBe(branchA2.org_id);
+    expect(branchA1.branch_id).not.toBe(branchA2.branch_id);
+
+    const sessionA1 = await openSession(gateway, branchA1);
+    const beforeCount = sessionA1.rec.all.length;
 
     const error = await refusalOf(
-      sessionA.conn.handle(staffRequestFor(tenantA.org_id, tenantA.branch_id)),
-      "a `staff` request on the session's own key",
+      sessionA1.conn.handle(staffRequestFor(branchA1.org_id, branchA2.branch_id)),
+      "a `staff` request naming a SIBLING branch of the session's own org",
     );
 
-    // `01-F71` (e): "refuses any other resource **by name**". A refusal that does not name the
-    // resource tells an operator a request failed and not which member of `01-F75`'s closed set
-    // this deployment cannot serve — and step 6 is the session that makes `staff` servable, so
-    // this is the message it will go looking for.
-    expect(error).toBeInstanceOf(ProtocolViolationError);
-    expect(error).not.toBeInstanceOf(AuthRejectedError);
-    expect((error as Error).message).toContain("staff");
+    // (1)+(2) — refused, and as an AUTH failure: `01-F71` (e) puts both halves in one sentence —
+    // "anything else is REFUSED as an auth failure, never clamped" — so a branch a session may not
+    // name is the same class of wrong as an org it may not name, and demonstrably not the protocol
+    // violation a malformed frame would be.
+    expect(error).toBeInstanceOf(AuthRejectedError);
+    expect(error).not.toBeInstanceOf(ProtocolViolationError);
 
-    // NOTHING SERVED — the same strong form as §A. A resource this gateway cannot serve must not
-    // produce an empty artifact either: an empty `staff` snapshot is a branch nobody can sign in
-    // to, arriving as a successful answer.
-    expect(ofKind(sessionA.rec.all, "reference_response")).toHaveLength(0);
-    expect(sessionA.rec.all).toHaveLength(beforeCount);
-    // Nor may it fall through to the resource it CAN serve — a `staff` request answered with the
-    // catalog is `01-F75`'s cross-resource payload arriving by another road.
-    expect(sinkText(sessionA)).not.toContain(MARKER_A);
+    // (3) — NOTHING SERVED, in §A's strong form.
+    expect(ofKind(sessionA1.rec.all, "reference_response")).toHaveLength(0);
+    expect(sessionA1.rec.all).toHaveLength(beforeCount);
+
+    // THE LEAK property: the artifact that was asked for must not arrive by any road.
+    expect(sinkText(sessionA1)).not.toContain(ROSTER_A2);
+    expect(sinkText(sessionA1)).not.toContain(branchA2.branch_id);
+
+    // THE CLAMP property, and it is the separate claim this section exists for. A clamp answers
+    // with the session's OWN roster — which contains none of A2's bytes and satisfies every
+    // assertion above. It is also the mutant that becomes REACHABLE the moment a branch-scoped
+    // resource is served: with this check deleted, an implementation that echoes the request's
+    // key serves A2's people, and one that derives the key from the session serves A1's under a
+    // number the device will store as A2's.
+    expect(sinkText(sessionA1)).not.toContain(ROSTER_A1);
+
+    // ANTI-VACUITY 1 — the same session, the same frame kind, its OWN branch: SERVED. Without it
+    // "refused" is equally consistent with a gateway that serves no roster to anyone, which is
+    // exactly what this file's previous §B was pinning.
+    await sessionA1.conn.handle(staffRequestFor(branchA1.org_id, branchA1.branch_id));
+    const own = staffServedTo(sessionA1, "§B anti-vacuity: A1's own roster");
+    expect(own.scope).toEqual({ org_id: branchA1.org_id, branch_id: branchA1.branch_id });
+    expect(JSON.stringify(own)).toContain(ROSTER_A1);
+
+    // ANTI-VACUITY 2 — A2's roster is real and reachable, BY A DEVICE AT A2. "A1 was served
+    // nothing of A2's" is otherwise a statement about an empty branch.
+    const sessionA2 = await openSession(gateway, branchA2);
+    await sessionA2.conn.handle(staffRequestFor(branchA2.org_id, branchA2.branch_id));
+    expect(JSON.stringify(staffServedTo(sessionA2, "§B anti-vacuity: A2's own roster"))).toContain(
+      ROSTER_A2,
+    );
   });
 
-  it("01-F71 (e): the resource refusal is a property of the SERVE PATH, not of one tenant — a second org's session is refused identically", async () => {
-    // Two tenants again, per `01-F71`'s own requirement, and here it buys attribution: a guard
-    // that happened to fire on one org's state would pass the test above and fail this one.
-    const tenantB = freshIdentity();
-    await publishFor(tenantB, "IB1", MARKER_B);
-    const sessionB = await openSession(gateway, tenantB);
-    const beforeCount = sessionB.rec.all.length;
+  it("01-F71 (e): the branch refusal is a property of the SERVE PATH, not of one tenant — and another TENANT's roster key is refused at the same site", async () => {
+    // Two tenants again, and here it buys attribution twice over: a guard that happened to fire on
+    // one org's state passes the test above and fails this one, and the second case varies the ORG
+    // axis while holding the frame's shape fixed — so the two enforcement halves are exercised on
+    // one resource without either standing in for the other.
+    const branchB1 = freshIdentity();
+    const branchB2 = siblingBranchOf(branchB1);
+    const tenantA = freshIdentity();
+    await rosterAt(branchB1, ROSTER_B1);
+    await rosterAt(branchB2, ROSTER_B2);
+    await rosterAt(tenantA, ROSTER_A1_OTHER_TENANT);
 
-    const error = await refusalOf(
-      sessionB.conn.handle(staffRequestFor(tenantB.org_id, tenantB.branch_id)),
-      "a `staff` request from the second tenant on its own key",
+    const sessionB1 = await openSession(gateway, branchB1);
+    const beforeSibling = sessionB1.rec.all.length;
+
+    const sibling = await refusalOf(
+      sessionB1.conn.handle(staffRequestFor(branchB1.org_id, branchB2.branch_id)),
+      "the second tenant's device naming its own org's other branch",
     );
+    expect(sibling).toBeInstanceOf(AuthRejectedError);
+    expect(ofKind(sessionB1.rec.all, "reference_response")).toHaveLength(0);
+    expect(sessionB1.rec.all).toHaveLength(beforeSibling);
+    expect(sinkText(sessionB1)).not.toContain(ROSTER_B2);
+    expect(sinkText(sessionB1)).not.toContain(ROSTER_B1);
 
-    expect(error).toBeInstanceOf(ProtocolViolationError);
-    expect((error as Error).message).toContain("staff");
-    expect(ofKind(sessionB.rec.all, "reference_response")).toHaveLength(0);
-    expect(sessionB.rec.all).toHaveLength(beforeCount);
+    // The ORG axis on the same resource: a key that is real, populated and belongs to somebody
+    // else entirely. `00 §5.4` calls org isolation absolute, and a roster is the artifact where
+    // crossing it costs credentials rather than a menu.
+    const beforeForeign = sessionB1.rec.all.length;
+    const foreign = await refusalOf(
+      sessionB1.conn.handle(staffRequestFor(tenantA.org_id, tenantA.branch_id)),
+      "the second tenant's device naming ANOTHER tenant's roster key",
+    );
+    expect(foreign).toBeInstanceOf(AuthRejectedError);
+    expect(ofKind(sessionB1.rec.all, "reference_response")).toHaveLength(0);
+    expect(sessionB1.rec.all).toHaveLength(beforeForeign);
+    expect(sinkText(sessionB1)).not.toContain(ROSTER_A1_OTHER_TENANT);
+    expect(sinkText(sessionB1)).not.toContain(tenantA.org_id);
+
+    // ANTI-VACUITY — this session is alive and this serve path answers it on its own key.
+    await sessionB1.conn.handle(staffRequestFor(branchB1.org_id, branchB1.branch_id));
+    expect(JSON.stringify(staffServedTo(sessionB1, "§B anti-vacuity: B1's own roster"))).toContain(
+      ROSTER_B1,
+    );
   });
 });
 
@@ -460,8 +646,10 @@ describe("§D — 01-F71 (e), the second clause: the ANSWER carries the SESSION'
   //
   // ⚠ **WHAT §D CAN AND CANNOT SEPARATE — THE OBVIOUS MUTANT IS A NO-OP, AND THAT IS MEASURED
   // RATHER THAN ARGUED (2026-08-19, out of tree).** Substituting `scope: message.scope` for the
-  // session's key — the mutant that reads like the whole point of this section — is **481/481
-  // GREEN with §D present**. It is not surviving because the echo is unasserted; it survives
+  // session's key on the CATALOG arm — the mutant that reads like the whole point of this section
+  // — is **481/481 GREEN with §D present** (the suite was 481 that day and is 499 now; the same
+  // substitution was re-measured on the `staff` arm below and survives there too). It is not
+  // surviving because the echo is unasserted; it survives
   // because it is the SAME VALUE. On the path that is served today the frame's key and the
   // session's key are equal *by construction*: §A's refusal makes `org_id` equal before the serve
   // is reached, and `01-F76`'s ONE SHAPE plus `01-F52`'s org-scoped catalog makes `branch_id`
@@ -472,10 +660,30 @@ describe("§D — 01-F71 (e), the second clause: the ANSWER carries the SESSION'
   // file present and 471 passed, exit 0, with it hidden**, while re-spelling the SAME key — the
   // members reordered and the org read through a template literal — kills 0. So the section is
   // sensitive to the key's VALUE and blind only to a rewrite that cannot change it.
-  // **The two clauses become separable the moment a BRANCH-scoped resource is served**: then
-  // `{own org, another branch of the same org}` passes §A's org check and the frame's key and the
-  // session's key differ for the first time. That is exactly the half `01-F71` (e) lists as OWED,
-  // it is where echoing the request would leak a roster's blast radius, and note (i) tracks it.
+  // ⚠ **AND THAT SURVIVAL IS UNCHANGED NOW THAT A BRANCH-SCOPED RESOURCE IS SERVED. THE EARLIER
+  // VERSION OF THIS PARAGRAPH PREDICTED OTHERWISE, THE PREDICTION WAS WRONG, AND IT IS REPLACED
+  // HERE BY THE MEASUREMENT RATHER THAN BY A BETTER ARGUMENT (2026-08-19, out of tree, control
+  // 499/499 with step 6's serve path in place).** It said the two clauses "become separable the
+  // moment a BRANCH-scoped resource is served", on the reasoning that `{own org, another branch of
+  // the same org}` would then reach the serve with the two keys differing.
+  //   · **The row: the `staff` arm's served key taken from the REQUEST (`message.scope`) with
+  //     `01-F71` (e)'s branch check LEFT STANDING — `0 killed of 499`.** Not 0 in this file: 0 in
+  //     the whole gateway suite. The branch half refuses a differing key before anything is
+  //     served, so by the time a key is echoed the frame's and the session's are equal on the
+  //     branch axis for exactly the reason they are already equal on the org axis.
+  //   · **What WOULD separate them: nothing, while the check stands.** The observable mutant is a
+  //     TWO-branch one — delete the branch check AND echo the request — and its first half is what
+  //     dies: that row is `2 failed of 499`, both of them §B's, and deleting the check ALONE is the
+  //     same 2. So §B is the whole kill and the echo contributes nothing measurable on this
+  //     resource either. The second clause of (e) has **no black-box witness** on any resource the
+  //     gateway serves today; §D asserts the key's VALUE, which is what remains assertable.
+  //   · The prediction was also written into the commit message that landed §B, where it cannot be
+  //     corrected. **This file is the correction**, and it is stated as a measurement so the next
+  //     reader can re-run it rather than re-reason it.
+  // The transferable point is the one this file keeps recording, now with the ending it actually
+  // had: a prediction about what a future change makes observable is a claim with a shelf life,
+  // this one expired in the same step that was supposed to fulfil it, and it survived one round of
+  // being "corrected" by reasoning before anybody measured it.
   it("01-F71 (e)/01-F76: two tenants, two answers, and each carries ITS OWN key — (catalog, {own org, null})", async () => {
     const tenantA = freshIdentity();
     const tenantB = freshIdentity();
