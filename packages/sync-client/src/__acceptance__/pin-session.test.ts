@@ -114,10 +114,21 @@ import { openStore } from "../store.js";
 
 type StaffAssignment = { readonly role: string; readonly branch_id: string | null };
 
-/** `01-F26` + `01-F28` (P3). `pin_hash` is the SYNCED credential — never a PIN. */
+/**
+ * `01-F26` + `01-F28` (P3). `pin_hash` is the SYNCED credential — never a PIN.
+ *
+ * ⚠ `display_name`, `grid_ordinal` and `status` were added to this MIRROR with step 7 of
+ * `plans/saas-pivot/staff-over-the-wire.md`, because the production registry now refuses a member
+ * carrying none of them (`11-F20`, `01-F61`, `11-F22` — that FR forecloses defaulting an absent
+ * status to `active` by name). **No assertion, title or expected value in this file moved**: the
+ * three fields are supplied by the builder below and read by nothing here.
+ */
 type StaffMember = {
   readonly user_id: string;
   readonly pin_hash: string;
+  readonly display_name: string;
+  readonly grid_ordinal: number;
+  readonly status: "active" | "inactive";
   readonly assignments: readonly StaffAssignment[];
 };
 
@@ -320,7 +331,17 @@ const member = (
   user_id: string,
   pin_hash: string,
   assignments: readonly StaffAssignment[] = [{ role: "cashier", branch_id: BRANCH_A }],
-): StaffMember => ({ user_id, pin_hash, assignments });
+): StaffMember => ({
+  user_id,
+  pin_hash,
+  // See the mirror above. Fixture values: `01-F75` makes `grid_ordinal` unique within a real
+  // artifact, and no snapshot built here is read back through `list()`, so one ordinal for every
+  // fixture member is inert rather than a claim about ordering.
+  display_name: user_id,
+  grid_ordinal: 0,
+  status: "active",
+  assignments,
+});
 
 const snapshot = (version: number, members: readonly StaffMember[]): StaffSnapshot => ({
   kind: "snapshot",

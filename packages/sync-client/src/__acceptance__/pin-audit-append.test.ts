@@ -129,6 +129,12 @@ const seedRegistry = async (store: DeviceStore): Promise<StaffRegistry> => {
     members: [
       {
         user_id: CASHIER_ID,
+        display_name: "Cashier",
+        // `01-F61`'s explicit ordinal and `11-F22`'s participation status, added with step 7 of
+        // `plans/saas-pivot/staff-over-the-wire.md`. FIXTURE-ONLY: no assertion in this file
+        // reads either field, and the roster exists here to make a real unlock reachable.
+        grid_ordinal: 0,
+        status: "active",
         pin_hash: await hashPin(PIN),
         assignments: [{ role: "cashier", branch_id: BRANCH }],
       },
@@ -425,6 +431,11 @@ describe("02-F20 §5 — a host can tell a locked-out cashier apart from a typo"
     device_not_registered: true,
     locked_out: true,
     unknown_user: true,
+    // `11-F22` — a sixth refusal, and this tripwire is what made adding it a typecheck failure
+    // rather than a silent widening. The FR declares the NAME on the protected path for exactly
+    // this reason: "an inactive person does not unlock, on any device, WAN or no WAN", and
+    // `unknown_user` is false while `bad_pin` is a lie about a PIN that was never checked.
+    not_active: true,
     bad_pin: true,
   };
 

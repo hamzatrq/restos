@@ -139,6 +139,17 @@ export type DevStaffRegistry = {
       readonly user_id: string;
       readonly display_name: string;
       readonly pin_hash: string;
+      /**
+       * `01-F61`'s explicit grid position and `11-F22`'s participation status, added with step 7
+       * of `plans/saas-pivot/staff-over-the-wire.md`. **Not optional here even though this type
+       * is deliberately narrower than `StaffMember`:** `sync-client`'s registry now refuses a
+       * member carrying neither as `malformed` — `11-F22` forecloses defaulting an absent status
+       * to `active` by name — so a seed that omitted them would report success while every row
+       * of it was rejected, which is the exact defect `seedDevStaff`'s `return …applied` exists
+       * to make visible.
+       */
+      readonly grid_ordinal: number;
+      readonly status: "active" | "inactive";
       readonly assignments: readonly { readonly role: string; readonly branch_id: string | null }[];
     }[];
   }): { readonly applied: boolean };
@@ -444,14 +455,25 @@ export const seedDevStaff = async (options: {
     user_id: string;
     display_name: string;
     pin_hash: string;
+    grid_ordinal: number;
+    status: "active" | "inactive";
     assignments: { role: string; branch_id: string }[];
   }[] = [];
-  for (const { user_id, display_name, role } of DEV_STAFF) {
+  for (const [index, { user_id, display_name, role }] of DEV_STAFF.entries()) {
     const configured = pinFor(user_id);
     if (configured === undefined || configured === "") continue;
     members.push({
       user_id,
       display_name,
+      // `01-F61` — an EXPLICIT position, taken from `DEV_STAFF`'s own declaration order so that
+      // an unconfigured member leaves a gap rather than shifting the tiles after her. Ordinals
+      // are unique within an artifact (`01-F75`) and `DEV_STAFF` is a literal, so the index is
+      // the one value here that cannot collide. It is NOT a derived key in `01-F61`'s sense:
+      // the grid reads the field, and nothing re-sorts when a member is added or dropped.
+      grid_ordinal: index,
+      // A seeded member is on shift by construction; `11-F22`'s other value belongs to a
+      // roster a real transport delivered, which this seed stands down for.
+      status: "active",
       // `01-F28`'s credential, produced by the same `domain` function the cloud writer will use —
       // the PIN itself is hashed here and never stored, never logged, never appended (`01-F1`).
       // `hashPin` is SALTED, so the three hashes differ even under the superseded shared-PIN path;

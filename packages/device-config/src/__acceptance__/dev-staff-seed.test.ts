@@ -299,10 +299,16 @@ const deliverRealRoster = async (
   version: number = REAL_FIRST_VERSION,
 ): Promise<StaffMember[]> => {
   const members: StaffMember[] = [];
-  for (const person of REAL) {
+  for (const [index, person] of REAL.entries()) {
     members.push({
       user_id: person.user_id,
       display_name: person.display_name,
+      // `01-F61`'s explicit ordinal and `11-F22`'s participation status, added with step 7 of
+      // `plans/saas-pivot/staff-over-the-wire.md`: the production registry now refuses a member
+      // carrying neither. FIXTURE-ONLY — no assertion in this file reads either field, and the
+      // `expect(result.applied)` below is what would have caught a fixture that stopped landing.
+      grid_ordinal: index,
+      status: "active",
       pin_hash: await hashPin(person.pin),
       assignments: [{ role: "cashier", branch_id: BRANCH }],
     });
@@ -346,6 +352,10 @@ const reportMustBeHonest = (
 const canSignIn = async (store: DeviceStore, user_id: string, pin: string): Promise<boolean> => {
   const row = store.staff.lookup(user_id);
   if (row === null) return false;
+  // `11-F21` made `pin_hash` OPTIONAL on the roster entry (step 7): it rides an `active` entry
+  // only. A member carrying none cannot sign in, which is this helper's own answer — and calling
+  // `verifyPin(undefined, …)` would throw instead of returning it.
+  if (row.pin_hash === undefined) return false;
   return verifyPin(row.pin_hash, pin);
 };
 
@@ -633,10 +643,13 @@ describe("§B 01-F56 — the bar a real publisher must clear does not depend on 
 
     const store = openDevice(dir);
     const members: StaffMember[] = [];
-    for (const person of REAL) {
+    for (const [index, person] of REAL.entries()) {
       members.push({
         user_id: person.user_id,
         display_name: person.display_name,
+        // See `deliverRealRoster` — fixture-only, step 7 (`01-F61`, `11-F22`).
+        grid_ordinal: index,
+        status: "active",
         pin_hash: await hashPin(person.pin),
         assignments: [{ role: "cashier", branch_id: BRANCH }],
       });
