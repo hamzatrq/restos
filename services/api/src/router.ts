@@ -15,6 +15,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { catalogProcedures } from "./catalog-router.js";
 import { deviceProcedures } from "./device-router.js";
+import { exportProcedures } from "./export-router.js";
 import { issueSessionToken } from "./session.js";
 import { summaryBranchScope, summaryProcedures } from "./summary-router.js";
 import {
@@ -203,11 +204,28 @@ const summaryRouter = router(summaryProcedures);
  */
 const userRouter = router(userProcedures);
 
+/**
+ * `22-F16` / R38 — the owner-triggered export, gated on `22-F23`'s `export.request` (**owner-only**,
+ * and unlike `14-F30`/`14-F39` that is a transcription rather than a pinned reading: the FR says
+ * *"owner-role only"* in its own text). All three procedures are built with `authorized(...)`, so
+ * `assertEveryProcedureIsGated` sees them and **neither exemption list changed** — an org's complete
+ * event log is not the caller's own identity.
+ *
+ * The namespace is `governance` after `22 §5`'s `governance_requests` entity and doc 22's
+ * `governance.*` event family, so the surface an owner meets is named for the thing doc 22 owns
+ * rather than for the button. The permission ACTION is `export.request` and not `governance.*`
+ * because the two vocabularies are separate (`14-F39`: `user.manage` the action beside `user.changed`
+ * the event), and `export.*` holds no event at all — which is what makes the action name unable to
+ * become an emission by accident.
+ */
+const governanceRouter = router(exportProcedures);
+
 export const appRouter = router({
   auth: authRouter,
   session: sessionRouter,
   catalog: catalogRouter,
   devices: deviceRouter,
+  governance: governanceRouter,
   summary: summaryRouter,
   tenancy: tenancyRouter,
   users: userRouter,

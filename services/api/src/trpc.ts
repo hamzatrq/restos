@@ -39,6 +39,7 @@ import superjson from "superjson";
 import { z } from "zod";
 import type { DeviceDirectory } from "./devices.js";
 import { IntegrationError } from "./errors.js";
+import type { ExportRequests } from "./exports.js";
 import type { DayLedger } from "./ledger.js";
 import type { CatalogRuntime } from "./publish.js";
 import { verifySessionToken } from "./session.js";
@@ -90,6 +91,14 @@ export type ApiContext = {
    * `unconfiguredUserDirectory`.
    */
   readonly users: UserDirectory;
+  /**
+   * `22-F16`. Required for `catalog`'s reason and one sharper: the fallback `createApiServer`
+   * resolves REFUSES every call rather than answering emptily or minting a `queued` record. On this
+   * surface `22-N3` renders a progress STATE rather than a spinner, so a stub would show an owner a
+   * completely plausible screen over a job that does not exist — and what she is waiting for is a
+   * copy of her own ledger. See `unconfiguredExportRequests`.
+   */
+  readonly exports: ExportRequests;
 };
 
 /**

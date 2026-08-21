@@ -181,6 +181,15 @@ if (agents.split("\n").length > 120)
       // (02-F47) — so `user.manage` is the FOURTH instance, not the third. It is listed by
       // name rather than wildcarded so a real `user.*` event landing later is still caught.
       "user.manage",
+      // `22-F23`'s action, and it passes this block's test more strongly than any entry above:
+      // those each argue that the past-tense event beside them in the same family is a DIFFERENT
+      // name (`user.manage` versus `user.changed`), whereas the `export.*` family contains no
+      // event at all — 22-F16's emission is `governance.export_generated`, in the family §2 of
+      // doc 22 adds to the `01 §4` catalog. So `export.*` can never become an emission without a
+      // spec act that would land in doc 01 under a different prefix entirely. Listed by name
+      // rather than wildcarded, on this block's own rule, so a real `export.*` event landing later
+      // is still caught.
+      "export.request",
       "order.create",
       "shift.open_close",
       "cash.count",

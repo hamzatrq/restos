@@ -158,6 +158,19 @@ export const PERMISSION_ACTIONS = [
   // default denied both for every role INCLUDING owner — `02-F27`'s inline creation could not
   // be built. Third instance of `device.manage`'s and `availability.toggle`'s shape.
   "customer.record",
+  // ── The owner's export (`22-F23`, which decides it alone). ──────────────────────────────
+  // Appendix A has no export, backup or governance row either, so before `22-F23` this matrix
+  // could not answer a request about `22-F16`'s owner-triggered export at all — and
+  // `services/api`'s `assertEveryProcedureIsGated` refuses at BOOT to host a procedure naming no
+  // action, so that surface "could not be built *or* booted", verbatim `14-F39`'s wall. Fifth
+  // instance of the shape `device.manage` introduced, named rather than pointed at.
+  //
+  // ⚠ **The one way it differs from the four above: its cells are a TRANSCRIPTION and not a
+  // pinned interpretation.** `14-F30` and `14-F39` both had to PIN owner-only against doc 14 §9's
+  // open question; `22-F16` writes "(audited; **owner-role only**)" in its own text, and doc 22 §7
+  // makes *who may trigger export* a layer-2 setting whose default is the owner. So there is no
+  // reading to contest here — only a config plane that does not exist yet.
+  "export.request",
   "history.edit_delete",
   "approval.grant",
   "report.sales_view",
@@ -470,6 +483,34 @@ const VERDICTS: Readonly<Record<VerdictAction, Readonly<Record<Role, AuthOutcome
   // is `deny` here — so that surface needs its own FR-decided action or a self-scope arm on
   // `02-F38`'s `requested_by_user_id` precedent, and inventing either now would be commandment 2.
   "user.manage": {
+    cashier: "deny",
+    branch_manager: "deny",
+    storekeeper: "deny",
+    owner: "allow",
+  },
+  /**
+   * `22-F23` — `22-F16`'s owner-triggered export. **No Appendix A row**; this cell is the FR's,
+   * and unlike `device.manage` / `user.manage` it is a TRANSCRIPTION: `22-F16` says
+   * *"(audited; owner-role only)"*.
+   *
+   * **The `branch_manager: "deny"` cell is the one that matters and it is not conservatism.** An
+   * export bundle is the org's COMPLETE event log (`22-F16`) — every branch's takings, every
+   * price, every person — so a branch manager holding this action reads the whole estate from a
+   * surface with no branch axis to narrow it, which `reportScope` exists to prevent one screen
+   * over (`02-F23`). `01-F71` (f) (iii) makes the org come from the subject, and that check bounds
+   * the TENANT and says nothing about the branch.
+   *
+   * **`deny`, not `escalate`**, on `user.manage`'s reasoning: `02-F20` enumerates the escalating
+   * actions and an export is not among them, so `escalate` would render a "get a manager"
+   * affordance on a back-office screen with no second credential to collect.
+   *
+   * ⚠ **What this row does NOT gate, stated because the neighbour is one keystroke away:** the
+   * nightly per-tenant BACKUP and the `restore` command are `services/jobs` acts run by an
+   * operator on the service host with no authenticated subject at all — the matrix never sees
+   * them, exactly as `provision-device` / `revoke-device` are outside it (`14-F30`). Widening this
+   * cell would not put a backup behind a role, and narrowing it would not take one away.
+   */
+  "export.request": {
     cashier: "deny",
     branch_manager: "deny",
     storekeeper: "deny",

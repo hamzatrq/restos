@@ -18,6 +18,7 @@ import { type CreateFastifyContextOptions, fastifyTRPCPlugin } from "@trpc/serve
 import Fastify, { type FastifyInstance } from "fastify";
 import { createMemoryStagedEditStore } from "./catalog.js";
 import { type DeviceDirectory, unconfiguredDeviceDirectory } from "./devices.js";
+import { type ExportRequests, unconfiguredExportRequests } from "./exports.js";
 import {
   createGatewayCatalogPublisher,
   createGatewayDayLedger,
@@ -109,6 +110,27 @@ export type ApiServerOptions = {
    * which never deletes a person record.
    */
   readonly users?: UserDirectory;
+  /**
+   * `22-F16`'s owner-triggered export. Optional here for `devices`' reason — suites that predate it
+   * still have to boot — and **REQUIRED once resolved**.
+   *
+   * **The fallback is `unconfiguredExportRequests`, which refuses every call**, not a memory stub.
+   * `22-N3` has the owner watching a progress STATE rather than a spinner, so a stub renders a
+   * screen that looks exactly right over a job that is not running — the "supplied with a stub"
+   * shape AGENTS.md measures as invisible to every rail we have, on a surface whose subject is a
+   * copy of the whole ledger.
+   *
+   * @unreached-owed **NOTHING SUPPLIES THIS, AND THE DEBT IS THE SEAM RATHER THAN THE PORT.**
+   * `start()` deliberately passes no `exports`, so a real deployment refuses every export request
+   * loudly and `pnpm -C services/jobs export-org --org <id> --out <dir>` is how a bundle is
+   * generated today. Two things are owed and neither could be invented here without taking a
+   * decision this change may not take: a **durable request record** — `22 §5`'s `governance_requests`
+   * entity, which `18 §4` gives exactly one writer service while this plane creates the row and the
+   * worker advances it to `ready`, so the writer is an open question — and the **enqueue** that
+   * makes pulling the trigger run the job. `owner-export.test.ts`'s header names the same gap from
+   * the other side and assigns it to *"whoever wires the queue"*, with a hand-written assertion.
+   */
+  readonly exports?: ExportRequests;
 };
 
 /**
@@ -155,6 +177,7 @@ export const createApiServer = async (options: ApiServerOptions): Promise<Fastif
   const ledger = options.ledger ?? unconfiguredDayLedger();
   const tenancy = options.tenancy ?? unconfiguredTenancyDirectory();
   const users = options.users ?? unconfiguredUserDirectory();
+  const exportRequests = options.exports ?? unconfiguredExportRequests();
 
   await app.register(fastifyTRPCPlugin, {
     prefix: "/trpc",
@@ -170,6 +193,7 @@ export const createApiServer = async (options: ApiServerOptions): Promise<Fastif
         ledger,
         tenancy,
         users,
+        exports: exportRequests,
       }),
     },
   });
