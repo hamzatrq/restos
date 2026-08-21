@@ -115,6 +115,18 @@ export {
   type OrderLineState,
   TERMINAL_LINE_STATES,
 } from "./states.js";
+// R39 / `16-F1`..`16-F6` — the posture arithmetic. Declared here once (`18 §2`) because BOTH the
+// ledger figure and the printed one derive from it, and two implementations of "what is the tax on
+// this line" is a receipt that disagrees with the order it was printed from.
+export {
+  TAX_POSTURES,
+  type TaxLineInput,
+  type TaxLineSnapshot,
+  type TaxPosture,
+  type TaxSnapshot,
+  type TaxSnapshotInput,
+  taxSnapshot,
+} from "./tax.js";
 // Named tenancy (`01-F68` org, `01-F69` branch, `01-F70` device, `11-F20` person; `15-F25`
 // lifecycle). The records an `org_id`/`branch_id`/`device_id`/`user_id` points AT — declared here
 // once (`18 §2`) because BOTH planes read them and a per-plane copy would disagree about what a

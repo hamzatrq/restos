@@ -64,7 +64,14 @@ export {
 } from "./min-columns.js";
 // `02-F15`/`02-F16` — the customer's copy. Its layout lives in `receipt-document.ts` beside the
 // two cash documents for the same reason: it carries money, which the `kot` TYPE may not.
-export type { ReceiptData, ReceiptLine, ReceiptTender } from "./receipt-document.js";
+export type {
+  ReceiptData,
+  ReceiptLine,
+  // R39's `16-F5` snapshot on the paper. Exported beside the data contract it is part of, so the
+  // seam that composes a taxed receipt names one type rather than spelling four fields inline.
+  ReceiptTax,
+  ReceiptTender,
+} from "./receipt-document.js";
 export {
   type ProfileFinding,
   type ProfileValidation,

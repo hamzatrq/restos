@@ -60,10 +60,22 @@ export const totalPaisaOrNull = (values: readonly number[]): number | null => {
 /**
  * Bigint-exact accumulation; throws rather than drift past Number.MAX_SAFE_INTEGER.
  *
- * @unreached-owed The THROWING sibling has no shipping caller — every live total runs the
- * ingest path through `totalPaisaOrNull` (which is reached), because `01-F17` forbids a throw
- * there. A caller appears where a throw is correct: back-office and report arithmetic (`specs/14`,
- * `specs/12`). Until then this is a tested primitive with no seam, and saying so beats pretending.
+ * **The seams-rail debt marker that stood here is DELETED because `seams:check` now calls it
+ * stale, and the deletion is required rather than tidy — a marker on something the rail considers
+ * reached is a mute button.** It said this throwing sibling had no shipping caller, that every
+ * live total runs the ingest path through `totalPaisaOrNull` because `01-F17` forbids a throw
+ * there, and that a caller would appear "where a throw is correct: back-office and report
+ * arithmetic (`specs/14`, `specs/12`)". The caller it predicted arrived from a third place —
+ * `tax.ts`'s `taxSnapshot` (R39, `16-F5`) — where a throw is correct for exactly the stated
+ * reason: settlement-time tax is not the ingest path `01-F17` protects.
+ *
+ * ⚠ **DO NOT READ THAT AS PAID, because the two are not the same claim.** `taxSnapshot` carries a
+ * debt marker of its own: no shipping code calls it, so this function now has a caller in code the
+ * product LOADS and still has none the product RUNS. The rail cannot express the difference — it
+ * entered `tax.ts` on a TYPE-only import edge (`packages/escpos` names `TaxPosture`, which erases
+ * at compile time) and cascaded reach onto every value that module imports. That is a permissive
+ * blind spot worth knowing about: a type edge alone can retire a debt marker. The honest register
+ * is `tax.ts`'s, and this paragraph is the pointer to it so nothing is lost at this end.
  */
 export const sumPaisa = (values: readonly Paisa[]): Paisa => {
   const total = totalPaisaOrNull(values as readonly number[]);
