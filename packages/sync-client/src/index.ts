@@ -119,8 +119,16 @@ export {
   type StaffMember,
   type StaffRegistry,
   type StaffSnapshot,
+  type StaffStatus,
   type StaffUpdate,
 } from "./staff.js";
+export {
+  createStaffFetch,
+  type StaffFetch,
+  type StaffFetchStep,
+  type WireStaffEntry,
+  type WireStaffResponse,
+} from "./staff-fetch.js";
 export type { SqlValue, StorageAdapter, StorageStatement } from "./storage.js";
 export { createNodeStorageAdapter } from "./storage-node.js";
 export { createOpSqliteStorageAdapter, type OpSqliteDb } from "./storage-op-sqlite.js";

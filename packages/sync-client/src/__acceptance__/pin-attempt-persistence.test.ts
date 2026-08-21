@@ -78,6 +78,13 @@ const launch = async (path: string, now: () => number): Promise<[DeviceStore, Pi
       members: [
         {
           user_id: CASHIER,
+          display_name: "Cashier",
+          // `01-F61`'s explicit ordinal and `11-F22`'s participation status, added with step 7 of
+          // `plans/saas-pivot/staff-over-the-wire.md`. FIXTURE-ONLY: nothing in this file reads
+          // either field — the roster is here so `attempts: store.pinAttempts` has a real unlock
+          // to count failures against.
+          grid_ordinal: 0,
+          status: "active",
           pin_hash: await HASH,
           assignments: [{ role: "cashier", branch_id: BRANCH }],
         },

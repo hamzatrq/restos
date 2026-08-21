@@ -443,12 +443,18 @@ describe("§F 01-F28/01-F61/02-F41 — one credential surface, two pads", () => 
         {
           user_id: CASHIER,
           display_name: "Ayesha",
+          // Step 7's two new required fields (`01-F61`, `11-F22`). Fixture-only — nothing here
+          // reads either, and the roster exists so `02-F20`'s two identities are both real.
+          grid_ordinal: 0,
+          status: "active",
           pin_hash,
           assignments: [{ role: "cashier", branch_id: identity.branch_id }],
         },
         {
           user_id: MANAGER,
           display_name: "Hina",
+          grid_ordinal: 1,
+          status: "active",
           pin_hash,
           assignments: [{ role: "branch_manager", branch_id: identity.branch_id }],
         },

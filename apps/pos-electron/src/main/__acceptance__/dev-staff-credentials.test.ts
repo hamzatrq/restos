@@ -284,9 +284,14 @@ describe("§A 01-F26/01-F28 — one PIN opens one person's row and nobody else's
     store.staff.apply({
       kind: "snapshot",
       version: 1,
-      members: DEV_STAFF.map((m) => ({
+      members: DEV_STAFF.map((m, index) => ({
         user_id: m.user_id,
         display_name: m.display_name,
+        // Step 7's two new required fields (`01-F61`, `11-F22`). Fixture-only: this hand-written
+        // registry is the MUTANT the sweep is fired at, and the defect it reproduces is the
+        // shared `pin_hash` on the line below — neither new field touches it.
+        grid_ordinal: index,
+        status: "active" as const,
         pin_hash: shared,
         assignments: [{ role: m.role, branch_id: IDENTITY.branch_id }],
       })),

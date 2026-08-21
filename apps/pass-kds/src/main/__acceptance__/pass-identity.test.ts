@@ -148,7 +148,12 @@ import {
   seedDevStaff,
 } from "@restos/device-config";
 import { hashPin, verifyPin } from "@restos/domain";
-import { type DeviceStore, openStore, PIN_LOCKOUT_COOLDOWN_MS } from "@restos/sync-client";
+import {
+  type DeviceStore,
+  openStore,
+  PIN_LOCKOUT_COOLDOWN_MS,
+  type StaffMember,
+} from "@restos/sync-client";
 import { afterEach, describe, expect, it } from "vitest";
 import { createPassIdentity, type PassIdentity } from "../pass-identity";
 import { createReadyMark, type LineStateChangedPayload } from "../ready-mark";
@@ -199,12 +204,19 @@ const enrol = async (store: DeviceStore): Promise<void> => {
       {
         user_id: SAJID,
         display_name: "Sajid",
+        // `01-F61`'s explicit ordinal and `11-F22`'s participation status, added with step 7 of
+        // `plans/saas-pivot/staff-over-the-wire.md` — the registry now refuses a member carrying
+        // neither. FIXTURE-ONLY: nothing in this helper's callers reads either field.
+        grid_ordinal: 0,
+        status: "active",
         pin_hash: await hashPin(SAJID_PIN),
         assignments: [{ role: "cashier", branch_id: BRANCH }],
       },
       {
         user_id: IMRAN,
         display_name: "Imran",
+        grid_ordinal: 1,
+        status: "active",
         pin_hash: await hashPin(IMRAN_PIN),
         assignments: [{ role: "cashier", branch_id: BRANCH }],
       },
@@ -428,13 +440,19 @@ describe("§A 03-F53 OWED (3) / DEC-ARCH-001 — the DEV SEED, moved and not cop
     for (const member of store.staff.list()) {
       const own = pins.get(member.user_id);
       expect(own, `no PIN was configured for seeded member ${member.user_id}`).toBeDefined();
+      // `11-F21` made `pin_hash` OPTIONAL with step 7 (it rides an `active` entry only), so the
+      // narrowing is stated rather than assumed — and stated as an ASSERTION, because a seeded
+      // member with no credential is a tile that cannot be unlocked and this loop must say so
+      // rather than skip her.
+      const hash = member.pin_hash;
+      expect(hash, `seeded member ${member.user_id} carries no credential`).toBeDefined();
       expect(
-        await verifyPin(member.pin_hash, own as string),
+        await verifyPin(hash as string, own as string),
         `${member.user_id} cannot unlock`,
       ).toBe(true);
       // `01-F1`/`01-F28`: what is synced is a HASH. A registry row holding the digits would be a
       // credential on disk, and the same row is what a real transport will one day carry.
-      expect(member.pin_hash.includes(own as string), "the PIN is in the credential").toBe(false);
+      expect((hash as string).includes(own as string), "the PIN is in the credential").toBe(false);
       // `01-F26` — the assignment is per LOCATION, and it must be THIS branch or the row
       // authorizes nothing here and renders no role on the tile.
       expect(member.assignments.some((a) => a.branch_id === BRANCH)).toBe(true);
@@ -456,10 +474,14 @@ describe("§A 03-F53 OWED (3) / DEC-ARCH-001 — the DEV SEED, moved and not cop
     await seedDevStaff({ registry: store.staff, branch_id: BRANCH, env });
 
     for (const member of store.staff.list()) {
+      const hash = member.pin_hash;
+      // See §A above — `11-F21`/step 7 made the field optional; a seeded member with none would
+      // silently make every cross-check below vacuous, so it is asserted rather than defaulted.
+      expect(hash, `seeded member ${member.user_id} carries no credential`).toBeDefined();
       for (const [other, pin] of pins) {
         if (other === member.user_id) continue;
         expect(
-          await verifyPin(member.pin_hash, pin),
+          await verifyPin(hash as string, pin),
           `${other}'s PIN opens ${member.user_id}'s row — one secret, two people (01-F28)`,
         ).toBe(false);
       }
@@ -598,6 +620,9 @@ describe("§B 01-F27 / 01-F28 — identity comes from the session, never from th
         {
           user_id: SAJID,
           display_name: "Sajid",
+          // Step 7's two new required fields (`01-F61`, `11-F22`). Fixture-only.
+          grid_ordinal: 0,
+          status: "active",
           pin_hash: "$argon2id$v=19$m=65536,t=3,p=4$c2FsdA$aGFzaA",
           assignments: [{ role: "cashier", branch_id: BRANCH }],
         },
@@ -609,18 +634,41 @@ describe("§B 01-F27 / 01-F28 — identity comes from the session, never from th
     expect(JSON.stringify(rows).includes("argon2"), "a credential reached the roster").toBe(false);
   });
 
-  it("01-F54 — a member with no display name still gets a tile, labelled by identifier", () => {
-    // `staff.ts` makes `display_name` optional on purpose (a device holding rows written before
-    // the field existed must not have its whole roster refused). A blank tile "is indistinguishable
-    // from a rendering failure on a surface an operator taps 20–60× a shift".
+  // ⚠ **THIS TEST DEFENDED A RULE `11-F20` OVERRULED, AND IT IS CARRIED BACK RATHER THAN LEFT
+  // GREEN-AND-WRONG** (step 7 of `plans/saas-pivot/staff-over-the-wire.md`). It was:
+  //
+  //     it("01-F54 — a member with no display name still gets a tile, labelled by identifier")
+  //       …members: [{ user_id: SAJID, pin_hash: "x", assignments: [] }]
+  //       expect(h.identity.roster()).toEqual([{ user_id: SAJID, display_name: SAJID }]);
+  //
+  // and its comment quoted `staff.ts`'s own justification for the optional field — which is
+  // exactly the shape this repo records as its most expensive defect (`catalog-pricing.test.ts:394`
+  // went on defending an overruled `01-F60` rule for three weeks, and would have FAILED the
+  // correct implementation). `11-F20` closes it by name: *"A person is a NAMED record; the name is
+  // required, single across both planes"*, and the FR's own measured gap is *"the device roster's
+  // `display_name` is optional"*. `StaffEntryWire` declares it `z.string().min(1)`, and
+  // `packages/sync-client/src/__acceptance__/staff-apply.test.ts` §D requires the registry to
+  // refuse a nameless member as `malformed` — so the input this test constructed can no longer
+  // reach `roster()` through any path, and the `?? user_id` branch it aimed at is unreachable.
+  //
+  // What replaces it asserts the SAME direction of failure on the SAME surface: a row the grid
+  // cannot label never becomes a tile. It is not vacuous — an implementation that defaulted an
+  // absent name (`01-F54` read the wide way) or that skipped the registry's validation would land
+  // the row and offer it.
+  //
+  // ⚠ **REPORTED, NOT SETTLED:** rewriting another session's oracle is outside `24 §3`'s licence
+  // and this edit was taken only because the original cannot compile OR pass under `11-F20`.
+  // Owner: this suite's test session.
+  it("11-F20/01-F54 — a member with no display name never becomes a tile at all", () => {
     const store = freshStore();
     const h = identityOn(store);
-    store.staff.apply({
+    const refusal = store.staff.apply({
       kind: "snapshot",
       version: 1,
-      members: [{ user_id: SAJID, pin_hash: "x", assignments: [] }],
+      members: [{ user_id: SAJID, pin_hash: "x", assignments: [] } as unknown as StaffMember],
     });
-    expect(h.identity.roster()).toEqual([{ user_id: SAJID, display_name: SAJID }]);
+    expect(refusal.applied, "a nameless member reached the branch's roster").toBe(false);
+    expect(h.identity.roster()).toEqual([]);
   });
 
   it("01-F61 — the ORDER is the registry's, passed through untouched", () => {
@@ -632,6 +680,12 @@ describe("§B 01-F27 / 01-F28 — identity comes from the session, never from th
     // MUTANT: `.sort((a, b) => a.display_name.localeCompare(b.display_name))` — alphabetical is
     // the tempting one and `27-F4` bans it by name. Caught: Zubair is enrolled with the LOWEST
     // user_id and the LAST name in the alphabet, so registry order and alphabetical order differ.
+    //
+    // ⚠ **`grid_ordinal` STOPPED BEING OWED** (step 7): `list()` now orders by that explicit
+    // field, so the ordinals below are what make the fixture separate the two orders — Zubair
+    // holds ordinal 0. The claim, the title and both assertions are unchanged; only the reason
+    // registry order differs from alphabetical moved from `user_id` to the field `01-F61`
+    // specifies. `status` is the other field the registry now requires (`11-F22`).
     const store = freshStore();
     const h = identityOn(store);
     const ZUBAIR = "0199bbbb-0000-7000-8000-00000000a001";
@@ -639,8 +693,22 @@ describe("§B 01-F27 / 01-F28 — identity comes from the session, never from th
       kind: "snapshot",
       version: 1,
       members: [
-        { user_id: SAJID, display_name: "Sajid", pin_hash: "x", assignments: [] },
-        { user_id: ZUBAIR, display_name: "Zubair", pin_hash: "x", assignments: [] },
+        {
+          user_id: SAJID,
+          display_name: "Sajid",
+          grid_ordinal: 1,
+          status: "active",
+          pin_hash: "x",
+          assignments: [],
+        },
+        {
+          user_id: ZUBAIR,
+          display_name: "Zubair",
+          grid_ordinal: 0,
+          status: "active",
+          pin_hash: "x",
+          assignments: [],
+        },
       ],
     });
     expect(h.identity.roster().map((m) => m.display_name)).toEqual(

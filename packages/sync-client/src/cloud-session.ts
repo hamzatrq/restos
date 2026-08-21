@@ -29,6 +29,7 @@ import type {
 } from "@restos/sync-protocol/transport";
 import { type CatalogFetch, createCatalogFetch } from "./catalog-fetch.js";
 import { type DeviceStore, DivergentDuplicateError, type PageItem } from "./device-store.js";
+import { createStaffFetch, type StaffFetch } from "./staff-fetch.js";
 
 /** Cloud outbox drain page per push (contract (b)); id-dedupe makes overlap free (01-F8). */
 export const CLOUD_PUSH_BATCH_MAX = 500;
@@ -114,6 +115,20 @@ export type CloudSessionStatus = {
    * exactly the shape `01-F56` refuses the delta to prevent.
    */
   catalog_refusal: { reason: string; have_version: number } | null;
+  /**
+   * `01-F56` + `01-F76` for the ROSTER — `catalog_refusal`'s shape one artifact key over, and a
+   * SECOND slot rather than a shared one because the two have different remedies and a surface
+   * that conflates them sends staff to the wrong fix (`00 §5.7`).
+   *
+   * A roster that has quietly stopped updating is indistinguishable from a roster nobody has
+   * edited, and here the user-visible symptom is a cashier whose PIN stopped working — so
+   * "stuck" alone sends a manager to the wrong problem, which is why `have_version` is what the
+   * device actually holds.
+   *
+   * The reasons are `01-F56`'s (`stale` is not surfaced — see the response arm) plus `divergent`
+   * plus `01-F76`'s `foreign_artifact`.
+   */
+  staff_refusal: { reason: string; have_version: number } | null;
 };
 
 export type CloudSession = {
@@ -165,6 +180,17 @@ export const createCloudSession = (options: {
    */
   let catalogRetries = 0;
   const CATALOG_MAX_RETRIES = 3;
+  /**
+   * The ROSTER's three, and they are three SEPARATE variables on purpose (`01-F76`: "a device
+   * holds one version *per key*, not one version"). The likeliest implementation error in this
+   * step is one `fetch` variable and one refusal slot copied from the catalog: `reconcile*`
+   * returns early while a fetch is in flight, so a shared slot would make a roster fetch cancel a
+   * menu fetch whenever an owner edits both — which is what an owner does on the day she opens.
+   */
+  let staffFetch: StaffFetch | null = null;
+  let staffRefusal: { reason: string; have_version: number } | null = null;
+  let staffRetries = 0;
+  const STAFF_MAX_RETRIES = 3;
   // ---- hub-relay state (DEC-SYNC-009, T-01-12; all volatile) ---------------
   // relayAuthorized: the gateway's hello_ack advertisement — without it this
   // session NEVER pushes third-party events (an unadvertised attempt would
@@ -301,6 +327,66 @@ export const createCloudSession = (options: {
     catalogFetch = createCatalogFetch(have);
     catalogRetries = 0;
     requestCatalog(have);
+  };
+
+  /**
+   * `01-F76` — **this device's own artifact key for the roster**, assembled here and never
+   * echoed from a frame. The org comes from the authenticated session and the branch from the
+   * device's own identity; a device that repeated a scope it was told would be stating a client
+   * role claim (commandment 8), and under R25 the roster's scope IS its credential blast radius,
+   * so the field is the whole ruling.
+   */
+  const ownStaffKey = (): { org_id: string; branch_id: string } => ({
+    org_id: store.identity.org_id,
+    branch_id: store.identity.branch_id,
+  });
+
+  const isOwnStaffKey = (scope: { org_id: string; branch_id: string | null }): boolean =>
+    scope.org_id === store.identity.org_id && scope.branch_id === store.identity.branch_id;
+
+  /** Start (or continue) a roster fetch (`01-F75`/`01-F76`/`01-F77`). */
+  const requestStaff = (have_version: number, from = 0, at_version?: number): void => {
+    transport.send({
+      v: 2,
+      kind: "reference_request",
+      resource: "staff",
+      scope: ownStaffKey(),
+      have_version,
+      ...(from === 0 ? {} : { from }),
+      ...(at_version === undefined ? {} : { at_version }),
+    });
+  };
+
+  /**
+   * `01-F77` — this device's roster version out of `hello_ack`'s per-artifact set, matched on the
+   * WHOLE key. A device at another branch of the same org has its own `staff` key in that array
+   * (fan-out is keyed by the artifact key), so matching on `resource` alone would fetch a roster
+   * this device must refuse.
+   *
+   * Absence is the same signal it is for the catalog: an artifact the org has published nothing
+   * for is OMITTED, never sent as `0`, so the device simply never asks — a `?? 0` here would have
+   * every till in the fleet asking a gateway that has nothing to answer with, for ever.
+   */
+  const staffVersionIn = (
+    keys: Extract<ProtocolMessage, { kind: "hello_ack" }>["reference_versions"],
+  ): number | undefined =>
+    keys?.find((key) => key.resource === "staff" && isOwnStaffKey(key.scope))?.version;
+
+  /**
+   * Compare and fetch if behind — the ONE place that decides a roster fetch is needed, called
+   * from both `hello_ack` (the correctness path: every reconnection reconciles, including for a
+   * device offline a week that could not have heard an announcement) and `reference_notice` (the
+   * freshness path). `reconcileCatalog`'s reasoning holds unchanged, including why a fetch in
+   * flight is never restarted.
+   */
+  const reconcileStaff = (serverVersion: number | undefined): void => {
+    if (serverVersion === undefined) return; // the org has published no roster for this branch
+    if (staffFetch !== null) return;
+    const have = store.staff.version();
+    if (serverVersion <= have) return;
+    staffFetch = createStaffFetch(have);
+    staffRetries = 0;
+    requestStaff(have);
   };
 
   /**
@@ -496,6 +582,10 @@ export const createCloudSession = (options: {
         // missed every notice while it was offline still converges the moment it comes back. The
         // push is only latency.
         reconcileCatalog(catalogVersionIn(message.reference_versions));
+        // `01-F77` again, for the ROSTER, and the same sentence is the whole design: a notice is
+        // exactly the kind of message a lossy link drops, so a design that reconciled the roster
+        // only on a pushed notice gives a till nobody can sign in to after a lossy week.
+        reconcileStaff(staffVersionIn(message.reference_versions));
         return;
       }
       case "push_ack": {
@@ -555,19 +645,96 @@ export const createCloudSession = (options: {
         // then waits for the next reconnect instead of landing live, and `hello_ack` reconciles
         // it. That is deliberate: a notice is exactly the kind of message a lossy link loses,
         // so nothing is allowed to depend on one arriving.
-        //
-        // ⚠ **THE CATALOG IS THE ONLY RESOURCE THIS DEVICE CONSUMES TODAY** (`01-F75` closes the
-        // set at `catalog` and `staff`). The roster's fetch and apply are the NEXT step of
-        // `plans/saas-pivot/staff-over-the-wire.md`, and `01-F76`'s device-side
-        // `foreign_artifact` refusal — the belt to `01-F71` (e)'s brace, with a named reason
-        // string this session does not yet own — lands with it. Until then a `staff` frame is
-        // dropped rather than half-applied: inventing either half here would be inventing the
-        // refusal vocabulary `01-F76` reserves (commandment 2).
-        if (message.resource === "catalog") reconcileCatalog(message.version);
+        if (message.resource === "catalog") {
+          reconcileCatalog(message.version);
+          return;
+        }
+        // `01-F76` — one version PER KEY: a notice for another branch's roster is about an
+        // artifact this device does not hold and starts nothing. No refusal is recorded for it
+        // either: a notice carries no artifact, so there is nothing that could have been applied
+        // silently, and `foreign_artifact` is the name for a refused ARTIFACT (below).
+        if (isOwnStaffKey(message.scope)) reconcileStaff(message.version);
         return;
       }
       case "reference_response": {
-        if (message.resource !== "catalog") return; // see `reference_notice` above
+        if (message.resource === "staff") {
+          /**
+           * `01-F76`'s device-side refusal, and it is checked BEFORE "a fetch we did not start"
+           * on purpose. The dangerous case is a mis-routed roster arriving while a fetch IS in
+           * flight; ordering the ignore first would answer this clause by accident, one case
+           * away, and leave the real thing unbuilt. Without the refusal the scope is decoration:
+           * a mis-routed roster applies silently as version N, every later comparison agrees
+           * with itself, and the divergence `01-F56` exists to detect is undetectable by
+           * construction.
+           *
+           * It is the BELT to `01-F71` (e)'s brace (the server derives the key from the session
+           * and refuses a request stating another), never a substitute for it — commandment 8.
+           */
+          if (!isOwnStaffKey(message.scope)) {
+            staffRefusal = {
+              reason: "foreign_artifact",
+              have_version: store.staff.version(),
+            };
+            return;
+          }
+          // A frame for a fetch we did not start — a late page from a previous connection, or a
+          // server volunteering one. Ignored rather than applied: applying it would splice pages
+          // from two different fetches into one commit, and on this artifact the commit is a set
+          // of credentials.
+          if (staffFetch === null) return;
+          const staffStep = staffFetch.accept(message);
+          if (!staffStep.done) {
+            // NO FORWARD PROGRESS means the server is not paging. `01-F17`: an unbounded
+            // receive-path loop is one of the few things in this session that could stop a till
+            // selling, and each iteration costs the gateway a fold over the branch's whole entry
+            // table — a hot loop against credential storage.
+            //
+            // ⚠ `no_progress` is `catalog-fetch`'s own token and is NOT in the vocabulary
+            // `01-F76` closes (`stale`/`needs_snapshot`/`malformed`/`divergent`/
+            // `foreign_artifact`). It is used rather than invented-anew because one word for one
+            // condition across both artifacts is what stops a fleet dashboard needing two, and
+            // it is reported as a finding rather than treated as settled.
+            if (message.next_from <= 0 && message.entries.length === 0) {
+              staffFetch = null;
+              staffRefusal = { reason: "no_progress", have_version: store.staff.version() };
+              return;
+            }
+            requestStaff(
+              staffStep.fetchMore.have_version,
+              staffStep.fetchMore.from,
+              staffStep.fetchMore.at_version,
+            );
+            return;
+          }
+          staffFetch = null;
+          if (staffStep.update === null) return;
+          const staffResult = store.staff.apply(staffStep.update);
+          if (staffResult.applied) {
+            staffRefusal = null;
+            staffRetries = 0;
+            return;
+          }
+          if (staffResult.reason === "needs_snapshot") {
+            // The belt to the server's braces: it decided a delta was constructible and this
+            // device disagrees about the base. Ask again from where we actually are — BOUNDED by
+            // a counter, because the frame has no way to REQUEST a form, so nothing here forces
+            // a snapshot and a server answering with the same bad delta would be asked forever.
+            staffRefusal = { reason: staffResult.reason, have_version: staffResult.version };
+            if (staffRetries >= STAFF_MAX_RETRIES) return;
+            staffRetries += 1;
+            staffFetch = createStaffFetch(staffResult.version);
+            requestStaff(staffResult.version);
+            return;
+          }
+          // `01-F56` + DEC-SYNC-011: a refusal is OBSERVABLE. `stale` is not a fault — it means
+          // a redelivery of something we already hold — so only the real refusals are surfaced,
+          // and a device that reported one every time it was current would send a manager to
+          // look for a problem that does not exist.
+          if (staffResult.reason !== "stale") {
+            staffRefusal = { reason: staffResult.reason, have_version: staffResult.version };
+          }
+          return;
+        }
         // A frame for a fetch we did not start — a late page from a previous connection, or a
         // server volunteering one. Ignored rather than applied: applying it would splice pages
         // from two different fetches into one commit.
@@ -669,6 +836,14 @@ export const createCloudSession = (options: {
       // number, undetectable at the till. The next hello_ack starts a fresh fetch if needed.
       catalogFetch = null;
       catalogRetries = 0;
+      // Same rule for the roster, and `01-F75`'s cost is the same one artifact over: a half
+      // received roster completed with pages from the NEXT connection splices two rosters under
+      // one version number, which is undetectable at the till and decides who may open a shift.
+      // `staffRefusal` deliberately SURVIVES the disconnect — like `blocked`, it is a property of
+      // the artifact and the refusal is still true when the link returns (R28: an old roster
+      // admits, so nothing already landed is touched either).
+      staffFetch = null;
+      staffRetries = 0;
     },
     onMessage: (message) => {
       if (running) dispatch(message);
@@ -732,6 +907,9 @@ export const createCloudSession = (options: {
         // a disconnect because the refusal is still true when the link returns, and it clears
         // only when an update actually applies.
         catalog_refusal: catalogRefusal === null ? null : { ...catalogRefusal },
+        // Two slots, never one: a roster problem and a menu problem have different remedies, and
+        // `01-F56` makes each observable in device health on its own key (`01-F76`).
+        staff_refusal: staffRefusal === null ? null : { ...staffRefusal },
       };
     },
   };

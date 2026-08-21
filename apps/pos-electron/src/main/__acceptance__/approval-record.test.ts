@@ -550,12 +550,19 @@ describe("§C 02-F20/02-F41 — one approval, two differently-attributed envelop
         {
           user_id: CASHIER,
           display_name: "Ayesha",
+          // `01-F61`'s explicit ordinal and `11-F22`'s participation status, added with step 7 of
+          // `plans/saas-pivot/staff-over-the-wire.md` — the registry now refuses a member carrying
+          // neither. FIXTURE-ONLY: no assertion here reads either field.
+          grid_ordinal: 0,
+          status: "active",
           pin_hash: "argon2id$stub",
           assignments: [{ role: "cashier", branch_id: BRANCH }],
         },
         {
           user_id: MANAGER,
           display_name: "Hina",
+          grid_ordinal: 1,
+          status: "active",
           pin_hash: "argon2id$stub",
           assignments: [{ role: "branch_manager", branch_id: BRANCH }],
         },

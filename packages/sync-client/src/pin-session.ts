@@ -37,6 +37,16 @@ export type UnlockRefusal =
   | "locked_out"
   /** Not in the synced registry (`01-F28`) — including a user `01-F42` revoked. */
   | "unknown_user"
+  /**
+   * `11-F22` — on the roster, and not `active` here. Declared there because *"the shipped
+   * vocabulary is closed and none of it fits"*: `unknown_user` is false (she is on the roster)
+   * and `bad_pin` is a lie about a PIN that was never checked. She still RENDERS everywhere else
+   * — status decides whether she may act and nothing about rendering.
+   *
+   * A row a build predating `11-F22` wrote carries no status and lands here too: `01-F48` refuses
+   * participation where state cannot be read, and that FR forecloses the other direction by name.
+   */
+  | "not_active"
   /** The PIN did not verify. */
   | "bad_pin";
 
@@ -179,7 +189,27 @@ export const createPinSession = (options: PinSessionOptions): PinSession => {
       const member = registry.lookup(user_id);
       if (member === null) return refuse(user_id, "unknown_user");
 
-      if (!(await verifyPin(member.pin_hash, pin))) {
+      // `11-F22`: "Only `active` PARTICIPATES… An inactive person does not unlock, on any device,
+      // WAN or no WAN." Compared POSITIVELY, so a stored row written by a build that predates the
+      // field — which carries no status and which the wire cannot express, so only this device's
+      // own history can produce it — is REFUSED rather than admitted (`01-F48`; that FR calls the
+      // other direction "not a licence to default an absent status to `active`").
+      //
+      // It records NO lockout failure, which `11-F22` states outright and prices: `unknown_user`
+      // already refuses without charging an attempt, and a non-`active` entry carries no
+      // `pin_hash` at all (`11-F21`), so there is no credential on the device to guess.
+      if (member.status !== "active") return refuse(user_id, "not_active");
+
+      // `11-F21` makes the hash optional and `01-F17` makes a shape the device cannot verify a
+      // REFUSAL rather than a throw: `verifyPin` takes a hash, and a straight call on a member
+      // with none crashes in whatever was serving the cashier. Reported as `bad_pin` because the
+      // vocabulary is closed and inventing a sixth reason for it would be commandment 2 — the two
+      // states that reach here are R29's "active, no PIN set yet" and `11-F23` (i)'s half-run
+      // re-activation, and neither has a name in `01-F26`'s unlock flow.
+      const hash = member.pin_hash;
+      if (hash === undefined) return refuse(user_id, "bad_pin");
+
+      if (!(await verifyPin(hash, pin))) {
         attempts.recordFailure(device.device_id, user_id, now());
         return refuse(user_id, "bad_pin");
       }
