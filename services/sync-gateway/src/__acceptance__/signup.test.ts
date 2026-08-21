@@ -17,6 +17,9 @@
  *     owner cannot be created the org must not stand … Atomicity is enforced at the writer, not by
  *     a foreign key"; "The credential is `15-F26`'s … The step mints the secret itself and stores
  *     only an Argon2id hash at `01-F61`'s cost floor."
+ *     ⚠ **THAT LAST CLAUSE AND THE FORM'S FIELD LIST HAVE BOTH BEEN AMENDED SINCE — see the
+ *     "TWO RULINGS" block below. Read the quotations above as the Draft-1 text this suite was
+ *     authored from, not as the current FR.**
  *   · `28-F14` — "THE SIGNUP ACT EMITS NO EVENT … At the instant the org is created the signer-up
  *     is not yet a user of any org … so `OrgEvent.actor_user_id` could only be `null`, permanently."
  *   · `28-F2` — "THE TENANT LIFECYCLE IS `15-F25`'s TWO STATES"; a pilot is **`active`**, and
@@ -78,6 +81,67 @@
  *      the plane a public procedure would land on. This file asserts (b)'s **assertable half**
  *      only: the secret is minted by the writer, verifies against what was stored, and exists in no
  *      durable column (§E). How it reaches a human is not decided here and must not be invented.
+ *      ⚠ **BOTH HALVES OF 4 ARE NOW RULED — the block immediately below supersedes this paragraph
+ *      and is dated. It is retained verbatim rather than rewritten, on `28-F15`'s own precedent for
+ *      its struck clauses: it is the text these assertions were authored from.**
+ *
+ * ── ⚠ TWO RULINGS LANDED BEFORE THIS SUITE AND ARE RECORDED HERE AS OPEN (amended August 2026) ───
+ *
+ * `f90be00` (this file) has `deea54d` — "R46–R49" — as its parent, so both rulings were in the tree
+ * when this was authored, and the header cites R40/R17/R35/R44 off that same table while §4 above
+ * records both of these questions as open. That is this repo's signature failure — **a green suite
+ * defending an overruled rule** — caught in the window rather than a fortnight later, and it is
+ * corrected here by the file's owner rather than by its implementer (`24 §3`, `24-F5`). **What is
+ * corrected is the PROSE and two test titles; not one assertion is weakened, deleted or re-scoped**,
+ * and each block below says why.
+ *
+ *   · **R46 / `28-F23` — THE ADMISSION CONTROL IS PICKED: a vendor invite code.** §4 (a)'s "THIS
+ *     DOCUMENT DOES NOT PICK ONE" is struck in `28-F15` itself and §9.6 is closed there. Two
+ *     consequences for this file, and **neither is an assertion today**: (i) `28-F13`'s form now
+ *     collects a FOURTH input — "the org's `display_name`, the owner's `display_name`, the owner's
+ *     email — and `28-F23`'s **invite code**, which is consumed by the writer as an admission input
+ *     and stored on neither record" — so `freshRequest` sends three fields where the amended FR
+ *     names four, and the day a writer requires a code **every `mustSignup` here goes red**. It is
+ *     not added pre-emptively because `28-F23` says in terms that the code's format, length and TTL
+ *     are "NOT decided here and must not be invented at a keyboard" and that its issuing surface is
+ *     **owed to doc 15** (§9.27): a fixture inventing one would be commandment 2, and a suite
+ *     asserting a shape nobody has specified is a suite that blocks its own implementer. **The
+ *     fixture gains the code in the change that lands it**, exactly as `28-F24` sequences §E below.
+ *     (ii) §C's "refuses every field the form does not collect" deliberately does **not** list an
+ *     `invite_code`, so nothing here forbids that field arriving — that was luck rather than
+ *     foresight, and it is said out loud so a later reader does not read a ban into the omission.
+ *   · **R47 / `28-F24` — THE OWNER'S FIRST CREDENTIAL IS A SINGLE-USE REDEMPTION TOKEN, not a
+ *     minted password.** §4 (b)'s DELIVERY half is closed: the token is handed over in the session
+ *     she is already in, so the outbound-mail capability no document owns is no longer in front of
+ *     the surface. **`28 §9.21` survives, narrowed to RECOVERY** — one owner, one password, no
+ *     reset flow anywhere in the corpus, `15-F15`'s vendor route unbuildable (`28-F19`), and a
+ *     locked-out pilot is an unadministrable org whose `org_id` can never be reused. Nothing here
+ *     asserts recovery and nothing may invent one.
+ *     - **`28-F24` names this suite by path on the day it landed, and sequences the repair**: its
+ *       §E "asserts that the returned secret **verifies against the stored password hash** — that
+ *       what signup hands over *is* a password. That was a correct reading of `28-F13` before R47
+ *       and **it is not a defect** … The suite is amended in the change that lands the token, by a
+ *       session that has read `24 §3`'s authorship split — **not before**, and not by the
+ *       implementer." So a minted `initial_secret` is a **legal intermediate** that R47's token
+ *       supersedes: strictly smaller than R47 (it does not expire, it is not single-use, nothing
+ *       forces rotation — `15-F27`'s own admission for `create-owner`) and strictly larger than
+ *       nothing. §E's title and its three shape-specific tests now say so in place.
+ *     - **Why the assertions are NOT rewritten today, stated so the restraint is checkable rather
+ *       than lazy.** `28-F24` leaves two implementations open on purpose — "either the column
+ *       becomes nullable and the login lookup refuses a row with no credential, or the row carries
+ *       a hash of a minted secret **nobody is ever told** and redemption replaces it" — and
+ *       `schema.ts` still declares `password_hash` `NOT NULL`. Rewriting §E to one of those shapes
+ *       would pin a choice doc 28 declines to make, and would leave this file RED against every
+ *       implementation that can exist before `14-F42`'s redemption surface does. That is precisely
+ *       the defect §A's control was repaired for in this same change; committing it here would be
+ *       reproducing that defect inside the fix for it.
+ *     - **What lands with the token:** §E1, §E2 and §E3 are amended in that change — they read the
+ *       returned artifact against `kernel.users.password_hash`, which is the one thing R47 moves.
+ *       `28-F24` blesses the rest of §E unchanged: "the writer mints it, a `password` /
+ *       `password_hash` / `pin` field is refused **by name**, the plaintext is durable nowhere, and
+ *       two signups mint two different secrets, neither derived from what was typed". The
+ *       assertion `28-F24` asks for that this file does NOT hold — *no credential set must never
+ *       read as no credential required* — lives on the login path in `services/api`, not here.
  *
  * ── ⚠ THE TRANSPORT IS PINNED BY THIS ORACLE AND ITS SECURITY RESIDUAL IS NAMED, NOT RESOLVED ───
  *
@@ -90,6 +154,12 @@
  *
  *   POST /internal/signup   { org_display_name, owner_display_name, owner_email, now }
  *                           → 200 { org_id, user_id, initial_secret }
+ *
+ * ⚠ **BOTH LINES ARE THE PRE-R46/R47 SHAPE AND ARE KEPT AS THE INTERIM CONTRACT, NOT AS THE
+ * DESTINATION.** The request gains `28-F23`'s invite code and the response's `initial_secret`
+ * becomes `28-F24`'s single-use redemption token, each in the change that lands it — see the
+ * rulings block above. `28-F24` quotes this very line as the thing that "pins the retired shape",
+ * and says the amendment belongs to the change that lands the token rather than to today.
  *
  * ⚠ **`create-org.ts`'s own recorded objection to this shape is UNANSWERED and is reported here
  * rather than argued away.** That file rejected "An `/internal` route behind `PUBLISH_TOKEN`" for
@@ -172,15 +242,42 @@ const call = async (
 };
 
 /**
- * The contracted request, wrapped once so a rename is one edit — and typed `unknown` on purpose.
+ * A request that carries NO `authorization` header at all — the arrangement §A's control needs and
+ * could not previously express.
  *
- * Every `strict` refusal below (§C, §E) hands this a field the shape does not declare. If the
- * wrapper took the three declared fields, TypeScript would refuse to express the attack and the
- * whole class would be untestable from here, which is how a closed-set rule ends up enforced by a
- * type checker at authoring time and by nothing at runtime.
+ * ⚠ **THIS CONSTANT AND `signupPresenting` EXIST BECAUSE A DEFAULT PARAMETER MADE §A's CONTROL
+ * UNSATISFIABLE BY ANY IMPLEMENTATION, AND THAT IS A DEFECT OF THE SAME CLASS AS A VACUOUS TEST.**
+ * As authored, the wrapper was `(body, token: string | undefined = PUBLISH_SECRET)`, so
+ * `signupOverHttp(request, undefined)` was **byte-identical to `signupOverHttp(request)`**: the
+ * default swallowed the absence, the VALID credential went on the wire, and one call was required
+ * to answer 401 in the loop and 200 four lines later. Measured against a correct implementation the
+ * file failed exactly that one test — `credential undefined: expected 200 to be 401` — which is
+ * the round-3 law's own second corollary (AGENTS.md; `plans/wave-1/oracle-round-2-findings.md` §C):
+ * **a test that stays RED under a CORRECT implementation is as damaging as a vacuous one, because
+ * it blocks its implementer indefinitely** — that round produced three of them. Both claims in this
+ * control are real and each needs its OWN arrangement; the bug was that one call could not make
+ * both.
+ *
+ * The repair is structural rather than a corrected argument: the credential is `signupPresenting`'s
+ * **first and required** parameter, so the absent case cannot be re-defaulted by a later edit, and
+ * `null` — not `undefined` — is what reaches `call` as "send no header". `undefined` is the value a
+ * default parameter eats; `null` is not, and it is deliberately the only way to say this.
  */
-const signupOverHttp = (body: unknown, token: string | undefined = PUBLISH_SECRET): Promise<Http> =>
-  call(base, "POST", SIGNUP, { token, body });
+const NO_CREDENTIAL = null;
+
+/**
+ * The contracted request with the `/internal` credential STATED — `null` means no header is sent.
+ *
+ * Typed `unknown` in the body on purpose: every `strict` refusal below (§C, §E, §F) hands this a
+ * field the shape does not declare. If the wrapper took the three declared fields, TypeScript would
+ * refuse to express the attack and the whole class would be untestable from here, which is how a
+ * closed-set rule ends up enforced by a type checker at authoring time and by nothing at runtime.
+ */
+const signupPresenting = (token: string | null, body: unknown): Promise<Http> =>
+  call(base, "POST", SIGNUP, { token: token ?? undefined, body });
+
+/** The same request presenting the credential this deployment was configured with. */
+const signupOverHttp = (body: unknown): Promise<Http> => signupPresenting(PUBLISH_SECRET, body);
 
 type SignupBody = {
   readonly org_display_name: string;
@@ -510,10 +607,19 @@ describe("§A — one act creates the org and its first owner (28-F13)", () => {
     // guards **every** `/internal/` path with one `onRequest` hook, so "no credential ⇒ 401" is
     // true of a route that does not exist. Asserted alone it is this repo's failure pattern 3
     // exactly. The 200 is what proves the 401 is about the credential and not about the absence.
+    //
+    // ⚠ AND THE TWO HALVES NEED TWO ARRANGEMENTS — see `NO_CREDENTIAL` above. The loop below once
+    // passed `undefined` into a wrapper that defaulted it back to `PUBLISH_SECRET`, so the refusal
+    // arm sent the SAME bytes as the success arm and no implementation could satisfy both. The
+    // credential is stated on every call here, and the `orgsNamed` line under the loop is what
+    // catches a re-defaulting: a swallowed credential does not merely answer 200, it writes a row.
     const request = freshRequest("Gate Control");
-    for (const token of [undefined, "not-the-publish-token"]) {
-      const refused = await signupOverHttp(request, token);
-      expect(refused.status, `credential ${String(token)}`).toBe(401);
+    for (const [what, token] of [
+      ["no `authorization` header at all", NO_CREDENTIAL],
+      ["an `authorization` header carrying the wrong secret", "not-the-publish-token"],
+    ] as const) {
+      const refused = await signupPresenting(token, request);
+      expect(refused.status, `${what}: ${JSON.stringify(refused.body)}`).toBe(401);
     }
     expect(await orgsNamed(request.org_display_name)).toEqual([]);
     const allowed = await signupOverHttp(request);
@@ -740,10 +846,32 @@ describe("§D — the signup act emits nothing (28-F14)", () => {
 //
 // This is the half of `28 §9.21` that IS decidable from here. How the secret reaches the stranger
 // who asked for it is not, and nothing below invents a channel.
+//
+// ⚠ **AMENDED IN PLACE, August 2026 — R47 / `28-F24` RULED THE OTHER HALF AND MOVED WHAT THE ACT
+// HANDS OVER.** §9.21's delivery question is closed (a single-use, expiring redemption token,
+// redeemed on `14-F42`) and survives narrowed to RECOVERY. Three tests below therefore assert a
+// **superseded intermediate** rather than the specified shape, and each is marked; the other three
+// are blessed unchanged by `28-F24` and bind the token exactly as they bind a password. Nothing is
+// rewritten here, because `28-F24` sequences that with the token and leaves two implementations
+// open — the full reasoning is in this file's header block "TWO RULINGS LANDED BEFORE THIS SUITE".
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 
 describe("§E — the writer mints the secret; a password is never an input (15-F27)", () => {
-  it("the secret it returns is the secret it hashed (verifiable against the stored row)", async () => {
+  it("⚠ SUPERSEDED BY R47 (28-F24) — INTERIM: the returned secret is the secret it hashed", async () => {
+    // **WHAT THIS ASSERTS:** that what the act hands over IS the owner's password — it verifies
+    // against `kernel.users.password_hash`. **WHAT OVERRULED IT:** founder ruling R47, transcribed
+    // as `28-F24` (August 2026): the act mints "a **single-use, expiring redemption token** — not a
+    // password", and she chooses her own on `14-F42`'s redemption surface. **WHEN:** `deea54d`,
+    // which is this file's own parent — the ruling predates the suite and the suite was authored
+    // against Draft 1's text anyway, which `28-F24` says "is not a defect" and expressly declines
+    // to have amended before the token lands.
+    //
+    // It is left BITING rather than skipped or deleted, because until the token lands it is the
+    // only thing aimed at the mutant named below, and the interim shape is what every reachable
+    // implementation ships. When the token lands, this test's claim becomes *the artifact handed
+    // over is not a password and does not verify against that row*, and the assertion is rewritten
+    // in that change — by this file's owner, not by its implementer (`24-F5`).
+    //
     // The `create-owner` mutation matrix's T5 in this shape: "`create-owner` hashes something OTHER
     // than the secret it prints". A signup that mints one value, hashes another and returns the
     // first produces an org nobody can administer — which `15-F26` forbids by name — and no gate in
@@ -754,15 +882,27 @@ describe("§E — the writer mints the secret; a password is never an input (15-
     expect(await verifyPin(hash as string, signed.initial_secret)).toBe(true);
   });
 
-  it("CONTROL — a WRONG secret does not verify against that same hash", async () => {
-    // Without this, the assertion above passes against a verifier that always says yes.
+  it("⚠ SUPERSEDED BY R47 (28-F24) — INTERIM CONTROL: a WRONG secret does not verify", async () => {
+    // Without this, the assertion above passes against a verifier that always says yes. It carries
+    // the same supersession as the test above and for the same reason — it reads the returned
+    // artifact against `kernel.users.password_hash`, which is the one thing R47 moves — and it is
+    // rewritten in the same change. Its own claim (a verifier that can say no) is untouched by R47.
     const signed = await mustSignup();
     const hash = (await storedPasswordHash(signed.org_id, signed.user_id)) as string;
     expect(await verifyPin(hash, `${signed.initial_secret}x`)).toBe(false);
     expect(await verifyPin(hash, signed.request.owner_email)).toBe(false);
   });
 
-  it("the stored hash is Argon2id at `01-F61`'s cost floor or above — the single hashing story", async () => {
+  it("⚠ SUPERSEDED BY R47 (28-F24) — INTERIM: the stored hash is Argon2id at `01-F61`'s cost floor", async () => {
+    // The COST FLOOR claim survives R47 verbatim — `28-F24`: "the password she then chooses is
+    // hashed by the same code at `01-F61`'s cost floor (`01-F26`'s single hashing story, no second
+    // parameter set)". What R47 moves is WHICH ROW carries the hash and WHEN: under the token
+    // shape either `kernel.users.password_hash` is nullable until redemption, in which case this
+    // read returns null and `argonOf` throws, or it holds a hash of a secret nobody is ever told.
+    // Doc 28 does not pick between them, so the row this reads is what the amendment must change —
+    // not the floor, which is why this is marked rather than rewritten. `01-F61`'s parameter form
+    // is untouched either way (a duration assertion makes a fast machine read as a weak one).
+    //
     // `15-F27`: "stores only an Argon2id hash at `01-F61`'s cost floor — the product's single
     // hashing story (`01-F26`)". AGENTS.md records the instance this is aimed at: the floor "was
     // exported precisely so a test could assert it, and nothing did — `m=8,t=1,p=1` passed in
@@ -934,14 +1074,59 @@ describe("§F — a signup cannot reach, alter or disclose an existing tenant (0
     }
   });
 
+  it("a refusal to a signup NAMING an existing org_id discloses nothing about it (01-F71, 28-F5 b)", async () => {
+    // ⚠ **THE SHARPEST ASSERTION IN THIS FILE WAS POINTED ONE CASE AWAY FROM THE LEAK ITS OWN
+    // COMMENT DESCRIBED, AND THE SESSION THAT TRIED TO IMPLEMENT AGAINST IT FOUND THAT THE SAME
+    // DAY.** The comment below the next test named `create-org.ts`'s colliding-**id** refusal —
+    // *"org <id> already exists and is called \"<stored display_name>\""* — as the cross-tenant
+    // oracle, and then inspected the body of the **email** collision only. The two refusals come
+    // from two different functions and say two different things, so the one that was measured was
+    // never the one that leaks.
+    //
+    // **The gap was measured rather than argued, out of tree against the implementation.** Under
+    // the mutant where the wire accepts an `org_id` and the act forwards it to `createOrg` — the
+    // good-faith shape a session reaches for, because passing on a value the caller supplied looks
+    // like plumbing — the file as authored lost **exactly one test to the mutant** (§C's `org_id`
+    // row, which dies for the FIELD being accepted and never reads what the answer SAID) while the
+    // refusal body returned another tenant's stored `display_name` to a caller who has
+    // authenticated as nobody. §B1 sends the same field and SURVIVES, because a colliding id is
+    // still a refusal that writes nothing. So a mutant that accepted the field and sanitised its
+    // message would have taken §C with it and left this class uncovered entirely.
+    //
+    // That is a cross-tenant disclosure (`01-F71`, `28-N3`) on the one act in this product that
+    // answers before anybody has authenticated: `28-F23`'s invite code admits an ACT and
+    // "authenticates nobody", so there is no subject to scope a refusal to, and the only defence
+    // available is that the sentence carries nothing the caller could not already have known.
+    const request = { ...freshRequest("Id Disclosure"), org_id: tenantA.org_id };
+    const reply = await signupOverHttp(request);
+    refusedByTheWriter(reply, "a signup naming an existing tenant's org_id");
+    const said = JSON.stringify(reply.body);
+    for (const secretOfA of [
+      tenantA.org_name,
+      tenantA.user_id,
+      tenantA.owner_name,
+      tenantA.branch_id,
+      tenantA.email,
+    ]) {
+      expect(said, `the refusal disclosed \`${secretOfA}\``).not.toContain(secretOfA);
+    }
+    // ⚠ `tenantA.org_id` is deliberately NOT in that list, on the same reasoning the email refusal
+    // states one test down: the caller typed it, so echoing it discloses nothing they did not
+    // already know — and a correct implementation refusing the FIELD by name may legitimately quote
+    // the value it refused. What may never travel is anything the caller could not have known, and
+    // a stored `display_name` is the first of those. The two halves close the class between them:
+    // §C proves the field is refused for a FRESH id (so accept-and-forward cannot survive), and
+    // this proves the refusal for an EXISTING one says nothing (so accept-and-disclose cannot).
+    expect(await orgsNamed(request.org_display_name)).toEqual([]);
+    expect((await readOrg(db, tenantA.org_id))?.display_name).toBe(tenantA.org_name);
+  });
+
   it("a refusal discloses NOTHING about the tenant it collided with (01-F71, on either plane)", async () => {
-    // THE SHARPEST ASSERTION IN THIS FILE, and it is aimed at a mutant a session would write in
-    // good faith. `create-org.ts` refuses a colliding id with *"org <id> already exists and is
-    // called \"<stored display_name>\""* — correct for an operator holding the DSN, and a
-    // cross-tenant oracle the moment the same sentence is served to a stranger. `create-owner.ts`
-    // already gets the email case right ("is already a login on this host"), naming no org. A
-    // signup assembled by copying the first of those two leaks; assembled by copying the second it
-    // does not. Nothing but this test separates them.
+    // The EMAIL collision, which is a second refusal by a second function and needs its own
+    // measurement — see the test above for the one this comment used to claim and did not make.
+    // `create-owner.ts` already gets this case right ("is already a login on this host"), naming no
+    // org. A signup assembled by copying `create-org`'s id refusal leaks; assembled by copying this
+    // one it does not. Both are asserted now, and neither test covers the other's function.
     const request = { ...freshRequest("Disclosure"), owner_email: tenantA.email };
     const reply = await signupOverHttp(request);
     refusedByTheWriter(reply, "a colliding signup");

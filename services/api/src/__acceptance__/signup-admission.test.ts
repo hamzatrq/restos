@@ -45,11 +45,38 @@
  * **in the same commit**, citing that ruling. Amending it without one is the act this file exists
  * to make visible.
  *
+ * ── ⚠ TWO OF THAT CONDITION'S THREE PARTS ARE NOW MET (amended August 2026, prose only) ──────────
+ *
+ * This file was authored at `f90be00`, whose parent is `deea54d` — "R46–R49" — so the rulings were
+ * already in the tree and the paragraphs above and below record their questions as open anyway.
+ * Corrected here by the file's owner rather than by an implementer (`24 §3`, `24-F5`), and **no
+ * assertion moves**: §A is still true of the tree, which is the whole point of a tripwire.
+ *
+ *   · **The ruling exists and is citable: R46**, `plans/saas-pivot/plan-of-record.md` §0 — the
+ *     admission control is **a vendor invite code**, chosen because it is "the only option that
+ *     needs no outbound-mail capability".
+ *   · **The FR naming the control exists: `28-F23`.** `28-F15`'s "THIS DOCUMENT DOES NOT PICK ONE"
+ *     is struck in that FR and §9.6 is closed there. `28-F23` closes with a paragraph naming **this
+ *     file, by path**, quoting its release condition back at it and stating that "R46's §0 row is
+ *     the first half, this FR is the second, and the third is that commit".
+ *   · **The third part has NOT happened and is what this file still guards**: the commit that lands
+ *     the public procedure and amends §A citing both. Until then the tenant plane still has exactly
+ *     one public door and §A still measures it. ⚠ **What the cleared blocker changes is the SHAPE of
+ *     the amendment, not whether one is owed** — `28-F24` and `14-F42` both require the boot
+ *     assertion to learn a **list** rather than take a widened default, because R47 adds a *second*
+ *     unauthenticated route (the redemption surface) beside the signup act's own. So the change
+ *     that lands them moves §A's expectation to a named set of three, and a diff that instead
+ *     loosens the assertion to "contains `auth.login`" is the act this tripwire exists to catch.
+ *
  * ── ⚠ WHAT THIS FILE DOES NOT ASSERT ───────────────────────────────────────────────────────────
  *
  *   · **Which admission control is right.** `28-F15` refuses to pick and so does this file. It also
  *     does not assert a rate limit, an invite-code shape or a verification token — each would be
- *     the invention `28 §9.6` exists to prevent (commandment 2).
+ *     the invention `28 §9.6` exists to prevent (commandment 2). ⚠ **The KIND is picked now (R46 /
+ *     `28-F23`: a vendor invite code) and this clause still binds unchanged**, because `28-F23`
+ *     says in terms that the code's format, length and TTL are "NOT decided here and must not be
+ *     invented at a keyboard" and that its issuing surface is **owed to doc 15** (§9.27). A
+ *     tripwire that asserted a code's shape would be inventing the half the ruling left open.
  *   · **Where the public surface is HOSTED** (`28 §9.26`): "The back office is a tenant-plane app
  *     whose every screen sits behind `14-F1`'s auth gate, so a public unauthenticated route inside
  *     it is a new posture rather than a new page; a separate app is a workspace nobody has scoped."
@@ -57,6 +84,16 @@
  *   · **The credential's delivery** (`28 §9.21`) — no document in the corpus owns an outbound-mail
  *     capability, so the screen this surface would serve cannot hand the owner her secret. That is
  *     a second, independent founder decision and it is stated in the gateway suite's header.
+ *     ⚠ **RULED — R47 / `28-F24`, August 2026, and this clause was already stale when written.**
+ *     The act mints a **single-use, expiring redemption token** and the owner sets her own password
+ *     on `14-F42`'s surface, handed over in the session she is already in, so no outbound mail is
+ *     needed. **`28 §9.21` survives narrowed to RECOVERY**, which nothing in this corpus answers.
+ *     Two consequences land on THIS plane and neither is asserted here yet: the redemption surface
+ *     is **unauthenticated by construction** (she has no session — that is the point), so it is a
+ *     second public route beside `auth.login`; and `28-F24` requires the fail-open direction to be
+ *     refused by hand — *no credential set must never read as no credential required* — which is an
+ *     assertion on the login path this file does not own. The gateway suite's header carries the
+ *     same correction against its own §E.
  */
 
 import { hashPin } from "@restos/domain";
