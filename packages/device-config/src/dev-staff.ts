@@ -282,6 +282,12 @@ type DevStaffLocation = { readonly org_id: string; readonly branch_id: string | 
 const canOpenTheDay = (
   roster: readonly {
     readonly user_id: string;
+    // ⚠ `status` is READ here and is therefore part of the structural contract this package keeps
+    // with `store.staff` — the whole point of a structural type is that it stays TRUE of the thing
+    // it mirrors, so a field the code reads has to be declared or the mirror is a lie that
+    // typechecks. `11-F22` puts participation on the (person, branch) pair; a device holds one
+    // branch's artifact (`01-F76`), so the member's single status is that pair's value here.
+    readonly status?: string;
     readonly assignments: readonly { readonly role: string; readonly branch_id: string | null }[];
   }[],
   location: DevStaffLocation,
@@ -312,12 +318,24 @@ const canOpenTheDay = (
           // surface `01-F17` measures a stopped till at. The comment stating the class while the
           // code closed one axis is AGENTS.md instance 15, reproduced inside a change that cites
           // instance 15 — which is why the guard is now the shape of the claim.
-          assignments: (Array.isArray(member.assignments) ? member.assignments : []).filter(
-            (assignment): assignment is { role: Role; branch_id: string | null } =>
+          // ⚠ `status` is carried onto each assignment because `11-F22` puts participation on the
+          // (person, BRANCH) pair and `RoleAssignment` therefore requires it. This site reads a
+          // roster the device HOLDS, which is one branch's artifact (`01-F76`), so the member's
+          // single status is that pair's value for every assignment on it — the same collapse
+          // `main/authorize.ts` argues at its own subject, and for the same reason. A row whose
+          // status is unreadable contributes NO assignment rather than an `active` one, because
+          // `11-F22` refuses defaulting an absent status to `active` in those words.
+          assignments: (Array.isArray(member.assignments) ? member.assignments : [])
+            .filter((assignment): assignment is { role: Role; branch_id: string | null } =>
               (ROLES as readonly string[]).includes(
                 (assignment as { role?: unknown } | null)?.role as string,
               ),
-          ),
+            )
+            .flatMap((assignment) =>
+              member.status === "active" || member.status === "inactive"
+                ? [{ ...assignment, status: member.status }]
+                : [],
+            ),
         },
         "day.open_close",
         { org_id: location.org_id, branch_id: location.branch_id },
@@ -335,7 +353,13 @@ const ROLE_ONLY_LOCATION: DevStaffLocation = { org_id: "role-only", branch_id: n
 
 const roleOpensTheDay = (role: string): boolean =>
   canOpenTheDay(
-    [{ user_id: "role-only", assignments: [{ role, branch_id: null }] }],
+    // ⚠ `status: "active"` here is NOT defaulting a person's participation, which `11-F22` refuses
+    // by name. There is no person: this asks "does this ROLE open the day", for a boot line that
+    // knows what an operator CONFIGURED and has no device to ask about. The subject is synthetic —
+    // `user_id: "role-only"` and an org that is not an org — and its status is the one value that
+    // lets the question be about the role at all. The DEVICE-backed path above reads the real
+    // member's real status and is the only one that answers about a person.
+    [{ user_id: "role-only", status: "active", assignments: [{ role, branch_id: null }] }],
     ROLE_ONLY_LOCATION,
   );
 

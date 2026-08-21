@@ -611,10 +611,14 @@ describe("§F Commandment 8 / 02-F27 — a cashier may record the caller she is 
     const store = {
       identity: { org_id: "org-1", branch_id: "br-1", device_id: "dev-1" },
       staff: {
+        // `11-F22` (August 2026) — participation rides the (person, branch) pair and only `active`
+        // participates; `subjectOf` reads it off the roster row. Ayesha is on the roster here, so
+        // the stamp restates the same fixture: the role under test is still the only variable.
         lookup: () => ({
           user_id: "u-ayesha",
           pin_hash: "argon2id$stub",
           display_name: "Ayesha",
+          status: "active",
           assignments: [{ role, branch_id: "br-1" }],
         }),
       },

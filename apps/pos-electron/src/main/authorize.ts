@@ -252,10 +252,30 @@ const subjectOf = (deps: SubjectDeps): AuthSubject | null => {
   const session = deps.session();
   if (session === null) return null;
   const member = deps.store.staff.lookup(session.user_id);
-  const assignments = (member?.assignments ?? []).flatMap((assignment) => {
-    const role = roleOf(assignment.role);
-    return role === null ? [] : [{ role, branch_id: assignment.branch_id }];
-  });
+  // ── `11-F22` ON THE DEVICE PLANE, AND WHY ONE STATUS IS ENOUGH HERE ─────────────────────────
+  //
+  // `11-F22` carries participation per-(PERSON, BRANCH) and `01-F78` says "the status a row
+  // carries is THIS branch's". A device holds exactly ONE branch's artifact (`01-F76`, R25 — the
+  // scope IS the credential blast radius), so every assignment on this roster already reaches this
+  // branch, and the member's single status is that pair's value for every one of them. The wire
+  // carries it once on the ENTRY rather than on each assignment for the same reason (`01-F75`).
+  //
+  // So per-(person, branch) collapses to per-person WITHIN one artifact — it is not a second
+  // reading of the FR, it is the same reading evaluated where only one branch exists. A device
+  // that ever held two branches' rosters would have to stop doing this, and `01-F76` is what
+  // stops it holding them.
+  //
+  // ⚠ An absent member is an EMPTY assignment list and therefore no authority (`01-F27`), which is
+  // the same fail-closed answer `01-F48` gives for a state that cannot be read — and it is why a
+  // missing status can never reach `can()` as `active` from this site.
+  const status = member?.status;
+  const assignments =
+    status === undefined
+      ? []
+      : (member?.assignments ?? []).flatMap((assignment) => {
+          const role = roleOf(assignment.role);
+          return role === null ? [] : [{ role, branch_id: assignment.branch_id, status }];
+        });
   return { user_id: session.user_id, org_id: deps.store.identity.org_id, assignments };
 };
 

@@ -94,11 +94,22 @@ const rig = (opts: { signedInAs?: string | null; pinOk?: boolean } = {}): Rig =>
   const store = {
     identity: { org_id: ORG, branch_id: BRANCH, device_id: "dev-1" },
     staff: {
+      // `11-F22` (August 2026) — participation rides the (person, branch) pair and only `active`
+      // participates; `subjectOf` reads it off the roster row. Everyone in `ROSTER` is on this
+      // branch's roster, and an id NOT in it still returns `null` (no member, no status, no
+      // authority) — which is what "refuses an approver the roster does not carry at all" rests
+      // on, and it is unchanged. No assertion, title, expected value, role or branch moves.
       lookup: (id: string) => {
         const row = ROSTER[id];
         return row === undefined
           ? null
-          : { user_id: id, pin_hash: "argon2id$stub", display_name: id, assignments: [row] };
+          : {
+              user_id: id,
+              pin_hash: "argon2id$stub",
+              display_name: id,
+              status: "active",
+              assignments: [row],
+            };
       },
     },
   } as unknown as Pick<DeviceStore, "identity" | "staff">;
@@ -359,11 +370,20 @@ describe("§E 18 §5 — the ordinary write path is unchanged", () => {
     const store = {
       identity: { org_id: ORG, branch_id: BRANCH, device_id: "dev-1" },
       staff: {
+        // `11-F22` — the same stamp as §B's rig, for the same reason. This rig is the SECOND
+        // roster builder in this file: §E drives the plain append channel rather than the
+        // approval one, and it builds its own store, so it needs the status on its own row.
         lookup: (id: string) => {
           const row = ROSTER[id];
           return row === undefined
             ? null
-            : { user_id: id, pin_hash: "argon2id$stub", display_name: id, assignments: [row] };
+            : {
+                user_id: id,
+                pin_hash: "argon2id$stub",
+                display_name: id,
+                status: "active",
+                assignments: [row],
+              };
         },
       },
     } as unknown as Pick<DeviceStore, "identity" | "staff">;

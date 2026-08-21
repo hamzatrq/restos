@@ -169,28 +169,28 @@ const makeHost = async (enabled: EnabledPairs = ENABLED): Promise<Host> => {
       org_id: ORG,
       email: "owner@example.com",
       password_hash: hash,
-      assignments: [{ role: "owner", branch_id: null }],
+      assignments: [{ role: "owner", branch_id: null, status: "active" }],
     },
     {
       user_id: "u-owner-2",
       org_id: ORG,
       email: "owner2@example.com",
       password_hash: hash,
-      assignments: [{ role: "owner", branch_id: null }],
+      assignments: [{ role: "owner", branch_id: null, status: "active" }],
     },
     {
       user_id: "u-cashier",
       org_id: ORG,
       email: "cashier@example.com",
       password_hash: hash,
-      assignments: [{ role: "cashier", branch_id: BRANCH_A }],
+      assignments: [{ role: "cashier", branch_id: BRANCH_A, status: "active" }],
     },
     {
       user_id: "u-manager",
       org_id: ORG,
       email: "manager@example.com",
       password_hash: hash,
-      assignments: [{ role: "branch_manager", branch_id: BRANCH_A }],
+      assignments: [{ role: "branch_manager", branch_id: BRANCH_A, status: "active" }],
     },
   ]);
 
@@ -603,7 +603,7 @@ describe("`01-F60`/`14-F29` — the editor refuses exactly what the kernel refus
         org_id: ORG,
         email: "owner@example.com",
         password_hash: hash,
-        assignments: [{ role: "owner", branch_id: null }],
+        assignments: [{ role: "owner", branch_id: null, status: "active" }],
       },
     ]);
     const app = await createApiServer({ store, sessionSecret: SECRET, now: () => T0 });

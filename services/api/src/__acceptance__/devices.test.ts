@@ -69,28 +69,28 @@ const users = async (): Promise<UserRecord[]> => {
       org_id: ORG,
       email: "owner@devices.test",
       password_hash,
-      assignments: [{ role: "owner", branch_id: null }],
+      assignments: [{ role: "owner", branch_id: null, status: "active" }],
     },
     {
       user_id: MANAGER_ID,
       org_id: ORG,
       email: "manager@devices.test",
       password_hash,
-      assignments: [{ role: "branch_manager", branch_id: BRANCH }],
+      assignments: [{ role: "branch_manager", branch_id: BRANCH, status: "active" }],
     },
     {
       user_id: MANAGER_ORG_ID,
       org_id: ORG,
       email: "manager-org@devices.test",
       password_hash,
-      assignments: [{ role: "branch_manager", branch_id: null }],
+      assignments: [{ role: "branch_manager", branch_id: null, status: "active" }],
     },
     {
       user_id: CASHIER_ID,
       org_id: ORG,
       email: "cashier@devices.test",
       password_hash,
-      assignments: [{ role: "cashier", branch_id: BRANCH }],
+      assignments: [{ role: "cashier", branch_id: BRANCH, status: "active" }],
     },
   ];
 };

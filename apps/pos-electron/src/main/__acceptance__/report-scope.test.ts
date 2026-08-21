@@ -158,9 +158,22 @@ const rig = (opts: {
       store: {
         identity: { org_id: ORG, branch_id: BRANCH, device_id: "dev-1" },
         staff: {
+          // `11-F22` (August 2026) — participation rides the (person, branch) pair and only
+          // `active` participates; `subjectOf` reads it off the roster row. `reportScope` NARROWS
+          // rather than refuses, so a member without one yields `none` — indistinguishable from a
+          // legitimately unscoped reader, which is why the stamp belongs here and not at a call
+          // site: every rig below then gets the scope its ROLE earns. No assertion, title,
+          // expected value, role or branch in this file moves, and `assignments: null` is still
+          // the LOCKED device (no session), which is a different fact from an unscoped one.
           lookup: (id: string) =>
             assignments !== null && id === user_id
-              ? { user_id, pin_hash: "argon2id$stub", display_name: "Stub", assignments }
+              ? {
+                  user_id,
+                  pin_hash: "argon2id$stub",
+                  display_name: "Stub",
+                  status: "active",
+                  assignments,
+                }
               : null,
         },
       } as unknown as Pick<DeviceStore, "identity" | "staff">,

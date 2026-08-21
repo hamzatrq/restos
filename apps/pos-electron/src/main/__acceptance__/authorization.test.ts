@@ -64,9 +64,20 @@ const rig = (opts: {
   const store = {
     identity: { org_id: opts.org_id ?? ORG, branch_id: BRANCH, device_id: "dev-1" },
     staff: {
+      // `11-F22` (August 2026) — participation rides the (person, branch) pair and only `active`
+      // participates; `subjectOf` reads it off the roster row, so a member without one contributes
+      // no role at all. Every member this rig builds is a person ON this branch's roster, so the
+      // stamp restates the SAME fixture under a widened record: no assertion, title, expected
+      // value, role or branch in this file moves. `assignments: null` is still the LOCKED device.
       lookup: (id: string) =>
         assignments !== null && id === user_id
-          ? { user_id, pin_hash: "argon2id$stub", display_name: "Stub", assignments }
+          ? {
+              user_id,
+              pin_hash: "argon2id$stub",
+              display_name: "Stub",
+              status: "active",
+              assignments,
+            }
           : null,
     },
   } as unknown as Pick<DeviceStore, "identity" | "staff">;
@@ -407,8 +418,12 @@ describe("§K the guard over the real gateway — a refusal never reaches the le
         return { ...input, lamport_seq: 1 };
       }),
       staff: {
+        // `11-F22` — the same stamp as `rig` above, for the same reason: this rig's ME is on the
+        // roster, and `subjectOf` reads the status off the row.
         lookup: (id: string) =>
-          id === ME ? { user_id: ME, pin_hash: "argon2id$stub", assignments } : null,
+          id === ME
+            ? { user_id: ME, pin_hash: "argon2id$stub", status: "active", assignments }
+            : null,
       },
     } as unknown as DeviceStore;
     const session = () => ({ user_id: ME, display_name: "Stub" });

@@ -244,7 +244,24 @@ const bootstrapUsers = (env: {
       // the credential itself, and `01-F1`'s reasoning about permanence applies to a deploy
       // config just as it does to the ledger.
       password_hash: BOOTSTRAP_OWNER_PASSWORD_HASH,
-      assignments: [{ role: "owner", branch_id: null }],
+      /**
+       * `11-F22` — participation, on the assignment, `active` (August 2026, step 2b).
+       *
+       * **STATED, never defaulted.** The matrix now reads this value and refuses an assignment that
+       * is not `active`, so the env-declared owner needs one or this deployment boots a back office
+       * its only account authorizes nothing in. `11-F22` refuses a DEFAULT by name — *"not a licence
+       * to default an absent status to `active`"* — and that ban is about a reader inventing a value
+       * for a person nobody classified. This is the other case: the seed is the WRITER, it is the
+       * one place this owner is brought into existence, and it is choosing her participation exactly
+       * as it already chooses her role. A seed that declined to choose would be declaring a person
+       * who cannot act.
+       *
+       * ⚠ It is `active` because this owner exists only where `15-F26`'s provisioning has not run;
+       * she is a stopgap standing in a provisioning step's place, and an operator who no longer
+       * wants her removes the env var rather than deactivating her here — there is no surface that
+       * writes this row.
+       */
+      assignments: [{ role: "owner", branch_id: null, status: "active" }],
     },
   ];
 };

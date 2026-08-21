@@ -96,7 +96,7 @@ const makeHost = async (): Promise<Host> => {
       org_id: ORG,
       email: "owner@example.com",
       password_hash: hash,
-      assignments: [{ role: "owner", branch_id: null }],
+      assignments: [{ role: "owner", branch_id: null, status: "active" }],
     },
   ]);
 

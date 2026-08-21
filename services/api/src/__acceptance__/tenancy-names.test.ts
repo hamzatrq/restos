@@ -72,14 +72,14 @@ const users = async (): Promise<UserRecord[]> => {
       email: "owner@kababjees.test",
       display_name: "Ayesha Khan",
       password_hash,
-      assignments: [{ role: "owner", branch_id: null }],
+      assignments: [{ role: "owner", branch_id: null, status: "active" }],
     },
     {
       user_id: NAMELESS_ID,
       org_id: ORG,
       email: "nameless@kababjees.test",
       password_hash,
-      assignments: [{ role: "owner", branch_id: null }],
+      assignments: [{ role: "owner", branch_id: null, status: "active" }],
     },
     {
       user_id: MANAGER_ID,
@@ -87,7 +87,7 @@ const users = async (): Promise<UserRecord[]> => {
       email: "hina@kababjees.test",
       display_name: "Hina Raza",
       password_hash,
-      assignments: [{ role: "branch_manager", branch_id: BRANCH_A }],
+      assignments: [{ role: "branch_manager", branch_id: BRANCH_A, status: "active" }],
     },
     {
       user_id: OTHER_OWNER_ID,
@@ -95,7 +95,7 @@ const users = async (): Promise<UserRecord[]> => {
       email: "owner@student-biryani.test",
       display_name: "Bilal Ahmed",
       password_hash,
-      assignments: [{ role: "owner", branch_id: null }],
+      assignments: [{ role: "owner", branch_id: null, status: "active" }],
     },
   ];
 };

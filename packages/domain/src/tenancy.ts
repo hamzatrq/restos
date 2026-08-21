@@ -55,7 +55,7 @@
 // that are now wired (`provision-device.ts` and `migrate.ts` both record that trap).
 import { z } from "zod";
 import { DEVICE_CLASSES } from "./device-classes.js";
-import { ROLES, type RoleAssignment } from "./permissions.js";
+import { PERSON_STATUSES, ROLES, type RoleAssignment } from "./permissions.js";
 
 /**
  * The upper bound on every name in this file, counted in CODE POINTS.
@@ -304,38 +304,34 @@ export const DeviceRecord = z.object({
 export type DeviceRecordT = z.infer<typeof DeviceRecord>;
 
 /**
- * `01-F26`'s "(role, location)" pair as a parser.
+ * `01-F26`'s "(role, location)" pair as a parser, WITHOUT participation — the base
+ * `PersonAssignment` extends below, and not a shape anything parses on its own.
  *
- * The TYPE stays declared exactly once, in `permissions.ts` (`18 §4`); this is the wire form of
- * it, and the `satisfies`-style bridge below makes any drift between the two a COMPILE error
- * rather than a runtime surprise. `branch_id: null` is org-wide — how an owner holds Appendix A's
- * "everything", and what `15-F26` gives the first owner at provisioning.
- *
- * ⚠ **`11-F22`'s participation status is deliberately NOT on this schema, and that is a decision
- * rather than an omission (August 2026).** Participation is per-(person, branch) and rides the
- * assignment — `PersonAssignment` below is that shape — but this declaration is pinned to
- * `permissions.ts`'s `RoleAssignment` by the tripwire underneath, and `RoleAssignment` is `can()`'s
- * subject. `11-F22`'s *"the authorization subject reads the status too"* is the plan's **step 2b**,
- * which lands on both planes in one change; adding the field here would half-land it, because a
- * matrix that carries a status nothing reads is the shape that later gets read by accident.
+ * ⚠ **IT IS NO LONGER THE PARSER FOR `RoleAssignment`, AND THE TRIPWIRE MOVED WITH THE FIELD
+ * (August 2026, step 2b).** It used to be: the type was declared once in `permissions.ts`, this was
+ * its wire form, and the bridge underneath made drift a COMPILE error. Then `11-F22`'s participation
+ * landed on `PersonAssignment` and deliberately NOT here, because `RoleAssignment` was `can()`'s
+ * subject and a matrix carrying a status nothing reads *"is the shape that later gets read by
+ * accident"*. **The matrix now reads it**, so that reason has expired in the direction that
+ * removes the exception rather than the field: `RoleAssignment` carries `status`, `PersonAssignment`
+ * is exactly that type, and the tripwire below pins THOSE two. Keeping a second statusless pair as
+ * the pinned one would mean the record and the matrix disagree about what an assignment is — two
+ * answers to *may she act here*, which is the `18 §2` case that has teeth.
  */
-const RoleAssignmentWire = z.object({
+const RoleAssignmentBase = z.object({
   role: z.enum(ROLES),
   branch_id: Id.nullable(),
 });
 
-/** Drift tripwire: if either declaration moves, this stops compiling. */
-type _RoleAssignmentAgrees =
-  z.infer<typeof RoleAssignmentWire> extends RoleAssignment
-    ? RoleAssignment extends z.infer<typeof RoleAssignmentWire>
-      ? true
-      : never
-    : never;
-const _roleAssignmentAgrees: _RoleAssignmentAgrees = true;
-void _roleAssignmentAgrees;
-
 /**
  * `11-F22` — a person's PARTICIPATION status, closed at two (founder ruling R26).
+ *
+ * ⚠ **THE DECLARATION MOVED TO `permissions.ts` (August 2026, step 2b) and is re-exported here
+ * unchanged**, so every importer of `@restos/domain` is untouched. It moved because the MATRIX now
+ * reads the value and `permissions.ts` cannot import from this module — this one already imports
+ * `ROLES` and `RoleAssignment` from it, so the other direction is a cycle. `ROLES` is the precedent
+ * and the direction is `18 §4`'s: the matrix declares the closed sets it answers against, and the
+ * record schemas import them. The reasoning for the set itself is stated at the declaration.
  *
  * `active | inactive`, and the set is closed for `ORG_STATUSES`' reason one level down: a wider
  * vocabulary (`suspended`, `on_leave`, `probation`) is org policy nobody has ruled, and inventing
@@ -349,8 +345,7 @@ void _roleAssignmentAgrees;
  * absent status is "not a licence to default an absent status to `active`". A default here would
  * be the one place a status could be invented for a person nobody classified.
  */
-export const PERSON_STATUSES = ["active", "inactive"] as const;
-export type PersonStatus = (typeof PERSON_STATUSES)[number];
+export { PERSON_STATUSES, type PersonStatus } from "./permissions.js";
 
 /**
  * `11-F22` — `01-F26`'s assignment **with the participation status on it**, which is where the FR
@@ -375,7 +370,7 @@ export type PersonStatus = (typeof PERSON_STATUSES)[number];
  * fact with nothing ruling which wins — `11-F20`'s "ONE name, not one per plane" argument on a
  * different field.
  */
-export const PersonAssignment = RoleAssignmentWire.extend({
+export const PersonAssignment = RoleAssignmentBase.extend({
   status: z.enum(PERSON_STATUSES, {
     error:
       "11-F22: an assignment carries the person's participation status at that location and the " +
@@ -386,6 +381,29 @@ export const PersonAssignment = RoleAssignmentWire.extend({
   }),
 });
 export type PersonAssignmentT = z.infer<typeof PersonAssignment>;
+
+/**
+ * Drift tripwire: if either declaration moves, this stops compiling.
+ *
+ * ⚠ **IT PINS `PersonAssignment` NOW, NOT THE STATUSLESS BASE (August 2026, step 2b).** The pair
+ * the record stores and the pair the matrix authorizes against are ONE type — `RoleAssignment`
+ * carries `11-F22`'s status and so does this — so this is the parser for that type and the bridge
+ * asserts it exactly. **What it buys is the case that was live for three days:** while the two
+ * shapes were allowed to differ, `PersonAssignment` carried a required `status` that
+ * `RoleAssignment` did not have, every stored assignment already held the value, and `can()` simply
+ * did not look at it. Nothing failed to compile, because a supertype accepts a subtype's extra
+ * field silently. Pinning them mutually makes the next such divergence a build error rather than a
+ * fail-open — which is what this tripwire was always for, aimed at the field that now decides
+ * authority.
+ */
+type _RoleAssignmentAgrees =
+  z.infer<typeof PersonAssignment> extends RoleAssignment
+    ? RoleAssignment extends z.infer<typeof PersonAssignment>
+      ? true
+      : never
+    : never;
+const _roleAssignmentAgrees: _RoleAssignmentAgrees = true;
+void _roleAssignmentAgrees;
 
 /**
  * `11-F20` — the PERSON record: the required minimum, and no more.

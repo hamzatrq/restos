@@ -89,7 +89,26 @@ const sessionRouter = router({
   whoami: sessionProcedure.query(({ ctx }) => ({
     user_id: ctx.subject.user_id,
     org_id: ctx.subject.org_id,
-    assignments: ctx.subject.assignments,
+    /**
+     * `01-F26`'s pair, and **`11-F22`'s participation status is deliberately PROJECTED OUT here**
+     * (August 2026, step 2b). The subject now carries `status` on every assignment because the
+     * matrix reads it; this response is the one place assignments cross to a client, and the status
+     * stops at that boundary.
+     *
+     * **Not for tidiness — because sending it is handing a client the input for the check `18 §`
+     * bans.** Commandment 8 puts authorization server-side and says client role claims are never
+     * trusted; a browser holding *may she act at branch A* will eventually branch on it, and then
+     * the product has two answers to one question with the untrusted one in front of the user.
+     * `11-F22` also gives this field exactly ONE rendering surface — `01-F61`'s identification grid,
+     * which is a till and not this plane — and its TWO FIELDS rule is precisely that *may she act*
+     * and *does she render* are different questions.
+     *
+     * ⚠ **The shape below is therefore UNCHANGED by step 2b, and that is asserted rather than
+     * hoped:** `startable.test.ts` and `tenancy-names.test.ts` both pin this object with `toEqual`,
+     * so a future author who returns `ctx.subject.assignments` verbatim gets two red oracles naming
+     * this procedure rather than a silent widening of what the server tells a browser.
+     */
+    assignments: ctx.subject.assignments.map(({ role, branch_id }) => ({ role, branch_id })),
     // `null` ⇔ the store holds no name — `21-F15`'s unnamed case, never a default (see `users.ts`).
     display_name: ctx.subject_display_name,
   })),

@@ -168,7 +168,15 @@ const BRANCH_B = newId();
 const subject = (assignments: readonly RoleAssignment[]): AuthSubject => ({
   user_id: newId(),
   org_id: ORG,
-  assignments,
+  // `11-F22` (August 2026) — participation rides the (role, location) pair, and only `active`
+  // participates. Every subject in this file is a person who is ON the roster, so stamping
+  // `active` here restates the SAME subject under a widened type: no assertion, no title and no
+  // expected value in this file moves, and nothing below reads the member. It is stamped in the
+  // builder rather than added to this file's structural mirror above precisely so the mirror —
+  // another session's declaration — is untouched; the extra member survives the assignment
+  // because a mapped array is not a fresh object literal, and `can()` is reached through the
+  // `unknown` cast this file already uses, so the real matrix sees it.
+  assignments: assignments.map((assignment) => ({ ...assignment, status: "active" })),
 });
 
 const CASHIER = subject([{ role: "cashier", branch_id: BRANCH_A }]);

@@ -101,7 +101,12 @@ const USER_B = "user-b-owner";
 const subjectIn = (org_id: string, role: Role, branch_id: string | null): AuthSubject => ({
   user_id: USER_A,
   org_id,
-  assignments: [{ role, branch_id }],
+  // `11-F22` (August 2026) — participation rides the pair and only `active` participates. Every
+  // subject here is a person ON her org's roster; the isolation claims this file makes are about
+  // `org_id`, so the stamp restates the same subject and no assertion, title or expected value
+  // moves. An INACTIVE subject would refuse for `11-F22`'s reason and would silently stop this
+  // file measuring `01-F71` at all.
+  assignments: [{ role, branch_id, status: "active" }],
 });
 
 /**

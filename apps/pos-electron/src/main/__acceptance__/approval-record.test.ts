@@ -161,11 +161,21 @@ const ROSTER: Readonly<Record<string, { role: string; branch_id: string | null }
 };
 
 const staffStub = {
+  // `11-F22` (August 2026) — participation rides the (person, branch) pair and only `active`
+  // participates; `subjectOf` reads it off the roster row, so a member without one contributes no
+  // role at all. Everyone in `ROSTER` is on this branch's roster, and an id NOT in it still
+  // returns `null`. No assertion, title, expected value, role or branch in this file moves.
   lookup: (id: string) => {
     const row = ROSTER[id];
     return row === undefined
       ? null
-      : { user_id: id, pin_hash: "argon2id$stub", display_name: id, assignments: [row] };
+      : {
+          user_id: id,
+          pin_hash: "argon2id$stub",
+          display_name: id,
+          status: "active",
+          assignments: [row],
+        };
   },
 };
 

@@ -109,6 +109,9 @@ const harness = (role: string | null): { store: DeviceStore; writes: AuthorizedW
     store: {
       identity: store.identity,
       staff: {
+        // `11-F22` (August 2026) — participation rides the (person, branch) pair and only `active`
+        // participates; `subjectOf` reads it off the roster row. Ayesha is on the roster here, so
+        // the stamp restates the same fixture and `role === null` is still the LOCKED device.
         lookup: () =>
           role === null
             ? null
@@ -116,6 +119,7 @@ const harness = (role: string | null): { store: DeviceStore; writes: AuthorizedW
                 user_id: "u-ayesha",
                 pin_hash: "argon2id$stub",
                 display_name: "Ayesha",
+                status: "active",
                 assignments: [{ role, branch_id: IDENTITY.branch_id }],
               },
       },

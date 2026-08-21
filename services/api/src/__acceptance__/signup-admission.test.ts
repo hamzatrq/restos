@@ -115,7 +115,7 @@ beforeAll(async () => {
       email: OWNER_EMAIL,
       display_name: "Ayesha Khan",
       password_hash: await hashPin(PASSWORD),
-      assignments: [{ role: "owner", branch_id: null }],
+      assignments: [{ role: "owner", branch_id: null, status: "active" }],
     },
   ];
   app = await createApiServer({

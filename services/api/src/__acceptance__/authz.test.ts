@@ -127,28 +127,28 @@ beforeAll(async () => {
       email: "owner@example.com",
       password_hash: hash,
       // `branch_id: null` is org-wide — Appendix A's "everything".
-      assignments: [{ role: "owner", branch_id: null }],
+      assignments: [{ role: "owner", branch_id: null, status: "active" }],
     },
     {
       user_id: "u-cashier",
       org_id: ORG,
       email: "cashier@example.com",
       password_hash: hash,
-      assignments: [{ role: "cashier", branch_id: BRANCH_A }],
+      assignments: [{ role: "cashier", branch_id: BRANCH_A, status: "active" }],
     },
     {
       user_id: "u-manager-a",
       org_id: ORG,
       email: "manager-a@example.com",
       password_hash: hash,
-      assignments: [{ role: "branch_manager", branch_id: BRANCH_A }],
+      assignments: [{ role: "branch_manager", branch_id: BRANCH_A, status: "active" }],
     },
     {
       user_id: "u-storekeeper",
       org_id: ORG,
       email: "store@example.com",
       password_hash: hash,
-      assignments: [{ role: "storekeeper", branch_id: BRANCH_A }],
+      assignments: [{ role: "storekeeper", branch_id: BRANCH_A, status: "active" }],
     },
     {
       // A real user with NO assignment anywhere — the generic seam probe below.
@@ -163,7 +163,7 @@ beforeAll(async () => {
       org_id: OTHER_ORG,
       email: "owner@other.example.com",
       password_hash: hash,
-      assignments: [{ role: "owner", branch_id: null }],
+      assignments: [{ role: "owner", branch_id: null, status: "active" }],
     },
   ]);
 
@@ -271,7 +271,7 @@ describe("the session is an IDENTITY claim, not an AUTHORITY claim (`01-F27`)", 
     );
     expect(after.status).toBe(403);
 
-    store.setAssignments("u-owner", [{ role: "owner", branch_id: null }]);
+    store.setAssignments("u-owner", [{ role: "owner", branch_id: null, status: "active" }]);
     const restored = await call(
       app,
       "catalog.editMenuPrices",

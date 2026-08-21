@@ -94,7 +94,7 @@ const makeHost = async (enabled: EnabledPairs = ENABLED): Promise<Host> => {
       org_id: ORG,
       email: "owner@example.com",
       password_hash: hash,
-      assignments: [{ role: "owner", branch_id: null }],
+      assignments: [{ role: "owner", branch_id: null, status: "active" }],
     },
     // Appendix A denies a cashier `catalog.edit_menu_prices`. She is here so the refusal is
     // asserted against a REAL rejected subject and not only against an absent credential.
@@ -103,7 +103,7 @@ const makeHost = async (enabled: EnabledPairs = ENABLED): Promise<Host> => {
       org_id: ORG,
       email: "cashier@example.com",
       password_hash: hash,
-      assignments: [{ role: "cashier", branch_id: BRANCH_A }],
+      assignments: [{ role: "cashier", branch_id: BRANCH_A, status: "active" }],
     },
   ]);
 

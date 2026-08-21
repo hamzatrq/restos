@@ -246,7 +246,7 @@ const makeHost = async (): Promise<Host> => {
       email: A_OWNER_EMAIL,
       display_name: "Ayesha Khan",
       password_hash,
-      assignments: [{ role: "owner", branch_id: null }],
+      assignments: [{ role: "owner", branch_id: null, status: "active" }],
     },
     {
       user_id: A_MANAGER,
@@ -254,7 +254,7 @@ const makeHost = async (): Promise<Host> => {
       email: A_MANAGER_EMAIL,
       display_name: "Hina Raza",
       password_hash,
-      assignments: [{ role: "branch_manager", branch_id: A_BRANCH }],
+      assignments: [{ role: "branch_manager", branch_id: A_BRANCH, status: "active" }],
     },
     {
       user_id: A_CASHIER,
@@ -262,7 +262,7 @@ const makeHost = async (): Promise<Host> => {
       email: A_CASHIER_EMAIL,
       display_name: "Sana Iqbal",
       password_hash,
-      assignments: [{ role: "cashier", branch_id: A_BRANCH }],
+      assignments: [{ role: "cashier", branch_id: A_BRANCH, status: "active" }],
     },
     {
       user_id: B_OWNER,
@@ -270,7 +270,7 @@ const makeHost = async (): Promise<Host> => {
       email: B_OWNER_EMAIL,
       display_name: "Bilal Ahmed",
       password_hash,
-      assignments: [{ role: "owner", branch_id: null }],
+      assignments: [{ role: "owner", branch_id: null, status: "active" }],
     },
   ];
 

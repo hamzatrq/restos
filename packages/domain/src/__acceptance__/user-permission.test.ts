@@ -156,10 +156,18 @@ const OTHER_ORG = newId();
 const BRANCH_A = newId();
 const BRANCH_B = newId();
 
+// `11-F22` (August 2026) — participation rides the (role, location) pair and only `active`
+// participates. Every subject built here is a person ON the roster, so the stamp restates the same
+// subject under a widened type: no assertion, title or expected value in this file moves, and
+// nothing below reads the member.
 const subject = (
   assignments: readonly { role: Role; branch_id: string | null }[],
   org_id: string = ORG,
-): AuthSubject => ({ user_id: newId(), org_id, assignments });
+): AuthSubject => ({
+  user_id: newId(),
+  org_id,
+  assignments: assignments.map((assignment) => ({ ...assignment, status: "active" as const })),
+});
 
 /** The `14-F39` actor: an owner, org-wide, which is how Appendix A gives them "everything". */
 const OWNER = subject([{ role: "owner", branch_id: null }]);

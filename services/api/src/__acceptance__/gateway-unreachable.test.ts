@@ -186,7 +186,7 @@ describe("an unreachable sync gateway is an IntegrationError, not `fetch failed`
             org_id: ORG,
             email: EMAIL,
             password_hash: await hashPin(PASSWORD),
-            assignments: [{ role: "owner", branch_id: null }],
+            assignments: [{ role: "owner", branch_id: null, status: "active" }],
           },
         ]),
         sessionSecret: SECRET,

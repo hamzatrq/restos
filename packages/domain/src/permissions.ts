@@ -47,12 +47,70 @@ export const ROLES = ["cashier", "branch_manager", "storekeeper", "owner"] as co
 export type Role = (typeof ROLES)[number];
 
 /**
- * `01-F26`'s "User × Role × per-location assignment" — one (role, location) pair.
- * `branch_id: null` is org-wide, which is how an owner holds Appendix A's "everything".
+ * `11-F22` — a person's PARTICIPATION at one location, closed at two (founder ruling R26).
+ *
+ * **Declared HERE, and it moved from `tenancy.ts` in the change that made the matrix read it.**
+ * `RoleAssignment` below now carries this value, and this file cannot import it from `tenancy.ts`:
+ * that module already imports `ROLES` and `RoleAssignment` from this one, so the other direction is
+ * a cycle. `ROLES` is the precedent and the direction is the same one `18 §4` already sets — the
+ * matrix declares the closed sets it answers against, and the record schemas import them. It is
+ * re-exported unchanged, so every existing importer of `@restos/domain` is unaffected.
+ *
+ * The set is closed at two because `14-F14`'s word is *deactivation*: `11-F22` rules that
+ * *suspended*, *on leave*, *probation* and *notice period* are an employment lifecycle and a
+ * **different field**, so widening this set is a spec act rather than an implementation choice.
+ */
+export const PERSON_STATUSES = ["active", "inactive"] as const;
+
+export type PersonStatus = (typeof PERSON_STATUSES)[number];
+
+/**
+ * `11-F22`: *"Only `active` PARTICIPATES."* A WHITELIST of one value, and the distinction is the
+ * whole guard: `status !== "inactive"` admits `suspended`, `on_leave`, `ACTIVE`, `1`, `true`, `{}`
+ * and `undefined`, which is `01-F48`'s unreadable state admitted rather than refused. The set is
+ * closed at two by the FR, so a third token is not a status this platform has an answer for.
+ */
+const PARTICIPATING: PersonStatus = "active";
+
+/**
+ * `01-F26`'s "User × Role × per-location assignment" — one (role, location) pair, carrying
+ * `11-F22`'s participation AT THAT LOCATION. `branch_id: null` is org-wide, which is how an owner
+ * holds Appendix A's "everything".
+ *
+ * ⚠ **`status` IS PER-(PERSON, BRANCH) AND RIDES THE PAIR, AND THE FIRST BUILD PUT IT ON
+ * `AuthSubject` AS A PER-PERSON FIELD** (`4edc2d2`, parked and never merged). `11-F22` carried both
+ * readings — its heading says *"a PERSON RECORD carries a participation status"* — and the FR now
+ * names the transfer clause as the operative one: a cashier moving A→B is *"`inactive` in A's
+ * roster and `active` in B's"* **at the same moment**, which one field on the person cannot express.
+ * So participation is carried where `01-F26` already carries the relationship — *"with the
+ * ASSIGNMENT"* — and `01-F78` states the same fact from the artifact side: *"The status a row
+ * carries is THIS branch's."*
+ *
+ * ⚠ **ONE TYPE, NOT TWO, AND THIS IS THE DECISION RATHER THAN THE DEFAULT** (`18 §2`). Before this
+ * change there were two shapes for one fact: this type, and `tenancy.ts`'s `PersonAssignment` — the
+ * stored/wire record, which has carried a REQUIRED `status` since step 3. They were allowed to
+ * differ because the matrix did not read the field; the moment it does, two declarations of "the
+ * pair a person holds at a location" would be two answers to *may she act here*, and `18 §2`'s
+ * one-declaration rule exists for exactly the case where the second answer is reached by accident.
+ * So `PersonAssignment` is now the PARSER for this TYPE and no longer a superset of it — the
+ * tripwire in `tenancy.ts` pins them to each other and stops compiling if either moves. The
+ * alternative (keep them separate and map between) was refused on the measured cost of the first
+ * build: a mapping layer is where a status gets dropped silently, and this wave already paid for
+ * that once when `toEntry` dropped `prices` and `station` across a reshape no test crossed.
+ *
+ * **REQUIRED, not optional, and the requiredness is load-bearing.** `01-F75` makes the field
+ * required at the writer *"so nothing on the wire lacks it"*, and `11-F22` refuses a default by
+ * name — an absent status is *"not a licence to default an absent status to `active`"*. Optional
+ * here would compile every forgetful call site and refuse it at RUN time, which is fail-closed and
+ * therefore safe, but it moves the discovery of a missing status from the build to a till that
+ * cannot sell. The runtime check in `rolesAt` is kept anyway and is not redundant: `01-F27` puts
+ * authorization on every operation and the untyped edges (sync payloads, tRPC input) reach this
+ * matrix without passing a compiler, which is the same reasoning `KNOWN_ACTIONS` already carries.
  */
 export type RoleAssignment = {
   readonly role: Role;
   readonly branch_id: string | null;
+  readonly status: PersonStatus;
 };
 
 /**
@@ -466,22 +524,23 @@ const VERDICTS: Readonly<Record<VerdictAction, Readonly<Record<Role, AuthOutcome
   // states its cells by ROLE and qualifies none of them by location, so `branch_id: null` widens
   // WHERE a role reaches and never WHICH row is read — an org-wide cashier is still a cashier.
   //
-  // ⚠ **THE NEIGHBOUR THIS ROW DOES NOT CLOSE, NAMED BECAUSE THE OTHERS ARE: a DEACTIVATED owner
-  // is `allow` here, and this is the action that writes the status.** `11-F22` puts the check at
-  // the matrix — *"the authorization subject reads the status too, so an inactive person authorizes
-  // nothing even from a session that predates her deactivation"* — and `14-F39`'s own "what it
-  // gates" clause lists `11-F22`'s status change among the acts. `AuthSubject` carries no status,
-  // so a subject holding `{role: "owner", branch_id: null}` whose person row is retained-but-
-  // `inactive` gets `allow` from this row. **Every other action's fail-open ends when a corrected
-  // roster arrives; this one can rewrite the roster** — re-activating its own holder, permanently
-  // under `01-F1`. It is LATENT, not live: nothing yet carries a person status on any plane (the
-  // `status` column on the cloud users table is `15-F25`'s ORG status, not a person's). Closing it
-  // is step 2b, `11-F22`'s change and not `14-F39`'s, and it is named here rather than left silent
-  // because a comment that lists every neighbour but one retires the assertion the next session
-  // would otherwise write (AGENTS.md instance 15: state the class you closed, name the one you
-  // did not). A second, smaller neighbour: R29 owes a change-my-PIN path at the till, and a cashier
-  // is `deny` here — so that surface needs its own FR-decided action or a self-scope arm on
-  // `02-F38`'s `requested_by_user_id` precedent, and inventing either now would be commandment 2.
+  // ⚠ **THE NEIGHBOUR THIS ROW DID NOT CLOSE IS NOW CLOSED, AND THE OLD TEXT IS SUMMARISED RATHER
+  // THAN DELETED so the next reader can see which claim moved.** It said: a DEACTIVATED owner is
+  // `allow` here, this is the action that writes the status, `AuthSubject` carries no status, so a
+  // retained-but-`inactive` owner gets `allow` from this row and can re-activate her own holder,
+  // permanently under `01-F1`. That was true and is no longer: `11-F22`'s participation now rides
+  // `RoleAssignment` and `rolesAt` resolves it, so an owner whose assignment is not `active`
+  // contributes no role and this row is never reached for her. **What actually closed is narrower
+  // than "deactivated people are handled", and the difference is the point** (AGENTS.md instance
+  // 15): the MATRIX refuses her. Whether the roster that feeds it carries a status at all is the
+  // producer's question and is answered per plane — `services/api` reads it from the stored record,
+  // and the device plane has no roster field yet, which is recorded where the subject is built and
+  // not here.
+  //
+  // The second, smaller neighbour is UNCHANGED and still open: R29 owes a change-my-PIN path at the
+  // till, and a cashier is `deny` here — so that surface needs its own FR-decided action or a
+  // self-scope arm on `02-F38`'s `requested_by_user_id` precedent, and inventing either now would
+  // be commandment 2 (`01-F79` records the same gap from the protocol side).
   "user.manage": {
     cashier: "deny",
     branch_manager: "deny",
@@ -573,10 +632,42 @@ const REACH_RANK: Readonly<Record<ReportReach, number>> = {
  * The roles a subject actually holds at this location (`01-F26`: the assignment is per-location).
  * An org-wide assignment (`branch_id: null`) carries into every branch; a branch assignment
  * carries into that branch only, so a cashier at branch A is a stranger at branch B.
+ *
+ * **`11-F22`'s participation is resolved HERE, in the one predicate, and that placement is the
+ * change.** All three readers of this matrix — `can`, `canPayOut` and `reportScope` — already
+ * resolve the location axis through this function, so a status check here is read by all of them
+ * and cannot be forgotten by one. `11-F22` says *"the authorization subject reads the status too,
+ * so an inactive person authorizes nothing even from a session that predates her deactivation"*,
+ * and it names three harms the narrow reading would leave live — *"recording payments, pay-outs and
+ * refunds"*. **Pay-outs are the reason a check on `can()` alone would not be enough**:
+ * `can(subject, "cash.paid_out", scope)` refuses BY DESIGN so `05-F19`'s threshold cannot be
+ * skipped, so `canPayOut` is the only route that answers it, and a guard placed in `can` would miss
+ * the FR's own example.
+ *
+ * **An inactive assignment contributes NO ROLE; it does not poison the branch** — the one reading
+ * here that is argued rather than quoted, so it is stated to be contested. A person holds a SET of
+ * (role, location) pairs (`01-F26`) and Appendix A's *"one person wears several hats"* makes the
+ * widest of them decide, so participation on the PAIR retires one hat and not the person. The
+ * alternative — any inactive pair reaching this branch refuses everything at it — is refused on
+ * `01-F78` half one by name: an owner holds "everything" through an org-wide assignment and
+ * *"therefore … unlocks a till at a branch she does not staff"*, so deactivating her cashier hat at
+ * one branch would silently take her owner authority there with it, as a side effect of tidying a
+ * roster. Fail-closed does not decide this one — both readings refuse strictly more than the matrix
+ * did before — so `01-F26`'s set semantics and `01-F78`'s predicate do.
+ *
+ * **It is a filter, not a search, and never an index.** `01-F26` holds a SET, and a set has no
+ * first element: a guard written as `assignments[0].status` or a `.find()` over the list would let
+ * array order decide a transfer, which is a wrong `allow` no fixture reproduces.
+ *
+ * The comparison is `=== PARTICIPATING` rather than `!== "inactive"` — see `PARTICIPATING`.
  */
 const rolesAt = (subject: AuthSubject, branch_id: string | null): readonly Role[] =>
   subject.assignments
-    .filter((assignment) => assignment.branch_id === null || assignment.branch_id === branch_id)
+    .filter(
+      (assignment) =>
+        (assignment.branch_id === null || assignment.branch_id === branch_id) &&
+        assignment.status === PARTICIPATING,
+    )
     .map((assignment) => assignment.role);
 
 /**

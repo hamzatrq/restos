@@ -416,7 +416,16 @@ describe("§H commandment 8 — the toggle is GATED (the M7 survivor)", () => {
   const storeFor = (role: string) =>
     ({
       identity: IDENTITY,
-      staff: { lookup: () => ({ user_id: "u-x", assignments: [{ role, branch_id: "br-1" }] }) },
+      // `11-F22` (August 2026) — participation rides the (person, branch) pair and only `active`
+      // participates; `subjectOf` reads it off the roster row. This member is on the roster, so
+      // the stamp restates the same fixture: the role under test is still the only variable.
+      staff: {
+        lookup: () => ({
+          user_id: "u-x",
+          status: "active",
+          assignments: [{ role, branch_id: "br-1" }],
+        }),
+      },
     }) as unknown as Parameters<typeof authorizeWrites>[0]["store"];
 
   const wrap = (role: string, session: () => { user_id: string; display_name: string } | null) => {
