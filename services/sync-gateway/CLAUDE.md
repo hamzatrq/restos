@@ -309,7 +309,11 @@
     is the destination and `15-F27` says so; `apps/platform-admin` is a two-line stub. An
     `/internal` route behind `PUBLISH_TOKEN` was rejected for `provision-device`'s reason **and one
     more**: unlike revocation there is no person-level `can()` above it, because no user exists yet.
-    Self-service signup is refused by `15-F26` outright, not merely unbuilt.
+    ~~Self-service signup is refused by `15-F26` outright, not merely unbuilt.~~ ⚠ **OVERRULED
+    August 2026** — `28-F12` amends `15-F26` by name (founder rulings **R17**/**R40**), and the act
+    ships as `signup.ts` behind `POST /internal/signup`. See the signup bullet below. R40 keeps
+    these four commands **as operator tools**; what it retires is `create-org` as *the onboarding
+    path*.
   - **ORDERING IS ENFORCED AT THE WRITER BECAUSE THE SCHEMA CANNOT ENFORCE IT.** `01-F68` forbids a
     foreign key and `0010`/`0011` extend that restraint to the directory's own edges, so a branch
     under an unnamed org, or an owner in one, is refused **here or nowhere** — and "nowhere" means
@@ -1181,6 +1185,141 @@ exactly that on the first run, and **the assertions still went green off the rec
 Testcontainers Postgres in `globalSetup` for every file in the package (T-01-07: fail loudly, never
 skip). Both processes `startable.test.ts` spawns are pointed at a deliberately CLOSED port instead,
 so what they prove is independent of that container — which is exactly the claim being made.
+
+## `POST /internal/signup` — `28-F13`'s SELF-SERVE ACT, and the four things it deliberately is not
+
+`signup.ts` + one route in `publish-http.ts`. Founder rulings **R17** (5–10 free pilots on one
+pooled deployment, self-serve onboarding) and **R40** (*"a restaurant signs itself up and reaches an
+org, a branch, an owner login and a device pairing code with nobody touching a terminal"*).
+`28-F12` amends `15-F26`'s *"there is no self-service signup path"* by name; the four provisioning
+commands survive **as operator tools** and are not deleted.
+
+    POST /internal/signup  { org_display_name, owner_display_name, owner_email, now }
+                           → 200 { org_id, user_id, initial_secret }
+
+- **IT DECIDES NOTHING. It orders `createOrg` and `createOwner` inside one transaction.** `28-F13`'s
+  own last clause is the reason: the self-serve act is a **third** writer of these two records
+  beside `15-F27`'s commands and `15-F1`'s console, and *"two writers of one fact disagreeing
+  silently is this corpus's most-repeated defect."* So `15-F25`'s `active`, `01-F68`'s minted
+  never-reused id, `11-F20`'s minimum WHOLE including `01-F61`'s `grid_ordinal 0`, `01-F26`'s
+  org-wide `{ role: owner, branch_id: null }` with `11-F22`'s status stated, `15-F26`'s first-owner
+  refusal and `15-F27`'s minted-secret rule are all **inherited**, never restated.
+- **ATOMICITY IS THE TRANSACTION AND `28-F13` PUTS IT AT THE WRITER BY NAME** — *"If the owner
+  cannot be created the org must not stand … Atomicity is enforced at the writer, not by a foreign
+  key — `01-F68` forbids one, permanently."* **Mutant S3 (the transaction deleted) SURVIVES the
+  whole suite**, so this is defended by measurement rather than by a test — see the matrix below.
+- **THE EMAIL CHECK BEFORE THE MINT IS `28-F13`'s ORDERING AND NEVER THE ENFORCEMENT.** The
+  enforcement is `users_email_lower_uq`, reached through `createOwner`'s conflict path, which stays
+  live for the concurrent case the read cannot see; a pre-check read as the enforcement is the TOCTOU
+  race `tenancy.ts` refuses by name. What it buys is the FR's stated order, a **400** instead of a
+  **500**, and not paying `01-F61`'s deliberately expensive Argon2id for a collision `28-F13` calls
+  *"foreseeable and ordinary"*. **Mutant S4 (the pre-check deleted) also SURVIVES** — none of those
+  three is asserted anywhere.
+- ⚠ **IT IS NOT A PUBLIC SURFACE, AND `create-org.ts`'s OBJECTION TO THIS SHAPE IS CARRIED
+  UNANSWERED.** That file rejected an `/internal` route behind `PUBLISH_TOKEN` for creating orgs
+  because *"`PUBLISH_TOKEN` is the menu credential … Unlike revocation there is no person-level
+  `can()` check above it either, because no user exists yet — the credential would be the entire
+  security story."* The second half is **permanently true of self-serve signup by construction**,
+  which is exactly why `28-F15` requires an admission control instead, and `28-F17`'s boot-asserted
+  internal gate is *"UNBUILDABLE TODAY"* for want of an action vocabulary doc 15 has never written.
+  `28-F18` (c) already owes this whole hop a `01-F71` clause. **Recorded, not resolved** — the route
+  is pinned by `signup.test.ts`'s header, which calls it contestable and says to change it there and
+  in any adapter together, never in one place.
+- ⚠ **FOUR OF R40's FIVE STEPS ARE NOT HERE, AND EACH IS BLOCKED BY THE CORPUS RATHER THAN BY EFFORT.**
+  - **The invite code (R46)** — `28-F15` requires a named admission control *"before the surface
+    exists"*; R46 picks the KIND and **no FR specifies one** (issuance, format, single-use, TTL, rate
+    limit, what a spent code does). There is also nothing for it to gate: `28 §9.26` leaves the
+    public surface's host undecided, and `services/api/src/__acceptance__/signup-admission.test.ts`
+    holds the tenant plane's one public door at `auth.login`. Building the store now would be a
+    correct subsystem with no seam to the product.
+  - **The branch** — a REFUSAL, not an omission (`28-F13`): `01-F69` wants a `display_name`, a
+    `type` and a `class`, *"three facts a signup form has not asked for"*. `14-F26`'s wizard owns it
+    and does not exist; `PERMISSION_ACTIONS` still carries no branch action, so its first procedure
+    *"cannot be built or booted"*.
+  - **The owner's own password on a single-use token (R47)** — `28 §9.21` records that `15-F26`'s
+    set-credential link **has no redemption surface anywhere in this product**, its TTL/format/
+    single-use protocol are specified nowhere, and the surface that redeems it is public by
+    construction. What ships is `15-F27`'s minted initial password: **strictly smaller than R47,
+    strictly larger than nothing.** ⚠ `signup.test.ts` §E pins that shape and its header records
+    `28 §9.21` as unresolved — the oracle was authored one commit after R47 was ruled and does not
+    carry it. **A finding for the test owner, not a blocker**: R47 is additive on a surface that does
+    not exist.
+  - **The device pairing code** — `01-F25` is one clause with no format, TTL, rate limit or claim
+    protocol, and `plans/saas-pivot/plan-of-record.md` A3 lists specifying it as OWED to doc 01.
+    `signup.test.ts` §C asserts the ABSENCE and forbids any test implying one exists.
+- ⚠ **`createOwner`'s refusals are plain `Error`s, so the race-path email collision arrives as a
+  `500`.** `signUp`'s pre-check throws a `RangeError` and gets a 400. `revokeRegisteredDevice`'s
+  NOT-REGISTERED throw is the precedent for moving the rest; it is left alone here rather than
+  reinterpreted at the route, and it is OWED to whoever builds the public surface.
+
+### Mutation matrix — `28-F13`'s signup act (round-3 law), control **531 of 532**
+
+⚠ **THE CONTROL IS NOT FULLY GREEN AND THE REASON IS THE ORACLE, NOT THE IMPLEMENTATION.**
+`signup.test.ts` §A's *"CONTROL — the act is genuinely reachable, and the credential is the only
+thing gating it"* is **unsatisfiable by any implementation**: its wrapper is
+`signupOverHttp(body, token = PUBLISH_SECRET)`, a **default parameter**, so
+`signupOverHttp(request, undefined)` sends the *valid* credential and is byte-identical to the call
+three lines below that the same test requires to answer **200**. One request, one credential, two
+required answers. Measured out of suite against the shipped route (probe deleted after): **no
+credential → 401, wrong credential → 401, correct credential → 200**, which is the property that
+test is aiming at. Reported to the file's owner; not edited (`24-F5`).
+
+In-tree with byte-exact backups and an `md5sum -c` restore trap after **every** row, verified again
+at the end. Nothing here is a security **constant** — no cost floor, no key length, no permission
+cell — so each mutant reds a test rather than downgrading a credential, which is the narrow case
+AGENTS.md's out-of-tree rule leaves in-tree. Every row is the FULL package suite, `REAL_EXIT` read
+from a marker written INSIDE the log. **In every killing row the failing FILE was
+`signup.test.ts` alone (`Test Files 1 failed | 58 passed`)**, so all 499 pre-existing gateway tests
+stayed green under every mutant.
+
+| # | mutant (exactly one branch) | killed (of the 32 satisfiable) | which |
+|---|---|---|---|
+| S1 | **the route never registered** — `/internal/signup` unmounted | **29** | all but §F's two fixture CONTROLs and §G's manifest row |
+| S2 | **`strictObject` → `object`** — a field the form does not collect is IGNORED (`28-F5` (b), `28 §7`, `15-F27`) | **3** | §B org_id, §C field sweep, §E credential sweep |
+| S6 | **the wire accepts an optional `org_id` AND the act forwards it** (2 branches, labelled) — the good-faith shape | **1** | §C field sweep **only** — see below |
+| S3 | **the transaction deleted** — the two writers run on the handle they were given | **0 — SURVIVES** | — |
+| S4 | `28-F13`'s email pre-check deleted (transaction + unique index remain) | **0 — SURVIVES** | — |
+| S5 | **NEGATIVE CONTROL: every refusal reworded, same states, same writes, same status codes** | **0** | — |
+
+**S6 IS THE ROW A REVIEWER SHOULD LOOK HARDEST AT, AND IT IS A HOLE IN THE ORACLE RATHER THAN IN THE
+CODE.** `signup.test.ts` §F's disclosure assertion — the file's own *"SHARPEST ASSERTION"* — inspects
+the body of the **email**-collision refusal and **never the `org_id`-collision one**, and §B's
+`org_id` test asserts only that the request was refused and wrote nothing. So under S6, 31 of 32
+tests pass while `createOrg`'s refusal is served verbatim to the caller. Measured out of suite under
+S6 (probe deleted after), against a real Postgres:
+
+    PROBE_STATUS=500
+    PROBE_BODY={"error":"org 01a02248-… already exists and is called \"Kababjees 01a02248-4a6\",
+                not \"Attacker 01a02248-4a9\". …"}
+    PROBE_LEAKS_VICTIM_NAME=true   PROBE_LEAKS_VICTIM_ID=true
+
+That is the cross-tenant oracle §F's own comment describes — *"does this tenant exist, and what is
+it called"*, answered to whoever can reach the route — and **nothing in this repo would catch its
+return.** What stops it today is one keystroke: `strictObject`. `01-F71`: *"each point carries a test
+that FAILS when that point alone is removed."* **The assertion is OWED**, and the shape it needs is
+`§F`'s disclosure sweep run over the `org_id` collision as well as the email one.
+
+**S3 SURVIVES AND THE TRANSACTION IS STILL LOAD-BEARING — measured, because a survivor is not
+evidence of a useless branch.** No test reaches the state it protects, because `28-F13`'s pre-check
+and the wire's `DisplayName` both refuse before anything is written. The case that does reach it is
+**two signups for one email, concurrently**, which no suite here constructs. Measured out of suite
+against a real Postgres, four concurrent `signUp` calls sharing one address, the transaction as the
+only difference, **identical on two consecutive runs**:
+
+    A-shipped-transactional: attempts=4 fulfilled=1 orgRows=1 ORPHAN_ORGS_NOBODY_CAN_ADMINISTER=0
+    B-no-transaction:        attempts=4 fulfilled=1 orgRows=4 ORPHAN_ORGS_NOBODY_CAN_ADMINISTER=3
+
+Three orgs **nobody can administer**, permanently — `15-F26`'s *"no org exists that nobody can
+administer"* broken and `01-F68` never reuses an `org_id`. The window is not a sleep and not a
+flake: `01-F61`'s Argon2id cost floor holds it open ~440 ms, which is why all four attempts enter it
+every time. **S3 is the row to re-run after any change here**, and its evidence is the block above
+and nowhere else.
+
+⚠ **S2 AND S6 DIFFER IN WHAT THEY DO WITH THE EXTRA FIELD, AND CONFLATING THEM COSTS THE FINDING.**
+Zod's non-strict `object` **strips** an unknown key, so under S2 an `org_id` is ignored and no leak
+occurs — the kills are about the refusal, not about the disclosure. Only S6, which *honours* the
+field, reaches `createOrg`'s colliding-id sentence. *Check what a mutant does before recording what
+its survival means* (`migratable`'s N5, `summary`'s S4x).
 
 ## `/internal/devices` — `14-F12`'s list and `14-F13`'s revocation, over the service credential
 

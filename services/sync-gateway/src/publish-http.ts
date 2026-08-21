@@ -10,6 +10,7 @@ import { listDevices } from "./registry.js";
 // `revoke-device.ts` carries a main-module entry guard, so importing it runs nothing. Reaching for
 // the CLI's own function is the point — see the route below.
 import { revokeRegisteredDevice } from "./revoke-device.js";
+import { signUp } from "./signup.js";
 import { listBranches, listUsers, readOrg } from "./tenancy.js";
 import { createPerson, setPersonAssignments, setPersonPin, setPersonStatus } from "./user-crud.js";
 
@@ -96,6 +97,44 @@ const OrgQuery = z.object({ org_id: z.string().min(1) });
 const DeviceRevokeRequest = z.strictObject({
   org_id: z.string().min(1),
   device_id: z.string().min(1),
+});
+
+/**
+ * **`28-F13`'s SIGNUP ACT — the org and its first owner, and nothing else.**
+ *
+ * `strictObject` is the whole of `28-F13`'s *"the form collects exactly what those two records
+ * require and nothing more … **No branch, no tier, no plan, no channel**"*, plus `28 §7`'s
+ * *"deliberately not configurable, ever: … a tenant-supplied org identifier on any request"*
+ * (`28-F5` (b)). Every one of those fields is refused **by name** rather than ignored, which is the
+ * direction that matters: an ignored `status: "suspended"` reads to its sender as accepted, and
+ * `create-org.ts` refuses `--status` on the stated ground that it *"would let a tenant be born
+ * suspended, which is a state `15-F7`'s reversal path has nothing to reverse"*. An ignored
+ * `password` is `create-owner.ts`'s worst outcome one plane out — `15-F27` bans a password as an
+ * input *"not in an environment variable, not in `argv`"*, and a request field crosses a network.
+ *
+ * Both names are `packages/domain`'s `DisplayName` — the SAME declaration `OrgRecord` and
+ * `PersonRecord` parse through, reached one layer earlier so a blank or unrenderable name comes back
+ * as a `400` naming the field rather than a `500` carrying a `ZodError` from inside `insertOrg`.
+ * That is `UserCreateRequest`'s move above, verbatim and for its recorded reason; the writers still
+ * parse, so this is one declaration read twice and never a second interpretation (`18 §2`).
+ *
+ * `owner_email` is `min(1)` and no stricter here: no FR in this corpus constrains an email's shape,
+ * and `createOwner`'s own loose check (one `@`, no whitespace) is the single interpretation of that
+ * — restating it would be the second copy `18 §2` forbids. `""` is refused because an empty address
+ * is an invented one rather than an absent one, and `28-F13` collects the owner's email because
+ * `15-F26` makes it the login handle and R30 requires it *"only for BACK-OFFICE access"*, which is
+ * exactly what this owner is created for.
+ *
+ * `now` rides the body on `/internal/catalog/publish`'s and `/internal/users`'s recorded precedent —
+ * `services/api` takes ONE reading per act, so one act cannot be split into two instants. It is a
+ * service-plane parameter and not a value a stranger supplies: this route is reachable only by a
+ * holder of `PUBLISH_TOKEN`.
+ */
+const SignupRequest = z.strictObject({
+  org_display_name: DisplayName,
+  owner_display_name: DisplayName,
+  owner_email: z.string().min(1),
+  now: z.number().int(),
 });
 
 /* ── `14-F14`'s USER CRUD, arriving from `services/api` on behalf of an AUTHENTICATED owner ───── */
@@ -490,6 +529,55 @@ export const registerPublishRoutes = (app: FastifyInstance, deps: PublishDeps): 
     }
   });
 
+  /**
+   * **`28-F13`/`28-F14` — SELF-SERVE SIGNUP: one act, two records, no branch, no device, no event.**
+   *
+   * Founder rulings **R17** and **R40**: a restaurant reaches an org and an owner login *"with
+   * nobody touching a terminal"*, and `create-org.ts` *"survives as an operator tool"* rather than
+   * being the onboarding path. `signup.ts` is the act; this route is the only thing that reaches it,
+   * and it decides nothing about a tenant.
+   *
+   * ⚠ **THIS IS NOT THE PUBLIC SURFACE, AND `create-org.ts`'s RECORDED OBJECTION TO THIS SHAPE IS
+   * CARRIED HERE UNANSWERED RATHER THAN ARGUED AWAY.** That file rejected *"an `/internal` route
+   * behind `PUBLISH_TOKEN`"* for creating orgs: *"`PUBLISH_TOKEN` is the menu credential held by
+   * `services/api`, and creating tenants is not a menu act. Unlike revocation there is no
+   * person-level `can()` check above it either, because no user exists yet — the credential would be
+   * the entire security story."* **The second half is permanently true of self-serve signup by
+   * construction** — that is precisely why `28-F15` requires an admission control instead — and
+   * `28-F17`'s boot-asserted internal gate, the thing that would constrain this hop, is
+   * *"UNBUILDABLE TODAY"* for want of an action vocabulary doc 15 has never written (`28 §9`).
+   * `28-F18` (c) already owes this whole hop a `01-F71` clause. So: this route is gated by the
+   * service credential and by nothing else, and splitting `PUBLISH_TOKEN` is unscoped work with a
+   * founder call in front of it. **Recorded, not resolved.**
+   *
+   * **What stands between this act and a stranger is therefore still owed.** `28-F15`: *"A PUBLIC
+   * SIGNUP SURFACE DOES NOT SHIP WITHOUT A NAMED ADMISSION CONTROL"*;
+   * `plans/saas-pivot/plan-of-record.md` **R46** picks the kind — a vendor invite code — and no FR
+   * specifies one, which is what `28-F15` requires *before the surface exists*. Where that surface
+   * is hosted is `28 §9.26`. `services/api/src/__acceptance__/signup-admission.test.ts` is the
+   * tripwire holding the tenant plane's one public door at `auth.login` until both land.
+   *
+   * **A refusal is a `400` when it is the caller's** (`refusalStatus`): `signUp`'s taken-email
+   * refusal is a `RangeError` for the reason `revokeRegisteredDevice`'s NOT-REGISTERED throw is.
+   * `createOwner`'s own conflict path — the race this cannot see — still throws a plain `Error` and
+   * therefore still arrives as a `500`; that is `create-owner.ts`'s to change and is left alone here
+   * rather than reinterpreted at the route.
+   */
+  app.post("/internal/signup", async (request, reply) => {
+    const parsed = SignupRequest.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: `signup: ${z.prettifyError(parsed.error)}` });
+    }
+    const { org_display_name, owner_display_name, owner_email, now } = parsed.data;
+    try {
+      return reply
+        .code(200)
+        .send(await signUp(deps.db, { org_display_name, owner_display_name, owner_email }, now));
+    } catch (error: unknown) {
+      return reply.code(refusalStatus(error)).send({ error: messageOf(error) });
+    }
+  });
+
   /** `14-F12`'s per-branch device list, as far as this table can honestly answer it. */
   app.get("/internal/devices", async (request, reply) => {
     const parsed = OrgQuery.safeParse(request.query);
@@ -537,10 +625,12 @@ export const registerPublishRoutes = (app: FastifyInstance, deps: PublishDeps): 
    * **`14-F14`'s USER CRUD — five routes, one writer, and the first shipping caller `staff.ts` has
    * ever had.**
    *
-   * They sit beside the seven above (⚠ this said EIGHT; counted off the `app.post`/`app.get` calls
-   * registered before this block, it is seven — catalog publish, catalog published, org-events in
-   * and out, tenancy, devices, device revoke) and behind the same `PUBLISH_TOKEN` and the same
-   * fail-closed
+   * They sit beside the eight above (⚠ this said SEVEN and before that EIGHT; counted off the
+   * `app.post`/`app.get` calls registered before this block it is now eight — catalog publish,
+   * catalog published, org-events in and out, tenancy, **signup**, devices, device revoke — the
+   * eighth being `28-F13`'s signup act, landed August 2026. The count moved because a route landed,
+   * which is the only reason a number in a comment may move) and behind the same `PUBLISH_TOKEN` and
+   * the same fail-closed
    * `503`, on `/internal/devices/revoke`'s recorded terms and with the same honest limit: **this
    * service authorizes SERVICES, never people.** The person-level gate is `14-F39`'s
    * `can("user.manage")`, owner-only, in `services/api` — so a holder of this credential bypasses

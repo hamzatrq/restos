@@ -31,10 +31,20 @@
 //     credential held by `services/api`, and creating tenants is not a menu act. Unlike revocation
 //     there is no person-level `can()` check above it either, because no user exists yet — the
 //     credential would be the entire security story.
-//   - **Self-service signup (rejected, and it is a DECISION rather than a gap).** `15-F26`: there is
-//     no self-service signup path; §1 makes this module internal-only, §9.7 records that whether one
-//     should ever exist is a business decision. A public form is the shortest path to a login and
-//     `15-F26` forbids taking it.
+//   - ~~**Self-service signup (rejected, and it is a DECISION rather than a gap).** `15-F26`: there
+//     is no self-service signup path; §1 makes this module internal-only, §9.7 records that whether
+//     one should ever exist is a business decision. A public form is the shortest path to a login
+//     and `15-F26` forbids taking it.~~ ⚠ **OVERRULED, and this paragraph was still asserting the
+//     refused position after the ruling landed.** `28-F12` amends `15-F26` by name on the founder
+//     ruling of August 2026 (`plans/saas-pivot/plan-of-record.md` **R17**, **R40**), and `28-F13`
+//     specifies the act: `signup.ts`, reached by `POST /internal/signup`. **This command is not
+//     retired — R40 keeps it "as an operator tool"** — but it is no longer the onboarding path, and
+//     `signUp` calls `createOrg` below rather than copying it, so there is still one writer of this
+//     row. What `28-F12` does NOT lift: the vendor still never holds a restaurant's password, the
+//     first owner is still created in the same act as the org, and an abandoned `org_id` is still
+//     abandoned rather than recycled. Corrected in place rather than deleted, because a comment that
+//     defends an overruled rule is the exact three-week failure `28-F12` cites as its own reason for
+//     insisting the reversal be recorded where the routed reader lands.
 //
 // **IT EMITS NO EVENT, and `15-F4` says it should.** *"Provisioning emits the org's first
 // `config.changed` events."* `config.changed` is a legal org-scoped type (`01-F62`) and
