@@ -185,6 +185,68 @@ passes under M-SEAM.
   answering; it is unconfigured), and those need different words from an owner. The answer is the
   DEPLOYMENT's set, not a per-org lookup — `00 §7`'s layer-2 config plane still does not exist.
 
+## `22-F16` / R38 — the owner's export, and the PORT NOTHING SUPPLIES
+
+`exports.ts` (the port + a refusing fallback), `export-router.ts` (three procedures under
+`governance`, all `authorized("export.request")` — `22-F23`, **owner-only**). Oracle:
+`__acceptance__/owner-export.test.ts` (9). This plane owns **two things only**: who may ask, and
+which tenant the answer is about. What is IN the bundle is `services/jobs`'s `export-org` command.
+
+- ⚠ **`start()` SUPPLIES NOTHING, SO A REAL DEPLOYMENT REFUSES EVERY EXPORT REQUEST — deliberately,
+  and it is on `seams:check`'s register rather than in a comment.** `ApiServerOptions.exports`
+  carries an `@unreached-owed` marker naming what is owed: a **durable request record** and the
+  **enqueue that reaches `services/jobs`**. Neither was invented, because `18 §4` gives every table
+  exactly one writer service and a record this plane creates while the worker advances it to `ready`
+  has two — that is a decision, not an implementation detail. The oracle's own header names the same
+  gap from the other side and assigns it to *"whoever wires the queue"*, with a hand-written
+  assertion. **`pnpm -C services/jobs export-org --org <id> --out <dir>` generates a bundle today.**
+- **The fallback REFUSES; it is not a memory stub**, and the oracle pins that by name. `22-N3` has
+  the owner watching a progress STATE rather than a spinner, so a stub renders a completely
+  plausible screen over a job that is not running — the "supplied with a stub" shape AGENTS.md
+  measures as invisible to every rail, on a surface whose subject is a copy of the whole ledger.
+- **No procedure takes an `org_id` and `requestExport` takes no input at all** (`01-F71` (f) (iii),
+  `28-F5` (b)). The port takes `org_id` as the FIRST argument on both reads, so an implementation
+  cannot forget the predicate without failing to compile. A foreign or unknown export id is
+  `NOT_FOUND` and the two are deliberately indistinguishable — `auth.login`'s enumeration argument,
+  and it matters more here because what is being probed for is a bundle of somebody else's ledger.
+- **No `branch_id`, and the reason is specific to this surface**: `22-F16`'s bundle is the ORG's
+  complete event log with no branch axis, so a stated branch could only ever narrow the
+  AUTHORIZATION and never the answer — an owner assigned to one branch would pass a check about that
+  branch and receive the whole estate.
+- ⚠ **An export is UNAUDITED.** `22-F16` says *"recorded as `governance.export_generated`"*;
+  `22-F23` records why nothing can write one. The actor lives on the request record and nowhere else.
+
+### Mutation matrix — `22-F16` (round-3 law), control **326/326** green
+
+| # | mutant (exactly one branch) | killed (of 326) | notes |
+|---|---|---|---|
+| E1 | **`requestExport` built with `sessionProcedure` — the trigger UNGATED** | **56** | `assertEveryProcedureIsGated` refuses to BOOT; 15 of 18 files fail because they build the host |
+| E2 | **`01-F71` (f) (iii): the org read from the REQUEST instead of the subject** | **1** | §B2, alone — 325 pre-existing green |
+| E4 | **`export.request` widened to `branch_manager: "allow"`** (OUT-OF-TREE) | **0 — SURVIVED** | see below |
+
+⚠ **E4 SURVIVED THE WHOLE SUITE AND IT IS A11 REPRODUCED EXACTLY — the fourth instance of that shape
+in this package and the SECOND on a permission cell.** `owner-export.test.ts` §A4 is titled *"22-F16
+'owner-role ONLY': a branch manager is refused too"* and **passes with the cell widened**, because
+every non-owner subject in the file is BRANCH-SCOPED and `governance.requestExport` states no
+`branch_id`: `branchOf` resolves `null`, `rolesAt` drops the branch assignment, and the 403 arrives
+from **scope resolution before any cell is read**. So this service had no coverage of the
+`export.request` cell for any non-owner role, and neither did `packages/domain`. Closed by a
+hand-written assertion at `packages/domain/src/export-permission.test.ts` (NOT an oracle; its header
+says so and says why), which asks `can()` with **org-wide** subjects — the shape that reaches the
+cell. Re-measured out-of-tree against it: **E4 kills 2 of the 8 new assertions.**
+
+⚠ **E4 was run OUT-OF-TREE and `packages/domain/src/permissions.ts` was never edited** (AGENTS.md:
+an agent killed between "weaken" and "revert" strands a widened credential with every test green).
+The package was copied to a scratchpad, mutated there, and only the gitignored
+`services/api/node_modules/@restos/domain` symlink was repointed for the run. `permissions.ts` was
+verified byte-identical by checksum (`64fc97b9…`) before and after.
+
+**One mutant could not be written and the reason is worth keeping:** there is no one-branch service-
+side mutant for *"look the export up by id with no org predicate"*, because `ExportRequests.get`
+takes `org_id` as its first parameter — the leak is excluded by the port's SIGNATURE rather than by
+a check a mutant could delete. That is a design property, not a coverage claim, and it is the reason
+the signature is shaped that way.
+
 ## ⚠ A PER-HOOK TIMEOUT IN THIS DIRECTORY OPTS OUT OF THE PACKAGE BUDGET — and ten still do
 
 `vitest.config.ts` sets `hookTimeout: 120_000` **for a measured reason**: `01-F61`'s Argon2id cost
