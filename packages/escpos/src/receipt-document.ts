@@ -55,7 +55,7 @@
  * left of the item name, on the same line, at the same size.
  */
 
-import type { OrderChannel, PaymentMethod } from "@restos/domain";
+import type { OrderChannel, PaymentMethod, TaxPosture } from "@restos/domain";
 import type { BlockRenderer, DocumentSpec } from "./document.js";
 import {
   amountToken,
@@ -108,6 +108,43 @@ export type ReceiptTender = {
   readonly amount_paisa: number;
 };
 
+/**
+ * `16-F5`'s snapshot as the receipt receives it — R39's *"receipts compute and show tax
+ * properly"*, arriving FINISHED (`27-F24`: "the system computes; staff read").
+ *
+ * **Every figure here is `taxSnapshot`'s and nothing on this document re-derives one.** `16-F5`
+ * puts the computation at settlement under `01-F18` discipline ("never re-derived") and
+ * `packages/domain` owns it; a renderer that applied `rate_bps` to `subtotal_paisa` itself would
+ * silently turn `16-F5`'s PER-LINE answer into a per-total one and disagree with the ledger by a
+ * rounding step.
+ *
+ * `posture` travels because `16-F1`'s "off" and a configured 0 % rate must stay distinguishable on
+ * paper: an org with no posture prints nothing, and a `Tax Rs 0` line is a claim about a tax regime
+ * it is not in.
+ */
+export type ReceiptTax = {
+  /**
+   * `16-F2`'s posture, as `@restos/domain` declares it. Imported rather than re-spelled: a second
+   * declaration of a domain type is a violation, not a convenience (`18 §2`), and a fourth posture
+   * word must fail to compile here rather than print.
+   */
+  readonly posture: TaxPosture;
+  /**
+   * `16-F4`'s pack rate in integer basis points, carried and **not printed**.
+   *
+   * NO FR requires a rate on a customer's receipt — `02-F15` lists the content and names no rate,
+   * and doc 16's receipt fields are `16-F9`'s fiscal ones, which R39 defers in full. It travels
+   * because a tax amount is only checkable against the rate that produced it and the seam that
+   * lands `16-F2`'s matrix will already hold both; printing it is a doc 02 or doc 16 question, and
+   * inventing the row here would be commandment 2.
+   */
+  readonly rate_bps: number;
+  /** `taxSnapshot`'s `subtotal_paisa` — the pre-tax figure, net of tax under BOTH postures. */
+  readonly subtotal_paisa: number;
+  /** `taxSnapshot`'s `tax_total_paisa`. */
+  readonly tax_total_paisa: number;
+};
+
 /** `03-F31`'s data contract for the customer's copy. */
 export type ReceiptData = {
   /** `02-F15`'s "order number" — the same eight-character handle `03-F5`'s band and the KOT use. */
@@ -155,6 +192,22 @@ export type ReceiptData = {
   readonly tenders: readonly ReceiptTender[];
   /** `03-F37`: "Reprint markers are mandatory **per type**, in a locked region"; `02-F16`. */
   readonly reprint: boolean;
+  /**
+   * `16-F5`'s snapshot, when one exists. **OPTIONAL, and ABSENT means no tax content at all** —
+   * `16-F1`: "Tax is off by default", so the ordinary Pakistani restaurant this product ships to
+   * prints the document it printed before this field existed, byte for byte.
+   *
+   * The rejected alternative (`24 §3b`) is three always-present fields defaulting to zero, which
+   * makes "no posture is configured" (print nothing) indistinguishable from "a 0 % rate applies"
+   * (print a tax row reading Rs 0) — `02-F43`'s "logged but uncounted" shape moved onto a document
+   * a customer keeps and a `16 §1` legal red line one step away.
+   *
+   * `| undefined` is explicit because `exactOptionalPropertyTypes` makes "absent" and "present as
+   * `undefined`" two different TYPES, and they must be the same DOCUMENT: a caller that composes
+   * `tax: posture === undefined ? undefined : …` must not print differently from one that omits the
+   * key.
+   */
+  readonly tax?: ReceiptTax | undefined;
 };
 
 const receiptOf = (data: unknown): ReceiptData => data as ReceiptData;
@@ -246,11 +299,53 @@ const RECEIPT_BLOCK_RENDERERS: Readonly<Record<string, BlockRenderer>> = {
     // it. §I now asserts a blank line at EVERY region change, and this is the part that fixes it.
     GROUP_BREAK,
   ],
-  /** `03-F33`'s `TOTALS` region and `02-F15`'s "totals" — the fold's own figure, never a sum here. */
-  RECEIPT_TOTALS: (data) => [
-    ...row("Total", amountToken(receiptOf(data).total_paisa)),
-    GROUP_BREAK,
-  ],
+  /**
+   * `03-F33`'s `TOTALS` region and `02-F15`'s "totals" — the fold's own figure, never a sum here.
+   *
+   * **R39's itemised tax line lives here and nowhere else.** DECLARED INTERPRETATION (`24 §3b`):
+   * *"an itemised tax line"* is the tax broken out as its OWN row between a pre-tax figure and the
+   * amount due — three rows, three distinct figures, in that reading order, because a tax printed
+   * below the number it is already inside cannot be checked by the person holding the paper. The
+   * named alternative is a per-ITEM tax column beside each line, rejected because R39 writes
+   * "line" singular, and because `27-F55`'s "carry LESS information" plus `03-F49`'s 32-column
+   * floor make a fourth money column a layout this corpus refuses elsewhere.
+   *
+   * The three rows are CONTIGUOUS — no `GROUP_BREAK` between them. `27-F58` separates groups with
+   * blank lines and does not say what a group is, but a base and the tax taken out of it are one
+   * arithmetic statement: a blank line between them makes the tax read as a charge from somewhere
+   * else.
+   *
+   * **`TOTALS` and deliberately not a region of its own.** `03-F33` puts `FISCAL_LOCKED` blocks
+   * *"not in the `DocumentSpec` at all"* — they are injected at render by a certified adapter — so
+   * a spec block for an ordinary posture tax would be the vendor authoring regulated content by
+   * hand, which R39 defers in full and `SpecRegion` exists to make unrepresentable. It is equally
+   * not `HEAD_OWNER`/`FOOT_OWNER`: those are the only regions an owner may reach (`03-F34`), and a
+   * tax figure an owner can edit or suppress is what `16 §7` puts under "deliberately not
+   * configurable, ever".
+   *
+   * **`none` prints nothing, exactly as an absent snapshot does.** `16-F1` is "tax is OFF", and
+   * a receipt that says `Tax Rs 0` on an org with no posture configured is a claim about a tax
+   * regime that org is not in. `16-F3`'s complete internal numbers are untouched by this: the
+   * posture decides what the PAPER shows, never what the ledger records.
+   *
+   * The two labels are English (`00 §5.6`) and `Tax` is R39's own noun. A `16-F4` pack may one day
+   * supply an authority's own label ("GST", "Sales Tax") — no FR rules on it, and `03-F49` refuses
+   * rather than squeezes, so a verbose label is a layout decision and not a copy one.
+   */
+  RECEIPT_TOTALS: (data) => {
+    const receipt = receiptOf(data);
+    const tax = receipt.tax;
+    return [
+      ...(tax === undefined || tax.posture === "none"
+        ? []
+        : [
+            ...row("Subtotal", amountToken(tax.subtotal_paisa)),
+            ...row("Tax", amountToken(tax.tax_total_paisa)),
+          ]),
+      ...row("Total", amountToken(receipt.total_paisa)),
+      GROUP_BREAK,
+    ];
+  },
   /**
    * `02-F15`'s "payment method(s)". Also `TOTALS`, because `03-F33`'s ladder has one region
    * between the body and the regulated block and what a customer paid is part of the settlement,

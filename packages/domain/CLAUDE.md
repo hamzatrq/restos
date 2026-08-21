@@ -122,3 +122,45 @@ back-office slice on phones … or stay manager-console-only until pilots demand
 stating that a manager's back-office reach is **undecided**. Widening is additive and needs a
 founder ruling; narrowing later is not additive, and the wrong guess in the permissive direction is
 an accidental revocation that stops a till mid-service.
+
+## `tax.ts` — R39's posture arithmetic (`16-F1`..`16-F6`), control **603/603** green
+
+R39: *"CORRECT TOTALS AND AN ITEMISED TAX LINE; NO FISCALIZATION."* `taxSnapshot` is `16-F5`'s
+per-line computation — integer paisa, `exclusive` through `00 §6`'s one door (`applyRateBps`),
+`inclusive` extracting `gross × bps / (10000 + bps)` at the same half-up policy, `none` charging
+nothing and consulting no rate. `__acceptance__/tax-posture.test.ts` is the oracle.
+
+Mutated **in-tree** with a byte-exact restore trap (`tax.ts` verified byte-identical after). Nothing
+here is a security constant: each mutant is an arithmetic branch that reds a test rather than
+downgrading a credential, which is the narrow case AGENTS.md's out-of-tree rule leaves in-tree. Every
+row is the FULL package suite. **In EVERY row the failing FILE was `tax-posture.test.ts` alone, so all
+565 pre-existing domain tests stayed green under every mutant** — the kills are attributable to the
+new file rather than to the suite at large.
+
+| # | mutant (exactly one branch) | new 38 failed | pre-existing 565 |
+|---|---|---|---|
+| T1 | **`16-F1` LEAK — `none` falls through to the exclusive arm** | **3** | **all green** |
+| T2 | **`16-F5` — the tax is rounded on the ORDER TOTAL, not per line (6683, not 6684)** | **7** | **all green** |
+| T3 | **`16-F2` — `inclusive` charges the rate ON TOP of a price that already contains it** | **2** | **all green** |
+| T4 | `00 §6` — naive float `Math.round(base × bps / 10000)` instead of `applyRateBps` | **0 — SURVIVES** | all green |
+| T4b | `00 §6` — a policy that really differs: FLOOR (truncation), not half-up | 8 | all green |
+| T5 | `01-F30` — a zero-billed (voided) line is dropped from the snapshot | 7 | all green |
+| T6 | `16-F1`/`11-F22` — an ABSENT posture defaults to `none` rather than refusing | 1 | all green |
+| T7 | **NEGATIVE CONTROL — the returned snapshot's fields swap position; same behaviour** | **0** | all green |
+
+**T2 is the one to re-run after any change here.** The fixture is three Rs 45 lines at **1650 bps**
+precisely because at a whole-percent rate on whole-rupee prices per-line and per-total rounding give
+the *same* answer — a suite fixtured on Rs 450 at 16 % cannot tell `16-F5`'s rule from the one it
+rejects. T7 is why the other counts mean anything: a real one-branch edit to the same object reddens
+nothing, so the oracle holds the PROPERTY and is not pinning field order.
+
+**⚠ T4 SURVIVES, AND IT IS THE ORACLE'S CLAIM THAT IS WRONG RATHER THAN THE IMPLEMENTATION —
+MEASURED, NOT ARGUED.** `tax-posture.test.ts` §D closes with a case commented *"2^52 − 1: the naive
+float path is off by one"*. It is not, at that value: `Math.round(base × bps / 10000)` equals
+`applyRateBps` on **all 10** of §D's rows, including that one (both answer `765611936652984` for
+`base = 4503599627370495`, `bps = 1700`). The general claim is sound — a random search over the
+safe-integer range finds divergent inputs in seconds, e.g. `base = 6446220095029487, bps = 1650`,
+where the naive path is **+1** — so the row needs a different base, not a different assertion. **A
+finding for the test-owning session, cited by FR (`00 §6` / `DEC-MONEY-005`), never an edit.** T4b is
+the control that proves the section is not vacuous about rounding at all: a policy that genuinely
+differs is killed 8 times.

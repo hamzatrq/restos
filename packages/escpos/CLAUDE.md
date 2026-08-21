@@ -45,3 +45,41 @@
 **M11 is what makes every red row mean something:** a real one-branch edit to a live constant reddens nothing, so the suites are holding properties rather than pinning strings a future session may improve.
 
 **WHAT THE MATRIX DOES NOT COVER, measured rather than assumed.** `02-F16`'s **`receipt.printed` is not emitted at all**, so no mutant can test it: the type is in the `01 §4` catalog and `packages/domain/src/registry.ts` carries no payload schema, which makes emitting it an `01-F4` runtime error — and adding one turns it into an `OrderKeyedEventType` whose `assertNever` guard in `sync-client`'s merge engine **fails to compile** until an oracle pins a merge rule (`merge.ts`'s own comment: "a new KnownEventType needs an oracle-pinned merge rule before the engine may consume it"). Two protected paths, neither this task's. The ack for a receipt band is unrecorded for the same reason. **`C17`'s reprint act** is owed with them, and `03-F41`'s duplicate hazard has a receipt analogue that is `02-F16`'s named fraud vector rather than a wasted chit.
+
+**Mutation matrix — R39's itemised tax line (control: escpos 395/395, 0 survivors).** In-tree,
+byte-exact backup with a restore trap (`receipt-document.ts` verified byte-identical after), **full
+package suite under every mutant**. 368 tests existed before this work; 27 are new
+(`__acceptance__/receipt-tax-line.test.ts`). **The last column is the point.**
+
+| # | mutant (exactly one branch) | new escpos (27) | pre-existing 368 |
+|---|---|---|---|
+| R1 | **THE CONTROL — the two tax rows removed: the pre-work tree** | **14** | **all green** |
+| R2 | **R39 — the tax row is APPENDED after the amount due** | 1 | all green |
+| R3 | **`16-F1` — posture `none` prints `Tax Rs 0`: "off" collapses into "zero-rated"** | 1 | all green |
+| R4 | **THE MONEY — the renderer recomputes the total as `subtotal + tax`** | 1 | all green |
+| R5 | **R39's NOUN — the tax row loses the word `Tax`** | 1 | all green |
+| R6 | `03-F36` — the pre-tax figure and the tax share ONE line | 3 | all green |
+| R7 | **NEGATIVE CONTROL — the same guard, inverted; identical behaviour** | **0** | all green |
+
+**R1 is the attribution baseline and its right-hand column is the argument for the work:** *933
+pre-existing tests across both packages cannot tell a receipt that itemises its tax from one that
+prints a bare total.* Deleting two rows takes the whole feature away and every gate in the repo
+stays green.
+
+**R4 is law 3 at the layout layer and it is the one to re-run after any change here.** `27-F24` puts
+the arithmetic upstream by name; a renderer that agrees with its inputs on coherent data and
+silently corrects them on incoherent data hides a real defect in the fold. It is killed only because
+the oracle's fixture is the DANGEROUS case — an *incoherent* total (Rs 9,999 against a subtotal and
+tax summing to Rs 1,334). On a coherent fixture the mutant survives, which is `M4`/`M5`'s lesson one
+document over.
+
+**⚠ TWO MUTANTS HAD TO BE REBUILT BECAUSE THEY DID NOT COMPILE, and the first draft's numbers were
+wrong in the direction that flatters.** Writing R1 as `true || tax === undefined || …` and R7 as
+`(tax === undefined ? true : …)` both defeat TypeScript's narrowing in the false branch, so
+`tax.subtotal_paisa` became "possibly undefined" — and `render.test.ts`'s **tsc oracle compiles the
+live package source**, so each reported **3 pre-existing failures** that had nothing to do with tax.
+A negative control that does not compile is not a negative control, and a control mutant whose
+pre-existing column is dirty cannot support the attribution claim it exists to make. Both were
+rewritten type-valid; both columns then read `all green`. **Check that a mutant COMPILES before
+reading its kill count** — this package's tsc oracle makes a type error look like a behavioural
+kill.
