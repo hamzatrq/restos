@@ -288,3 +288,63 @@ measurement was right. The standing rule, so it is not re-litigated per conflict
    alternative** — never "that cannot be done". The sold-out colour is the worked example: the
    amber→red arc was swept exhaustively, the best achievable was 13.7 against a floor of 20, and
    that number is what made the alternative persuasive rather than merely obedient.
+
+---
+
+## §5. The build queue, re-derived from the authority (2026-08-23)
+
+⚠ **This section exists because the owed list could not be trusted to plan a wave.** `AGENTS.md`'s
+owed register has now been wrong **eight times** in the same direction — claiming a gap that had
+already closed — and two of those were found in the *same parenthesis* an hour before this was
+written (`02-F7`'s availability toggle and T2's `served` emitter both ship). The guide names the
+root cause itself: *a derived document was mistaken for the source and nobody re-derived it.* So
+this list is measured against `restaurant-os.md` Part I §8 and `00 §1`'s wave table — the
+authority — rather than carried forward. **Re-derive it again before quoting it; it has a shelf
+life measured in days, and this file has already recorded what happens when a measurement is
+quoted as if it were durable.**
+
+Method that makes it worth anything: every grep `-a` (a C locale turns this repo's UTF-8 source
+into `Binary file … matches` and silently drops real call sites); **emitters enumerated as
+construction sites and constant-resolved `append(...)` calls, not as mentions** — seven event
+types are emitted through a `const` and are invisible to a literal grep, and `served` is one of
+them; consumers read as fold arms rather than counted as `case` labels.
+
+### (a) Genuinely absent and MVP-blocking
+
+| # | Gap | Measured evidence | Owner |
+|---|---|---|---|
+| 1 | **Every corrective emitter.** Six types, five with schemas, four with folds, **zero producers** — the counter has no void, comp, discount or refund control at all. | `packages/sync-client/src/folds/merge.ts:866`–`868` are inert arms the file itself calls *"projection-inert … a stated DEBT"*; `main/authorize.ts:125`–`126` and `approval-record.ts:55`–`72` are authorization tables, not emitters, and `approval-record.ts:63` says discount is *"UNREACHABLE today"* | doc 02 surface + `packages/sync-client` fold |
+| 2 | `order.cancelled` **payload schema** — the only one of the six with nothing at all | zero hits in any production TS; `01-F4` makes it unemittable | `01-F84` spec-closed, code owed |
+| 3 | **Fold arms for void/comp/discount** — three of `01-F30`'s four RHS conservation terms evaluate to zero permanently until these land | `26 §7` (corrected 2026-08-23) | `26 §7` owes the oracle-pinned merge rule |
+| 4 | **`00 §7` layer-2 config plane** | only ENV device config exists; `PAID_OUT_APPROVAL_THRESHOLD_PAISA` pinned at `main/authorize.ts:161` | carrier now **DECIDED**: `01-F87` makes `config` `01-F75`'s fourth resource |
+| 5 | **Tenancy enforcement — A SUSPENDED ORG IS FULLY SERVED.** `status: active \| suspended` is stored and **never compared anywhere**; no `=== "suspended"` exists in the tree; `entitlement` greps to **zero** production hits | `services/sync-gateway/src/schema.ts:380`, `packages/domain/src/tenancy.ts:182` | doc 28 §246 **already specifies it** |
+| 6 | **Billing** — `subscription\|billing\|invoice\|plan_\|stripe\|payfast` across every `src/` returns **zero hits**, and R1 names it in the first sellable product | — | founder call on scope; R5 fixes it at flat subscription, no metering |
+| 7 | **Platform control-plane surface** — `apps/platform-admin/src/index.ts:2` is `export {}`; the logic ships as seven gateway CLIs and is lift-ready | no vendor router in `services/api/src/router.ts` | doc 15 |
+| 8 | **Signup's door** — the ACT ships (`signup.ts:134`, atomic org+owner, routed at `publish-http.ts:566`); the door does not | service-credential-only route, no public surface, no `28-F15` admission control, no credential delivery | doc 28 |
+| 9 | **Manager PIN session** — without it the console cannot author, so `audit.alarm_acknowledged` is **a consumer with no producer** | `apps/manager/src/branch.ts:50`–`53`; `alarms.ts:202` | doc 05 |
+| 10 | **Nightly delivery** of the owner summary — compute and render both ship; nothing schedules it | `services/jobs/src/index.ts` schedules only `auditor-nightly` and `tenant-backup-nightly` | doc 12 |
+
+⚠ **Gap 5 is the one to read twice, and its shape is the opposite of what it looks like.** Doc 28's
+*Suspension and reactivation* paragraph specifies it fully: *"cloud services gated with an honest
+notice, **sync still accepted**, in-branch billing untouched."* Sync stays open and the till keeps
+selling **because commandment 4 forbids blocking a sale** — so this is not "refuse the org", and an
+implementation that gates the ingest path would breach `00 §5.1` while appearing to close the gap.
+`15-F7` puts the status banner on the device. It is **specified and unenforced**, not unspecified.
+
+### (b) Claimed owed somewhere but actually SHIPS — each worth as much as a real gap
+
+`served` at T2 (`serve-mark.ts` + wiring `index.ts:373`–`390`, landed 2026-08-12 — *eight days
+before* the plan that calls it absent). The availability toggle end to end (`Counter.tsx:1230` →
+`preload:44` → `gateway.ts:707`). `approval.requested` (`approval-record.ts:188`). Signup's act,
+its atomicity, its email-uniqueness ordering and its refusals. Void/comp/discount **payload
+schemas** — claimed absent by `26 §7` and by **four shipping files**, one of which
+(`services/api/src/summary.ts`'s `OMISSIONS`) states it **to an owner** in the nightly summary;
+corrected at `e74cffb`, the escpos three reported not edited (protected path).
+
+### (c) Cannot tell without running it
+
+`02-N3`'s ≤30 s quick-entry (no harness exists). T2 over LAN with the WAN unplugged. Whether the
+printer→ledger chain closes (`main/index.ts:1801`–`1806` states in-tree that only a real till with
+a dead printer can prove it, and that `seams:check` is clean either way). Argon2id cost under
+Hermes — `apps/manager/src/probe.ts` exists precisely because it decides whether the manager
+approval path is deliverable at all.
