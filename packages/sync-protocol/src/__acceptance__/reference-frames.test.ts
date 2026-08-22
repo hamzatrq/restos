@@ -364,14 +364,23 @@ describe("§B — the wire version bumps, and the system moves in ONE step (01-F
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 describe("§C — an artifact is (resource, scope), and the resource set is CLOSED (01-F75, 01-F76)", () => {
-  // "The resource set is CLOSED, and adding a member is a spec act exactly as adding a kind is. It
-  // holds two: `catalog` (01-F52) and `staff` (01-F28, 01-F61, 11-F20)."
+  // "The resource set is CLOSED, and adding a member is a spec act exactly as adding a kind is."
   //
-  // The refused names are the corpus's OWN named exclusions, not arbitrary strings: 01-F74's signed
-  // branch device roster ("deliberately NOT declared here"), and 11 §2 / 11-F18's four sets. "A
-  // resource string an implementation invents is a 01-F4-shaped error one layer down."
+  // ⚠ **IT HOLDS THREE AS OF `01-F81` (August 2026), and `device_roster` LEFT the refused list by
+  // the spec act 01-F75's own clause demands** — that clause now reads "It holds THREE as of
+  // 01-F81 … and the count moved by the spec act this clause demands rather than by an
+  // implementation". `01-F74`'s roster was excluded because it is a *signed* artifact and 01-F75
+  // specified no signature envelope; `01-F81` (b) is that envelope, so the member arrived WITH its
+  // security half. Retiring the assertion here is the same act as retiring the FR's own strikethrough
+  // — a green test that goes on defending an overruled rule would fail the correct implementation,
+  // which this repo has already paid for once (`catalog-pricing.test.ts:394`).
+  //
+  // What is NOT retired is the property: the set is CLOSED, and every name outside it is refused.
+  // The remaining refusals are still the corpus's OWN named exclusions rather than arbitrary
+  // strings — 11 §2 / 11-F18's four sets, excluded for a DIFFERENT reason 01-F75 states separately
+  // (none of them needs a signature; each has no writer, no publication surface and no device
+  // consumer). "A resource string an implementation invents is a 01-F4-shaped error one layer down."
   const NOT_RESOURCES = [
-    "device_roster",
     "checklist_templates",
     "shift_presets",
     "schedules",
@@ -383,7 +392,7 @@ describe("§C — an artifact is (resource, scope), and the resource set is CLOS
     "",
   ];
 
-  it("C1 01-F75: `catalog` and `staff` are the whole set — every other resource string is refused", () => {
+  it("C1 01-F75/01-F81: `catalog`, `staff` and `device_roster` are the whole set — every other resource string is refused", () => {
     for (const name of REFERENCE_FIXTURES) {
       const frame = anchored(name);
       for (const resource of NOT_RESOURCES) refuses({ ...frame, resource });

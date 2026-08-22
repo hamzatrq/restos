@@ -1291,6 +1291,25 @@ export const createGateway = ({
     // commandment 2. **What re-opens it is adding a THIRD member** (`01-F74`'s device roster is the
     // expected one) to a fleet where some gateways serve it and some do not — that member's own
     // spec act inherits this decision, and a session-killing refusal is what it gets by default.
+    //
+    // ⚠ **THE THIRD MEMBER LANDED (`01-F81`) AND THE PARAGRAPH ABOVE IS NO LONGER TRUE OF THE
+    // CODEC: `device_roster` IS REPRESENTABLE HERE NOW.** This gateway does not serve it — no serve
+    // path, no signer, so `hello_ack` never advertises the key — and `01-F81` (e) rules exactly
+    // that fleet: a device asks only for what the session advertised, so a request naming this
+    // resource is "a client that ignored the advertisement: our own bug or a hostile peer, neither
+    // of which earns a designed degradation", and it **inherits the default the paragraph above
+    // predicted**. The guard is written rather than left to fall through, because the fall-through
+    // would answer a roster request with the org's CATALOG under a key it was not asked for —
+    // which is the mis-routing `01-F76` says makes scope decoration, arriving through the one door
+    // widening the union opened.
+    if (message.resource === "device_roster") {
+      throw new ProtocolViolationError(
+        "reference_request names `device_roster`, which this gateway does not serve and never " +
+          "advertised in hello_ack.reference_versions — a device must not request an artifact key " +
+          "the session did not advertise (01-F81 (e), 01-F77). The residual is bounded and named " +
+          "by that clause: a reconnect, after which hello_ack reconciles every key it does serve",
+      );
+    }
     const artifact =
       message.resource === "staff"
         ? {

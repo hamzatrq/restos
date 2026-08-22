@@ -29,6 +29,7 @@ import type {
 } from "@restos/sync-protocol/transport";
 import { type CatalogFetch, createCatalogFetch } from "./catalog-fetch.js";
 import { type DeviceStore, DivergentDuplicateError, type PageItem } from "./device-store.js";
+import { createDeviceRosterFetch, type DeviceRosterFetch } from "./roster-fetch.js";
 import { createStaffFetch, type StaffFetch } from "./staff-fetch.js";
 
 /** Cloud outbox drain page per push (contract (b)); id-dedupe makes overlap free (01-F8). */
@@ -129,6 +130,14 @@ export type CloudSessionStatus = {
    * plus `01-F76`'s `foreign_artifact`.
    */
   staff_refusal: { reason: string; have_version: number } | null;
+  /**
+   * `01-F56` + `01-F76` for `01-F81`'s BRANCH DEVICE ROSTER — a THIRD slot, on the same argument
+   * that made the second one: a roster of DEVICES and a roster of PEOPLE have different remedies,
+   * and here the symptom is a till that has silently stopped learning who its branch's peers are.
+   * `01-F74` (d) admits an OLD roster, so this is never a reason to refuse the LAN; it is the only
+   * way a human finds out that the artifact `01-F72`'s admission rests on stopped moving.
+   */
+  device_roster_refusal: { reason: string; have_version: number } | null;
 };
 
 export type CloudSession = {
@@ -142,13 +151,18 @@ export type CloudSession = {
 export const createCloudSession = (options: {
   store: DeviceStore;
   transport: CloudTransport;
-  // Injected for signature parity with the mesh; the cloud session schedules no timers
-  // of its own (assumption 12 — reconnect lives in the transport), so it takes no time.
+  // Injected for signature parity with the mesh. The session still schedules NO TIMERS of its own
+  // (assumption 12 — reconnect lives in the transport), which is the property the header claims and
+  // the one that matters. ⚠ It is no longer unused: `01-F81`'s roster apply stamps `received_at`
+  // with `clock.now()` — the arrival wall clock `lan-roster.ts` asks for, so `00 §5.7` can say how
+  // long since the cloud last named this branch's peers. That is a READ of injected time, which
+  // keeps the session deterministic under a virtual clock; it is never branch time and never
+  // reaches a fold (`01-F34`, `01-F43`).
   clock: Clock;
   device_class: DeviceClass;
   token: string;
 }): CloudSession => {
-  const { store, transport, device_class, token } = options;
+  const { store, transport, clock, device_class, token } = options;
 
   let running = false;
   let connected = false;
@@ -191,6 +205,15 @@ export const createCloudSession = (options: {
   let staffRefusal: { reason: string; have_version: number } | null = null;
   let staffRetries = 0;
   const STAFF_MAX_RETRIES = 3;
+  /**
+   * `01-F81`'s three, separate for the reason directly above: `01-F76` says a device holds one
+   * version PER KEY, and `device_roster` is a different key from `staff` even though both are this
+   * branch's. Sharing a fetch slot would make an owner's roster edit cancel a staff fetch.
+   */
+  let deviceRosterFetch: DeviceRosterFetch | null = null;
+  let deviceRosterRefusal: { reason: string; have_version: number } | null = null;
+  let deviceRosterRetries = 0;
+  const DEVICE_ROSTER_MAX_RETRIES = 3;
   // ---- hub-relay state (DEC-SYNC-009, T-01-12; all volatile) ---------------
   // relayAuthorized: the gateway's hello_ack advertisement — without it this
   // session NEVER pushes third-party events (an unadvertised attempt would
@@ -330,18 +353,23 @@ export const createCloudSession = (options: {
   };
 
   /**
-   * `01-F76` — **this device's own artifact key for the roster**, assembled here and never
-   * echoed from a frame. The org comes from the authenticated session and the branch from the
-   * device's own identity; a device that repeated a scope it was told would be stating a client
-   * role claim (commandment 8), and under R25 the roster's scope IS its credential blast radius,
-   * so the field is the whole ruling.
+   * `01-F76` — **this device's own BRANCH artifact key**, assembled here and never echoed from a
+   * frame. The org comes from the authenticated session and the branch from the device's own
+   * identity; a device that repeated a scope it was told would be stating a client role claim
+   * (commandment 8), and under R25 the roster's scope IS its credential blast radius, so the field
+   * is the whole ruling.
+   *
+   * ⚠ **Renamed from the `…StaffKey` pair when `01-F81` added `device_roster`, which is
+   * branch-scoped too (`01-F76`: one scope shape, `branch_id` non-null).** One assembly, not two:
+   * a second copy of the same three lines is one fact declared twice, free to drift, and this
+   * repo's `catalog.enabled` finding is the worked example of what that costs.
    */
-  const ownStaffKey = (): { org_id: string; branch_id: string } => ({
+  const ownBranchKey = (): { org_id: string; branch_id: string } => ({
     org_id: store.identity.org_id,
     branch_id: store.identity.branch_id,
   });
 
-  const isOwnStaffKey = (scope: { org_id: string; branch_id: string | null }): boolean =>
+  const isOwnBranchKey = (scope: { org_id: string; branch_id: string | null }): boolean =>
     scope.org_id === store.identity.org_id && scope.branch_id === store.identity.branch_id;
 
   /** Start (or continue) a roster fetch (`01-F75`/`01-F76`/`01-F77`). */
@@ -350,7 +378,7 @@ export const createCloudSession = (options: {
       v: 2,
       kind: "reference_request",
       resource: "staff",
-      scope: ownStaffKey(),
+      scope: ownBranchKey(),
       have_version,
       ...(from === 0 ? {} : { from }),
       ...(at_version === undefined ? {} : { at_version }),
@@ -370,7 +398,7 @@ export const createCloudSession = (options: {
   const staffVersionIn = (
     keys: Extract<ProtocolMessage, { kind: "hello_ack" }>["reference_versions"],
   ): number | undefined =>
-    keys?.find((key) => key.resource === "staff" && isOwnStaffKey(key.scope))?.version;
+    keys?.find((key) => key.resource === "staff" && isOwnBranchKey(key.scope))?.version;
 
   /**
    * Compare and fetch if behind — the ONE place that decides a roster fetch is needed, called
@@ -387,6 +415,58 @@ export const createCloudSession = (options: {
     staffFetch = createStaffFetch(have);
     staffRetries = 0;
     requestStaff(have);
+  };
+
+  /**
+   * `01-F81` (a)/(e) — start (or continue) a BRANCH DEVICE ROSTER fetch.
+   *
+   * `requestStaff`'s frame one resource over, and deliberately the SAME triple: `01-F74` (b)'s
+   * smuggling ban survives its own unblocking, so the roster rides `01-F75`'s own member and never
+   * a `reference_response` typed for another resource. The scope is this device's own branch key,
+   * assembled from its bound identity and never echoed from a frame (commandment 8).
+   */
+  const requestDeviceRoster = (have_version: number, from = 0, at_version?: number): void => {
+    transport.send({
+      v: 2,
+      kind: "reference_request",
+      resource: "device_roster",
+      scope: ownBranchKey(),
+      have_version,
+      ...(from === 0 ? {} : { from }),
+      ...(at_version === undefined ? {} : { at_version }),
+    });
+  };
+
+  /**
+   * `01-F77`/`01-F81` (e) — this device's roster version out of `hello_ack`'s per-artifact set,
+   * matched on the WHOLE key.
+   *
+   * ⚠ **`undefined` here is what makes the staged rollout work, and it is the whole of `01-F81`
+   * (e).** A gateway that does not serve `device_roster` OMITS the key (`01-F77`: omitted, never
+   * `0`), so this returns `undefined` and the device NEVER ASKS — and `01-F81` (e) makes a request
+   * for an unserved resource a client that ignored the advertisement, which earns a session-killing
+   * refusal by default. A `?? 0` here would have every till in the fleet asking a gateway that
+   * cannot answer, and losing its session for it.
+   */
+  const deviceRosterVersionIn = (
+    keys: Extract<ProtocolMessage, { kind: "hello_ack" }>["reference_versions"],
+  ): number | undefined =>
+    keys?.find((key) => key.resource === "device_roster" && isOwnBranchKey(key.scope))?.version;
+
+  /**
+   * Compare and fetch if behind — the ONE place that decides a roster fetch is needed, called from
+   * both `hello_ack` (the correctness path) and `reference_notice` (the freshness path).
+   * `reconcileCatalog`'s reasoning holds unchanged, including why a fetch in flight is never
+   * restarted.
+   */
+  const reconcileDeviceRoster = (serverVersion: number | undefined): void => {
+    if (serverVersion === undefined) return; // a gateway that does not serve this resource
+    if (deviceRosterFetch !== null) return;
+    const have = store.lanRoster.version();
+    if (serverVersion <= have) return;
+    deviceRosterFetch = createDeviceRosterFetch(have);
+    deviceRosterRetries = 0;
+    requestDeviceRoster(have);
   };
 
   /**
@@ -586,6 +666,10 @@ export const createCloudSession = (options: {
         // exactly the kind of message a lossy link drops, so a design that reconciled the roster
         // only on a pushed notice gives a till nobody can sign in to after a lossy week.
         reconcileStaff(staffVersionIn(message.reference_versions));
+        // `01-F81` (e) — and the same sentence a THIRD time, because the negotiation IS the answer
+        // for the new member: this device asks for `device_roster` only if this session advertised
+        // it, and every reconnection reconciles the key whether or not a notice ever arrived.
+        reconcileDeviceRoster(deviceRosterVersionIn(message.reference_versions));
         return;
       }
       case "push_ack": {
@@ -653,10 +737,109 @@ export const createCloudSession = (options: {
         // artifact this device does not hold and starts nothing. No refusal is recorded for it
         // either: a notice carries no artifact, so there is nothing that could have been applied
         // silently, and `foreign_artifact` is the name for a refused ARTIFACT (below).
-        if (isOwnStaffKey(message.scope)) reconcileStaff(message.version);
+        if (message.resource === "device_roster") {
+          // `01-F76` again, and the check is the same one: a notice for another branch's roster is
+          // about an artifact this device does not hold and starts nothing.
+          if (isOwnBranchKey(message.scope)) reconcileDeviceRoster(message.version);
+          return;
+        }
+        if (isOwnBranchKey(message.scope)) reconcileStaff(message.version);
         return;
       }
       case "reference_response": {
+        if (message.resource === "device_roster") {
+          /**
+           * `01-F76`'s device-side refusal FIRST, for the reason the `staff` arm below records in
+           * full: the dangerous case is a mis-routed artifact arriving while a fetch IS in flight,
+           * and ordering the ignore first would answer the clause one case away. On THIS artifact a
+           * mis-routed roster is another branch's admission list applied as our own.
+           */
+          if (!isOwnBranchKey(message.scope)) {
+            deviceRosterRefusal = {
+              reason: "foreign_artifact",
+              have_version: store.lanRoster.version(),
+            };
+            return;
+          }
+          // A frame for a fetch we did not start — a late page from a previous connection, or a
+          // server volunteering one. Ignored rather than applied: applying it would splice pages
+          // from two different fetches into one commit.
+          if (deviceRosterFetch === null) return;
+          const rosterStep = deviceRosterFetch.accept(message);
+          if (!rosterStep.done) {
+            // NO FORWARD PROGRESS means the server is not paging (`01-F17`, and `no_progress` is
+            // `catalog-fetch`'s token rather than one invented here — see the `staff` arm).
+            if (message.next_from <= 0 && message.entries.length === 0) {
+              deviceRosterFetch = null;
+              deviceRosterRefusal = {
+                reason: "no_progress",
+                have_version: store.lanRoster.version(),
+              };
+              return;
+            }
+            requestDeviceRoster(
+              rosterStep.fetchMore.have_version,
+              rosterStep.fetchMore.from,
+              rosterStep.fetchMore.at_version,
+            );
+            return;
+          }
+          deviceRosterFetch = null;
+          if (rosterStep.update === null) return;
+          /**
+           * ⚠ **THE APPLY, AND THE ONE THING IT DOES NOT DO.** `01-F81` (b) puts SIGNATURE
+           * VERIFICATION here — at apply, over the assembled artifact — and it is **not
+           * implemented**, because (c) pins the verifying key **at pairing** (`01-F80` (f)) and no
+           * device holds one: `01-F80`'s claim endpoint is unbuilt and `setLanCredential` has no
+           * shipping caller. A verifier written now would refuse every artifact for want of a key
+           * nothing can supply, which is a correct implementation that blocks this transport.
+           *
+           * What `01-F81` (d) DID close is that an unsigned roster is unrepresentable on the wire,
+           * so the bytes are carried on every frame and only the check is owed. What it did NOT
+           * close is stated here rather than left implied: **this line believes what it is told.**
+           * The bound is `01-F75` (ii)/(iii)'s — the reference-data channel has ONE leg, the
+           * cloud's, authenticated end to end, and a hub relays no reference data of any kind,
+           * which is the same argument that lets `staff` carry Argon2id credentials here unsigned —
+           * plus `01-F72` (d): `createLanMesh` refuses at the CREDENTIAL gate, so today this
+           * artifact is an admission input on no shipped path. Both facts die in the same change,
+           * the one that lands `01-F80`'s pairing, so that is the change the verifier lands with.
+           *
+           * `received_at` is the ARRIVAL wall clock and never `signature.signed_at`: `lan-roster`
+           * measures "how long since the cloud last told us who is on this branch", and `01-F81`
+           * (b) gives `signed_at` to `00 §5.7`'s display and nothing else — never to a fold and
+           * never to an ordering decision (`01-F34`, law 1).
+           */
+          const rosterResult = store.lanRoster.apply(rosterStep.update, clock.now());
+          if (rosterResult.applied) {
+            deviceRosterRefusal = null;
+            deviceRosterRetries = 0;
+            return;
+          }
+          if (rosterResult.reason === "needs_snapshot") {
+            // The belt to the server's brace: it decided a delta was constructible and this device
+            // disagrees about the base. Ask again from where we actually are — BOUNDED, because
+            // the frame cannot REQUEST a form and a server answering with the same bad delta would
+            // be asked for ever.
+            deviceRosterRefusal = {
+              reason: rosterResult.reason,
+              have_version: rosterResult.version,
+            };
+            if (deviceRosterRetries >= DEVICE_ROSTER_MAX_RETRIES) return;
+            deviceRosterRetries += 1;
+            deviceRosterFetch = createDeviceRosterFetch(rosterResult.version);
+            requestDeviceRoster(rosterResult.version);
+            return;
+          }
+          // `stale` is not a fault — it means a redelivery of something we already hold — so only
+          // the real refusals are surfaced (`01-F56` + DEC-SYNC-011, the `staff` arm's reasoning).
+          if (rosterResult.reason !== "stale") {
+            deviceRosterRefusal = {
+              reason: rosterResult.reason,
+              have_version: rosterResult.version,
+            };
+          }
+          return;
+        }
         if (message.resource === "staff") {
           /**
            * `01-F76`'s device-side refusal, and it is checked BEFORE "a fetch we did not start"
@@ -670,7 +853,7 @@ export const createCloudSession = (options: {
            * It is the BELT to `01-F71` (e)'s brace (the server derives the key from the session
            * and refuses a request stating another), never a substitute for it — commandment 8.
            */
-          if (!isOwnStaffKey(message.scope)) {
+          if (!isOwnBranchKey(message.scope)) {
             staffRefusal = {
               reason: "foreign_artifact",
               have_version: store.staff.version(),
@@ -844,6 +1027,11 @@ export const createCloudSession = (options: {
       // admits, so nothing already landed is touched either).
       staffFetch = null;
       staffRetries = 0;
+      // And a third time for `01-F81`'s device roster, whose splice would decide who may be
+      // ADMITTED to the branch LAN. `deviceRosterRefusal` survives the disconnect for
+      // `staffRefusal`'s reason.
+      deviceRosterFetch = null;
+      deviceRosterRetries = 0;
     },
     onMessage: (message) => {
       if (running) dispatch(message);
@@ -910,6 +1098,10 @@ export const createCloudSession = (options: {
         // Two slots, never one: a roster problem and a menu problem have different remedies, and
         // `01-F56` makes each observable in device health on its own key (`01-F76`).
         staff_refusal: staffRefusal === null ? null : { ...staffRefusal },
+        // Three slots, never two: `01-F81`'s roster of DEVICES is a different artifact from
+        // `01-F28`'s roster of PEOPLE, and a surface that conflated them would send an operator
+        // hunting a PIN problem when what stopped was LAN admission.
+        device_roster_refusal: deviceRosterRefusal === null ? null : { ...deviceRosterRefusal },
       };
     },
   };

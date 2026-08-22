@@ -266,6 +266,88 @@ export const StaffEntryWire = z
 export type StaffEntryWireT = z.infer<typeof StaffEntryWire>;
 
 /**
+ * `01-F81` (a) — **one row of `01-F74`'s branch device roster: exactly four facts.**
+ *
+ * `device_id`, `device_class`, the certificate fingerprint, and revocation state. Nothing else,
+ * and in particular **no key material and no credential**: a fingerprint is a public hash of a
+ * certificate its holder already presents on the wire (`01-F72` (b)), which is why this artifact's
+ * branch scope is `01-F74`'s own (a roster is per branch) rather than R25's credential argument.
+ *
+ * ⚠ **`device_class` IS OPEN TEXT AND `z.enum(DEVICE_CLASSES)` IS THE WRONG ANSWER HERE**, on the
+ * FR's own stated reason (`01-F81` (a), `01-F56`'s forward-skew problem, `DEC-SYNC-011`): *"an
+ * older build must not refuse a whole roster because the cloud learned a class it has not"*. One
+ * unparseable member refuses the ENTIRE update (`01-F56` `malformed`), so the day a new class
+ * ships would be the day every older till loses its branch LAN — a stopped branch (`01-F17`).
+ * Admitting it is safe because `01-F39`'s hub-eligible set is a closed membership test, so an
+ * unrecognised class simply never wins an election; `packages/sync-client`'s `lan-roster.ts` and
+ * `createLanAdmission` already refuse the enum for the same reason, in those words.
+ *
+ * The fingerprint is **lowercase hex SHA-256 of the DER** (`01-F81` (a)) and the regex is that
+ * sentence. It is asserted at the FRAME rather than left to the device because `lan-roster.ts`
+ * refuses anything else as `malformed` on arrival — deliberately, so a mixed-case or truncated
+ * fingerprint is loud at the boundary rather than a silent never-admits at every handshake
+ * afterwards. A frame schema that let one through would move that failure to the place the FR
+ * avoided.
+ */
+const DeviceRosterEntryWire = z.object({
+  device_id: z.string().min(1),
+  device_class: z.string().min(1),
+  cert_sha256: z.string().regex(/^[0-9a-f]{64}$/, {
+    error:
+      "01-F81 (a): the certificate fingerprint is the lowercase hex SHA-256 of the DER — a " +
+      "mixed-case or truncated fingerprint matches no handshake this product can make",
+  }),
+  /**
+   * `01-F75`'s no-removals-list rule is what makes this a FIELD and not an absence: a delta
+   * carries one entry per changed id, so a device that simply vanished from the artifact is a
+   * change a delta has no way to state, and an absence would silently leave every
+   * non-snapshotting device admitting a departed peer (`01-F81` (a)). In THIS artifact the mark
+   * IS the revocation field.
+   */
+  revoked: z.boolean(),
+});
+
+/**
+ * `01-F81` (b)/(d) — **the signature envelope, a REQUIRED member of the `device_roster` arm and
+ * absent from the others.**
+ *
+ * (d) is explicit about why it is not an optional field on the shared response body: *"an optional
+ * protection is one an implementation can simply not supply — this corpus's most-repeated defect
+ * and precisely the shape `seams:check` Rule B exists for — while a required per-arm member makes
+ * an unsigned device roster **unrepresentable**"*. `staff` stays unsigned by the same clause, and
+ * extending this envelope to it is a further amendment to doc 01 (the precondition of `01-F75`
+ * (ii)'s LAN reference-data leg), never an implementation's choice.
+ *
+ * ⚠ **THREE PINNED INTERPRETATIONS, contestable in review rather than in an implementation**
+ * (`01-F76`'s precedent, and `01-F81` (b) pins its own domain-separation prefix the same way).
+ * `01-F81` (b) says WHAT the signature covers and with WHICH algorithm; it does not name the wire
+ * field, its encoding, or its shape. A frame cannot be built without answering all three, so they
+ * are answered HERE, once: (i) the field is `signature`; (ii) it carries `{ alg, signed_at,
+ * value }`; (iii) `value` is base64 of the raw IEEE-P1363 (`r‖s`, 64 bytes) signature WebCrypto
+ * produces, which `packages/lan-pki` already drives. The device-side oracle
+ * (`packages/sync-client/src/__acceptance__/device-roster-distribution.test.ts`) makes the same
+ * three pins in its header and states that if the two disagree, that file moves.
+ *
+ * **The LENGTH is deliberately not pinned** even though pin (iii) determines it: the only code
+ * that can decode this value is the verifier, which does not exist yet (`01-F81` (c)'s pinned
+ * roster-signing key arrives at pairing, and `01-F80`'s claim endpoint is unbuilt), and a length
+ * asserted here plus a length asserted there is two interpretations of one encoding — `03-F40`'s
+ * defect, which `01-F81` (b) names by name when it reuses `01-F5`'s canonical JSON rather than
+ * minting a second one. The alphabet is asserted because it costs nothing and pins no encoding.
+ *
+ * `signed_at` is epoch milliseconds and exists **for `00 §5.7`'s age display and nothing else**
+ * (`01-F81` (b)): `01-F74` (d) admits an old roster, so no implementation may refuse on age, and
+ * it is never an input to any fold (`01-F34`, `01-F45`).
+ */
+const ReferenceSignature = z.object({
+  alg: z.literal("ES256"),
+  signed_at: z.number().int().nonnegative(),
+  value: z.string().regex(/^[A-Za-z0-9+/]+={0,2}$/, {
+    error: "01-F81 (b): the signature travels base64-encoded",
+  }),
+});
+
+/**
  * `01-F75`'s triple, assembled per resource. The bodies below are `catalog_*`'s existing
  * vocabulary, unchanged and now generic; only the `(resource, scope)` key and the per-resource
  * `entries[]` are new.
@@ -320,6 +402,15 @@ const referenceResponseBody = {
 const ReferenceVersionKey = z.discriminatedUnion("resource", [
   z.object({ resource: z.literal("catalog"), scope: OrgScope, version: z.number().int().min(1) }),
   z.object({ resource: z.literal("staff"), scope: BranchScope, version: z.number().int().min(1) }),
+  // `01-F81` (a)/(e) — the third member, BRANCH-scoped. (e) makes this key the whole of the
+  // staged-rollout answer: a gateway that does not serve the roster OMITS it here, so a
+  // `device_roster`-capable device meeting that gateway never asks, and a request for an unserved
+  // resource is then a client that ignored the advertisement rather than a negotiation outcome.
+  z.object({
+    resource: z.literal("device_roster"),
+    scope: BranchScope,
+    version: z.number().int().min(1),
+  }),
 ]);
 
 export const messageSchemas = {
@@ -453,6 +544,10 @@ export const messageSchemas = {
   reference_request: z.discriminatedUnion("resource", [
     z.object({ ...referenceRequestBody, resource: z.literal("catalog"), scope: OrgScope }),
     z.object({ ...referenceRequestBody, resource: z.literal("staff"), scope: BranchScope }),
+    // `01-F81` (a) — the roster rides `01-F75`'s OWN triple, never a fourth bespoke chain and
+    // never a `reference_response` typed for another resource (`01-F74` (b)'s smuggling ban
+    // survives its own unblocking).
+    z.object({ ...referenceRequestBody, resource: z.literal("device_roster"), scope: BranchScope }),
   ]),
   /**
    * `01-F75`/`01-F76` — `catalog_response`'s body plus the artifact key, which the response
@@ -481,6 +576,17 @@ export const messageSchemas = {
         resource: z.literal("staff"),
         scope: BranchScope,
         entries: z.array(StaffEntryWire),
+      }),
+      z.object({
+        ...referenceResponseBody,
+        resource: z.literal("device_roster"),
+        scope: BranchScope,
+        entries: z.array(DeviceRosterEntryWire),
+        // `01-F81` (d) — REQUIRED, and required HERE rather than on `referenceResponseBody`,
+        // which is what makes an unsigned device roster unrepresentable while leaving `staff`
+        // unsigned. A shared optional field is forgettable; a shared required one breaks every
+        // staff publisher at once.
+        signature: ReferenceSignature,
       }),
     ])
     .superRefine((frame, ctx) => {
@@ -568,6 +674,16 @@ export const messageSchemas = {
       v,
       kind: z.literal("reference_notice"),
       resource: z.literal("staff"),
+      scope: BranchScope,
+      version: seq,
+    }),
+    // `01-F81` (a) — the third member on the third frame. A notice carries no artifact and
+    // therefore no signature: it is a version number, and the envelope is verified at APPLY over
+    // the assembled artifact, never per frame (`01-F81` (b)).
+    z.object({
+      v,
+      kind: z.literal("reference_notice"),
+      resource: z.literal("device_roster"),
       scope: BranchScope,
       version: seq,
     }),
