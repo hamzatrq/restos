@@ -232,61 +232,6 @@ export const createCloudSession = (options: {
   let deviceRosterRetries = 0;
   const DEVICE_ROSTER_MAX_RETRIES = 3;
   /**
-   * `01-F81` (e) — **THE ARTIFACT KEYS THIS SESSION'S `hello_ack` ADVERTISED**, and what may
-   * authorize a `reference_request` off a `reference_notice`.
-   *
-   * (e) states the requirement as a MUST — *"a device MUST NOT request an artifact key the
-   * session's `hello_ack` did not advertise, **for any resource**"* — and says why it is written
-   * that way: *"so it is assertable rather than assumed"*. It was assumed. `reconcile*` is reached
-   * from TWO places, `hello_ack` (which compares against this array and so obeyed it by
-   * construction) and `reference_notice` (which compared against nothing), and the second path
-   * asked for whatever a notice named. Measured 2026-08-23 against the shipped session: a
-   * `hello_ack` advertising `staff` alone, followed by a `device_roster` notice, sent **1**
-   * `device_roster` request.
-   *
-   * ⚠ **THE FIELD'S TWO ABSENCES ARE DIFFERENT STATES AND THIS GUARD TREATS THEM DIFFERENTLY.
-   * THAT IS A PINNED INTERPRETATION, CONTESTABLE BY FR ID, NOT A SHORTCUT.** `hello_ack` can
-   * carry a set of keys with one MISSING, or carry no `reference_versions` field at all —
-   * `services/sync-gateway/src/gateway.ts` omits the field entirely when it has zero keys, "which
-   * is what an org that has published nothing has", and includes it the moment it has one.
-   *
-   *   · **PRESENT, key absent → the notice is DROPPED.** This is the state (e) is written for and
-   *     the one it argues from: the session stated what it serves, so a request for something
-   *     outside that statement is *"not an ordinary negotiation outcome but a client that ignored
-   *     the advertisement"*. It is also the staged-rollout case — a `device_roster`-capable device
-   *     meeting a gateway that serves `catalog` and `staff` and not the roster.
-   *   · **ABSENT entirely → the notice is HONOURED, and this half of the MUST is deliberately NOT
-   *     enforced.** No advertisement was made, so there is none to have ignored; and enforcing it
-   *     here costs a shipped capability for a refusal no shipped peer can produce. Measured: with
-   *     the strict reading, a till connected to an org **before its first publish** drops the
-   *     notice announcing that publish AND every later one, because the field stays absent for the
-   *     whole connection — so the live delta the back office promises ("every till in the
-   *     organisation changes as soon as this saves") is dead until something drops the socket.
-   *     That is the `v0 → v20` path `plans/wave-1/running-the-stack.md` records as run end to end.
-   *     Two independent-oracle assertions in `__acceptance__/staff-session.test.ts` — authored
-   *     from `01-F75`/`01-F76`/`01-F77` text by a session that wrote no implementation — ANCHOR on
-   *     exactly this: `helloAck({})` followed by an own-branch `staff` notice must fetch. Both go
-   *     red under the strict reading, and weakening an oracle anchor to pass is forbidden.
-   *
-   * **So: the rollout case is CLOSED and the empty-org case is NAMED AND OPEN.** It is open by a
-   * decision, not by an oversight, and it wants a ruling on `01-F81` (e) rather than a patch:
-   * either (e) means "a key the session positively declined to advertise" (this implementation), or
-   * it means the literal thing and `01-F75`'s freshness path must be re-specified for an org's
-   * first publish. `01-F77`'s own words are the reason this is not obvious — it calls the omitted
-   * key "indistinguishable from a gateway that does not serve the resource", which is the sentence
-   * (e) generalises from, and it is a statement about the `hello_ack` COMPARISON, made in the same
-   * FR that keeps the notice as the freshness path.
-   *
-   * `undefined` therefore means **no statement was made**; `[]` means **nothing is advertised**,
-   * which is what a dropped link leaves behind. They are not the same and the two are one keystroke
-   * apart. Kept as the frame's own ARRAY of structured keys, never a `Set` of composed tokens:
-   * `01-F71` (d)/`01-F76` ban the concatenation of `(resource, org_id, branch_id)` into one string,
-   * and a set key is exactly where that gets done by convenience (`messages.ts` records the same
-   * ban at the same field).
-   */
-  let advertisedKeys: Extract<ProtocolMessage, { kind: "hello_ack" }>["reference_versions"] = [];
-
-  /**
    * **NO FORWARD PROGRESS on an incomplete page — ONE declaration, for every resource** (`01-F17`).
    *
    * A continuation echoes `next_from` as `from`, and `requestCatalog`/`requestStaff`/
@@ -311,27 +256,24 @@ export const createCloudSession = (options: {
    * refuse a non-increasing one — a change to all three `*-fetch.ts` step types, which is a
    * separate act. What is closed here is `next_from <= 0`, which is the reset-to-start case and the
    * one reproduced above.
+   *
+   * ⚠ **AND THE LARGER ONE, ON THE LEDGER PATH: `catchup_response` HAS NO FORWARD-PROGRESS GUARD
+   * OF ANY KIND.** This declaration says "for every resource" and it means every REFERENCE
+   * resource; the `catchup_response` arm in `dispatch` is a bare
+   * `if (!message.complete) sendCatchup(message.next_from)`, with no condition on `next_from` at
+   * all — so it is not the non-zero-cursor case above but a superset of it, and it is on the path
+   * that carries the LEDGER rather than reference data. Measured 2026-08-23 against this session:
+   * a server answering `{ complete: false, next_from: 7, events: [] }` to every request produced
+   * **300** rounds of `catchup_request { from_global_seq: 7 }` — 300 being the harness cap, not the
+   * device's — with nothing refused and nothing observable. Same `01-F17` hazard, wider blast
+   * radius. **Deliberately NOT fixed in the change that wrote this paragraph**: it is a separate
+   * act with its own adversarial review (commandment 10), and closing it wants the same "remember
+   * the last cursor" mechanism as the case above rather than a fourth ad-hoc condition. Stated
+   * here, at the declaration that owns the class, so the next reader of "no forward progress" is
+   * not told this file already covers it.
    */
   const noForwardProgress = (response: { next_from: number }): boolean => response.next_from <= 0;
 
-  /**
-   * `01-F81` (e)'s membership test, matched on the WHOLE key (`01-F76`: a version means nothing
-   * without the `(resource, scope)` it counts, and a device at another branch of the same org has
-   * its own `staff` key in that array).
-   */
-  const wasAdvertised = (
-    resource: "catalog" | "staff" | "device_roster",
-    scope: { org_id: string; branch_id: string | null },
-  ): boolean =>
-    // `undefined` = this session stated nothing about any key. See the declaration: that half is
-    // deliberately not enforced and is named there rather than left to be discovered here.
-    advertisedKeys === undefined ||
-    advertisedKeys.some(
-      (key) =>
-        key.resource === resource &&
-        key.scope.org_id === scope.org_id &&
-        key.scope.branch_id === scope.branch_id,
-    );
   // ---- hub-relay state (DEC-SYNC-009, T-01-12; all volatile) ---------------
   // relayAuthorized: the gateway's hello_ack advertisement — without it this
   // session NEVER pushes third-party events (an unadvertised attempt would
@@ -566,15 +508,23 @@ export const createCloudSession = (options: {
    * advertisement, which earns a session-killing refusal by default. A `?? 0` here would have every
    * till in the fleet asking a gateway that cannot answer, and losing its session for it.
    *
-   * ⚠ **This comment said "the whole of `01-F81` (e)" and that was FALSE WHEN WRITTEN.** The other
-   * entry point is `reference_notice`, which reached `reconcileDeviceRoster` — and
-   * `reconcileStaff`, and `reconcileCatalog` — with no reference to what this session advertised,
-   * so the MUST held on the `hello_ack` path and on no other. Guarded 2026-08-23 (`advertisedKeys`
-   * / `wasAdvertised`), where the measurement and the half that is deliberately still open are both
-   * recorded. The lesson is this repo's own: a protection claimed in prose retires the assertion
-   * the next session would otherwise write, so state the class you closed and name the one you did
-   * not — which is why that declaration names its open half in the same paragraph as its closed
-   * one.
+   * ⚠ **This comment said "the whole of `01-F81` (e)" and that was FALSE WHEN WRITTEN — and its
+   * correction then claimed a protection that is NOT here either, so read the second half
+   * carefully.** The other entry point is `reference_notice`, which reaches `reconcileDeviceRoster`
+   * — and `reconcileStaff`, and `reconcileCatalog` — with **no reference to what this session
+   * advertised**. That is still true, and it is now DELIBERATE rather than an oversight: a
+   * membership guard on that path shipped on 2026-08-23 (`0073f69`) and was reverted the same day,
+   * because `hello_ack.reference_versions` does not carry the fact (e) is about — it is built per
+   * key from published versions, so "key missing" reads far more often as *"nothing published for
+   * this key yet"* than as *"this gateway does not serve the resource"*. **The measurement, the two
+   * alternatives that fail, and the one-field wire amendment that is owed are all at the
+   * `reference_notice` arm in `dispatch`**; do not re-derive them from this sentence.
+   *
+   * So the class that IS closed here: **the `hello_ack` path, by construction** — an omitted key
+   * returns `undefined` and `reconcile*` returns early, so this session never asks at hello for a
+   * key it was not advertised. The class that is NOT closed, named rather than left to be
+   * discovered: **the notice path**, which is not closeable from the client until the wire states
+   * a served-resource set.
    */
   const deviceRosterVersionIn = (
     keys: Extract<ProtocolMessage, { kind: "hello_ack" }>["reference_versions"],
@@ -785,13 +735,6 @@ export const createCloudSession = (options: {
         // everything"; catchup_response pages via next_from while complete === false.
         sendCatchup(store.status().last_global_seq ?? 0);
         relayDrain(); // resume any latched relay work across a reconnect (DEC-SYNC-009)
-        // `01-F81` (e) — RECORDED BEFORE ANY RECONCILE, because this is what authorizes a
-        // `reference_request` off a notice for the rest of this connection, on every resource.
-        // Assigned WHOLE and never merged with the previous one: a gateway that has stopped
-        // serving a key says so by omitting it, and carrying a superseded advertisement forward is
-        // how a device asks for a key it is no longer offered. The `undefined` is preserved rather
-        // than defaulted — the declaration above is where that distinction is argued.
-        advertisedKeys = message.reference_versions;
         // T-C4 — THE catalog correctness mechanism (01-F9, now `01-F77`'s per-artifact set).
         // Comparing versions here is what makes every reconnection reconcile, so a device that
         // missed every notice while it was offline still converges the moment it comes back. The
@@ -865,32 +808,79 @@ export const createCloudSession = (options: {
         // it. That is deliberate: a notice is exactly the kind of message a lossy link loses,
         // so nothing is allowed to depend on one arriving.
         //
-        // ⚠ **`01-F81` (e) IS ENFORCED HERE, AND NOTHING ENFORCED IT UNTIL 2026-08-23.** Every arm
-        // below gates on `wasAdvertised` — see that declaration for the measurement, for what the
-        // guard does NOT close, and for why. This is the half of the requirement
-        // `deviceRosterVersionIn`'s `undefined` return does not cover: that one covers the
-        // `hello_ack` path, and a notice names its own key. Dropping a notice for a key this
-        // session's advertisement positively omitted is exactly the sentence above and costs
-        // nothing but freshness — the next `hello_ack` reconciles it.
+        // ⚠ **`01-F81` (e) IS NOT ASSERTABLE ON THIS PATH, AND A GUARD THAT CLAIMED IT WAS SHIPPED
+        // IN `0073f69` AND WAS REVERTED BEFORE IT LEFT THIS MACHINE (2026-08-23).** The clause
+        // reads *"a device MUST NOT request an artifact key the session's `hello_ack` did not
+        // advertise, for any resource"*, and the obvious reading — gate each arm below on
+        // membership of `hello_ack.reference_versions` — is wrong, because **the wire does not
+        // carry the fact (e) is about.** `01-F77`'s advertisement conflates two different facts:
+        // *"this gateway serves resource R"* and *"key K has a published artifact"*.
+        // `services/sync-gateway/src/gateway.ts` builds the field PER KEY, from
+        // `catalogVersionAtHello > 0` and `staffVersionAtHello > 0`, and omits the whole field only
+        // when EVERY key is empty — and it says so in its own words at that site, calling an
+        // omitted key *"indistinguishable from a gateway that does not serve the resource"*. (e)
+        // is a rule about the FIRST fact; the wire only carries the second. So "field present, key
+        // missing" is NOT the staged-rollout state (e) argues from. It is, far more often, **"this
+        // key has published nothing yet"** — which is by construction the key whose first notice
+        // matters most.
+        //
+        // Measured against the guarded tree, one probe per row (`hello_ack` → notice → requests):
+        //
+        //   · `[catalog@4]` + the branch's FIRST `staff` publish → **0** requests, against **1**
+        //     without the guard.
+        //   · `[staff@3]` + the org's FIRST `catalog` publish → **0**, against **1**.
+        //   · `[staff@3]` + TWENTY catalog publishes v1..v20, one till connected and idle
+        //     throughout → **0** requests and the till still at catalog **v0**, against 20 and
+        //     v20. That is the `v0 → v20` live path `plans/wave-1/running-the-stack.md` records as
+        //     run end to end, dead for the LIFE of the connection for any org whose branch has a
+        //     published staff roster (`publish-http.ts`'s `/internal/users*` routes are the
+        //     shipping writer that fills `kernel.staff_versions`).
+        //   · the STAFF twin of that row → **0** requests and an EMPTY `store.staff`, which is the
+        //     identity registry the unlock grid is built from (`01-F26`/`01-F28`): a branch's first
+        //     cashier would never appear on the till until something dropped the socket.
+        //
+        // **Both alternatives fail for a structural reason, recorded so neither is re-attempted.**
+        // Honouring absence only until the first field-carrying `hello_ack` does not help — the
+        // harmful case has the field PRESENT. Making the gateway always send the field is strictly
+        // worse — it would send `[]`, and the first publish of any key still arrives after the
+        // advertisement was made. **The advertised set is a snapshot at connect time, and the key
+        // whose freshness matters most is the one that did not exist yet.**
+        //
+        // ⚠ **(e)'s RESIDUAL IS A SERVER'S REFUSAL, NOT A CLIENT'S DROP, AND THE GUARD INHERITED
+        // THE JUSTIFICATION WITHOUT THE PRECONDITION.** (e) bounds the cost as *"a session lost
+        // that way costs a reconnect and `hello_ack` reconciles every key on the next one"*. A
+        // client-side drop produces neither: no refusal slot is set (and no refusal slot has a
+        // production reader except `catalogRefusal`), and `transport-ws.ts` reconnects only on
+        // `close`/`error` with no keepalive re-hello — so nothing ends the outage. Unbounded, and
+        // silent.
+        //
+        // **WHERE (e) IS STILL ENFORCED: the `hello_ack` path, by construction.** `catalogVersionIn`
+        // / `staffVersionIn` / `deviceRosterVersionIn` return `undefined` for an omitted key and
+        // every `reconcile*` returns early on it, so this session never asks for a key it was not
+        // advertised AT HELLO. The notice path cannot enforce it without deleting `01-F75`'s
+        // freshness path.
+        //
+        // ⚠ **OWED AS A SPEC ACT AND DELIBERATELY NOT ATTEMPTED HERE: a one-field wire amendment to
+        // `01-F77`/`01-F81` (e)** — `hello_ack` stating the SERVED RESOURCE SET as a fact distinct
+        // from the per-key versions. With that field (e) becomes assertable on this path and this
+        // comment becomes a guard. Doc 01 is AT its `23-F3` line cap (359 lines against ~350), so
+        // the amendment needs room made for it first; and a wire field invented by a client is the
+        // `01-F4`-shaped error one layer down.
         if (message.resource === "catalog") {
-          if (wasAdvertised("catalog", message.scope)) reconcileCatalog(message.version);
+          reconcileCatalog(message.version);
           return;
         }
         // `01-F76` — one version PER KEY: a notice for another branch's roster is about an
         // artifact this device does not hold and starts nothing. No refusal is recorded for it
         // either: a notice carries no artifact, so there is nothing that could have been applied
-        // silently, and `foreign_artifact` is the name for a refused ARTIFACT (below).
+        // silently, and `foreign_artifact` is the name for a refused ARTIFACT (below). This is a
+        // SCOPE test and never (e)'s membership test — the two were conflated by the reverted
+        // guard, and only this one is decidable from what the wire carries.
         if (message.resource === "device_roster") {
-          // `01-F76` again, and the check is the same one: a notice for another branch's roster is
-          // about an artifact this device does not hold and starts nothing. `wasAdvertised` is a
-          // SECOND question and not the same one — a notice can name this device's own branch key
-          // for a resource this session was never offered, which is `01-F81` (e)'s case exactly.
-          if (isOwnBranchKey(message.scope) && wasAdvertised("device_roster", message.scope))
-            reconcileDeviceRoster(message.version);
+          if (isOwnBranchKey(message.scope)) reconcileDeviceRoster(message.version);
           return;
         }
-        if (isOwnBranchKey(message.scope) && wasAdvertised("staff", message.scope))
-          reconcileStaff(message.version);
+        if (isOwnBranchKey(message.scope)) reconcileStaff(message.version);
         return;
       }
       case "reference_response": {
@@ -1220,11 +1210,6 @@ export const createCloudSession = (options: {
       // `staffRefusal`'s reason.
       deviceRosterFetch = null;
       deviceRosterRetries = 0;
-      // `01-F81` (e): an advertisement belongs to ONE connection. `[]` and not `undefined` —
-      // "nothing is advertised", not "nothing has been said": a key the dead session was offered
-      // must not authorize a request until the next `hello_ack` re-states the set it serves, and
-      // that `hello_ack` runs before any `reconcile*` on the new connection.
-      advertisedKeys = [];
     },
     onMessage: (message) => {
       if (running) dispatch(message);

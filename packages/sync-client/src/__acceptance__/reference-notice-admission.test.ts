@@ -1,106 +1,129 @@
-// `01-F81` (e) + `01-F17` — THE TWO THINGS A `reference_notice` MAY NOT DO: ask for a key this
-// session was never advertised, and page for ever against a server that is not paging.
+// `01-F75` + `01-F17` — THE TWO THINGS A `reference_notice` MUST DO: reach the device for the key
+// it names, and never page for ever against a server that is not paging.
 //
 // ⚠ **THIS FILE IS IMPLEMENTER-AUTHORED AND IS NOT AN ORACLE.** `24 §3` disqualifies the session
 // that writes an implementation from writing its acceptance tests, and the `01-F81` oracle is
 // `device-roster-distribution.test.ts`, authored from spec text by another session. This is the
-// hand-written assertion `AGENTS.md` requires for two defects no rail can see — both were found by
-// adversarial review of `6932c85`, both reproduced against the shipped session before a line was
-// changed, and both are recorded here with the numbers rather than the belief.
+// hand-written assertion `AGENTS.md` requires for defects no rail can see — every number below was
+// measured against a running session before a line of it was written.
 //
-// ── WHY IT EXISTS: THE TWO MEASUREMENTS ────────────────────────────────────────────────────────
+// ⚠ **THIS FILE ONCE ASSERTED THE OPPOSITE OF WHAT IT NOW ASSERTS, AND THE REVERSAL IS THE POINT.**
+// `0073f69` gated all three notice arms on membership of `hello_ack.reference_versions`, and this
+// file pinned that — one case titled *"a key OMITTED from a stated advertisement is dropped too"*.
+// Adversarial review returned **DO NOT SHIP** and the commit never left the machine. The
+// assertions were INVERTED rather than deleted, on `oracle-round-2-findings.md` §C's own law: a
+// test pinning measured-false behaviour retires the assertion the next session would otherwise
+// write, so this file has to end up asserting the corrected behaviour with the reason in it.
 //
-// **(1) `01-F81` (e)'s MUST held on ONE of two entry points.** That clause requires that "a device
-// MUST NOT request an artifact key the session's `hello_ack` did not advertise, **for any
-// resource**", and says it is written that way "so it is assertable rather than assumed". It was
-// assumed. `hello_ack` obeyed it by construction (an omitted key returns `undefined` and
-// `reconcile*` returns early); `reference_notice` compared against nothing. Measured 2026-08-23
-// against the tree at `6932c85`:
+// ── WHY THE GUARD WAS WRONG: `01-F77`'s ADVERTISEMENT CARRIES A DIFFERENT FACT ─────────────────
 //
-//   · `hello_ack { reference_versions: [staff@2] }` → `device_roster` requests: **0** (correct)
-//   · then `reference_notice { resource: "device_roster", version: 1 }` → requests: **1**
-//   · `hello_ack` with NO `reference_versions`, then one notice per resource →
-//     `staff`: **1**, `catalog`: **1**, `device_roster`: **1**
+// `01-F81` (e) reads *"a device MUST NOT request an artifact key the session's `hello_ack` did not
+// advertise, **for any resource**"*, and it argues from the staged-rollout state: a gateway that
+// does not SERVE a resource omits its key. But `services/sync-gateway/src/gateway.ts` builds the
+// field PER KEY from `catalogVersionAtHello > 0` and `staffVersionAtHello > 0`, and omits the whole
+// field only when EVERY key is empty. It says so in its own words at that site, calling an omitted
+// key *"indistinguishable from a gateway that does not serve the resource"*. So the advertisement
+// conflates two facts — *"this gateway serves resource R"* and *"key K has a published artifact"* —
+// and the wire carries only the second. **"Field present, key missing" is therefore not the
+// rollout case at all; it is, far more often, "this key has published nothing YET"** — which is by
+// construction the key whose first notice matters most.
 //
-//   The window is `01-F77`'s own omitted-never-zero rule, which the same file relies on correctly
-//   one function away: a gateway omits a key until the org has published something for it
-//   (`services/sync-gateway/src/gateway.ts` builds `reference_versions` from `> 0` versions), so a
-//   session that connects before a branch's first publish is advertised nothing — and then receives
-//   the notice announcing that very first publish.
+// Probes against the guarded tree, against the same probes on the tree before it (`6932c85`):
 //
-//   ⚠ **The live harm today is nil and that is not the reason to assert it.** A request for a key
-//   is refused only by a gateway that does not serve the resource, and such a gateway emits no
-//   notice for it either, so no shipped pair of peers reaches the refusal. The MUST is a checkable
-//   property of the CLIENT; a property enforced on one of two entry points is this repo's
-//   most-recorded shape.
+//   | probe | `hello_ack.reference_versions` | notice                        | guarded | before |
+//   |-------|--------------------------------|-------------------------------|--------:|-------:|
+//   | P1    | `[catalog@4]`                  | branch's FIRST `staff` publish |      0 |      1 |
+//   | P2    | `[staff@3]`                    | org's FIRST `catalog` publish  |      0 |      1 |
+//   | P3    | *(field absent)*               | `catalog` v1                   |      1 |      1 |
+//   | P7    | `[staff@3]`                    | TWENTY catalog publishes v1..20|      0 |     20 |
 //
-//   ⚠ **AND ONLY HALF OF IT IS CLOSED — DELIBERATELY, WITH THE MEASUREMENT.** `hello_ack` has two
-//   different absences: a `reference_versions` array with a key MISSING, and no `reference_versions`
-//   field at all (the gateway omits it when it has zero keys, "which is what an org that has
-//   published nothing has"). The first is the state (e) argues from and is now DROPPED. The second
-//   is HONOURED, because the strict reading costs a shipped capability to close a refusal no
-//   shipped peer can produce: a till connected to an org before its FIRST publish would drop the
-//   notice announcing that publish and every later one, since the field stays absent for the whole
-//   connection — the `v0 → v20` live path `plans/wave-1/running-the-stack.md` records as run end to
-//   end. Measured: the strict reading also reddens TWO anchors in `staff-session.test.ts`, an
-//   oracle authored from `01-F75`/`01-F76`/`01-F77` text by a session that wrote no implementation,
-//   which encode `helloAck({})` + own-branch notice ⇒ fetch. Weakening an oracle anchor to pass is
-//   forbidden, so the open half is reported for a ruling on (e) and asserted as-is below.
+//   P7 is the finding in one line: the till stayed at catalog **v0** through all twenty, so the
+//   `v0 → v20` live path `plans/wave-1/running-the-stack.md` records as run end to end was DEAD for
+//   the life of the connection — for any org whose branch has a published staff roster.
+//   `services/sync-gateway/src/publish-http.ts`'s `/internal/users*` routes (`announce:
+//   notifyStaffVersion`) are the shipping writer that fills `kernel.staff_versions`; it survived
+//   the runbook only because that seeds staff from env and leaves the table empty.
+//   **P7s, the staff twin, is the sharper one**: `store.staff` is the identity registry the unlock
+//   grid is built from (`apps/pos-electron/src/main/index.ts` calls `store.staff.list()`), so a
+//   branch's FIRST cashier never appeared on the till.
 //
-// **(2) `no_progress` was aimed one case away, in three copies.** The non-progress condition is
-// `next_from <= 0` alone — a continuation echoes `next_from` as `from`, and every `request*` omits
-// `from` when it is `0`, so the server sees a fresh first-page request and answers identically.
-// All three arms also required `entries.length === 0`. Measured 2026-08-23 against a scripted
-// gateway answering `{ complete: false, next_from: 0, entries: [one row] }` on every request:
+// ⚠ **AND (e)'s RESIDUAL IS A SERVER'S REFUSAL, NOT A CLIENT'S DROP.** (e) bounds the cost as *"a
+// session lost that way costs a reconnect and `hello_ack` reconciles every key on the next one"*.
+// A client-side drop produces neither: no refusal slot is set (and no refusal slot has a production
+// reader except `catalog_refusal`), and `transport-ws.ts` reconnects only on `close`/`error` with
+// no keepalive re-hello. The guard inherited the justification without the precondition, and the
+// outage was unbounded and silent instead of one reconnect.
 //
-//   · `device_roster`: **300** rounds, `device_roster_refusal` **null**
-//   · `staff`:         **300** rounds, `staff_refusal`         **null**
-//   · `catalog`:       **300** rounds, `catalog_refusal`       **null**
+// **Both alternatives fail structurally and neither is to be re-attempted.** Honouring absence only
+// until the first field-carrying `hello_ack` does not help — the harmful case has the field
+// PRESENT. Making the gateway always send the field is strictly worse — it would send `[]`, and the
+// first publish of any key still arrives after the advertisement was made. **The advertised set is
+// a snapshot at connect time, and the key whose freshness matters most is the one that did not
+// exist yet.**
 //
-//   300 is where the probe harness stopped, not where the device did. The `staff` arm's own comment
-//   already stated the purpose the condition only half met: "an unbounded receive-path loop is one
-//   of the few things in this session that could stop a till selling … a hot loop against
-//   credential storage".
+// **WHERE (e) IS STILL ENFORCED, and asserted below rather than assumed: the `hello_ack` path, by
+// construction.** An omitted key returns `undefined` from `catalogVersionIn`/`staffVersionIn`/
+// `deviceRosterVersionIn` and every `reconcile*` returns early on it. **A one-field wire amendment
+// to `01-F77`/`01-F81` (e) — `hello_ack` stating the SERVED RESOURCE SET as a fact distinct from
+// the per-key versions — is OWED as a spec act**, and is not attempted from here: doc 01 is at its
+// `23-F3` line cap, and a wire field invented by a client is the `01-F4`-shaped error one layer
+// down.
+//
+// ── THE SECOND DEFECT THIS FILE OWNS: `no_progress` WAS AIMED ONE CASE AWAY, IN THREE COPIES ────
+//
+// The non-progress condition is `next_from <= 0` alone — a continuation echoes `next_from` as
+// `from`, and every `request*` omits `from` when it is `0`, so the server sees a fresh first-page
+// request and answers it identically. All three arms also required `entries.length === 0`.
+// Measured against a scripted gateway answering `{ complete: false, next_from: 0, entries: [one
+// row] }` on every request: `device_roster` **300** rounds with `device_roster_refusal` **null**,
+// `staff` **300** with `staff_refusal` **null**, `catalog` **300** with `catalog_refusal` **null**
+// — 300 being where the probe harness stopped, not where the device did. That fix is `0073f69`'s
+// and is KEPT; only the `01-F81` (e) guard was reverted.
 //
 // ── WHAT THIS FILE DOES NOT CLAIM ──────────────────────────────────────────────────────────────
 //
 //   · It asserts nothing about the SIGNATURE (`01-F81` (b)) — see `device-roster-apply.test.ts`.
-//   · It does not close the neighbouring non-progress case: a cursor stuck at a NON-ZERO value
-//     loops identically, and closing that needs the accumulators to remember their last cursor.
-//     Named in `cloud-session.ts` at `noForwardProgress`, asserted nowhere, owed.
+//   · It does not close either neighbouring non-progress case, both named at `noForwardProgress`:
+//     a cursor stuck at a NON-ZERO value, and `catchup_response`, which has no forward-progress
+//     guard of ANY kind (measured: **300** rounds of `catchup_request { from_global_seq: 7 }`
+//     against `{ complete: false, next_from: 7, events: [] }`). The second is the LEDGER path and
+//     is a separate act with its own review.
 //   · It asserts nothing about whether a REFUSAL reaches a human. `device_roster_refusal` and
-//     `staff_refusal` have zero production readers (measured 2026-08-23, comment-blind); the
-//     consumer is owed and is recorded on the type.
+//     `staff_refusal` have zero production readers (measured, comment-blind); the consumer is owed
+//     and is recorded on the type.
 //
 // ── MUTATION MATRIX (round-3 law) — every row is the FULL package suite ─────────────────────────
 //
-//   CONTROL (this tree): 918 passed / 919. The one red is `device-roster-distribution.test.ts` §4,
+//   CONTROL (this tree): 919 passed / 920. The one red is `device-roster-distribution.test.ts` §4,
 //   deliberate and pre-existing (`setLanCredential` has no shipping caller until `01-F80` pairing).
 //   Every "pre-existing" column below EXCLUDES it.
 //
-//   | # | mutant (exactly one branch of `cloud-session.ts`)             | kills here | pre-existing |
-//   |---|--------------------------------------------------------------|-----------:|-------------:|
-//   | A | all three notice arms un-gated (the shipped state)           |          5 |            0 |
-//   | A1| only the `device_roster` arm un-gated                        |          4 |            0 |
-//   | A2| `wasAdvertised` returns `true` always — a SUPPLIED stub       |          5 |            0 |
-//   | A3| `hello_ack` MERGES the advertised set instead of replacing    |          2 |            2 |
-//   | A4| `onDown` no longer clears the set                            |          1 |            0 |
-//   | A5| match on `resource` only, not the whole `01-F76` key         |          1 |            0 |
-//   | A6| the STRICT reading of (e): an absent field advertises nothing |          1 |            2 |
-//   | B | `no_progress` also requires an empty page — THE shipped bug   |          3 |            0 |
-//   | B2| CONTROL: `noForwardProgress` always true (paging deleted)     |          2 |            1 |
-//   | C | swap the `device_roster` foreign/ignore check order          |          0 |            0 |
-//   | C2| swap the `staff` foreign/ignore check order                  |          0 |            0 |
+//   | # | mutant (exactly one branch of `cloud-session.ts`)               | kills here | pre-existing |
+//   |---|----------------------------------------------------------------|-----------:|-------------:|
+//   | A | RE-ADD the reverted guard to all three notice arms — `0073f69`  |          4 |            0 |
+//   | A1| RE-ADD it to the `catalog` arm ONLY                             |          2 |            0 |
+//   | A2| RE-ADD it to the `staff` arm ONLY                               |          2 |            0 |
+//   | A3| the `device_roster` arm drops `isOwnBranchKey` — `01-F76` gone  |          1 |            0 |
+//   | A4| every notice arm muted (`reconcile*` never called from here)    |          6 |            6 |
+//   | A5| `deviceRosterVersionIn` matches on SCOPE only, not the whole key|          1 |            1 |
+//   | B | `no_progress` also requires an empty page — the fixed defect     |          3 |            0 |
+//   | B2| CONTROL: `noForwardProgress` always true (paging deleted)       |          1 |            1 |
 //
-//   **Read row B first: the shipped defect failed ZERO of the 915 tests that already existed.**
-//   **Row A2 is the seam control** — a guard that is present, called and inert dies exactly as the
-//   missing guard does, so these assertions are about behaviour and not about a call site.
-//   **Row B2 is the over-reach control** — an implementation that refused everything would satisfy
-//   the three `no_progress` assertions, and it kills the paging control instead.
-//   **Rows A3 and A6 are the two that reach the `staff-session.test.ts` ORACLE**, which is how the
-//   open half above was measured rather than argued: A6 IS the strict reading, and it reddens two
-//   anchors authored from spec text by a session that wrote no implementation.
-//   **Rows C and C2 kill nothing and CANNOT** — see the ordering comment in `cloud-session.ts`.
+//   **Row A is the regression this file exists for** — the reverted commit, re-applied verbatim:
+//   it kills P1, P2, P7 and P7s and NOTHING ELSE in 919 tests, which is the measurement that says
+//   the defect was invisible to every suite that existed when it shipped.
+//   **A1 and A2 are the attribution controls.** Each guards ONE arm, and each kills exactly the two
+//   rows on that arm's axis — A1 → P2 + P7 (catalog), A2 → P1 + P7s (staff) — so the kill count in
+//   row A is four distinct properties and not one assertion counted four times.
+//   **Row A4 is the over-reach control**: an implementation that dropped EVERY notice satisfies no
+//   assertion here (6 killed) and reddens **five** anchors in `staff-session.test.ts`, an ORACLE
+//   authored from `01-F75`/`01-F76`/`01-F77` text by a session that wrote no implementation. That is
+//   what stops the P-rows being read as "any fetch will do".
+//   **Row A5 is the class that IS closed** — `01-F81` (e) on the `hello_ack` path. It kills the
+//   assertion below AND the `01-F81` (e) anchor in the `device-roster-distribution.test.ts` oracle,
+//   so both halves of (e) are named here: the enforceable one is asserted, the unenforceable one is
+//   argued and left open with the wire amendment it needs.
+//   **Row B2 is the paging over-reach control**, unchanged from `0073f69`.
 
 import { createHash } from "node:crypto";
 import type {
@@ -195,15 +218,6 @@ const notice = (resource: string, scope: unknown, version: number) => ({
   version,
 });
 
-const helloAck = (keys?: readonly { resource: string; scope: unknown; version: number }[]) => ({
-  v: PROTOCOL_VERSION,
-  kind: "hello_ack",
-  session_id: "s-n",
-  hub: false,
-  resume_from: 0,
-  ...(keys === undefined ? {} : { reference_versions: keys }),
-});
-
 const rosterRow = (seed: string) => ({
   device_id: seed,
   device_class: "counter_electron",
@@ -258,26 +272,25 @@ const landSnapshot = (
   });
 };
 
-describe("01-F81 (e) — a notice for a key `hello_ack` did not advertise starts NOTHING", () => {
-  it("device_roster: advertised `staff` only, noticed `device_roster` — no request is sent", () => {
+describe("01-F75 — a `reference_notice` starts a fetch for the key it names, whatever `hello_ack` advertised", () => {
+  it("P1 — the branch's FIRST `staff` publish reaches a till whose `hello_ack` carried only `catalog`", () => {
+    // REGRESSION. Under `0073f69` this was 0: the gateway omits the `staff` key while
+    // `staffVersion === 0` (`gateway.ts`, `staffVersionAtHello > 0`), so the very publish that
+    // creates the roster is the one the guard dropped.
     const { cloud, store, session } = connected([
-      { resource: "staff", scope: BRANCH_SCOPE, version: 2 },
+      { resource: "catalog", scope: ORG_SCOPE, version: 4 },
     ]);
     try {
-      expect(
-        requestsFor(cloud.sent, "device_roster"),
-        "the `hello_ack` path already obeyed (e): an omitted key is `undefined` and reconciles nothing",
-      ).toBe(0);
+      const before = requestsFor(cloud.sent, "staff");
 
-      cloud.deliver(notice("device_roster", BRANCH_SCOPE, 1));
+      cloud.deliver(notice("staff", BRANCH_SCOPE, 1));
 
       expect(
-        requestsFor(cloud.sent, "device_roster"),
-        "01-F81 (e): a device MUST NOT request an artifact key the session's `hello_ack` did not " +
-          "advertise, FOR ANY RESOURCE — and a notice names a key, it does not advertise one. " +
-          "Dropping it costs freshness and never correctness: the next `hello_ack` reconciles " +
-          "every key the gateway serves (`01-F77`)",
-      ).toBe(0);
+        requestsFor(cloud.sent, "staff") - before,
+        "`01-F75`: the notice is the FRESHNESS path and a key absent from `hello_ack` is far more " +
+          "often 'nothing published for it yet' than 'this gateway does not serve it' — the " +
+          "advertisement is built per key from published versions and cannot tell the two apart",
+      ).toBe(1);
 
       session.stop();
     } finally {
@@ -285,28 +298,83 @@ describe("01-F81 (e) — a notice for a key `hello_ack` did not advertise starts
     }
   });
 
-  it("catalog and staff: a key OMITTED from a stated advertisement is dropped too — (e) is 'for any resource'", () => {
+  it("P2 — the org's FIRST `catalog` publish reaches a till whose `hello_ack` carried only `staff`", () => {
+    // REGRESSION, the other axis: 0 under `0073f69`.
     const { cloud, store, session } = connected([
-      { resource: "device_roster", scope: BRANCH_SCOPE, version: 1 },
+      { resource: "staff", scope: BRANCH_SCOPE, version: 3 },
     ]);
     try {
-      landSnapshot(cloud, "device_roster", BRANCH_SCOPE, 1);
-      const before = {
-        staff: requestsFor(cloud.sent, "staff"),
-        catalog: requestsFor(cloud.sent, "catalog"),
-      };
+      const before = requestsFor(cloud.sent, "catalog");
 
-      cloud.deliver(notice("staff", BRANCH_SCOPE, 5));
-      cloud.deliver(notice("catalog", ORG_SCOPE, 5));
+      cloud.deliver(notice("catalog", ORG_SCOPE, 1));
+
+      expect(
+        requestsFor(cloud.sent, "catalog") - before,
+        "`01-F52`/`01-F75`: an org's first menu publish must reach a till already connected — the " +
+          "back office promises 'every till in the organisation changes as soon as this saves'",
+      ).toBe(1);
+
+      session.stop();
+    } finally {
+      store.close();
+    }
+  });
+
+  it("P7 — twenty catalog publishes move a CONNECTED, idle till v0 → v20 with no reconnect", () => {
+    // THE FINDING IN ONE TEST. Under `0073f69` this was 0 requests and version 0 — the live delta
+    // path dead for the life of the connection, for any org whose branch has a published roster.
+    const { cloud, store, session } = connected([
+      { resource: "staff", scope: BRANCH_SCOPE, version: 3 },
+    ]);
+    try {
+      const before = requestsFor(cloud.sent, "catalog");
+      for (let v = 1; v <= 20; v += 1) {
+        cloud.deliver(notice("catalog", ORG_SCOPE, v));
+        // A gateway answers only a fetch the device actually started, so a dropped notice leaves
+        // nothing to serve — which is exactly how the guarded till stayed at v0 in silence.
+        if (requestsFor(cloud.sent, "catalog") > before + (v - 1)) {
+          landSnapshot(cloud, "catalog", ORG_SCOPE, v);
+        }
+      }
+
+      expect(
+        [requestsFor(cloud.sent, "catalog") - before, store.catalog.version()],
+        "`plans/wave-1/running-the-stack.md` records this run end to end: a menu authored one " +
+          "entry at a time, a till connected and idle throughout, v0 → v20 with no restart",
+      ).toEqual([20, 20]);
+
+      session.stop();
+    } finally {
+      store.close();
+    }
+  });
+
+  it("P7s — the STAFF twin of P7: a branch's first cashier reaches the unlock grid without a reconnect", () => {
+    // The sharper half of the same defect. `store.staff` is the identity registry
+    // (`apps/pos-electron/src/main/index.ts` builds the unlock grid from `store.staff.list()`),
+    // so under `0073f69` a branch's first cashier could not sign in until something dropped the
+    // socket — and nothing would, since a dropped notice sets no refusal and forces no reconnect.
+    const { cloud, store, session } = connected([
+      { resource: "catalog", scope: ORG_SCOPE, version: 4 },
+    ]);
+    try {
+      const before = requestsFor(cloud.sent, "staff");
+      for (let v = 1; v <= 20; v += 1) {
+        cloud.deliver(notice("staff", BRANCH_SCOPE, v));
+        if (requestsFor(cloud.sent, "staff") > before + (v - 1)) {
+          landSnapshot(cloud, "staff", BRANCH_SCOPE, v);
+        }
+      }
 
       expect(
         [
-          requestsFor(cloud.sent, "staff") - before.staff,
-          requestsFor(cloud.sent, "catalog") - before.catalog,
+          requestsFor(cloud.sent, "staff") - before,
+          store.staff.version(),
+          store.staff.list().length,
         ],
-        "01-F81 (e) is 'for ANY resource' — the roster is not a special case, and a gateway that " +
-          "stated its keys and omitted these two has not offered them",
-      ).toEqual([0, 0]);
+        "`01-F26`/`01-F28`: the roster the till identifies people from is reference data on this " +
+          "same path, so a notice dropped here is a cashier who cannot sign in",
+      ).toEqual([20, 20, 1]);
 
       session.stop();
     } finally {
@@ -314,13 +382,10 @@ describe("01-F81 (e) — a notice for a key `hello_ack` did not advertise starts
     }
   });
 
-  it("⚠ PINS THE OPEN HALF: a `hello_ack` with NO `reference_versions` AT ALL still honours a notice", () => {
-    // **THIS ASSERTS WHAT THE CODE DOES, AND THE CODE DOES NOT ENFORCE THE MUST HERE.** Read the
-    // header and `cloud-session.ts`'s `advertisedKeys` declaration before changing it: the strict
-    // reading of `01-F81` (e) would make all three of these `0`, and it would also kill the live
-    // catalog delta for every org before its first publish and redden two `staff-session.test.ts`
-    // anchors. This test exists so that a ruling on (e) has to come THROUGH it — flipping the
-    // behaviour reddens a named assertion rather than silently changing what a till does.
+  it("P3 — a `hello_ack` with NO `reference_versions` at all honours a notice, on every resource", () => {
+    // Unchanged by the revert (it was the one case `0073f69` carved out), and kept because it is
+    // the state of an org that has published NOTHING: the gateway omits the whole field, and the
+    // first publish of any key is announced on this path.
     const { cloud, store, session } = connected(undefined);
     try {
       cloud.deliver(notice("staff", BRANCH_SCOPE, 1));
@@ -333,9 +398,8 @@ describe("01-F81 (e) — a notice for a key `hello_ack` did not advertise starts
           requestsFor(cloud.sent, "catalog"),
           requestsFor(cloud.sent, "device_roster"),
         ],
-        "OPEN, not settled: no advertisement was made, so `01-F81` (e)'s 'a client that ignored " +
-          "the advertisement' has none to have ignored. `01-F75`'s freshness path is what would be " +
-          "lost, and the refusal it would avoid is one no shipped gateway can produce",
+        "the gateway omits the field entirely when it holds zero keys, 'which is what an org that " +
+          "has published nothing has' — so this is the empty org's first publish",
       ).toEqual([1, 1, 1]);
 
       session.stop();
@@ -344,10 +408,7 @@ describe("01-F81 (e) — a notice for a key `hello_ack` did not advertise starts
     }
   });
 
-  it("the guard is a MEMBERSHIP test, not a mute: an ADVERTISED key still fetches on a notice", () => {
-    // THE CONTROL. Without it, an implementation that dropped EVERY notice would pass both
-    // assertions above — and would delete `01-F75`'s freshness path, which is the whole reason a
-    // notice exists. One branch apart from them.
+  it("an ADVERTISED key still fetches on a notice — the freshness path is not resource-specific", () => {
     const { cloud, store, session } = connected([
       { resource: "device_roster", scope: BRANCH_SCOPE, version: 1 },
       { resource: "staff", scope: BRANCH_SCOPE, version: 1 },
@@ -373,8 +434,8 @@ describe("01-F81 (e) — a notice for a key `hello_ack` did not advertise starts
           requestsFor(cloud.sent, "staff") - after.staff,
           requestsFor(cloud.sent, "catalog") - after.catalog,
         ],
-        "01-F75's freshness path survives the guard: a key this session WAS advertised is fetched " +
-          "on the notice, without waiting for a reconnect",
+        "`01-F75`: a later version on a key the device already holds is fetched on the notice, " +
+          "without waiting for a reconnect",
       ).toEqual([1, 1, 1]);
 
       session.stop();
@@ -383,30 +444,11 @@ describe("01-F81 (e) — a notice for a key `hello_ack` did not advertise starts
     }
   });
 
-  it("01-F76: an advertisement is matched on the WHOLE key — another branch's roster is not one", () => {
-    const { cloud, store, session } = connected([
-      {
-        resource: "device_roster",
-        scope: { org_id: ORG, branch_id: "branch-elsewhere" },
-        version: 5,
-      },
-    ]);
-    try {
-      cloud.deliver(notice("device_roster", BRANCH_SCOPE, 5));
-      expect(
-        requestsFor(cloud.sent, "device_roster"),
-        "01-F76: a version means nothing without the `(resource, scope)` it counts, so matching on " +
-          "`resource` alone would let a fan-out key for a sibling branch authorize this device's " +
-          "own request",
-      ).toBe(0);
-
-      session.stop();
-    } finally {
-      store.close();
-    }
-  });
-
-  it("a later `hello_ack` REPLACES the advertised set — it does not merge with the last one", () => {
+  it("01-F76 — the ONE test this path CAN decide: a notice for ANOTHER branch's roster starts nothing", () => {
+    // The scope test survives the revert and the membership test does not, and the difference is
+    // what the wire carries. `scope` is ON the notice, so "this artifact is not mine" is decidable
+    // from the message itself; "this gateway does not serve the resource" is not, because the only
+    // field that could say so counts PUBLISHED VERSIONS. The reverted guard conflated the two.
     const { cloud, store, session } = connected([
       { resource: "device_roster", scope: BRANCH_SCOPE, version: 1 },
     ]);
@@ -414,16 +456,12 @@ describe("01-F81 (e) — a notice for a key `hello_ack` did not advertise starts
       landSnapshot(cloud, "device_roster", BRANCH_SCOPE, 1);
       const baseline = requestsFor(cloud.sent, "device_roster");
 
-      // A gateway that has stopped serving the resource (a rollback mid-fleet) states the keys it
-      // still has, and this one is not among them.
-      cloud.deliver(helloAck([{ resource: "staff", scope: BRANCH_SCOPE, version: 1 }]));
-      cloud.deliver(notice("device_roster", BRANCH_SCOPE, 9));
+      cloud.deliver(notice("device_roster", { org_id: ORG, branch_id: "branch-elsewhere" }, 9));
 
       expect(
         requestsFor(cloud.sent, "device_roster"),
-        "01-F81 (e): `?? []` and not 'keep the previous set'. Carrying a superseded " +
-          "advertisement forward is how a device asks a gateway for a key that gateway has just " +
-          "stopped offering it",
+        "`01-F76`: a version means nothing without the `(resource, scope)` it counts — a sibling " +
+          "branch's roster is an artifact this device does not hold and starts nothing",
       ).toBe(baseline);
 
       session.stop();
@@ -432,22 +470,23 @@ describe("01-F81 (e) — a notice for a key `hello_ack` did not advertise starts
     }
   });
 
-  it("an advertisement belongs to ONE connection — a WAN bounce clears it", () => {
+  it("01-F81 (e) IS enforced where it is enforceable: an omitted key is never asked for AT HELLO", () => {
+    // THE CLASS THAT IS CLOSED, asserted rather than claimed in prose — this repo's own most
+    // recorded failure is a protection stated in a comment that retires the assertion nobody then
+    // wrote. `hello_ack` omitting a key returns `undefined` from `*VersionIn` and `reconcile*`
+    // returns early, so no request leaves the device for it. `01-F77`: OMITTED, never `0` — a
+    // `?? 0` here would have every till in the fleet asking a gateway that cannot answer.
     const { cloud, store, session } = connected([
-      { resource: "device_roster", scope: BRANCH_SCOPE, version: 1 },
+      { resource: "staff", scope: BRANCH_SCOPE, version: 2 },
     ]);
     try {
-      landSnapshot(cloud, "device_roster", BRANCH_SCOPE, 1);
-      const baseline = requestsFor(cloud.sent, "device_roster");
-
-      cloud.bounce(); // onDown → onUp: the link is back and no `hello_ack` has landed yet
-      cloud.deliver(notice("device_roster", BRANCH_SCOPE, 9));
-
       expect(
-        requestsFor(cloud.sent, "device_roster"),
-        "01-F81 (e): the NEXT session's `hello_ack` states what it serves, and until it lands this " +
-          "session has been advertised nothing",
-      ).toBe(baseline);
+        [requestsFor(cloud.sent, "device_roster"), requestsFor(cloud.sent, "catalog")],
+        "`01-F81` (e) on the `hello_ack` path: a device MUST NOT request an artifact key the " +
+          "session's `hello_ack` did not advertise. This half needs no guard — an omitted key is " +
+          "`undefined` and reconciles nothing — and the NOTICE half is not closeable from here " +
+          "until the wire states a served-resource set (see `cloud-session.ts`)",
+      ).toEqual([0, 0]);
 
       session.stop();
     } finally {
