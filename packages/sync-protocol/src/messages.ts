@@ -338,6 +338,26 @@ const DeviceRosterEntryWire = z.object({
  * `signed_at` is epoch milliseconds and exists **for `00 §5.7`'s age display and nothing else**
  * (`01-F81` (b)): `01-F74` (d) admits an old roster, so no implementation may refuse on age, and
  * it is never an input to any fold (`01-F34`, `01-F45`).
+ *
+ * ⚠ **OWED, RECORDED HERE BECAUSE NOTHING ELSE CAN SEE IT: `01-F75` REQUIRES A GOLDEN FIXTURE PER
+ * MEMBER AND `device_roster` HAS NONE.** That clause makes a member *"an amendment to this clause
+ * plus its own golden fixture"*, and `01-F81` landed the member without the fixture. **The
+ * omission is silent in BOTH directions**, which is why it is written down rather than left to a
+ * rail: `reference-fixtures.test.ts` §J1 requires a fixture per KIND and not per RESOURCE, so the
+ * three `reference_*` fixtures satisfy it with two resources; and §J7 pins the fixture set's
+ * resources to exactly `{catalog, staff}`, so ADDING the missing fixture reddens that oracle until
+ * it moves in the same change. Nothing in between fails.
+ *
+ * **The stated reason for deferring it is real and it is not the whole story.** A golden file
+ * carrying a FABRICATED signature would pin a contract no signer has ever made — `01-F81` (b)/(c)
+ * put the roster-signing key on the cloud plane and `01-F80`'s claim endpoint is unbuilt — so the
+ * fixture is owed with the gateway serve path, which is what can produce a real one. What that
+ * argument does not cover is the rest of the frame: both suites landed with this member already
+ * build well-formed-invalid envelopes (`device-roster-apply.test.ts`'s `SIGNATURE`,
+ * `device-roster-distribution.test.ts`'s), so the shape of every OTHER field on this arm could be
+ * pinned today by a fixture whose envelope is marked as unsigned-by-a-real-key. That is an
+ * implementer deviating from an explicit spec requirement, and the deviation belongs to whoever
+ * lands the serve path.
  */
 const ReferenceSignature = z.object({
   alg: z.literal("ES256"),
@@ -402,10 +422,18 @@ const referenceResponseBody = {
 const ReferenceVersionKey = z.discriminatedUnion("resource", [
   z.object({ resource: z.literal("catalog"), scope: OrgScope, version: z.number().int().min(1) }),
   z.object({ resource: z.literal("staff"), scope: BranchScope, version: z.number().int().min(1) }),
-  // `01-F81` (a)/(e) — the third member, BRANCH-scoped. (e) makes this key the whole of the
-  // staged-rollout answer: a gateway that does not serve the roster OMITS it here, so a
-  // `device_roster`-capable device meeting that gateway never asks, and a request for an unserved
-  // resource is then a client that ignored the advertisement rather than a negotiation outcome.
+  // `01-F81` (a)/(e) — `device_roster`, BRANCH-scoped. (e) makes this key the staged-rollout
+  // answer: a gateway that does not serve the roster OMITS it here, so a `device_roster`-capable
+  // device meeting that gateway never asks, and a request for an unserved resource is then a
+  // client that ignored the advertisement rather than a negotiation outcome.
+  //
+  // ⚠ This comment said "the THIRD member" and is now `01-F87`-stale in the direction that
+  // matters: the RULE is that `01-F75`'s resource set is closed and its size is that clause's to
+  // state, and the count has moved twice (`01-F81`, then `01-F87`'s `config`) in the month this
+  // union has existed. The number lives in `01-F75`; a copy of it here acquires this file's shelf
+  // life, which is `e74cffb`'s recorded lesson one layer down. What THIS union is, is the set of
+  // members whose wire arm this build carries; `config` has none and adding one is a spec-directed
+  // act plus its golden fixture, never an implementation's choice.
   z.object({
     resource: z.literal("device_roster"),
     scope: BranchScope,
@@ -677,9 +705,9 @@ export const messageSchemas = {
       scope: BranchScope,
       version: seq,
     }),
-    // `01-F81` (a) — the third member on the third frame. A notice carries no artifact and
-    // therefore no signature: it is a version number, and the envelope is verified at APPLY over
-    // the assembled artifact, never per frame (`01-F81` (b)).
+    // `01-F81` (a) — `device_roster` on the third frame of `01-F75`'s triple. A notice carries no
+    // artifact and therefore no signature: it is a version number, and the envelope is verified at
+    // APPLY over the assembled artifact, never per frame (`01-F81` (b)).
     z.object({
       v,
       kind: z.literal("reference_notice"),

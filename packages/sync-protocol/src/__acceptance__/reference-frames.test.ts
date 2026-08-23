@@ -366,14 +366,27 @@ describe("§B — the wire version bumps, and the system moves in ONE step (01-F
 describe("§C — an artifact is (resource, scope), and the resource set is CLOSED (01-F75, 01-F76)", () => {
   // "The resource set is CLOSED, and adding a member is a spec act exactly as adding a kind is."
   //
-  // ⚠ **IT HOLDS THREE AS OF `01-F81` (August 2026), and `device_roster` LEFT the refused list by
-  // the spec act 01-F75's own clause demands** — that clause now reads "It holds THREE as of
-  // 01-F81 … and the count moved by the spec act this clause demands rather than by an
-  // implementation". `01-F74`'s roster was excluded because it is a *signed* artifact and 01-F75
-  // specified no signature envelope; `01-F81` (b) is that envelope, so the member arrived WITH its
-  // security half. Retiring the assertion here is the same act as retiring the FR's own strikethrough
-  // — a green test that goes on defending an overruled rule would fail the correct implementation,
-  // which this repo has already paid for once (`catalog-pricing.test.ts:394`).
+  // ⚠ **`device_roster` LEFT the refused list by the spec act 01-F75's own clause demands**
+  // (`01-F81`, August 2026). `01-F74`'s roster was excluded because it is a *signed* artifact and
+  // 01-F75 specified no signature envelope; `01-F81` (b) is that envelope, so the member arrived
+  // WITH its security half. Retiring the assertion here is the same act as retiring the FR's own
+  // strikethrough — a green test that goes on defending an overruled rule would fail the correct
+  // implementation, which this repo has already paid for once (`catalog-pricing.test.ts:394`).
+  //
+  // ⚠ **THE SIZE OF THE SET IS NOT STATED HERE, AND IT USED TO BE — TWICE, THE SECOND TIME AS A
+  // QUOTATION.** This comment read "IT HOLDS THREE AS OF 01-F81" and then quoted the clause as
+  // saying so. Measured 2026-08-23, that clause reads FOUR: `01-F87` added `config`. A quoted spec
+  // sentence inside shipping code acquires the code's shelf life — the finding of the commit
+  // immediately before the one that wrote this line (`e74cffb`), reproduced by the change that had
+  // just read it. So the RULE is stated and the FR id is cited, and the count is looked up in
+  // `01-F75`'s clause where it lives.
+  //
+  // ⚠ **`config` is deliberately ABSENT from `NOT_RESOURCES` below, and that is not an omission.**
+  // It is a declared member of `01-F75`'s set (`01-F87`) with no wire arm in this build, so it is
+  // neither a legal resource on these frames nor one of the corpus's NAMED exclusions. Listing it
+  // as refused would encode "config is not a reference resource", which the corpus overruled the
+  // day it was written — this file's own `device_roster` lesson, one member later. Its arm and its
+  // golden fixture are a separate spec-directed act.
   //
   // What is NOT retired is the property: the set is CLOSED, and every name outside it is refused.
   // The remaining refusals are still the corpus's OWN named exclusions rather than arbitrary

@@ -16,6 +16,23 @@ import type { RosterEntry, RosterUpdate } from "./lan-roster.js";
  * consistent if the device also records how far it got, and it does not — it would commit the
  * delta's FINAL version while holding a prefix of its rows.
  *
+ * ## ⚠ NOTHING SERVES THIS RESOURCE YET — THE BLOCKING CALLEE IS THE GATEWAY SERVE PATH
+ *
+ * This accumulator is reached from `cloud-session.ts` on a `reference_response` for
+ * `device_roster`, and **no gateway ever sends one.** Measured 2026-08-23 against
+ * `services/sync-gateway/src/gateway.ts`: `hello_ack.reference_versions` is built from `catalog`
+ * and `staff` only, no `device_roster` notice is emitted anywhere, and a `device_roster`
+ * `reference_request` is answered with `ProtocolViolationError` — the guard that file added with
+ * this same wire widening, and whose own comment states it does not serve the resource.
+ *
+ * So the device half is a complete caller whose CALLEE does not exist. That is the correct
+ * sequencing — the wire member, the device consumer and the serve path are three acts and this is
+ * the second — but it is stated here rather than left to be inferred from "it has a shipping
+ * caller", because on this artifact that phrase is true and "it reaches the product" is not. The
+ * serve path needs `01-F81` (b)/(c)'s signer, which is the same change that pins the key the
+ * section below is waiting on. The gateway file says this at its own end; until now the device
+ * side did not.
+ *
  * ## ⚠ THIS FILE DOES NOT VERIFY THE SIGNATURE, AND THAT IS A NAMED DEBT RATHER THAN AN OVERSIGHT
  *
  * `01-F81` (b) puts verification at APPLY, over the assembled artifact, and (c) has the public half
