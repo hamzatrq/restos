@@ -46,7 +46,7 @@ type Till = {
   anomalies: (order_id?: string) => string[];
 };
 
-const till = (opts: { confirm?: boolean } = {}): Till => {
+const till = (opts: { confirm?: boolean; failAppend?: number } = {}): Till => {
   const dir = mkdtempSync(join(tmpdir(), "restos-line-void-"));
   dirs.push(dir);
   const store = openStore({
@@ -104,8 +104,19 @@ const till = (opts: { confirm?: boolean } = {}): Till => {
   }
 
   const landed: Till["landed"] = [];
+  let appendCalls = 0;
   const writes: RendererWrites = {
     append: (req: unknown): AppendResult => {
+      appendCalls += 1;
+      /*
+        `opts.failAppend` fails the Nth call to the INNER writes, so §F can drive the one thing
+        `01-F1` makes permanent and no refusal can reach: an append that got past every guard and
+        then did not persist. The message is the real one — `AGENTS.md` records
+        `SqliteError: database is locked` from the two-instance incident on a real till, and
+        `01-F66`'s single-instance lock closed that CAUSE without making a failed append
+        impossible (a full disk, a corrupt page and a killed process all arrive here too).
+      */
+      if (appendCalls === opts.failAppend) throw new Error("SqliteError: database is locked");
       const r = req as { type: string; payload: Record<string, unknown>; refs?: string[] };
       landed.push({ type: r.type, payload: r.payload, refs: r.refs ?? [] });
       raw(r.type, r.payload, r.refs ?? []);
@@ -182,9 +193,13 @@ describe("§A 02-F20/02-F8 — voiding a line takes it off the bill", () => {
     // `02-F8`: post-confirm removal "must be `void.recorded` with an approver". `01 §4`: the exit
     // states are the only vocabulary any module may use. Both, or the ledger tells half the story.
     const t = till();
-    t.guarded.append(voidReq());
+    t.guarded.append(voidReq({ amount_paisa: 999_999_900 }));
 
     expect(t.landed.map((e) => e.type)).toEqual(["void.recorded", "order.line_state_changed"]);
+    // ⚠ `amount_paisa` is asserted against a request that sent something ELSE, deliberately. This
+    // assertion read `amount_paisa: NAAN` against a `voidReq()` that supplies exactly `NAAN`, so
+    // it was a TAUTOLOGY: it passed against the layer copying the renderer's payload through,
+    // which is what the layer did. See §A's derivation tests directly below.
     expect(t.landed[0]?.payload).toMatchObject({
       order_id: ORDER_ID,
       amount_paisa: NAAN,
@@ -192,6 +207,62 @@ describe("§A 02-F20/02-F8 — voiding a line takes it off the bill", () => {
     });
     expect(t.landed[0]?.refs, "the line rides refs, never the payload (00 §6)").toEqual([LINE_B]);
     expect(t.landed[1]?.payload).toMatchObject({ order_id: ORDER_ID, state: "voided" });
+  });
+
+  it("DERIVES amount_paisa from the fold and DISCARDS whatever the renderer sent", () => {
+    /*
+      ⚠ **THE DEFECT THIS ASSERTION WAS WRITTEN FOR, reproduced against the real store before it
+      was fixed.** `amount_paisa` originated in `LineCorrection.tsx` (`act === "discount" ?
+      entered : lineTotal`), crossed `shared/ipc.ts`'s bridge — *"the untrusted end of this bridge
+      even though we ship it"* — and landed permanently under `01-F1`, and this module's own
+      header claimed it *"is the value the line exit removed"* while the file mentioned the field
+      nowhere but in that sentence. Measured:
+
+        landed[0].payload.amount_paisa === 999_999_900   a permanent money field nothing derived
+        billed_effective dropped by     ===       6_000   the NAAN, not the recorded amount
+
+      It was not inert: `approval-record.ts` reads this field into `approval.requested`, which is
+      the figure `05-F5`'s manager card shows the approver.
+
+      MUTATION THIS CATCHES: the payload copied through (the shipped product before this fix), and
+      any derivation that is not `billedLinePaisa` of the cell that exited.
+    */
+    const t = till();
+    const before = t.billed();
+    t.guarded.append(voidReq({ amount_paisa: 999_999_900 }));
+    const recorded = t.landed[0]?.payload.amount_paisa;
+
+    expect(recorded, "the renderer's figure must not survive the bridge").not.toBe(999_999_900);
+    expect(recorded, "it is billedLinePaisa of the cell that exited").toBe(NAAN);
+    // The strongest form, and the one that makes the module's sentence true rather than merely
+    // consistent: the number recorded IS the money the exit removed, both sides read out of the
+    // REAL fold rather than out of the request.
+    expect(before - t.billed(), "amount_paisa === what the exit took off the bill").toBe(recorded);
+  });
+
+  it("the derivation is PER LINE — it is not the order total and not a constant", () => {
+    // MUTATION THIS CATCHES: an amount read off `total_paisa`, or off the wrong cell. Without
+    // this, a derivation that always answers with the first line passes the test above.
+    const t = till();
+    t.guarded.append(voidReq({ amount_paisa: 1 }, [LINE_A]));
+    expect(t.landed[0]?.payload.amount_paisa).toBe(KARAHI);
+    expect(t.landed[0]?.payload.amount_paisa).not.toBe(NAAN);
+  });
+
+  it("carries the rest of the payload through untouched — only the money is main's", () => {
+    // The overwrite rebuilds the request, so this is the guard against it dropping a field on the
+    // way: `01-F83`'s attempt key and `02-F20`'s approver are both load-bearing and neither is
+    // derivable here. CONTROL for the two assertions above — without it, "main decides the
+    // money" and "main rewrites the payload" are indistinguishable.
+    const t = till();
+    const req = voidReq({ amount_paisa: 7, approver_user_id: "user-hina" });
+    t.guarded.append(req);
+    expect(t.landed[0]?.payload).toMatchObject({
+      order_id: ORDER_ID,
+      reason: "Wrong item",
+      approver_user_id: "user-hina",
+      adjustment_attempt_id: req.payload.adjustment_attempt_id,
+    });
   });
 
   it("the fold records NO `illegal_transition` — the edge is legal and its from_states are true", () => {
@@ -355,15 +426,78 @@ describe("§D the edge is a pure function of the projection", () => {
     // `01-F34`: legality is judgeable only from the states the edge CLAIMS to leave, so an emitter
     // that hardcoded `["placed"]` writes an edge the fold flags for ever.
     for (const from of ["placed", "confirmed", "in_prep", "ready"]) {
-      const edge = voidExitFor(order([from]), [LINE_B]);
-      expect("refused" in edge).toBe(false);
-      if ("refused" in edge) continue;
+      const resolved = voidExitFor(order([from]), [LINE_B]);
+      expect("refused" in resolved).toBe(false);
+      if ("refused" in resolved) continue;
+      const edge = resolved.edge;
       expect(edge.line_context[LINE_B]?.from_states).toEqual([from]);
       expect(edge.line_context[LINE_B]?.to).toBe("voided");
       expect(edge.line_ids, "line_ids is derived from line_context, never assembled apart").toEqual(
         Object.keys(edge.line_context),
       );
     }
+  });
+
+  it("resolves the edge and its money from ONE cell, with no store and no request", () => {
+    // The amount is a function of the PROJECTION, exactly as the edge is — so the derivation is
+    // testable without a ledger, and the two can never come from different lookups.
+    //
+    // MUTATION THIS CATCHES: an `amount_paisa` that reads anything but this cell's own qty ×
+    // unit_price, and one that ignores `26 §7`'s exited-cell rule.
+    const priced = {
+      order_id: ORDER_ID,
+      json_lines: JSON.stringify({
+        [LINE_B]: { item_id: "i-naan", qty: 3, unit_price_paisa: 2_500, states: ["confirmed"] },
+      }),
+    };
+    const resolved = voidExitFor(priced, [LINE_B]);
+    expect("refused" in resolved).toBe(false);
+    if ("refused" in resolved) return;
+    expect(resolved.amount_paisa, "qty x unit_price, the fold's own product").toBe(7_500);
+  });
+
+  it("an unrepresentable line value contributes ZERO, never a rounded double (standing law 3)", () => {
+    /*
+      `billedLinePaisa` is `merge.ts`'s own `billedCellPaisa` exported rather than re-derived, and
+      it answers **0** for a product the double cannot hold exactly — matching what the fold's
+      accumulators do, so `amount_paisa` and the `billed_effective` it comes off never disagree.
+
+      MUTATION THIS CATCHES: a hand-rolled `cell.qty * cell.unit_price_paisa` here. It is
+      behaviourally identical on every ordinary line — which is exactly why it would survive a
+      suite without this assertion — and it puts a SILENTLY ROUNDED money figure into an
+      append-only ledger on the one input where it differs. `26 §8`'s *fold logic is never
+      reimplemented outside this module*, stated as a test instead of as a preference.
+    */
+    const huge = {
+      order_id: ORDER_ID,
+      json_lines: JSON.stringify({
+        [LINE_B]: {
+          item_id: "i",
+          qty: 3,
+          unit_price_paisa: Number.MAX_SAFE_INTEGER,
+          states: ["confirmed"],
+        },
+      }),
+    };
+    const resolved = voidExitFor(huge, [LINE_B]);
+    expect("refused" in resolved).toBe(false);
+    if ("refused" in resolved) return;
+    expect(resolved.amount_paisa).toBe(0);
+    expect(resolved.amount_paisa, "a rounded product is the thing being refused").not.toBe(
+      3 * Number.MAX_SAFE_INTEGER,
+    );
+  });
+
+  it("refuses a cell carrying no projected VALUE rather than throwing on it", () => {
+    // `01-F53`'s captured price. Unreachable from the real fold — `merge.ts` builds every cell FROM
+    // a `LineValue` — but this function is exported as a pure function of a JSON string, and
+    // `BigInt(undefined)` THROWS where every other bad input here is refused by name (`00 §5.7`).
+    const valueless = {
+      order_id: ORDER_ID,
+      json_lines: JSON.stringify({ [LINE_B]: { states: ["confirmed"] } }),
+    };
+    expect(() => voidExitFor(valueless, [LINE_B])).not.toThrow();
+    expect(voidExitFor(valueless, [LINE_B])).toMatchObject({ refused: expect.any(String) });
   });
 
   it("refuses every terminal state by name (01-F35 / LEGAL_NEXT maps a terminal to [])", () => {
@@ -404,5 +538,109 @@ describe("§E the product reaches this, on BOTH routes an approved write can tak
     // not by reading the guard.
     expect(mainSrc).toMatch(/authorizeEscalation\(\{[\s\S]{0,2000}?writes:\s*voidGuarded,/);
     expect(mainSrc).not.toMatch(/authorizeEscalation\(\{[\s\S]{0,2000}?writes:\s*gateway,/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// §F — ⚠ THE WINDOW. The two appends are NOT atomic, and the header no longer says they are.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+describe("§F 01-F1 — a half-landed void, pinned as a fact rather than claimed away", () => {
+  /*
+    ⚠ **`line-void.ts` used to close *"Refusing up front makes both unreachable"* and *"EVERY
+    `void.recorded` THIS PRODUCT EMITS NAMES EXACTLY ONE LINE, AND THAT LINE EXITS IN THE SAME
+    ACT."* Neither survives a failure on the SECOND append**, and both were corrected in August
+    2026 rather than defended. `DeviceStore` exposes only a single-event `append` (`appendTx` is a
+    one-event transaction), so there is no door to make the pair atomic without widening a
+    PROTECTED package's surface — measured and sized in the module header.
+
+    This block exists so the window is a MEASURED, PINNED fact and not a sentence anyone can
+    quietly re-strengthen. It is also the input `01-F30`'s owed `void_value` arm needs: an ORPHAN
+    `void.recorded` names money the bill is still carrying, so a fold arm reading *"no line exit
+    ⇒ contribute `amount_paisa`"* would subtract a rupee that was never removed.
+
+    **If a transactional append ever lands, these tests must go RED** — the first two by becoming
+    unreachable, and a session that sees that should delete them and strengthen the header back.
+  */
+
+  it("a failure on the EXIT leaves void.recorded in the ledger with the line still billed", () => {
+    const t = till({ failAppend: 2 });
+    expect(() => t.guarded.append(voidReq())).toThrow(/did NOT exit/);
+
+    expect(
+      t.landed.map((e) => e.type),
+      "the corrective landed alone",
+    ).toEqual(["void.recorded"]);
+    expect(t.billed(), "01-F1: permanent, and the bill did not move").toBe(KARAHI + NAAN);
+    expect(t.states(LINE_B), "the line never left").toEqual(["confirmed"]);
+  });
+
+  it("names what happened, because the cashier is the one who has to fix it (00 §5.7)", () => {
+    // `SqliteError: database is locked` tells an operator nothing she can act on, and the original
+    // is CARRIED rather than swallowed so a log still holds it.
+    //
+    // MUTATION THIS CATCHES: the try/catch removed (the raw error reaches the counter), and the
+    // `cause` dropped (the diagnosis is lost).
+    const t = till({ failAppend: 2 });
+    try {
+      t.guarded.append(voidReq());
+      expect.unreachable("the exit failed, so the act must not report success");
+    } catch (err) {
+      const e = err as Error;
+      expect(e.message).toMatch(/LANDED/);
+      expect(e.message, "it must not read as a refusal — a refusal appends nothing").not.toMatch(
+        /refused/,
+      );
+      expect(e.message, "and it must say what she can do about it").toMatch(/Void it again/);
+      expect((e.cause as Error | undefined)?.message).toMatch(/database is locked/);
+    }
+  });
+
+  it("CONTROL — an EXIT never lands without its corrective, on EITHER failure", () => {
+    /*
+      The two directions are not symmetric, and this is what makes that claim measured rather than
+      argued. An exit with no `void.recorded` removes a cooked dish with **no approver** — Appendix
+      A's void row bypassed by an event type, the theft vector `02-F49` exists to close — and it is
+      unrecoverable, where the half that IS reachable leaves the dish on the bill for the cashier
+      to void again. The corrective going first is what puts the recoverable half on the exposed
+      side, so this sweeps both failure points rather than the convenient one.
+
+      ⚠ **A first draft asserted only `failAppend: 1` ⇒ nothing landed, and the reversed-order
+      mutant SURVIVED it** — with the appends swapped, failing the first call still lands nothing,
+      so the assertion was true of both implementations. Reading it would not have shown that; the
+      mutant did.
+    */
+    for (const failAppend of [1, 2]) {
+      const t = till({ failAppend });
+      expect(() => t.guarded.append(voidReq())).toThrow();
+      expect(
+        t.landed.map((e) => e.type),
+        `a failure on append ${failAppend} must never leave an unapproved exit`,
+      ).not.toContain("order.line_state_changed");
+      expect(t.states(LINE_B), "no dish left the bill without an approver").toEqual(["confirmed"]);
+    }
+  });
+
+  it("the cashier CAN recover, and the ledger keeps both correctives (01-F83 / 01-F1)", () => {
+    // Why the recoverable half is the one on the exposed side. The dish is still billed, the line
+    // is still non-terminal, so voiding again works — and the bill moves the second time.
+    //
+    // `LineCorrection.tsx` mints a FRESH `adjustment_attempt_id` per submit, so `01-F83`'s key
+    // does NOT collapse the pair: the ledger ends up holding two `void.recorded` for one line,
+    // one of them an orphan naming money the first attempt never removed. That is the input the
+    // owed `01-F30` `void_value` arm has to survive, and it is asserted rather than described.
+    const t = till({ failAppend: 2 });
+    expect(() => t.guarded.append(voidReq())).toThrow();
+
+    t.guarded.append(voidReq());
+    expect(t.billed(), "the retry took the naan off").toBe(KARAHI);
+    expect(t.states(LINE_B)).toEqual(["voided"]);
+
+    const correctives = t.landed.filter((e) => e.type === "void.recorded");
+    expect(correctives, "two correctives for one line — one of them an orphan").toHaveLength(2);
+    expect(
+      new Set(correctives.map((e) => e.payload.adjustment_attempt_id)).size,
+      "under two different 01-F83 keys, so no fold can collapse them",
+    ).toBe(2);
   });
 });
