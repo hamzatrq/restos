@@ -730,8 +730,8 @@ describe("§H 16-F6 — the split-payment apportionment is NOT decided, and is n
  *       gate's three conditions (a producer, an `01-F31`-class key, a `26 §7` merge rule) are the
  *       questions to answer before anyone adds one.
  */
-describe("§I 01-F30 — an exclusive posture puts the tax into the conservation residual", () => {
-  it("a fully-tendered exclusive order reads as an EXCESS of exactly the tax", () => {
+describe("§I 01-F30 (SUPERSEDED READING, see the §I header) — an exclusive posture PUT the tax into the conservation residual", () => {
+  it("a fully-tendered exclusive order READ as an EXCESS of exactly the tax — the pre-01-F82 reading", () => {
     const residual = settledConservationResidualPaisa({
       // what the fold derives from delivered lines
       billed_paisa: SALE_SUBTOTAL,

@@ -705,6 +705,15 @@ const payloadSchemas = {
    * comparing envelope ids into a projected value, and it would dedupe the wrong thing — `01-F8`
    * already covers transport duplicates, while the case this key exists for is a double-tapped
    * approval, i.e. two genuine events with two ids.
+   *
+   * ⚠ **WHAT AN EMITTER THAT FORGETS THIS KEY ACTUALLY COSTS — stated because it is worse than
+   * a rejected event, and it is what makes "the window closes at the first emit" load-bearing
+   * rather than tidy.** The parse-on-read surface includes `readAllParsed()`
+   * (`packages/sync-client/src/device-store.ts:766`), the FULL-LEDGER replay run at **store
+   * open** and by `refoldTx()`. So an unkeyed corrective is not merely refused on the way in:
+   * on the next launch `parseEvent` throws inside `openStore`, which is **a till that will not
+   * start** — and it will not start on the launch after that either, because `01-F1` makes the
+   * event permanent. Mint it at the UI or do not append.
    */
   "void.recorded": z.looseObject({
     // `01-F30` conserves per ORDER, and `26 §3`'s projection-key sidecar answers

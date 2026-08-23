@@ -38,6 +38,24 @@
  * than only the one that moves. So the number this function returns as `total_paisa` is the number
  * `01-F30`'s equation, `01-F63`'s attested `billed_paisa`, the `pay_total >= billed_effective`
  * cover test, the `shift_cash` fold's expected drawer and the receipt's *Total* row all mean.
+ *
+ * ⚠ **THAT IDENTITY HOLDS IN THE FR AND NOT YET IN THIS TREE, AND THE DIFFERENCE IS OWED —
+ * measured 2026-08-23 by adversarial review, comment-blind.** All five readers derive their
+ * billed figure from `billedEffectiveFromJsonLines`, which is line-derived and tax-BLIND
+ * (`packages/sync-client/src/folds/merge.ts:327`), and **none of them consults `taxSnapshot`**:
+ * `auditor.ts:364`, `settlement-closer.ts:154`, `settlement-guard.ts:113`, `line-advance.ts:262`,
+ * `printing.ts:1731`, `gateway.ts:484`, `aggregator-settlement.ts:180` — seven shipping sites.
+ * They must move TOGETHER when the posture matrix lands, and the move is blocked on blocker (1)
+ * below, the missing `billedCellPaisa` export. It is inert today only because `taxSnapshot` has
+ * zero production callers.
+ *
+ * The sentence above is stated as the FR's requirement rather than as a property of the code on
+ * purpose: a comment claiming a property that does not exist retires the assertion the next
+ * session would otherwise write, and this repo has shipped that mistake twice. **`packages/escpos`
+ * is the one place that ALREADY means the new thing** — `receipt-document.ts` renders
+ * *Subtotal / Tax / Total* and `receipt-tax-line.test.ts:380` pins `subtotal + tax = total` —
+ * so its producer (`printing.ts:1731`) is the mismatch, not the renderer.
+ *
  * Nothing downstream re-derives it (`01-F18`).
  *
  * **The change is ONE POSTURE WIDE.** Under `none` there is no tax and under `inclusive` the

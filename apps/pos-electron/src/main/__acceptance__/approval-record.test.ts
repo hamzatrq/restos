@@ -197,6 +197,13 @@ const voidLine = (): AppendRequest => ({
     amount_paisa: 45_000,
     reason: "wrong item discovered after the KOT",
     approver_user_id: null,
+    // FIXTURE-ONLY, added 2026-08-23 with `01-F83`'s required key. This file's rig header
+    // (`appendAs` runs every payload through the REAL `parseEvent`) makes an unkeyed corrective
+    // payload a ZodError the moment anything exercises `record.approve(...)` — the path
+    // `approval-record.ts:246` exists for — and it would read as a bug in the recorder rather
+    // than a stale fixture. Every use here is `record.raise(...)`, which READS the payload, so
+    // no claim in this file moved; only the payload became well-formed.
+    adjustment_attempt_id: "aak-void-1",
   },
   refs: ["order-1", "line-3"],
 });
@@ -208,6 +215,13 @@ const compLine = (): AppendRequest => ({
     amount_paisa: 32_000,
     reason: "cold when it reached the table",
     approver_user_id: null,
+    // FIXTURE-ONLY, added 2026-08-23 with `01-F83`'s required key. This file's rig header
+    // (`appendAs` runs every payload through the REAL `parseEvent`) makes an unkeyed corrective
+    // payload a ZodError the moment anything exercises `record.approve(...)` — the path
+    // `approval-record.ts:246` exists for — and it would read as a bug in the recorder rather
+    // than a stale fixture. Every use here is `record.raise(...)`, which READS the payload, so
+    // no claim in this file moved; only the payload became well-formed.
+    adjustment_attempt_id: "aak-comp-1",
   },
   refs: ["order-1"],
 });
@@ -220,6 +234,13 @@ const priceOverride = (): AppendRequest => ({
     unit_price_paisa: 28_000,
     reason: "price agreed with the owner for the wedding party",
     approver_user_id: null,
+    // FIXTURE-ONLY, added 2026-08-23 with `01-F83`'s required key. This file's rig header
+    // (`appendAs` runs every payload through the REAL `parseEvent`) makes an unkeyed corrective
+    // payload a ZodError the moment anything exercises `record.approve(...)` — the path
+    // `approval-record.ts:246` exists for — and it would read as a bug in the recorder rather
+    // than a stale fixture. Every use here is `record.raise(...)`, which READS the payload, so
+    // no claim in this file moved; only the payload became well-formed.
+    adjustment_attempt_id: "aak-override-1",
   },
   refs: ["order-1", "line-3"],
 });
