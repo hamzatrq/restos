@@ -18,6 +18,20 @@ import {
   recordModeSurface,
 } from "./mode-contract";
 // ── end MODE CONTRACT import ─────────────────────────────────────────────────────────────────
+// ── 27-F77 ORDERING SURFACE (added August 2026) — three call sites, all marked like this one. ──
+// `27-F77` fixes the counter's check/grid arrangement, and it is a claim about ONE surface that
+// must hold on EVERY panel — the transpose of what `mode-contract.ts` computes, and invisible to
+// happy-dom, which lays nothing out. Own file for the same reason that one has: the gate is
+// worked on by several sessions at once. See `ordering-surface.ts` for what it pins and why.
+import {
+  type ArrangementReport,
+  judgeOrderingSurface,
+  measureOrderingSurface,
+  orderingSurfaceResolved,
+  orderingSurfaceSummary,
+  recordOrderingSurface,
+} from "./ordering-surface";
+// ── end 27-F77 import ────────────────────────────────────────────────────────────────────────
 import { measureSurface, type SurfaceReport } from "./probe";
 
 /**
@@ -933,6 +947,14 @@ const run = async (): Promise<number> => {
   const measure = (): Promise<SurfaceReport> =>
     window.webContents.executeJavaScript(`(${measureSurface.toString()})()`);
 
+  // ── 27-F77 ORDERING SURFACE call site 1 of 3 ───────────────────────────────────────────────
+  // Serialized into the page exactly like `measureSurface` above, and like it, self-contained.
+  // It PRESSES NOTHING and CHANGES NOTHING — a pure read of the DOM the sweep has already
+  // navigated to — which is why adding it cannot move any surface this gate already measures.
+  const arrangement = (): Promise<ArrangementReport> =>
+    window.webContents.executeJavaScript(`(${measureOrderingSurface.toString()})()`);
+  // ── end 27-F77 call site 1 ─────────────────────────────────────────────────────────────────
+
   const click = (index: number): Promise<void> =>
     window.webContents.executeJavaScript(
       `(() => { const b = document.querySelectorAll('nav[aria-label="Main"] button')[${index}];
@@ -1551,6 +1573,12 @@ const run = async (): Promise<number> => {
         await click(i);
         await new Promise((r) => setTimeout(r, 350));
         judge(on(`tab:${tab.label || i}`), state, await measure());
+        // ── 27-F77 ORDERING SURFACE call site 2 of 3 ─────────────────────────────────────────
+        // Recorded for EVERY tab rather than for a named one, so the ordering surface identifies
+        // ITSELF (by carrying both a grid tile and a check line for one fixture dish) instead of
+        // being found by a tab label a rename or a reorder could silently take out of coverage.
+        recordOrderingSurface(on(`tab:${tab.label || i}`), state, panel, await arrangement());
+        // ── end 27-F77 call site 2 ───────────────────────────────────────────────────────────
         // `24-F14` — the Sold-out grid must be measured in the state it exists FOR. Checked
         // while the tab is open, because the greyed tiles only exist in this DOM.
         if (tab.label === "Sold out" && !(await soldOutReasonPresent())) {
@@ -1566,6 +1594,19 @@ const run = async (): Promise<number> => {
           });
         }
         await shoot(window, `${panel.label}--${state}--${tab.label || i}`);
+      }
+      // ── 27-F77 ORDERING SURFACE: the retry, and it is a MEASUREMENT fix, not a softened
+      // assertion. `Counter.tsx` draws no grid until `usePhysicalSize` has measured the box,
+      // and on the first panel's first sweep that has sometimes not happened at `+350 ms` — the
+      // same race that empties the `Sold out` grid on this gate's 22 pre-existing EMPTY MATCHes.
+      // One more pass, only when the whole state produced nothing, and the EMPTY MATCH still
+      // stands if it finds nothing either. See `orderingSurfaceResolved` for the measurements.
+      if (!orderingSurfaceResolved(panel.label, state)) {
+        for (const [i, tab] of shell.tabs.entries()) {
+          await click(i);
+          await new Promise((r) => setTimeout(r, 400));
+          recordOrderingSurface(on(`tab:${tab.label || i}`), state, panel, await arrangement());
+        }
       }
     };
 
@@ -1941,6 +1982,15 @@ const run = async (): Promise<number> => {
   for (const f of judgeModeContract()) failures.push(f);
   // ── end MODE CONTRACT call site 3 ────────────────────────────────────────────────────────
 
+  // ── 27-F77 ORDERING SURFACE call site 3 of 3 ─────────────────────────────────────────────
+  // ⚠ DELIBERATELY ABOVE `fatal`, for the reason the next block spells out and the twin check
+  // already paid for once: a check pushed below that line writes into an array nobody reads
+  // again while looking completely present. These verdicts carry no `fit` flag, so they bind on
+  // every panel including the `ships: false` ones — putting the check on the left costs no
+  // millimetre on any glass, and small glass is where the temptation to stack them lives.
+  for (const f of judgeOrderingSurface(PANELS.length)) failures.push(f);
+  // ── end 27-F77 call site 3 ───────────────────────────────────────────────────────────────
+
   // ---------------------------------------------------------------------------------------
   // 5. THE OWED REGISTER — exempt the known fourth defect, and FAIL if it has been fixed.
   //
@@ -1990,6 +2040,9 @@ const run = async (): Promise<number> => {
   // ── MODE CONTRACT: its own counts, printed separately so a healthy total cannot cover for a
   // dead cross-panel check. Notes only — the verdicts were pushed above `fatal`.
   note(modeContractSummary());
+  // The 27-F77 axis prints its own counts for the same reason: a healthy total must not be able
+  // to cover for a dead check.
+  note(orderingSurfaceSummary());
 
   if (probe.length > 0) {
     note("");
