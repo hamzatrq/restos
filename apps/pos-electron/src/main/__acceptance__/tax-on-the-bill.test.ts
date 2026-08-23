@@ -41,6 +41,7 @@ import {
 import type { DeviceStore, OpenOrderRow } from "@restos/sync-client";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { createGateway, type GatewayDeps } from "../gateway";
 import { advancesOnSettlement } from "../line-advance";
 import { createReceiptPrinter, type ReceiptPrinterDeps } from "../printing";
 import { closingActFor } from "../settlement-closer";
@@ -310,14 +311,25 @@ describe("§B 01-F82 — the cover test is against the TAX-INCLUSIVE total", () 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-// §C — THE SEAM. Five readers, ONE cell — and the sixth that did not move.
+// §C — THE SEAM. SIX readers, ONE cell.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 describe("§C — every reader of `billed_total` resolves the SAME cell", () => {
   /**
    * `16-F33` (a) refuses a second declaration of the posture beside the one settlement uses:
    * *"this corpus has already paid for the other arrangement once, when two declarations of one
-   * enabled channel set drifted silently and nothing could see it."* Five files, one import.
+   * enabled channel set drifted silently and nothing could see it."* Six files, one import.
+   *
+   * ⚠ **`gateway.ts` IS THE SIXTH AND IT JOINED IN AUGUST 2026.** This list held five, and the
+   * section closed with a test titled *"REPORTED, NOT ASSERTED — `gateway.ts`'s screen total has
+   * NOT moved"* that pinned `total_paisa: billedEffectiveFromJsonLines(` and said, in terms,
+   * *"WHEN THIS GOES RED … delete this test and add the reader to `READERS` above."* It went red
+   * and that is what happened. The gap it was holding open was a MONEY gap wider than the tax
+   * debt it was written for: `02-F63`'s rounding fires under posture `none` too, so at
+   * `charge_rounding_paisa = 1000` the Pay surface offered `Rs 405` on a bill the guard priced at
+   * `Rs 410` and the sale silently did not settle when the cashier keyed exactly what she was
+   * shown. **The tripwire worked and is worth copying** — it converted "somebody remembers" into
+   * a suite that failed on the day the file moved.
    */
   const READERS = [
     "settlement-guard.ts",
@@ -325,6 +337,7 @@ describe("§C — every reader of `billed_total` resolves the SAME cell", () => 
     "line-advance.ts",
     "aggregator-settlement.ts",
     "printing.ts",
+    "gateway.ts",
   ] as const;
 
   it("all five import the one resolver and none re-reads the environment itself", () => {
@@ -387,17 +400,17 @@ describe("§C — every reader of `billed_total` resolves the SAME cell", () => 
   // customer would hold. An assertion here would have pinned a branch that changes no outcome,
   // which is how a suite comes to defend a shape instead of a property.
 
-  it("⚠ REPORTED, NOT ASSERTED — `gateway.ts`'s screen total has NOT moved", () => {
-    // **This is a deliberate red flag in a green test, and it must fail LOUDLY when it closes.**
-    // `openOrders()` projects the cashier's `total_paisa` from the tax-blind sum, so with a
-    // posture configured she reads the PRE-tax figure while §B's guard demands the gross. The file
-    // is out of this session's allowlist (a concurrent session owns it), the change is one
-    // expression, and pinning the CURRENT state is the only honest thing a test can do: it turns
-    // "somebody remembers" into "the suite says so on the day it moves".
+  it("02-F63: the SCREEN's due is the CHARGE — the figure the guard and the paper mean", () => {
+    // ⚠ **THE ASSERTION THAT REPLACED THIS SECTION'S `REPORTED, NOT ASSERTED` TRIPWIRE.** A source
+    // read is a weak instrument (`K-3`'s dead-oracle shape), so the behavioural half is
+    // `screen-due.test.ts`, which drives `openOrders()` and `alreadySettled` off ONE row and
+    // asserts they answer the same number. This row is the seam half: it catches a reader silently
+    // switched back to the tax-blind sum in a file the behavioural suite does not construct.
     //
-    // WHEN THIS GOES RED: `gateway.ts:498` now uses the tax-inclusive door. Delete this test and
-    // add the reader to `READERS` above.
-    expect(readSrc("gateway.ts")).toContain("total_paisa: billedEffectiveFromJsonLines(");
+    // MUTANT THIS KILLS: `total_paisa: billedEffectiveFromJsonLines(row.json_lines)` — the
+    // shipping expression until August 2026, which put a DIFFERENT number on the glass from the
+    // one the ledger accepts under every posture once `02-F63` landed.
+    expect(readSrc("gateway.ts")).toContain("total_paisa: billedTotalPaisa(");
   });
 });
 
@@ -707,5 +720,164 @@ describe("§E 02-F63 — sub-rupee is PRINTED, and the charge is rounded", () =>
         `"${bad}" was accepted`,
       ).toThrow(/02-F63/);
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// §E — THE GLASS. What the cashier is SHOWN, against what the guard will accept.
+//
+// ⚠ **THE GAP THIS SECTION CLOSES WAS A MONEY GAP AND IT WAS LIVE AT THE SHIPPING POSTURE.**
+// Adversarial review of `8ef7cf1`, reproduced: `gateway.ts`'s `openOrders()` projected
+// `total_paisa` from `billedEffectiveFromJsonLines` — line-derived, tax-blind and UNROUNDED — while
+// every settlement reader used `billedTotalPaisa`. Before `02-F63` the two agreed *by construction*
+// under `16-F1`'s default cell, so §C could report the sixth reader as an open tax debt. R70's
+// rounding broke the agreement under **every** posture including `none`: at
+// `charge_rounding_paisa = 1000` the Pay surface offered `Rs 405`, the keypad is whole-rupees-only,
+// the cashier keyed exactly what the till told her — and `alreadySettled` was `null`,
+// `closingActFor` was `null` and no line advanced. **The sale silently did not settle.**
+//
+// These are BEHAVIOURAL and §C's row is the source read. Neither subsumes the other: §C catches a
+// reader switched back in a file this section does not drive, and this section catches a wiring
+// that compiles and still disagrees.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The gateway's non-money dependencies — scenery, so the money is the only variable. */
+const gatewayDeps = (store: Pick<DeviceStore, "openOrders">): GatewayDeps =>
+  ({
+    store: {
+      identity: { org_id: "org1", branch_id: "br1", device_id: "dev1" },
+      kitchenQueue: () => [],
+      availability: () => [],
+      branchTimeStatus: () => ({
+        offset_ms: 0,
+        basis: "branch",
+        skew_ms: null,
+        skew_flagged: false,
+      }),
+      ...store,
+    },
+    catalog: () => null,
+    menu: () => [],
+    priceOf: () => null,
+    actor: "Ayesha",
+    session: () => ({ user_id: "user-1", display_name: "Ayesha" }),
+    deviceLabel: "Counter 1",
+    training: false,
+    reachability: () => ({ lan: "ok", hub: "ok", cloud: "down" }),
+    blockedCursor: () => null,
+    catalogRefusal: () => null,
+    businessDay: () => "2026-07-26",
+    panelPpi: () => 100.5,
+    panelFit: () => null,
+    aging: () => ({ amberAt: 600_000, redAt: 1_200_000 }),
+  }) as unknown as GatewayDeps;
+
+/** The one number the Pay surface puts in front of the cashier (`Counter.tsx`'s `dueP`). */
+const screenDue = (over: Partial<OpenOrderRow> = {}): number => {
+  const [order] = createGateway(gatewayDeps({ openOrders: () => [row(over)] })).openOrders();
+  return order?.total_paisa ?? -1;
+};
+
+describe("§E 02-F63 — the screen shows the CHARGE, and it is the guard's own number", () => {
+  it("posture `none`, step Rs 10: tendering the DISPLAYED due settles the bill", () => {
+    // ⚠ **THE REPRODUCTION, VERBATIM.** Before this fix the screen said 40,500 and the guard
+    // wanted 41,000: `alreadySettled` null, `closingActFor` null, `advancesOnSettlement` false —
+    // the cashier keys what she is shown and the sale does not close. MUTANT THIS KILLS:
+    // `total_paisa: billedEffectiveFromJsonLines(row.json_lines)`, the shipping expression.
+    setPosture(undefined, undefined);
+    process.env[CHARGE_ROUNDING_ENV] = "1000";
+    try {
+      const due = screenDue();
+      expect(due, "the screen still offers the unrounded subtotal").toBe(41_000);
+      expect(alreadySettled({ order_id: "o", pay_total: due, json_lines: LINES })).not.toBeNull();
+      expect(closingActFor(row({ pay_total: due }))?.billed_paisa).toBe(due);
+      expect(
+        advancesOnSettlement({ order_type: "takeaway", pay_total: due, json_lines: LINES }),
+      ).toBe(true);
+    } finally {
+      delete process.env[CHARGE_ROUNDING_ENV];
+    }
+  });
+
+  it("the screen and the guard agree under every posture and step — one source, not two", () => {
+    // The property rather than the one case. MUTANT THIS KILLS: a screen that rounds but resolves
+    // its own cell or its own step (`16-F33` (a)'s drift), which passes the case above and fails
+    // the moment either configuration differs from the guard's.
+    for (const [posture, rate] of [
+      [undefined, undefined],
+      ["inclusive", "1600"],
+      ["exclusive", "1600"],
+      ["exclusive", "1650"],
+    ] as const) {
+      for (const step of ["1", "100", "1000"]) {
+        setPosture(posture, rate);
+        process.env[CHARGE_ROUNDING_ENV] = step;
+        try {
+          const due = screenDue();
+          const what = `${String(posture)} @ ${step}`;
+          expect(
+            alreadySettled({ order_id: "o", pay_total: due, json_lines: LINES }),
+            `${what}: the displayed due did not cover the bill`,
+          ).toEqual({ order_id: "o", billed_paisa: due, paid_paisa: due });
+          expect(closingActFor(row({ pay_total: due }))?.billed_paisa, what).toBe(due);
+          // One paisa short must NOT settle, or the equality above proves nothing about the guard.
+          expect(
+            alreadySettled({ order_id: "o", pay_total: due - 1, json_lines: LINES }),
+            `${what}: a short tender settled the bill`,
+          ).toBeNull();
+        } finally {
+          delete process.env[CHARGE_ROUNDING_ENV];
+        }
+      }
+    }
+  });
+
+  it("02-F63 (g): a non-empty order never reads `Rs 0` on the glass", () => {
+    // The screen half of the floor. MUTANT THIS KILLS: the pre-(g) tree, where an order under half
+    // a step read `TOTAL Rs 0` on the Pay surface and `Nothing more is due` on a bill nobody paid.
+    // ⚠ The 400 is an arithmetic boundary and NOT a claim about prices (founder, August 2026:
+    // *"nothing costs 4rs"*); `02-F63` (g) is an invariant defence, not a small-bill trade.
+    setPosture(undefined, undefined);
+    process.env[CHARGE_ROUNDING_ENV] = "1000";
+    try {
+      const under = JSON.stringify({
+        "line-chai": { item_id: "i-chai", qty: 1, unit_price_paisa: 400, states: ["placed"] },
+      });
+      expect(screenDue({ json_lines: under }), "below half a step").toBe(1_000);
+      // `01-F17`'s narrowing survives the floor: an order with nothing billable is still not a
+      // settled one, and its due is still zero rather than one step.
+      expect(screenDue({ json_lines: "{}" }), "an empty order").toBe(0);
+      expect(alreadySettled({ order_id: "o", pay_total: 0, json_lines: "{}" })).toBeNull();
+    } finally {
+      delete process.env[CHARGE_ROUNDING_ENV];
+    }
+  });
+
+  it("⚠ REPORTED, NOT FIXED — a fully-VOIDED order still presents as an empty one", () => {
+    // ⚠ **THE SAME INVARIANT BREAKS THROUGH A SECOND DOOR, IT PREDATES R70, AND IT IS OUT OF THIS
+    // CHANGE'S SCOPE (`02-F63` (g)'s closing clause).** `billed_total == 0` is the sentinel for
+    // *nothing billable*; `02-F63` (g) closed the door rounding opened. It did NOT close this one:
+    // `01-F30` excludes exited lines, so a confirmed order whose every line is voided
+    // (`02-F61`'s post-confirm act, which `main/line-void.ts` ships) projects zero and is
+    // byte-identical, through both narrowings, to an order that never had a line.
+    //
+    // **Measured at the SHIPPED default step with no rounding in play**, so this is not a rounding
+    // defect and a granularity of 100 does not hide it. Whether such an order is a sale that
+    // happened is `01-F30`'s own clause to decide — doc 01's act, not doc 02's — and inventing an
+    // answer here would be commandment 2. This test PINS the current behaviour so the day someone
+    // rules on it, the suite says which readers move.
+    setPosture(undefined, undefined);
+    const voided = JSON.stringify({
+      "line-karahi": { item_id: "i-karahi", qty: 2, unit_price_paisa: 45_000, states: ["voided"] },
+      "line-naan": { item_id: "i-naan", qty: 4, unit_price_paisa: 5_000, states: ["voided"] },
+    });
+    expect(screenDue({ json_lines: voided }), "six lines of food, all voided").toBe(0);
+    expect(screenDue({ json_lines: "{}" }), "and an order that never had a line").toBe(0);
+    expect(alreadySettled({ order_id: "o", pay_total: 0, json_lines: voided })).toBeNull();
+    expect(closingActFor(row({ json_lines: voided, pay_total: 0 }))).toBeNull();
+    expect(
+      advancesOnSettlement({ order_type: "takeaway", pay_total: 0, json_lines: voided }),
+      "02-F31 advances every line at a tender of zero",
+    ).toBe(true);
   });
 });

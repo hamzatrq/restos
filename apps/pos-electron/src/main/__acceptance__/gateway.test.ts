@@ -402,23 +402,53 @@ describe("ORACLE ROUND 2 / A15 — the money guard is EXECUTED, not merely decla
       ],
     } as Partial<DeviceStore>);
 
+  /** A corrupt tender sum — the money field this projection passes through UNCHANGED. */
+  const negativePayTotal = () =>
+    stubStore({
+      openOrders: () => [{ order_id: "order-bad", pay_total: -1, json_lines: JSON_LINES }],
+    } as Partial<DeviceStore>);
+
   it("refuses a negative total at the plane boundary rather than blanking the till", () => {
     // MoneyValue throws a RangeError on a negative and React 19 unmounts the root on a render
     // throw — a blank region on a counter screen is indistinguishable from a hung app. 01-F54's
     // remedy is to DEGRADE, and there is nothing to degrade to when the money is the corrupt
     // value, so the boundary is where it has to be refused.
-    expect(() => createGateway(deps({ store: negativeStore(-1) })).openOrders()).toThrow(
+    //
+    // ⚠ **THE FIXTURE MOVED FROM A NEGATIVE LINE PRICE TO A NEGATIVE `pay_total`, AND THE REASON
+    // IS THE ASSERTION ITSELF (August 2026, `02-F63`).** `total_paisa` now comes from
+    // `billedTotalPaisa`, which refuses a negative line INSIDE `@restos/domain` — see the case
+    // below — so a corrupt line price can no longer reach this schema and a test aimed at it would
+    // be asserting a message from a door one layer down while claiming to prove the gateway runs
+    // Zod. `pay_total` is the money field `openOrders` passes through untouched, so it is the one
+    // input that still exercises `checked()` on this projection. The claim is unchanged and the
+    // instrument is aimed at the thing it names.
+    expect(() => createGateway(deps({ store: negativePayTotal() })).openOrders()).toThrow(
       /failed its IPC contract/,
     );
   });
 
   it("names WHICH payload failed, so a kernel bug is not anonymous", () => {
     try {
-      createGateway(deps({ store: negativeStore(-500) })).openOrders();
+      createGateway(deps({ store: negativePayTotal() })).openOrders();
       throw new Error("expected a refusal");
     } catch (e) {
       expect((e as Error).message).toContain("open order order-bad");
     }
+  });
+
+  it("a corrupt LINE price is refused too — loudly, and it names the line", () => {
+    // The half the fixture above gave up, kept rather than dropped: the same corrupt-money hazard
+    // one door earlier. `01-F82`'s charge runs `taxSnapshot`, which brands every per-line figure,
+    // so a negative price is refused before it can become a `total_paisa` at all — and the message
+    // names the LINE, which is strictly more useful than naming the order. What must NOT happen is
+    // a silent pass-through or a swallowed throw: `01-F54` degrades what it can, and there is
+    // nothing to degrade to when the money itself is the corrupt value.
+    expect(() => createGateway(deps({ store: negativeStore(-1) })).openOrders()).toThrow(
+      /line-a must be a non-negative safe integer/,
+    );
+    expect(() => createGateway(deps({ store: negativeStore(-500) })).openOrders()).toThrow(
+      RangeError,
+    );
   });
 
   it("a healthy total still passes through untouched", () => {

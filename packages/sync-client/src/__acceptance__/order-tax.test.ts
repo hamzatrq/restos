@@ -31,11 +31,18 @@
 //  - **Where the cell comes from.** `16-F27` makes it layer-2 org configuration and `01-F87` rules
 //    its carrier; neither is built (`plans/v0.md` gap 3). A resolved cell arrives here.
 
-import { addPaisa, paisa, TAX_OFF, type TaxCell, totalPaisaOrNull } from "@restos/domain";
+import {
+  addPaisa,
+  paisa,
+  TAX_OFF,
+  type TaxCell,
+  type TaxLineSnapshot,
+  totalPaisaOrNull,
+} from "@restos/domain";
 import { describe, expect, it } from "vitest";
 
 import { billedEffectiveFromJsonLines } from "../folds/merge.js";
-import { billedTotalPaisa, orderChargeSnapshot } from "../order-tax.js";
+import { billedTotalPaisa, type ChargeSnapshot, orderChargeSnapshot } from "../order-tax.js";
 
 // ── fixtures, in the shape `merge.ts` projects into `json_lines` ──────────────────────────────
 
@@ -60,7 +67,8 @@ const linesOf = (map: Record<string, Cell>): string => JSON.stringify(map);
  *
  * The suite's subject up to §E is `01-F82` — that `billed_total` is the tax-inclusive number — and
  * a rounding step in those fixtures would change what they measure. 1 is legal and is the exact
- * identity (`roundPaisaToGranularity` refuses only 0), so every figure below is the same figure
+ * identity (`chargePaisaAtGranularity` refuses only 0, and `02-F63` (g)'s floor at a step of 1
+ * is the value itself), so every figure below is the same figure
  * this file asserted before R70. **It is deliberately NOT the product's default**, which is 100:
  * `02-F63` (c) records that a default of no rounding is a till asking for a coin that does not
  * exist. §E is where the shipped default and the tens-of-rupees case are asserted.
@@ -399,18 +407,29 @@ describe("§E 02-F63 — the rounded charge, and the row that makes the paper cl
     });
   });
 
-  it("01-F34: key order in `json_lines` cannot move the charge OR the rounding", () => {
+  it("01-F34: key order in `json_lines` cannot move the charge OR the rounding OR a LINE", () => {
     // Standing law 1, extended to the new figures. The rounding reads exactly one number — the
     // snapshot total — and that total is an exact integer sum over per-line figures, so it is
     // order-invariant and so is any function of it. MUTANT THIS KILLS: rounding the total and then
     // distributing the residue across the lines, which is the shape this design invites.
+    //
+    // ⚠ **THIS TEST NAMED THAT MUTANT AND DID NOT KILL IT** (adversarial review of `8ef7cf1`).
+    // `tax.lines[0].line_total_paisa += rounding_paisa` — `02-F63` (e)'s forbidden implementation,
+    // verbatim — SURVIVED the whole repo: 0 kills in `sync-client`'s 942 and 0 in
+    // `apps/pos-electron`'s 1300. The reason is the paragraph that used to stand here: it compared
+    // only ORDER-LEVEL figures, on the argument that `tax.lines` "legitimately reverses with the
+    // map" and that deep equality would pin the array ORDER. Both halves were true and the
+    // conclusion did not follow — the array order is not the claim, the VALUES are, and a mutant
+    // that moves a per-line value with `Object.entries` order is invisible to a total. It is the
+    // round-3 law's own failure shape: a mechanism built correctly and never aimed at the case
+    // that matters.
+    //
+    // So the lines are compared **keyed by `line_id`**, which is order-blind by construction and
+    // still pins every money value on every line.
     const forward = ORDER_JSON;
     const reversed = linesOf(Object.fromEntries(Object.entries(ORDER).reverse()));
-    //
-    // The comparison is on the FIGURES and not on the whole snapshot: `16-F5` snapshots per line
-    // and `taxSnapshot` preserves the caller's line order, so `tax.lines` legitimately reverses
-    // with the map. What must not move is any money value — which is what `01-F34` is about, and
-    // asserting deep equality here would pin the array order instead.
+    const byLineId = (snap: ChargeSnapshot): Record<string, TaxLineSnapshot> =>
+      Object.fromEntries(snap.tax.lines.map((line) => [line.line_id, line]));
     for (const step of [RUPEE, TEN_RUPEES]) {
       for (const c of [TAX_OFF, INCLUSIVE_16, EXCLUSIVE_16]) {
         const a = orderChargeSnapshot(forward, c, step);
@@ -424,6 +443,12 @@ describe("§E 02-F63 — the rounded charge, and the row that makes the paper cl
         expect(b.tax.total_paisa, `${c.posture} @ ${step}`).toBe(a.tax.total_paisa);
         expect(b.tax.subtotal_paisa, `${c.posture} @ ${step}`).toBe(a.tax.subtotal_paisa);
         expect(b.tax.tax_total_paisa, `${c.posture} @ ${step}`).toBe(a.tax.tax_total_paisa);
+        // The same four lines, same ids, same three money fields each — and `toEqual` on the maps
+        // rather than a loop, so a line that appears in one snapshot and not the other fails too.
+        expect(
+          byLineId(b),
+          `${c.posture} @ ${step}: a per-LINE figure moved with key order`,
+        ).toEqual(byLineId(a));
       }
     }
   });
@@ -458,5 +483,45 @@ describe("§E 02-F63 — the rounded charge, and the row that makes the paper cl
 
   it("a step of ZERO is refused rather than producing a NaN charge", () => {
     expect(() => billedTotalPaisa(ORDER_JSON, TAX_OFF, 0)).toThrow(RangeError);
+  });
+
+  it("02-F63 (g): a NON-EMPTY order can never present as an empty one", () => {
+    // ⚠ **THE INVARIANT THE (g) AMENDMENT DEFENDS, at this join rather than in `domain`.**
+    // `billed_total == 0` is a **sentinel** meaning *this order has nothing billable*, and two
+    // shipping modules narrow on it and return nothing (`settlement-guard.ts`,
+    // `settlement-closer.ts`) because closing there would *"settle a sale that has not happened"*
+    // (`01-F17`). Adversarial review of `8ef7cf1`: at `charge_rounding_paisa = 1000`,
+    // `billedTotalPaisa` answered **0** for an order with food on it — so the sentinel became
+    // reachable from a non-empty order and every consequence is permanent under `01-F1`: the cover
+    // test passes at a tender of zero, `order.settlement_closed` is never emitted so the order
+    // stays open for ever and never reaches `01-F63`'s attestation, the main-process
+    // double-settlement refusal is off, and the receipt prints `Total Rs 0`.
+    //
+    // ⚠ The fixture is an arithmetic boundary and **not a claim about prices** — founder, August
+    // 2026: *"nothing costs 4rs … even the basic transparent plastic box in which you deliver food
+    // costs around 15-20rs."* The floor is not a trade against cheap items, which is why it binds
+    // at every granularity.
+    //
+    // MUTANT THIS KILLS: the pre-(g) tree. Asserted HERE and not only in `packages/domain` because
+    // this is the function every one of the five readers of `billed_total` actually calls, and a
+    // floor applied in the primitive but bypassed at the join would be invisible one package over.
+    const under = linesOf({ a: cell(1, 400) }); // below half of a Rs 10 step
+    expect(billedTotalPaisa(under, TAX_OFF, TEN_RUPEES), "below half a step").toBe(1_000);
+    const snap = orderChargeSnapshot(under, TAX_OFF, TEN_RUPEES);
+    // `02-F63` (b): the derived row still closes, and it is the one that pays for the floor.
+    expect(snap.rounding_paisa, "the receipt would print `Rounded up Rs 6`").toBe(600);
+    expect(plusSigned(snap.tax.total_paisa, snap.rounding_paisa)).toBe(snap.charge_total_paisa);
+    // The floor is not a tax rule either (`02-F63` (a)) — it fires under every posture.
+    for (const c of [TAX_OFF, INCLUSIVE_16, EXCLUSIVE_16, EXCLUSIVE_16_5]) {
+      expect(billedTotalPaisa(under, c, TEN_RUPEES), `posture ${c.posture}`).toBe(1_000);
+    }
+    // ⚠ **AND THE SENTINEL'S TRUE CASE STILL ANSWERS ZERO** — the over-correction, which would
+    // charge one step for an order with nothing on it and for `01-F30`'s fully-voided order that
+    // "nets to zero". That second fixture is in `SWEEP` and it is the one that matters: a voided
+    // order reaching `billed == 0` is `01-F30`'s own rule, not this amendment's business.
+    for (const [what, json] of SWEEP) {
+      const out = billedTotalPaisa(json, TAX_OFF, TEN_RUPEES);
+      expect(out === 0, `${what}: charged ${out}`).toBe(billedEffectiveFromJsonLines(json) === 0);
+    }
   });
 });

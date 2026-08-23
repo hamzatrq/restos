@@ -69,7 +69,13 @@ import type {
   PrinterCapability,
   ShiftCloseData,
 } from "../index.js";
-import { DOCUMENT_SPECS, MIN_COLUMNS, render } from "../index.js";
+import {
+  DOCUMENT_SPECS,
+  MIN_COLUMNS,
+  PRINTER_CAPABILITIES,
+  render,
+  UNKNOWN_PRINTER_CAPABILITY,
+} from "../index.js";
 
 // ── the instruments ──────────────────────────────────────────────────────────────────────────────
 
@@ -330,6 +336,46 @@ describe("03-F49/03-F36 — the cash documents declare their own column floor", 
       expect(result.document_type).toBe(type);
       expect(result.required_columns).toBe(floor);
       expect(result.available_columns).toBe(floor - 1);
+    }
+  });
+
+  it("02-F63 (c): at a SUB-RUPEE step the widest cash row is 38, and the floor still does not move", () => {
+    // ⚠ **`min-columns.ts` CLAIMED THESE FIGURES WERE WHOLE RUPEES "BY CONSTRUCTION" AND THAT WAS
+    // WRONG — IT IS BY CONFIGURATION** (adversarial review, August 2026). `02-F63` (c) makes
+    // `charge_rounding_paisa` layer-2 configuration and states that a step of **1 paisa** is legal;
+    // at that step the `aggregator_receivable` row carries paisa and its widest form is
+    // `Aggregator receivable Rs 99,999,999.99` = 21 + 1 + 16 = **38** against a declared floor of
+    // **35**. This measures that number instead of arguing it.
+    //
+    // **And it pins the reason the floor does not move**, which is a claim about hardware rather
+    // than about arithmetic: no declared `PrinterCapability` lies between 35 and 38, so a floor of
+    // 38 would admit and refuse exactly the printers 35 does. If a capability is ever declared in
+    // that band the argument stops holding and this assertion is what says so — the alternative
+    // was leaving it in a comment, which is how the "by construction" claim survived in the first
+    // place. MUTANT THIS KILLS: a capability row at 36 or 37 columns added with no floor review.
+    const example = specOf("shift_close_slip").example_data as ShiftCloseData;
+    const subRupee: ShiftCloseData = {
+      ...example,
+      expected_by_method: { ...example.expected_by_method, aggregator_receivable: 9_999_999_999 },
+    };
+    const out = okOf(
+      render(
+        specOf("shift_close_slip"),
+        shippedDefaults(specOf("shift_close_slip")),
+        subRupee,
+        WIDE,
+      ),
+      "shift slip at a sub-rupee step",
+    );
+    const row = linesOf(out.blocks).find((line) => line.text.startsWith("Aggregator receivable"));
+    expect(row?.text).toBe("Aggregator receivable Rs 99,999,999.99");
+    expect(row?.columns, "the widest row a legal configuration can produce").toBe(38);
+    expect(MIN_COLUMNS.shift_close_slip, "the floor did not move").toBe(35);
+    for (const caps of [...PRINTER_CAPABILITIES, UNKNOWN_PRINTER_CAPABILITY]) {
+      expect(
+        caps.cols_font_a >= MIN_COLUMNS.shift_close_slip && caps.cols_font_a < 38,
+        `${caps.model_id} at ${caps.cols_font_a} columns sits between the floor and the widest row`,
+      ).toBe(false);
     }
   });
 

@@ -374,11 +374,34 @@ export const runAuditor = async (args: RunAuditorArgs): Promise<AuditorReport> =
           // as a worry:** under `16-F2`'s `exclusive` posture the customer tenders `bill + tax`
           // and this derives only the bill, so `settledConservationResidualPaisa` reads an EXCESS
           // of exactly the tax on **every** settled order — and `EXCESS_TENDER_IS_EXCEPTION` is
-          // `false`, so it is SILENT. That is the finding `01-F82` was ruled to delete, surviving
-          // on the one plane the ruling's implementation could not reach. Under `none` (`16-F1`'s
-          // default, and the v0 seed's) and under `inclusive` the number does not move at all, so
-          // nothing is wrong today — the debt becomes live the first time an org types an
-          // exclusive rate.
+          // `false`, so it is SILENT.
+          //
+          // ⚠ **AND THE SENTENCE THAT FOLLOWED THAT ONE WENT FALSE IN `8ef7cf1` AND WAS NOT
+          // TOUCHED — IT IS CORRECTED HERE RATHER THAN DELETED, BECAUSE THE FAILURE MODE FLIPPED
+          // FROM SILENT TO LOUD (adversarial review, August 2026).** It read: *"Under `none`
+          // (`16-F1`'s default, and the v0 seed's) and under `inclusive` the number does not move
+          // at all, so nothing is wrong today — the debt becomes live the first time an org types
+          // an exclusive rate."* That was true while the only gap was the tax. `02-F63` (founder
+          // ruling R70) rounds the CHARGE inside `billed_total`, binds card and cash alike and
+          // **fires under posture `none`** — so a charge rounded DOWN makes `pay_total` smaller
+          // than the pre-rounding figure this line derives, and the residual comes out
+          // **POSITIVE**: a `conservation` finding raised against a correctly settled order.
+          // Reproduced at the v0 seed's own posture: `charge_rounding_paisa = 1000`,
+          // `billed_effective` 76,400, `pay_total` 76,000, residual **+400 → flagged**. It needs
+          // no human in the loop either — `aggregator-settlement.ts` mints `amount_paisa: billed`
+          // (the ROUNDED charge) automatically on the confirm path, and `services/jobs` runs this
+          // Auditor on a BullMQ repeatable.
+          //
+          // **IT CANNOT BE MADE CORRECT ON THIS PLANE, AND THE CHECK IS NOT SILENCED FOR IT.** A
+          // true recomputation needs the org's posture AND its granularity; neither reaches the
+          // cloud until `01-F87`'s carrier ships, and `02-F63` (c) puts no upper bound on the step,
+          // so **no tolerance is derivable** — a positive residual of 400 paisa is
+          // indistinguishable here from a genuine 400-paisa shortfall. A rounding-shaped exemption
+          // would therefore have to guess a step, and guessing one wrong deletes real shortfalls up
+          // to it. So the finding is still RAISED, and what changed is what it CLAIMS: it names
+          // both candidate causes instead of asserting an `01-F32` violation. `20 §4.2` makes this
+          // report something a human reads; a finding that overstates its own certainty is how that
+          // human learns to ignore the leg.
           //
           // **Do NOT "fix" this by reading `01-F63`'s attested `billed_paisa` instead.** The
           // T-01-11 ruling deleted the Auditor's own mirror of the billed sum precisely so that
@@ -400,9 +423,13 @@ export const runAuditor = async (args: RunAuditorArgs): Promise<AuditorReport> =
               event_id: null,
               lamport_seq: null,
               detail:
-                `settled order ${order.order_id} falls short of billed: tendering ` +
-                `${order.pay_total} − refunds ${order.refund_total} < billed ${billed} ` +
-                `(shortfall ${residual} paisa; 01-F30/01-F32)`,
+                `settled order ${order.order_id}: tendering ${order.pay_total} − refunds ` +
+                `${order.refund_total} < billed ${billed} (residual ${residual} paisa). TWO ` +
+                "CANDIDATE CAUSES AND THIS PLANE CANNOT TELL THEM APART: a genuine shortfall " +
+                "(01-F30/01-F32), or 02-F63's charge rounding, which rounds DOWN inside " +
+                "billed_total and fires under every tax posture. The cloud cannot recompute the " +
+                "charge until 01-F87's config carrier delivers the org's posture and its " +
+                "charge_rounding_paisa; until then compare against the till's own settled bill",
             });
           }
         } catch (error) {

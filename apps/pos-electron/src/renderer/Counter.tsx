@@ -153,11 +153,21 @@ const STATE_LINE: React.CSSProperties = {
  * the Pay surface below cannot drift from what a test asserts.
  *
  * **It is the SAME comparison `main/settlement-guard.ts` makes, on the same two numbers**, and
- * that is the point rather than a duplication: `gateway.ts` projects `total_paisa` from the
- * engine's own `billedEffectiveFromJsonLines` and `paid_paisa` from the fold's `pay_total`, so
- * this reads the guard's two inputs after one lossless mapping. The refusal is decided in main
- * (Commandment 8's side of `18 §9`); this decides only what the cashier is TOLD, and a screen that
- * used a different rule would offer a `TAKE CASH` the ledger then refuses.
+ * that is the point rather than a duplication: `gateway.ts` projects `total_paisa` through
+ * `billedTotalPaisa` — the guard's own door, at the guard's own cell and step — and `paid_paisa`
+ * from the fold's `pay_total`, so this reads the guard's two inputs after one lossless mapping. The
+ * refusal is decided in main (Commandment 8's side of `18 §9`); this decides only what the cashier
+ * is TOLD, and a screen that used a different rule would offer a `TAKE CASH` the ledger then
+ * refuses.
+ *
+ * ⚠ **THE PROJECTION USED TO BE `billedEffectiveFromJsonLines` AND THE SENTENCE ABOVE STILL SAID
+ * "the same two numbers" — it was true until `02-F63` and false after it** (adversarial review of
+ * `8ef7cf1`). That helper is tax-blind and unrounded; before R70 it agreed with the guard by
+ * construction under `16-F1`'s default cell, and R70's rounding broke the agreement under **every**
+ * posture. The measured cost was not this predicate but `TenderPanel`'s `dueP`: at
+ * `charge_rounding_paisa = 1000` the screen offered Rs 405 on a bill the guard priced at Rs 410,
+ * the cashier keyed exactly what she was shown, and the sale silently did not settle. Fixed at the
+ * projection, because the fix belongs where the one source is.
  *
  * **`total_paisa > 0` is the same narrowing and for the same reason** — `0 >= 0` would make every
  * empty order read as settled, and refusing a sale that has not happened is the `01-F17` break

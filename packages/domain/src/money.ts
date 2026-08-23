@@ -169,17 +169,40 @@ export const rupeesFromPaisa = (amount: Paisa): { rupees: number } => {
 };
 
 /**
- * Round a money value to the nearest multiple of a granularity step (`02-F63`, founder ruling R70).
+ * What the customer is CHARGED for a bill of `amount`, at the org's granularity step (`02-F63`,
+ * founder ruling R70).
  *
- * **This is what the customer is CHARGED, and it is not a display rule.** R70: *"round to rupees …
- * some restaurants round to 10s and some round to rupees … even coins are getting rare."* The step
- * is `00 §7` layer-2 org configuration (`charge_rounding_paisa`, default 100), so it arrives as an
- * argument and is never read from anywhere by this function — `01-F87` bans a fold input keyed on
- * configuration, and a helper that resolved its own step would put the same hazard one layer down.
+ * **It is not a display rule.** R70: *"round to rupees … some restaurants round to 10s and some
+ * round to rupees … even coins are getting rare."* The step is `00 §7` layer-2 org configuration
+ * (`charge_rounding_paisa`, default 100), so it arrives as an argument and is never read from
+ * anywhere by this function — `01-F87` bans a fold input keyed on configuration, and a helper that
+ * resolved its own step would put the same hazard one layer down.
  *
- * Rounding policy: ROUND-HALF-UP, the policy `applyRateBps` already declares, so a charge and the
- * tax inside it cannot round by two different rules (`02-F63` (d)). Always-down and always-up were
- * both considered and refused there by name; changing this is a spec act, not an edit here.
+ * ⚠ **THE NAME WAS `roundPaisaToGranularity` UNTIL `02-F63` (g) LANDED, AND THE RENAME IS THE
+ * POINT RATHER THAN TIDYING.** With (g)'s floor this function no longer answers *the nearest
+ * multiple* — at a step of 1,000 an input below 500 comes back as 1,000 and not 0 — so a name promising pure
+ * rounding would be a name that lies about money, which this repo has already paid for three times
+ * in comments. There is exactly one production caller (`packages/sync-client`'s
+ * `orderChargeSnapshot`) and the old name has no surviving export, so nothing can reach the pure
+ * rounding under a name that describes it.
+ *
+ * Policy, in the order it applies:
+ *
+ *  1. **ROUND-HALF-UP to the nearest multiple**, the policy `applyRateBps` already declares, so a
+ *     charge and the tax inside it cannot round by two different rules (`02-F63` (d)). Always-down
+ *     and always-up were both considered and refused there by name.
+ *  2. **`02-F63` (g)'s FLOOR: a bill greater than zero is never charged nothing — and it defends an
+ *     INVARIANT rather than a price.** `billed_total == 0` is a **sentinel** meaning *this order
+ *     has nothing billable*: `settlement-guard.ts`'s `alreadySettled` and `settlement-closer.ts`'s
+ *     `closingActFor` both narrow on `billed <= 0` and return nothing, because closing there would
+ *     *"settle a sale that has not happened"* (`01-F17`). Below half a step, half-up answers `0` —
+ *     so rounding made that sentinel reachable from a NON-empty order, food served and lines on the
+ *     ledger, and three correct modules went on honouring a flag whose meaning had changed
+ *     underneath them (`pay_total >= billed` holds at a tender of zero; `order.settlement_closed`
+ *     is never emitted, so the order never reaches `01-F63`'s attestation and stays open for ever
+ *     under `01-F1`; `02-F31` advances every line). A positive `amount` therefore floors at one
+ *     step, at EVERY granularity — there is no small-bill trade to make and `02-F63` (g) refuses to
+ *     argue it as one. **A zero `amount` stays zero**, because that is the sentinel's true case.
  *
  * Exact and float-free on all safe integers: the remainder is removed before anything is added, so
  * every intermediate is an exactly representable integer. A result past `Number.MAX_SAFE_INTEGER`
@@ -189,19 +212,26 @@ export const rupeesFromPaisa = (amount: Paisa): { rupees: number } => {
  * the identical choice for the identical reason).
  *
  * A step of `1` is the identity — legal, and deliberately NOT the default: `02-F63` (c) records
- * that a default of no rounding is a till that asks for a coin which does not exist.
+ * that a default of no rounding is a till that asks for a coin which does not exist, and it is the
+ * restaurant's own choice. The floor is invisible there, and invisible at the shipped Rs 1 step for
+ * every `14-F29` whole-rupee menu, which is what keeps the amendment checkable.
  */
-export const roundPaisaToGranularity = (amount: Paisa, granularity_paisa: number): Paisa => {
-  const a = asPaisaInt(amount, "roundPaisaToGranularity amount"); // brands are compile-time (18 §4)
-  const g = asPaisaInt(granularity_paisa, "roundPaisaToGranularity granularity");
+export const chargePaisaAtGranularity = (amount: Paisa, granularity_paisa: number): Paisa => {
+  const a = asPaisaInt(amount, "chargePaisaAtGranularity amount"); // brands are compile-time (18 §4)
+  const g = asPaisaInt(granularity_paisa, "chargePaisaAtGranularity granularity");
   if (g === 0) {
-    throw new RangeError("roundPaisaToGranularity granularity must be >= 1 paisa, got 0");
+    throw new RangeError("chargePaisaAtGranularity granularity must be >= 1 paisa, got 0");
   }
   const r = a % g;
   // `2r >= g` rather than `r >= g / 2`: the halving is what would introduce a fraction, and on an
   // ODD step `g / 2` is not representable as an integer at all. Same trick as `extractedTaxPaisa`'s
   // doubling in `tax.ts`, and for the same reason.
-  return paisa(2 * r >= g ? a - r + g : a - r);
+  const rounded = 2 * r >= g ? a - r + g : a - r;
+  // `02-F63` (g). `rounded === 0` on a positive `a` is exactly the case `2a < g` — a bill under
+  // half a step — because `a >= g` forces `a - r >= g`. Written as the observable outcome ("the
+  // charge came out at nothing") rather than as `2 * a < g`, so the guard reads as the thing it
+  // refuses and cannot drift from the rounding above it.
+  return paisa(a > 0 && rounded === 0 ? g : rounded);
 };
 
 /**

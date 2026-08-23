@@ -1,6 +1,6 @@
 import { newId } from "@restos/domain";
 import type { BlockedCursor, DeviceStore } from "@restos/sync-client";
-import { billedEffectiveFromJsonLines, billedLinePaisa, wallClock } from "@restos/sync-client";
+import { billedLinePaisa, billedTotalPaisa, wallClock } from "@restos/sync-client";
 import {
   type AddLineRequest,
   AddLineRequestSchema,
@@ -27,6 +27,7 @@ import {
 } from "../shared/ipc";
 import { normalizeDialledPhone } from "./customer-phone";
 import { assertRemovableLine } from "./line-removal-guard";
+import { deviceChargeRoundingPaisa, deviceTaxCell } from "./tax-posture";
 import type { PanelFit } from "./window-options";
 
 /**
@@ -491,11 +492,40 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
         {
           order_id: row.order_id,
           reference: row.order_id.slice(0, 8),
-          // The ENGINE's own billed derivation — never reimplemented here. 26 §8 and the T-01-11
-          // ruling: fold logic lives in one module, and the Auditor's mirror of it was deleted
-          // precisely because two implementations of one sum is how a money anomaly becomes a
-          // false conservation finding.
-          total_paisa: billedEffectiveFromJsonLines(row.json_lines),
+          /*
+            `01-F82`/`02-F63` — **THE SCREEN SHOWS THE CHARGE, which is the number the guard and
+            the paper mean.** The ENGINE's own derivation, never reimplemented here (26 §8 and the
+            T-01-11 ruling: fold logic lives in one module, and the Auditor's mirror of it was
+            deleted precisely because two implementations of one sum is how a money anomaly becomes
+            a false conservation finding).
+
+            ⚠ **THIS READ `billedEffectiveFromJsonLines` UNTIL AUGUST 2026 AND THAT WAS A MONEY
+            GAP, reproduced by adversarial review of `8ef7cf1`.** That helper is line-derived,
+            tax-blind and UNROUNDED, while `settlement-guard.ts`, `settlement-closer.ts`,
+            `line-advance.ts`, `aggregator-settlement.ts` and `printing.ts` all read
+            `billedTotalPaisa`. Before `02-F63` the two agreed *by construction* under `16-F1`'s
+            default cell, so the gap was a tax-only debt; R70's rounding broke that for **every**
+            posture including `none`. Measured at posture `none` with `charge_rounding_paisa =
+            1000`: the Pay surface offered `Rs 405`, the keypad is whole-rupees-only, the cashier
+            keyed exactly what the till told her — and `alreadySettled` was `null`, `closingActFor`
+            was `null` and no line advanced. The sale silently did not settle.
+
+            So this is the same call the guard makes, with the same cell and the same step: three
+            readers, ONE source. `Counter.tsx`'s `isAlreadySettled` and `TenderPanel`'s `dueP` both
+            hang off this field, and `02-F45` refuses a second definition of what the customer owes.
+
+            **It can THROW, and that is the same refusal the five other readers already carry.**
+            `deviceTaxCell` refuses a posture an operator mistyped rather than defaulting one
+            (`16-F1`/`11-F22`), and `01-F17` protects a sale from inventory math, sync and approval
+            timeouts — never from a configuration typed wrong. A fallback here would be worse than
+            the throw: it would put a DIFFERENT number on the glass from the one the ledger accepts,
+            which is the defect this line is fixing.
+          */
+          total_paisa: billedTotalPaisa(
+            row.json_lines,
+            deviceTaxCell(),
+            deviceChargeRoundingPaisa(),
+          ),
           // The fold's keyed sum (01-F30/01-F31), never re-derived here — same rule as the
           // billed total directly above, and for the same reason.
           paid_paisa: row.pay_total,

@@ -365,7 +365,20 @@ describe("§D 03-F49/03-F36 — what the paisa cost in columns, measured", () =>
     // The measurement the change turns on. `min-columns.ts` derives the floors from *"the widest
     // money token is `Rs 99,999,999` = 13 columns"*; a sub-rupee token is **16**, so a `.NN` costs
     // exactly 3. On this type the widest totals row is `Subtotal Rs 450.70` at 18 and the widest
-    // rounding row is `Rounded down Rs 0.07` at 21 — both far under the floor.
+    // rounding row is `Rounded down Rs 0.07` at **20** — both far under the floor.
+    //
+    // ⚠ **BOTH NUMBERS WERE PROSE AND ONE OF THEM WAS WRONG** (adversarial review, August 2026):
+    // `min-columns.ts` and this comment both said the rounding row was 21, and `row()` is
+    // `label + " " + value` — 12 + 1 + 7 = 20. It changed no outcome, because the assertion was a
+    // `<=` against 32 and always will be. They are MEASURED now rather than described, which is
+    // the only thing that stops a stated column count drifting from the paper again.
+    const widest = (label: string): number => {
+      const rows = linesOf(draw(R70_BILL, AT_FLOOR).blocks).filter((l) => l.text.startsWith(label));
+      expect(rows, `no ${label} row rendered`).toHaveLength(1);
+      return (rows[0] as Line).columns;
+    };
+    expect(widest("Subtotal"), "Subtotal Rs 450.70").toBe(18);
+    expect(widest("Rounded down"), "Rounded down Rs 0.07").toBe(20);
     for (const line of linesOf(draw(R70_BILL, AT_FLOOR).blocks)) {
       expect(line.columns, `"${line.text}" is ${line.columns} columns`).toBeLessThanOrEqual(
         MIN_COLUMNS.receipt,

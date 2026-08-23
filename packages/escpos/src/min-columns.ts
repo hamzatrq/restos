@@ -62,21 +62,50 @@ export type DocumentType = (typeof DOCUMENT_TYPES)[number];
  *   * ⚠ **A SUB-RUPEE TOKEN IS `Rs 99,999,999.99` = 16 COLUMNS, AND THE FLOORS BELOW DID NOT MOVE
  *     — measured, not assumed (`02-F63`, founder ruling R70, August 2026).** A `.NN` costs
  *     **exactly 3 more columns**, which would take `shift_close_slip` to 38 and `day_summary`'s
- *     money rows to 27, and would put a `receipt` floor of 35 outside 58 mm paper. **None of that
- *     happens, and the reason is R70 itself: the CHARGE is rounded to the org's granularity, so
- *     every figure on these two cash documents is a whole number of rupees by construction** —
- *     they render tenders, a counted drawer, a float and a variance, and each is either the
- *     rounded charge or a figure a human keyed in rupees. `amountToken` renders a sub-rupee part
- *     only where one EXISTS, so a whole figure is byte-identical to what it printed before R70 and
- *     the derivations below stand unchanged. **The check that keeps this true is
- *     `cash-documents.test.ts` §A** — it measures what each spec's `example_data` actually renders
- *     against the number declared here, so a cash figure that ever acquires paisa fails the
- *     derivation rather than silently over-running the paper.
+ *     money rows to 27, and would put a `receipt` floor of 35 outside 58 mm paper.
+ *
+ *     ⚠ **THIS BULLET CLAIMED THE FIGURES WERE WHOLE "BY CONSTRUCTION" AND THAT WAS WRONG — IT IS
+ *     BY CONFIGURATION (adversarial review, August 2026).** The claim rested on R70 rounding the
+ *     charge, but `02-F63` (c) makes the step **layer-2 configuration** and states outright that
+ *     `charge_rounding_paisa = 1` is legal. At that step the rounding is the identity, the
+ *     `aggregator_receivable` row carries paisa, and its widest form is
+ *     `Aggregator receivable Rs 99,999,999.99` = 21 + 1 + 16 = **38 columns** against a declared
+ *     floor of **35**. Nothing constructs that away; the DEFAULT does. **The claim as it stands:
+ *     every figure on these two cash documents is whole at every granularity that is a whole
+ *     number of rupees**, which is `02-F63` (c)'s default (100) and both of R70's own named cases
+ *     (100 and 1000) — they render tenders, a counted drawer, a float and a variance, and each is
+ *     either the rounded charge or a figure a human keyed in rupees.
+ *
+ *     **THE DECISION, WITH THE NUMBER: THE FLOOR DOES NOT MOVE TO 38, AND THE CONFIGURATION IS NOT
+ *     BOUNDED EITHER.** Bounding it to multiples of 100 would contradict `02-F63` (c) by name and
+ *     is a spec act, not an edit here. Moving the floor is refused on three measured grounds. (i)
+ *     `03-F49`'s floor is **not** "the widest line a type can produce" — the `receipt` declares 32
+ *     and already ships a 35-column `Aggregator receivable` tender row, which WRAPS; that is
+ *     `03-F36`'s last declared degradation and the same mechanism a 38-column cash row would take.
+ *     (ii) `cash-documents.test.ts` §A binds each floor to what its own `example_data` renders,
+ *     `toBe` in both directions, so raising it to 38 would mean shipping an example document
+ *     carrying a figure the DEFAULT configuration cannot produce. (iii) It would change no
+ *     purchasing outcome: `PRINTER_CAPABILITIES` declares 44, 42, 48 and 32 Font-A columns and
+ *     `UNKNOWN_PRINTER_CAPABILITY` is 32, so **no declared capability lies between 35 and 38** and
+ *     both floors admit and refuse exactly the same printers. **What is owed if an org ever
+ *     configures a sub-rupee step:** the shift slip's widest row is then 3 columns over its own
+ *     declared minimum and wraps at it. That is a spec act for `03-F49`, recorded here rather than
+ *     guessed — and `cash-documents.test.ts` §A pins the 38 and the empty 35–38 capability band so
+ *     the argument cannot rot silently.
+ *
+ *     `amountToken` renders a sub-rupee part only where one EXISTS, so a whole figure is
+ *     byte-identical to what it printed before R70 and the derivations below stand unchanged.
+ *     **The check that keeps this true is `cash-documents.test.ts` §A** — it measures what each
+ *     spec's `example_data` actually renders against the number declared here, so a cash figure
+ *     that ever acquires paisa at the default step fails the derivation rather than silently
+ *     over-running the paper.
  *   * **Where paisa DO appear is the `receipt`, and its floor is the FR's rather than a
  *     derivation.** `03-F49` states 32 for this type and gives it wrapping as its declared
  *     degradation (*"a price column genuinely can degrade"*), so a wider row is reflowed and never
  *     refused. Measured on `02-F63`'s own worked bill, the widest totals rows are `Subtotal
- *     Rs 450.70` (18) and `Rounded down Rs 0.07` (21); at the PINNED bound the worst case a
+ *     Rs 450.70` (18) and `Rounded down Rs 0.07` (**20** — ⚠ this said 21 and was arithmetic, not
+ *     measurement: `row()` is `label + " " + value`, so it is 12 + 1 + 7. The load-bearing 29
+ *     below was and is correct); at the PINNED bound the worst case a
  *     rounding row can reach is `Rounded down Rs 99,999,999.99` = 12 + 1 + 16 = **29**, still
  *     inside 32. `receipt-rounding-row.test.ts` §D asserts both numbers. ⚠ **The receipt's tender
  *     rows were ALREADY over the floor before any of this** — `Aggregator receivable` is a

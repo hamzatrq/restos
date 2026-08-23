@@ -42,8 +42,8 @@
  */
 
 import {
+  chargePaisaAtGranularity,
   paisa,
-  roundPaisaToGranularity,
   type TaxCell,
   type TaxSnapshot,
   taxSnapshot,
@@ -120,7 +120,14 @@ const taxSnapshotOf = (jsonLines: string, cell: TaxCell): TaxSnapshot =>
  * a live standing-law-1 break (`01-F34`) through entirely schema-valid payloads. What keeps this
  * safe is that `taxSnapshot`'s total is an exact integer sum over per-line figures each computed
  * from its own billed amount, so it is order-invariant, and a function of an order-invariant number
- * is order-invariant.
+ * is order-invariant. **`tax.lines` is therefore untouched by the rounding, and `order-tax.test.ts`
+ * §C now compares it KEYED BY `line_id`** — comparing only the order-level figures could not see a
+ * per-line value that moves with `Object.entries` order, which is precisely this mutant.
+ *
+ * ⚠ **`02-F63` (g)'s FLOOR IS INSIDE `chargePaisaAtGranularity`, NOT HERE.** A positive
+ * `tax.total_paisa` never charges zero; a zero one still does. It is in `domain` rather than at this
+ * join because the Auditor becomes a second reader of the charge the moment `01-F87`'s carrier
+ * ships, and a floor applied at one of two joins is the drift this whole file exists to prevent.
  */
 export const orderChargeSnapshot = (
   jsonLines: string,
@@ -128,7 +135,7 @@ export const orderChargeSnapshot = (
   rounding_granularity_paisa: number,
 ): ChargeSnapshot => {
   const tax = taxSnapshotOf(jsonLines, cell);
-  const charge = roundPaisaToGranularity(paisa(tax.total_paisa), rounding_granularity_paisa);
+  const charge = chargePaisaAtGranularity(paisa(tax.total_paisa), rounding_granularity_paisa);
   // BigInt, not `subPaisa` and not a bare `-`. `subPaisa` brands its result and `Paisa` is
   // non-negative, so it would THROW on every rounding-DOWN order — the same wall
   // `settledConservationResidualPaisa` hit, which `invariants.ts` answers by returning the

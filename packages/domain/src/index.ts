@@ -31,6 +31,7 @@ export {
 export {
   addPaisa,
   applyRateBps,
+  chargePaisaAtGranularity,
   type DirectedPaisa,
   directedPaisa,
   type Milligrams,
@@ -39,7 +40,6 @@ export {
   ml,
   type Paisa,
   paisa,
-  roundPaisaToGranularity,
   rupeesAndPaisaFromPaisa,
   rupeesFromPaisa,
   splitPaisa,
