@@ -168,7 +168,7 @@ All three landed **additive under `v: 1`** — no `v` bump, no fixture-semantics
 - **`01-F75`/`01-F76`/`01-F77` — the reference-data generalisation, and the FIRST `v` bump.**
   `catalog_request` / `catalog_response` / `catalog_notice` are replaced by ONE
   resource-discriminated triple keyed by an artifact `(resource, scope)`; the resource set is
-  CLOSED at `catalog` and `staff`; `hello_ack.catalog_version` becomes `reference_versions`, one
+  CLOSED — **it held two when this line was written and the count is deliberately not repeated here; `01-F75` is the one place it lives**, because a count copied into a package doc is a count that goes stale silently, and this one did: it stayed at two through `01-F81` (`device_roster`) and `01-F87` (`config`); `hello_ack.catalog_version` becomes `reference_versions`, one
   number per key. Six new golden fixtures (both resources on all three kinds), and every other
   fixture re-cut at `v: 2` — including `purge_command`, which had never had one.
 - **`01-F79` — the credential-change pair.** `credential_change_request` /

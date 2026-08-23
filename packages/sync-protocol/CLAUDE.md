@@ -8,7 +8,7 @@
   BREAKING CHANGE THIS PROTOCOL HAS HAD.** `catalog_request` / `catalog_response` /
   `catalog_notice` are **gone**, replaced by ONE resource-discriminated triple —
   `reference_request` / `reference_response` / `reference_notice` — keyed by an artifact
-  `(resource, scope)` whose resource set is CLOSED at `catalog` and `staff`. `01-F79` adds
+  `(resource, scope)` whose resource set is CLOSED — **the members are `01-F75`'s and the count is not repeated here.** ⚠ This sentence read *"CLOSED at `catalog` and `staff`"* until 2026-08-23, through two additions (`01-F81`'s `device_roster`, `01-F87`'s `config`), which is why it now points at the FR instead of restating it. `01-F79` adds
   `credential_change_request` / `credential_change_result`. `MESSAGE_KINDS` is **16**.
   - **The N−1 reader is DEFERRED, not withdrawn** (`01-F77`, founder ruling; R4 puts nothing in
     the field). A `v: 1` frame is REFUSED and the refusal **names `v: 2`** rather than reporting
