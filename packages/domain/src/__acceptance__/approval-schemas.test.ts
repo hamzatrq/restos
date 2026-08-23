@@ -73,6 +73,11 @@ const RECORDED = {
   amount_paisa: 45_000,
   reason: "the customer sent the biryani back after the KOT printed",
   approver_user_id: "user-hina",
+  // `01-F83`'s `01-F31`-class attempt key, REQUIRED on all four since August 2026 (founder ruling
+  // R56 — see the schema's own note in `registry.ts`). Fixture-only, on `supersedes`' precedent
+  // below: §D asserts that all four types PARSE and that the approver key is DECLARED, and neither
+  // claim moved. `__acceptance__/adjustment-attempt-key.test.ts` is the key's own oracle.
+  adjustment_attempt_id: "0193b0f0-1111-7000-8000-0000000000a1",
 };
 const OVERRIDDEN = {
   order_id: "order-1",
@@ -84,6 +89,8 @@ const OVERRIDDEN = {
   // own note in `registry.ts`). `[]` is a root override. Fixture-only: §D asserts that all four
   // types PARSE and that the approver key is DECLARED, and neither claim moved.
   supersedes: [] as readonly string[],
+  // `01-F83`, as on `RECORDED` above.
+  adjustment_attempt_id: "0193b0f0-1111-7000-8000-0000000000a1",
 };
 
 /** Whatever `parseEvent` threw, or `undefined` if it did not throw. */

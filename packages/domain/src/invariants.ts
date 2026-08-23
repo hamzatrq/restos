@@ -43,8 +43,19 @@ export const refundRemainderExceeded = (args: RefundRemainderArgs): boolean => {
 };
 
 export type SettledConservationArgs = {
-  /** Billed total derived from the delivered lines, exited (voided/cancelled)
-   * lines excluded — "a fully-voided order nets to zero" (01-F30). */
+  /** What the customer owes, TAX INCLUDED (01-F82, founder ruling R54) — precisely
+   * `taxSnapshot(...).total_paisa` (16-F5's snapshot total), under all three of
+   * 16-F2's postures. Its base is still the delivered lines with exited
+   * (voided/cancelled) ones excluded — "a fully-voided order nets to zero"
+   * (01-F30) — and under `exclusive` it exceeds that base by exactly the tax.
+   *
+   * ⚠ This doc read "Billed total derived from the delivered lines" with no
+   * mention of tax, which is the definition 01-F30 as amended calls "wrong rather
+   * than merely stale". Under the old reading an exclusive order's correct tender
+   * read as a silent EXCESS of exactly the tax on EVERY settled order
+   * (EXCESS_TENDER_IS_EXCEPTION is false), and 01-F63's `pay_total >=
+   * billed_effective` cover test passed a bill that was under-tendered by it.
+   * `__acceptance__/tax-inside-billed-total.test.ts` pins both directions. */
   billed_paisa: number;
   /** Σ agreed TENDERING payments — purpose `settles_order` only (01-F32 /
    * DEC-MONEY-007: a `repays_receivable` payment is never tender). */
@@ -86,14 +97,17 @@ export type SettledConservationArgs = {
  * The worked argument and the options are `plans/wave-1/f30-conservation-terms-
  * options.md`; the decision is a founder's.
  *
- *  1. **No idempotency key exists on any of the four types, and `01-F31`'s
- *     mechanism IS a key** (*"folds dedupe by attempt key … a fold never picks
- *     a winner"*). Exactly two schemas in the repo carry one — `payment.recorded`
- *     and `payment.refunded` — and `02-F36`, the only FR naming a key beside a
- *     void, names the linked REFUND's. Σ-over-members and Σ-over-event-ids both
- *     make a double-tapped "void Rs 500" subtract Rs 1,000, which is the failure
- *     `01-F31` exists to prevent. Minting a key is a payload change to four
- *     `01 §4` types: a spec PR (commandments 2 and 9), not an implementer's call.
+ *  1. ~~**No idempotency key exists on any of the four types.**~~ **CLOSED by
+ *     `01-F83` (founder ruling R56, August 2026).** All four now carry a required
+ *     `adjustment_attempt_id` — `01-F31`'s law unchanged, org-globally unique,
+ *     UI-minted, UUID-class (`DEC-MONEY-008`), under its own field name so a fold
+ *     cannot sum settlements and correctives into one Σ. That was `DEC-MONEY-010`'s
+ *     gate condition **(ii)**, and it is the only one this closes: (i) and (iii)
+ *     below are untouched and each is independently fatal, so **the three terms
+ *     stay ABSENT**. The reason the key was needed is kept, because it is what the
+ *     next reader must not re-open: Σ-over-members and Σ-over-event-ids both make
+ *     a double-tapped "void Rs 500" subtract Rs 1,000, which is the failure
+ *     `01-F31` exists to prevent.
  *  2. **`26 §7` already rules this is not a fold problem** — its *"looks like
  *     ordering, actually needs"* table maps `01-F30` to a **closure** mechanism
  *     (the Auditor over the merged log), and conservation is absent from its

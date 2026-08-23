@@ -297,6 +297,10 @@ describe("§B 02-F8/02-F9 — a removal is a plain, per-line fact", () => {
       amount_paisa: 45000,
       reason: "customer returned the dish",
       approver_user_id: "user-hina",
+      // `01-F83` (founder ruling R56, August 2026): the corrective's `01-F31`-class attempt key,
+      // REQUIRED on all four escalatable writes. Fixture-only — this control asserts that the void
+      // still requires the three fields the removal must NOT have, and that claim is unchanged.
+      adjustment_attempt_id: "0193b0f0-1111-7000-8000-0000000000a1",
     };
     expect(parses("void.recorded", VOID).type).toBe("void.recorded");
     for (const field of ["amount_paisa", "reason", "approver_user_id"] as const) {

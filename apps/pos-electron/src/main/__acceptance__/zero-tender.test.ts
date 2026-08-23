@@ -303,6 +303,9 @@ describe("§B 01-F17 / 02-F13 — everything else still lands", () => {
           reason: "manager comped the karahi",
           approver_user_id: "user-manager",
           supersedes: [],
+          // `01-F83` (R56), required on all four escalatable writes since August 2026. Fixture-
+          // only: this control is about the ZERO price being accepted, which is unchanged.
+          adjustment_attempt_id: "0193b0f0-1111-7000-8000-0000000000a1",
         },
         refs: [],
       }),

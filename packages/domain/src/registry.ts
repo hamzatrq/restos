@@ -669,6 +669,42 @@ const payloadSchemas = {
    * engine consumes all four as **projection-inert**, so `01-F30`'s `void_value`, `comp_value` and
    * `discounts` terms still evaluate to zero. Declaring their fold rule is a `26 §7` decision
    * (an oracle-pinned merge rule), not an implementer's, and it is not what `01-F4` was blocking.
+   *
+   * ── `01-F83` — THE ATTEMPT KEY, ADDED AUGUST 2026 (founder ruling R56) ────────────────────────
+   *
+   * All four gain a REQUIRED `adjustment_attempt_id`. `01-F31`'s mechanism IS a key (*"folds
+   * dedupe by attempt key … a fold never picks a winner"*), so a corrective without one
+   * double-counts on re-delivery — a double-tapped "void Rs 500" subtracts Rs 1,000, converged on
+   * every device and permanent under `01-F1`. `DEC-MONEY-010`'s gate (ii) requires it on **all
+   * four** before any of `01-F30`'s three terms may enter the equation; this closes (ii) and
+   * nothing else, and the terms stay ABSENT (see `invariants.ts`).
+   *
+   * **ONE NAMESPACE, TWO FIELD NAMES.** The token obeys `01-F31` unchanged — org-globally unique,
+   * UI-minted, UUID-class (`DEC-MONEY-008`) — and shares `settlement_attempt_id`'s uniqueness
+   * space, which is what stops a collision. It carries a **different field name** because the name
+   * is what stops a fold summing both sides of `01-F30`'s equation into one Σ: settlements on the
+   * left, correctives on the right. Its schema is therefore `settlement_attempt_id`'s, character
+   * for character — a shape that drifted on one side would break the shared space it names.
+   *
+   * **REQUIRED, never `.optional()`**, on this file's own `order.parked` argument: `01-F1` makes
+   * the append-only ledger permanent, so a field omitted and later needed cannot be added as
+   * required at all, and an optional one cannot tell "a root act" from "a writer forgot". The
+   * window is open exactly now — `DEC-MONEY-010` (i) measures ZERO production emitters for all
+   * four — and it closes at the first emit.
+   *
+   * **`payment.refunded` gains NOTHING, and the refusal is written down so nobody adds one by
+   * symmetry** (`01-F83`). R56's literal list names it; `01-F29` already gives it TWO keys "in
+   * those words as *two fields, never one*" — its own `settlement_attempt_id` and the parent's
+   * `payment_attempt_id` — so a third would be `02-F45`'s second source for one fact and would
+   * fragment the `01-F29` cap that resolves parents by attempt id precisely to avoid fragmentation
+   * (`26 §8`). `order.cancelled` and `order.rejected` gain nothing either: no amount, and terminal
+   * monotone facts under `01-F35`, so a key on them would dedupe nothing.
+   *
+   * **Minted at the UI at `02-F20`'s approval path, before the append, and reused by a retry of
+   * the same act.** Deriving it from the envelope is refused twice over: `01-F34` forbids a fold
+   * comparing envelope ids into a projected value, and it would dedupe the wrong thing — `01-F8`
+   * already covers transport duplicates, while the case this key exists for is a double-tapped
+   * approval, i.e. two genuine events with two ids.
    */
   "void.recorded": z.looseObject({
     // `01-F30` conserves per ORDER, and `26 §3`'s projection-key sidecar answers
@@ -678,18 +714,23 @@ const payloadSchemas = {
     amount_paisa: z.number().int().nonnegative(),
     reason: z.string().min(1),
     approver_user_id: z.union([z.string().min(1), z.null()]),
+    // 01-F83: the corrective's own `01-F31`-class key. Same shape as `settlement_attempt_id`
+    // above (one uniqueness space), different name (two sides of 01-F30's equation).
+    adjustment_attempt_id: z.string().min(1),
   }),
   "comp.recorded": z.looseObject({
     order_id: z.string().min(1),
     amount_paisa: z.number().int().nonnegative(),
     reason: z.string().min(1),
     approver_user_id: z.union([z.string().min(1), z.null()]),
+    adjustment_attempt_id: z.string().min(1), // 01-F83
   }),
   "discount.recorded": z.looseObject({
     order_id: z.string().min(1),
     amount_paisa: z.number().int().nonnegative(),
     reason: z.string().min(1),
     approver_user_id: z.union([z.string().min(1), z.null()]),
+    adjustment_attempt_id: z.string().min(1), // 01-F83
   }),
   /**
    * The override names ONE line and the price it becomes. Unlike a void it is definitionally
@@ -734,6 +775,18 @@ const payloadSchemas = {
      * accepted for exactly the reason the park pair accepts it.
      */
     supersedes: z.array(z.string().min(1)),
+    /**
+     * `01-F83`. This type is in the key's class on the corpus's own grouping rather than on an
+     * implementer's judgment — `APPROVAL_TYPES` above already groups it with the other three as an
+     * escalatable act, and `DEC-MONEY-010`'s gate (ii) names all four.
+     *
+     * **It does not duplicate `supersedes` and neither absorbs the other.** `supersedes` is `26 §7`'s
+     * CAUSAL link — which earlier override this one replaces, so a register keyed on `line_id`
+     * converges. This is `01-F31`'s IDEMPOTENCY key — that this act is ONE act however many times
+     * it is delivered. Two overrides on one line are two acts with two keys and a link between
+     * them; one override delivered twice is one key.
+     */
+    adjustment_attempt_id: z.string().min(1),
   }),
   /**
    * `05-F7`'s event extension, transcribed. The `01 §4` catalog has carried

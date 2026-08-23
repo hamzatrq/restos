@@ -30,7 +30,22 @@
  * the bill. `packages/escpos` records the identical blocker for the receipt's extended line
  * amount; it is the same missing export and it blocks both.
  *
- * ── THREE THINGS THIS FILE DELIBERATELY DOES NOT DECIDE (commandment 2) ───────────────────────
+ * ── `billed_total` IS THIS FILE'S `total_paisa` (`01-F82`, founder ruling R54) ────────────────
+ *
+ * `01-F82` amends `01-F30` in place: `billed_total` stops being *"the sum of line prices"* and
+ * becomes **what the customer owes, tax included** — *"precisely `16-F5`'s snapshot total
+ * (`taxSnapshot`'s `total_paisa`)"*, and that identity holds under **all three** postures rather
+ * than only the one that moves. So the number this function returns as `total_paisa` is the number
+ * `01-F30`'s equation, `01-F63`'s attested `billed_paisa`, the `pay_total >= billed_effective`
+ * cover test, the `shift_cash` fold's expected drawer and the receipt's *Total* row all mean.
+ * Nothing downstream re-derives it (`01-F18`).
+ *
+ * **The change is ONE POSTURE WIDE.** Under `none` there is no tax and under `inclusive` the
+ * captured price already contains it, so the total does not move; under `exclusive` it is larger
+ * than the delivered lines' billed cells by exactly `tax_total_paisa`. That is what makes the
+ * amendment checkable, and `__acceptance__/tax-inside-billed-total.test.ts` is where it is pinned.
+ *
+ * ── TWO THINGS THIS FILE DELIBERATELY DOES NOT DECIDE (commandment 2) ─────────────────────────
  *
  *  1. **WHERE THE POSTURE MATRIX LIVES.** `16-F2` is a channel × payment-method matrix and
  *     `00 §7` makes it layer-2 configuration. An ALREADY-RESOLVED posture and rate arrive here;
@@ -44,12 +59,17 @@
  *     be split depends on the tax. There is therefore **no per-method parameter** on this
  *     signature — `DEC-MONEY-010`'s idiom, an optional term with no producer wearing a signature
  *     that says it has one.
- *  3. **WHETHER `01-F30`'s BILLED TOTAL INCLUDES TAX.** Under `exclusive` the customer tenders
+ *  ~~3. **WHETHER `01-F30`'s BILLED TOTAL INCLUDES TAX.**~~ **CLOSED by `01-F82` (founder ruling
+ *     R54, August 2026) — see the section above.** It read: *"Under `exclusive` the customer tenders
  *     `bill + tax` while `billed_effective` derives from delivered lines, so
  *     `settledConservationResidualPaisa` reads an EXCESS of exactly the tax on every settled order
- *     — and `EXCESS_TENDER_IS_EXCEPTION` is `false`, so it is silent. Resolving that is a change to
- *     `01-F30`'s own term or a new term under `DEC-MONEY-010`'s gate: a founder decision and a spec
- *     PR, not an implementer's. Nothing here presumes either answer.
+ *     — and `EXCESS_TENDER_IS_EXCEPTION` is `false`, so it is silent."* That measurement was right
+ *     and is the whole reason the ruling was taken: tax beside the total made every settled
+ *     exclusive order a silent Auditor finding, and the same reading would have closed a bill on a
+ *     tender that did not cover it. **It is answered now — `billed_total` IS `total_paisa` — and a
+ *     reader who still means the pre-amendment number is wrong rather than merely stale
+ *     (`01-F30`).** Kept rather than deleted because the cost of the old answer is what makes the
+ *     new one checkable.
  *
  * ── ROUNDING: ONE POLICY, AND ITS SOURCE IS `00 §6` RATHER THAN DOC 16 ────────────────────────
  *
@@ -228,10 +248,11 @@ const lineSnapshot = (
  * `billedCellPaisa` is private to `packages/sync-client/src/folds/merge.ts` and only the
  * ORDER-level `billedEffectiveFromJsonLines` is public, so a caller cannot obtain its inputs
  * without re-deriving fold logic, which `26 §8` forbids. `packages/escpos` records the identical
- * blocker for the receipt's extended line amount — one missing export, two debts. (2) Whether
- * `01-F30`'s billed total INCLUDES tax is an open founder decision (see this file's header); a
- * caller written before it lands would freeze the wrong answer under `01-F1`. `16-F2`'s posture
- * matrix also has no store (`00 §7` layer-2, doc 14). The seam test the caller owes is named in
+ * blocker for the receipt's extended line amount — one missing export, two debts. ~~(2) Whether
+ * `01-F30`'s billed total INCLUDES tax is an open founder decision.~~ **(2) is CLOSED by `01-F82`
+ * (R54): `billed_total` IS this function's `total_paisa`, so a caller no longer risks freezing the
+ * wrong answer under `01-F1`. Blocker (1) is untouched and is what still stops a caller today.**
+ * `16-F2`'s posture matrix also has no store (`00 §7` layer-2, doc 14). The seam test the caller owes is named in
  * `packages/escpos/src/__acceptance__/receipt-tax-line.test.ts`'s DEFERRED block: the mutant is
  * `createReceiptPrinter` composing a receipt with no `tax` key while a posture is configured.
  */

@@ -664,6 +664,10 @@ describe("§G — the residuals, asserted so this file cannot be read as a closu
       amount_paisa: 45_000,
       reason: "kitchen remade the karahi",
       approver_user_id: "user-manager",
+      // `01-F83` (R56) closes `DEC-MONEY-010`'s gate condition (ii) and ONLY that one: (i) still
+      // has no emitter and (iii) still owes a `26 §7` merge rule, so the terms stay ABSENT and
+      // this test's shortfall is unchanged. Fixture-only.
+      adjustment_attempt_id: "0193b0f0-1111-7000-8000-0000000000a1",
     });
     t.raw(TILL_1, "payment.recorded", tender(55_000));
     t.closer.settled(ORDER_ID);

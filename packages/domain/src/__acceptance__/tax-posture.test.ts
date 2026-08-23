@@ -54,8 +54,11 @@
 //     test-owning session, cited by FR — never an edit.
 //  3. **`16-F6`'s SPLIT APPORTIONMENT IS PROVISIONAL AND CIRCULAR, so §H is a GATE, not a rule.**
 //     See §H's own header for the circularity, which the corpus does not resolve.
-//  4. **WHETHER `01-F30`'s BILLED TOTAL INCLUDES TAX.** §I demonstrates what today's answer costs
-//     in rupees and asserts nothing about what it should be. That is a founder decision.
+//  ~~4. **WHETHER `01-F30`'s BILLED TOTAL INCLUDES TAX.**~~ **RULED — `01-F82` (founder ruling R54,
+//     August 2026): it DOES.** `billed_total` is `taxSnapshot(...).total_paisa`, under all three
+//     postures. §I's arithmetic is unchanged and still green; what expired is its PREMISE that
+//     `billed_paisa` is the pre-tax figure — see §I's own header. The pin for the new reading is
+//     `__acceptance__/tax-inside-billed-total.test.ts`, not this file.
 //
 // ── THE SURFACE THIS ORACLE PINS (DECLARED INTERPRETATION, `24 §3b`) ──────────────────────────
 //
@@ -699,7 +702,17 @@ describe("§H 16-F6 — the split-payment apportionment is NOT decided, and is n
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * ⚠ **THIS SECTION IS GREEN AT AUTHORING TIME AND IS THE HARDEST FINDING IN THE FILE.**
+ * ⚠ **THE FINDING THIS SECTION MADE HAS SINCE BEEN RULED ON, AND THE SECTION NOW DOCUMENTS THE
+ * SUPERSEDED READING RATHER THAN THE CURRENT ONE (`01-F82`, founder ruling R54, August 2026).**
+ * Its arithmetic is untouched and still green — `settledConservationResidualPaisa` did not move —
+ * but `billed_paisa` is now *what the customer owes, tax included*, so the `SALE_SUBTOTAL` fed to
+ * it below is no longer `01-F30`'s `billed_total`: it is the pre-amendment number, and feeding it
+ * is what produces the excess. Alternative (a) named at the foot of this comment is the one the
+ * founder took. Kept, unedited below the line, because the cost stated in rupees is what makes the
+ * ruling checkable; `__acceptance__/tax-inside-billed-total.test.ts` §B is the same arithmetic read
+ * the other way round and is the pin for the CURRENT reading. Read what follows in the past tense.
+ *
+ * ⚠ **THIS SECTION WAS GREEN AT AUTHORING TIME AND WAS THE HARDEST FINDING IN THE FILE.**
  *
  * It drives SHIPPED code — `settledConservationResidualPaisa`, `EXCESS_TENDER_IS_EXCEPTION` — and
  * asserts nothing about tax arithmetic. Its job is to state, in rupees, what happens the day an

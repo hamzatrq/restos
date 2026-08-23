@@ -128,6 +128,13 @@ const VOID = {
   amount_paisa: AMOUNT,
   reason: "customer changed their mind after the KOT",
   approver_user_id: MANAGER,
+  /**
+   * `01-F83`'s `01-F31`-class attempt key, REQUIRED on all four since August 2026 (founder ruling
+   * R56) — see the schema's own note. Added to the fixture rather than to an assertion, on
+   * `supersedes`' precedent below: nothing §A–§F claims changed, each of them constructs from this
+   * constant, and `__acceptance__/adjustment-attempt-key.test.ts` is the key's own oracle.
+   */
+  adjustment_attempt_id: "0193b0f0-1111-7000-8000-0000000000a1",
 };
 const COMP = { ...VOID, reason: "cold when it reached the table" };
 const DISCOUNT = { ...VOID, reason: "regular, 10% off the bill" };
@@ -144,6 +151,8 @@ const OVERRIDE = {
    * an assertion: nothing §A–§E claims changed, and each of them constructs from this constant.
    */
   supersedes: [] as readonly string[],
+  /** `01-F83`, as on `VOID` above. */
+  adjustment_attempt_id: "0193b0f0-1111-7000-8000-0000000000a1",
 };
 
 /** The three money-carrying `*.recorded` acts — everything §C and §D say holds for all three. */

@@ -328,6 +328,10 @@ describe("§C 02-F49/02-F8 — after confirm, a removal is REFUSED and the void 
           amount_paisa: 12_000,
           reason: "customer returned the dish",
           approver_user_id: "u-hina",
+          // `01-F83` (R56): the corrective's `01-F31`-class attempt key, required on all four
+          // escalatable writes since August 2026. Fixture-only — this control asserts the void
+          // path stays OPEN after confirm, and that claim is unchanged.
+          adjustment_attempt_id: "0193b0f0-1111-7000-8000-0000000000a1",
         },
         refs: [],
       }),
