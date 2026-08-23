@@ -85,6 +85,19 @@ jobs:
         run: pnpm test
       - name: build
         run: pnpm build
+      # R68 (2026-08-23): these four ran in `pnpm verify` and gated NOTHING on a push, so they
+      # slowed every local run and protected no merge. They gate here now and are out of the
+      # default local `verify` (`pnpm verify:full` still runs all seven). `seams:check` is the
+      # only automated check for this codebase's most-recorded defect class.
+      - name: tokens:check
+        run: pnpm tokens:check
+      - name: strings:check
+        run: pnpm strings:check
+      - name: seams:check
+        run: pnpm seams:check
+      # xvfb is installed above for the Electron suites; layout:check needs the same display.
+      - name: layout:check
+        run: xvfb-run -a pnpm layout:check
 
   # Spec-before-behavior (commandment 9, 20 §4.1): a PR touching behavior paths
   # must cite an FR ID in its body or carry a spec diff in the same PR.
