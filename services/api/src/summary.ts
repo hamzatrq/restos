@@ -1,6 +1,56 @@
 /**
  * `12-F10` — the nightly owner summary, as a fold over one business day's delivered events.
  *
+ * ── WHERE THE DAY'S MONEY COMES FROM, AND WHY IT CANNOT BE RE-DERIVED HERE ────────────────
+ *
+ * **`sales.total_paisa` IS `Σ order.settlement_closed.billed_paisa` over the window.** Not a sum
+ * that agrees with it — the same number, read off the ledger's own closing acts, so there is no
+ * second derivation for the two to drift apart on. `01-F63` makes that field the ATTESTATION the
+ * till appended when the bill was covered, and `01-F82` (R54) + `02-F63` (R70) fix what it means:
+ * *what the customer owes, tax included*, rounded to the org's `charge_rounding_paisa`. `02-F63`
+ * says so in terms — it is *"one number that `01-F30`'s equation, `01-F63`'s attested
+ * `billed_paisa`, the `pay_total >= billed_total` cover test, the `shift_cash` fold and the printed
+ * *Total* all mean"*. This report joins that list rather than starting a second one (`12-F21`).
+ *
+ * **The alternative — re-deriving a line sum here and adding tax — is not merely worse, it is
+ * unbuildable on this plane, and the measurement is what settles it.** The tax cell and the charge
+ * granularity are `00 §7` layer-2 settings whose carrier (`01-F87`) is decided and **not built**:
+ * today they are three env vars seeded PER DEVICE (`RESTOS_TAX_POSTURE`, `RESTOS_TAX_RATE_BPS`,
+ * `RESTOS_CHARGE_ROUNDING_PAISA` — `apps/pos-electron/src/main/tax-posture.ts`, and `00 §7` names
+ * all three as stopgaps). `services/api` and `services/sync-gateway` hold **no tax configuration of
+ * any kind**; a symbol-precise grep over both finds none. So a cloud-side `qty × unit_price × rate`
+ * would have to INVENT the rate (Commandment 2), and under `12-F22`'s roll-up it would invent ONE
+ * rate for branches that may sit on different postures. The till is the only process that knows
+ * what it charged, and it wrote the number down.
+ *
+ * **What this fixes, stated as the defect it was.** This fold computed revenue as
+ * `Σ qty × unit_price_paisa` over every delivered line — no tax term, and no arm for a voided line.
+ * Measured end to end on 2026-08-23 it reported **Rs 2,679** against a ledger truth of
+ * **Rs 2,968**: four raw pre-tax line sums with two voided Raitas still inside them, under a screen
+ * that also read `raita · 2 sold · Rs 120` for two dishes nobody sold. Both halves are closed here,
+ * and `__acceptance__/summary-corrections.test.ts` reproduces that exact day.
+ *
+ * **The three blocks tile, and that is a property to keep.** `Σ hourly.billed_paisa ==
+ * sales.total_paisa` exactly, because the curve buckets the SAME attested figures. `Σ
+ * by_channel.billed_paisa == sales.total_paisa` **minus** any order whose `order.created` did not
+ * reach this window (`order_created_outside_window`), which is stated rather than hidden. The one
+ * block that does NOT tile is `top_items`, and it cannot: an order-level attestation carries no
+ * item breakdown, so splitting it per item would be an invented allocation. It is a pre-tax
+ * menu-mix ranking and is labelled as one wherever it is rendered.
+ *
+ * ⚠ **THE DAY A SALE BANKS TO IS NOW THE DAY ITS BILL CLOSED, and that is a stated reading with a
+ * losing alternative.** The window is `01-F46`'s Asia/Karachi 05:00 day applied to each event's own
+ * branch stamp, so an order rung at 23:50 and closed at 00:10 banks to the night it was served
+ * either way (`01-F46`'s whole case). What moves is the sharp edge: an order rung at 04:55 and
+ * closed at 05:05 now banks to the FOLLOWING day. That is the same basis `shift.closed`'s
+ * `expected_paisa_by_method` already uses — the drawer is counted against the payments taken in the
+ * shift, not against the lines rung in it — so the owner's sales figure and the cashier's
+ * reconciliation move onto ONE basis instead of two. It also makes the money count exactly once
+ * across a boundary: the day the lines were rung reports the order as unsettled and takes no money
+ * from it, and the day the bill closed takes all of it. The alternative — banking by the hour the
+ * lines were rung — cannot be paid for, because the attested figure is per ORDER and has no
+ * per-line share to distribute.
+ *
  * **This file's hardest job is refusing to answer.** `restaurant-os.md` Appendix C and `12-F10`
  * name seven blocks; the product's ledger can answer four of them today. A summary is a report an
  * owner makes decisions on, so a block computed from events that do not exist is worse than an
@@ -39,7 +89,34 @@
  *   line existence + money     MVR keyed by `line_id`, member = canonical payload bytes. One line
  *                              redelivered under two envelope ids collapses to one member; two
  *                              members that differ dispute the line, contribute ZERO money and
- *                              raise `order_line_divergence`.
+ *                              raise `order_line_divergence`. Feeds `top_items` ONLY — the day's
+ *                              money comes off the closing act, one row down.
+ *   line exit (`02-F8` post-   monotone G-Set of `line_id` PER ORDER off `order.line_state_changed`,
+ *   confirm, `02-F20`'s void)  split into EXIT edges (`voided`/`cancelled`) and other TERMINAL ones
+ *                              (`served`/`delivered`). A line is out of `top_items` iff it has an
+ *                              exit edge and no other terminal edge — which is exactly
+ *                              `merge.ts`'s `billedCellPaisa` (`states.length === 1 &&
+ *                              EXITED.has(states[0])`), including its contested case, where
+ *                              `CONTESTED_LINE_BILLABLE = true` keeps a two-headed line billable.
+ *                              Both halves monotone, so an exit is order-free and idempotent and
+ *                              `01-F35`'s terminality is what makes that sound.
+ *   an order's billed money    `agreed()` over an MVR of `order.settlement_closed` members (payload
+ *                              bytes + the closing act's own branch stamp), then its attested
+ *                              `billed_paisa`. Absent register ⇒ UNSETTLED: no money, counted in
+ *                              `honesty.unsettled_orders`. Two differing members ⇒ ZERO and
+ *                              `order_close_divergence` — `01-F31`, a fold never picks a winner.
+ *                              ⚠ `merge.ts` reads the SAME field with a different rule (the LARGEST
+ *                              valid snapshot) and both are right, because they answer different
+ *                              questions: there it is `uncovered_addition`'s CEILING, where
+ *                              understating is the unsafe direction, and a ceiling is a check.
+ *                              Here it is the money on an owner's screen, and picking the larger of
+ *                              two disputed attestations would print a number no act supports.
+ *   corrections (`12-F10` 3)   `01-F83`'s `adjustment_attempt_id` is the `01-F31`-class key, so the
+ *                              register is keyed by it and its member is the payload bytes plus the
+ *                              ENVELOPE's `actor_user_id` (`02-F41`/`02-F45`: the cashier is on the
+ *                              envelope and the approver is in the payload — two identities, two
+ *                              homes). Diverging members dispute the key, contribute nothing and
+ *                              raise `<kind>_divergence`.
  *   line removal (`02-F8`)     monotone G-Set of `line_id` PER ORDER, off `order.line_removed`. A
  *                              tombstone, never arithmetic: subtracting at fold time would subtract
  *                              twice on a redelivery (`01-F31`) and would subtract a line not yet
@@ -50,12 +127,16 @@
  *                              org-unique. This is the rule `packages/sync-client/src/folds/merge.ts`
  *                              already applies on the device, and `12-F21`'s "one number,
  *                              everywhere" is why it must be the same rule here.
- *   sales by channel           Σ (BigInt) of the agreed lines of the orders on that channel.
- *   top items                  Σ per `item_id`, ranked by (revenue desc, item_id asc). The
- *                              tiebreak is a PAYLOAD field, never an envelope id.
- *   hourly curve               Σ per hour offset from the day's cutover, on each line's own branch
- *                              stamp. A bucket, not a selection — `01-F45`'s basis precedence
- *                              governs selection among competing members and there is none here.
+ *   sales by channel           Σ (BigInt) of the attested `billed_paisa` of the orders on that
+ *                              channel.
+ *   top items                  Σ per `item_id` over lines that were neither removed nor exited,
+ *                              ranked by (revenue desc, item_id asc). The tiebreak is a PAYLOAD
+ *                              field, never an envelope id. PRE-TAX by construction — see the
+ *                              header on why it cannot tile the day's total.
+ *   hourly curve               Σ per hour offset from the day's cutover, on the CLOSING ACT's own
+ *                              branch stamp. A bucket, not a selection — `01-F45`'s basis
+ *                              precedence governs selection among competing members and there is
+ *                              none here.
  *   shift cash                 CARRIED facts off `shift.closed` (`26 §7`, `02-F23`) — expected by
  *                              method, counted, and variance are READ, never re-derived. This is
  *                              the same rule `packages/sync-client/src/folds/shift-cash.ts`
@@ -87,6 +168,7 @@ import {
   canonicalJson,
   ORDER_CHANNELS,
   type OrderChannel,
+  TERMINAL_LINE_STATES,
 } from "@restos/domain";
 
 /** One hour of the business day. Named because the number is used for both bucketing and length. */
@@ -94,6 +176,55 @@ const HOUR_MS = 3_600_000;
 
 /** `12-F10` bullet 4 — the FR says five, and the number lives here rather than at a call site. */
 const TOP_ITEM_COUNT = 5;
+
+/**
+ * `12-F10` bullet 3's three kinds, and the `01 §4` event type that carries each. Exhaustive and
+ * ordered, so the block always renders all three rows: a missing row cannot tell *"no comps today"*
+ * from *"the comp figure was never computed"* — the same rule `by_channel` follows for `02-F42`'s
+ * closed channel set. `order.line_price_overridden` is `02-F20`'s fourth escalatable write and is
+ * deliberately NOT here: `12-F10` bullet 3 names three, and adding a fourth would be inventing a
+ * block the FR does not ask for.
+ */
+const CORRECTION_KINDS = ["void", "comp", "discount"] as const satisfies readonly CorrectionKind[];
+const CORRECTION_TYPES: Readonly<Record<string, CorrectionKind>> = {
+  "void.recorded": "void",
+  "comp.recorded": "comp",
+  "discount.recorded": "discount",
+};
+
+/**
+ * Which of the three are already OUT of `sales.total_paisa`, as a declared table rather than an
+ * inline `kind === "void"` — this is the one fact on the block that an owner would act on, and it
+ * deserves a place a reader can argue with. See `CorrectionBlock` for the whole reasoning; in
+ * short, only the void is a line EXIT (`DEC-MONEY-010` (2)), and only a line exit moves money out
+ * of `01-F63`'s attestation.
+ */
+const REMOVED_FROM_SALES: Readonly<Record<CorrectionKind, boolean>> = {
+  void: true,
+  comp: false,
+  discount: false,
+};
+
+/**
+ * `01 §4`'s exit states, and the terminal states that are not exits.
+ *
+ * The two lists together ARE `merge.ts`'s `billedCellPaisa` rule expressed in the only shape a
+ * report can see: a cell contributes zero *"when `states.length === 1 && EXITED.has(states[0])`"*,
+ * and a contested terminal set stays billable because `CONTESTED_LINE_BILLABLE` is ratified `true`.
+ * So a line is out of `top_items` iff an exit edge reached it and no other terminal edge did.
+ *
+ * The two are declared here rather than imported because `packages/sync-client` exports neither
+ * (its `EXITED` is module-private) and `18 §6` keeps this plane off that package regardless. What
+ * IS imported is `TERMINAL_LINE_STATES`, so the *partition* is checked against `domain`'s own
+ * vocabulary rather than hand-copied twice — a typo in either list fails the assertion below at
+ * module load, and `summary-corrections.test.ts` §A pins it as a fact rather than a hope.
+ */
+const EXIT_STATES: readonly string[] = ["voided", "cancelled"];
+const FINISH_STATES: readonly string[] = TERMINAL_LINE_STATES.filter(
+  (state) => !EXIT_STATES.includes(state),
+);
+const EXITED: ReadonlySet<string> = new Set(EXIT_STATES);
+const FINISHED: ReadonlySet<string> = new Set(FINISH_STATES);
 
 /**
  * Exactly the envelope fields this fold reads. `global_seq`, `lamport_seq`, `device_created_at`
@@ -114,8 +245,14 @@ export type SummaryEvent = {
 /** `12-F10` bullet 1 — "sales total & order count by channel". */
 export type ChannelSales = {
   readonly channel: OrderChannel;
-  /** Distinct `order.created` ids on this channel. Set cardinality, so a redelivery counts once. */
+  /**
+   * Distinct SETTLED orders on this channel — orders this window holds a closing act for. Set
+   * cardinality, so a redelivery counts once. It is deliberately the same population as
+   * `billed_paisa` below: an order count that included the still-open table would divide a settled
+   * total by an unsettled count, and an owner reads that ratio as her average check.
+   */
   readonly orders: number;
+  /** Σ of `01-F63`'s attested `billed_paisa` — tax-inclusive and rounded (`01-F82`, `02-F63`). */
   readonly billed_paisa: number;
 };
 
@@ -142,14 +279,80 @@ export type ShiftCash = {
   readonly paid_out_paisa: number;
 };
 
-/** `12-F10` bullet 4 — "top 5 items by revenue". */
+/**
+ * `12-F10` bullet 4 — "top 5 items by revenue".
+ *
+ * **A PRE-TAX MENU-MIX RANKING, and the only block here that does not tile the day's total.** The
+ * money above is `01-F63`'s per-ORDER attestation and carries no item breakdown, so splitting it
+ * per item would be an allocation nothing in the corpus rules on. What these rows are is
+ * `01-F53`'s captured line prices — `qty × unit_price_paisa` — over the lines that were neither
+ * removed pre-confirm (`02-F8`) nor exited post-confirm (`02-F20`'s void). The RANKING is what the
+ * FR asks for and a single org-wide rate cannot reorder it; the FIGURES are line prices and are
+ * labelled as such on every surface that renders them.
+ */
 export type ItemRevenue = {
   readonly item_id: string;
+  /** Units actually sold. A voided line contributes NEITHER a unit nor a rupee — see the block. */
   readonly qty: number;
   readonly revenue_paisa: number;
 };
 
-/** `12-F10` bullet 5 — "hourly sales curve". One entry per hour of the business day. */
+/** `12-F10` bullet 3 — the three correctives `01 §4` names, as this product can emit them. */
+export type CorrectionKind = "void" | "comp" | "discount";
+
+/**
+ * `12-F10` bullet 3's *"and by whom"*, and it is TWO identities rather than one (`02-F20`).
+ *
+ * The cashier who performed the act is `actor_user_id` on the ENVELOPE, stamped at append from the
+ * live PIN session (`02-F41`); the manager who approved it is `approver_user_id` in the PAYLOAD.
+ * `02-F45` forbids duplicating the actor into the payload, so neither field can absorb the other,
+ * and `registry.ts` makes the approver required-and-nullable on purpose: `null` is *"a manager did
+ * this unsupervised"*, which `permissions.ts` allows outright, not *"nobody approved it"*.
+ */
+export type CorrectionActor = {
+  readonly actor_user_id: string | null;
+  readonly approver_user_id: string | null;
+  readonly count: number;
+  readonly value_paisa: number;
+};
+
+/**
+ * One correction kind's count, value and attribution.
+ *
+ * ⚠ **`removed_from_sales` IS THE FIELD THAT STOPS THIS BLOCK MISLEADING AN OWNER, and the three
+ * kinds do not agree on it.** A VOID is a line EXIT (`DEC-MONEY-010` (2): *"the LINE authoritative
+ * wherever a line exists"*), so `merge.ts`'s `billedCellPaisa` already returns zero for that cell
+ * and the attested `billed_paisa` never contained it. A COMP and a DISCOUNT are **recorded and not
+ * subtracted** — neither is a line exit, `01 §4` has no `comped` state, and `01-F30`'s `comp_value`
+ * and `discounts` terms are ABSENT until `DEC-MONEY-010`'s gate (iii) is met. The counter says the
+ * same thing to the cashier in the same words (*"Recorded — the bill does NOT change yet"*), and a
+ * screen that let an owner read "Discounts Rs 200" as money already off her takings would be wrong
+ * in the opposite direction from the defect this file was fixing.
+ *
+ * ⚠ **`value_paisa` is the RECORDED MAGNITUDE, and for a void that is a PRE-TAX line value.**
+ * `line-void.ts` derives it as `billedLinePaisa` of the exited cell — `01-F53`'s captured price —
+ * so under an `exclusive` posture the drop in the tax-inclusive `billed_total` is LARGER than this
+ * figure by that line's tax. No reader on this plane can compute the difference (see the file
+ * header), so the recorded number is reported and named for what it is rather than adjusted.
+ */
+export type CorrectionBlock = {
+  readonly kind: CorrectionKind;
+  readonly count: number;
+  readonly value_paisa: number;
+  /** True only for `void`. See the type's own note — the three kinds genuinely differ here. */
+  readonly removed_from_sales: boolean;
+  /** Sorted by `actor_user_id` then `approver_user_id`, both PAYLOAD/ENVELOPE facts. */
+  readonly by: readonly CorrectionActor[];
+};
+
+/**
+ * `12-F10` bullet 5 — "hourly sales curve". One entry per hour of the business day.
+ *
+ * The hour a BILL CLOSED, on the closing act's own branch stamp — see the file header for why the
+ * alternative (the hour each line was rung) cannot carry the tax-inclusive figure. These buckets
+ * therefore sum to `sales.total_paisa` exactly, which is the property that stops a curve and a
+ * headline disagreeing on one screen.
+ */
 export type HourBucket = {
   /** Hours since the day's cutover, 0-based. */
   readonly offset: number;
@@ -186,6 +389,14 @@ export type SummaryHonesty = {
   /** Shifts in the window with no delivered `shift.closed` — money still in an open drawer. */
   readonly open_shifts: number;
   /**
+   * Orders this window saw that carry NO closing act — a bill nobody has settled yet. Their money
+   * is not in any figure above, because `01-F63`'s attestation is the only tax-inclusive number
+   * this plane can read and an unsettled order has not produced one. Reported rather than folded
+   * in with a guessed line sum: that guess is precisely the defect this file was rebuilt to remove,
+   * and `00 §5.7` prefers a stated absence to a confident smaller number.
+   */
+  readonly unsettled_orders: number;
+  /**
    * The gateway's row cap was hit, so this is a PREFIX of the day and every total is a floor.
    * Reported rather than silently paged: a paged read of an append-only window is a second
    * mechanism, and this one is honest without it.
@@ -213,6 +424,8 @@ export type NightlySummary = {
     readonly by_channel: readonly ChannelSales[];
   };
   readonly cash: readonly ShiftCash[];
+  /** `12-F10` bullet 3 — one row per kind, always all three, so a zero is a MEASURED zero. */
+  readonly corrections: readonly CorrectionBlock[];
   readonly top_items: readonly ItemRevenue[];
   readonly hourly: readonly HourBucket[];
   readonly days: readonly DayState[];
@@ -231,14 +444,32 @@ export type NightlySummary = {
  * these blocks would look buildable to anyone who read `01 §4` and stopped there.
  */
 export const OMISSIONS: readonly Omission[] = [
+  /**
+   * ⚠ **THIS ENTRY REPLACES ONE THAT WENT ON ASSERTING, TO AN OWNER, ON THE SCREEN, THAT VOIDS
+   * COULD NOT BE AFFECTING HER NUMBER WHILE THEY WERE.** It read: *"void.recorded, comp.recorded
+   * and discount.recorded are 01 §4 catalog vocabulary with no payload schema in packages/domain
+   * and no emitter anywhere in the product — the counter has no void, comp or discount surface at
+   * all."* All three clauses were true when written and all three became false in one day's
+   * commits: `registry.ts` carries the schemas, `apps/pos-electron/src/main/line-void.ts` is the
+   * emitter, and `LineCorrection.tsx` is the surface. It is this repo's most-recorded defect shape
+   * one turn worse than usual, because the stale claim was not a comment — it was RENDERED.
+   *
+   * What replaces it is the part that is genuinely still not measured, and it is a NETTING rather
+   * than a measurement: the counts and the values are now reported (`corrections`), the void's
+   * money is already out of the day's total through the line exit, and the comp's and the
+   * discount's are not out of anything.
+   */
   {
-    block: "Voids, comps and discounts",
+    block: "Comps and discounts NETTED OUT of the day's takings",
     reason:
-      "void.recorded, comp.recorded and discount.recorded are 01 §4 catalog vocabulary with no " +
-      "payload schema in packages/domain and no emitter anywhere in the product — the counter has " +
-      "no void, comp or discount surface at all. There is nothing to count, and a zero would read " +
-      "as 'a clean day' rather than 'not measured'.",
-    fr: "12-F10",
+      "the count, value and attribution of every void, comp and discount ARE now reported (see " +
+      "that block). What is still absent is the subtraction: a comp and a discount are recorded " +
+      "and do not reduce the bill, because neither is a line exit, 01 §4 has no comped state, and " +
+      "01-F30's comp_value and discounts terms stay ABSENT until DEC-MONEY-010's gate (iii) — an " +
+      "oracle-pinned merge rule in 26 §7 — is met. So the sales figure above is what customers " +
+      "were charged, and a comped dish is inside it. A void IS out of it: the line exits, and " +
+      "01-F63's attested billed_paisa never contained it.",
+    fr: "DEC-MONEY-010",
   },
   {
     block: "Purchases and wastage logged",
@@ -307,6 +538,21 @@ type OrderAcc = {
    * redelivered removal is idempotent, and independent of whether the line itself has arrived.
    */
   readonly removed: Set<string>;
+  /**
+   * `01-F63`'s closing acts, as an MVR keyed by canonical payload bytes + the act's own branch
+   * stamp. The stamp is folded INTO the member for the reason `agreedActor` folds the actor into a
+   * shift open: the hour a bill closed is a projected value now (the hourly curve), so two members
+   * disagreeing about it are two contested heads and a fold picks neither.
+   */
+  readonly closes: Members;
+  /**
+   * `01 §4`'s EXIT states delivered against a line of this order (`voided` / `cancelled`), and the
+   * other TERMINAL ones (`served` / `delivered`) beside them. Two monotone G-Sets, because
+   * `01-F35` makes every one of them terminal — an exit is permanent, so a set is the whole of
+   * what a later reader needs and delivery order can never matter (`01-F34`).
+   */
+  readonly exited: Set<string>;
+  readonly finished: Set<string>;
 };
 
 type ShiftAcc = {
@@ -333,6 +579,13 @@ export type SummaryState = {
   readonly orders: Map<string, OrderAcc>;
   readonly shifts: Map<string, ShiftAcc>;
   readonly days: Map<string, DayAcc>;
+  /**
+   * `12-F10` bullet 3, keyed the way `01-F83` says a corrective must be: kind → the act's
+   * `adjustment_attempt_id` → that key's MVR register. Keyed by the ATTEMPT and not the envelope,
+   * because `01-F8` already covers a transport duplicate and the case `01-F83` exists for is a
+   * double-tapped approval — two genuine events, two envelope ids, one act.
+   */
+  readonly corrections: Map<CorrectionKind, Map<string, Members>>;
   readonly branches: Set<string>;
   /** Envelope ids seen, so a duplicated delivery cannot inflate the honesty count. */
   readonly seen: Set<string>;
@@ -344,6 +597,7 @@ export const emptySummary = (): SummaryState => ({
   orders: new Map(),
   shifts: new Map(),
   days: new Map(),
+  corrections: new Map(CORRECTION_KINDS.map((kind) => [kind, new Map<string, Members>()])),
   branches: new Set(),
   seen: new Set(),
   provisional: new Set(),
@@ -358,7 +612,14 @@ const sub = <K, V>(m: Map<K, V>, k: K, mk: () => V): V => {
 };
 
 const orderOf = (state: SummaryState, id: string): OrderAcc =>
-  sub(state.orders, id, () => ({ created: new Map(), lines: new Map(), removed: new Set() }));
+  sub(state.orders, id, () => ({
+    created: new Map(),
+    lines: new Map(),
+    removed: new Set(),
+    closes: new Map(),
+    exited: new Set(),
+    finished: new Set(),
+  }));
 
 const shiftOf = (state: SummaryState, id: string): ShiftAcc =>
   sub(state.shifts, id, () => ({
@@ -389,12 +650,26 @@ const carriedShift = (payload: Payload): string | null =>
   typeof payload.shift_id === "string" ? payload.shift_id : null;
 
 /**
- * The branch stamp is folded INTO a line's member rather than resolved beside it, for the reason
- * `02-F45` folds the actor into a shift open: the hour a line was rung is one of its carried
+ * The branch stamp is folded INTO the CLOSING ACT's member rather than resolved beside it, for the
+ * reason `02-F45` folds the actor into a shift open: the hour a bill closed is one of its carried
  * facts, so two members disagreeing about it are two contested heads and a fold picks neither.
  * The key is prefixed so it can never collide with a `01 §4` payload key.
+ *
+ * ⚠ **IT USED TO BE FOLDED INTO A LINE'S MEMBER INSTEAD, AND MOVING IT IS PART OF THIS CHANGE
+ * RATHER THAN A TIDY-UP.** The rule the old comment gave was right — fold in what you project —
+ * and its premise stopped holding the moment the hourly curve moved onto the closing act: a line's
+ * stamp now reaches NO projected value, so keeping it in the member would DISPUTE a line
+ * redelivered under two stamps and zero its item revenue for a disagreement about a fact nothing
+ * reads. `merge.ts` does not fold stamps into line cells either.
  */
 const STAMP_KEY = "__branch_stamp";
+
+/**
+ * The envelope's actor, folded into a corrective's member for the same reason. `12-F10` bullet 3
+ * asks *"by whom"*, so the actor is a projected value here and two members naming two different
+ * cashiers under one `adjustment_attempt_id` are two contested heads (`01-F31`).
+ */
+const ACTOR_KEY = "__envelope_actor";
 
 /**
  * Fold one delivered envelope. A type outside this fold's vocabulary changes nothing — an
@@ -417,10 +692,9 @@ export const foldSummary = (state: SummaryState, event: SummaryEvent): SummarySt
     }
     case "order.line_added": {
       const acc = orderOf(state, payload.order_id as string);
-      const member: Payload = { ...payload, [STAMP_KEY]: event.branch_created_at };
       sub(acc.lines, payload.line_id as string, () => new Map<string, Payload>()).set(
-        canonicalJson(member),
-        member,
+        canonicalJson(payload),
+        payload,
       );
       return state;
     }
@@ -433,6 +707,64 @@ export const foldSummary = (state: SummaryState, event: SummaryEvent): SummarySt
      */
     case "order.line_removed": {
       orderOf(state, payload.order_id as string).removed.add(payload.line_id as string);
+      return state;
+    }
+    /**
+     * `02-F20` / `02-F8`'s POST-confirm half, and the arm whose absence is what put two Raitas
+     * nobody sold at the top of an owner's item table.
+     *
+     * `DEC-MONEY-010` (2) makes the LINE authoritative wherever a line exists — *"`void.recorded`
+     * carries the approval facts and contributes value only for what no line exit removed"* — so
+     * the money leaves through THIS event and `void.recorded` below is counted, never subtracted
+     * twice. Both sets are monotone: `01-F35` makes every terminal state permanent, so a
+     * redelivered edge is idempotent and a set is order-free by construction (`01-F34`).
+     *
+     * `state` and not `line_context[*].to`: `registry.ts` requires both, `line-void.ts` derives one
+     * from the other object so they cannot disagree, and reading the top-level field is what
+     * `merge.ts`'s own edge collection does. A state outside both lists (`in_prep`, `ready`) is a
+     * workflow edge and belongs to `03-F47`'s screen, not to a money report.
+     */
+    case "order.line_state_changed": {
+      const acc = orderOf(state, payload.order_id as string);
+      const to = payload.state as string;
+      const bucket = EXITED.has(to) ? acc.exited : FINISHED.has(to) ? acc.finished : null;
+      if (bucket === null) return state;
+      for (const line_id of (payload.line_ids as string[] | undefined) ?? []) bucket.add(line_id);
+      return state;
+    }
+    /**
+     * `01-F63`'s closing act — **the day's money**. The attested `billed_paisa` inside it is what
+     * the customer owed, tax included and rounded (`01-F82`, `02-F63`); see the file header for why
+     * this plane cannot compute that number and must read it.
+     */
+    case "order.settlement_closed": {
+      const acc = orderOf(state, payload.order_id as string);
+      const member: Payload = { ...payload, [STAMP_KEY]: event.branch_created_at };
+      acc.closes.set(canonicalJson(member), member);
+      return state;
+    }
+    /**
+     * `12-F10` bullet 3 — the three correctives, counted and attributed, never netted.
+     *
+     * The key is `01-F83`'s `adjustment_attempt_id` and the member is the payload plus the
+     * ENVELOPE's actor. A corrective with no key cannot be deduped at all — two deliveries of one
+     * double-tapped approval would count twice and `01-F1` makes that permanent — so it is
+     * REFUSED here rather than counted, and reported as `correction_key_absent`. `01-F4` already
+     * makes such an event unemittable; this arm is what keeps that true of a report read from a
+     * ledger written before the key existed.
+     */
+    case "void.recorded":
+    case "comp.recorded":
+    case "discount.recorded": {
+      const kind = CORRECTION_TYPES[event.type] as CorrectionKind;
+      const key = payload.adjustment_attempt_id;
+      if (typeof key !== "string" || key.length === 0) {
+        keylessOf(state).add(event.id);
+        return state;
+      }
+      const register = state.corrections.get(kind) as Map<string, Members>;
+      const member: Payload = { ...payload, [ACTOR_KEY]: event.actor_user_id };
+      sub(register, key, () => new Map<string, Payload>()).set(canonicalJson(member), member);
       return state;
     }
     case "shift.opened": {
@@ -502,6 +834,8 @@ export const foldSummary = (state: SummaryState, event: SummaryEvent): SummarySt
  */
 const UNBOUND_DRAWER = new WeakMap<SummaryState, Set<string>>();
 const UNBOUND_PAID_OUT = new WeakMap<SummaryState, Set<string>>();
+/** Correctives delivered with no `01-F83` attempt key — counted nowhere, reported by name. */
+const KEYLESS_CORRECTION = new WeakMap<SummaryState, Set<string>>();
 const bucketOf = (map: WeakMap<SummaryState, Set<string>>, state: SummaryState): Set<string> => {
   const existing = map.get(state);
   if (existing !== undefined) return existing;
@@ -511,6 +845,7 @@ const bucketOf = (map: WeakMap<SummaryState, Set<string>>, state: SummaryState):
 };
 const unboundOf = (state: SummaryState): Set<string> => bucketOf(UNBOUND_DRAWER, state);
 const unboundPaidOutOf = (state: SummaryState): Set<string> => bucketOf(UNBOUND_PAID_OUT, state);
+const keylessOf = (state: SummaryState): Set<string> => bucketOf(KEYLESS_CORRECTION, state);
 
 // ── projection ─────────────────────────────────────────────────────────────────────────────────
 
@@ -543,9 +878,40 @@ const agreed = (members: Members, code: string, anomalies: Set<string>): Payload
   return null;
 };
 
-/** A line's billed value, in BigInt. `qty` is an integer count (`00 §6`). */
+/** A line's captured value, in BigInt (`01-F53`). `qty` is an integer count (`00 §6`). */
 const lineValue = (member: Payload): bigint =>
   BigInt(member.qty as number) * BigInt(member.unit_price_paisa as number);
+
+/**
+ * `01-F63`'s attestation, read off ONE agreed closing act — **the day's money, and the only
+ * tax-inclusive figure this plane can obtain** (`01-F82`, `02-F63`; see the file header).
+ *
+ * `null` is *"this act attests no readable amount"* and its two causes are kept apart on purpose,
+ * because they mean different things to whoever reads the anomaly:
+ *
+ *  - **absent** — the act settled and carried no snapshot. `merge.ts` reads the same absence as
+ *    *"no ceiling"* and `01-F63` is explicit that *"the act is the fact, the snapshot is evidence
+ *    about it"*, so the order stays settled and stays counted; only its money is unknown.
+ *  - **invalid** — a non-integer or negative snapshot. `merge.ts` raises `close_snapshot_invalid`
+ *    for exactly this and the name is reused rather than reinvented (`12-F21`), so an owner and
+ *    the device fold report one word for one fact.
+ *
+ * In both cases the contribution is ZERO and never a guess: substituting a line sum here would
+ * reintroduce the tax-blind, void-blind number this file was rebuilt to remove, and it would do it
+ * silently, on the one order where something already went wrong.
+ */
+const attestedBilled = (close: Payload, anomalies: Set<string>): bigint | null => {
+  if (!("billed_paisa" in close)) {
+    anomalies.add("close_snapshot_absent");
+    return null;
+  }
+  const snapshot = close.billed_paisa;
+  if (typeof snapshot !== "number" || !Number.isInteger(snapshot) || snapshot < 0) {
+    anomalies.add("close_snapshot_invalid");
+    return null;
+  }
+  return BigInt(snapshot);
+};
 
 /**
  * `02-F45` — the agreed cashier for a shift. Two opens naming two different actors are two
@@ -572,6 +938,28 @@ const agreedActor = (acc: ShiftAcc, anomalies: Set<string>): string | null => {
 
 /** Rows sorted by key (UTF-16 code unit) — row ORDER is part of the projection (`01-F34`). */
 const sortedKeys = <V>(m: Map<string, V>): string[] => [...m.keys()].sort();
+
+type ActorAcc = {
+  readonly actor: string | null;
+  readonly approver: string | null;
+  count: number;
+  total: bigint;
+};
+
+/** A delivered identity, or `null`. Both slots are nullable and neither may become the string. */
+const stringOrNull = (value: unknown): string | null => (typeof value === "string" ? value : null);
+
+/**
+ * The `by` row's sort key: `(actor, approver)` as ONE string, so the rows are ordered by two
+ * PAYLOAD/ENVELOPE facts and never by an envelope id (`26 §8`).
+ *
+ * `null` maps to the empty string and a present id is prefixed, so a null actor can never collide
+ * with a cashier whose id is somehow empty — the two mean opposite things here (`null` on the
+ * approver is "no approval was involved", which `permissions.ts` allows outright) and a report
+ * that merged them would say a manager approved her own unsupervised void.
+ */
+const attributionKey = (actor: string | null, approver: string | null): string =>
+  `${actor === null ? "" : `\u0001${actor}`}\u0002${approver === null ? "" : `\u0001${approver}`}`;
 
 const soleBranch = (branches: Set<string>): string => [...branches].sort()[0] ?? "";
 
@@ -611,50 +999,70 @@ export const projectSummary = (
   const perItem = new Map<string, { qty: number; total: bigint }>();
   const perHour = new Map<number, bigint>();
   let orders = 0;
+  let unsettled_orders = 0;
   let salesTotal = 0n;
 
   for (const order_id of sortedKeys(state.orders)) {
     const acc = state.orders.get(order_id) as OrderAcc;
     const created = agreed(acc.created, "order_channel_divergence", anomalies);
-    if (acc.created.size > 0) orders += 1;
-    // An order whose `order.created` never arrived (its lines did) is HELD, never parked into a
+    // An order whose `order.created` never arrived (its close did) is HELD, never parked into a
     // guessed channel: `01-F60` makes channel the PRICE KEY, so guessing one would attribute money
-    // to a channel nobody sold on. Its money still reaches the day total and the hourly curve.
-    else anomalies.add("order_created_outside_window");
+    // to a channel nobody sold on. Its money still reaches the day total and the hourly curve,
+    // which is why `by_channel` can sum BELOW `total_paisa` — see the file header.
+    if (acc.created.size === 0) anomalies.add("order_created_outside_window");
     const channel = created === null ? null : (created.channel as string);
 
-    let orderTotal = 0n;
+    // ── `12-F10` bullet 4, the menu mix. Line-derived and PRE-TAX; see `ItemRevenue`. ──────────
     for (const line_id of sortedKeys(acc.lines)) {
-      // `02-F8` — the tombstone is read BEFORE the register, so the line leaves every block at
-      // once: the total, its channel row, the top-items table and the hourly bucket. A build that
-      // subtracted only from the total leaves the Coke standing in three of the six blocks
-      // `12-F10` names, and an owner reads two different days off one screen. Nothing is disputed
-      // about a line that is gone, so no `order_line_divergence` is raised for one.
+      // `02-F8`'s two halves, read BEFORE the register so a line that is gone leaves the item
+      // table and its unit count together. PRE-confirm the line was removed and was never a sale;
+      // POST-confirm `02-F20`'s void exited it and `merge.ts` already returns zero for that cell.
+      // A build that fixed only the money would leave `raita · 2 sold` standing beside a corrected
+      // total — which is what the end-to-end run actually printed, and is worse than a missing row
+      // because it names a dish and a quantity.
       if (acc.removed.has(line_id)) continue;
+      // `billedCellPaisa`'s exact disposition: a DECIDED exit contributes nothing, and a line
+      // holding an exit AND another terminal head is contested, which `CONTESTED_LINE_BILLABLE`
+      // ratifies as billable. Neither branch reads delivery order (`01-F34`).
+      if (acc.exited.has(line_id) && !acc.finished.has(line_id)) continue;
       const register = acc.lines.get(line_id) as Members;
       const member = agreed(register, "order_line_divergence", anomalies);
       if (member === null) continue;
-      const value = lineValue(member);
-      orderTotal += value;
-
       const item = sub(perItem, member.item_id as string, () => ({ qty: 0, total: 0n }));
       item.qty += member.qty as number;
-      item.total += value;
+      item.total += lineValue(member);
+    }
 
-      // The hourly bucket, on the line's OWN delivered branch stamp (`01-F43`). An offset outside
-      // the day is clamped into it and flagged: a `branch_provisional` stamp can land anywhere,
-      // and dropping the money would understate the day, which is the worse of the two errors.
-      const raw = Math.floor(((member[STAMP_KEY] as number) - bounds.start_ms) / HOUR_MS);
+    // ── the day's money: `01-F63`'s closing act and nothing else. ──────────────────────────────
+    if (acc.closes.size === 0) {
+      // A bill nobody has settled. `00 §5.7` — stated as a count, never folded in at a line sum.
+      unsettled_orders += 1;
+      continue;
+    }
+    // The ACT happened, so the order is counted even when its snapshot is unreadable: `01-F63`
+    // separates the fact from the evidence about it, and dropping the order would understate the
+    // count as well as the money.
+    orders += 1;
+    const close = agreed(acc.closes, "order_close_divergence", anomalies);
+    const attested = close === null ? null : attestedBilled(close, anomalies);
+    const value = attested ?? 0n;
+    salesTotal += value;
+
+    if (close !== null) {
+      // The hourly bucket, on the CLOSING ACT's own delivered branch stamp (`01-F43`). An offset
+      // outside the day is clamped into it and flagged: a `branch_provisional` stamp can land
+      // anywhere, and dropping the money would understate the day, which is the worse of the two
+      // errors. Clamping is also what keeps `Σ hourly === total_paisa` unconditionally true.
+      const raw = Math.floor(((close[STAMP_KEY] as number) - bounds.start_ms) / HOUR_MS);
       if (raw < 0 || raw >= hours) anomalies.add("stamp_outside_business_day");
       const offset = Math.min(hours - 1, Math.max(0, raw));
       perHour.set(offset, (perHour.get(offset) ?? 0n) + value);
     }
 
-    salesTotal += orderTotal;
     if (channel === null) continue;
     const bucket = sub(perChannel, channel, () => ({ orders: 0, total: 0n }));
     bucket.orders += 1;
-    bucket.total += orderTotal;
+    bucket.total += value;
   }
 
   // Exhaustive over `02-F42`'s CLOSED channel set, with explicit zeros — `01-F60`'s rule, and the
@@ -697,6 +1105,67 @@ export const projectSummary = (
     billed_paisa: renderTotal(perHour.get(offset) ?? 0n, anomalies),
   }));
 
+  /**
+   * `12-F10` bullet 3 — count, value and by whom, for all three kinds always.
+   *
+   * Nothing here subtracts. `01-F30`'s `void_value`, `comp_value` and `discounts` terms are ABSENT
+   * (`DEC-MONEY-010`, gate (iii) unmet: no oracle-pinned merge rule in `26 §7`), so this is a
+   * REPORT and not a conservation equation — the day's money above is read off `01-F63`'s
+   * attestation, which the void has already left through its line exit and the comp and the
+   * discount never entered a subtraction at all.
+   */
+  const corrections: CorrectionBlock[] = CORRECTION_KINDS.map((kind) => {
+    const register = state.corrections.get(kind) as Map<string, Members>;
+    const by = new Map<string, ActorAcc>();
+    let count = 0;
+    let total = 0n;
+    for (const attempt_id of sortedKeys(register)) {
+      const members = register.get(attempt_id) as Members;
+      // `01-F83` verbatim: "members diverging in any field mark the key disputed, contribute zero
+      // … no fold picks a winner". A disputed corrective is not counted either — a count is a
+      // claim about how many acts happened, and two irreconcilable members are not evidence of
+      // one act or of two.
+      const member = agreed(members, `${kind}_divergence`, anomalies);
+      if (member === null) continue;
+      count += 1;
+      const amount = member.amount_paisa;
+      // The MAGNITUDE, checked rather than trusted. `registry.ts` makes it a non-negative integer
+      // and `01-F30` subtracts these terms, so a negative would ADD to a bill through a minus
+      // sign; the act is still counted, because `01-F63`'s "the act is the fact, the snapshot is
+      // evidence about it" is the same separation one event family over.
+      const usable = typeof amount === "number" && Number.isInteger(amount) && amount >= 0;
+      if (!usable) anomalies.add("correction_amount_invalid");
+      const value = usable ? BigInt(amount as number) : 0n;
+      total += value;
+
+      const actor = stringOrNull(member[ACTOR_KEY]);
+      const approver = stringOrNull(member.approver_user_id);
+      const row = sub(by, attributionKey(actor, approver), () => ({
+        actor,
+        approver,
+        count: 0,
+        total: 0n,
+      }));
+      row.count += 1;
+      row.total += value;
+    }
+    return {
+      kind,
+      count,
+      value_paisa: renderTotal(total, anomalies),
+      removed_from_sales: REMOVED_FROM_SALES[kind],
+      by: sortedKeys(by).map((key) => {
+        const row = by.get(key) as ActorAcc;
+        return {
+          actor_user_id: row.actor,
+          approver_user_id: row.approver,
+          count: row.count,
+          value_paisa: renderTotal(row.total, anomalies),
+        };
+      }),
+    };
+  });
+
   const cash: ShiftCash[] = sortedKeys(state.shifts).map((shift_id) => {
     const acc = state.shifts.get(shift_id) as ShiftAcc;
     const close = agreed(acc.closes, "shift_close_divergence", anomalies);
@@ -732,6 +1201,9 @@ export const projectSummary = (
 
   if (unboundOf(state).size > 0) anomalies.add("unbound_drawer_open");
   if (unboundPaidOutOf(state).size > 0) anomalies.add("unbound_paid_out");
+  // `01-F83` — a corrective with no attempt key cannot be deduped, so it is counted nowhere and
+  // named here. Unemittable through `01-F4` today; the ledger is append-only and older.
+  if (keylessOf(state).size > 0) anomalies.add("correction_key_absent");
 
   // `12-F9` — "day not closed yet, figures provisional". The claim is about branches that STARTED
   // a day and did not finish it; a branch with no `day.opened` has no day to close.
@@ -745,6 +1217,7 @@ export const projectSummary = (
     branch_ids: [...state.branches].sort(),
     sales: { total_paisa: renderTotal(salesTotal, anomalies), orders, by_channel },
     cash,
+    corrections,
     top_items,
     hourly,
     days,
@@ -753,6 +1226,7 @@ export const projectSummary = (
       provisional_stamp_events: state.provisional.size,
       every_day_closed,
       open_shifts: cash.filter((shift) => !shift.closed).length,
+      unsettled_orders,
       truncated: options.truncated === true,
       anomalies: [...anomalies].sort(),
     },

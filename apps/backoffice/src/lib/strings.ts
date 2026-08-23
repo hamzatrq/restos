@@ -7,8 +7,69 @@
  * a catalog can be asserted by a test that never renders anything.
  */
 
+/**
+ * **`21-F15`'s vocabulary, hoisted so there is exactly ONE literal per treatment.**
+ *
+ * The staff screen shipped two of these inline and the rest of the app shipped raw keys; a second
+ * copy of *"an unnamed branch"* is how one law becomes two laws. `lib/names.tsx` is the only
+ * consumer of this object, and every name slot in the app goes through it.
+ *
+ * ⚠ **No FR id, no environment key, no path** (`14-F38`): these sentences are read by a restaurant
+ * owner. What she can act on is *who* sets a name, so that is what they say.
+ */
+const naming = {
+  /**
+   * `01-F68` — an org with events and no directory row is UNNAMED, not invalid. This is what her
+   * own restaurant reads as until whoever set RestOS up types its name.
+   */
+  orgUnnamed: "an unnamed business",
+  /**
+   * The third state, and the reason there are three (see `lib/names.tsx`). The directory could not
+   * be read at all — still loading, or this sign-in may not read it — so the screen says that
+   * rather than claiming the business has no name.
+   */
+  orgUnknown: "business name unavailable",
+  /** `21-F15` exception (b): a labelled technical id beside a name, never inside the name slot. */
+  orgReference: "Business reference",
+
+  /** `01-F69`. Every branch in the directory is named by its schema; one absent from it is not. */
+  branchUnnamed: "an unnamed branch",
+  branchUnknown: "branch name unavailable",
+  branchReference: "Branch reference",
+
+  /**
+   * `01-F70` — a till carries a human name on its cloud registry row, REQUIRED at registration.
+   * Nothing writes one in this deployment (the provisioning command takes no name argument), so
+   * this is what the whole fleet reads as — the debt made visible rather than a rare edge.
+   */
+  deviceUnnamed: "an unnamed till",
+  deviceUnknown: "till name unavailable",
+  deviceReference: "Till reference",
+
+  /**
+   * `11-F20` — a person is a named record. She reads as this only where the roster does not carry
+   * her at all; a departed cashier still renders her name (`11-F22`), which is the point of that
+   * rule and is asserted rather than assumed.
+   */
+  personUnnamed: "an unnamed person",
+  personUnknown: "staff name unavailable",
+  personReference: "Staff reference",
+
+  /**
+   * `21-F15`'s counterpart half — a treatment that says only *unnamed* has retired the question.
+   * `14-F38`'s rule for something the owner cannot change herself: name the ROLE that can.
+   */
+  owed:
+    "Whoever set up RestOS for you gives your business, its branches and your staff their names. " +
+    "Until that is done they read here as unnamed, with a reference beside them so two of them " +
+    "can be told apart.",
+} as const;
+
 export const strings = {
   appName: "RestOS Back Office",
+
+  /** `21-F15`'s treatments. Rendered only through `lib/names.tsx` — see `naming` above. */
+  names: naming,
 
   signIn: {
     heading: "Sign in",
@@ -32,11 +93,15 @@ export const strings = {
     signOut: "Sign out",
     org: "Organisation",
     /**
-     * The signed-in user, LABELLED. The header ran the org id and the user id together behind one
-     * word, so `org-zaiqa · bootstrap-owner:org-zaiqa` read as one fact with a stray separator.
-     * Both are raw ids because they are the only names the server has — `01-F47` covers devices,
-     * not people, and there is no user profile in the corpus to read a display name from — so the
-     * least this can do is say which id is which.
+     * The signed-in user, LABELLED.
+     *
+     * ⚠ **The note that stood here said *"both are raw ids because they are the only names the
+     * server has … there is no user profile in the corpus to read a display name from"*. That was
+     * true when written and had stopped being true well before it was read: `11-F20` makes a
+     * person a named record, `01-F68` names the org, and `session.whoami` has served
+     * `display_name` beside `org_id` for as long as this header has rendered neither. The header
+     * was not short of data — nothing read the data it had.** Both slots are names now
+     * (`21-F15`); the labels stay, because *which* is which still needs saying.
      */
     user: "Signed in as",
   },
@@ -407,18 +472,61 @@ export const strings = {
       /** Four nulls on one row: no expected figure, no count, no variance, no cashier. */
       notCounted: "Still open — not counted yet",
       cashierNotRecorded: "cashier not recorded",
+      /**
+       * `21-F15` exception (b). A shift has no NAME record anywhere in the corpus — the law names
+       * four (org, branch, device, person) and a shift is none of them — so its key stays, and the
+       * law's requirement of it is that it is labelled and does not occupy the name slot. The
+       * cashier's name is what leads that row now.
+       */
+      shiftReference: "Shift reference",
       empty: "No shift was opened.",
+    },
+
+    /**
+     * `12-F10` bullet 3, and the ONE screen fact an owner would act on wrongly if it were left
+     * unsaid: a void is already off the takings and a comp is not. The server sends that per kind
+     * and this catalog gives it two sentences, so neither has to be inferred from a total.
+     */
+    corrections: {
+      heading: "Voids, comps and discounts",
+      help: "Every correction recorded today, who made it, and who approved it.",
+      recorded: "recorded",
+      /** The void: the dish left the bill, so the takings above never held its money. */
+      removed: "Already off the takings above.",
+      /**
+       * The comp and the discount: recorded, and the bill did not move. The counter says the same
+       * thing to the cashier in the same words, so one product has one story about this money.
+       */
+      kept: "Recorded only — the takings above still include this money.",
+      approvedBy: "approved by",
+      /** A manager may do all three unsupervised, so there is no second name to show. */
+      unsupervised: "no approval needed",
+      staffNotRecorded: "staff member not recorded",
+      empty: "Nothing was corrected today.",
+      kinds: {
+        void: "Voids",
+        comp: "Comps",
+        discount: "Discounts",
+      },
     },
 
     items: {
       heading: "Top items by revenue",
+      /**
+       * The one block on this screen that does not add up to the day's takings, said plainly. The
+       * takings are what each bill was closed at, tax included; these are the prices of the dishes
+       * themselves, which is what a ranking of dishes has to be built from.
+       */
+      help: "Ranked by the price of the dishes sold, before tax. A voided dish is not counted.",
       sold: "sold",
       empty: "No item was sold.",
     },
 
     hourly: {
       heading: "Hourly sales",
-      help: "One bar per hour of the business day, labelled by the clock on the wall.",
+      help:
+        "One bar per hour of the business day, labelled by the clock on the wall. A bill lands " +
+        "in the hour it was closed, so these bars add up to the takings above.",
       empty: "No hour of this day carries an order.",
     },
 
@@ -433,6 +541,8 @@ export const strings = {
       /** `01-F44`'s raw device stamps — see this block's header on the word "provisional". */
       deviceClock: "Events stamped on a device clock rather than the branch clock:",
       openShifts: "Shifts with money still in an open drawer:",
+      /** `12-F10` — a bill nobody has settled is in no figure on this screen, and says so. */
+      unsettled: "Bills opened and not settled yet, whose money is in no figure here:",
       allDaysClosed: "Every branch closed its day.",
       /** `12-F9`'s banner — and the ONE string on this screen allowed the word "provisional". */
       dayOpen: "A branch has not closed its day, so every figure here is provisional.",
@@ -576,14 +686,14 @@ export const strings = {
      * branch"*), and a control whose name runs to a sentence is the a11y regression this app
      * already records from the apply-when row.
      */
-    branchUnnamed: "an unnamed branch",
+    branchUnnamed: naming.branchUnnamed,
     /**
      * `21-F15` exception (b) — *"a secondary, explicitly labelled technical id offered for support
      * beside a name"*. Two unnamed branches must be tellable apart, and the key is how; the
      * exception's condition is that it is LABELLED and never occupies the name slot, which is why
      * the label and the value render as one demoted caption beside the treatment above.
      */
-    branchReference: "Branch reference",
+    branchReference: naming.branchReference,
     /**
      * `21-F15`'s counterpart half — *"an unnamed record is a missing field upstream, so the fix is
      * the required field on the record, never a prettier fallback"*. A treatment that says only

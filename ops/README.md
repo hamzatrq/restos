@@ -38,6 +38,13 @@ Both are cheap now and expensive later, and neither has an error message.
    stations only, and with no `RESTOS_PRINTER` **every settlement still raises an alarm band** for
    the customer's receipt. See [What this cannot do yet](#what-this-cannot-do-yet).
 
+   ⚠ **If you are choosing paper: `RESTOS_PRINTER` is only half of it.** `RESTOS_KOT_PRINTER` names
+   the printer MODEL, and without it the capability record is a conservative 32 columns — so
+   **every KOT and every cash slip is refused before a byte is sent while receipts still print**,
+   and the till looks healthy from the customer's side. Set both. `plans/wave-1/running-the-stack.md`
+   **§6e** is the step to follow with a printer in your hands: every variable, the measured refusal
+   matrix, and what the first real head will tell you that nothing in this repo can.
+
 ### 1. Mint the ids — once, on any machine
 
 ```bash
@@ -158,11 +165,18 @@ You want four lines from the gateway — the port, the (redacted) database it wi
 that from a gateway that did not print it*):
 
 ```
-@restos/sync-gateway listening on http://0.0.0.0:8080
+@restos/sync-gateway listening on http://127.0.0.1:8080
 @restos/sync-gateway database postgres://gateway:*****@127.0.0.1:5432/restos (opened lazily …)
 @restos/sync-gateway publish surface enabled (PUBLISH_TOKEN configured)
-@restos/sync-gateway schema up to date — all 10 migrations applied
+@restos/sync-gateway schema up to date — all 13 migrations applied
 ```
+
+⚠ *Two corrections here, 2026-08-24, and both are the same hazard as the `publish surface` one
+above — an operator greps a literal and a wrong literal is indistinguishable from a dead service.*
+**The first line says `127.0.0.1`, not `0.0.0.0`.** The process does bind `0.0.0.0`
+(`host: "0.0.0.0"`), and Fastify resolves that wildcard before returning the address it prints; the
+loopback one lands on this line and the pino lines beside it carry the other interfaces. **And the
+migration count is 13, not 10** — read it off the last line, never off this page.
 
 If the third reads `publish surface DISABLED — no PUBLISH_TOKEN`, the API gets a 503 on every
 publish and no menu will ever ship. If the fourth reads `NOT MIGRATED`, go back to step 3.
@@ -170,7 +184,7 @@ publish and no menu will ever ship. If the fourth reads `NOT MIGRATED`, go back 
 The API prints **two** lines, and the second is the one that used to be missing:
 
 ```
-@restos/api listening on http://0.0.0.0:3001
+@restos/api listening on http://127.0.0.1:3001
 @restos/api accounts: kernel.users at postgres://restos:*****@127.0.0.1:5432/restos (persistent; …)
 ```
 
@@ -193,11 +207,21 @@ cd /opt/restos
 export DATABASE_URL=... DEVICE_TOKEN_SECRET=...     # the same values the gateway has
 
 sudo -u restos --preserve-env pnpm -C services/sync-gateway provision-device \
-  --org "$ORG_ID" --branch "$BRANCH_ID" --device "$COUNTER_DEVICE_ID" --class counter_electron
+  --org "$ORG_ID" --branch "$BRANCH_ID" --device "$COUNTER_DEVICE_ID" --class counter_electron \
+  --name "Counter till"
 
 sudo -u restos --preserve-env pnpm -C services/sync-gateway provision-device \
-  --org "$ORG_ID" --branch "$BRANCH_ID" --device "$KITCHEN_DEVICE_ID" --class kitchen
+  --org "$ORG_ID" --branch "$BRANCH_ID" --device "$KITCHEN_DEVICE_ID" --class kitchen \
+  --name "Kitchen screen"
 ```
+
+⚠ **`--name` is REQUIRED and both commands here omitted it until 2026-08-24** — measured, the run
+fails with `missing required argument(s): --name` and exit **1**, so this step simply did not
+complete as written. It is a LABEL, not a key (`device_id` remains the sole key for admission,
+fan-out and `01-F64`'s store binding), and `01-F70` requires it *at registration* because the
+operator reading `14-F12`'s device list is by construction not standing in front of the till. Give
+each machine the name a human would use over the phone. `--reissue` **refuses** a different one
+rather than renaming.
 
 Each prints a token. Copy each one into that device's `RESTOS_DEVICE_TOKEN` — the counter's token
 into the counter's file, the kitchen's into the kitchen's. A token minted for one device id does
@@ -306,9 +330,14 @@ following it would have reported a healthy till as broken*):
 ```
 
 Three states, and only one is a fault. `0 tile(s)` means the menu has not arrived at all — check
-the till's `org` against the API's `BOOTSTRAP_ORG_ID`. `n unsellable (no price set)` means the
-tiles arrived and the prices did not — that is `ENABLED_BRANCHES` not containing this till's
-branch, or Trap 1. **`n tile(s), 0 unsellable` is the line you want.**
+the till's `RESTOS_ORG_ID` against **the org id `create-org` printed in §3b**, which is the org the
+owner's `kernel.users` row belongs to and the one the API publishes under (`ctx.subject.org_id`).
+⚠ *This said to check it against the API's `BOOTSTRAP_ORG_ID`, and on this deployment that variable
+**must not be set at all**: `DATABASE_URL` is set here, and the two together are a boot refusal
+(§4). An operator following the old sentence would have set it and stopped the API.*
+`n unsellable (no price set)` means the tiles arrived and the prices did not — that is
+`ENABLED_BRANCHES` not containing this till's branch, or Trap 1. **`n tile(s), 0 unsellable` is the
+line you want.**
 
 What the *grid* shows is the same fact from the other side: a sellable tile carries the item name
 alone, and an unsellable one carries the name with `no price set` under it and will not add a line.

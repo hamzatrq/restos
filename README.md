@@ -186,16 +186,22 @@ drives it, and completeness is enforced at the writer.
 ## Running the till
 
 ```sh
-# ── 7a. native addon — ONCE per checkout, and NOT optional ───────────────────
+# ── 7a. native addon — ONLY IF IT IS NOT ALREADY BUILT ──────────────────────
 # better-sqlite3 is native, and Electron's V8 ABI (148) differs from Node's (127).
 # A fresh install has no Electron-ABI build and the till dies with an UNHANDLED
 # REJECTION — the window comes up and the app hangs, which reads as "it started".
+#
+# TEST FIRST. rebuild:native writes into node_modules/.pnpm/, which is
+# workspace-global: on a shared tree, running it when it is not needed reddens
+# every other process's suites for as long as the restore below takes.
+ls -d node_modules/.pnpm/better-sqlite3@*/node_modules/better-sqlite3/bin/$(node -p 'process.platform+"-"+process.arch')-*   && echo "Electron build present — SKIP 7a entirely"
+
+# Only if that printed nothing:
 pnpm -C apps/pos-electron rebuild:native                       # ~64 s
 
 # It then clobbers the Node-ABI copy that every test suite loads. Restore it, or
 # every suite touching the device store dies with NODE_MODULE_VERSION 148 vs 127.
-# Both ABIs coexist afterwards. Note this writes into node_modules/.pnpm/, which
-# is workspace-global, not app-local.
+# Both ABIs coexist afterwards.
 ( cd node_modules/.pnpm/better-sqlite3@*/node_modules/better-sqlite3 && npm run build-release )
 
 # ── 7b. provision the device ─────────────────────────────────────────────────
@@ -203,9 +209,10 @@ pnpm -C apps/pos-electron rebuild:native                       # ~64 s
 # The registry has the veto, so a valid token alone opens nothing.
 # Do NOT fold this into `export X=$(…)` — the assignment always succeeds and would
 # hide a failure, leaving the till with a non-token that never syncs.
+# --name is REQUIRED (01-F70): without it the command exits 1 and provisions nothing.
 DEV_TOKEN=$(pnpm -C services/sync-gateway provision-device \
   --org "$ORG_ID" --branch "$BRANCH_ID" --device "$DEVICE_ID" \
-  --class counter_electron | tail -1)
+  --class counter_electron --name "Counter till" | tail -1)
 case "$DEV_TOKEN" in ey*) ;; *) echo "provisioning failed — read stderr"; exit 1;; esac
 export RESTOS_DEVICE_TOKEN="$DEV_TOKEN"
 # The token is the ONLY thing on stdout; every readable line goes to stderr.
@@ -255,6 +262,11 @@ Sign in as **Ayesha** (`RESTOS_DEV_PIN`) or **Bilal** (`RESTOS_DEV_PIN_BILAL`) �
   both resolved to `~/.config/Electron/device.db`, one file for two `device_id`s).
   `pnpm start -- --user-data-dir=X` silently does **not** forward the flag; to control the location,
   run `electron-vite build` and `electron out/main/index.js --user-data-dir=…` as two steps.
+  ⚠ **`--user-data-dir=DIR` makes `userData` *`DIR` itself* — no app-name subdirectory** — so the
+  store is then `DIR/device.db`, not `DIR/RestOS Counter/device.db`. Measured 2026-08-24 by calling
+  `app.getPath("userData")` in a real Electron process both ways. Reading the wrong one fails with
+  `Cannot open database because the directory does not exist`, which is a message about the
+  **directory** and reads like a missing store.
 - ⚠ **UPGRADING A TILL THAT RAN BEFORE THE RENAME? IT STARTS ON AN EMPTY STORE.** The old file is
   still at `~/.config/Electron/device.db` (`%APPDATA%\Electron\device.db` on Windows) and **nothing
   migrates it and nothing points at it**. The till comes up with no open day, no shift and no
@@ -670,7 +682,7 @@ about the wrong ledger), `REDIS_URL` (**required**), `AUDITOR_INTERVAL_MS` (defa
 | `RESTOS_STATION_ROUTES` | `paper` for all | `*=screen` if you have no printer, or every order raises an alarm. **It routes KITCHEN STATIONS only** — see the note below the table |
 | `RESTOS_AGING_THRESHOLDS` | `dine_in=10/20,…` | `order_type=amber/red` in minutes |
 | `RESTOS_PRINTER` | unset ⇒ no printer link | the CABLE (`03-F1`, `18 §10`): `tcp://host[:9100]`, `windows://ShareName` (a share on **this** machine), or `device:///dev/usb/lp0`. Unreadable values are refused whole and named on the boot line. **Prefer `tcp://`** — it is the only form that can read `03-F40`'s paper sensor; the two USB forms take the bytes silently, so a paper-out reads as a printed ticket. **No printer has ever been attached to this code (K-8)** |
-| `RESTOS_KOT_PRINTER` | none ⇒ 32-column record | the printer MODEL, not the cable. Unset resolves conservatively to 32 Font-A columns; a KOT needs 42, so every KOT is refused before a byte is sent. **Not irrelevant under `*=screen`** — the shift-close slip (35) and day summary (34) are refused too |
+| `RESTOS_KOT_PRINTER` | none ⇒ 32-column record | the printer MODEL, not the cable. Unset (or blank, or an unrecognised id) resolves conservatively to **32** Font-A columns, and `03-F49`'s floors differ per type — so, measured: **KOT (42), shift-close slip (35) and day summary (34) are REFUSED at render, while receipt and bill (32) still print.** That asymmetry is the trap: a till with `RESTOS_PRINTER` set and this unset hands the customer a receipt and gives the kitchen nothing, so it looks healthy from the front. **Set both or neither.** Known models: `TM-T20II` 48 · `TH230` 44 · `TM-P80` 42 · `BC-58U` 32 — and the 58 mm `BC-58U` behaves identically to unset, because 58 mm genuinely cannot carry a KOT. **Not irrelevant under `*=screen`**: routing suppresses KOTs only |
 | `RESTOS_SERVE_SIGNAL_OWNER` | `settlement` | must be the **same value** on the till and the pass |
 | `RESTOS_READY_SIGNAL_OWNER` | `pass` | pass-kds only. **A different set of values** from the serve signal |
 | `RESTOS_DEV_PIN` | unset ⇒ Ayesha absent | **dev seed** — **one key per member since August 2026** (`01-F28`). This one is **Ayesha's alone** (cashier) |
@@ -698,6 +710,10 @@ fact this path deliberately never writes). Shift close and day summary take `03-
 refusal instead, and their bands are unrecorded because `01 §4` carries no `slip.print_failed`.
 **A branch with no printer at all is not yet a quiet configuration** — `03-F22`'s per-station choice
 has no equivalent for the customer's copy.
+
+**Attaching a real printer:** `plans/wave-1/running-the-stack.md` **§6e** is the step to follow with
+one in your hands — every variable, the measured refusal matrix, the three cable forms and what each
+can and cannot observe, and what the first real head will tell you that nothing here can (K-8).
 
 ### `apps/backoffice`
 

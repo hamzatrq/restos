@@ -51,8 +51,16 @@ const DISHES = [
 ].map((label, i) => ({ id: `d${i}`, label }));
 
 const CART = [
-  { id: "1", quantity: 2, name: "Chicken Karahi", modifiers: ["Medium spice"] },
-  { id: "2", quantity: 4, name: "Naan" },
+  // `27-F24`'s line total — every cart row carries its own money, so the shell's own stories
+  // cannot show a priceless cart the product no longer renders.
+  {
+    id: "1",
+    quantity: 2,
+    name: "Chicken Karahi",
+    modifiers: ["Medium spice"],
+    billedPaisa: paisa(90000),
+  },
+  { id: "2", quantity: 4, name: "Naan", billedPaisa: paisa(24000) },
 ];
 
 const BASE = {

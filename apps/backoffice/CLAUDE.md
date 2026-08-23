@@ -419,9 +419,12 @@ it does not have.
   `catalog.changed` row until it lands, so between staging and 05:00 the old name is on screen
   nowhere. Closing it means the STAGED record carrying a before-name of its own, which is a payload
   change and therefore a spec question (`01 §4` / `14-F28`), not a client fix.
-- **`Staged by bootstrap-owner:org-demo`** — the row renders a raw `user_id` where `14-F3`'s example
-  says *"by Ali"*. Same gap as the history line's actor; it wants the staff registry
-  (`01-F26`/`F27`) that the back office does not yet read, and is not this row's to invent.
+- ~~**`Staged by bootstrap-owner:org-demo`** — the row renders a raw `user_id` where `14-F3`'s
+  example says *"by Ali"*. It wants the staff registry (`01-F26`/`F27`) that the back office does
+  not yet read.~~ **CLOSED (August 2026) — and the premise was false in the same way the pending
+  row's was.** The back office did not need a registry it "does not yet read": `users.list` had been
+  serving `11-F20`'s `display_name` for as long as this bullet had been standing, and
+  `session.whoami` had been serving the caller's own. See the naming section below.
 - **A non-price field change still has no before/after values.** `price_changes` is a price delta by
   construction and the refs are one-way `payloadHash` digests indexed by nothing, so a rename or a
   `03-F50` station move renders as "changed" at a catalog version and no values. The footnote
@@ -484,3 +487,153 @@ only on devices revoked through this screen cannot tell a correct implementation
 stamps the signed-in owner on every revoked row — so the CLI-revoked fixture is not extra coverage,
 it is the only row that discriminates. AGENTS.md's "guard that was never pointed at the dangerous
 case", answered by choosing the fixture rather than by adding assertions.
+
+## `21-F15` — the naming law, and the fourteen slots that were rendering keys
+
+`lib/names.tsx`. **Every name slot in this app goes through it; nothing else may resolve a name or
+invent a fallback.**
+
+**THE DEFECT WAS ON THE READ SIDE, AND `services/api` NEEDED NO CHANGE AT ALL.** A provisioned
+tenant — Postgres holding *Karachi Biryani House*, *Tariq Road*, *Ayesha Khan* — rendered
+`ORGANISATION 01a03082-83d2-725f-81ae-c044cdd0b0c4` over `SIGNED IN AS 01a03082-8b3a-…`, and the
+Summary's shift rows showed cashier UUIDs. **`tenancy.directory` (`01-F68` + `01-F69`, gated
+`report.sales_view`), `users.list` (`11-F20`, gated `user.manage`) and `session.whoami`'s
+`display_name` all already shipped, correct and tested** — and exactly one screen, the staff roster,
+consumed any of them. This is the wave's recurring defect (*a correct subsystem with no seam to the
+product*) on a **read** path: nothing was unreached in the `seams:check` sense, because
+`tenancy.directory` had one caller, and one caller is not a rail's problem.
+
+⚠ **So the first move on a naming gap here is to look for the door before building one.** No
+procedure was added, no permission action was minted, and neither exemption list in `router.ts`
+changed. `14-F30`'s precedent — a new action is an FR that decides its cells, not a convenience
+taken by an implementer — never had to be tested.
+
+### The three states, and why two would be a lie
+
+| state | when | what the slot reads |
+|---|---|---|
+| `named` | the directory answered and holds a name | the name, alone |
+| `unnamed` | the directory answered and holds none (`01-F68`'s UNNAMED — **most tenants today**) | *an unnamed branch* + the labelled key |
+| `unknown` | the read is in flight or the matrix refused it | *branch name unavailable* + the labelled key |
+
+Collapsing `unknown` into `unnamed` makes a screen **claim** a restaurant has no name because a
+query 401'd — the class `00 §5.7` bans, and the reason a value's SOURCE travels with it there.
+`M3` in the matrix below is that collapse; it is invisible to every other suite in the app.
+
+**Neither naming read may gate a screen, and that is a security-shaped decision rather than a
+robustness one.** `tenancy.directory` is `report.sales_view` and `users.list` is `user.manage`,
+while the screens they decorate are gated on `catalog.*` and `device.manage`. A naming read that
+failed loudly would take down a screen the matrix said **yes** to. Both degrade to `unknown`.
+
+### `21-F15` exception (b) is a LABEL, not an attribute — found by running the sweep
+
+The FR describes its own check as *"a node whose text matches the identifier shape and is not inside
+a component declared a technical-id slot"*, and `<TechnicalId>` is that component (it carries
+`data-technical-id`). **But two real slots cannot contain a component at all** — an `<option>` and
+an `aria-label` hold ONE string — so the flat form (`nameText`) is the only thing that fits there,
+and an ancestor walk reported all four of them as violations while every one was correctly labelled.
+The sweep therefore checks **label adjacency**, which is the exception's actual condition, covers
+the component case for free, and is *harder* to satisfy by accident: a key emitted anywhere without
+its label fails, **including inside a declared slot** (asserted).
+
+### What moved
+
+| surface | slot | now |
+|---|---|---|
+| header (`auth-gate.tsx`) | org, signed-in person | `01-F68` name · `whoami`'s `display_name` (`11-F20`) |
+| menu card | *Prices shown for …* | branch name |
+| price grid | row axis **and** each cell's `sr-only` label | branch name |
+| entry editor | the incomplete-pair refusal | branch names |
+| change history | each moved `(branch, channel)` cell | branch name |
+| pending edits | *Staged by …* | person name |
+| owner summary | branch drill-in, shift row, correction actor, approver | branch + person names |
+| device list | the till itself (`01-F70`), its branch, who revoked it | till + branch + person names |
+
+Two structural changes worth knowing before editing those files:
+
+- **The summary's shift row now leads with WHO RAN THE SHIFT.** It shipped as a bare `shift_id` at
+  content scale over the cashier's key at caption scale — two machine identifiers in one row, naming
+  neither. A shift has **no name record anywhere in the corpus** (`21-F15` names four: org, branch,
+  device, person), so its key cannot be resolved and becomes exception (b)'s labelled technical id.
+- **The device list keeps its `device_id` on the row whether or not the till is named**
+  (`reference={false}` on `<Named>` plus an explicit `<Reference>`), because `device_id` is the sole
+  key for admission, revocation and `01-N5`'s replacement path — it is what an owner quotes to
+  support. Every other surface drops the key once the record has a name.
+
+⚠ **`DeviceRecord.display_name` was served and dropped**, and the comment on that row said *"there
+is no device display name in the corpus to prefer"* — false since `01-F70`, in the one list that FR
+names as its reason. It is `null` for every row in every deployment (the provisioning command takes
+no name argument), so the fleet reads as *an unnamed till* today; the fix is upstream and the screen
+now shows the debt instead of hiding it behind a UUID.
+
+### Mutation matrix — `21-F15` (round-3 law), control **378/378** green, **0 survivors**
+
+In-tree with a byte-exact backup and a restore that runs whatever happens. Every row is one branch
+and the FULL app suite; *new* is the two files added with this work (`naming-law.dom.test.tsx`,
+`names.test.ts`), *pre-existing* is everything else.
+
+| # | mutant (exactly one branch) | tests failed | new | pre-existing |
+|---|---|---|---|---|
+| M1 | **the reported defect restored: the header renders the org id** | 9 | 1 file | **0** |
+| M2 | `isName` drops the emptiness test — `""` becomes a name, so the slot is blank | 3 | 1 | 0 |
+| M3 | **the two absences COLLAPSE: `unknown` renders as `unnamed`** | 2 | 1 | **0** |
+| M4 | the treatment drops its KEY — two unnamed branches become indistinguishable | 3 | 1 | 1 |
+| M5 | the identifier is promoted into the name slot (`21-F15` broken at its hinge) | 10 | 1 | 1 |
+| M6 | the flat form emits a BARE key — exception (b) loses its label | 9 | 1 | 2 |
+| M7 | the summary's cashier reverts to the raw user id | 6 | 1 | 1 |
+| M8 | **CONTROL: only the DEVICE list's branch reverts** — attribution | 2 | 1 | 1 |
+| M9 | **NEGATIVE CONTROL: behaviour-preserving rewrite of `resolve`** | **0** | 0 | 0 |
+| M10 | **SEAM: `NameDebt` wired with an empty list** — decoration that never disappears | 1 | 0 | 1 |
+| M11 | **SEAM: `NameDebt` renders its sentence unconditionally** | 1 | 0 | 1 |
+
+**M1 and M3 are the rows that indict the old suite.** The defect a human found by opening the app
+failed **0 of the pre-existing tests**, and so does merging the two absences. Neither is visible to
+`layout:check` either — the header fits its box perfectly while saying the wrong thing.
+
+**M4 is why the sweep alone is not enough, and it was measured rather than argued.** `bareIdentifiers()`
+reports a key that reaches the glass *without* its label; an implementation that dropped the key
+entirely emits nothing and passes cleanly. Its first run killed **0** of the new tests. The dual
+assertion (*"the key is KEPT and labelled"*) was added for exactly that, and M4 now kills 1.
+
+**M8 proves the counts mean something**: it changes one consumer of one resolver, and exactly the
+device-list assertions fire while the summary's and the header's stay green.
+
+**M10 and M11 are the SEAM mutants for the counterpart sentence**, and they are here because
+*"mutate the SEAM, not the logic"* is what this repo learned the hard way: a `<NameDebt>` handed an
+empty list looks right on every fixture that has a debt and never disappears when the debt is paid,
+and a `NameDebt` that renders unconditionally is an absence stated where there is no absence. Both
+are killed by the pair of device-list assertions that check the sentence in **both** directions —
+one assertion alone blesses either mutant.
+
+### `24-F14`, per SECTION — and the reason the guard is not per run
+
+`workspace.tsx` mounts one section at a time (*"the inactive section's queries should not run"*), so
+the DOM only ever holds the tab you are on. **A sweep that clicked four tabs and read the document
+once would be a sweep of the fourth** — the vacuous shape this repo keeps recording. Collection is
+per section, and each section is separately asserted to have carried an identifier at all, scoped to
+`<main>` so the shell's own header cannot supply the target for all four.
+
+### Two pre-existing assertions were PROXIES for their FRs, and both were relaxed to what the FR says
+
+`12-F26` (*"this surface emits nothing"*) and the device list's Commandment 5 test both asserted
+*"the path set has exactly one member"*. `12-F26` bans **creation, edit or deletion** and asks for a
+test that *"the app's API client has no mutating endpoints"* — so a one-member path set is stricter
+than the FR in one direction and weaker in the other: it reddens on a legal added READ (which is
+what happened) while saying nothing about the KIND of call, so a mutation to `summary.*` would have
+passed it. `harness.tsx`'s `CallLog` now records the operation's `type`, and both tests assert
+*every call is a query* plus a path allow-list, so a new read is still a diff a reviewer sees.
+
+### Owed, and named as owed
+
+- **The shift-close slip prints `Cashier 00000000-…-006` while the receipt prints `Cashier Hina`.**
+  `apps/pos-electron/src/main/printing.ts:1546` passes `shift.cashier` — which
+  `packages/sync-client/src/folds/shift-cash.ts:44` projects from the envelope's `actor_user_id`,
+  i.e. a raw id — into `ShiftCloseData.cashier`, and `packages/escpos/src/cash-documents.ts:229`
+  prints it verbatim. The receipt path at `printing.ts:1938` uses the `cashier()` display-name
+  resolver and is correct. ⚠ **`cashier()` is NOT the fix**: it answers *who is signed in now*, and
+  the slip needs *who ran that shift* (`02-F41`), so the correct fix is `11-F20`'s render-time
+  lookup against the roster `main/index.ts` already holds. Device plane, another owner's file.
+- **Nothing writes `01-F70`'s device name** — `provision-device` takes no name argument, so every
+  till renders the unnamed treatment.
+- **`01-F69`'s branch directory is written only by `create-branch`**, so a branch outside it renders
+  the treatment on every surface, including the summary's drill-in.

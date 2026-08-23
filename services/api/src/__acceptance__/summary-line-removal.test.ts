@@ -1,10 +1,18 @@
 /**
  * ACCEPTANCE TESTS — `12-F10`'s nightly sales figure and `02-F8`'s `order.line_removed`.
  *
- * ⚠ **AUTHORED FROM SPEC TEXT ONLY, by a session that did not implement these FRs and has not
- * edited `summary.ts`.** `24 §3` step 2. The neighbouring `summary.test.ts` carries an explicit
- * authorship departure (its author wrote the fold); this file does not, and is deliberately a
- * separate file so that the independent-oracle guarantee applies to it without qualification.
+ * ⚠ **AUTHORED FROM SPEC TEXT ONLY, by a session that did not implement these FRs and had not
+ * edited `summary.ts`** — `24 §3` step 2, and true of everything below the fixtures.
+ *
+ * ⚠ **AMENDED IN AUGUST 2026 BY A SESSION THAT DID EDIT `summary.ts`, AND THE AMENDMENT IS
+ * DECLARED HERE RATHER THAN LEFT TO BE INFERRED.** The day's money moved onto `01-F63`'s attested
+ * `billed_paisa` (see `summary.ts`'s header), so every fixture here gained a closing act and the
+ * VALUE assertions in §B and §C moved from `sales.total_paisa` to `menuMix` — the block the
+ * tombstone still decides. **Left where they were, all six would have gone on passing with the
+ * removal arm deleted**, which is a green test defending a rule it had stopped testing, and is why
+ * the move is written up rather than done quietly. The independent-oracle guarantee therefore
+ * holds for what this file ASSERTS and not for where those six assertions now point; the
+ * re-measured matrix below is what stands in for it.
  *
  * ── WHAT IS ASSERTED, AND THE FRs THAT RESOLVE IT ─────────────────────────────────────────
  *
@@ -41,24 +49,41 @@
  *
  * ── MUTATION MATRIX (the round-3 law: a claim that a test bites is not evidence that it does) ──
  *
- * Measured OUT OF TREE: `summary.ts` was copied to a scratchpad, given the tombstone build, and
- * mutated there — `services/api/src/summary.ts` was never edited by this session. Control:
- * **11/11 green**. Every row is this file's 11 tests; each mutant differs in exactly one branch.
+ * **RE-MEASURED August 2026 against this file's 12 tests, control 12/12 green**, because the
+ * numbers below were taken against a fold whose money came from line sums and two of the rows had
+ * stopped meaning anything. In-tree this time, with a byte-exact backup and a checksum-verified
+ * restore after every run, and scoped to this file so each count is attributable.
  *
- *   R1  the `order.line_removed` arm absent — **THE SHIPPED TREE**            9 killed
- *   R2  build (i): arithmetic subtraction at fold time                        7 killed
+ *   R1  the `order.line_removed` arm absent                                   6 killed
  *   R3  build (ii): `lines.delete(line_id)`                                   2 killed (§B, both)
- *   R4  the tombstone keyed by `line_id` GLOBALLY, not per order              2 killed (§C, both)
- *   R5  the removal applied to the TOTAL only                                 4 killed
- *   R6  the removal takes one UNIT off the line instead of the line           3 killed
+ *   R4  the tombstone keyed by `line_id` GLOBALLY, not per order              6 killed
+ *   R6  the removal takes one UNIT off the line instead of the line           1 killed
  *   R7  over-eager: `order.note_added` tombstones too                         1 killed — the CONTROL, alone
  *   R8  NEGATIVE CONTROL: the same set, reshaped (`[...set].includes`)        **0 killed**
  *
- * R3 and R7 are the rows to re-run after any change here. R3 is the only mutant §B was written
- * for and it is invisible to every other assertion in this file; R7 is the only mutant the
- * control test can see, and without it "tombstone anything unhandled" passes the other ten.
+ * **R2 and R5 are RETIRED rather than re-measured, and the reason is the point.** R2 was
+ * *"arithmetic subtraction at fold time"* and R5 *"the removal applied to the TOTAL only"* — both
+ * describe a fold that reaches the day's total through the removal, and no such path exists any
+ * more: the total is `01-F63`'s attestation, which the till computed with the removed line already
+ * gone. What replaced them is a mutant pointing the OTHER way, and it lives in §A as an assertion
+ * rather than a matrix row: a build that subtracts the tombstoned line from the attested figure
+ * reports Rs 580 for a bill of Rs 900.
+ *
+ * The former numbers, kept so the drift is visible rather than overwritten: R1 9, R2 7, R3 2,
+ * R4 2, R5 4, R6 3, R7 1, R8 0.
+ *
+ * R3 and R7 are still the rows to re-run after any change here. R3 is the only mutant §B was
+ * written for and it is invisible to every other assertion in this file; R7 is the only mutant the
+ * control test can see, and without it "tombstone anything unhandled" passes the other eleven.
  *
  * ── WHAT THIS FILE DELIBERATELY DOES **NOT** ASSERT, and why that is not an omission ───────
+ *
+ * ⚠ **THE FIRST OF THESE WAS ANSWERED IN AUGUST 2026 AND THE ANSWER IS RECORDED IN
+ * `summary.ts`'s HEADER, NOT HERE.** The figure is settlement-based, because `01-F63`'s attested
+ * `billed_paisa` is the only tax-inclusive number this plane can obtain at all — the tax cell and
+ * the rounding step are seeded per DEVICE and no cloud service holds either. That is a stated
+ * reading with a losing alternative named, not a transcription, and the paragraph below is kept
+ * verbatim because its evidence is what made the reading checkable.
  *
  * **Whether the figure is confirmed-based or settlement-based is UNRESOLVED in the corpus, so it
  * is not tested here and must not be guessed by the implementer either (commandment 2).** The
@@ -139,6 +164,14 @@ const line = (
 const removed = (id: string, order_id: string, line_id: string, at_ms: number): SummaryEvent =>
   event(id, "order.line_removed", { order_id, line_id }, at_ms);
 
+/**
+ * `01-F63`'s closing act, carrying the bill the TILL attested — tax-inclusive and rounded
+ * (`01-F82`, `02-F63`). Every fixture below is on the shipped default posture, so the attested
+ * figure equals the surviving line sum and each assertion still reads as arithmetic.
+ */
+const closed = (id: string, order_id: string, billed_paisa: number, at_ms: number): SummaryEvent =>
+  event(id, "order.settlement_closed", { order_id, billed_paisa }, at_ms);
+
 const fold = (events: readonly SummaryEvent[]): NightlySummary =>
   summarise(events, DAY.start_ms + 1);
 
@@ -147,6 +180,20 @@ const channelOf = (summary: NightlySummary, name: string) =>
 
 const itemOf = (summary: NightlySummary, item_id: string) =>
   summary.top_items.find((row) => row.item_id === item_id);
+
+/**
+ * The block the `order.line_removed` tombstone now DECIDES, summed so a delivery-order assertion
+ * has one number to compare.
+ *
+ * ⚠ **The value assertions in §B and §C were pointed at `sales.total_paisa` and had to move here,
+ * and the move is the finding rather than a tidy-up.** The day's money is `01-F63`'s attestation
+ * now (see this file's header), so a removed line leaves the total because the TILL never billed
+ * it — not because this fold subtracted it. Left pointing at the total, every §B and §C assertion
+ * would have gone on passing with the removal arm deleted: green tests defending a rule they had
+ * stopped testing, which is this repo's most-recorded test defect.
+ */
+const menuMix = (summary: NightlySummary): number =>
+  sumPaisa(summary.top_items.map((row) => paisa(row.revenue_paisa)));
 
 /**
  * ONE counter order, two lines, and the second one removed.
@@ -172,6 +219,9 @@ const oneRemoval = (): SummaryEvent[] => [
     at(19),
   ),
   removed("ev-4", "ord-1", "l-2", at(19, 5)),
+  // The till billed Rs 900: the naan came off before it was ever charged for. `02-F8`'s whole
+  // point — *"a line taken off before the kitchen heard of it was never a sale"*.
+  closed("ev-5", "ord-1", KARAHI_PAISA, at(19, 10)),
 ];
 
 // ── §A · the money leaves every block, not only the total ──────────────────────────────────────
@@ -186,14 +236,33 @@ describe("§A · 12-F10 / 02-F8 — a removed line is not a sale", () => {
     expect(channelOf(summary, "counter")?.billed_paisa).toBe(KARAHI_PAISA);
   });
 
-  it("excludes a removed line from the hourly curve, not only the total (12-F10, 02-F8)", () => {
+  /**
+   * **THE OTHER DIRECTION, AND IT IS NEW.** The day's money is `01-F63`'s attestation, and that
+   * figure ALREADY excludes the removed line — `merge.ts` drops a removed cell before
+   * `billedEffectiveFromJsonLines` ever sees it, which is why the till attested Rs 900. So a
+   * cloud fold that "helpfully" subtracted the tombstoned line from the attested figure would
+   * charge the customer Rs 900 and report Rs 580, permanently and on every order with a removal.
+   * `01-F30` has no `removed_value` term for the same reason: there is nothing left to subtract.
+   */
+  it("does NOT subtract a removed line a second time from the attested bill (01-F30, 12-F21)", () => {
+    const summary = fold(oneRemoval());
+    expect(summary.sales.total_paisa).toBe(KARAHI_PAISA);
+    expect(summary.sales.total_paisa).not.toBe(KARAHI_PAISA - 320_00);
+    // The line IS in the window and IS tombstoned — otherwise this asserts nothing about the
+    // double subtraction, only that the fold cannot see a line it was never given.
+    expect(oneRemoval().some((e) => e.type === "order.line_removed")).toBe(true);
+    expect(oneRemoval().some((e) => e.payload.line_id === "l-2")).toBe(true);
+  });
+
+  it("keeps the removed line out of the hourly curve, which TILES the total (12-F10, 02-F8)", () => {
     const summary = fold(oneRemoval());
 
-    // 13:05 → offset 8 keeps its money; 19:00 → offset 14 must be EMPTY, not Rs 320.
-    expect(summary.hourly[8]?.billed_paisa).toBe(KARAHI_PAISA);
-    expect(summary.hourly[14]?.billed_paisa).toBe(0);
-    // And the curve still sums to the headline — a build that zeroed the bucket by subtracting
-    // twice, or that dropped the whole hour, fails here rather than being read off the total.
+    // The bill closed at 19:10 → offset 14, so that is where the day's Rs 900 sits. 19:00 → the
+    // same bucket, and it must carry the Rs 900 and NOT Rs 1,220: the naan is in neither.
+    expect(summary.hourly[14]?.billed_paisa).toBe(KARAHI_PAISA);
+    expect(summary.hourly[8]?.billed_paisa).toBe(0);
+    // And the curve sums to the headline — a build that zeroed a bucket by subtracting twice, or
+    // that dropped an hour, fails here rather than being read off the total.
     const curve = sumPaisa(summary.hourly.map((bucket) => paisa(bucket.billed_paisa)));
     expect(curve).toBe(summary.sales.total_paisa);
   });
@@ -233,7 +302,11 @@ describe("§A · 12-F10 / 02-F8 — a removed line is not a sale", () => {
       removed("ev-3", "ord-1", "l-1", at(12, 2)),
     ]);
 
+    // No closing act at all: the till refuses to close a bill of zero (`closingActFor`'s
+    // `billed <= 0` arm), so this is an UNSETTLED order and the report says so rather than
+    // inventing a figure for it.
     expect(summary.sales.total_paisa).toBe(0);
+    expect(summary.honesty.unsettled_orders).toBe(1);
     expect(itemOf(summary, "item-roti")?.qty ?? 0).toBe(0);
   });
 
@@ -259,6 +332,7 @@ describe("§A · 12-F10 / 02-F8 — a removed line is not a sale", () => {
 
     expect(channelOf(summary, "foodpanda")?.billed_paisa).toBe(0);
     expect(summary.sales.total_paisa).toBe(0);
+    expect(summary.honesty.unsettled_orders).toBe(1);
   });
 });
 
@@ -272,23 +346,25 @@ describe("§B · 01-F34 / 01-F31 — the removal survives delivery order and red
     const reversed = [...forward].reverse();
 
     // The value assertion FIRST, because the equality below is satisfied by a build that is
-    // wrong in both directions (Rs 1,220 twice is still equal to itself).
-    expect(fold(reversed).sales.total_paisa).toBe(KARAHI_PAISA);
+    // wrong in both directions (Rs 1,220 twice is still equal to itself). It reads the MENU MIX,
+    // which is the block the tombstone decides — see `menuMix`.
+    expect(menuMix(fold(reversed))).toBe(KARAHI_PAISA);
     expect(fold(reversed)).toEqual(fold(forward));
   });
 
   it("applies a removal delivered before its order.created too (01-F34, 02-F8)", () => {
     const events = oneRemoval();
     const removal = events[3] as SummaryEvent;
-    expect(fold([removal, ...events.slice(0, 3)]).sales.total_paisa).toBe(KARAHI_PAISA);
+    expect(menuMix(fold([removal, ...events.slice(0, 3)]))).toBe(KARAHI_PAISA);
   });
 
   it("subtracts a REDELIVERED removal exactly once (01-F31, 01-F34)", () => {
     // Two envelopes, one act — the shape `01-F31` exists for. A build that subtracts on each
     // delivery reads Rs 580 here and would report NEGATIVE sales on a busy retry.
-    const twice = fold([...oneRemoval(), removed("ev-5", "ord-1", "l-2", at(19, 5))]);
+    const twice = fold([...oneRemoval(), removed("ev-6", "ord-1", "l-2", at(19, 5))]);
     const once = fold(oneRemoval());
 
+    expect(menuMix(twice)).toBe(KARAHI_PAISA);
     expect(twice.sales.total_paisa).toBe(KARAHI_PAISA);
     // Every MONEY-BEARING block, not just the headline. The whole summary is deliberately NOT
     // compared: `honesty.events` is `00 §5.7`'s count of what the window actually held, so it
@@ -334,8 +410,13 @@ describe("§C · 02-F8 — the removal names an order AND a line, and both bind"
         at(13, 31),
       ),
       removed("ev-5", "ord-1", "l-1", at(13, 40)),
+      // ord-1 was emptied and never closes; ord-2 was billed and did.
+      closed("ev-6", "ord-2", 450_00, at(13, 45)),
     ]);
 
+    // The MIX is the assertion that bites: a tombstone keyed by `line_id` alone wipes ord-2's
+    // identically-named line from the item table while the attested total stays Rs 450.
+    expect(menuMix(summary)).toBe(450_00);
     expect(summary.sales.total_paisa).toBe(450_00);
     expect(itemOf(summary, "item-karahi")).toEqual({
       item_id: "item-karahi",
@@ -363,8 +444,10 @@ describe("§C · 02-F8 — the removal names an order AND a line, and both bind"
       ),
       removed("ev-3", "ord-1", "l-ghost", at(13, 5)),
       removed("ev-4", "ord-ghost", "l-1", at(13, 6)),
+      closed("ev-5", "ord-1", 450_00, at(13, 10)),
     ]);
 
+    expect(menuMix(summary)).toBe(450_00);
     expect(summary.sales.total_paisa).toBe(450_00);
     expect(channelOf(summary, "counter")?.billed_paisa).toBe(450_00);
   });
@@ -392,8 +475,10 @@ describe("§C · 02-F8 — the removal names an order AND a line, and both bind"
         { order_id: "ord-1", line_id: "l-1", note: "no chilli" },
         at(13, 2),
       ),
+      closed("ev-4", "ord-1", 450_00, at(13, 10)),
     ]);
 
+    expect(menuMix(summary)).toBe(450_00);
     expect(summary.sales.total_paisa).toBe(450_00);
     expect(itemOf(summary, "item-karahi")?.qty).toBe(1);
   });

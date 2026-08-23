@@ -52,6 +52,7 @@ import { directedPaisa, paisa } from "@restos/domain";
 import { MoneyValue } from "@restos/ui";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
+import { Named, nameText, TechnicalId, usePeopleNames, usePlaceNames } from "../lib/names";
 import { strings } from "../lib/strings";
 import { refusalMessage, useTRPC } from "../lib/trpc";
 import { Field, Input } from "./ui/field";
@@ -168,6 +169,17 @@ const Variance = ({ signedPaisa }: { signedPaisa: number }): ReactNode => {
 export const OwnerSummary = (): ReactNode => {
   const trpc = useTRPC();
   /**
+   * `21-F15` — every id this report puts in front of an owner is a NAME. The branch axis is
+   * `01-F69`'s; the cashier and both correction identities are `11-F20`'s.
+   *
+   * **Neither read gates this screen and neither may.** `12-F2` puts the summary behind
+   * `report.sales_view` and the roster behind `user.manage` (`14-F39`), so a naming read that was
+   * refused would otherwise take down a report the matrix said yes to. Both degrade to the stated
+   * treatment, which says the name could not be read rather than claiming there is none.
+   */
+  const places = usePlaceNames();
+  const people = usePeopleNames();
+  /**
    * `12-F13` and `12-F22`. Both are INTENTS — what the owner has asked to see — never a copy of
    * server data, which is what `18 §6` forbids. Null means "the server decides": on first load no
    * `business_date` is sent at all, so the day named in the header is the one the server answered
@@ -248,9 +260,13 @@ export const OwnerSummary = (): ReactNode => {
               }
             >
               <option value="">{strings.summary.allBranches}</option>
+              {/* `21-F15` — the drill-in offers BRANCHES, so it offers their names. An
+                  `<option>` holds one string, so this is the flat form of the same treatment
+                  `<Named>` renders elsewhere; the `value` stays the key, because that is what
+                  goes back to the server and `12-F2` keeps scope the server's to decide. */}
               {answer.branch_ids.map((branch_id) => (
                 <option key={branch_id} value={branch_id}>
-                  {branch_id}
+                  {nameText(places.branch(branch_id))}
                 </option>
               ))}
             </select>
@@ -315,10 +331,32 @@ export const OwnerSummary = (): ReactNode => {
             {answer.cash.map((shift) => (
               <Row key={shift.shift_id} data-shift={shift.shift_id}>
                 <span className="flex min-w-0 flex-col gap-1">
-                  <span className="truncate text-body text-foreground">{shift.shift_id}</span>{" "}
-                  <span className="text-xs text-muted-foreground">
-                    {shift.cashier_user_id ?? strings.summary.cash.cashierNotRecorded}
-                  </span>
+                  {/*
+                    **The row's identity is WHO RAN THE SHIFT, and the shift key is demoted under
+                    it (`21-F15`).** It shipped the other way round — a bare `shift_id` at content
+                    scale over the cashier's key at caption scale — which put two machine
+                    identifiers in one row and named neither.
+
+                    A shift has no name record anywhere in the corpus (`21-F15` names four: org,
+                    branch, device, person), so its key cannot be resolved to a word and instead
+                    becomes exception (b)'s labelled technical id: KEPT, because two of an evening's
+                    shifts must be tellable apart, and LABELLED, because a bare key beside a name is
+                    exactly what the law stops.
+
+                    **`11-F22` is why nothing here filters on her participation status:** a let-go
+                    cashier's name still renders on last month's orders, and a report that dropped
+                    to a key on the day she left would be this defect arriving through the exit.
+                    `null` is a different fact — the server could not attribute the shift at all —
+                    and keeps its own sentence rather than borrowing the naming treatment.
+                  */}
+                  <span className="truncate text-body text-foreground">
+                    {shift.cashier_user_id === null ? (
+                      strings.summary.cash.cashierNotRecorded
+                    ) : (
+                      <Named naming={people.person(shift.cashier_user_id)} />
+                    )}
+                  </span>{" "}
+                  <TechnicalId label={strings.summary.cash.shiftReference} id={shift.shift_id} />
                 </span>{" "}
                 {/*
                   All three figures are null together — there is no expected figure before a shift
@@ -353,7 +391,93 @@ export const OwnerSummary = (): ReactNode => {
         )}
       </Block>
 
+      {/*
+        `12-F10` bullet 3 — *"voids, comps, discounts — count, value, and by whom"*.
+        **The `removed_from_sales` sentence is the load-bearing part of this block, not the
+        figures.** A void's money is already out of the takings above (the line exits, and the
+        till's attested bill never held it); a comp's and a discount's are not, because neither is
+        a line exit. An owner reading "Discounts Rs 200" beside a total she assumes is net would be
+        wrong in the opposite direction from the defect this block replaced — which was an
+        `omissions` entry telling her, on this screen, that voids could not be affecting her number
+        while two of them were.
+      */}
+      <Block name="corrections" title={strings.summary.corrections.heading}>
+        <Caption>{strings.summary.corrections.help}</Caption>
+        {answer.corrections.every((correction) => correction.count === 0) ? (
+          <p className="text-body text-muted-foreground">{strings.summary.corrections.empty}</p>
+        ) : (
+          <div className="flex flex-col gap-4">
+            {/* Every kind renders, including a zero one: a missing row cannot tell "no comps
+                today" from "the comp figure was never computed" (`00 §5.7`). */}
+            {answer.corrections.map((correction) => (
+              <div
+                key={correction.kind}
+                data-correction={correction.kind}
+                className="flex flex-col gap-2"
+              >
+                <Row>
+                  <span className="text-body text-foreground">
+                    {strings.summary.corrections.kinds[correction.kind]}
+                  </span>{" "}
+                  <span className="flex items-baseline gap-4">
+                    <span className="text-xs text-muted-foreground">
+                      {`${correction.count} ${strings.summary.corrections.recorded}`}
+                    </span>{" "}
+                    {/* `27-F16` — money is never coloured by default. A void is not an
+                        abnormality; it is a correction that was authorised. */}
+                    <MoneyValue paisa={paisa(correction.value_paisa)} />
+                  </span>
+                </Row>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {correction.removed_from_sales
+                    ? strings.summary.corrections.removed
+                    : strings.summary.corrections.kept}
+                </p>
+                {correction.by.map((row) => (
+                  <Row
+                    key={`${row.actor_user_id ?? ""}/${row.approver_user_id ?? ""}`}
+                    data-correction-by={row.actor_user_id ?? ""}
+                  >
+                    <span className="flex min-w-0 flex-col gap-1">
+                      <span className="truncate text-body text-foreground">
+                        {/* `11-F20` — *"an event carries the id; the roster resolves the word"*.
+                            `null` is the server's own "not recorded", not an unnamed person. */}
+                        {row.actor_user_id === null ? (
+                          strings.summary.corrections.staffNotRecorded
+                        ) : (
+                          <Named naming={people.person(row.actor_user_id)} />
+                        )}
+                      </span>{" "}
+                      {/* Two identities, never merged: `02-F20`'s approver is a different person
+                          from the cashier who performed the act, and `null` means a manager did it
+                          herself rather than "nobody approved it". */}
+                      <span className="text-xs text-muted-foreground">
+                        {row.approver_user_id === null ? (
+                          strings.summary.corrections.unsupervised
+                        ) : (
+                          <>
+                            {`${strings.summary.corrections.approvedBy} `}
+                            <Named naming={people.person(row.approver_user_id)} />
+                          </>
+                        )}
+                      </span>
+                    </span>{" "}
+                    <span className="flex items-baseline gap-4">
+                      <span className="text-xs text-muted-foreground">
+                        {`${row.count} ${strings.summary.corrections.recorded}`}
+                      </span>{" "}
+                      <MoneyValue paisa={paisa(row.value_paisa)} />
+                    </span>
+                  </Row>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </Block>
+
       <Block name="top-items" title={strings.summary.items.heading}>
+        <Caption>{strings.summary.items.help}</Caption>
         {answer.top_items.length === 0 ? (
           <p className="text-body text-muted-foreground">{strings.summary.items.empty}</p>
         ) : (
@@ -407,6 +531,7 @@ export const OwnerSummary = (): ReactNode => {
             {`${strings.summary.honesty.deviceClock} ${answer.honesty.provisional_stamp_events}`}
           </Fact>
           <Fact>{`${strings.summary.honesty.openShifts} ${answer.honesty.open_shifts}`}</Fact>
+          <Fact>{`${strings.summary.honesty.unsettled} ${answer.honesty.unsettled_orders}`}</Fact>
           <Fact>
             {answer.honesty.every_day_closed
               ? strings.summary.honesty.allDaysClosed

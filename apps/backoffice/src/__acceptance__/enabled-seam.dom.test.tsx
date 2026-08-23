@@ -68,6 +68,40 @@ const receipt = {
  * server fail, answer empty, or answer differently — the three cases a build-time constant makes
  * unreachable.
  */
+/**
+ * `01-F69`'s branch directory — the second server answer this screen now reads, and the reason
+ * every cell name below is a WORD rather than a key (`21-F15`).
+ *
+ * **`dha` is deliberately unnamed** so both halves of the law are exercised by the assertions that
+ * already exist: a suite in which every branch is named cannot tell a correct implementation from
+ * one that renders whatever the directory holds and nothing else.
+ */
+const DIRECTORY = {
+  org: { org_id: "org-zaiqa", display_name: "Karachi Biryani House", status: "active" },
+  branches: [
+    {
+      branch_id: "gulberg",
+      display_name: "Gulberg",
+      branch_type: "branch",
+      branch_class: "production",
+    },
+    {
+      branch_id: "johar",
+      display_name: "Johar Town",
+      branch_type: "branch",
+      branch_class: "production",
+    },
+  ],
+};
+
+/** What a branch reads as on the glass — the shipped treatment, not a second copy of it. */
+const placeName = (branch: string): string => {
+  const found = DIRECTORY.branches.find((b) => b.branch_id === branch);
+  return found === undefined
+    ? `${strings.names.branchUnnamed} · ${strings.names.branchReference} ${branch}`
+    : found.display_name;
+};
+
 const mount = (enabled: () => unknown): CallLog => {
   const log: CallLog = [];
   render(
@@ -79,6 +113,7 @@ const mount = (enabled: () => unknown): CallLog => {
         "catalog.pending": () => [],
         "catalog.history": () => [],
         "catalog.save": () => receipt,
+        "tenancy.directory": () => DIRECTORY,
       }}
     >
       <CatalogScreen />
@@ -96,7 +131,9 @@ const openTheItem = async (): Promise<void> => {
 
 /** Every price cell currently on screen, by its accessible name (`<branch> <channel>`). */
 const cellNames = (answer: Answer): string[] =>
-  answer.branches.flatMap((branch) => answer.channels.map((channel) => `${branch} ${channel}`));
+  answer.branches.flatMap((branch) =>
+    answer.channels.map((channel) => `${placeName(branch)} ${channel}`),
+  );
 
 /**
  * Long enough for a mutation to reach the link, so a "nothing was sent" assertion means the screen
@@ -115,10 +152,11 @@ describe("the screen asks the server what to draw", () => {
     mount(() => TWO_BY_TWO);
     await openTheItem();
 
+    await screen.findByLabelText(`${placeName("gulberg")} counter`);
     for (const name of cellNames(TWO_BY_TWO)) expect(screen.getByLabelText(name)).toBeDefined();
     // The negative half: a pair the server did NOT name has no cell. Without it, a screen drawing
     // the union of its own guess and the server's answer would pass.
-    expect(screen.queryByLabelText("johar storefront")).toBeNull();
+    expect(screen.queryByLabelText(`${placeName("johar")} storefront`)).toBeNull();
     expect(screen.queryAllByRole("columnheader")).toHaveLength(TWO_BY_TWO.channels.length + 1);
   });
 
@@ -128,14 +166,15 @@ describe("the screen asks the server what to draw", () => {
     // renders the same cells twice and fails here.
     mount(() => TWO_BY_TWO);
     await openTheItem();
-    expect(screen.getByLabelText("gulberg counter")).toBeDefined();
+    await screen.findByLabelText(`${placeName("gulberg")} counter`);
     cleanup();
 
     mount(() => OTHER);
     await openTheItem();
+    await screen.findByLabelText(`${placeName("johar")} storefront`);
     for (const name of cellNames(OTHER)) expect(screen.getByLabelText(name)).toBeDefined();
-    expect(screen.queryByLabelText("gulberg counter")).toBeNull();
-    expect(screen.queryByLabelText("dha foodpanda")).toBeNull();
+    expect(screen.queryByLabelText(`${placeName("gulberg")} counter`)).toBeNull();
+    expect(screen.queryByLabelText(`${placeName("dha")} foodpanda`)).toBeNull();
   });
 
   it("quotes the server's pair as the list's money column, not a locally configured one", async () => {
@@ -143,7 +182,9 @@ describe("the screen asks the server what to draw", () => {
     // moved the grid to the server and left this heading on a local constant would tell an owner
     // she is comparing a column that is not there.
     mount(() => OTHER);
-    await screen.findByText(`${strings.catalog.pricesShown} johar · storefront`);
+    // `21-F15` — the heading quotes the branch by NAME. It is one `<p>` whose direct text children
+    // are the label, the resolved name and the channel, so it is still one findable string.
+    await screen.findByText(`${strings.catalog.pricesShown} ${placeName("johar")} · storefront`);
   });
 });
 

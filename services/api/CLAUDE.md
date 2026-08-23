@@ -499,8 +499,10 @@ copy for the two runs. `permissions.ts` was verified byte-identical by checksum 
 ## `12-F10` — the nightly owner summary, and the two mutants that SURVIVED the first run
 
 `summary.ts` (the fold), `summary-router.ts` (the gated procedure), `ledger.ts` (the port).
-Oracles: `__acceptance__/summary.test.ts` (35) plus the `12-F10` seam test in
-`catalog-gateway-seam.test.ts`. Control **206/206** green; every row below is the FULL package
+Oracles: `__acceptance__/summary.test.ts` (39), `__acceptance__/summary-corrections.test.ts` (35),
+`__acceptance__/summary-line-removal.test.ts` (12), plus the `12-F10` seam test in
+`catalog-gateway-seam.test.ts`. ⚠ *This line said `summary.test.ts` (35) and named no other file;
+the counts move whenever a fixture grows, so read them off a run rather than off this page.* Control **206/206** green; every row below is the FULL package
 suite, in-tree with byte-exact backups and a restore trap (all four files verified by checksum
 after every run). Nothing here weakens a security CONSTANT — each mutant reds a test rather than
 downgrading a credential, which is the narrow case AGENTS.md's out-of-tree rule leaves in-tree.
@@ -556,6 +558,118 @@ everything above 2^53 is already refused by the guard. So S4 mutates the guard, 
 a reason the current fixtures cannot demonstrate — the moment a signed accumulation lands here
 (netting `payment.refunded` by method, which `shift-cash.ts` already does), the equivalence breaks
 and the guard alone stops being enough.
+
+## `12-F10` again — WHERE THE DAY'S MONEY COMES FROM (August 2026), and the mutant that survived
+
+**The defect this closed was found by running the product, not by any suite.** On 2026-08-23 an
+end-to-end run rang four orders on a real till at 1600 bps exclusive with charge rounding live, and
+three readers gave three different totals for one day. This one gave **Rs 2,679** against a ledger
+truth of **Rs 2,968** — `summary.ts` computed revenue as `Σ qty × unit_price_paisa`, with **no tax
+term and no arm for a voided line**, so the figure decomposed exactly as `913 + 853 + 509 + 404`:
+four raw pre-tax line sums with both voided Raitas still inside them. The item table read
+`raita · 2 sold · Rs 120` for two dishes nobody sold.
+
+**And the screen said the opposite, to the owner, in the same view.** `OMISSIONS` is rendered
+content, and its first entry stated that `void.recorded`, `comp.recorded` and `discount.recorded`
+*"have no payload schema … and no emitter anywhere in the product — the counter has no void, comp
+or discount surface at all"*. All three clauses had become false in one day's commits. That is
+this repo's most-recorded comment defect with the blast radius one step wider: not a comment a
+future session reads, but **a sentence telling a user that a number she is reading cannot be
+affected by something that is affecting it.**
+
+### The decision, and why the alternative is unbuildable rather than merely worse
+
+`sales.total_paisa` is now `Σ order.settlement_closed.billed_paisa` — `01-F63`'s attestation, which
+`01-F82` (R54) and `02-F63` (R70) define as *what the customer owes, tax included*, rounded to the
+org's charge granularity. The alternative (re-derive a line sum here and add tax) **cannot be built
+on this plane**: the tax cell and the rounding step are `00 §7` layer-2 settings whose carrier
+(`01-F87`) is decided and not built, so today they are three env vars seeded **per device**
+(`apps/pos-electron/src/main/tax-posture.ts`). Measured: `services/api` and `services/sync-gateway`
+hold **no tax configuration of any kind**. A cloud-side rate would be invented (Commandment 2), and
+under `12-F22`'s roll-up it would be one invented rate across branches that may sit on different
+postures.
+
+Three consequences worth knowing before editing this file:
+
+- **`hourly` buckets on the CLOSING ACT's stamp**, so `Σ hourly === total_paisa` exactly. The
+  losing alternative — the hour each line was rung — cannot carry a per-order attestation, and the
+  basis now matches `shift.closed`'s `expected_paisa_by_method`, which is also act-time.
+- **`top_items` does not tile the total and cannot.** An order-level attestation has no item share,
+  so splitting it would be an invented allocation. It is a pre-tax menu-mix ranking and both the
+  type and `strings.summary.items.help` say so.
+- **A void, a comp and a discount are not the same money.** Only the void is a line EXIT
+  (`DEC-MONEY-010` (2)), so only its value is already out of the total. `CorrectionBlock`'s
+  `removed_from_sales` carries that per kind, and the back office renders two different sentences.
+
+### The matrix — api, control **365/365**, one branch per mutant
+
+In-tree with byte-exact backups and a restore trap (checksum verified after every run); no security
+constant is touched, which is the narrow case AGENTS.md's out-of-tree rule leaves in-tree.
+
+| # | mutant | killed |
+|---|---|---|
+| M1 | **THE SHIPPED DEFECT: the day's money reverts to the raw line sum** | **13** |
+| M2 | the `order.line_state_changed` arm deleted — a voided line is still sold | 1 |
+| M3 | the exit test ignores the CONTESTED case (`CONTESTED_LINE_BILLABLE`) | 1 |
+| M4 | a disputed close PICKS the largest snapshot (`merge.ts`'s ceiling rule, on money) | 2 |
+| M5 | an ABSENT snapshot falls back to a guessed line sum | 1 |
+| M6 | the hourly curve buckets on the LINE's stamp instead of the closing act's | 2 |
+| M7 | `removed_from_sales` true for all three kinds | 1 |
+| M8 | `removed_from_sales` false for all three kinds | 1 |
+| M9 | correctives keyed by ENVELOPE id instead of `01-F83`'s attempt key | 3 |
+| M10 | the corrective's actor read from the PAYLOAD instead of the envelope (`02-F45`) | 3 |
+| M11 | a disputed corrective PICKS the first member instead of contributing zero | 1 |
+| M12 | **the void's amount SUBTRACTED from the total — a second subtraction** | **8** |
+| M13 | **the comp and the discount SUBTRACTED — the OPPOSITE error** | **7** |
+| M14 | `unsettled_orders` always reports zero | 3 |
+| M15 | the `OMISSIONS` entry keeps its old, now-false text | 3 |
+| M16 | the corrections block emits only kinds that occurred (no measured zeros) | 1 |
+| M17 | **`attributionKey` collapses the approver — SURVIVED 0 of 364, see below** | **1** (after) |
+| M18 | **NEGATIVE CONTROL: three behaviour-preserving rewrites** | **0** |
+
+⚠ **M17 SURVIVED THE FIRST RUN — 0 of 364 — and it is the round-3 law reproduced inside the work
+that cites it.** Every fixture in `summary-corrections.test.ts` paired a *distinct* cashier with a
+*distinct* approver, so collapsing `(actor, approver)` to `actor` still produced distinct rows and
+changed no assertion. The case that matters is ordinary — **two managers on one shift approving the
+same cashier's voids** — and nothing was aimed at it, so `12-F10`'s *"and by whom"* could have
+stopped naming who authorised what with the suite green. Closed by a fixture with one cashier and
+two approvers. **Reading the suite does not find this; only mutating does.**
+
+M12 and M13 are the pair to re-run after any change here: they are the two ways to be wrong about
+correction money in opposite directions, and each is worth 7–8 assertions.
+
+### The screen half — backoffice, control **64/64** on the two summary suites
+
+⚠ **Scoped to `owner-summary.dom.test.tsx` + `owner-summary-gaps.dom.test.tsx` deliberately.** The
+first attempt ran the whole package and the "negative control" killed **6** — which was a
+concurrent agent's in-flight edits to `price-grid.tsx` and friends landing mid-matrix, not a
+behaviour change. AGENTS.md's rule (*do not report a parallel red as a regression without re-running
+alone*) has a mutation-testing corollary: **a shared working tree contaminates a kill count in both
+directions**, so scope the run to the suites the mutant can reach.
+
+| # | mutant | killed |
+|---|---|---|
+| B1 | **the corrections `Block` is not rendered at all — THE SEAM MUTANT** | **6** |
+| B2 | one sentence for all three kinds — the void reads like the comp | 1 |
+| B3 | the *by whom* rows are dropped (`12-F10` bullet 3's third clause) | 1 |
+| B4 | a missing approver renders blank rather than as the sentence | 1 |
+| B5 | the item table loses its pre-tax / voided caption | 1 |
+| B6 | the unsettled-bill honesty fact is not rendered | 1 |
+| B7 | a kind with a zero count is filtered off the screen | 2 |
+| B8 | **NEGATIVE CONTROL: the sentence choice hoisted into a local const** | **0** |
+
+**B2 is the row that matters and its fixture is built for it**: the void and the comp carry the
+*same* Rs 120 in `CORRECTIONS`, so nothing but the sentence separates them — a screen printing one
+sentence for both passes every other assertion in the file.
+
+⚠ **DATE THE MEASUREMENT: the eight rows above were taken against `owner-summary.tsx` BEFORE
+`21-F15` put every person id through `Named` in the same component (that landed from another
+session hours later, and adapted the `by whom` assertions to resolved names).** The mutants B2, B4
+and B7 are aimed at the two SENTENCES and at the zero row, all of which the current assertions
+still carry, and B1 is structural — `rowsOf("corrections", …)` throws when the region is absent. But
+they were not re-run afterwards, deliberately: mutate-and-restore on a file another agent is
+actively editing clobbers their work, which is a worse outcome than a dated number. **Re-run the B
+rows before relying on them.**
 
 ## `21-F15` — NAMES on the read surfaces, and the stub that is indistinguishable from the truth
 

@@ -138,6 +138,17 @@ const order = (kitchen: KitchenState | undefined, over: Partial<OpenOrder> = {})
         modifiers: [],
         removals: [],
         note: null,
+        /**
+         * ⚠ **ADDED AUGUST 2026 — A FIXTURE REPAIR, NOT AN ASSERTION CHANGE.**
+         * `OpenOrderSchema.lines[].billed_paisa` is REQUIRED at this seam and has been since
+         * `02-F20`'s correctives landed, so this line was never an order a real host could
+         * deliver; the `as OpenOrder` cast above is what let it compile. It went unnoticed while
+         * the cart rendered no money at all, and `27-F24`'s line total is what surfaced it —
+         * `paisa(undefined)` throws, which in React 19 unmounts the root and blanks the screen,
+         * so every assertion here failed to find its control. Nothing about `02-F55` or
+         * `02-F9` is touched.
+         */
+        billed_paisa: 45_000,
       },
     ],
     channel: "counter",

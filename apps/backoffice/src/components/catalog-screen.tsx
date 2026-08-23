@@ -28,6 +28,7 @@ import { ListTree, Plus, RefreshCw } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import type { CatalogEntry, EnabledSet } from "../lib/catalog-types";
 import { formatPaisa } from "../lib/money";
+import { Named, usePlaceNames } from "../lib/names";
 import { strings } from "../lib/strings";
 import { useTRPC } from "../lib/trpc";
 import { cn } from "../lib/utils";
@@ -179,6 +180,8 @@ const Unreachable = ({
 
 export const CatalogScreen = (): ReactNode => {
   const trpc = useTRPC();
+  /** `01-F69` — the branch in the price-column heading is a NAME (`21-F15`). */
+  const places = usePlaceNames();
   const published = useQuery(trpc.catalog.published.queryOptions());
   /**
    * `01-F60`'s axes, asked of the server. Read where it is needed and passed down as a prop —
@@ -248,10 +251,14 @@ export const CatalogScreen = (): ReactNode => {
                 <span className="text-body tabular-nums text-foreground">{version}</span>
               </span>
             </div>
-            {/* The column heading for the money column below — `01-F60`'s pair, said once. */}
+            {/* The column heading for the money column below — `01-F60`'s pair, said once.
+                The branch half is a NAME (`21-F15`); the channel half is a closed vocabulary
+                (`02-F42`) and an owner's own word for it, so it is not an identifier and gets no
+                treatment. */}
             {pair === null ? null : (
               <p className="text-xs text-muted-foreground">
-                {`${strings.catalog.pricesShown} ${pair.branch_id} · ${pair.channel}`}
+                {strings.catalog.pricesShown} <Named naming={places.branch(pair.branch_id)} />
+                {` · ${pair.channel}`}
               </p>
             )}
           </CardHeader>

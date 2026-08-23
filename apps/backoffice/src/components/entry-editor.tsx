@@ -59,6 +59,7 @@ import {
   type PendingEdit,
 } from "../lib/catalog-types";
 import { isWholeRupees, rupeeTextFromPaisa } from "../lib/money";
+import { nameText, usePlaceNames } from "../lib/names";
 import {
   cellKey,
   draftFromPrices,
@@ -322,6 +323,8 @@ export const EntryEditor = ({
 }): ReactNode => {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  /** `01-F69` — the incomplete-pair refusal below names the branches it is about (`21-F15`). */
+  const places = usePlaceNames();
 
   /**
    * The menu as published. Read here, never copied into state, and never fatal: `entries` is `[]`
@@ -785,8 +788,13 @@ export const EntryEditor = ({
           */}
           {faults.length === 0 ? null : (
             <Note tone="fault" role="status" className="bg-destructive">
+              {/* `21-F15` — the refusal names the branches it is about. It is one sentence, so
+                  the flat form of the treatment is what fits; the grid marks the same cells. */}
               {`${strings.grid.incomplete} ${faults
-                .map((fault) => `${fault.branch_id} · ${fault.channel} — ${fault.reason}`)
+                .map(
+                  (fault) =>
+                    `${nameText(places.branch(fault.branch_id))} · ${fault.channel} — ${fault.reason}`,
+                )
                 .join("; ")}`}
             </Note>
           )}

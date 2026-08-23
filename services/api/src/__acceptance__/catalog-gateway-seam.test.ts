@@ -333,6 +333,17 @@ describe("a published menu reaches the sync gateway (the seam, out of process)",
             unit_price_paisa: 145_000,
           },
         },
+        // `01-F63`'s closing act — the day's money comes off the ATTESTATION, so a seeded order
+        // with no close is an unsettled bill and reports Rs 0 by design (`summary.ts`).
+        {
+          id: "seam-ev-3",
+          type: "order.settlement_closed",
+          branch_id: BRANCH,
+          branch_created_at: rung,
+          time_basis: "branch",
+          actor_user_id: null,
+          payload: { order_id: "seam-ord-1", billed_paisa: 290_000 },
+        },
       ],
       rung,
     );
@@ -353,7 +364,7 @@ describe("a published menu reaches the sync gateway (the seam, out of process)",
       branch_ids: readonly string[];
       omissions: readonly unknown[];
     };
-    // 2 × Rs 1,450 — the figure, because a stub answering `[]` would give a 200 and a zero.
+    // Rs 2,900 as the till attested it, because a stub answering `[]` gives a 200 and a zero.
     expect(summary.sales.total_paisa).toBe(290_000);
     expect(summary.sales.orders).toBe(1);
     expect(summary.branch_ids).toEqual([BRANCH]);

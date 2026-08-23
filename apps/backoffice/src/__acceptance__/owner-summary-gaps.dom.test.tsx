@@ -122,6 +122,39 @@ const ANSWER = {
     ],
   },
   cash: CASH,
+  // `12-F10` bullet 3. The void is already out of `total_paisa`; the comp is not — the two
+  // sentences that pair with `removed_from_sales` are what this screen has to keep apart.
+  corrections: [
+    {
+      kind: "void" as const,
+      count: 2,
+      value_paisa: 12_000,
+      removed_from_sales: true,
+      by: [
+        {
+          actor_user_id: "user-hina",
+          approver_user_id: "user-ayesha",
+          count: 2,
+          value_paisa: 12_000,
+        },
+      ],
+    },
+    {
+      kind: "comp" as const,
+      count: 1,
+      value_paisa: 6_000,
+      removed_from_sales: false,
+      by: [
+        {
+          actor_user_id: "user-hina",
+          approver_user_id: null,
+          count: 1,
+          value_paisa: 6_000,
+        },
+      ],
+    },
+    { kind: "discount" as const, count: 0, value_paisa: 0, removed_from_sales: false, by: [] },
+  ],
   top_items: [
     { item_id: "item-biryani", qty: 3, revenue_paisa: 135_000 },
     { item_id: "item-chai", qty: 40, revenue_paisa: 40_000 },
@@ -136,6 +169,7 @@ const ANSWER = {
     provisional_stamp_events: 2,
     every_day_closed: false,
     open_shifts: 1,
+    unsettled_orders: 3,
     truncated: true,
     anomalies: ["shift_close_divergence"] as readonly string[],
   },

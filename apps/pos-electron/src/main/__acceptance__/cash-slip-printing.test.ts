@@ -34,6 +34,7 @@
 // attached), or that a cashier can read the slip (`27-F35`'s ≥85% gate is measured on staff).
 
 import { readFileSync } from "node:fs";
+import { totalPaisaOrNull } from "@restos/domain";
 import {
   classifyTransmit,
   createSpooler,
@@ -328,7 +329,9 @@ describe("26 §7/02-F43 — what the fold carried is what the paper says", () =>
           { channel: "phone", pay_total: 30_000, confirmed_at: Date.UTC(2026, 0, 2, 21, 0, 0) },
           // 2026-01-03 01:00 UTC = 2026-01-03 06:00 PKT — past the cutover, a DIFFERENT day.
           { channel: "counter", pay_total: 999_900, confirmed_at: Date.UTC(2026, 0, 3, 1, 0, 0) },
-          // Never confirmed: not a sale.
+          // Never confirmed, and SETTLED: `01-F17` lets a cashier take money for an order that
+          // was never sent to the kitchen. It has no branch stamp, so it belongs to no business
+          // day — see §B's undated-sales tests below for where its money goes.
           { channel: "counter", pay_total: 777_700, confirmed_at: null },
         ],
       },
@@ -344,7 +347,118 @@ describe("26 §7/02-F43 — what the fold carried is what the paper says", () =>
     expect(text).toContain("Counter Rs 1,200");
     expect(text).toContain("Phone Rs 300");
     expect(text).not.toContain("Rs 9,999");
-    expect(text).not.toContain("Rs 7,777");
+    // ⚠ THIS LINE USED TO READ `expect(text).not.toContain("Rs 7,777")` UNDER THE COMMENT "Never
+    // confirmed: not a sale." It IS a sale — measured on 2026-08-23, an order settled with no
+    // kitchen send carried `payment.recorded`, `order.settlement_closed` and its money inside
+    // `shift.closed.expected_paisa_by_method`, so the shift slip and this document disagreed about
+    // the same order. What must stay true is only that its money is not filed under a business day
+    // this device cannot date it into: it may not reach the CHANNEL row.
+    expect(text, "an undated sale was bucketed into a channel it cannot be dated into").toContain(
+      "Counter Rs 1,200",
+    );
+    expect(text).not.toContain("Counter Rs 8,977");
+  });
+
+  it("02-F43/01-F46: a settled order with NO branch stamp is COUNTED and NAMED, never dropped", async () => {
+    // THE MEASURED DEFECT. On the 2026-08-23 run, order 3 settled at Rs 521 without *Send to
+    // kitchen*; `sales_by_channel` dropped it entirely, so 17.6% of the day was missing from the
+    // paper a manager reconciles against the deposit while the same money sat inside the shift's
+    // expected cash. `02-F43` rules the shape and names this very document: money that cannot be
+    // bound is "counted into an unbound bucket", never dropped, because the forbidden path is
+    // "money vanishing from … `02-F24`'s day close with nothing to point at".
+    const h = recordingHarness({
+      store: {
+        orders: [
+          { channel: "counter", pay_total: 244_700, confirmed_at: IN_DAY },
+          { channel: "counter", pay_total: 52_100, confirmed_at: null },
+        ],
+      },
+    });
+    h.printer.dayClosed(DAY_ID);
+    await h.spooler.pump();
+    const text = textOf(h.sent[0] as Uint8Array);
+    expect(text, "the undated sale is not on the paper at all").toContain(
+      "Undated sales so far Rs 521",
+    );
+    expect(text, "the count is what makes the figure readable").toContain(
+      "Undated orders so far 1",
+    );
+    // And it is NOT in the channel row: a stamp this device does not hold is not one it may
+    // invent (`01-F45`), and Rs 2,968 under `Counter` would file the money under a business day
+    // chosen by whichever day happened to close next.
+    expect(text).toContain("Counter Rs 2,447");
+    expect(text).not.toContain("Counter Rs 2,968");
+  });
+
+  it("02-F43: an order that has taken NOTHING is not an undated sale — it is an open bill", async () => {
+    // `pay_total` is `01-F31`'s keyed sum. An order still being rung, and a contested attempt key
+    // (which contributes zero), must not inflate either figure — a count of undated *orders* that
+    // included every open bill on the device would make the row unreadable within one service.
+    const h = recordingHarness({
+      store: {
+        orders: [
+          { channel: "counter", pay_total: 0, confirmed_at: null },
+          { channel: "counter", pay_total: 0, confirmed_at: null },
+        ],
+      },
+    });
+    h.printer.dayClosed(DAY_ID);
+    await h.spooler.pump();
+    const text = textOf(h.sent[0] as Uint8Array);
+    expect(text).toContain("Undated sales so far Rs 0");
+    expect(text).toContain("Undated orders so far 0");
+  });
+
+  it("02-F43: the rows print at ZERO too — a row that appears only on bad nights is not looked for", async () => {
+    // `SHIFT_DRAWER`'s stated reason, one document over. A zero here is the manager's evidence
+    // that every sale on this device is inside the channel rows above.
+    const h = recordingHarness({
+      store: { orders: [{ channel: "counter", pay_total: 244_700, confirmed_at: IN_DAY }] },
+    });
+    h.printer.dayClosed(DAY_ID);
+    await h.spooler.pump();
+    const text = textOf(h.sent[0] as Uint8Array);
+    expect(text).toContain("Undated sales so far Rs 0");
+    expect(text).toContain("Undated orders so far 0");
+  });
+
+  it("02-F24: the channel rows PLUS the undated row account for every settled rupee on the device", async () => {
+    // The reader's own arithmetic, done on the BYTES — the assertion the run turned on and the one
+    // no existing test made. Every figure in this repo is checked against the fold; none was
+    // checked against the figure beside it, which is how a document can be internally inconsistent
+    // with every gate green.
+    const h = recordingHarness({
+      store: {
+        orders: [
+          { channel: "counter", pay_total: 98_900, confirmed_at: IN_DAY },
+          { channel: "counter", pay_total: 93_800, confirmed_at: IN_DAY },
+          { channel: "phone", pay_total: 52_000, confirmed_at: IN_DAY },
+          { channel: "counter", pay_total: 52_100, confirmed_at: null },
+        ],
+      },
+    });
+    h.printer.dayClosed(DAY_ID);
+    await h.spooler.pump();
+    const text = textOf(h.sent[0] as Uint8Array);
+    const figureOf = (label: string): number => {
+      const found = text.match(new RegExp(`${label} Rs ([\\d,]+)`));
+      expect(found, `the document carries no ${label} row`).not.toBeNull();
+      const digits = (found === null ? "0" : (found[1] as string)).replace(/,/g, "");
+      // `27-F23` prints whole rupees here; the reader's own conversion back to the ledger's unit.
+      return Number(`${digits}00`);
+    };
+    // `domain`'s adder, not a running `+`: standing law 3 is about a printed money figure too, and
+    // `DEC-MONEY-005` blesses exactly this path.
+    const onPaper = totalPaisaOrNull([
+      figureOf("Counter"),
+      figureOf("Phone"),
+      figureOf("Storefront"),
+      figureOf("WhatsApp"),
+      figureOf("Foodpanda"),
+      figureOf("Undated sales so far"),
+    ]);
+    // 98,900 + 93,800 + 52,000 + 52,100 — the ledger's own sum for the four orders above.
+    expect(onPaper, "the printed rows do not account for every settled rupee").toBe(296_800);
   });
 
   it("02-F24: the day's over/short is the SUM of the shifts' CARRIED variances", async () => {

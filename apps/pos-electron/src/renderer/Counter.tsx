@@ -479,6 +479,58 @@ const CALLER_NUMBER: React.CSSProperties = {
   fontVariantNumeric: "tabular-nums",
 };
 
+/**
+ * `01 §4`'s two EXIT states as the word the cart puts on the row, and `undefined` for a line that
+ * is still on the bill.
+ *
+ * ── WHY THIS EXISTS AT ALL ───────────────────────────────────────────────────────────────────
+ *
+ * Measured on a real till in August 2026: after a void, the cart row was **byte-identical to the
+ * three live rows beside it** — same name, same quantity, same `✕ NO`, no marker of any kind — and
+ * the only evidence anything had happened was the total moving 1,059 → 989. A cashier who voided
+ * the wrong dish could not see that she had, and `01-F1` makes the mistake permanent. `27-F12` is
+ * what decides the remedy: the state is carried by a **word**, because *"a lone `-` is one glyph
+ * wide, is the first thing lost at 1–2 m or on a scratched panel, and means nothing to a
+ * non-reader"* — and a strike-through and a grey fill are the same argument in different marks.
+ *
+ * ── THE PREDICATE IS THE FOLD'S OWN, DELIBERATELY ────────────────────────────────────────────
+ *
+ * `merge.ts`'s `billedCellPaisa` zeroes a cell on exactly `states.length === 1 && EXITED.has(...)`.
+ * This function tests the SAME shape, so the word and the `Rs 0` printed beside it are two
+ * renderings of one decision and cannot disagree — which is the whole reason the money is the
+ * engine's `billed_paisa` carried across the seam (`26 §8`) and never re-derived here.
+ *
+ * **`length === 1` is `01-F31` and not a convenience.** A CONTESTED line arrives as its whole
+ * terminal MVR set because *a fold never picks a winner*; `CONTESTED_LINE_BILLABLE` is RATIFIED
+ * TRUE, so such a line is still BILLED at full value. Saying `VOIDED` over a line the customer is
+ * being charged for would be the cart lying about money, and collapsing the set to pick `voided`
+ * out of it is the move `line-advance.ts` refuses by name. It therefore renders as an ordinary
+ * live row, which is what its money says it is.
+ *
+ * ⚠ **`served` and `delivered` are terminal and are NOT exits.** They bill in full, so they are
+ * absent from this table on purpose — `correctionUnavailable` one file over lists all four because
+ * it answers a different question (*can this line still be corrected*), and reading its `TERMINAL`
+ * set as this one's would put `VOIDED`'s treatment on every dish that reached a customer.
+ *
+ * ⚠ **There is no `comp` and no `discount` row here, and there cannot be one today.**
+ * `merge.ts`'s `comp.recorded` / `discount.recorded` arms are projection-inert — `DEC-MONEY-010`
+ * gate (iii) wants an oracle-pinned merge rule in `26 §7` and `26 §7` records that it is still
+ * owed — so the fold projects no per-line comp and no per-line discount at all and this device has
+ * nothing to read. `Cart`'s own header states what the cart therefore shows for them and why
+ * inventing a device-local marker is refused.
+ */
+const OFF_BILL_WORDS: Readonly<Record<string, string>> = {
+  voided: "VOIDED",
+  cancelled: "CANCELLED",
+};
+
+/**
+ * Exported for the same reason `correctionUnavailable` is: this is the whole of the cart's
+ * off-bill policy, so it must be a value an oracle can assert rather than a branch buried in JSX.
+ */
+export const offBillWord = (states: readonly string[] | undefined): string | undefined =>
+  states === undefined || states.length !== 1 ? undefined : OFF_BILL_WORDS[states[0] as string];
+
 export const Counter = () => {
   const [device, setDevice] = useState<DeviceState | null>(null);
   const [orders, setOrders] = useState<readonly OpenOrder[]>([]);
@@ -2704,6 +2756,22 @@ export const Counter = () => {
                     modifiers: l.modifiers,
                     removals: l.removals,
                     ...(l.note === null ? {} : { note: l.note }),
+                    /*
+                      `27-F24` — *"Every total, change amount, LINE TOTAL and elapsed minute
+                      arrives as a finished number."* This prop is the second thing on this
+                      surface the whole track turned on, and it is the `onRemove` defect below in
+                      its purest form: `OpenOrderSchema.lines[].billed_paisa` has been REQUIRED at
+                      this seam since `02-F20`'s correctives landed, `LineCorrection`'s picker
+                      renders it, and the cart — the surface a cashier actually watches — dropped
+                      it on the floor, so a real till showed `1 Chicken Biryani ✕ NO` and one
+                      figure at the bottom. It is the ENGINE's `billedLinePaisa` (`26 §8`) and is
+                      never re-derived here; `paisa()` only puts `00 §6`'s brand back on a number
+                      the IPC schema has already narrowed to a non-negative integer.
+                    */
+                    billedPaisa: paisa(l.billed_paisa),
+                    ...(offBillWord(l.states) === undefined
+                      ? {}
+                      : { offBill: offBillWord(l.states) }),
                   }))}
                   // The total is the ENGINE's own derivation, carried across the IPC seam as
                   // branded integer paisa and never re-summed here (00 §6, 26 §8).

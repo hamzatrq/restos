@@ -28,6 +28,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Smartphone } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import {
+  NameDebt,
+  Named,
+  type Naming,
+  namingFrom,
+  type PeopleNames,
+  Reference,
+  usePeopleNames,
+  usePlaceNames,
+} from "../lib/names";
 import { strings } from "../lib/strings";
 import { useTRPC } from "../lib/trpc";
 import { formatInstant } from "../lib/when";
@@ -41,12 +51,19 @@ import { Card, CardBody, CardHeader, CardTitle, Note, Problem } from "./ui/surfa
  * into either neighbour: collapsing it into "active" hides a dead till, and collapsing it into
  * "revoked by —" invents an attribution the ledger does not have.
  */
+/** `01-F70` — the till's own name, off the row `devices.list` already returns. */
+const namingOf = (device: { device_id: string; display_name: string | null }): Naming =>
+  namingFrom("device", device.device_id, device.display_name);
+
 const RevocationState = ({
   revoked_at,
   revoked_by,
+  people,
 }: {
   revoked_at: number | null;
   revoked_by: string | null;
+  /** `11-F20` — the roster resolves the word; this row carries only the id (`21-F15`). */
+  people: PeopleNames;
 }): ReactNode => {
   if (revoked_at === null) {
     return <span className="text-label text-muted-foreground">{strings.devices.active}</span>;
@@ -59,9 +76,17 @@ const RevocationState = ({
         {`${strings.devices.revokedAt} ${formatInstant(revoked_at)}`}
       </span>
       <span className="text-xs text-muted-foreground">
-        {revoked_by === null
-          ? strings.devices.notRecorded
-          : `${strings.devices.revokedBy} ${revoked_by}`}
+        {/* `14-F13`'s actor, by name. `null` is a real state and NOT an unnamed person — a
+            revocation performed by the shell command has no authenticated user to attribute, so
+            it keeps its own sentence rather than borrowing the naming treatment. */}
+        {revoked_by === null ? (
+          strings.devices.notRecorded
+        ) : (
+          <>
+            {`${strings.devices.revokedBy} `}
+            <Named naming={people.person(revoked_by)} />
+          </>
+        )}
       </span>
     </span>
   );
@@ -69,6 +94,14 @@ const RevocationState = ({
 
 export const DeviceList = (): ReactNode => {
   const trpc = useTRPC();
+  /**
+   * `21-F15` — a fleet register names three things: the till (`01-F70`, off the row itself), the
+   * branch it stands in (`01-F69`) and whoever revoked it (`11-F20`). Neither read gates this
+   * screen: `14-F12`'s list is `device.manage`, and a naming read that failed must not take down
+   * a list the matrix said yes to.
+   */
+  const places = usePlaceNames();
+  const people = usePeopleNames();
   const queryClient = useQueryClient();
   const devices = useQuery(trpc.devices.list.queryOptions());
   /** Which row is asking for confirmation. `14-F13` is irreversible, so it is never one tap. */
@@ -133,9 +166,24 @@ export const DeviceList = (): ReactNode => {
           `sync lag` or `app version` appear in it — a row must never look like it is carrying a
           fact the registry does not hold.
         */}
-        <p className="rounded-md border border-border bg-muted px-4 py-3 text-xs leading-relaxed text-muted-foreground">
-          {strings.devices.columnsOwed}
-        </p>
+        <div className="flex flex-col gap-2 rounded-md border border-border bg-muted px-4 py-3">
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            {strings.devices.columnsOwed}
+          </p>
+          {/*
+            `21-F15`'s counterpart half — *"an unnamed record is a missing field upstream, so the fix
+            is the required field on the record, never a prettier fallback"*. The treatment words on
+            the rows say WHAT is missing; this says WHERE it is set, which is the half that keeps the
+            question filed instead of retiring it.
+
+            It renders only while something on this screen is actually standing on the treatment, on
+            `staff-screen.tsx`'s rule that an absence stated where there is no absence is its own
+            dishonesty — so the day `01-F70`'s writer lands, this sentence disappears by itself.
+          */}
+          <NameDebt
+            namings={rows.flatMap((device) => [namingOf(device), places.branch(device.branch_id)])}
+          />
+        </div>
         {revoke.error !== null ? (
           <Note tone="fault">{`${strings.devices.refused} ${revoke.error.message}`}</Note>
         ) : null}
@@ -165,11 +213,33 @@ export const DeviceList = (): ReactNode => {
                     className="mt-1 size-4 shrink-0 text-muted-foreground"
                   />
                   <div className="flex min-w-0 flex-col gap-1">
-                    {/* The identity leads, because it is what an owner matches against the tablet
-                        in her hand — there is no device display name in the corpus to prefer. */}
-                    <span className="truncate text-body text-foreground">{device.device_id}</span>
+                    {/*
+                      **The till's NAME leads (`01-F70`, `21-F15`), and the note that stood here
+                      said the opposite: *"there is no device display name in the corpus to
+                      prefer"*. `01-F70` put one on the registry row, `DeviceRecord.display_name`
+                      has carried it across the wire since, and this list — the one surface the FR
+                      names as its reason — dropped it on the floor and rendered the key.**
+
+                      It is `null` for every row in this deployment, because `01-F70`'s
+                      *required at registration* half is owed at the provisioning command. So what
+                      an owner sees today is the stated unnamed treatment with the key demoted
+                      under it, which is the debt shown rather than hidden — and the day a name is
+                      written, this row starts reading it with no further change here.
+                    */}
+                    <span className="truncate text-body text-foreground">
+                      <Named naming={namingOf(device)} reference={false} />
+                    </span>
                     <span className="flex flex-wrap gap-x-4 text-xs text-muted-foreground">
-                      <span className="truncate">{`${strings.devices.branch} ${device.branch_id}`}</span>
+                      {/* **The key stays on the row whether or not the till is named**, which is
+                          `21-F15` exception (b) rather than a hedge: `device_id` is the sole key
+                          for admission, revocation and `01-N5`'s replacement path, so it is what an
+                          owner quotes to whoever supports her. `reference={false}` above is what
+                          stops it appearing twice. */}
+                      <Reference naming={namingOf(device)} />
+                      <span className="truncate">
+                        {`${strings.devices.branch} `}
+                        <Named naming={places.branch(device.branch_id)} />
+                      </span>
                       <span className="truncate">{`${strings.devices.deviceClass} ${device.device_class}`}</span>
                       {device.token_expires_at === null ? null : (
                         <span className="truncate">
@@ -180,7 +250,11 @@ export const DeviceList = (): ReactNode => {
                   </div>
                 </div>
                 <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
-                  <RevocationState revoked_at={device.revoked_at} revoked_by={device.revoked_by} />
+                  <RevocationState
+                    revoked_at={device.revoked_at}
+                    revoked_by={device.revoked_by}
+                    people={people}
+                  />
                   {/* No control at all on a revoked device — there is no un-revoke anywhere in this
                       product (`14-F30`; `01-N5`'s replacement path is a fresh device_id), and a
                       disabled button would suggest one exists behind a condition. */}

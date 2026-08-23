@@ -33,6 +33,7 @@
 // nor that a customer can read the receipt (`27-F35`'s gate is measured on real people).
 
 import { readFileSync } from "node:fs";
+import { totalPaisaOrNull } from "@restos/domain";
 import {
   classifyTransmit,
   createSpooler,
@@ -46,6 +47,7 @@ import type { DeviceStore } from "@restos/sync-client";
 import { describe, expect, it } from "vitest";
 import { CHANNELS } from "../../shared/ipc";
 import { createReceiptPrinter, type ReceiptPrinterDeps } from "../printing";
+import { TAX_POSTURE_ENV, TAX_RATE_BPS_ENV } from "../tax-posture";
 
 // ── the fixtures ────────────────────────────────────────────────────────────────────────────────
 
@@ -334,8 +336,15 @@ describe("§B 02-F15 — what the fold holds is what the paper says", () => {
       paper,
       "the total was re-derived from the lines instead of read off the fold",
     ).not.toContain("Total Rs 960");
-    // And the voided line is still ON the paper — the customer sees what was rung.
-    expect(paper).toContain("Chicken Karahi");
+    // ⚠ THIS TEST USED TO CLOSE `expect(paper).toContain("Chicken Karahi")` UNDER THE COMMENT
+    // "And the voided line is still ON the paper — the customer sees what was rung." That was a
+    // deliberate reading and it was disproved by paper: printed, the row carries `Rs 450 each`
+    // above a total of Rs 60, and a receipt whose rows do not close is the hazard
+    // `receipt-document.ts` names on `ReceiptLine.unit_price_paisa` in its own words. The
+    // assertion is INVERTED rather than deleted, so the property it was pointed at still has a
+    // guard: the row is gone, and the total is still the fold's rather than a sum of what remains.
+    expect(paper, "a VOIDED line printed as if it had been sold").not.toContain("Chicken Karahi");
+    expect(paper).toContain("Garlic Naan");
   });
 
   it("00 §5.7: an order that never reached the kitchen has no branch stamp, and says so", async () => {
@@ -520,6 +529,217 @@ describe("§D the wave's recurring defect — the receipt has a PRODUCTION calle
     expect(half.length, "the slice found nothing to scan").toBeGreaterThan(1_000);
     expect(half).not.toContain("kot.printed");
     expect(half).not.toContain("kot.print_failed");
+  });
+});
+
+// ── F. THE DOCUMENT RECONCILES — measured on the BYTES, not on the render helper ───────────────
+//
+// PROVENANCE: authored by the session that fixed the defect (`20 §4.3` as amended by R66 — tests
+// alongside the code for an app-layer path). The mitigation is the round-3 law: every assertion
+// below was run against a deliberately-broken implementation and confirmed to red. The matrix is
+// in the session report.
+//
+// ⚠ THE REASON THIS SECTION EXISTS RATHER THAN A RENDER-HELPER ASSERTION. The defect it pins was
+// found by reading the ESC/POS bytes of a real receipt on 2026-08-23 and adding the four printed
+// line figures up by hand — Rs 913 over a `Subtotal Rs 853` — while every arithmetic assertion in
+// this repo was green, because each one checks a figure against the fold and none checks the
+// figures against EACH OTHER. So these read the emitted bytes and do the reader's arithmetic.
+
+/** One printed item row, parsed back out of the emitted bytes: `<qty> <name> Rs <amount> each`. */
+const ITEM_ROW = /(\d+) ([A-Za-z][A-Za-z -]*?) Rs ([\d,]+(?:\.\d{2})?) each/g;
+
+/** `Rs 1,234.50` → 123_450 paisa. The reader's own parse, deliberately not `domain`'s inverse. */
+const paisaOf = (token: string): number =>
+  Math.round(Number.parseFloat(token.replace(/,/g, "")) * 100);
+
+/** Every item row the paper carries, in order. */
+const itemRowsOf = (paper: string): { qty: number; name: string; paisa: number }[] =>
+  [...paper.matchAll(ITEM_ROW)].map((m) => ({
+    qty: Number(m[1]),
+    name: (m[2] as string).trim(),
+    paisa: paisaOf(m[3] as string),
+  }));
+
+/**
+ * What the READER gets by doing what the paper tells her to: `N × Rs P`, added up.
+ *
+ * The extension is a REPETITION and not a multiplication, and the addition is `domain`'s —
+ * `DEC-MONEY-005` bans raw arithmetic on a money value and the ban fires here, correctly. Writing
+ * `qty * unit` in a test would be exactly the float-product hazard `billedCellPaisa` takes BigInt
+ * to avoid, one layer over, and `27-F57`'s `each` means "this figure, once per unit" — so the
+ * expansion is the FR's own reading of the row rather than a way round the rule.
+ */
+const readerSum = (paper: string): number =>
+  totalPaisaOrNull(
+    itemRowsOf(paper).flatMap((r) => Array.from({ length: r.qty }, () => r.paisa)),
+  ) as number;
+
+/** The value of a labelled money row, or `null` when the document does not carry one. */
+const rowPaisa = (paper: string, label: string): number | null => {
+  const found = paper.match(new RegExp(`${label} Rs ([\\d,]+(?:\\.\\d{2})?)`));
+  return found === null ? null : paisaOf(found[1] as string);
+};
+
+/**
+ * The four-order service day of 2026-08-23, as the ledger held it — one VOIDED line among four.
+ * The figures are the run's own: Rs 449 + 325 + 79 billed, Rs 60 rung and voided.
+ */
+const RUN_LINES = {
+  "line-1": { item_id: "item-biryani", qty: 1, unit_price_paisa: 44_900, states: ["confirmed"] },
+  "line-2": { item_id: "item-kebab", qty: 1, unit_price_paisa: 32_500, states: ["confirmed"] },
+  "line-3": { item_id: "item-drink", qty: 1, unit_price_paisa: 7_900, states: ["confirmed"] },
+  "line-4": { item_id: "item-raita", qty: 1, unit_price_paisa: 6_000, states: ["voided"] },
+};
+const RUN_CATALOG: Record<string, string> = {
+  "item-biryani": "Chicken Biryani",
+  "item-kebab": "Seekh Kebab",
+  "item-drink": "Soft Drink",
+  "item-raita": "Raita",
+};
+/** Rs 449 + 325 + 79 — what the fold bills, and what the paper must add up to. */
+const RUN_BILLED = 85_300;
+
+const runHarness = (over: Record<string, unknown> = {}): Harness =>
+  harness({
+    catalog: RUN_CATALOG,
+    order: {
+      json_lines: JSON.stringify({ ...RUN_LINES, ...over }),
+      pay_total: 1_000_000,
+      pay_attempts_json: JSON.stringify({ "attempt-1": [attempt("cash", 1_000_000)] }),
+    },
+  });
+
+describe("§F 01-F30/02-F15 — the printed rows CLOSE against the printed total", () => {
+  it("01-F30: THE MEASURED DEFECT — a VOIDED dish is not on the customer's copy at any price", async () => {
+    const h = runHarness();
+    h.printer.settled(ORDER_ID);
+    const paper = await paperOf(h);
+    const rows = itemRowsOf(paper);
+    expect(rows.map((r) => r.name)).toEqual(["Chicken Biryani", "Seekh Kebab", "Soft Drink"]);
+    // Not just the row: the WORD. A voided dish on a customer's copy is a dish they can be asked
+    // to pay for, whatever column its figure sits in.
+    expect(paper, "the voided item's name reached the customer's copy").not.toContain("Raita");
+    expect(paper, "the voided line's money token reached the paper").not.toContain("Rs 60");
+  });
+
+  it("02-F15: the item rows ADD UP to the total the same document prints — the reader's own sum", async () => {
+    // The assertion the whole run turned on, and the one no existing test made: every money figure
+    // in this repo is checked against the fold, and none is checked against the figure beside it.
+    // Under `16-F1`'s default posture there is no Subtotal row, so the closing figure is `Total`.
+    const h = runHarness();
+    h.printer.settled(ORDER_ID);
+    const paper = await paperOf(h);
+    const summed = readerSum(paper);
+    expect(summed, "the rows do not sum to what the fold billed").toBe(RUN_BILLED);
+    expect(rowPaisa(paper, "Total"), "the printed rows and the printed total disagree").toBe(
+      summed,
+    );
+  });
+
+  it("16-F5/02-F63: with tax ON the rows close against SUBTOTAL, and the void is still absent", async () => {
+    // The run's own configuration: `exclusive` at 1600 bps with whole-rupee charge rounding, where
+    // `Total` is deliberately NOT the sum of the rows (`01-F82` puts tax inside it) and `Subtotal`
+    // is. Both halves are asserted, so an implementation that made `Total` the row sum would fail
+    // here even though it would satisfy the test above.
+    process.env[TAX_POSTURE_ENV] = "exclusive";
+    process.env[TAX_RATE_BPS_ENV] = "1600";
+    try {
+      const h = runHarness();
+      h.printer.settled(ORDER_ID);
+      const paper = await paperOf(h);
+      const summed = readerSum(paper);
+      expect(summed).toBe(RUN_BILLED);
+      expect(rowPaisa(paper, "Subtotal")).toBe(summed);
+      const total = rowPaisa(paper, "Total") as number;
+      expect(total, "tax did not reach the amount charged").toBeGreaterThan(summed);
+      expect(paper).not.toContain("Raita");
+    } finally {
+      delete process.env[TAX_POSTURE_ENV];
+      delete process.env[TAX_RATE_BPS_ENV];
+    }
+  });
+
+  it("01-F60: a line priced at ZERO is NOT a voided line, and it stays on the paper", async () => {
+    // `01-F60` permits an explicit zero precisely so *free* is distinguishable from *forgotten*,
+    // and both a free line and a voided one contribute nothing. An implementation that filtered on
+    // "contributes nothing" alone would take the customer's evidence of a complimentary item off
+    // the document — a different defect wearing this one's costume.
+    const h = runHarness({
+      "line-5": { item_id: "item-raita", qty: 1, unit_price_paisa: 0, states: ["confirmed"] },
+    });
+    h.printer.settled(ORDER_ID);
+    const paper = await paperOf(h);
+    expect(paper, "a deliberately free line was dropped with the voided one").toContain(
+      "1 Raita Rs 0 each",
+    );
+    // And it still closes: a zero adds nothing to either side.
+    const summed = readerSum(paper);
+    expect(summed).toBe(RUN_BILLED);
+    expect(rowPaisa(paper, "Total")).toBe(summed);
+  });
+
+  it("01-F30: an order whose every line was voided prints NOTHING — there is no sale to receipt", async () => {
+    // "a fully-voided order nets to zero". The cover test then reads `0 >= 0` with no agreed
+    // tender, so the guard that already exists holds — asserted rather than assumed, because the
+    // filter above is what makes `lines` empty and an empty-lines receipt would be a document
+    // claiming a customer bought nothing.
+    const allVoided = Object.fromEntries(
+      Object.entries(RUN_LINES).map(([id, cell]) => [id, { ...cell, states: ["voided"] }]),
+    );
+    const h = harness({
+      catalog: RUN_CATALOG,
+      order: {
+        json_lines: JSON.stringify(allVoided),
+        pay_total: 0,
+        pay_attempts_json: "{}",
+      },
+    });
+    h.printer.settled(ORDER_ID);
+    expect(jobsOf(h.spooler).length, "a receipt was printed for an order with no sale on it").toBe(
+      0,
+    );
+  });
+});
+
+// ── G. THE RULING ON COMP AND DISCOUNT — what the receipt does NOT say, and why ────────────────
+//
+// `02-F20`'s comp and discount both have a producer as of `plans/v0.md` gap 1
+// (`renderer/LineCorrection.tsx` → `comp.recorded` / `discount.recorded`, both with `01 §4` payload
+// schemas). Neither MOVES the bill: `merge.ts`'s two `case` labels are projection-inert while
+// `DEC-MONEY-010`'s gate condition (iii) — "an oracle-pinned merge rule in `26 §7`" — is unmet, so
+// `01-F30`'s `comp_value` and `discounts` terms do not exist. The customer was therefore charged in
+// full and paid in full, and the receipt says so.
+//
+// **THE RULING, and it is a DECLARED INTERPRETATION (`24 §3b`) on the half the corpus leaves open.**
+// `02-F15` lists "discount lines" among receipt content and names no comp line at all, so the
+// discount surface IS specified and the comp one is NOT — stated rather than glossed. Neither is
+// printed today and the reason is the same for both: `16-F33` (c) gives a settled receipt exactly
+// ONE total, and a `Discount Rs 200` row above a total it did not reduce is a second, implied total
+// — a customer subtracting it would compute a figure nobody was ever charged. The row lands the day
+// `01-F30`'s term does, and it must move `billed_total` before it may move this paper;
+// `receipt-document.ts` argues exactly that and only its PREMISE ("no payload schema at all") went
+// stale. The minimum that keeps the document reconcilable is silence, and no vocabulary is invented
+// for either act.
+//
+// These assertions FAIL THE DAY A ROW IS ADDED, which is the point: an unsubtracted money row on a
+// customer's copy is the defect, not the fix.
+
+describe("§G 16-F33 (c)/DEC-MONEY-010 — one total, and no row that does not move it", () => {
+  it("16-F33 (c): a settled receipt carries exactly ONE total figure", async () => {
+    const h = runHarness();
+    h.printer.settled(ORDER_ID);
+    const paper = await paperOf(h);
+    expect(paper.match(/Total Rs /g) ?? []).toHaveLength(1);
+  });
+
+  it("DEC-MONEY-010: no comp or discount row — neither has moved `billed_total`", async () => {
+    const h = runHarness();
+    h.printer.settled(ORDER_ID);
+    const paper = await paperOf(h);
+    expect(paper, "a discount row was printed above a total it does not reduce").not.toMatch(
+      /discount/i,
+    );
+    expect(paper, "a comp row was printed above a total it does not reduce").not.toMatch(/\bcomp/i);
   });
 });
 

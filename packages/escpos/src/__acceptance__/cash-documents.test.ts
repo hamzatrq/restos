@@ -248,6 +248,8 @@ const DAY: DaySummaryData = {
   over_short_paisa: 6_600,
   shifts_closed: 2,
   shifts_open: 1,
+  undated_sales_paisa: 52_100,
+  undated_orders: 1,
   reprint: false,
 };
 
@@ -529,6 +531,65 @@ describe("02-F43 — an unbound drawer event reaches the slip, because a slip is
     const text = documentText(okOf(renderDay(DAY), "shift counts").blocks);
     expect(text).toContain("Shifts closed 2");
     expect(text).toContain("Shifts open 1");
+  });
+
+  // ── 02-F43 at 01-F46's binding — added August 2026 with the field itself ─────────────────────
+  //
+  // PROVENANCE, stated rather than glossed: these four were authored by the session that added
+  // `undated_sales_paisa`/`undated_orders`, which is NOT the `24 §3` split — `20 §4.3` as amended
+  // by R66 tiers the separation rule by path and this is a new field on an existing document. The
+  // mitigation is the round-3 law; the mutants and their kills are in the session report. The rest
+  // of this file is the ORACLE and remains read-only.
+
+  it("02-F43/01-F46: a settled sale with no BUSINESS DAY is counted and named on the day summary", () => {
+    // The measured defect (2026-08-23): an order settled without a kitchen send has no branch
+    // stamp, so `01-F46` cannot date it and `sales_by_channel` dropped it — Rs 521 of Rs 2,968,
+    // 17.6% of the day, absent from the paper a manager reconciles against the deposit while the
+    // same money sat inside the shift's expected cash. `02-F43` names this document by name and
+    // forbids exactly that: money that cannot be bound is "counted into an unbound bucket".
+    const text = documentText(okOf(renderDay(DAY), "undated").blocks);
+    expect(text).toContain("Undated sales so far Rs 521");
+    expect(text).toContain("Undated orders so far 1");
+  });
+
+  it("02-F43: the undated rows print at ZERO too, on the shift slip's stated reason", () => {
+    const quiet: DaySummaryData = { ...DAY, undated_sales_paisa: 0, undated_orders: 0 };
+    const text = documentText(okOf(renderDay(quiet), "quiet undated").blocks);
+    expect(text).toContain("Undated sales so far Rs 0");
+    expect(text).toContain("Undated orders so far 0");
+  });
+
+  it("27-F58: the undated rows are INSIDE the sales group — no BLANK LINE before them", () => {
+    // A blank line between the channel rows and these two would tell a manager the figure belongs
+    // to a different arithmetic statement from the one she has to add it into. `27-F58` separates
+    // GROUPS with blank lines, so "same group" is exactly "no blank line between", measured on
+    // the rendered line sequence.
+    //
+    // ⚠ THE FIRST FORM OF THIS TEST SURVIVED ITS OWN MUTANT AND IS RECORDED RATHER THAN REPLACED
+    // QUIETLY. It asked whether the BLOCK holding `Sales by channel` also held `Undated sales so
+    // far` — and a `GROUP_BREAK` is a PART inside a block, not a block boundary, so a mutant that
+    // inserted one between the channel rows and these two changed the paper and passed the test.
+    // That is the round-3 shape reproduced inside the guard written for it: the mechanism was
+    // right and it was pointed one case away. Found by running the mutant, not by reading.
+    const lines = linesOf(okOf(renderDay(DAY), "grouping").blocks);
+    const last = lines.findIndex((line) => line.text.startsWith("Foodpanda"));
+    expect(last, "the channel rows are not on the paper at all").toBeGreaterThan(-1);
+    expect(lines[last + 1]?.text).toBe("Undated sales so far Rs 521");
+    expect(lines[last + 2]?.text).toBe("Undated orders so far 1");
+    // And the group DOES end after them — a break that never arrives is the opposite defect.
+    expect(lines[last + 3]?.blank, "the sales group never closes").toBe(true);
+  });
+
+  it("03-F49: the undated money row TIES the floor at 34 columns and does not move it", () => {
+    // `min-columns.ts` derives `day_summary`'s 34 from `Voids/comps/discounts NOT RECORDED`, and
+    // this row is 20 + 1 + 13 at the pinned eight-digit display bound — exactly 34. A label one
+    // column wider would have made this a spec act on `03-F49` rather than an addition, so the
+    // number is asserted rather than trusted to have been counted correctly once.
+    const wide: DaySummaryData = { ...DAY, undated_sales_paisa: 9_999_999_900 };
+    const out = okOf(renderDay(wide, WIDE), "widest undated row");
+    const row = linesOf(out.blocks).find((line) => line.text.startsWith("Undated sales so far"));
+    expect(row?.text).toBe("Undated sales so far Rs 99,999,999");
+    expect(row?.columns).toBe(MIN_COLUMNS.day_summary);
   });
 });
 

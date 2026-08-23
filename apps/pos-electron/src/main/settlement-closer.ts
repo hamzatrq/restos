@@ -5,8 +5,8 @@
  *
  * `01-F33` ruled that settlement is an **act, not a derivation**, and named the event:
  * `order.settlement_closed`. The type has had a payload schema (`packages/domain/src/registry.ts`),
- * a fold arm and a ratified merge rule (`folds/merge.ts` — a monotone OR over a G-Set, with the
- * attested `billed_paisa` as `uncovered_addition`'s ceiling) since the kernel landed, and **zero
+ * a fold arm and a ratified merge rule (`folds/merge.ts` — a monotone OR over a G-Set, with an
+ * attested snapshot as `uncovered_addition`'s ceiling) since the kernel landed, and **zero
  * production emitters**. So `OpenOrderRow.settled` was `0` on every order this product has ever
  * held, `01-F30`'s conservation equation — which only runs once settled — had **never executed on
  * a real order**, and `DEC-MONEY-009`'s duplicate-settlement guard had to be built on an arithmetic
@@ -68,7 +68,12 @@
  * already carries `branch_created_at`, stamped at append by the kernel.
  */
 
-import { billedTotalPaisa, type DeviceStore, type OpenOrderRow } from "@restos/sync-client";
+import {
+  billedEffectiveFromJsonLines,
+  billedTotalPaisa,
+  type DeviceStore,
+  type OpenOrderRow,
+} from "@restos/sync-client";
 import type { Gateway } from "./gateway";
 import { deviceChargeRoundingPaisa, deviceTaxCell } from "./tax-posture";
 
@@ -156,11 +161,32 @@ export const closingActFor = (order: OpenOrderRow): Record<string, unknown> | nu
   if (order.pay_total < billed) return null;
   return {
     order_id: order.order_id,
-    // `01-F30`'s billed total through the ENGINE's own derivation, never re-summed here — and the
-    // merge rule reads it back as `uncovered_addition`'s ceiling, so a wrong number here breaches
-    // the order's own ceiling the moment it closes. An ATTESTATION, never re-derived later
-    // (`01-F1`), on `shift.closed`'s `expected_paisa_by_method` precedent.
+    // `01-F30`'s billed total through the ENGINE's own derivation, never re-summed here. An
+    // ATTESTATION, never re-derived later (`01-F1`), on `shift.closed`'s
+    // `expected_paisa_by_method` precedent — and the only record this ledger will ever hold of
+    // what the customer was actually charged, because `01-F87`'s carrier does not exist and
+    // `02-F63` says in terms that *"the Auditor cannot recompute a rounded total without the
+    // granularity"*. `services/api`'s owner summary sums exactly this field for the day's sales.
     billed_paisa: billed,
+    // `01-F33`'s `uncovered_addition` CEILING, and it is a SECOND number rather than the one
+    // above (amended August 2026 — the comment that stood here claimed the opposite and was
+    // wrong in the one direction it reasoned about).
+    //
+    // ⚠ **THE OLD COMMENT, KEPT AS THE FINDING IT IS:** *"a pre-tax figure here would breach the
+    // order's own ceiling the moment an exclusive order closed."* It does not. A pre-tax figure
+    // IS `billedEffective`, and `x > x` is false — what breaches is a charge that rounded DOWN,
+    // which is the case nobody checked. Measured on shipping code: posture `none`, step 1000, one
+    // Rs 404 line, settled and closed with nothing added → `["uncovered_addition"]`, an exception
+    // that means *a line was added after the close*. And the mirror: `exclusive` 16 %, a genuine
+    // Rs 60 line added after the settlement act → `[]`, because the charge sits above the line sum
+    // by the tax. The false negative PREDATES the rounding and is live at any exclusive posture.
+    //
+    // The fold cannot be moved to the other quantity — `01-F87`/`01-F52` ban configuration as a
+    // fold input — so the emitter attests the fold's own accumulator alongside the charge. This
+    // is `01-F63`'s literal words for `billed_paisa` (*"the fold's `billed_effective` at the
+    // moment of closing"*) restored as its own field, because `01-F82`'s enumeration moved the
+    // NAME to the tax-inclusive number and could not move the fold that reads it.
+    billed_effective_paisa: billedEffectiveFromJsonLines(order.json_lines),
     tendered_paisa: order.pay_total,
     // `refund_total`, NOT `repaid_total`. `DEC-MONEY-007`'s near miss: `repaid_total` is a khata
     // tab being paid off, which is a different act against the same order and belongs to no part

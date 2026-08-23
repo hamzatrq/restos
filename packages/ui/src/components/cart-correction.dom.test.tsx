@@ -77,10 +77,17 @@ import { Cart } from "./Cart";
 
 afterEach(cleanup);
 
+/**
+ * ⚠ **`billedPaisa` was added to this fixture in August 2026 and is REQUIRED, not decoration.**
+ * `27-F24`'s line total became a required prop of `CartProps.lines`, so a fixture without it no
+ * longer compiles — which is the point of making it required rather than optional. Nothing else
+ * in this file changed and none of its assertions read the money; `cart-money.dom.test.tsx` owns
+ * that claim.
+ */
 const LINES = [
-  { id: "line-1", name: "Mutton Karahi", quantity: 1 },
-  { id: "line-2", name: "Coke", quantity: 2 },
-  { id: "line-3", name: "Naan", quantity: 4 },
+  { id: "line-1", name: "Mutton Karahi", quantity: 1, billedPaisa: paisa(45000) },
+  { id: "line-2", name: "Coke", quantity: 2, billedPaisa: paisa(12000) },
+  { id: "line-3", name: "Naan", quantity: 4, billedPaisa: paisa(20000) },
 ];
 
 const mount = (over: Partial<Parameters<typeof Cart>[0]> = {}) => {
@@ -279,8 +286,14 @@ describe("§D 02-F6/27-F59 — the note reads under its dish", () => {
       <ThemeProvider>
         <Cart
           lines={[
-            { id: "line-1", name: "Mutton Karahi", quantity: 1, note: "less spicy" },
-            { id: "line-2", name: "Coke", quantity: 2 },
+            {
+              id: "line-1",
+              name: "Mutton Karahi",
+              quantity: 1,
+              note: "less spicy",
+              billedPaisa: paisa(45000),
+            },
+            { id: "line-2", name: "Coke", quantity: 2, billedPaisa: paisa(12000) },
           ]}
           totalPaisa={paisa(77000)}
           onRemove={() => {}}

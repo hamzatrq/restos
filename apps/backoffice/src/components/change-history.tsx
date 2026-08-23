@@ -49,6 +49,7 @@ import type { CatalogPriceChangeT } from "@restos/domain";
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { formatPaisa } from "../lib/money";
+import { nameText, usePlaceNames } from "../lib/names";
 import { strings } from "../lib/strings";
 import { useTRPC } from "../lib/trpc";
 import { formatInstant } from "../lib/when";
@@ -89,6 +90,8 @@ export const ChangeHistory = ({
   entity_id: string;
 }): ReactNode => {
   const trpc = useTRPC();
+  /** `01-F69` — a moved price cell names its branch (`21-F15`). */
+  const places = usePlaceNames();
   const history = useQuery(trpc.catalog.history.queryOptions());
 
   if (history.isPending) {
@@ -181,7 +184,10 @@ export const ChangeHistory = ({
                     key={`${change.branch_id} ${change.channel}`}
                     className="col-span-2 grid grid-cols-subgrid text-xs tabular-nums text-muted-foreground"
                   >
-                    <span className="truncate">{`${change.branch_id} · ${change.channel} `}</span>
+                    {/* `21-F15` — the moved cell's key is a BRANCH and reads as its name. The
+                        flat form keeps this one contiguous string, which the note above says is
+                        load-bearing: these spans may be restyled, never re-split. */}
+                    <span className="truncate">{`${nameText(places.branch(change.branch_id))} · ${change.channel} `}</span>
                     {/* `27-F25` — these two numbers are the payload of an audit line and were
                         the DIMMEST thing on it: 12px muted, under a metadata header at full
                         contrast. Full contrast now, cell key muted, which is the correct way

@@ -34,10 +34,11 @@
  *   module   `apps/backoffice/src/components/owner-summary.tsx`, exporting `OwnerSummary`
  *   reached  from the shipped `Workspace` navigation — the seam, and §A is the only assertion in
  *            this file that would survive the wave's recurring defect being present
- *   regions  `[data-summary-block="…"]` on: `sales`, `cash`, `top-items`, `hourly`, `honesty`,
- *            `omissions`, `sync`
+ *   regions  `[data-summary-block="…"]` on: `sales`, `cash`, `corrections`, `top-items`, `hourly`,
+ *            `honesty`, `omissions`, `sync`
  *   rows     `[data-channel="…"]`, `[data-shift="…"]`, `[data-item="…"]`, `[data-hour="…"]`,
- *            `[data-omission="…"]` — one element per server row, inside its block
+ *            `[data-correction="…"]`, `[data-correction-by="…"]`, `[data-omission="…"]` — one
+ *            element per server row, inside its block
  *   controls `[data-summary-control="business-date"]` (a `YYYY-MM-DD` value, `12-F13`) and
  *            `[data-summary-control="branch"]` (a `<select>`, `12-F22`)
  *   money    every figure through `packages/ui`'s `MoneyValue` — which is what makes the `27-F16`
@@ -75,6 +76,19 @@ type ShiftCash = {
   paid_out_paisa: number;
 };
 type ItemRevenue = { item_id: string; qty: number; revenue_paisa: number };
+type CorrectionActor = {
+  actor_user_id: string | null;
+  approver_user_id: string | null;
+  count: number;
+  value_paisa: number;
+};
+type CorrectionBlock = {
+  kind: "void" | "comp" | "discount";
+  count: number;
+  value_paisa: number;
+  removed_from_sales: boolean;
+  by: readonly CorrectionActor[];
+};
 type HourBucket = { offset: number; wall_hour: number; billed_paisa: number };
 type DayState = {
   day_id: string;
@@ -89,6 +103,7 @@ type Honesty = {
   provisional_stamp_events: number;
   every_day_closed: boolean;
   open_shifts: number;
+  unsettled_orders: number;
   truncated: boolean;
   anomalies: readonly string[];
 };
@@ -98,6 +113,7 @@ type Answer = {
   branch_ids: readonly string[];
   sales: { total_paisa: number; orders: number; by_channel: readonly ChannelSales[] };
   cash: readonly ShiftCash[];
+  corrections: readonly CorrectionBlock[];
   top_items: readonly ItemRevenue[];
   hourly: readonly HourBucket[];
   days: readonly DayState[];
@@ -248,9 +264,59 @@ const HONESTY: Honesty = {
   provisional_stamp_events: 2,
   every_day_closed: false,
   open_shifts: 1,
+  unsettled_orders: 3,
   truncated: true,
   anomalies: ANOMALIES,
 };
+
+/**
+ * `12-F10` bullet 3, and the fixture is shaped around the one thing this block can get wrong.
+ *
+ * **The void and the comp carry the SAME money, Rs 120, and differ only in `removed_from_sales`.**
+ * A void's value is already out of `sales.total_paisa` (the line exited, and the till's attested
+ * bill never held it); a comp's is not, because a comp is recorded and does not move the bill. A
+ * screen that printed one sentence for both would be indistinguishable from a correct one on any
+ * fixture where the figures differed, so here they do not.
+ *
+ * The discount row carries a **measured zero** and no attribution — the row a screen that filtered
+ * empty kinds would drop, which cannot then tell "no discounts today" from "not computed".
+ *
+ * `void.by` holds TWO rows for one cashier: one act she needed a manager for, one the manager did
+ * herself. `02-F20`'s two identities, and `null` on the second means *no approval was involved*
+ * rather than *nobody approved it*.
+ */
+const CORRECTIONS: readonly CorrectionBlock[] = [
+  {
+    kind: "void",
+    count: 3,
+    value_paisa: 12_000,
+    removed_from_sales: true,
+    by: [
+      { actor_user_id: "user-ayesha", approver_user_id: null, count: 1, value_paisa: 4_000 },
+      {
+        actor_user_id: "user-hina",
+        approver_user_id: "user-ayesha",
+        count: 2,
+        value_paisa: 8_000,
+      },
+    ],
+  },
+  {
+    kind: "comp",
+    count: 1,
+    value_paisa: 12_000,
+    removed_from_sales: false,
+    by: [
+      {
+        actor_user_id: "user-hina",
+        approver_user_id: "user-ayesha",
+        count: 1,
+        value_paisa: 12_000,
+      },
+    ],
+  },
+  { kind: "discount", count: 0, value_paisa: 0, removed_from_sales: false, by: [] },
+];
 
 const DAYS: readonly DayState[] = [
   {
@@ -276,6 +342,7 @@ const ANSWER: Answer = {
   branch_ids: ["branch-main", "branch-two"],
   sales: { total_paisa: 355_000, orders: 20, by_channel: CHANNELS },
   cash: CASH,
+  corrections: CORRECTIONS,
   top_items: TOP_ITEMS,
   hourly: HOURLY,
   days: DAYS,
@@ -290,15 +357,73 @@ const answerWith = (over: Partial<Answer>): Answer => ({ ...ANSWER, ...over });
 
 // ── mounting and reading the screen ───────────────────────────────────────────────────────────
 
+/**
+ * `01-F68`/`01-F69` and `11-F20` — the two directories this report resolves its ids through
+ * (`21-F15`). **THE FIXTURE IS THE COVERAGE HERE, exactly as the device list records for its actor
+ * column.** `branch-two` is absent from the branch list and `user-bilal` is absent from the roster,
+ * so one branch and one cashier on this screen stand on the unnamed treatment while the rest are
+ * named — and a third state, *the server did not attribute this shift at all*, is already carried
+ * by `shift-open`. A suite that named everything could not tell a correct implementation from one
+ * that renders whatever a directory happens to hold.
+ */
+const DIRECTORY = {
+  org: { org_id: "org-zaiqa", display_name: "Karachi Biryani House", status: "active" },
+  branches: [
+    {
+      branch_id: "branch-main",
+      display_name: "Tariq Road",
+      branch_type: "branch",
+      branch_class: "production",
+    },
+  ],
+};
+
+const ROSTER = [
+  {
+    user_id: "user-hina",
+    display_name: "Hina Raza",
+    email: null,
+    grid_ordinal: 1,
+    assignments: [],
+  },
+  {
+    user_id: "user-ayesha",
+    display_name: "Ayesha Khan",
+    email: "ayesha@example.test",
+    grid_ordinal: 2,
+    assignments: [],
+  },
+];
+
 const mount = (answer: Answer | (() => unknown), extra: Handlers = {}): CallLog => {
   const log: CallLog = [];
   const nightly = typeof answer === "function" ? answer : () => answer;
   render(
-    <Harness log={log} handlers={{ "summary.nightly": nightly, ...extra }}>
+    <Harness
+      log={log}
+      handlers={{
+        "summary.nightly": nightly,
+        "tenancy.directory": () => DIRECTORY,
+        "users.list": () => ROSTER,
+        ...extra,
+      }}
+    >
       <OwnerSummary />
     </Harness>,
   );
   return log;
+};
+
+/**
+ * Waits for the two naming reads to land. Waiting on a NAME is what makes this a real wait — the
+ * treatment is on screen from the first paint, so waiting on a key would return immediately.
+ */
+const named = async (): Promise<void> => {
+  await waitFor(() => {
+    if (!(document.body.textContent ?? "").includes("Ayesha Khan")) {
+      throw new Error("the roster has not landed yet");
+    }
+  });
 };
 
 /** Waits for the query to land. Every read below happens after this. */
@@ -599,13 +724,16 @@ describe("C · 12-F10 — cash expected vs counted per cashier", () => {
   it("renders a row per shift, naming the cashier and both figures", async () => {
     mount(ANSWER);
     await settled();
+    await named();
     const rows = rowsOf("cash", "data-shift");
     expect(rows.map((el) => el.getAttribute("data-shift"))).toEqual(CASH.map((s) => s.shift_id));
 
     const evening = rowText(
       rows.find((el) => el.getAttribute("data-shift") === "shift-evening") as HTMLElement,
     );
-    expect(evening).toContain("user-ayesha");
+    // BY NAME (`11-F20`, `21-F15`). The row is still FOUND by `data-shift`, which is a key on an
+    // attribute and never on the glass.
+    expect(evening).toContain("Ayesha Khan");
     expect(evening).toContain("Rs 1,200"); // expected
     expect(evening).toContain("Rs 1,185"); // counted
   });
@@ -1238,7 +1366,23 @@ describe("K · 12-F26 — this surface emits nothing", () => {
     await flush();
 
     expect(log.length).toBeGreaterThan(1);
-    expect([...new Set(log.map((call) => call.path))]).toEqual(["summary.nightly"]);
+    /*
+      **THE CLAIM IS "NO MUTATION", AND IT IS NOW ASSERTED AS THAT.** This read
+      `toEqual(["summary.nightly"])`, which is a proxy: `12-F26` bans *creation, edit or deletion*
+      and asks for a test that *"the app's API client has no mutating endpoints"*. A one-member path
+      set is a stricter claim than the FR makes and a weaker one than it wants — it reddens on a
+      legal added READ (`21-F15`'s naming reads, which is what happened) while saying nothing about
+      the KIND of call, so a mutation to `summary.*` would have passed it.
+
+      Both halves are here now: every call is a QUERY, and the paths are an allow-list, so a new
+      read is still a diff a reviewer sees rather than a silent widening.
+    */
+    expect(log.every((call) => call.type === "query")).toBe(true);
+    expect([...new Set(log.map((call) => call.path))].sort()).toEqual([
+      "summary.nightly",
+      "tenancy.directory",
+      "users.list",
+    ]);
   });
 });
 
@@ -1295,7 +1439,7 @@ describe("L · 12-F22 — org roll-up with per-branch drill-in", () => {
 
   /**
    * `12-F22`: *"the branch view inside the roll-up is identical to the single-branch view
-   * (structure never changes with org size)"*. So the same seven regions are present whether the
+   * (structure never changes with org size)"*. So the same eight regions are present whether the
    * answer covers two branches or one.
    */
   it("a single-branch answer renders the same regions as the roll-up", async () => {
@@ -1322,6 +1466,7 @@ describe("L · 12-F22 — org roll-up with per-branch drill-in", () => {
     expect(drilled).toEqual(rollUp);
     expect(rollUp).toEqual([
       "cash",
+      "corrections",
       "honesty",
       "hourly",
       "omissions",
@@ -1329,6 +1474,107 @@ describe("L · 12-F22 — org roll-up with per-branch drill-in", () => {
       "sync",
       "top-items",
     ]);
+  });
+});
+
+// ══ L2. 12-F10 BULLET 3 — VOIDS, COMPS AND DISCOUNTS ═══════════════════════════════════════════
+
+/**
+ * **The block that replaced a sentence telling an owner the opposite of the truth.** Until August
+ * 2026 this screen rendered, as part of the server's `omissions` list, the claim that voids, comps
+ * and discounts *"have no payload schema and no emitter anywhere in the product — the counter has
+ * no void, comp or discount surface at all"*. All three clauses had become false, and on the same
+ * day an end-to-end run printed `raita · 2 sold` for two voided dishes and a day total Rs 289
+ * short.
+ *
+ * The assertions below are aimed at the ONE thing this block can still get wrong, which is not a
+ * figure: a void's money is already out of the takings and a comp's is not, and an owner who reads
+ * them alike is wrong about her own day in the opposite direction.
+ */
+describe("L2 · 12-F10 bullet 3 — count, value, and by whom", () => {
+  it("renders one row per kind, including the kind that did not happen", async () => {
+    mount(ANSWER);
+    await settled();
+    expect(rowsOf("corrections", "data-correction").map((el) => el.dataset.correction)).toEqual([
+      "void",
+      "comp",
+      "discount",
+    ]);
+  });
+
+  it("carries each kind's COUNT and its money (12-F10)", async () => {
+    mount(ANSWER);
+    await settled();
+    const rows = rowsOf("corrections", "data-correction");
+    expect(rowText(rows[0] as HTMLElement)).toContain("3");
+    expect(rowText(rows[0] as HTMLElement)).toContain("Rs 120");
+    expect(rowText(rows[1] as HTMLElement)).toContain("Rs 120");
+    // The zero row keeps its zero rather than being dropped — `00 §5.7`.
+    expect(rowText(rows[2] as HTMLElement)).toContain("Rs 0");
+  });
+
+  /**
+   * **THE ASSERTION THIS SECTION EXISTS FOR.** The void and the comp carry the SAME Rs 120 in the
+   * fixture, so nothing but the sentence can tell them apart — a screen printing one sentence for
+   * both passes every other assertion in this file.
+   */
+  it("says the void is OFF the takings and the comp is NOT (DEC-MONEY-010)", async () => {
+    mount(ANSWER);
+    await settled();
+    const rows = rowsOf("corrections", "data-correction");
+    const voided = rowText(rows[0] as HTMLElement);
+    const comped = rowText(rows[1] as HTMLElement);
+    expect(voided).toContain("Already off the takings");
+    expect(voided).not.toContain("still include this money");
+    expect(comped).toContain("still include this money");
+    expect(comped).not.toContain("Already off the takings");
+    // Both really do carry the same figure, or this proves nothing about the sentences.
+    expect(CORRECTIONS[0]?.value_paisa).toBe(CORRECTIONS[1]?.value_paisa);
+  });
+
+  /**
+   * `02-F20`'s two identities. `null` on the approver is *"a manager did this unsupervised"*,
+   * which `permissions.ts` allows outright — not *"nobody approved it"*, and a screen that
+   * rendered a blank or an id there would say the second.
+   */
+  it("names the cashier AND the approver, and says so when there was no approval", async () => {
+    mount(ANSWER);
+    await settled();
+    await named();
+    const by = rowsOf("corrections", "data-correction-by").map(rowText);
+    // BY NAME (`11-F20`, `21-F15`) — the event carried the id and the roster resolves the word.
+    expect(by[0]).toContain("Ayesha Khan");
+    expect(by[0]).toContain("no approval needed");
+    expect(by[1]).toContain("Hina Raza");
+    /*
+      The label and the identity are asserted SEPARATELY rather than as one concatenated string,
+      because `21-F15` puts a person's id through `Named` — a roster lookup with a technical-id
+      fallback — so the two are no longer adjacent characters in the rendered text. What this test
+      owns is that the approver is NAMED under an "approved by" label and is not merged into the
+      actor; how a person's identity is spelled is that FR's business, not this one's.
+    */
+    expect(by[1]).toContain("approved by");
+    expect(by[1]).toContain("Ayesha Khan");
+    expect(by[1]).not.toContain("no approval needed");
+  });
+
+  it("states the unsettled-bill count as its own honesty fact (00 §5.7)", async () => {
+    mount(ANSWER);
+    await settled();
+    expect(textOf("honesty")).toContain("not settled yet");
+    expect(textOf("honesty")).toContain("3");
+  });
+
+  /**
+   * `12-F10` bullet 4 is the one block that does not add up to the takings, and the screen has to
+   * say so: an owner adding five item figures and finding a different number would read the
+   * mismatch as an error rather than as a different measurement.
+   */
+  it("labels the item table as a pre-tax ranking that excludes voided dishes", async () => {
+    mount(ANSWER);
+    await settled();
+    expect(textOf("top-items")).toContain("before tax");
+    expect(textOf("top-items")).toContain("voided");
   });
 });
 
@@ -1345,6 +1591,11 @@ describe("M · a day with no events reads as a day with no events", () => {
       answerWith({
         sales: { total_paisa: 0, orders: 0, by_channel: [] },
         cash: [],
+        corrections: [
+          { kind: "void", count: 0, value_paisa: 0, removed_from_sales: true, by: [] },
+          { kind: "comp", count: 0, value_paisa: 0, removed_from_sales: false, by: [] },
+          { kind: "discount", count: 0, value_paisa: 0, removed_from_sales: false, by: [] },
+        ],
         top_items: [],
         hourly: [],
         days: [],
@@ -1353,6 +1604,7 @@ describe("M · a day with no events reads as a day with no events", () => {
           provisional_stamp_events: 0,
           every_day_closed: true,
           open_shifts: 0,
+          unsettled_orders: 0,
           truncated: false,
           anomalies: [],
         },
@@ -1363,6 +1615,10 @@ describe("M · a day with no events reads as a day with no events", () => {
     const page = (document.body.textContent ?? "").replace(/\s+/g, " ");
     expect(page).not.toMatch(/can't reach|cannot reach|try again/i);
     // Every region still stands, so the day reads as measured-and-empty rather than as missing.
-    expect(Array.from(document.querySelectorAll("[data-summary-block]"))).toHaveLength(7);
+    expect(Array.from(document.querySelectorAll("[data-summary-block]"))).toHaveLength(8);
+    // …and a day with three all-zero correction rows says NOTHING WAS CORRECTED, in words. The
+    // three rows are still delivered, so the screen is stating a measurement rather than an
+    // absence of one — the distinction the whole `omissions` mechanism exists to keep.
+    expect(textOf("corrections")).toContain("Nothing was corrected today");
   });
 });

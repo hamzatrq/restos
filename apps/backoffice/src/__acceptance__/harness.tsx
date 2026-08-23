@@ -22,8 +22,20 @@ import { TRPCProvider } from "../lib/trpc";
 export type Handler = (input: unknown) => unknown;
 export type Handlers = Record<string, Handler>;
 
-/** Every call the components made, in order — the evidence each seam test reads. */
-export type CallLog = { path: string; input: unknown }[];
+/**
+ * Every call the components made, in order — the evidence each seam test reads.
+ *
+ * **`type` is the operation's own kind**, added when `21-F15`'s naming reads landed on screens whose
+ * read-only claims (`12-F26`, Commandment 5) were asserted as *"the path set has one member"*. That
+ * is a proxy: the FR bans MUTATING endpoints, not additional queries, and a proxy assertion breaks
+ * on a legal change while staying silent on the illegal one it was aimed at. With the kind on the
+ * log a suite can assert what the FR says.
+ */
+export type CallLog = {
+  path: string;
+  input: unknown;
+  type: "query" | "mutation" | "subscription";
+}[];
 
 /** The refusal shape `services/api` actually puts on the wire, so `isUnauthorized` sees the real thing. */
 export const unauthorized = (): never => {
@@ -41,7 +53,7 @@ const fakeLink =
   () =>
   (opts) =>
     observable((observer) => {
-      log.push({ path: opts.op.path, input: opts.op.input });
+      log.push({ path: opts.op.path, input: opts.op.input, type: opts.op.type });
       const handler = handlers[opts.op.path];
       if (handler === undefined) {
         observer.error(TRPCClientError.from(new Error(`no handler for ${opts.op.path}`)));

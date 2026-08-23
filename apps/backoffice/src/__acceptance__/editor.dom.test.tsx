@@ -67,6 +67,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { EntryEditor } from "../components/entry-editor";
 import type { CatalogEntry } from "../lib/catalog-types";
 import type { EnabledPairs } from "../lib/price-grid";
+import { strings } from "../lib/strings";
 import { type CallLog, Harness } from "./harness";
 
 afterEach(cleanup);
@@ -83,6 +84,39 @@ const receipt = {
   version: null,
 };
 
+/**
+ * `01-F69` — the branch directory this screen resolves its row axis through (`21-F15`).
+ *
+ * **`cantt` is deliberately absent from it.** Four of the five enabled branches are named and the
+ * fifth is not, so both halves of the law are on screen at once: a suite that named every branch
+ * could not tell a correct implementation from one that renders whatever the directory happens to
+ * hold, and a suite that named none could not tell it from one that always renders the treatment.
+ */
+const DIRECTORY = {
+  org: { org_id: "org-zaiqa", display_name: "Karachi Biryani House", status: "active" },
+  branches: (
+    [
+      ["gulberg", "Gulberg"],
+      ["dha", "DHA Phase 5"],
+      ["johar", "Johar Town"],
+      ["model", "Model Town"],
+    ] as const
+  ).map(([branch_id, display_name]) => ({
+    branch_id,
+    display_name,
+    branch_type: "branch",
+    branch_class: "production",
+  })),
+};
+
+/** What a price cell's accessible name reads as, given the directory above. */
+const placeName = (branch: string): string => {
+  const found = DIRECTORY.branches.find((b) => b.branch_id === branch);
+  return found === undefined
+    ? `${strings.names.branchUnnamed} · ${strings.names.branchReference} ${branch}`
+    : found.display_name;
+};
+
 const mount = (initial: CatalogEntry | null): CallLog => {
   const log: CallLog = [];
   render(
@@ -96,6 +130,7 @@ const mount = (initial: CatalogEntry | null): CallLog => {
         "catalog.save": () => receipt,
         "catalog.archive": () => receipt,
         "catalog.history": () => [],
+        "tenancy.directory": () => DIRECTORY,
       }}
     >
       <EntryEditor initial={initial} enabled={FIVE} onSaved={() => {}} />
@@ -105,7 +140,17 @@ const mount = (initial: CatalogEntry | null): CallLog => {
 };
 
 const cell = (branch: string, channel: string): HTMLInputElement =>
-  screen.getByLabelText(`${branch} ${channel}`) as HTMLInputElement;
+  screen.getByLabelText(`${placeName(branch)} ${channel}`) as HTMLInputElement;
+
+/**
+ * Waits for `tenancy.directory` to land, because a cell's accessible name is its BRANCH's name
+ * (`21-F15`) and that arrives on its own query. Waiting on the NAMED label is what makes this a
+ * real wait: the unnamed treatment is on screen from the first paint, so waiting on `cantt` would
+ * return immediately and prove nothing.
+ */
+const namesResolved = async (): Promise<void> => {
+  await screen.findByLabelText(`${placeName("gulberg")} counter`);
+};
 
 const type = (input: HTMLElement, value: string): void => {
   fireEvent.change(input, { target: { value } });
@@ -143,6 +188,7 @@ describe("14-F29 — one number fills the grid, and overrides are typed on top",
     // depend on this control.
     mount(null);
     await startTask("Add a dish");
+    await namesResolved();
     fillAll("450");
     for (const branch of FIVE.branches) {
       for (const channel of FIVE.channels) expect(cell(branch, channel).value).toBe("450");
@@ -152,13 +198,14 @@ describe("14-F29 — one number fills the grid, and overrides are typed on top",
   it("keeps an override typed on top of the fill", async () => {
     mount(null);
     await startTask("Add a dish");
+    await namesResolved();
     fillAll("450");
     type(cell("dha", "foodpanda"), "520");
     expect(cell("dha", "foodpanda").value).toBe("520");
     expect(cell("dha", "counter").value).toBe("450");
   });
 
-  it("prefills from the entry's existing prices", () => {
+  it("prefills from the entry's existing prices", async () => {
     const entry = {
       kind: "item",
       id: "tikka",
@@ -168,6 +215,10 @@ describe("14-F29 — one number fills the grid, and overrides are typed on top",
       ),
     } as CatalogEntry;
     mount(entry);
+    await namesResolved();
+    // `gulberg` is named by the directory and `cantt` is not, so one cell is found by a NAME and
+    // the other by `21-F15`'s treatment — both halves of the law, in the assertion that already
+    // existed for a different reason.
     expect(cell("gulberg", "counter").value).toBe("450");
     expect(cell("cantt", "foodpanda").value).toBe("450");
   });

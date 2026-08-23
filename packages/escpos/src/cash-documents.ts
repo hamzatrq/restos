@@ -168,6 +168,33 @@ export type DaySummaryData = {
    */
   readonly shifts_closed: number;
   readonly shifts_open: number;
+  /**
+   * `02-F43`'s unbound treatment, applied to `01-F46`'s binding rather than `02-F22`'s: money this
+   * device has taken that belongs to no BUSINESS DAY, and the number of orders it came from.
+   *
+   * **Why the figure exists at all.** An order projection's only delivered branch stamp is its
+   * confirm anchor (`01-F43`), and `01-F17` lets a cashier settle an order that was never sent to
+   * the kitchen — a drink, a packaged good, a bill rung after the food went out. That order has no
+   * branch time, so `01-F46` cannot file it under a business date and it cannot enter
+   * `sales_by_channel`. It was DROPPED until August 2026, and the drop was measured on a real
+   * service day: Rs 521 of Rs 2,968 — 17.6% — settled, in the shift slip's expected cash, and
+   * absent from the document the manager reconciles against the deposit. `02-F43` rules that shape
+   * by name and names this very document: money that cannot be bound is *"counted into an unbound
+   * bucket"* and surfaced, because the silent path is *"money vanishing from … `02-F24`'s day close
+   * with nothing to point at"*.
+   *
+   * **CUMULATIVE AND BRANCH-WIDE, exactly as `unbound_paid_out_paisa` is on the shift slip.** An
+   * order with no branch stamp has no business day by definition — that is what makes it undated —
+   * so it appears on every summary this device prints until the order projection carries a
+   * settlement stamp. The LABEL carries that (`so far`), because a manager who adds a running total
+   * into one night's deposit is exactly the harm this field exists to prevent.
+   *
+   * **NOT defaulted, NOT optional.** A field absent-or-zero would make "no undated sales" and "the
+   * undated figure was never computed" the same ink — the `02-F43` shape this whole contract
+   * refuses one field up.
+   */
+  readonly undated_sales_paisa: number;
+  readonly undated_orders: number;
   readonly reprint: boolean;
 };
 
@@ -177,6 +204,15 @@ export type DaySummaryData = {
  * this document's own.
  */
 const ADJUSTMENTS_LABEL = "Voids/comps/discounts";
+
+/**
+ * `02-F43`'s unbound bucket at `01-F46`'s binding — see `DaySummaryData.undated_sales_paisa`.
+ *
+ * 20 and 21 columns. The money row is therefore 20 + 1 + 13 = **34** at `MIN_COLUMNS`' pinned
+ * eight-digit display bound, which ties `day_summary`'s floor and does not move it.
+ */
+const UNDATED_SALES_LABEL = "Undated sales so far";
+const UNDATED_ORDERS_LABEL = "Undated orders so far";
 
 const shiftOf = (data: unknown): ShiftCloseData => data as ShiftCloseData;
 const dayOf = (data: unknown): DaySummaryData => data as DaySummaryData;
@@ -332,6 +368,25 @@ const DAY_BLOCK_RENDERERS: Readonly<Record<string, BlockRenderer>> = {
     GROUP_BREAK,
   ],
   DAY_HEAD_NOTE: (_data, slot) => ownerNote(String(slot("header_note"))),
+  /**
+   * `02-F24`'s "sales by channel", plus `02-F43`'s unbound bucket for the sales no channel row can
+   * hold — see `DaySummaryData.undated_sales_paisa`.
+   *
+   * The two rows are INSIDE this group and not below it: they are sales, and `27-F58` separates
+   * GROUPS with blank lines, so a break here would tell a manager the figure belongs to a
+   * different statement from the one it has to be added to.
+   *
+   * **Printed on every summary, including at zero**, on `SHIFT_DRAWER`'s stated reason one document
+   * over: *"a row that appears only on bad nights teaches readers to stop looking for it"*, and a
+   * zero here is the manager's evidence that every sale on this device is in the rows above.
+   *
+   * `so far` is doing real work and is not a hedge. These figures are branch-wide and cumulative —
+   * an undated order has no business day, so it is on tomorrow's summary too — and the shift slip's
+   * terser `Unbound paid out` gets away without the qualifier because a cashier reconciles a
+   * DRAWER she is holding, where this reader is adding rows into one night's deposit. `Undated
+   * sales so far` + the 13-column money bound is 34 columns, which TIES `day_summary`'s floor
+   * rather than moving it (`min-columns.ts` states the derivation).
+   */
   DAY_SALES: (data) => {
     const day = dayOf(data);
     return [
@@ -340,6 +395,10 @@ const DAY_BLOCK_RENDERERS: Readonly<Record<string, BlockRenderer>> = {
       ...ORDER_CHANNELS.flatMap((channel) =>
         row(CHANNEL_LABELS[channel], amountToken(day.sales_by_channel[channel])),
       ),
+      ...row(UNDATED_SALES_LABEL, amountToken(day.undated_sales_paisa)),
+      // The count is what makes the money readable, on `shifts_closed`'s own argument: `Rs 0` over
+      // no undated orders and `Rs 0` over three are the same ink and opposite facts.
+      ...row(UNDATED_ORDERS_LABEL, String(day.undated_orders)),
       GROUP_BREAK,
     ];
   },
@@ -386,6 +445,11 @@ const DAY_SUMMARY_EXAMPLE: DaySummaryData = {
   over_short_paisa: -2_000,
   shifts_closed: 2,
   shifts_open: 0,
+  // The measured defect's own figure (Rs 521 of Rs 2,968, 2026-08-23). Non-zero and ≥ Rs 10 for
+  // `SHIFT_CLOSE_EXAMPLE`'s stated reason: `render.test.ts`'s data-axis control probes a money leaf
+  // by ±1 paisa upward, and a zero leaf would be a DEAD witness in `03-F36`'s build-time gate.
+  undated_sales_paisa: 52_100,
+  undated_orders: 1,
   reprint: false,
 };
 

@@ -355,8 +355,28 @@ describe("§C — every reader of `billed_total` resolves the SAME cell", () => 
     // `billedEffectiveFromJsonLines` is line-derived and tax-blind. A reader left on it is a
     // reader that disagrees with the receipt — which is exactly the state this gap was opened to
     // close. The word may still appear in PROSE, so the assertion is on the call.
+    //
+    // ⚠ **`settlement-closer.ts` HAS ONE LEGITIMATE CALL SINCE AUGUST 2026, AND THE EXEMPTION IS
+    // NARROWED RATHER THAN GRANTED.** `01-F33`'s amended `uncovered_addition` ceiling is
+    // `billed_effective_paisa` — the fold's own line sum — precisely BECAUSE it is tax-blind and
+    // unrounded: `01-F87` bans configuration as a fold input, so the fold can never hold the
+    // charge, and comparing a rounded tax-inclusive charge against a raw line sum was wrong in
+    // both directions (see `uncovered-addition-ceiling.test.ts`). The rail this test IS must not
+    // be softened into "the closer may call it": the call is pinned to that ONE attested field
+    // and counted, so any second use — a cover test, a receipt total, a screen figure — reddens
+    // exactly as it did before.
+    const CEILING_CALL = "billed_effective_paisa: billedEffectiveFromJsonLines(order.json_lines)";
     for (const file of READERS) {
-      expect(readSrc(file), `${file} still calls the tax-blind sum`).not.toContain(
+      const src = readSrc(file);
+      if (file === "settlement-closer.ts") {
+        expect(src, "the ceiling attestation is gone or renamed").toContain(CEILING_CALL);
+        expect(
+          src.split("billedEffectiveFromJsonLines(").length - 1,
+          "settlement-closer.ts calls the tax-blind sum somewhere other than the ceiling",
+        ).toBe(1);
+        continue;
+      }
+      expect(src, `${file} still calls the tax-blind sum`).not.toContain(
         "billedEffectiveFromJsonLines(",
       );
     }
@@ -714,7 +734,15 @@ describe("§E 02-F63 — sub-rupee is PRINTED, and the charge is rounded", () =>
     // `"1e3"` is deliberately NOT in this list: `Number("1e3")` is 1000, a perfectly good
     // integer of paisa, and refusing an exponent an operator is unlikely to type would be
     // inventing a rule. What is refused is what is NOT a positive integer.
-    for (const bad of ["0", "-100", "1.5", "one rupee", "100rs", "NaN"]) {
+    //
+    // ⚠ **`"1"`, `"50"` AND `"250"` JOINED THE LIST IN AUGUST 2026 — `02-F63` (c) AS AMENDED.**
+    // They are positive integers of paisa and were accepted; they are also the steps that produce
+    // a charge with paisa in it, which neither `MoneyValue` (`27-F23` truncates) nor the tender
+    // pad can express. Measured before the amendment at step 1, `exclusive` 16 %, one Rs 404
+    // line: due 46,864, the glass reads `Rs 468`, keying that gives 46,800, `alreadySettled` is
+    // null and the shortfall renders `Rs 0` — the bill can never be settled from the counter.
+    // `packages/ui`'s `sub-rupee-tender.dom.test.tsx` is that reproduction, in the component.
+    for (const bad of ["0", "-100", "1.5", "one rupee", "100rs", "NaN", "1", "50", "250"]) {
       expect(
         () => resolveChargeRoundingPaisa({ [CHARGE_ROUNDING_ENV]: bad }),
         `"${bad}" was accepted`,
@@ -809,7 +837,15 @@ describe("§E 02-F63 — the screen shows the CHARGE, and it is the guard's own 
       ["exclusive", "1600"],
       ["exclusive", "1650"],
     ] as const) {
-      for (const step of ["1", "100", "1000"]) {
+      // ⚠ **THIS LOOP READ `["1", "100", "1000"]` AND THAT WAS THE DEFECT, NOT AN OMISSION.**
+      // It iterated step 1 and passed, because it compared `alreadySettled(pay_total = due)`
+      // against the RAW PROJECTED NUMBER — never against what the glass renders or what the pad
+      // can produce. At step 1 under `exclusive` the projected due carries paisa, both ends of
+      // the human path truncate, and the cashier is stranded on a bill she cannot settle. **A
+      // guard built correctly and aimed one case away.** `02-F63` (c) now refuses the step, the
+      // refusal is asserted in the `02-F63` (c) case above, and the glass-and-pad property this
+      // loop could not express lives in `packages/ui/src/components/sub-rupee-tender.dom.test.tsx`.
+      for (const step of ["100", "1000"]) {
         setPosture(posture, rate);
         process.env[CHARGE_ROUNDING_ENV] = step;
         try {

@@ -172,8 +172,34 @@ export const deviceTaxCell = (): TaxCell => resolveTaxCell(process.env);
  * configuration an operator typed wrong.
  *
  * **Zero is refused explicitly**, because `Number("0")` is a perfectly good integer and a
- * granularity of zero has no meaning — `roundPaisaToGranularity` would throw one layer down, at the
- * settling act, where the message names neither the variable nor the operator who typed it.
+ * granularity of zero has no meaning — `chargePaisaAtGranularity` would throw one layer down, at
+ * the settling act, where the message names neither the variable nor the operator who typed it.
+ *
+ * ⚠ **A STEP THAT IS NOT A WHOLE NUMBER OF RUPEES IS REFUSED (`02-F63` (c) as amended, August
+ * 2026), AND IT IS THE HUMAN PATH THAT FORCES IT — measured, not argued.** The charge is always a
+ * multiple of the step, so a step of 100 or 1000 can only ever produce whole rupees while a step
+ * of 1 (or 50, or 250) can produce paisa. **Both ends of the counter's money path are
+ * whole-rupee**: `MoneyValue` renders through `rupeesFromPaisa`, which TRUNCATES (`27-F23` — no
+ * decimals on operational screens), and `TenderPanel`'s pad multiplies the typed entry by 100.
+ * Measured on shipping code at `charge_rounding_paisa = 1`, `exclusive` 16 %, one Rs 404 line: the
+ * bill is `46_864`, the glass shows **`Rs 468`**, keying exactly that gives `46_800`, `coversBill`
+ * is false, `alreadySettled` and `closingActFor` are both **null**, and the 64-paisa shortfall
+ * renders as **`Rs 0`**. The cashier keys what she is shown, the bill never settles, and the Pay
+ * surface reads `DUE Rs 0` for ever. That is `01-F17` broken by a configuration `02-F63` (c) used
+ * to bless by name.
+ *
+ * **The alternative was measured and refused (`24 §3b`): teach the pad and the display paisa.**
+ * It is a `27-F23` act (*"no decimals on operational screens"* is doc 27's, not this file's), it
+ * moves `MoneyValue` — every money surface in the product — and it contradicts R70's own words,
+ * *"there is no concept of paisa"* and *"the waiter when charging charges in rupees"*, which is
+ * why `02-F63` (f) separates SHOWING paisa (paper, where the receipt already prints them) from
+ * CHARGING them. Refusing here is the smaller and the more honest half: it takes away a
+ * configuration nothing in this product can serve, and takes away nothing an owner can use.
+ *
+ * ⚠ **THE RESTRICTION IS THE CONFIGURATION'S, NOT THE ARITHMETIC'S.** `domain`'s
+ * `chargePaisaAtGranularity` still accepts any step ≥ 1 paisa and its identity step stays legal
+ * there — it is a pure function with no glass in front of it, and `01-F87`'s carrier will inherit
+ * this check rather than the helper.
  */
 export const resolveChargeRoundingPaisa = (env: Record<string, string | undefined>): number => {
   const raw = env[CHARGE_ROUNDING_ENV]?.trim();
@@ -183,6 +209,15 @@ export const resolveChargeRoundingPaisa = (env: Record<string, string | undefine
     throw new RangeError(
       `${CHARGE_ROUNDING_ENV} must be a positive integer of PAISA (02-F63 — 100 rounds to the ` +
         `rupee, 1000 to ten rupees), got "${raw}"`,
+    );
+  }
+  if (step % DEFAULT_CHARGE_ROUNDING_PAISA !== 0) {
+    throw new RangeError(
+      `${CHARGE_ROUNDING_ENV} must be a whole number of RUPEES (02-F63 (c) — a multiple of ` +
+        `${DEFAULT_CHARGE_ROUNDING_PAISA} paisa: 100 rounds to the rupee, 1000 to ten rupees), ` +
+        `got "${raw}". A sub-rupee charge cannot be shown on an operational screen (27-F23) or ` +
+        `entered on the tender pad, so the cashier would key what she is shown and the bill ` +
+        `would never settle`,
     );
   }
   return step;

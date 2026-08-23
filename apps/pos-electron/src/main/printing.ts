@@ -22,7 +22,7 @@ import {
   type SpoolerTransport,
 } from "@restos/escpos";
 import type { DeviceStore } from "@restos/sync-client";
-import { orderChargeSnapshot } from "@restos/sync-client";
+import { billedLinePaisa, orderChargeSnapshot } from "@restos/sync-client";
 import type { Alarm, KitchenState } from "../shared/ipc";
 import type { CatalogResolver } from "./gateway";
 import { deviceChargeRoundingPaisa, deviceTaxCell } from "./tax-posture";
@@ -303,8 +303,40 @@ const kotNoteOf = (notes: readonly string[] | undefined): string | undefined =>
 /**
  * The same cell with `01-F53`'s captured price, which the KOT deliberately never reads (`03-F32`:
  * "prices are simply not in the chit data model") and the receipt must.
+ *
+ * `states` is typed `unknown` and cast at the one place that reads it, exactly as `line-void.ts`'s
+ * `ProjectedCell` types it and for its reason: the real input is a JSON string off a projection
+ * this module does not own, so a declaration narrower than the data would be a claim this layer
+ * cannot make. `billedOnPaper` below records what happens when the key is genuinely absent.
  */
-type BilledCell = LineCell & { unit_price_paisa: number };
+type BilledCell = LineCell & { unit_price_paisa: number; states?: unknown };
+
+/**
+ * `01-F30` — is this line one the bill is built from?
+ *
+ * **`02-F45`, one fact one source.** The receipt's *Total* is `orderChargeSnapshot`'s charge, which
+ * totals `billedLinePaisa` per cell; so the lines the document itemises are the lines that answer
+ * `billedLinePaisa` with money, and the two cannot disagree. Nothing here reads `states` for a
+ * BILLING decision, multiplies `qty` by a price, or names an exit state: `26 §8` puts that logic in
+ * `packages/sync-client` and `merge.ts` exports this function so a host app does not re-derive it.
+ *
+ * **The `unit_price_paisa === 0` arm is `01-F60`'s explicit zero and is not a defensive clause.**
+ * A free line and a voided line both contribute nothing, and dropping both would take a
+ * deliberately-priced-at-zero item off a customer's copy — the state `01-F60` created the explicit
+ * zero to keep distinguishable from *forgotten*. A comparison against a money field is legal by
+ * name (`DEC-MONEY-005`: "comparisons and plain assignment stay legal on purpose").
+ *
+ * ⚠ **THERE IS NO GUARD FOR A CELL WITH NO PROJECTED `states`, AND THAT IS MEASURED RATHER THAN
+ * ASSUMED.** A first draft carried one (fail OPEN: print the line) with a test for it, and the
+ * test failed for a reason worth recording — `orderChargeSnapshot` runs three statements ABOVE
+ * this and **throws** on such a cell, inside `merge.ts`'s `billedCellPaisa` at
+ * `cell.states.length`, so nothing here can ever see one. The branch was dead code: this wave's
+ * own named defect in miniature, written in the act of fixing it. It is deleted, and the state it
+ * would have handled is reported as a finding against `packages/sync-client` — a `01-F17` hazard
+ * on the settlement path that predates this change and is not a printer's to close.
+ */
+const billedOnPaper = (cell: BilledCell): boolean =>
+  cell.unit_price_paisa === 0 || billedLinePaisa({ ...cell, states: cell.states as string[] }) > 0;
 
 /** `03-F3`: "order number + table/channel in large type" — ONE field, filled in that order. */
 const tableOf = (table_ids_json: string, channel: string): string => {
@@ -1528,9 +1560,18 @@ export const createCashPrinter = ({
   /**
    * `02-F24` — "a day-summary ticket (sales by channel, voids/comps/discounts, over/short)".
    *
-   * Two of the three groups are assembled below and the third does not exist: `01 §4` has no
-   * void/comp/discount event (`26 §7` states it outright), so the document names the gap instead
-   * of printing a zero. See `DaySummaryData`.
+   * Two of the three groups are assembled below and the third is still not COUNTED.
+   *
+   * ⚠ **THE REASON THIS FILE USED TO GIVE IS NOW FALSE AND IS CORRECTED RATHER THAN CARRIED.** It
+   * read *"the third does not exist: `01 §4` has no void/comp/discount event (`26 §7` states it
+   * outright)"*. `packages/domain/src/registry.ts` has carried payload schemas for
+   * `void.recorded`, `comp.recorded` and `discount.recorded` since `plans/v0.md` gap 1 landed, and
+   * `main/line-void.ts` + `renderer/LineCorrection.tsx` emit all three. What is still absent is the
+   * **projection**: `merge.ts`'s three `case` labels are projection-inert while `DEC-MONEY-010`'s
+   * gate condition (iii) — *"an oracle-pinned merge rule in `26 §7`"* — is unmet, so `01-F30`'s
+   * `void_value`, `comp_value` and `discounts` terms do not exist and there is no number to print.
+   * The document therefore still NAMES the gap rather than printing a zero — the same paper, a
+   * different and now-true reason, and one fold arm away from a real figure. See `DaySummaryData`.
    *
    * **The day's over/short is a SUM of CARRIED shift variances, never a day-level recompute.**
    * `day.closed` carries a count and no expectation, so "expected minus counted" for a whole day
@@ -1547,8 +1588,52 @@ export const createCashPrinter = ({
     const shifts = store.shifts().filter((row) => onBusinessDate(row.open_at, day.business_date));
     const sales = new Map<OrderChannel, number[]>();
     for (const channel of ORDER_CHANNELS) sales.set(channel, []);
+    /*
+      `02-F43`'s UNBOUND BUCKET, one binding key over — and it is the fix for a measured defect.
+
+      The only DELIVERED branch stamp an order projection carries is `confirmed_at` (`01-F43`), and
+      `01-F17` lets a cashier settle an order that was never sent to the kitchen — a bottle of
+      water, a packaged good, a bill rung after the food has gone out. Such an order has no branch
+      time at all, so `01-F46` cannot say which business day it belongs to, and the loop below used
+      to `continue` past it. **Its money is real**: measured on 2026-08-23, order 3 of a four-order
+      service day settled at Rs 521 with no kitchen send, landed `payment.recorded` and
+      `order.settlement_closed`, sat inside `shift.closed.expected_paisa_by_method` — and was
+      absent from this document, so the day summary and the shift slip disagreed about the same
+      order and **17.6% of the day was missing from the paper a manager reconciles against the
+      deposit.**
+
+      `02-F43` is the corpus's own ruling on this exact shape and it names `02-F24`'s day close
+      outright: an event that cannot be bound is *"accepted, recorded against a null reference,
+      **counted** into an unbound bucket"* and surfaced, because *"what this forbids is the silent
+      path … money vanishing from `02-F23`'s expected cash and `02-F24`'s day close with nothing to
+      point at"*. So the money is COUNTED and NAMED, never bucketed into a channel: a stamp this
+      device does not hold is not one it may invent (`01-F45`), and putting the figure in
+      `Counter` would file it under a business day chosen by whichever day happened to close next.
+
+      **CUMULATIVE AND BRANCH-WIDE, on the shift slip's stated precedent.** `unbound_no_sale_count`
+      and `unbound_paid_out_paisa` are branch-wide figures printed on a per-SHIFT document, because
+      *"an unbound event has no shift by definition — and the block says so"*. An undated order has
+      no business day by definition and the same follows: it will appear on tomorrow's summary too,
+      which is why the document's label says `so far` rather than leaving a manager to add it twice.
+
+      **THE ROOT FIX IS NOT HERE AND IS NAMED RATHER THAN ATTEMPTED.** `OpenOrderRow` carries no
+      branch stamp for the settling act; projecting `order.settlement_closed`'s own
+      `branch_created_at` onto the row would date these orders properly, close this bucket AND
+      close the `Date NOT RECORDED` on their receipts (one root cause, two documents). That is a
+      fold change in `packages/sync-client` under `26 §8`'s oracle, not an edit in a printer.
+    */
+    const undated: number[] = [];
+    let undated_orders = 0;
     for (const order of store.openOrders()) {
-      if (order.confirmed_at === null) continue;
+      if (order.confirmed_at === null) {
+        // Money, not orders: an order still being rung has taken nothing and is not a sale this
+        // document may count. `pay_total` is `01-F31`'s keyed sum, so a contested attempt is
+        // already zero here and cannot inflate either figure.
+        if (order.pay_total <= 0) continue;
+        undated.push(order.pay_total);
+        undated_orders += 1;
+        continue;
+      }
       if (!onBusinessDate(order.confirmed_at, day.business_date)) continue;
       // `02-F42` closed the channel set. A row outside it cannot be bucketed and is NOT folded
       // into another channel: a mis-bucketed sale is worse than a missing one on a document a
@@ -1572,6 +1657,10 @@ export const createCashPrinter = ({
       ),
       shifts_closed: shifts.filter((row) => row.closed === 1).length,
       shifts_open: shifts.filter((row) => row.closed === 0).length,
+      // `02-F43`'s treatment applied to `01-F46`'s binding — see the loop above. BigInt-exact
+      // through `totalOf` like every other money figure on this document.
+      undated_sales_paisa: totalOf(undated),
+      undated_orders,
       reprint: false,
     });
   };
@@ -1793,15 +1882,46 @@ export const createReceiptPrinter = ({
     const job_id = `${RECEIPT_JOB_PREFIX}${order_id}`;
     if (spooler.job(job_id) !== undefined) return;
 
-    const lines = Object.values(JSON.parse(order.json_lines) as Record<string, BilledCell>).map(
-      (cell) => ({
+    /*
+      `02-F15`'s "lines" — THE LINES THIS BILL IS BUILT FROM, and a line that left the bill is not
+      one of them (`01-F30`: "billed derives from delivered lines, exited lines excluded").
+
+      ⚠ **THIS FILTER IS THE FIX FOR A MEASURED DEFECT AND THE OMISSION IS THE POINT.** Every cell
+      in `json_lines` used to be mapped, so a VOIDED dish printed as `1 Raita Rs 60 each` above a
+      *Subtotal* that excluded it: measured in the ESC/POS bytes of a real receipt on 2026-08-23,
+      four line rows reading Rs 913 over a subtotal of Rs 853. `receipt-document.ts` names that
+      exact hazard on `ReceiptLine.unit_price_paisa` — *"a receipt whose lines do not add up to its
+      total is worse than one that asks the reader to multiply"* — and mitigates it by printing a
+      UNIT price rather than an extended one. **That mitigation does not survive a void**: the row
+      carries a money token either way, and the only figure that reconciles beside a line
+      contributing zero is no figure at all.
+
+      **DECLARED INTERPRETATION (`24 §3b`), because no FR rules on how a void APPEARS on a
+      customer's copy.** `02-F15` lists the receipt's content and names lines, discount lines and
+      totals; it does not name a void. The alternative — keep the row and replace its money token
+      with a word — was considered and refused on three grounds: it needs a marker vocabulary no FR
+      supplies (commandment 2), it needs `ReceiptLine` to carry an exit fact this application would
+      have to derive from `states` (`26 §8` puts that derivation in `packages/sync-client`), and
+      `27-F55` puts paper on the side of carrying LESS. What the receipt owes the person holding it
+      is a document whose rows close; what was rung and taken off again is the ledger's business
+      (`02-F19` attributes it, `02-F20` approves it, and `void.recorded` is permanent under
+      `01-F1`).
+
+      ⚠ **IT RETIRES A GREEN ASSERTION AND SAYS SO.** `receipt-printing.test.ts` §B closed with
+      *"And the voided line is still ON the paper — the customer sees what was rung"*. That was a
+      deliberate reading, not an accident, and it is the `01-F60` shape this repo has already paid
+      for once: a passing test defending a rule the paper later disproved. The assertion is
+      rewritten in the same commit rather than annotated.
+    */
+    const lines = Object.values(JSON.parse(order.json_lines) as Record<string, BilledCell>)
+      .filter(billedOnPaper)
+      .map((cell) => ({
         quantity: cell.qty,
         // `01-F54` — an unsynced or renamed item degrades to its identifier. The money came from the
         // EVENT (`01-F53`), so a stale catalog costs a word on the paper and never a rupee.
         name: catalog(cell.item_id)?.name ?? cell.item_id,
         unit_price_paisa: cell.unit_price_paisa,
-      }),
-    );
+      }));
 
     const result = render(
       spec,

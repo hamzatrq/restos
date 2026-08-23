@@ -15,6 +15,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Clock } from "lucide-react";
 import type { ReactNode } from "react";
+import { Named, usePeopleNames } from "../lib/names";
 import { strings } from "../lib/strings";
 import { useTRPC } from "../lib/trpc";
 import { formatInstant } from "../lib/when";
@@ -31,6 +32,8 @@ import { Note } from "./ui/surface";
 const landsAtText = formatInstant;
 
 export const PendingEdits = (): ReactNode => {
+  /** `11-F20` — who staged the edit is a PERSON, and the roster resolves the word (`21-F15`). */
+  const people = usePeopleNames();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const pending = useQuery(trpc.catalog.pending.queryOptions());
@@ -123,7 +126,8 @@ export const PendingEdits = (): ReactNode => {
                   {`${nounForKind(edit.entity)} · ${strings.catalog.reference} ${edit.entity_id}`}
                 </span>
                 <span>
-                  {`${strings.timing.landsAt} ${landsAtText(edit.lands_at)} · ${strings.timing.stagedBy} ${edit.actor_user_id}`}
+                  {`${strings.timing.landsAt} ${landsAtText(edit.lands_at)} · ${strings.timing.stagedBy} `}
+                  <Named naming={people.person(edit.actor_user_id)} />
                 </span>
               </span>
             </div>

@@ -22,6 +22,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarClock, History, LogOut, RefreshCw, Table2 } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { Named, namingFrom, usePlaceNames } from "../lib/names";
 import { clearSessionToken, writeSessionToken } from "../lib/session-token";
 import { strings } from "../lib/strings";
 import { isUnauthorized, useTRPC } from "../lib/trpc";
@@ -145,6 +146,69 @@ const SignIn = ({ onSignedIn }: { onSignedIn: () => void }): ReactNode => {
   );
 };
 
+/**
+ * **The org and the person, BY NAME (`21-F15`).**
+ *
+ * This is the surface the naming law was reported from: it rendered
+ * `ORGANISATION 01a03082-…` over `SIGNED IN AS 01a03082-…` on a deployment whose Postgres holds
+ * *Karachi Biryani House* and *Ayesha Khan*. Neither name was missing — neither was read.
+ *
+ * **The two slots come from two different reads, and that is not tidiness.** The person is
+ * `session.whoami`'s own `display_name` (`11-F20`), which arrives with the gate's answer and costs
+ * nothing; the org is `tenancy.directory`'s (`01-F68`), which lives in another service. `router.ts`
+ * records why they are split — *"an identity read that cannot answer without a peer is not an
+ * identity read"* — and the consequence is exactly what this header wants: with the gateway down,
+ * the app still renders **who you are** beside a business whose name could not be read, and says so.
+ *
+ * **Its own component so the hook is unconditional.** `AuthGate` returns early for pending,
+ * unreachable and unauthorised before it reaches this, so a `useQuery` at its top would fire the
+ * directory read behind the sign-in screen — one guaranteed 401 for every visitor who is not
+ * signed in yet.
+ *
+ * Label above value, each in its own column: the direction's move 2 at chrome scale. **The org
+ * survives to phone width and the user does not** — `14-N2` puts an owner on a phone with a publish
+ * button, and which business she is about to publish to is consequential in a way her own name is
+ * not.
+ */
+const SessionIdentity = ({
+  org_id,
+  user_id,
+  display_name,
+}: {
+  readonly org_id: string;
+  readonly user_id: string;
+  /** `null` ⇔ the store holds no name for her — `21-F15`'s unnamed case, never a default. */
+  readonly display_name: string | null;
+}): ReactNode => {
+  const places = usePlaceNames();
+  const org = places.org(org_id);
+  // Not `usePeopleNames()`: her name is already in the gate's answer, and asking the owner-only
+  // roster for a fact `whoami` just handed us would put an owner-only read on every screen in the
+  // app to render a value we hold.
+  const person = namingFrom("person", user_id, display_name);
+
+  return (
+    <>
+      <span className="flex min-w-0 flex-col leading-tight">
+        <span className="text-xs uppercase tracking-wider text-muted-foreground">
+          {strings.session.org}
+        </span>
+        <span className="truncate text-label text-foreground">
+          <Named naming={org} />
+        </span>
+      </span>
+      <span className="hidden flex-col leading-tight md:flex">
+        <span className="text-xs uppercase tracking-wider text-muted-foreground">
+          {strings.session.user}
+        </span>
+        <span className="text-label text-foreground">
+          <Named naming={person} />
+        </span>
+      </span>
+    </>
+  );
+};
+
 export const AuthGate = ({ children }: { children: ReactNode }): ReactNode => {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -201,29 +265,11 @@ export const AuthGate = ({ children }: { children: ReactNode }): ReactNode => {
               which doubled the chrome's height on the surface with the least of it to spare. */}
           <span className="truncate text-base font-semibold tracking-tight">{strings.appName}</span>
           <div className="flex shrink-0 items-center gap-4 sm:gap-8">
-            {/*
-              The org and the user, LABELLED AND STACKED. These are raw ids because they are the
-              only names the server has — `01-F47` covers devices, not people, and there is no user
-              profile in the corpus to read a display name from. They used to run together on one
-              line behind a single word and a `·`, which read as one fact.
-
-              Label above value, each in its own column: the direction's move 2 at chrome scale.
-              **The org survives to phone width and the user does not** — `14-N2` puts an owner on
-              a phone with a publish button, and which organisation she is about to publish to is
-              consequential in a way her own user id is not.
-            */}
-            <span className="flex min-w-0 flex-col leading-tight">
-              <span className="text-xs uppercase tracking-wider text-muted-foreground">
-                {strings.session.org}
-              </span>
-              <span className="truncate text-label text-foreground">{whoami.data.org_id}</span>
-            </span>
-            <span className="hidden flex-col leading-tight md:flex">
-              <span className="text-xs uppercase tracking-wider text-muted-foreground">
-                {strings.session.user}
-              </span>
-              <span className="text-label text-foreground">{whoami.data.user_id}</span>
-            </span>
+            <SessionIdentity
+              org_id={whoami.data.org_id}
+              user_id={whoami.data.user_id}
+              display_name={whoami.data.display_name}
+            />
             <Button
               type="button"
               variant="ghost"

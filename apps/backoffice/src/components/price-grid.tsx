@@ -16,6 +16,7 @@
 import type { OrderChannel } from "@restos/domain";
 import { ArrowRightToLine } from "lucide-react";
 import { useState } from "react";
+import { Named, nameText, usePlaceNames } from "../lib/names";
 import type { EnabledPairs, GridDraft, GridFault } from "../lib/price-grid";
 import { cellKey, cellsOf } from "../lib/price-grid";
 import { strings } from "../lib/strings";
@@ -71,6 +72,12 @@ export const PriceGrid = ({
   onCellChange,
   onFillAcross,
 }: PriceGridProps): React.ReactNode => {
+  /**
+   * `01-F69` — the row axis, by name. The hook rather than a prop: TanStack shares one cached
+   * answer across every component that asks, so a leaf reading it costs no request and drilling
+   * it through the editor would put a naming argument on a component that renders no name.
+   */
+  const places = usePlaceNames();
   // The fill value is the owner's unsent keystrokes, not server state — `18 §6` bans copying the
   // second into a store and says nothing about the first, which has nowhere else to live.
   const [fillValue, setFillValue] = useState("");
@@ -212,11 +219,16 @@ export const PriceGrid = ({
             <tbody>
               {enabled.branches.map((branch_id) => (
                 <tr key={branch_id} className="border-b border-border last:border-b-0">
+                  {/* **The row axis is a NAME (`21-F15`).** `12-F10`'s report axis and this
+                      grid's row header are the same kind of slot: an owner setting nine prices
+                      has to know which branch each row IS, and a key tells her only that they
+                      differ. `01-F60`'s pair is still the cell's identity — see the label below,
+                      which keeps the key for the screen-reader path. */}
                   <th
                     scope="row"
                     className="w-40 px-4 py-2 text-left align-middle text-label text-muted-foreground"
                   >
-                    {branch_id}
+                    <Named naming={places.branch(branch_id)} />
                   </th>
                   {enabled.channels.map((channel) => {
                     const key = cellKey(branch_id, channel);
@@ -239,8 +251,11 @@ export const PriceGrid = ({
                         */
                         className="min-w-36 border-l border-border p-2"
                       >
+                        {/* The cell's name for a screen reader. `nameText` and not `<Named>`:
+                            a label is a string, and the flat form is the same treatment spelled
+                            once (`lib/names.tsx`). */}
                         <Label htmlFor={id} className="sr-only">
-                          {`${branch_id} ${channel}`}
+                          {`${nameText(places.branch(branch_id))} ${channel}`}
                         </Label>
                         {/*
                           **`01-F60`'s two facts, given two appearances.**

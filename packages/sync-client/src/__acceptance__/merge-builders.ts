@@ -322,9 +322,8 @@ export const refund = (
   },
 });
 
-export const settlementClosed = (order_id: string, extra: Record<string, unknown> = {}) => ({
-  type: "order.settlement_closed",
-  payload: {
+export const settlementClosed = (order_id: string, extra: Record<string, unknown> = {}) => {
+  const payload = {
     order_id,
     settlement_attempt_ids: [] as string[],
     billed_paisa: 0,
@@ -332,8 +331,20 @@ export const settlementClosed = (order_id: string, extra: Record<string, unknown
     refunded_paisa: 0,
     closed_by_user: "u-close",
     ...extra,
-  },
-});
+  };
+  return {
+    type: "order.settlement_closed",
+    // `01-F33` as amended (August 2026): the `uncovered_addition` ceiling is
+    // `billed_effective_paisa` — the fold's own line sum — and NOT `billed_paisa`, which is
+    // `01-F82`/`02-F63`'s rounded tax-inclusive charge. An unstated ceiling MIRRORS
+    // `billed_paisa` here so every fixture written before the amendment keeps asserting the
+    // ceiling it was written for: these suites are all TAX_OFF at the identity step, which is
+    // exactly the configuration in which the two numbers coincide. A fixture that wants them to
+    // DIFFER — which is the whole point of the amendment — states both, and `close-ceiling.test.ts`
+    // does.
+    payload: { billed_effective_paisa: payload.billed_paisa, ...payload },
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Projections. Full projection = byte-comparable across stores holding the SAME

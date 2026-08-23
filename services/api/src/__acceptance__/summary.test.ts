@@ -20,7 +20,7 @@
  * in `services/api/CLAUDE.md` is what stands in for it.
  */
 
-import { businessDayBoundsOfDate, hashPin } from "@restos/domain";
+import { businessDayBoundsOfDate, hashPin, paisa, sumPaisa } from "@restos/domain";
 import superjson from "superjson";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { DayLedger, LedgerWindow } from "../ledger.js";
@@ -80,6 +80,13 @@ const zeroExpected = {
  * The numbers are chosen so every assertion below reads as an arithmetic claim rather than as a
  * fixture echo: Rs 450 × 2 and Rs 320 × 1 on the counter (Rs 1,220), Rs 600 × 1 on foodpanda, and
  * **a Rs 180 line rung at 01:30**, which is the `01-F46` case.
+ *
+ * **Every order also CLOSES (`01-F63`), because that act is where the day's money now comes from.**
+ * `01-F82`/`02-F63` make `billed_paisa` the tax-inclusive rounded charge, and this fixture sits on
+ * the shipped default posture (`none`, whole-rupee prices), so each attestation equals its own line
+ * sum and every arithmetic claim below still reads as one. `summary-corrections.test.ts` is where
+ * the attestation deliberately DIFFERS from the line sum — tax, rounding, a void and a comp — and
+ * that file is what proves this fold READS the act rather than re-deriving it.
  */
 const day = (): SummaryEvent[] => {
   seq = 0;
@@ -146,6 +153,24 @@ const day = (): SummaryEvent[] => {
       { at: at(1, 30) },
     ),
 
+    // `01-F63`'s closing acts. The stamp on each is the hour its BILL CLOSED, which is what the
+    // curve buckets — minutes after that order's last line here, as it is at a counter.
+    event(
+      "order.settlement_closed",
+      { order_id: "ord-1", billed_paisa: 1_220_00 },
+      { at: at(13, 50) },
+    ),
+    event(
+      "order.settlement_closed",
+      { order_id: "ord-2", billed_paisa: 600_00 },
+      { at: at(20, 20) },
+    ),
+    event(
+      "order.settlement_closed",
+      { order_id: "ord-3", billed_paisa: 180_00 },
+      { at: at(1, 35) },
+    ),
+
     // `02-F21` — two no-sale opens and one drawer open that is not a no-sale.
     event("cash.drawer_opened", { reason: "no_sale", shift_id: "shift-hina" }, { at: at(15) }),
     event("cash.drawer_opened", { reason: "no_sale", shift_id: "shift-hina" }, { at: at(16) }),
@@ -196,6 +221,11 @@ const day = (): SummaryEvent[] => {
       },
       { at: at(19), branch_id: BRANCH_B },
     ),
+    event(
+      "order.settlement_closed",
+      { order_id: "ord-b1", billed_paisa: 999_00 },
+      { at: at(19, 10), branch_id: BRANCH_B },
+    ),
   ];
 };
 
@@ -211,9 +241,9 @@ const channel = (summary: NightlySummary, name: string) =>
 // ── §A · the numbers ───────────────────────────────────────────────────────────────────────────
 
 describe("§A · 12-F10 — the blocks this ledger can answer", () => {
-  it("totals sales by channel from order.created + order.line_added (12-F10)", () => {
+  it("totals sales by channel from 01-F63's closing acts, attributed by order.created (12-F10)", () => {
     const summary = fold(onlyBranch(day(), BRANCH_A));
-    // counter: 450×2 + 320 + 180 = 1,400. foodpanda: 600.
+    // counter: 1,220 + 180 = 1,400 attested. foodpanda: 600 attested.
     expect(channel(summary, "counter")).toEqual({
       channel: "counter",
       orders: 2,
@@ -309,15 +339,55 @@ describe("§A · 12-F10 — the blocks this ledger can answer", () => {
     expect(zebra.top_items[0]?.revenue_paisa).toBe(zebra.top_items[1]?.revenue_paisa);
   });
 
-  it("buckets the hourly curve on each line's own branch stamp (12-F10, 01-F43)", () => {
+  it("buckets the hourly curve on the CLOSING ACT's own branch stamp (12-F10, 01-F43)", () => {
     const summary = fold(onlyBranch(day(), BRANCH_A));
     expect(summary.hourly).toHaveLength(24);
-    // Offset 0 is the 05:00 cutover, so 13:00 is offset 8 and carries 450×2 + 320.
+    // Offset 0 is the 05:00 cutover, so 13:00 is offset 8 and carries ord-1's Rs 1,220.
     expect(summary.hourly[0]?.wall_hour).toBe(5);
     expect(summary.hourly[8]).toEqual({ offset: 8, wall_hour: 13, billed_paisa: 1_220_00 });
     expect(summary.hourly[15]?.billed_paisa).toBe(600_00);
     // 01:30 is offset 20 — the last stretch of the same business day.
     expect(summary.hourly[20]).toEqual({ offset: 20, wall_hour: 1, billed_paisa: 180_00 });
+  });
+
+  /**
+   * **THE FIXTURE ABOVE CANNOT TELL THE TWO BASES APART, WHICH IS WHY THIS ONE EXISTS.** Every
+   * order there closes in the same hour its lines were rung, so a build bucketing on the LINE's
+   * stamp reads the same curve — the round-3 defect exactly (a mechanism aimed one case away).
+   * Here the lines are rung at 13:00 and the bill closes at 21:00, which is the ordinary table
+   * service case and the only one that separates them.
+   */
+  it("buckets a table settled long after it was rung into the hour it was PAID (12-F10)", () => {
+    const summary = fold([
+      event("order.created", { order_id: "tbl", channel: "counter" }, { at: at(13) }),
+      event(
+        "order.line_added",
+        {
+          order_id: "tbl",
+          line_id: "t-1",
+          item_id: "item-karahi",
+          qty: 1,
+          unit_price_paisa: 450_00,
+        },
+        { at: at(13) },
+      ),
+      event("order.settlement_closed", { order_id: "tbl", billed_paisa: 450_00 }, { at: at(21) }),
+    ]);
+    expect(summary.hourly[8]?.billed_paisa).toBe(0);
+    expect(summary.hourly[16]).toEqual({ offset: 16, wall_hour: 21, billed_paisa: 450_00 });
+  });
+
+  /**
+   * `12-F21` — one number, everywhere. The curve and the headline are not two computations that
+   * agree; they are one set of attestations bucketed two ways, so this identity holds by
+   * construction and its failure means a bucket was dropped or double-counted.
+   */
+  it("makes the hourly curve TILE the day's total exactly (12-F10, 12-F21)", () => {
+    const summary = fold(onlyBranch(day(), BRANCH_A));
+    // `DEC-MONEY-005` — the domain helper, never a raw `+` on a money field.
+    const curve = sumPaisa(summary.hourly.map((bucket) => paisa(bucket.billed_paisa)));
+    expect(curve).toBe(summary.sales.total_paisa);
+    expect(curve).toBe(2_000_00);
   });
 
   it("carries the day's float, count and deposit (02-F22, 02-F24)", () => {
@@ -482,8 +552,34 @@ describe("§B · 01-F34 — the answer is a function of the delivered SET", () =
     );
     const summary = fold([...base, ...forged.filter((e) => e.id === "ev-forged")]);
     expect(summary.honesty.anomalies).toContain("order_line_divergence");
-    // The disputed line contributes ZERO — not the honest member, and not the forged one.
-    expect(summary.sales.total_paisa).toBe(2_000_00 - 900_00);
+    // The disputed line contributes ZERO to the menu mix — not the honest member, and not the
+    // forged one. The DAY's money is untouched, because it is the till's attestation and a
+    // forged line cannot rewrite an act that was already appended (`01-F1`).
+    const karahi = summary.top_items.find((row) => row.item_id === "item-karahi");
+    expect(karahi).toEqual({ item_id: "item-karahi", qty: 1, revenue_paisa: 600_00 });
+    expect(summary.sales.total_paisa).toBe(2_000_00);
+  });
+
+  /**
+   * The same law one event family over, and the one that costs MONEY rather than a ranking: two
+   * closing acts attesting two different bills for one order. `merge.ts` takes the LARGEST valid
+   * snapshot for `uncovered_addition`'s ceiling, deliberately, because understating a ceiling is
+   * the unsafe direction for a CHECK. This is not a check — it is the figure on an owner's screen,
+   * and picking the larger of two disputed attestations prints a number no act supports.
+   */
+  it("refuses to pick a winner when two acts close ONE bill at two figures (01-F31)", () => {
+    const base = onlyBranch(day(), BRANCH_A);
+    const rival = event(
+      "order.settlement_closed",
+      { order_id: "ord-1", billed_paisa: 9_999_00 },
+      { at: at(13, 50) },
+    );
+    const summary = fold([...base, rival]);
+    expect(summary.honesty.anomalies).toContain("order_close_divergence");
+    // Rs 1,220 leaves the total; neither Rs 1,220 nor Rs 9,999 is picked.
+    expect(summary.sales.total_paisa).toBe(2_000_00 - 1_220_00);
+    // The ORDER is still counted — the act happened, only its evidence is disputed (`01-F63`).
+    expect(summary.sales.orders).toBe(3);
   });
 });
 
@@ -728,7 +824,11 @@ describe("§E · 00 §5.7 — the report says what it does not know", () => {
     const reply = await summaryFor(OWNER_ID, { business_date: DATE });
     const body = reply.body as NightlySummary;
     const blocks = body.omissions.map((o) => o.block);
-    expect(blocks).toContain("Voids, comps and discounts");
+    // ⚠ This line read `"Voids, comps and discounts"` and was GREEN while the entry it pinned had
+    // become false in three clauses at once — schemas, emitter and counter surface all shipped.
+    // A test that pins a stale claim is what keeps a stale claim on an owner's screen.
+    expect(blocks).not.toContain("Voids, comps and discounts");
+    expect(blocks).toContain("Comps and discounts NETTED OUT of the day's takings");
     expect(blocks).toContain("Purchases and wastage logged");
     expect(blocks).toContain("Estimated gross margin");
     expect(blocks).toContain("What's odd (exception alerts)");
@@ -740,12 +840,33 @@ describe("§E · 00 §5.7 — the report says what it does not know", () => {
     }
   });
 
-  it("never reports a voids, comps, discounts, margin or tip FIGURE anywhere", () => {
-    // The strongest form of the claim: no such number exists in the answer at all, so it cannot be
-    // rendered as a zero by a screen that assumed one.
-    const body = JSON.stringify(fold(onlyBranch(day(), BRANCH_A)).sales);
-    for (const forbidden of ["void", "comp", "discount", "margin", "tip"]) {
-      expect(body.toLowerCase()).not.toContain(forbidden);
+  /**
+   * ⚠ **THIS TEST USED TO FORBID THE WORDS `void`, `comp` AND `discount` TOO, AND IT WAS RIGHT
+   * WHEN WRITTEN AND WRONG BY THE TIME IT WAS READ.** All three now have schemas, an emitter and a
+   * counter surface, so a report that carried no such figure would be the missing block the
+   * `OMISSIONS` mechanism exists to prevent — and it would leave `raita · 2 sold` unexplained.
+   * What survives unchanged is `margin` and `tip`, which genuinely cannot be computed: `12-F11`
+   * omits the margin line below `13-F5`'s coverage precondition and `DEC-MONEY-004` forbids a tip
+   * field until `tip.pooled`/`tip.paid_out` enter the `01 §4` catalog.
+   */
+  it("never reports a margin or tip figure ANYWHERE in the answer (12-F11, DEC-MONEY-004)", () => {
+    const summary = fold(onlyBranch(day(), BRANCH_A));
+    const numbers = JSON.stringify({
+      sales: summary.sales,
+      cash: summary.cash,
+      corrections: summary.corrections,
+      top_items: summary.top_items,
+      hourly: summary.hourly,
+      days: summary.days,
+      honesty: summary.honesty,
+    });
+    for (const forbidden of ["margin", "tip"]) {
+      expect(numbers.toLowerCase()).not.toContain(forbidden);
+    }
+    // …and the day's money block still carries no correction term of its own: `01-F30`'s three
+    // are ABSENT (`DEC-MONEY-010`), so nothing here may look like a netting that did not happen.
+    for (const forbidden of ["void", "comp", "discount"]) {
+      expect(JSON.stringify(summary.sales).toLowerCase()).not.toContain(forbidden);
     }
   });
 

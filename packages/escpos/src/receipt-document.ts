@@ -22,15 +22,30 @@
  *   * **VARIANTS / MODIFIERS.** The read models carry none — `main/gateway.ts` writes
  *     `modifiers: []` and says so, and the KOT's own assembly says the same. A line prints its
  *     quantity, its name and its captured price; a modifier prints when the fold projects one.
- *   * **DISCOUNT LINES.** `01 §4` has no `discount.recorded` payload schema at all (`26 §7`:
- *     "`void/comp/discount.recorded` … have **no payload schema at all**"), and `C25` has no
- *     surface, so no discount can exist against any order this device can settle.
- *     **Deliberately NOT printed as a named gap**, which is where this parts company with
- *     `day_summary`'s `Voids/comps/discounts NOT RECORDED`: that document is a RECONCILIATION a
- *     manager checks against a drawer, so a missing group breaks its arithmetic and must be
- *     visible. A receipt's arithmetic is self-contained — `total_paisa` is the fold's own
- *     `01-F30` billed_effective, and the day a discount event exists it must move THAT number
- *     before it can move this document. Nothing is silently dropped from what is printed here.
+ *   * **DISCOUNT LINES — and COMPS, which `02-F15` does not name at all.**
+ *
+ *     ⚠ **THE PREMISE THIS ENTRY GAVE IS NOW FALSE AND IS CORRECTED RATHER THAN CARRIED
+ *     (August 2026).** It read: *"`01 §4` has no `discount.recorded` payload schema at all
+ *     (`26 §7`), and `C25` has no surface, so no discount can exist against any order this device
+ *     can settle."* `packages/domain/src/registry.ts` has carried schemas for `void.recorded`,
+ *     `comp.recorded` and `discount.recorded` since `plans/v0.md` gap 1 landed, and
+ *     `apps/pos-electron`'s `renderer/LineCorrection.tsx` is the surface. A discount CAN exist
+ *     against an order this device settles.
+ *
+ *     **The CONCLUSION is unchanged and now rests on the money instead.** `merge.ts`'s `comp` and
+ *     `discount` arms are projection-inert while `DEC-MONEY-010`'s gate condition (iii) — *"an
+ *     oracle-pinned merge rule in `26 §7`"* — is unmet, so `01-F30`'s `comp_value` and `discounts`
+ *     terms do not exist and neither act moves `billed_total`. The customer was charged in full
+ *     and paid in full. A `Discount Rs 200` row above a total it did not reduce is a SECOND,
+ *     implied total, which `16-F33` (c) refuses by name for a settled receipt — and a customer
+ *     subtracting it computes a figure nobody was ever charged. So the row is still absent, and it
+ *     lands the day `01-F30`'s term does: a discount must move THAT number before it can move this
+ *     document.
+ *
+ *     This is where the receipt parts company with `day_summary`'s `Voids/comps/discounts NOT
+ *     RECORDED`: that document is a RECONCILIATION a manager checks against a drawer, so a missing
+ *     group breaks its arithmetic and must be visible. A receipt's arithmetic is self-contained.
+ *     Nothing is silently dropped from what is printed here.
  *
  * ── DOC 16 FORCES NOTHING TODAY, AND THE MECHANISM IS ALREADY BUILT ──
  *
@@ -98,6 +113,20 @@ export type ReceiptLine = {
    * that contributes zero to the total below it, and a receipt whose lines do not add up to its
    * total is worse than one that asks the reader to multiply. The extended amount is OWED and its
    * blocker is one exported function in a protected package.
+   *
+   * ⚠ **THE HAZARD NAMED ABOVE HAPPENED, AND THE MITIGATION DID NOT STOP IT (August 2026).**
+   * Printing a UNIT price rather than an extended one keeps THIS layer from multiplying; it does
+   * nothing about a voided line ARRIVING in `lines` at all. Measured in the ESC/POS bytes of a
+   * real receipt on 2026-08-23: four rows reading Rs 449 + 325 + 79 + 60 above a `Subtotal
+   * Rs 853`, because the producer mapped every cell of `json_lines` with no filter. The row
+   * carries a money token either way, and the only figure that reconciles beside a line
+   * contributing zero is no figure at all.
+   *
+   * **The fix is at the PRODUCER and deliberately not here** (`apps/pos-electron/src/main/
+   * printing.ts`, `billedOnPaper`): a line that left the bill is not one of `02-F15`'s "lines",
+   * and deciding that here would need this layer to read `states` — the exited-line rule `26 §8`
+   * puts in `packages/sync-client` and the very re-derivation this comment refuses. This type's
+   * contract is unchanged: what arrives is what prints.
    */
   readonly unit_price_paisa: number;
 };

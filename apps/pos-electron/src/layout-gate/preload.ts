@@ -184,6 +184,24 @@ const ORDER: OpenOrder = {
       // `02-F20`'s corrective needs the line's own money; the engine projects it (`26 §8`).
       billed_paisa: 45_000,
     },
+    /**
+     * **A VOIDED LINE, AND THIS FIXTURE IS THE ONLY THING THAT PUTS ONE IN FRONT OF THE GATE.**
+     *
+     * *"The fixture is the real coverage boundary, not the assertions"* — the same argument
+     * `SECOND_ORDER`'s aging badge makes below, applied to the cart. `27-F24`'s line total gave
+     * every cart row a money column and `27-F12` gives an exited line a WORD beside it, so a cart
+     * row is now the widest it has ever been; with no voided line here, `layout:check` measures
+     * the row WITHOUT its word and reports green for a column that clips it.
+     *
+     * `billed_paisa: 0` is not decoration either. `merge.ts`'s `billedCellPaisa` zeroes a cell on
+     * exactly `states.length === 1 && EXITED.has(...)`, and `Counter.tsx`'s `offBillWord` tests
+     * the same shape — so a fixture carrying the word beside a NON-zero figure would be measuring
+     * a row this product cannot produce.
+     *
+     * It is the THIRD line rather than the second on purpose: `ordering-surface.ts` anchors
+     * `27-F77` on the fixture dish `Mutton Biryani`, and voiding the anchor would change what that
+     * probe measures for a reason that has nothing to do with `27-F77`.
+     */
     {
       line_id: "line-3",
       name: "Garlic Naan",
@@ -191,8 +209,8 @@ const ORDER: OpenOrder = {
       modifiers: [],
       removals: [],
       note: null,
-      // `02-F20`'s corrective needs the line's own money; the engine projects it (`26 §8`).
-      billed_paisa: 45_000,
+      billed_paisa: 0,
+      states: ["voided"],
     },
   ],
 };

@@ -5,6 +5,52 @@ import { MoneyValue } from "./MoneyValue";
 import { QuantityItemLine, type QuantityItemLineProps } from "./QuantityItemLine";
 
 /**
+ * One row of the cart as the operator must be able to READ it.
+ *
+ * `billedPaisa` is **required**, and that is the whole of `27-F24` applied to this surface: *"Every
+ * total, change amount, **line total** and elapsed minute arrives as a finished number."* Until
+ * August 2026 this component rendered `1 Chicken Biryani ✕ NO` and the only figure anywhere on the
+ * cart was `TOTAL Rs 989`, so a cashier could not check her own work — the one number she is
+ * accountable for was the one number no row explained. ~60% of this population recognise numbers
+ * against 9.5% who can do any arithmetic, so "she can subtract to find out" is not a fallback.
+ *
+ * **Required rather than optional, on `shared/ipc.ts`'s own argument for `billed_paisa` one seam
+ * over:** *"an optional money field is a number a host can decline to say while the screen goes on
+ * treating its absence as a value."* An optional price here is a cart that renders priceless rows
+ * again the moment a caller forgets one, which is exactly the defect this closes; making it
+ * required means no arrangement of props produces the shipped bug. The value is the ENGINE's
+ * `billedLinePaisa` carried across the IPC seam and is never re-derived on the way (`26 §8`).
+ */
+export type CartLineProps = QuantityItemLineProps & {
+  id: string;
+  /**
+   * The fold's own billed value for THIS line, branded integer paisa. Never summed, never
+   * multiplied and never re-derived here: `billedCellPaisa` carries `01-F30`'s exited-line rule
+   * and `CONTESTED_LINE_BILLABLE`, and a screen that computed `qty × price` would disagree with
+   * the total below it on precisely the rows that matter.
+   */
+  billedPaisa: Paisa;
+  /**
+   * **This line has left the bill, and the WORD that says so.**
+   *
+   * `27-F12` — colour never carries state alone, and direction is a word: *"a lone `-` is one
+   * glyph wide, is the first thing lost at 1–2 m or on a scratched panel, and means nothing to a
+   * non-reader."* A strike-through and a grey fill are both marks a scratched panel eats, so the
+   * word is the load-bearing signal and the fill is the preattentive half — the same division
+   * `Tile` makes for `selected` and `unavailable`, one file over.
+   *
+   * **ONE optional string rather than a boolean beside a word**, so there is no way to render the
+   * fill without the word. Two props can be half-supplied; this one cannot.
+   *
+   * The caller supplies the word because `01 §4`'s state vocabulary is the kernel's and this
+   * package is a closed vocabulary of PRESENTATION (`21-F1`, `18 §2`) — `Counter.tsx`'s
+   * `offBillWord` derives it from the same projected `states` the fold zeroes the money from, so
+   * the word and the `Rs 0` beside it cannot disagree.
+   */
+  offBill?: string | undefined;
+};
+
+/**
  * The cashier's working memory. Screen-map §3.1: **always visible, never a separate screen,
  * never collapsed.**
  *
@@ -16,9 +62,30 @@ import { QuantityItemLine, type QuantityItemLineProps } from "./QuantityItemLine
  * `27-F24` governs the total: it arrives **finished**. There is no subtotal the operator is
  * expected to add anything to, because ~60% of this population recognise numbers against
  * 9.5% who can do any arithmetic.
+ *
+ * ── WHAT A COMPED OR DISCOUNTED LINE SHOWS, WHICH IS A DECISION AND NOT AN OMISSION ──────────
+ *
+ * **Nothing. A comped line and a discounted line render exactly as live lines, at full price,
+ * because that is what the customer owes today.** `merge.ts`'s `comp.recorded` and
+ * `discount.recorded` arms are **projection-inert** — `DEC-MONEY-010` admits `01-F30`'s
+ * `comp_value` and `discounts` terms only on an oracle-pinned merge rule in `26 §7`, and `26 §7`
+ * says in terms that the rule is still owed — so the fold projects no per-line comp and no
+ * per-line discount at all, and there is no honest source for a marker here.
+ *
+ * The tempting fix is to have the counter remember which lines it just comped and mark them. It
+ * is refused: that fact is device-local, dies on the next reload, disagrees with every other till
+ * in the branch, and would put a mark meaning *"money came off"* beside a bill that still carries
+ * it — the precise misleading `LineCorrection`'s act tile exists to prevent (*"Recorded — the bill
+ * does NOT change yet"*). A cart that lies about money is worse than a cart that is silent.
+ *
+ * **So the three acts are told apart by the MONEY, which is the only discriminator the ledger can
+ * back:** a void reads `VOIDED  Rs 0` because the line exited and the fold zeroed it; a comp and a
+ * discount read their full price because the bill did not move. What a cashier cannot yet see on
+ * this surface is that a comp was recorded at all — a **named degradation** (`00 §5.7`) whose
+ * blocker is the fold arm above, not this component.
  */
 export type CartProps = {
-  lines: readonly (QuantityItemLineProps & { id: string })[];
+  lines: readonly CartLineProps[];
   /**
    * Already computed, in **branded** integer paisa. The screen never does money arithmetic,
    * and now it cannot be handed a value that did not come from `domain` — the brand travels
@@ -50,13 +117,109 @@ export const Cart = ({ lines, totalPaisa, onRemove }: CartProps) => {
           Nothing added yet
         </span>
       ) : (
-        lines.map(({ id, ...line }) => (
+        lines.map(({ id, billedPaisa, offBill, ...line }) => (
           <div
             key={id}
             style={{ display: "flex", alignItems: "flex-start", gap: space["space-2"] }}
           >
-            <div style={{ flex: 1 }}>
-              <QuantityItemLine {...line} />
+            <div
+              style={{
+                flex: 1,
+                // The item and its money are ONE box, so the money travels with the dish when the
+                // row wraps and the off-bill fill covers both. Nothing here touches
+                // `QuantityItemLine`: `27-F57` binds the QUANTITY to the name and this column sits
+                // outside that pair entirely, which is why the price may be right-aligned and the
+                // quantity may never be.
+                display: "flex",
+                alignItems: "flex-start",
+                gap: space["space-2"],
+                ...(offBill === undefined
+                  ? {}
+                  : {
+                      // `Tile`'s `unavailable` treatment, verbatim — the vocabulary this platform
+                      // already ships for "this is not live", and the one a cashier has already
+                      // met on `LineCorrection`'s picker where a voided dish reads
+                      // `1 × Raita / Rs 0 / already voided`. A second vocabulary for one fact is
+                      // `03-F40`'s two sensor bit layouts wearing a cart row.
+                      background: color["bgColor-surface-sunken"],
+                      // Cascades onto the quantity and the name, which set no colour of their own.
+                      // The modifier, note and removal rows all set their own and are untouched —
+                      // a removal is an allergen fact and must not be dimmed by a money state.
+                      color: color["fgColor-disabled"],
+                      // `27-F66` — the elevation fills sit ~1.1:1 apart and cannot carry
+                      // perceivability on their own, so the fill takes an independent mark. The
+                      // neutral boundary for a neutral fill (`27-F64`); this is not a status
+                      // surface and must not spend `27-F14`'s three-colour budget.
+                      border: `1px solid ${color["borderColor-default"]}`,
+                      borderRadius: space["space-1"],
+                      padding: space["space-1"],
+                    }),
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <QuantityItemLine {...line} />
+              </div>
+              {/*
+                `27-F24`'s line total. `flexShrink: 0` and `nowrap` deliberately: the cart lives in
+                a fixed column ~555 dp wide and the NAME is the elastic half — a price squeezed to
+                `Rs 4` `50` on a long dish name is the one element on this row that must never
+                reflow, because it is the figure the cashier is checking.
+
+                Size `body` is not a default falling through: it is what `LineCorrection`'s picker
+                renders a per-line price at, and `27-F25` gives the REGION's payload to the total
+                below at `hero`. A line total at 28 dp would compete with the dish name beside it
+                and with the one number this region exists to deliver.
+
+                ⚠ **`primary` (28 dp) WAS MEASURED, NOT ARGUED AWAY, AND THE NUMBERS ARE THE
+                REASON IT IS NOT USED.** `27-F27`'s own ISO 9241-303 derivation is the case FOR it:
+                16 dp is a ~1.8 mm cap, which at a 55 cm counter is ~11 arcmin — under that
+                standard's 16-arcmin minimum — where 28 dp gives ~19.6. That FR scopes
+                cap-millimetres to **KDS**, so adopting it here would be a new reading of `27-F25`,
+                and `layout:check` prices the reading: at 28 dp the name loses ~8 more characters
+                before it wraps, and with a 37-character dish name the sweep goes from 8 new
+                verdicts to 29, adding `netbook-1024 caller` to the list. Recorded as a finding for
+                doc 27 rather than taken here.
+
+                ⚠ **WHAT THIS COLUMN COSTS, MEASURED — a finding, not a defect in this file.** The
+                money is `flexShrink: 0`, so the NAME is the elastic half and wraps ~4 characters
+                sooner than it did before this column existed (~22 rather than ~26 at
+                `counter-1366`). A wrapped row is taller, and `tablet-10.1`'s **caller** surface
+                has no vertical slack to give: with a 37-character dish name it overruns `main` by
+                **17 px** (`8dp / -3dp` of slack) — 1 overflow against 0 for the same fixture with
+                this column deleted. At the fixture's real 21-character name every panel is clean
+                and the sweep is byte-identical to the tree before this change. So a pilot that
+                names a dish longer than ~22 characters clips the phone-order surface on a 10.1″
+                tablet. The remedy is that surface's vertical budget, not a smaller line total.
+              */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  gap: space["space-2"],
+                  flexShrink: 0,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {offBill === undefined ? null : (
+                  <span
+                    style={{
+                      fontFamily: label.fontFamily,
+                      fontSize: label.fontSize,
+                      // 600 rather than the token's 500: the word is the only signal on this row
+                      // that survives a scratched panel and a greyscale render (`27-F13`), and it
+                      // is competing with a numeral at 16 dp beside it.
+                      fontWeight: 600,
+                      color: color["fgColor-disabled"],
+                    }}
+                  >
+                    {offBill}
+                  </span>
+                )}
+                {/* 27-F16: not `abnormal`. `Rs 0` on a voided line is the EXPECTED value for that
+                    line, and colouring a number means "this number is abnormal" — spending the
+                    preattentive channel on the case the word already names. */}
+                <MoneyValue paisa={billedPaisa} />
+              </div>
             </div>
             {onRemove ? (
               <button

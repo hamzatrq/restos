@@ -152,7 +152,27 @@ type TableAssignedP = {
 type LineCtx = { to: OrderLineState; from_states: OrderLineState[]; preds: string[] };
 type LineStateChangedP = { order_id: string; line_context: Record<string, LineCtx> };
 type PaymentP = { order_id: string; settlement_attempt_id: string };
-type ClosedP = { order_id: string; billed_paisa?: unknown };
+/**
+ * `01-F63`'s attested snapshot, as the fold reads it. Both money fields are `unknown` because
+ * `01-F4`'s registry schema keeps every field beyond `order_id` an additive LOOSE extra — the
+ * fold, not the parser, is what judges the evidence.
+ *
+ * `billed_paisa` is `01-F82`/`02-F63`'s `billed_total` — the rounded, tax-inclusive charge.
+ * `billed_effective_paisa` is the fold's own `billed_effective` at the moment of closing, which
+ * is `01-F33`'s `uncovered_addition` ceiling; see the check below for why they cannot be one field.
+ */
+type ClosedP = {
+  order_id: string;
+  billed_paisa?: unknown;
+  billed_effective_paisa?: unknown;
+};
+
+/**
+ * `00 §6` — an attested money figure is a NON-NEGATIVE INTEGER of paisa, and anything else is bad
+ * evidence rather than a number to coerce. Named once so the two snapshot fields cannot drift into
+ * two readings of one rule.
+ */
+const isAttestedPaisa = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 0;
 
 type LineValue = { item_id: string; qty: number; unit_price_paisa: number };
 /** `02-F8`'s removal (`{order_id, line_id}` — the registry's P1, a *plain* event). */
@@ -1355,24 +1375,49 @@ export const createMergeEngine = (): MergeEngine => {
     // 01-F33: settlement is an ACT (monotone OR over the close G-Set); a late
     // line-add never reopens — it raises uncovered_addition against the closes'
     // attested ceiling. Fix-round F4 (ruling d): the ceiling is the LARGEST
-    // VALID integer billed_paisa snapshot among delivered closes —
-    // `billed_paisa: 0` is ATTESTED ZERO (a real ceiling), an ABSENT snapshot
-    // asserts NO ceiling ("no attestation" is not "attested zero"), and with no
-    // valid snapshot at all the check is skipped. A non-integer or negative
-    // snapshot is ignored-with-anomaly: the ACT still settles, the bad snapshot
-    // contributes no ceiling and raises close_snapshot_invalid instead — a pure
-    // function of the payload, so session ≡ reopen byte-for-byte.
+    // VALID integer snapshot among delivered closes — an attested `0` is
+    // ATTESTED ZERO (a real ceiling), an ABSENT snapshot asserts NO ceiling
+    // ("no attestation" is not "attested zero"), and with no valid snapshot at
+    // all the check is skipped. A non-integer or negative snapshot is
+    // ignored-with-anomaly: the ACT still settles, the bad snapshot contributes
+    // no ceiling and raises close_snapshot_invalid instead — a pure function of
+    // the payload, so session ≡ reopen byte-for-byte.
+    //
+    // ⚠ **THE CEILING IS `billed_effective_paisa` AND NOT `billed_paisa` (01-F33 as
+    // amended August 2026; measured, both directions).** It was `billed_paisa`, and
+    // post-01-F82/02-F63 that field is the ROUNDED, TAX-INCLUSIVE charge while
+    // `billedEffective` above is the raw, tax-blind, unrounded line sum — two
+    // different quantities on the two sides of one `>`. A charge that rounded DOWN
+    // sits below its own line sum, so `uncovered_addition` — which means *a line was
+    // added after the close* — fired on a correctly settled order that nobody touched
+    // (measured: posture `none`, step 1000, one Rs 404 line, `["uncovered_addition"]`);
+    // and under `exclusive` the charge sits ABOVE the line sum by the tax, so any
+    // post-close addition up to the tax was invisible (measured: 16 %, a genuine
+    // Rs 60 line added after the act, `[]`). The fold cannot hold the charge and this
+    // is not a limitation to route around: `01-F87`/`01-F52` ban configuration as a
+    // fold input, and a projection keyed on an org-typed rate makes two tills at
+    // different configuration versions project different money. So the CEILING is the
+    // one quantity both sides can express — the fold's own accumulator — attested by
+    // the emitter beside the charge (`01-F63`, `settlement-closer.ts`).
+    //
+    // `billed_paisa` is still VALIDATED here, and that is deliberate: 01-F63 calls the
+    // whole payload "the attested snapshot", so either money field arriving malformed
+    // is bad evidence and raises the anomaly while the act stands. It is simply no
+    // longer read as a ceiling by anything.
     const settled = e.closes.size > 0 ? 1 : 0;
     if (settled === 1) {
       let ceiling: number | null = null;
       for (const close of e.closes.values()) {
-        if (!("billed_paisa" in close)) continue;
-        const snap = (close as ClosedP).billed_paisa;
-        if (!Number.isInteger(snap) || (snap as number) < 0) {
+        const c = close as ClosedP;
+        if ("billed_paisa" in c && !isAttestedPaisa(c.billed_paisa))
+          exceptions.add("close_snapshot_invalid");
+        if (!("billed_effective_paisa" in c)) continue;
+        const snap = c.billed_effective_paisa;
+        if (!isAttestedPaisa(snap)) {
           exceptions.add("close_snapshot_invalid");
           continue;
         }
-        if (ceiling === null || (snap as number) > ceiling) ceiling = snap as number;
+        if (ceiling === null || snap > ceiling) ceiling = snap;
       }
       if (ceiling !== null && billedEffective > BigInt(ceiling))
         exceptions.add("uncovered_addition");
