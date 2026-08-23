@@ -1,9 +1,20 @@
 /**
- * `16-F1`..`16-F6`'s posture arithmetic — R39's *"correct totals"*, computed **per line** in
- * integer paisa and handed back as ONE snapshot so nothing downstream re-derives it.
+ * `16-F1`..`16-F6` + `16-F27`..`16-F35`'s posture arithmetic — R39's *"correct totals"*, computed
+ * **per line** in integer paisa and handed back as ONE snapshot so nothing downstream re-derives
+ * it.
  *
- * Owning specs: `16 §3` (postures, rule packs, per-line computation), `00 §6` + `DEC-MONEY-005`
- * (integer paisas, rates as integer basis points, one door for scaling money).
+ * Owning specs: `16 §3` (postures, per-line computation, and the August 2026 amendments R55/R54/
+ * R58/R59), `00 §6` + `DEC-MONEY-005` (integer paisas, rates as integer basis points, one door for
+ * scaling money).
+ *
+ * ── THE AUGUST 2026 AMENDMENTS, BECAUSE THEY CHANGE WHAT THIS FILE IS ─────────────────────────
+ *
+ * `16-F4`'s vendor rule packs are **struck** — `16-F27` (R55) hands the owner his own channels and
+ * his own rates, so a cell is layer-2 org configuration and not a pack reference. `16-F30` keeps
+ * packs alive for the **certified compliance add-on only**, where an org-typed rate may never
+ * override one, and `16-F34` puts that add-on **post-pilot**. Nothing in this file mentions a pack
+ * for that reason, and re-adding a required `rule_pack_version` would refuse to build a snapshot
+ * for an artifact the ruling deleted — which is exactly what it did until v0 gap 2.
  *
  * ── WHAT THIS FILE IS AND IS NOT (R39) ───────────────────────────────────────────────────────
  *
@@ -39,22 +50,32 @@
  * `01-F30`'s equation, `01-F63`'s attested `billed_paisa`, the `pay_total >= billed_effective`
  * cover test, the `shift_cash` fold's expected drawer and the receipt's *Total* row all mean.
  *
- * ⚠ **THAT IDENTITY HOLDS IN THE FR AND NOT YET IN THIS TREE, AND THE DIFFERENCE IS OWED —
- * measured 2026-08-23 by adversarial review, comment-blind.** All five readers derive their
- * billed figure from `billedEffectiveFromJsonLines`, which is line-derived and tax-BLIND
- * (`packages/sync-client/src/folds/merge.ts:327`), and **none of them consults `taxSnapshot`**:
- * `auditor.ts:364`, `settlement-closer.ts:154`, `settlement-guard.ts:113`, `line-advance.ts:262`,
- * `printing.ts:1731`, `gateway.ts:484`, `aggregator-settlement.ts:180` — seven shipping sites.
- * They must move TOGETHER when the posture matrix lands, and the move is blocked on blocker (1)
- * below, the missing `billedCellPaisa` export. It is inert today only because `taxSnapshot` has
- * zero production callers.
+ * ⚠ **THE IDENTITY IS NOW LOAD-BEARING IN FIVE OF SEVEN SHIPPING READERS, AND THE TWO THAT DID
+ * NOT MOVE ARE NAMED RATHER THAN LEFT TO BE DISCOVERED (v0 gap 2, August 2026).** The reader is
+ * `billedTotalPaisa` in `packages/sync-client/src/order-tax.ts` — this snapshot's `total_paisa`
+ * over the fold's own per-line cells — and it replaced the tax-BLIND
+ * `billedEffectiveFromJsonLines` at `settlement-guard.ts`, `settlement-closer.ts`,
+ * `line-advance.ts`, `aggregator-settlement.ts` and `printing.ts`.
  *
- * The sentence above is stated as the FR's requirement rather than as a property of the code on
- * purpose: a comment claiming a property that does not exist retires the assertion the next
- * session would otherwise write, and this repo has shipped that mistake twice. **`packages/escpos`
- * is the one place that ALREADY means the new thing** — `receipt-document.ts` renders
- * *Subtotal / Tax / Total* and `receipt-tax-line.test.ts:380` pins `subtotal + tax = total` —
- * so its producer (`printing.ts:1731`) is the mismatch, not the renderer.
+ *   - **`apps/pos-electron/src/main/gateway.ts` (the screen's `total_paisa`) DID NOT MOVE.** It is
+ *     one expression and it is the last one: until it does, a cashier reads the pre-tax figure the
+ *     guard no longer accepts. Inert while the posture is `none` — which is `16-F1`'s default and
+ *     the v0 seed — and a live contradiction the moment a rate is typed.
+ *   - **`packages/auditor/src/auditor.ts` CANNOT move yet, for a structural reason.** It runs on
+ *     the CLOUD plane with no device environment, so it has no posture to resolve: the org's cell
+ *     reaches a till through `01-F87`'s fourth `01-F75` resource, and that carrier is not built
+ *     (`plans/v0.md` gap 3). Under `exclusive` it therefore reads `16-F31`'s excess on every
+ *     settled order — the finding `01-F82` was ruled to delete — and this is recorded so nobody
+ *     reads a silent Auditor as agreement.
+ *
+ * **`packages/escpos` ALREADY meant the new thing before any of this** — `receipt-document.ts`
+ * renders *Subtotal / Tax / Total* and `receipt-tax-line.test.ts:380` pins `subtotal + tax =
+ * total` — so its producer was the mismatch, not the renderer, and `printing.ts` is where the fix
+ * landed. Not one byte of `packages/escpos` changed.
+ *
+ * ⚠ **Blocker (1) below is CLOSED and this is what closed it:** `billedLinePaisa` is
+ * `merge.ts`'s `billedCellPaisa` exported rather than re-derived, so a caller can obtain this
+ * function's `billed_paisa` inputs without breaching `26 §8`.
  *
  * Nothing downstream re-derives it (`01-F18`).
  *
@@ -65,18 +86,23 @@
  *
  * ── TWO THINGS THIS FILE DELIBERATELY DOES NOT DECIDE (commandment 2) ─────────────────────────
  *
- *  1. **WHERE THE POSTURE MATRIX LIVES.** `16-F2` is a channel × payment-method matrix and
- *     `00 §7` makes it layer-2 configuration. An ALREADY-RESOLVED posture and rate arrive here;
- *     how `(channel, method)` → `(posture, rate)` is stored, validated and distributed is doc 14's
- *     and `00 §7`'s. `16-F4`'s effective-date resolution is the caller's for the same reason — and
+ *  1. **WHERE THE POSTURE MATRIX LIVES.** `16-F27` makes the cell — posture *and* rate — layer-2
+ *     ORG configuration the owner types, overruling `16-F4`'s vendor rule packs by name; `01-F87`
+ *     rules the carrier (a fourth `01-F75` reference-data resource, snapshot-plus-delta). An
+ *     ALREADY-RESOLVED `TaxCell` arrives here and this file stores, validates and distributes
+ *     nothing. `16-F29`'s effective-date resolution is the caller's for the same reason — and
  *     because a function resolving its own rate by `Date.now()` would break standing laws 1 and 2
- *     at once.
- *  2. **`16-F6`'s SPLIT-PAYMENT APPORTIONMENT.** The FR marks its own rule provisional ("pending
- *     authority guidance", `16 §9.1`), and under `exclusive` the stated rule is circular: apportion
- *     by payment share ⇒ the tax depends on the split; add tax on top of the bill ⇒ the amount to
- *     be split depends on the tax. There is therefore **no per-method parameter** on this
- *     signature — `DEC-MONEY-010`'s idiom, an optional term with no producer wearing a signature
- *     that says it has one.
+ *     at once. ⚠ **The carrier is NOT built** (`plans/v0.md` gap 3); the v0 seed is
+ *     `apps/pos-electron/src/main/tax-posture.ts` and it says so in its own header.
+ *  2. **~~`16-F6`'s SPLIT-PAYMENT APPORTIONMENT.~~ CLOSED by `16-F35` (founder ruling R59): there
+ *     is nothing to apportion.** Differently-rated tenders are two BILLS — `01-F86` makes a
+ *     sub-bill `02-F5`'s child order, which settles with its own `payment.recorded`, resolves its
+ *     own cell and computes its own tax — so within one bill there is one tender channel,
+ *     therefore one cell. The **absence of a per-method parameter is therefore now a RULE rather
+ *     than a gate**, and the older reason still holds against re-adding one: `DEC-MONEY-010`'s
+ *     idiom, an optional term with no producer wearing a signature that says it has one.
+ *     `02-F13`'s split across methods survives as the case where every part lands in the same
+ *     cell, which this signature already expresses.
  *  ~~3. **WHETHER `01-F30`'s BILLED TOTAL INCLUDES TAX.**~~ **CLOSED by `01-F82` (founder ruling
  *     R54, August 2026) — see the section above.** It read: *"Under `exclusive` the customer tenders
  *     `bill + tax` while `billed_effective` derives from delivered lines, so
@@ -136,13 +162,49 @@ export type TaxLineInput = {
   readonly billed_paisa: number;
 };
 
-export type TaxSnapshotInput = {
-  /** `16-F2`, already resolved for this order's (channel, payment method) by the caller. */
+/**
+ * ONE CELL of `16-F27`'s posture matrix, already resolved for this order.
+ *
+ * **`16-F27` (R55): the owner types both fields.** A cell stopped *"referencing a rate from a rule
+ * pack"* in August 2026 and became layer-2 org configuration (`00 §7`), so there is no pack
+ * version on it — see the header. `16-F30` returns pack authority for the certified add-on, which
+ * `16-F34` puts post-pilot; a pack field added before that adapter exists is a field with no
+ * producer.
+ *
+ * **`16-F28`: the axis a cell is keyed BY is the *tender* channel** — `02-F12`'s payment method,
+ * widened by `01-F85` to an org-scoped tender id — and never `02-F42`'s order channel, which stays
+ * a CLOSED set and stays `01-F60`'s price key. That distinction is one keystroke apart in English
+ * and nothing alike in the code.
+ *
+ * **The KEYING is deliberately not expressed here, and this is `24 §3b`'s named alternative.**
+ * `16-F27`'s grid is a default cell plus per-cell overrides over (order channel × tender channel);
+ * the shape considered and refused for v0 was a `TaxMatrix` type carrying that map. It is refused
+ * because **nothing can select a non-default cell yet**: `16-F32` puts the tender-channel choice
+ * *before the unpaid bill prints* and no surface offers it, so a per-tender override would be a
+ * branch no caller can reach — this wave's named defect, shipped on purpose. A resolved cell is
+ * what every reader of a bill needs and it is all this file takes. **When `16-F32`'s choice lands,
+ * the matrix and its resolver land with it** — and `16-F29`'s pinning (the rate version resolves
+ * from the order's CREATION time in branch time, never the settlement clock) lands there too,
+ * because it is a question about which configuration version applies and not about arithmetic.
+ */
+export type TaxCell = {
+  /** `16-F2`'s posture, resolved for this order's cell by the caller. */
   readonly posture: TaxPosture;
-  /** `00 §6` integer basis points, from a `16-F4` rule pack. 1600 = 16 %. */
+  /** `00 §6` integer basis points — `16-F27`'s owner-typed rate. 1600 = 16 %. */
   readonly rate_bps: number;
-  /** `16-F4`: packs are versioned and effective-dated; the snapshot records which one priced it. */
-  readonly rule_pack_version: string;
+};
+
+/**
+ * `16-F1` — *"Tax is off by default"*, as a value rather than as a sentence in a comment.
+ *
+ * The cell every org has until it types one, and the v0 seed's default
+ * (`apps/pos-electron/src/main/tax-posture.ts`). Exported because the alternative is each caller
+ * writing `{ posture: "none", rate_bps: 0 }` inline, and `16-F1`'s default is exactly the kind of
+ * fact that drifts when it is spelled in five places.
+ */
+export const TAX_OFF: TaxCell = { posture: "none", rate_bps: 0 };
+
+export type TaxSnapshotInput = TaxCell & {
   readonly lines: readonly TaxLineInput[];
 };
 
@@ -158,7 +220,6 @@ export type TaxLineSnapshot = {
 export type TaxSnapshot = {
   readonly posture: TaxPosture;
   readonly rate_bps: number;
-  readonly rule_pack_version: string;
   readonly lines: readonly TaxLineSnapshot[];
   readonly subtotal_paisa: number;
   readonly tax_total_paisa: number;
@@ -249,10 +310,10 @@ const lineSnapshot = (
  * Every input the snapshot RECORDS is refused rather than defaulted. `16-F1` has tax off by
  * default and `11-F22`'s precedent transcribes one field over — *"an absent status is not a licence
  * to default"*: a posture defaulted to `none` is a tax silently not charged, defaulted to
- * `exclusive` is a tax silently charged, and both are permanent under `01-F1`. A missing
- * `rule_pack_version` is refused for `16-F4`'s reason — a snapshot nothing can tie to a pack is one
- * nobody can defend to an auditor, and "rule-pack updates never rewrite past invoices" is
- * unverifiable without it.
+ * `exclusive` is a tax silently charged, and both are permanent under `01-F1`. **`16-F1`'s default
+ * is expressed as `TAX_OFF` for a CALLER to pass explicitly, never as a fallback inside this
+ * function** — the difference is that a caller with no configuration says so, while a fallback
+ * here would let a caller that forgot one look identical.
  *
  * **Overflow is `applyRateBps`'s existing policy, not a new one.** The aggregates go through
  * `sumPaisa`, which throws past `Number.MAX_SAFE_INTEGER` exactly as the rate door already does one
@@ -261,18 +322,22 @@ const lineSnapshot = (
  * tax computed at settlement is not that path. Which policy governs here is unresolved in the
  * corpus; this file adopts the door's rather than inventing a second.
  *
- * @unreached-owed NOTHING IN THIS PRODUCT COMPUTES A TAX YET, and the two blockers are structural
- * rather than schedule. (1) The per-line `billed_paisa` this function consumes has no export:
- * `billedCellPaisa` is private to `packages/sync-client/src/folds/merge.ts` and only the
- * ORDER-level `billedEffectiveFromJsonLines` is public, so a caller cannot obtain its inputs
- * without re-deriving fold logic, which `26 §8` forbids. `packages/escpos` records the identical
- * blocker for the receipt's extended line amount — one missing export, two debts. ~~(2) Whether
- * `01-F30`'s billed total INCLUDES tax is an open founder decision.~~ **(2) is CLOSED by `01-F82`
- * (R54): `billed_total` IS this function's `total_paisa`, so a caller no longer risks freezing the
- * wrong answer under `01-F1`. Blocker (1) is untouched and is what still stops a caller today.**
- * `16-F2`'s posture matrix also has no store (`00 §7` layer-2, doc 14). The seam test the caller owes is named in
- * `packages/escpos/src/__acceptance__/receipt-tax-line.test.ts`'s DEFERRED block: the mutant is
- * `createReceiptPrinter` composing a receipt with no `tax` key while a posture is configured.
+ * ── THIS FUNCTION IS REACHED NOW, AND BOTH BLOCKERS ARE CLOSED (v0 gap 2, August 2026) ───────
+ *
+ * The seams-register debt marker that stood here is **deleted, not moved** — written in words
+ * rather than as the literal token, because `pnpm seams:check` scans for the token itself and
+ * pasting one into a comment attributes it to this file's exports and reddens the rail (the same
+ * trap `apps/pos-electron/src/main/hardware-tier.ts` records). `packages/sync-client`'s
+ * `orderTaxSnapshot` calls this on the shipping path and five readers in `apps/pos-electron`
+ * consume its `total_paisa` as `01-F82`'s `billed_total`. (1) The per-line export arrived —
+ * `billedLinePaisa` is `billedCellPaisa` exported rather than re-derived, so no caller breaches
+ * `26 §8`. (2) Was closed earlier by `01-F82` (R54).
+ *
+ * What is NOT closed, stated so the absence is not read as completeness: `16-F27`'s matrix still
+ * has **no store** — `01-F87` rules the carrier and nothing builds it (`plans/v0.md` gap 3) — so
+ * the shipping cell comes from a v0 seed that says so in its own header, and `16-F32`'s
+ * tender-channel choice, `16-F33`'s multi-total `bill` document and `16-F29`'s effective-date
+ * pinning have no surface at all.
  */
 export const taxSnapshot = (input: TaxSnapshotInput): TaxSnapshot => {
   const posture = input.posture;
@@ -284,13 +349,14 @@ export const taxSnapshot = (input: TaxSnapshotInput): TaxSnapshot => {
   // `00 §6`: a rate is an INTEGER basis point. Guarded even under `none`, so a malformed pack is
   // refused where it is written rather than on the first day somebody switches a posture on.
   const rate_bps = asPaisaInt(input.rate_bps, "rate_bps");
-  const rule_pack_version = input.rule_pack_version;
-  if (typeof rule_pack_version !== "string" || rule_pack_version === "") {
-    throw new RangeError(
-      `rule_pack_version is required — 16-F4 makes the pack that priced an order part of the ` +
-        `snapshot, got ${String(rule_pack_version)}`,
-    );
-  }
+  // ⚠ **A `rule_pack_version` guard STOOD HERE and it refused every snapshot this product could
+  // build.** It threw a `RangeError` citing `16-F4`, which `16-F27` (R55) struck **by name** in
+  // August 2026: the owner types the rate and no pack exists, so the requirement demanded an
+  // artifact the ruling deleted and nothing could compute a tax at all. Deleted rather than made
+  // optional — an optional field no producer fills is `DEC-MONEY-010`'s idiom, and `16-F30` says
+  // precisely when a pack returns: with a **certified adapter**, which `16-F34` puts post-pilot.
+  // Recorded here rather than silently removed, because a reader who knows `16-F4` will otherwise
+  // read the absence as an omission and put it back.
 
   const lines = input.lines.map((line) => {
     if (typeof line.line_id !== "string" || line.line_id === "") {
@@ -308,7 +374,6 @@ export const taxSnapshot = (input: TaxSnapshotInput): TaxSnapshot => {
   return {
     posture,
     rate_bps,
-    rule_pack_version,
     lines,
     subtotal_paisa: subtotal,
     tax_total_paisa: tax_total,

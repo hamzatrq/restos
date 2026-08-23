@@ -794,3 +794,84 @@ export const canPayOut = (
     satisfied_by: ROLES.filter((role) => VERDICTS["approval.grant"][role] === "allow"),
   };
 };
+
+/**
+ * `02-F20` — *"discount above org threshold"* — and Appendix A's two rows, which are the reason
+ * this is a SEPARATE predicate rather than a `WRITE_ACTIONS` entry.
+ *
+ * > | Discount ≤ X% (configurable) | ✔ | ✔ | — | ✔ |
+ * > | Discount > X%                | needs Mgr PIN | ✔ | — | ✔ |
+ *
+ * `apps/pos-electron/src/main/authorize.ts` recorded the gap in its own words and named this
+ * file as where it belongs — *"there is no `canDiscount` predicate on `canPayOut`'s pattern …
+ * so it fails closed and the predicate is owed to `domain` before any discount surface can
+ * land"* — and `02-F61` repeats it as the reason the act is *"specified and unbuilt"*. This is
+ * that predicate. It mints **no matrix action**: both cells already ship above, and the only
+ * thing missing was the input that chooses between them.
+ *
+ * ── WHY `can()` CANNOT ANSWER IT, and why that is a DIFFERENT reason from `cash.paid_out` ────
+ *
+ * `can(subject, "cash.paid_out", scope)` refuses because ONE action's verdict depends on an
+ * amount `AuthScope` cannot carry. Here the two actions are genuinely two actions, each with a
+ * complete verdict, so `can()` answers either one correctly and is left untouched. What the
+ * amount decides is **which action the act is an instance of** — and that is a question a
+ * `Record<event_type, action>` map is structurally unable to ask, which is exactly why
+ * `discount.recorded` has no row in `WRITE_ACTIONS` and fails closed there today.
+ *
+ * ── THE THRESHOLD IS A PERCENTAGE, AND THE BASE IS A READING ─────────────────────────────────
+ *
+ * Appendix A writes `X%`, not an amount, so the threshold is an integer **basis point** rate
+ * (`DEC-MONEY-005`: rates as integer bps) rather than paisa — the one place this differs from
+ * `PaidOutRequest`, and it differs because the appendix says so. **The base is the ORDER's
+ * billed total**, which is a READING and is disputable by FR id: no FR states what the
+ * percentage is OF. The alternative base is the line the discount names. The order was chosen
+ * because `discount.recorded` is order-keyed (`registry.ts` declares `order_id` and
+ * deliberately no `line_id`), so the order total is the only base the payload itself can be
+ * evaluated against; a line base would need a key the schema does not carry.
+ *
+ * Both figures are REQUIRED POSITIONAL parameters on `canPayOut`'s reasoning — `01-F60`'s
+ * enabled-set precedent, where optional-means-skip is how a silent omission gets in.
+ */
+export type DiscountRequest = {
+  /** What comes off the bill, integer paisa (`01 §4`'s payload — a magnitude, never signed). */
+  readonly amount_paisa: number;
+  /**
+   * `01-F30`'s `billed_total` for the order being discounted, integer paisa — the base the
+   * percentage is taken of. Supplied by the caller from the fold's own projection, never
+   * re-derived (`26 §8`: fold logic lives in one module).
+   */
+  readonly order_total_paisa: number;
+  /** Appendix A's `X%` as integer basis points (`02-F20`; `00 §7` layer 2 per R63). */
+  readonly threshold_bps: number;
+};
+
+/**
+ * Which of Appendix A's two discount rows this act is an instance of, and the verdict for it.
+ *
+ * **The comparison is a CROSS-MULTIPLICATION in BigInt, and both halves of that are load-bearing.**
+ * Dividing to get a percentage would round, and a rounded rate decides an authorization at the
+ * boundary; multiplying in `number` would let a product leave the exact-integer range silently,
+ * which is `billedCellPaisa`'s own stated reason for BigInt one package over (standing law 3 —
+ * a product leaves 2^53 far sooner than a sum does). `DEC-MONEY-005` bans the arithmetic
+ * OPERATORS on money, not a predicate over it, which is the reading `canPayOut` already applies
+ * to its own `<=`.
+ *
+ * **At the threshold is WITHIN it** — Appendix A's rows are `≤ X%` and `> X%`, and `05-F19`'s
+ * *"above"* is read the same way by `canPayOut` directly above.
+ *
+ * **A zero-total order takes the ABOVE-threshold row.** Any positive discount against a bill of
+ * nothing is infinitely above any percentage, and the cross-multiplication says so without a
+ * special case: `amount × 10000 > 0` for every positive amount. A zero discount on a zero bill
+ * is within, which is the harmless direction.
+ */
+export const canDiscount = (
+  subject: AuthSubject,
+  scope: AuthScope,
+  request: DiscountRequest,
+): AuthDecision => {
+  const within =
+    BigInt(request.amount_paisa) * 10_000n <=
+    BigInt(request.threshold_bps) * BigInt(request.order_total_paisa);
+  const action = within ? "order.discount_within_threshold" : "order.discount_above_threshold";
+  return can(subject, action, scope);
+};

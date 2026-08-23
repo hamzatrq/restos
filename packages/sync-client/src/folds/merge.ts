@@ -336,6 +336,28 @@ export const billedEffectiveFromJsonLines = (jsonLines: string): number => {
   return safeNumber(billed) ?? 0;
 };
 
+/**
+ * billed_effective of ONE line, for a host app that must name the money a single line is worth
+ * (`02-F20`'s void and comp both carry `amount_paisa`, and `01-F30` conserves per order, so an
+ * emitter that guessed the figure would put a number in an append-only ledger that disagrees
+ * with the fold's own).
+ *
+ * **The same `billedCellPaisa` the projection accumulates, exported rather than re-derived** —
+ * `billedEffectiveFromJsonLines` directly above exists for exactly this reason at the order
+ * level, and its comment states the rule this follows: *fold logic is never reimplemented
+ * outside this module* (`26 §8` / the T-01-11 ruling; two implementations of one sum is how a
+ * money anomaly becomes a false conservation finding). `apps/pos-electron/src/main/gateway.ts`
+ * already says the same of `total_paisa` in its own words.
+ *
+ * **This is not a fold arm and it changes no projection.** It reads one already-projected cell
+ * and returns its billed contribution — no ordering metadata, no clock, no envelope id, so
+ * standing law 1 (`01-F34`) is untouched. Unrepresentable ⇒ ZERO, matching what the fold's own
+ * accumulators do and what the order-level helper returns, so a caller can never be handed a
+ * rounded double for a money field.
+ */
+export const billedLinePaisa = (cell: BilledLineCell): number =>
+  safeNumber(billedCellPaisa(cell)) ?? 0;
+
 type LineProjection = {
   states: string[];
   anomalies: Record<string, string>;

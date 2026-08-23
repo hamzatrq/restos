@@ -54,8 +54,12 @@ export {
   type AuthScope,
   type AuthSubject,
   can,
+  // `02-F20` + Appendix A's two rows — which discount row an act is an instance of. `02-F61`
+  // names this predicate as the one thing owed before a discount surface can land.
+  canDiscount,
   // `05-F19` — the paid-out threshold decision, with both figures as required inputs.
   canPayOut,
+  type DiscountRequest,
   type PaidOutRequest,
   PERMISSION_ACTIONS,
   type PermissionAction,
@@ -119,7 +123,9 @@ export {
 // ledger figure and the printed one derive from it, and two implementations of "what is the tax on
 // this line" is a receipt that disagrees with the order it was printed from.
 export {
+  TAX_OFF,
   TAX_POSTURES,
+  type TaxCell,
   type TaxLineInput,
   type TaxLineSnapshot,
   type TaxPosture,

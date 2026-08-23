@@ -64,7 +64,7 @@ export type {
 // order total from the engine's own derivation rather than summing `json_lines` themselves
 // (26 §8 / 01-F34, and the T-01-11 ruling that deleted the Auditor's mirror of this sum:
 // two implementations of one total is how a money anomaly becomes a false finding).
-export { billedEffectiveFromJsonLines } from "./folds/merge.js";
+export { billedEffectiveFromJsonLines, billedLinePaisa } from "./folds/merge.js";
 export { electHub } from "./hub-election.js";
 export {
   createLanAdmission,
@@ -91,6 +91,11 @@ export {
   type MeshSessionStatus,
   REELECTION_BUDGET_MS,
 } from "./mesh-session.js";
+// `01-F82`/`16-F31` (R54): `billed_total` INCLUDES TAX, so a host app that means "what the
+// customer owes" reads `billedTotalPaisa` and not the tax-blind order-level sum above. One join
+// of the two halves — the fold's per-line cells and `@restos/domain`'s posture arithmetic —
+// because two joins of one identity is how a money anomaly becomes a false finding.
+export { billedTotalPaisa, orderTaxSnapshot } from "./order-tax.js";
 // 01-F26/F27/F28/F61 — the PIN session and the reference data it verifies against.
 export {
   createMemoryPinAttemptStore,

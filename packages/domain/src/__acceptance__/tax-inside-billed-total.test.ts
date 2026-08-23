@@ -134,12 +134,20 @@ const LINES = [
 
 const LINE_SUM = total(LINES.map((l) => l.billed_paisa));
 
-/** `16-F4`'s pack, and a rate that is not a round divisor of anything here. */
+/**
+ * A rate that is not a round divisor of anything here.
+ *
+ * ⚠ **The `PACK` constant that stood beside it is GONE, with `16-F4`.** `16-F27` (founder ruling
+ * R55, August 2026) struck that FR by name — the owner types the rate and no rule pack exists —
+ * so `TaxSnapshotInput` no longer carries a `rule_pack_version` and every call below is one field
+ * shorter. `16-F30` returns pack authority for the certified adapter only, which `16-F34` puts
+ * post-pilot. **Nothing about this file's arithmetic moved**: the pack version was never an input
+ * to a figure, only a field echoed onto the snapshot.
+ */
 const RATE_BPS = 1_600;
-const PACK = "sindh-2026.1";
 
 const snapshotOf = (posture: TaxPosture, rate_bps = RATE_BPS): ReturnType<typeof taxSnapshot> =>
-  taxSnapshot({ posture, rate_bps, rule_pack_version: PACK, lines: [...LINES] });
+  taxSnapshot({ posture, rate_bps, lines: [...LINES] });
 
 /** `01-F82`/P1: THE definition. Written once, here, so no assertion below re-derives it. */
 const billedTotalPaisa = (posture: TaxPosture, rate_bps = RATE_BPS): number =>
@@ -299,7 +307,7 @@ describe("§C 01-F82/P2 — the identity holds for every rate, magnitude and lin
   it("for every (posture, rate, lines): billed_total = subtotal + tax, and a full tender conserves", () => {
     fc.assert(
       fc.property(arbPosture, arbRate, arbLines, (posture, rate_bps, lines) => {
-        const snap = taxSnapshot({ posture, rate_bps, rule_pack_version: PACK, lines });
+        const snap = taxSnapshot({ posture, rate_bps, lines });
         const billed = snap.total_paisa;
         // P1: `billed_total` IS the snapshot total, and the snapshot closes on itself.
         expect(billed).toBe(plus(snap.subtotal_paisa, snap.tax_total_paisa));
@@ -321,7 +329,7 @@ describe("§C 01-F82/P2 — the identity holds for every rate, magnitude and lin
     fc.assert(
       fc.property(arbRate, arbLines, (rate_bps, lines) => {
         const sum = total(lines.map((l) => l.billed_paisa));
-        const args = { rate_bps, rule_pack_version: PACK, lines };
+        const args = { rate_bps, lines };
         // `none` and `inclusive` do not move: the total is the captured bill.
         expect(taxSnapshot({ ...args, posture: "none" }).total_paisa).toBe(sum);
         expect(taxSnapshot({ ...args, posture: "inclusive" }).total_paisa).toBe(sum);
@@ -339,10 +347,7 @@ describe("§C 01-F82/P2 — the identity holds for every rate, magnitude and lin
     let sawTax = false;
     fc.assert(
       fc.property(arbRate, arbLines, (rate_bps, lines) => {
-        if (
-          taxSnapshot({ posture: "exclusive", rate_bps, rule_pack_version: PACK, lines })
-            .tax_total_paisa > 0
-        ) {
+        if (taxSnapshot({ posture: "exclusive", rate_bps, lines }).tax_total_paisa > 0) {
           sawTax = true;
         }
       }),

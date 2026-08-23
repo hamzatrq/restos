@@ -346,6 +346,8 @@ describe("01-F1 — opening a shift later does NOT retro-bind the settlement", (
             modifiers: [],
             removals: [],
             note: null,
+            // `02-F20`'s corrective needs the line's own money; the engine projects it (`26 §8`).
+            billed_paisa: 45_000,
           },
         ],
       }),

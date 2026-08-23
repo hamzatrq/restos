@@ -112,7 +112,14 @@ describe("§C 02-F48 — the zero-tender guard is in the chain the renderer reac
     // Every link, in order. Pinning only the outermost name goes green on a chain that silently
     // dropped a middle link — which is the whole failure this file is about.
     expect(mainSrc).toMatch(/refuseDoubleSettlement\(\{\s*writes:\s*gateway,\s*store\s*\}\)/);
-    expect(mainSrc).toMatch(/authorizeWrites\(\{\s*writes:\s*tenderGuarded,/);
+    // ⚠ **THE INNER NAME MOVED IN AUGUST 2026 AND THE ASSERTION MOVED WITH IT.** The chain
+    // gained `voidExitsLine` between the matrix and the amount guard (`02-F20`'s post-confirm
+    // void appends the line's `01 §4` exit as part of one authorized act, so it must sit
+    // INSIDE commandment 8 and OUTSIDE the two guards that refuse by throwing). Both links
+    // are pinned rather than just the new outermost one — pinning the outermost alone is what
+    // this test's own comment above says goes green on a chain that dropped a middle link.
+    expect(mainSrc).toMatch(/voidExitsLine\(\{\s*writes:\s*tenderGuarded,\s*store\s*\}\)/);
+    expect(mainSrc).toMatch(/authorizeWrites\(\{\s*writes:\s*voidGuarded,/);
     expect(mainSrc).toMatch(/CHANNELS\.append[\s\S]{0,200}writes\.append\(req\)/);
   });
 });

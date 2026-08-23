@@ -171,6 +171,8 @@ const ORDER: OpenOrder = {
       modifiers: ["Extra spicy"],
       removals: [],
       note: null,
+      // `02-F20`'s corrective needs the line's own money; the engine projects it (`26 §8`).
+      billed_paisa: 45_000,
     },
     {
       line_id: "line-2",
@@ -179,6 +181,8 @@ const ORDER: OpenOrder = {
       modifiers: [],
       removals: ["No raita"],
       note: "Table 6",
+      // `02-F20`'s corrective needs the line's own money; the engine projects it (`26 §8`).
+      billed_paisa: 45_000,
     },
     {
       line_id: "line-3",
@@ -187,6 +191,8 @@ const ORDER: OpenOrder = {
       modifiers: [],
       removals: [],
       note: null,
+      // `02-F20`'s corrective needs the line's own money; the engine projects it (`26 §8`).
+      billed_paisa: 45_000,
     },
   ],
 };
@@ -244,6 +250,8 @@ const SECOND_ORDER: OpenOrder = {
       modifiers: [],
       removals: [],
       note: null,
+      // `02-F20`'s corrective needs the line's own money; the engine projects it (`26 §8`).
+      billed_paisa: 45_000,
     },
   ],
 };
@@ -265,6 +273,8 @@ const CLOUD_ORDER: OpenOrder = {
       modifiers: [],
       removals: [],
       note: null,
+      // `02-F20`'s corrective needs the line's own money; the engine projects it (`26 §8`).
+      billed_paisa: 45_000,
     },
   ],
 };

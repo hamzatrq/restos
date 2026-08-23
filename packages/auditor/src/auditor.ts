@@ -361,6 +361,30 @@ export const runAuditor = async (args: RunAuditorArgs): Promise<AuditorReport> =
             });
             continue;
           }
+          // ⚠ **THIS IS THE PRE-`01-F82` READING OF `billed_total`, AND IT IS THE ONE OF SEVEN
+          // SHIPPING READERS THAT COULD NOT MOVE WITH THE OTHERS (v0 gap 2, August 2026).**
+          // `01-F82`/`16-F31` (founder ruling R54) make `billed_total` *what the customer owes,
+          // tax included* — precisely `taxSnapshot`'s `total_paisa` — and the five device-side
+          // readers now compute it through `packages/sync-client`'s `billedTotalPaisa`. This one
+          // cannot: resolving a posture needs the org's `16-F27` cell, which reaches a till as
+          // `01-F87`'s fourth `01-F75` reference-data resource, and **that carrier is not built**
+          // (`plans/v0.md` gap 3). There is nothing on this plane to resolve it from.
+          //
+          // **What that costs while it stands, stated in the shape the residual takes rather than
+          // as a worry:** under `16-F2`'s `exclusive` posture the customer tenders `bill + tax`
+          // and this derives only the bill, so `settledConservationResidualPaisa` reads an EXCESS
+          // of exactly the tax on **every** settled order — and `EXCESS_TENDER_IS_EXCEPTION` is
+          // `false`, so it is SILENT. That is the finding `01-F82` was ruled to delete, surviving
+          // on the one plane the ruling's implementation could not reach. Under `none` (`16-F1`'s
+          // default, and the v0 seed's) and under `inclusive` the number does not move at all, so
+          // nothing is wrong today — the debt becomes live the first time an org types an
+          // exclusive rate.
+          //
+          // **Do NOT "fix" this by reading `01-F63`'s attested `billed_paisa` instead.** The
+          // T-01-11 ruling deleted the Auditor's own mirror of the billed sum precisely so that
+          // this check derives from the ENGINE's export rather than from anything a device
+          // asserts, and reversing that is a spec act, not an implementation choice. The fix is
+          // `01-F87`'s carrier. OWED, with an owner.
           const billed = billedEffectiveFromJsonLines(order.json_lines);
           const residual = settledConservationResidualPaisa({
             billed_paisa: billed,

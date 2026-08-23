@@ -306,6 +306,8 @@ const ONE_ORDER: OpenOrder[] = [
         modifiers: [],
         removals: [],
         note: null,
+        // `02-F20`'s corrective needs the line's own money; the engine projects it (`26 §8`).
+        billed_paisa: 45_000,
       },
     ],
   } as OpenOrder,

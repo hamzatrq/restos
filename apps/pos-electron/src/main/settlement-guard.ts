@@ -69,9 +69,10 @@
  * event is the shape `02-F45` names and refuses.
  */
 
-import { billedEffectiveFromJsonLines, type DeviceStore } from "@restos/sync-client";
+import { billedTotalPaisa, type DeviceStore } from "@restos/sync-client";
 import { type AppendRequest, AppendRequestSchema, type AppendResult } from "../shared/ipc";
 import type { Gateway } from "./gateway";
+import { deviceTaxCell } from "./tax-posture";
 
 /** The three money facts a refusal is made of, all read off ONE `open_orders` row. */
 export type AlreadySettled = {
@@ -110,7 +111,11 @@ export const alreadySettled = (order: {
   readonly pay_total: number;
   readonly json_lines: string;
 }): AlreadySettled | null => {
-  const billed = billedEffectiveFromJsonLines(order.json_lines);
+  // `01-F82`/`16-F31` (R54): the cover test is against what the customer OWES, tax included.
+  // `billedEffectiveFromJsonLines` is line-derived and tax-blind, so under `16-F2`'s `exclusive`
+  // posture this would have declared an order settled on a tender that did not cover it — the
+  // consequence `01-F82` names in terms. `16-F1`'s default cell leaves the number unchanged.
+  const billed = billedTotalPaisa(order.json_lines, deviceTaxCell());
   if (billed <= 0) return null;
   if (order.pay_total < billed) return null;
   return { order_id: order.order_id, billed_paisa: billed, paid_paisa: order.pay_total };

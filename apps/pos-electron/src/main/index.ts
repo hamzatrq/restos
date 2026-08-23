@@ -47,6 +47,7 @@ import {
   authorizeEscalation,
   authorizeReads,
   authorizeWrites,
+  DISCOUNT_APPROVAL_THRESHOLD_BPS,
   PAID_OUT_APPROVAL_THRESHOLD_PAISA,
 } from "./authorize";
 import {
@@ -67,6 +68,7 @@ import {
 } from "./hardware-tier";
 import { openJobStore } from "./job-store";
 import { createLineAdvance } from "./line-advance";
+import { voidExitsLine } from "./line-void";
 import { createLanMesh } from "./mesh";
 import type { LanMesh } from "./mesh.js";
 import {
@@ -1146,11 +1148,43 @@ const counterBoot = app.whenReady().then(async () => {
    */
   const tenderGuarded = refuseZeroTender({ writes: settlementGuarded });
 
+  /**
+   * `02-F20` / `02-F8` — **THE SEAM FOR THE POST-CONFIRM VOID, and its position is the decision.**
+   *
+   * The chain a renderer write now travels is **matrix → amount → duplicate → void exit → ledger**.
+   *
+   * **Inside `authorizeWrites`**, so a void has cleared commandment 8 — including a cashier's
+   * `escalate` verdict satisfied by a manager's PIN — before any line is touched. That placement
+   * is also what puts it on BOTH routes an approved write takes: this handler, and
+   * `authorizeEscalation.approve`, which appends through `AuthorizedWritesDeps.writes` and never
+   * reaches the `CHANNELS.append` consequence block below. A consequence hung off that block
+   * instead would fire for a manager's own unsupervised void and NOT for a cashier's approved
+   * one — the case `02-F20` exists for. Measured as a mutant rather than reasoned:
+   * `__acceptance__/line-void.test.ts` §E.
+   *
+   * **Inside the two money guards**, because it appends a SECOND event and both of those refuse by
+   * throwing: a void that is going to be refused must be refused before anything lands (`01-F1`
+   * has no unwinding).
+   *
+   * It reads the store for the same one thing `refuseDoubleSettlement` does — this device's own
+   * converged projection, synchronously, with no peer and no network (`02-F49`, `01-F17`).
+   */
+  const voidGuarded = voidExitsLine({ writes: tenderGuarded, store });
+
   const writes = authorizeWrites({
-    writes: tenderGuarded,
+    writes: voidGuarded,
     store,
     session,
     paidOutApprovalThresholdPaisa: PAID_OUT_APPROVAL_THRESHOLD_PAISA,
+    discountApprovalThresholdBps: DISCOUNT_APPROVAL_THRESHOLD_BPS,
+    /**
+     * `02-F20`'s discount base — the ENGINE's own billed total for the order, read at verdict time
+     * from this device's converged fold. `null` when this till has no such order, which
+     * `verdictFor` refuses rather than defaulting (Commandment 8: the renderer's own number is
+     * never the base, or any discount could be made to read as within-threshold).
+     */
+    orderTotalPaisa: (order_id: string) =>
+      gateway.openOrders().find((row) => row.order_id === order_id)?.total_paisa ?? null,
   });
 
   /**
@@ -1211,14 +1245,27 @@ const counterBoot = app.whenReady().then(async () => {
   });
 
   const escalation = authorizeEscalation({
-    // The RAW gateway: this object performs the authorization itself and appending through
-    // `writes` would re-run the guard that already refused the unescalated write.
-    writes: gateway,
+    /**
+     * **NOT `writes`**: this object performs the authorization itself, and appending through
+     * `authorizeWrites` would re-run the guard that already refused the unescalated write.
+     *
+     * ⚠ **It was the RAW `gateway` until August 2026 and that was a live defect for `02-F20`'s
+     * void.** `voidExitsLine` sits INSIDE `authorizeWrites` precisely so both routes reach it, and
+     * this call site went around the whole stack — so a MANAGER voiding unsupervised got the line
+     * exit and a CASHIER voiding with a manager's PIN got a `void.recorded` and **no exit**, i.e.
+     * the bill unchanged, on the one path `02-F20` exists for. `voidGuarded` is the same chain
+     * minus the matrix layer, which is exactly what the sentence above asks for: the money guards
+     * and the void's own consequence still apply, and commandment 8 is not asked twice.
+     */
+    writes: voidGuarded,
     store,
     // The REQUESTER, and it stays the requester: `subjectOf` reads this for `02-F38`'s
     // self-approval rule and `gateway.append` reads it for `02-F41`'s attribution.
     session,
     paidOutApprovalThresholdPaisa: PAID_OUT_APPROVAL_THRESHOLD_PAISA,
+    discountApprovalThresholdBps: DISCOUNT_APPROVAL_THRESHOLD_BPS,
+    orderTotalPaisa: (order_id: string) =>
+      gateway.openOrders().find((row) => row.order_id === order_id)?.total_paisa ?? null,
     verifyApprover: async (user_id, pin) => (await approvals.unlock(user_id, pin)).ok,
   });
 

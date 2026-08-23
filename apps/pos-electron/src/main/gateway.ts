@@ -1,6 +1,6 @@
 import { newId } from "@restos/domain";
 import type { BlockedCursor, DeviceStore } from "@restos/sync-client";
-import { billedEffectiveFromJsonLines, wallClock } from "@restos/sync-client";
+import { billedEffectiveFromJsonLines, billedLinePaisa, wallClock } from "@restos/sync-client";
 import {
   type AddLineRequest,
   AddLineRequestSchema,
@@ -350,6 +350,20 @@ const linesFrom = (jsonLines: string, catalog: CatalogResolver): OpenOrder["line
      * cook's ticket. The wave's named recurring defect at its smallest.
      */
     note: noteFrom(cell.notes),
+    /**
+     * `02-F20`'s correctives need the money a single line is worth, and the ENGINE's own
+     * derivation is the only legal source — the same rule `total_paisa` above states, applied
+     * one level down. `billedLinePaisa` is `merge.ts`'s `billedCellPaisa` exported rather than
+     * re-implemented here (`26 §8` / the T-01-11 ruling), so a voided line's `amount_paisa` and
+     * the order total it comes off can never disagree by construction.
+     */
+    billed_paisa: billedLinePaisa(cell),
+    /**
+     * Verbatim from the fold, uncollapsed — see `OpenOrderSchema.lines[].states`. A contested
+     * line arrives here as its whole terminal set and leaves as its whole terminal set; picking
+     * one would be a fold decision taken in a host app (`01-F31`: a fold never picks a winner).
+     */
+    states: cell.states,
   }));
 
 /**

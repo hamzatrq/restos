@@ -22,9 +22,10 @@ import {
   type SpoolerTransport,
 } from "@restos/escpos";
 import type { DeviceStore } from "@restos/sync-client";
-import { billedEffectiveFromJsonLines } from "@restos/sync-client";
+import { orderTaxSnapshot } from "@restos/sync-client";
 import type { Alarm, KitchenState } from "../shared/ipc";
 import type { CatalogResolver } from "./gateway";
+import { deviceTaxCell } from "./tax-posture";
 
 /**
  * K-7 — the wire between `order.confirmed` and the paper, and `03-F5`'s band on the counter.
@@ -1728,7 +1729,22 @@ export const createReceiptPrinter = ({
     const order = store.openOrders().find((row) => row.order_id === order_id);
     if (order === undefined) return;
 
-    const total_paisa = billedEffectiveFromJsonLines(order.json_lines);
+    // `01-F82`/`16-F31` (R54) — **the receipt's *Total* row IS `billed_total`, tax included.**
+    // `16-F5`'s snapshot is computed ONCE here and every figure the document prints comes out of
+    // it, so *Subtotal*, *Tax* and *Total* cannot disagree; `packages/escpos` already rendered the
+    // three rows and pinned `subtotal + tax = total`, and this producer was the mismatch.
+    //
+    // `16-F32` (R58): before the settling act tax is a PREVIEW and carries no snapshot. This runs
+    // on the settling act, so what is rendered here is the snapshot — and `01-F18` makes it never
+    // re-derived. ⚠ **It is not PERSISTED anywhere**: no payload field on any `01 §4` type carries
+    // a tax snapshot, `01-F82`'s own note says none lands before `billed_total`'s definition moved
+    // (it now has), and adding one is a protected-path spec act this change does not take. So the
+    // document is reproducible from the order and the cell, and a later rate edit would reprint a
+    // different receipt — which is exactly what `16-F29`'s effective-dating exists to stop and
+    // exactly what the v0 seed cannot express (`tax-posture.ts`).
+    const tax_cell = deviceTaxCell();
+    const tax = orderTaxSnapshot(order.json_lines, tax_cell);
+    const total_paisa = tax.total_paisa;
     // `01-F31`'s keyed sum, computed by the fold: a disputed attempt contributes ZERO to it and is
     // rendered, never picked. The receipt must agree with that or it would claim money the ledger
     // does not count. `pay_total` also excludes `repays_receivable` (`DEC-MONEY-007`), so a khata
@@ -1797,6 +1813,20 @@ export const createReceiptPrinter = ({
         lines,
         total_paisa,
         tenders,
+        // `16-F5`'s snapshot, handed over WHOLE and unconditionally — including under `16-F1`'s
+        // `none`, and that is a decision rather than an oversight. `receipt-document.ts` spends a
+        // paragraph ruling that *"`none` prints nothing, exactly as an absent snapshot does"*,
+        // because a `Tax Rs 0` line is a claim about a tax regime the org is not in. Re-deciding
+        // it here would be **two declarations of one rule**, which is the drift `16-F33` (a)
+        // refuses by name and which this repo has already paid for once. Measured: a `none` cell
+        // renders byte-identically to an absent one. `16-F33` (c): a settled receipt shows exactly
+        // ONE total, and `01-F82` makes it `total_paisa` above.
+        tax: {
+          posture: tax.posture,
+          rate_bps: tax.rate_bps,
+          subtotal_paisa: tax.subtotal_paisa,
+          tax_total_paisa: tax.tax_total_paisa,
+        },
         // `03-F7`/`03-F37`: a reprint is a deliberate, logged act and a settlement is not one.
         // `C17` is owed with the surface that offers it.
         reprint: false,

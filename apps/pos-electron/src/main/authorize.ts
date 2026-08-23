@@ -3,6 +3,7 @@ import {
   type AuthScope,
   type AuthSubject,
   can,
+  canDiscount,
   canPayOut,
   type PermissionAction,
   ROLES,
@@ -99,14 +100,18 @@ import type { Gateway } from "./gateway";
  * threshold, and `can()` refuses that route on purpose; `canPayOut` is the only one that
  * resolves it. See `guard` below.
  *
- * **`discount.recorded` is deliberately ABSENT, and it is a FINDING, not an oversight.**
- * `02-F20` splits discounts at the org threshold and the matrix carries both cells
- * (`order.discount_within_threshold`, `order.discount_above_threshold`) — but nothing here can
- * tell them apart: there is no `canDiscount` predicate on `canPayOut`'s pattern, and no
- * threshold in `00 §7` layer 2 to feed one. Answering anyway would be answering without the
- * input that decides the question, which is the reasoning `permissions.ts` already applies to
- * `cash.paid_out`. So it fails closed and the predicate is owed to `domain` before any discount
- * surface can land.
+ * **`discount.recorded` is deliberately ABSENT, for a REASON THAT HAS CHANGED — read the new one
+ * (August 2026).** It used to be absent because the predicate did not exist: *"there is no
+ * `canDiscount` predicate on `canPayOut`'s pattern, and no threshold in `00 §7` layer 2 to feed
+ * one … the predicate is owed to `domain` before any discount surface can land"*. `canDiscount`
+ * now ships in `permissions.ts` and `DISCOUNT_APPROVAL_THRESHOLD_BPS` below feeds it, so that
+ * debt is CLOSED and `02-F61`'s *"specified and unbuilt"* no longer describes it.
+ *
+ * It stays out of this map for the structural reason that outlives the debt: Appendix A gives a
+ * discount **two** actions — `Discount ≤ X%` and `Discount > X%` — and which one an act is an
+ * instance of depends on its amount, which a `Record<event_type, action>` has no way to ask.
+ * `cash.paid_out` is absent for the neighbouring but distinct reason (one action, amount-dependent
+ * VERDICT). See `verdictFor`'s two branches, which is where both are resolved.
  */
 export const WRITE_ACTIONS: Readonly<Record<string, PermissionAction>> = {
   "order.created": "order.create",
@@ -143,6 +148,56 @@ export const WRITE_ACTIONS: Readonly<Record<string, PermissionAction>> = {
 
 /** The one event type whose verdict needs an amount, so it never reaches `WRITE_ACTIONS`. */
 const PAID_OUT = "cash.paid_out";
+
+/**
+ * The one event type whose ACTION needs an amount, so it never reaches `WRITE_ACTIONS` either.
+ * Neighbouring shape to `PAID_OUT`, different question — see the map's note and `verdictFor`.
+ */
+const DISCOUNT = "discount.recorded";
+
+/**
+ * The two figures and the one projection read that `can()` cannot reach, gathered so the three
+ * readings of `verdictFor` ask the identical question. It replaced a bare
+ * `paidOutApprovalThresholdPaisa: number` positional when the discount branch landed: a second
+ * loose number in the same slot is how a caller passes the right value to the wrong parameter.
+ */
+type MatrixLimits = {
+  /** `05-F19`. See `PAID_OUT_APPROVAL_THRESHOLD_PAISA`. */
+  readonly paidOutApprovalThresholdPaisa: number;
+  /** `02-F20` + Appendix A's `X%`. See `DISCOUNT_APPROVAL_THRESHOLD_BPS`. */
+  readonly discountApprovalThresholdBps: number | undefined;
+  /**
+   * `01-F30`'s `billed_total` for one order as THIS DEVICE's own fold projects it, or `null`
+   * when this device has no such open order. Never the payload's — Commandment 8.
+   */
+  readonly orderTotalPaisa: ((order_id: string) => number | null) | undefined;
+};
+
+/**
+ * `02-F20`'s org discount threshold, as integer basis points of the order's billed total
+ * (Appendix A writes `X%`, so the unit is a RATE and not paisa — `DEC-MONEY-005` puts rates in
+ * integer bps).
+ *
+ * **PINNED, not specified — and more thinly than `PAID_OUT_APPROVAL_THRESHOLD_PAISA` above, which
+ * is stated rather than smoothed over.** That pin reproduces a worked scenario: `05 §5` has a
+ * PKR 4,000 paid-out that must escalate, so Rs 2,000 is read off the corpus. **No FR anywhere
+ * supplies a discount percentage.** Appendix A writes `Discount ≤ X% (configurable)` and leaves
+ * `X` open; `02-F20` says only *"above the org threshold"*; R63 rules that the number is the
+ * owner's and **not the vendor's** — *"this should be a feature for the restaurant owner or ops
+ * lead to set not us"* — and its stated consequence is that `00 §7` layer 2 becomes MVP scope,
+ * carrying `PAID_OUT_APPROVAL_THRESHOLD_PAISA` there with it. So this constant is a placeholder
+ * for a configuration surface that does not exist, and it is the FIRST thing to delete when it
+ * does.
+ *
+ * 1000 bps = 10%. Chosen as the round number an owner would recognise, and the direction of the
+ * error is the one that costs least: too LOW makes a legitimate discount ask for a manager, which
+ * `02-F20` already gives a one-tap answer to; too HIGH lets a cashier give money away
+ * unsupervised, permanently (`01-F1`). A pin with no source should fail toward the manager.
+ *
+ * Exported and passed EXPLICITLY at the one call site, on `PAID_OUT_APPROVAL_THRESHOLD_PAISA`'s
+ * reasoning: a default living inside this module is the optional-means-skip hole one layer up.
+ */
+export const DISCOUNT_APPROVAL_THRESHOLD_BPS = 1000;
 
 /**
  * `05-F19`'s org threshold, in integer paisa (`00 §6`).
@@ -207,6 +262,41 @@ export type AuthorizedWritesDeps = {
   session: () => Session | null;
   /** `05-F19` — REQUIRED, never defaulted. See `PAID_OUT_APPROVAL_THRESHOLD_PAISA`. */
   paidOutApprovalThresholdPaisa: number;
+  /**
+   * `02-F20`'s two discount inputs, and **they are OPTIONAL where
+   * `paidOutApprovalThresholdPaisa` directly above is REQUIRED. That is not an inconsistency and
+   * the difference decides which way each one fails.**
+   *
+   * `canPayOut`'s threshold is required because `cash.paid_out` is `allow` for **every** role: a
+   * host that omitted it would be a host where nothing ever escalates, so absent-means-skip is a
+   * Rs 4,000 withdrawal walking past `05-F19`. That is `01-F60`'s optional-completeness hole and
+   * it is why that field cannot be optional.
+   *
+   * A discount's absent input fails the other way. `discount.recorded` has no `WRITE_ACTIONS` row,
+   * so `verdictFor` reaching the end DENIES it — and the branch below refuses explicitly when
+   * either input is missing rather than relying on that. **Absent therefore means `deny`, which is
+   * exactly the shipped behaviour before this feature existed**: a host that forgets these cannot
+   * authorize a discount it should have refused, it can only refuse one it should have allowed,
+   * and the cashier sees `02-F57`'s refusal on the counter rather than money leaving quietly.
+   *
+   * They are optional rather than required for the reason `OpenOrderSchema`'s four `.optional()`
+   * fields record one file over — a new required key on this bag is a compile error in a dozen
+   * oracle files (`24 §3` step 2) — and that trade is only acceptable **because** the failure
+   * direction is safe. It would not be acceptable one field up. `seams:check` Rule B watches both
+   * from here: an optional member of an options bag on a factory shipping code already calls is
+   * exactly its candidate shape, so a host that stops supplying them reddens `pnpm verify`.
+   */
+  discountApprovalThresholdBps?: number;
+  /**
+   * `01-F30`'s billed total for one order, from THIS DEVICE's own converged fold — the base
+   * `canDiscount` takes its percentage of. A function rather than a value because the projection
+   * moves with every line added: a total captured at construction would authorize a discount
+   * against a bill that has since doubled.
+   *
+   * `null` for an order this device has no row for, which `verdictFor` refuses. Supplied by the
+   * host from `gateway.openOrders()` so the number is the engine's own (`26 §8`).
+   */
+  orderTotalPaisa?: (order_id: string) => number | null;
 };
 
 const refused = (refusal: WriteRefusal): WriteRefusedError => {
@@ -300,6 +390,21 @@ const scopeOf = (store: Pick<DeviceStore, "identity">): AuthScope => ({
 });
 
 /**
+ * The deps that `can()` cannot reach, gathered for `verdictFor`. Reads the resolver off `deps`
+ * rather than calling it, so the projection is consulted at VERDICT time and not at construction.
+ */
+const limitsOf = (deps: AuthorizedWritesDeps): MatrixLimits => ({
+  paidOutApprovalThresholdPaisa: deps.paidOutApprovalThresholdPaisa,
+  discountApprovalThresholdBps: deps.discountApprovalThresholdBps,
+  // Read off `deps` at call time rather than captured, so the projection is consulted at VERDICT
+  // time and not at construction.
+  orderTotalPaisa:
+    deps.orderTotalPaisa === undefined
+      ? undefined
+      : (order_id) => deps.orderTotalPaisa?.(order_id) ?? null,
+});
+
+/**
  * The matrix's verdict on ONE event for ONE subject — the whole of this file's policy reading,
  * extracted so that two different subjects can be asked the identical question.
  *
@@ -315,7 +420,7 @@ const scopeOf = (store: Pick<DeviceStore, "identity">): AuthScope => ({
 const verdictFor = (
   subject: AuthSubject | null,
   scope: AuthScope,
-  paidOutApprovalThresholdPaisa: number,
+  limits: MatrixLimits,
   event_type: string,
   payload: Record<string, unknown>,
 ): WriteRefusal => {
@@ -346,7 +451,54 @@ const verdictFor = (
     if (typeof amount !== "number" || !Number.isInteger(amount) || amount < 0) return denied();
     const decision = canPayOut(subject, scope, {
       amount_paisa: amount,
-      threshold_paisa: paidOutApprovalThresholdPaisa,
+      threshold_paisa: limits.paidOutApprovalThresholdPaisa,
+    });
+    return decision.outcome === "allow" ? ALLOWED : from(decision);
+  }
+
+  /**
+   * `02-F20`'s discount, on `cash.paid_out`'s pattern directly above and for a DIFFERENT
+   * reason, which is why it is a second branch and not a row in `WRITE_ACTIONS`.
+   *
+   * The paid-out has one action whose verdict turns on an amount. A discount has **two
+   * actions** — Appendix A's `Discount ≤ X%` and `Discount > X%`, both shipping in
+   * `permissions.ts` — and the amount decides *which one the act is an instance of*. A
+   * `Record<event_type, action>` cannot express that, so `discount.recorded` had no row at all
+   * and hit the fail-closed default below: measured before this change, a discount was DENIED
+   * for every role including owner, which is `02-F61`'s *"specified and unbuilt"* living in the
+   * matrix rather than on the screen.
+   *
+   * **`canDiscount` holds the policy, not this file** (`18 §5`, and this module's own header:
+   * *"It holds no policy of its own"*). What lives here is the two inputs the matrix cannot
+   * reach: the org threshold, and the order's billed total.
+   *
+   * **The total is read from THIS DEVICE's own fold, never from the payload** (Commandment 8).
+   * A renderer that sent its own base could make any discount read as within-threshold by
+   * inflating one number, which is `02-F20`'s manager PIN deleted by a field. It is the same
+   * synchronous local-projection read `02-F49` and `DEC-MONEY-009` already make — no peer, no
+   * clock, no network — so a WAN outage cannot turn a refusal into an allow or the reverse.
+   *
+   * **An order this device cannot see is DENIED, not defaulted.** `01-F60`'s precedent: the
+   * answer that cannot be right is the permissive one. A missing order treated as a zero base
+   * would still be safe by accident (every positive discount escalates), but treated as
+   * anything else it is an unapproved discount in an append-only ledger — so it refuses in
+   * terms rather than relying on the arithmetic to refuse for it.
+   */
+  if (event_type === DISCOUNT) {
+    // Absent inputs DENY — see `AuthorizedWritesDeps.discountApprovalThresholdBps` for why that
+    // is safe here and would not be one field up.
+    const { discountApprovalThresholdBps: threshold_bps, orderTotalPaisa } = limits;
+    if (threshold_bps === undefined || orderTotalPaisa === undefined) return denied();
+    const amount = payload.amount_paisa;
+    if (typeof amount !== "number" || !Number.isInteger(amount) || amount < 0) return denied();
+    const order_id = payload.order_id;
+    if (typeof order_id !== "string") return denied();
+    const order_total_paisa = orderTotalPaisa(order_id);
+    if (order_total_paisa === null) return denied();
+    const decision = canDiscount(subject, scope, {
+      amount_paisa: amount,
+      order_total_paisa,
+      threshold_bps,
     });
     return decision.outcome === "allow" ? ALLOWED : from(decision);
   }
@@ -384,7 +536,7 @@ export const authorizeWrites = (deps: AuthorizedWritesDeps): AuthorizedWrites =>
     const verdict = verdictFor(
       subjectOf(deps),
       scopeOf(deps.store),
-      deps.paidOutApprovalThresholdPaisa,
+      limitsOf(deps),
       event_type,
       payload,
     );
@@ -544,11 +696,11 @@ export type AuthorizedEscalationDeps = AuthorizedWritesDeps & {
 
 export const authorizeEscalation = (deps: AuthorizedEscalationDeps): AuthorizedEscalation => {
   const scope = (): AuthScope => scopeOf(deps.store);
-  const threshold = deps.paidOutApprovalThresholdPaisa;
+  const limits = limitsOf(deps);
 
   /** What the matrix says about the SIGNED-IN session for this request. */
   const requesterVerdict = (type: string, payload: Record<string, unknown>): WriteRefusal =>
-    verdictFor(subjectOf(deps), scope(), threshold, type, payload);
+    verdictFor(subjectOf(deps), scope(), limits, type, payload);
 
   /**
    * `02-F20`'s four refusals, decided ONCE for both routes out of an escalation.
@@ -628,7 +780,7 @@ export const authorizeEscalation = (deps: AuthorizedEscalationDeps): AuthorizedE
       const approverVerdict = verdictFor(
         approver,
         scope(),
-        threshold,
+        limits,
         parsed.data.type,
         parsed.data.payload,
       );

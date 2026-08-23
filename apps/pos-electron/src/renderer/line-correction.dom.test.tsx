@@ -136,8 +136,18 @@ const ORDER: OpenOrder = {
       modifiers: [],
       removals: [],
       note: null,
+      // `02-F20`'s corrective needs the line's own money; the engine projects it (`26 §8`).
+      billed_paisa: 45_000,
     },
-    { line_id: "line-coke", name: "Coke", quantity: 2, modifiers: [], removals: [], note: null },
+    {
+      line_id: "line-coke",
+      name: "Coke",
+      quantity: 2,
+      modifiers: [],
+      removals: [],
+      note: null,
+      billed_paisa: 45_000,
+    },
   ],
 };
 

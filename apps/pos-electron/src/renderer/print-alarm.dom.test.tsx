@@ -67,7 +67,15 @@ const OPEN_ORDER: OpenOrder = {
   total_paisa: 45_000,
   paid_paisa: 0,
   lines: [
-    { line_id: "l1", name: "Chicken Karahi", quantity: 2, modifiers: [], removals: [], note: null },
+    {
+      line_id: "l1",
+      name: "Chicken Karahi",
+      quantity: 2,
+      modifiers: [],
+      removals: [],
+      note: null,
+      billed_paisa: 45_000,
+    },
   ],
 };
 

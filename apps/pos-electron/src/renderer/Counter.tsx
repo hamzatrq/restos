@@ -30,6 +30,11 @@ import type {
   RosterMember,
 } from "../shared/ipc";
 import { CashSurface, MeSurface, openShiftOf } from "./CashSurfaces";
+import {
+  CORRECTION_EVENT_TYPES,
+  LineCorrection,
+  type LineCorrectionSubmit,
+} from "./LineCorrection";
 import { ManagerApproval } from "./ManagerApproval";
 import { isCloudInbox, OrdersSurface } from "./OrdersSurface";
 
@@ -489,6 +494,13 @@ export const Counter = () => {
    * it. `null` is the ordinary state — a pad is raised only after MAIN has said the matrix
    * escalates this act, never because a screen guessed that it might.
    */
+  /**
+   * `02-F20`/`02-F61` — is the correction surface open? Renderer state only, appending nothing:
+   * choosing to look at a screen is not a ledger fact (`02-F51` (b) makes the identical argument
+   * for which order this terminal is on).
+   */
+  const [correcting, setCorrecting] = useState(false);
+
   const [pending, setPending] = useState<{ req: AppendRequest; offer: EscalationOffer } | null>(
     null,
   );
@@ -1179,6 +1191,67 @@ export const Counter = () => {
         refs: [],
       }),
     );
+  };
+
+  /**
+   * `C26` / `02-F20` / `02-F61` — **VOID, COMP AND DISCOUNT A LINE.** The producer for three of
+   * `01 §4`'s six correctives, which had payload schemas, matrix rows, an approval path and
+   * **nothing anywhere that constructed one**.
+   *
+   * **`escalatableWrite` and not `write`, and that is the whole difference from `removeLine`
+   * above.** All three carry an `escalate` cell for a cashier — `order.void_after_kot`,
+   * `order.comp_item`, `order.discount_above_threshold` — so the plain append is REFUSED and
+   * `02-F20`'s local manager PIN is what completes it. `02-F49` requires exactly that: *"the
+   * refusal must hand the operator the escalation for the SAME line in the same gesture"*, and
+   * the comment on `removeLine` that called this path *"owed with the surface that offers a
+   * void"* is what this closes.
+   *
+   * ── `01-F83`'S ATTEMPT KEY IS MINTED HERE, AND *HERE* IS LOAD-BEARING ────────────────────────
+   *
+   * *"Minted at the UI, at `02-F20`'s approval path, before the append, and reused by a retry of
+   * the same act."* One `newId()` per act, inside the request object — and `escalatableWrite`
+   * stores that OBJECT as `pending.req`, which `approve` re-sends verbatim. So the cashier's
+   * refused attempt and the manager-approved retry carry **one key**, which is the entire point:
+   * `01-F8`'s event-id dedupe already covers transport duplicates, and the case this key exists
+   * for is a **double-tapped approval** — two genuine events with two envelope ids that must sum
+   * once. Minting inside `approve`, or deriving it from the envelope, breaks that in a way no
+   * test of a single append can see, and `01-F1` makes a double-subtracted void permanent.
+   *
+   * **The field is `adjustment_attempt_id` and never `settlement_attempt_id`.** They share one
+   * uniqueness space and carry two names deliberately: the name is what stops a fold summing both
+   * sides of `01-F30`'s equation into one Σ — settlements on the left, correctives on the right.
+   *
+   * **`approver_user_id: null` at emit, and `null` is a value here rather than a hedge.**
+   * `registry.ts` makes it required-and-nullable: `null` means *no approval was involved*, which
+   * is the truth for a manager acting unsupervised, and `authorize.ts`'s escalation path merges
+   * the real approver into the payload when a PIN closes the gap (`payload: { ...payload,
+   * approver_user_id }`). A screen that guessed an approver would be asserting an approval nobody
+   * gave.
+   *
+   * **The line rides `refs`, not the payload** — `registry.ts` declares no `line_id` on these
+   * three on purpose (*"a payload line key would be a second place to say what an act touches and
+   * two can disagree"*) and `00 §6` puts soft references on the envelope. `main/line-void.ts`
+   * reads `refs` to build the void's line exit and refuses anything that does not name exactly
+   * one line, which is what keeps `DEC-MONEY-010` (2)'s double-count unreachable.
+   *
+   * **No amount is computed on this side.** `amount_paisa` is the ENGINE's own `billed_paisa` for
+   * that line, carried across the seam (`26 §8`); the one number this surface originates is a
+   * discount the operator typed, which is an intent and not a derivation.
+   */
+  const correctLine = (correction: LineCorrectionSubmit) => {
+    if (current === undefined) return;
+    setCorrecting(false);
+    escalatableWrite({
+      type: CORRECTION_EVENT_TYPES[correction.act] as string,
+      payload: {
+        order_id: current.order_id,
+        amount_paisa: correction.amount_paisa,
+        reason: correction.reason,
+        approver_user_id: null,
+        adjustment_attempt_id: newId(),
+      },
+      refs: [correction.line_id],
+    });
   };
 
   /**
@@ -2087,6 +2160,23 @@ export const Counter = () => {
               setApprovalRefusal(null);
             }}
           />
+        ) : correcting && current !== undefined ? (
+          /*
+            `C26`/`02-F20`/`02-F61` — the correction surface takes the whole work area, on
+            `ManagerApproval`'s precedent directly above and for its reason: a 0–5×-a-shift act
+            with three picks does not fit beside the grid, and `27-F2` forbids reaching a primary
+            action by scrolling.
+
+            **AFTER `pending`, deliberately.** A correction that has been refused and is waiting on
+            a manager's PIN must show the PAD, not the surface that raised it — `correctLine`
+            closes this arm as it fires, so the two can never both be up, and the ordering is what
+            makes that true even if a later edit forgets.
+          */
+          <LineCorrection
+            lines={current.lines}
+            onSubmit={correctLine}
+            onCancel={() => setCorrecting(false)}
+          />
         ) : activeTab === "orders" ? (
           /*
           `C19`/`C31`. It takes the whole `orders` read — the same array the Order tab draws
@@ -2633,7 +2723,22 @@ export const Counter = () => {
               `QuantityItemLine`'s own note row, so the operator sees where it went (`21 §5`:
               icons + numbers dominant, minimal words; `00 §5.6`: memorized position).
             */}
-              {lastLine === undefined || quickTags.length === 0 ? null : (
+              {/*
+              ⚠ **THE CONDITION CHANGED IN AUGUST 2026 AND THE OLD ONE IS WORTH READING.** It was
+              `lastLine === undefined || quickTags.length === 0`, i.e. the whole row was absent
+              unless the org had configured tags — and the note below explains that absence for
+              TAGS, which is still exactly right: an inert tag tile is `27-F5`'s failure mode
+              wearing the other costume.
+
+              `C26`'s correction control is not inert and is not org-configured, so it hangs on
+              `lastLine` alone. The row is folded rather than given a box of its own **for a
+              measured reason**: this column's height is what the panel floor rests on
+              (`window-options.ts`, `PANEL_FLOOR_MM`), a second `counter`-posture row costs ~76 dp
+              of the tightest vertical budget in the product, and `flexWrap` means one more tile in
+              an existing row costs nothing in every state a shift actually spends its time in.
+              The one state that gains a row is *an order with lines and no tags configured*.
+            */}
+              {lastLine === undefined ? null : (
                 <div
                   style={{
                     display: "flex",
@@ -2644,6 +2749,21 @@ export const Counter = () => {
                     paddingLeft: space["space-6"],
                   }}
                 >
+                  {/*
+                    `C26` — the way IN to void, comp and discount. `27-F5`: present whenever there
+                    is a dish to correct, never disabled and never moved. It is deliberately NOT a
+                    second per-row control on `Cart`: `27-F9` keeps a destructive target away from
+                    a high-frequency one on a surface a wet hand touches, and the row's existing
+                    `NO` is `02-F8`'s pre-confirm removal — a DIFFERENT act with a different
+                    permission cell. Two destructive controls one thumb apart, one of which needs a
+                    manager, is the confusion that FR exists to prevent.
+                  */}
+                  <Tile
+                    posture="counter"
+                    label="Correct a line"
+                    destructive
+                    onPress={() => setCorrecting(true)}
+                  />
                   {quickTags.map((tag) => (
                     <Tile
                       key={tag}

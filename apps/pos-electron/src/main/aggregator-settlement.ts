@@ -54,7 +54,9 @@
  */
 
 import { newId } from "@restos/domain";
-import { billedEffectiveFromJsonLines, type DeviceStore } from "@restos/sync-client";
+import { billedTotalPaisa, type DeviceStore } from "@restos/sync-client";
+
+import { deviceTaxCell } from "./tax-posture";
 
 /**
  * `02-F42`'s aggregator channel, named once.
@@ -177,7 +179,11 @@ export const createAggregatorSettlement = (
     // `01-F30`'s billed total, through the ENGINE's own derivation — never re-summed here, so a
     // quantity or a per-line price cannot be dropped on the way (`01-F53` snapshots the price into
     // `order.line_added`, and this reads the fold's projection of those cells).
-    const billed = billedEffectiveFromJsonLines(order.json_lines);
+    // `01-F82`/`16-F31` (R54): the receivable is what the aggregator owes, tax included — the
+    // same number the bill states. `16-F2`'s illustrative matrix taxes a foodpanda order *per
+    // aggregator invoicing*, which is an ORDER-channel cell `16-F27`'s grid can express and the
+    // v0 seed cannot (`tax-posture.ts` names that limit); today one cell serves every channel.
+    const billed = billedTotalPaisa(order.json_lines, deviceTaxCell());
     // **ONE comparison carrying TWO facts, and it is one line rather than two on purpose.**
     //
     // 1. `01-F31` — **entering twice does not bill twice.** The trigger here is a ROBOT on the

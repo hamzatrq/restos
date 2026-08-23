@@ -90,6 +90,10 @@ const order = (total: number) => ({
       modifiers: [],
       removals: [],
       note: null,
+      // Required since `02-F20`'s corrective surface landed: `void.recorded`/`comp.recorded`
+      // carry `amount_paisa`, and the only honest source for it is the ENGINE's own billed value
+      // for the line. It is money, so this file's own grammar governs how it is declared.
+      billed_paisa: 22_500,
     },
   ],
 });

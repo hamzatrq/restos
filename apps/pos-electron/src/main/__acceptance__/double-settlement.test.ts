@@ -601,7 +601,14 @@ describe("§G — main/index.ts puts the guard between the renderer and the ledg
     // the outermost name would have gone green on a chain that dropped this guard entirely, so the
     // whole chain is pinned instead — every link, in order — which is strictly stronger than what
     // stood here. The negative control is unchanged and still the point.
-    expect(mainSrc).toMatch(/authorizeWrites\(\{\s*writes:\s*tenderGuarded,/);
+    // ⚠ **THE INNER NAME MOVED IN AUGUST 2026 AND THE ASSERTION MOVED WITH IT.** The chain
+    // gained `voidExitsLine` between the matrix and the amount guard (`02-F20`'s post-confirm
+    // void appends the line's `01 §4` exit as part of one authorized act, so it must sit
+    // INSIDE commandment 8 and OUTSIDE the two guards that refuse by throwing). Both links
+    // are pinned rather than just the new outermost one — pinning the outermost alone is what
+    // this test's own comment above says goes green on a chain that dropped a middle link.
+    expect(mainSrc).toMatch(/voidExitsLine\(\{\s*writes:\s*tenderGuarded,\s*store\s*\}\)/);
+    expect(mainSrc).toMatch(/authorizeWrites\(\{\s*writes:\s*voidGuarded,/);
     expect(mainSrc).toMatch(/refuseZeroTender\(\{\s*writes:\s*settlementGuarded\s*\}\)/);
     expect(mainSrc).not.toMatch(/authorizeWrites\(\{\s*writes:\s*gateway,/);
     expect(mainSrc).not.toMatch(/refuseZeroTender\(\{\s*writes:\s*gateway\s*\}\)/);

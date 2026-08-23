@@ -271,6 +271,42 @@ export const OpenOrderSchema = z.object({
       modifiers: z.array(z.string()),
       removals: z.array(z.string()),
       note: z.string().nullable(),
+      /**
+       * `02-F20`'s two money-carrying correctives — **the billed value of THIS line**, integer
+       * paisa, as `packages/sync-client`'s own `billedLinePaisa` derives it from the projected
+       * cell. `void.recorded` and `comp.recorded` both require `amount_paisa`, `01-F30`
+       * conserves against it, and until this field existed there was no honest source for the
+       * number on this side of the seam: `OpenOrder.lines` carried `quantity` and no price at
+       * all, so a surface offering a void could only have guessed or done the fold's
+       * arithmetic a second time (`26 §8` forbids the second, `01-F1` makes the first
+       * permanent).
+       *
+       * **Never re-derived here or in the renderer.** It is passed through from the engine for
+       * the same reason `total_paisa` above is, and `main/gateway.ts` says so in its own words.
+       *
+       * **REQUIRED, where the four order-level fields below are `.optional()` — and the rail is
+       * what decides that, not a preference.** `__acceptance__/ipc-money-seam.test.ts` F3 holds
+       * every money-named field at this seam to one closed grammar,
+       * `z.number().int()[.nonnegative()][.nullable()]`, and `.optional()` is outside it: an
+       * optional money field is a number a host can decline to say while the screen goes on
+       * treating its absence as a value. Widening that grammar to spare a fixture edit would be
+       * trading a money rail for convenience, so the fixtures moved instead.
+       */
+      billed_paisa: z.number().int().nonnegative(),
+      /**
+       * The line's projected workflow states (`01 §4`), verbatim from the fold — an ARRAY
+       * because `merge.ts` renders a CONTESTED line as its full terminal MVR set (≥ 2 members)
+       * and `01-F31`'s rule is that *a fold never picks a winner*. Collapsing it to one string
+       * here would launder a disputed line into a decided one on the way to a screen, which is
+       * the move `line-advance.ts` refuses by name.
+       *
+       * The counter reads it to know whether a line can still be voided at all: `01-F35` makes
+       * `served`/`delivered`/`voided`/`cancelled` terminal and `LEGAL_NEXT` maps them to `[]`,
+       * so a void of a terminal line is an edge the fold would record as
+       * `illegal_transition` — permanently, under `01-F1`. `.optional()` for the reason above;
+       * an absent value disables the control rather than enabling a guess.
+       */
+      states: z.array(z.string()).optional(),
     }),
   ),
   /**

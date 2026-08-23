@@ -14,17 +14,39 @@
 //   16-F1      "Tax is off by default. Enabling any posture or the add-on is an explicit org
 //              action recorded as `config.changed` (audited, 01-F5)."
 //   16-F2      "Posture matrix per channel × payment method: `none | inclusive | exclusive`, each
-//              referencing a rate from a rule pack. Rates are never free-typed by orgs."
+//              ~~referencing a rate from a rule pack. Rates are never free-typed by orgs.~~"
+//              ⚠ **AMENDED (R55, August 2026): the SHAPE stands; its SOURCE does not.** The three
+//              posture words are untouched — every assertion in §A, §B and §G rests on those and
+//              on nothing that moved — and a cell's rate is now the owner's (`16-F27`).
 //   16-F3      "Internal true numbers always complete: every order records full value, channel,
 //              and payment method regardless of posture."
-//   16-F4      "All rates and rules live in vendor-maintained, versioned **rule packs** with
-//              effective dates … All rates/rules are configuration; rule-pack updates are
-//              `config.changed` events and **never rewrite past invoices**."
-//   16-F5      "**Tax is computed per line at settlement and snapshotted on the order** (01-F18
-//              discipline — never re-derived); integer paisas; rounding rules per authority spec,
-//              fixed at build-time verification."
-//   16-F6      "Split payments across differently-rated methods: tax apportioned by payment share
-//              per method. **Provisional rule pending authority guidance (§9.1)**."
+//   16-F4      ~~"All rates and rules live in vendor-maintained, versioned **rule packs** with
+//              effective dates …"~~ **STRUCK BY NAME by `16-F27` (R55, August 2026).** Its
+//              surviving clause — *"never rewrite past invoices"* — moved to `16-F29`, and it is
+//              a property of a snapshot being a plain VALUE, which §F still pins.
+//   16-F27     "**The posture matrix is ORG configuration and the owner types the rates —
+//              `16-F4` is overruled by name.** … A cell's rate stops coming from a
+//              vendor-maintained rule pack and becomes layer-2 org configuration (`00 §7`)."
+//   16-F30     "Where a certified adapter is enabled, its rule pack is authoritative and an
+//              org-typed rate cannot override it." — the ONLY place a pack survives, and
+//              `16-F34` puts that adapter **post-pilot**.
+//   16-F5      "**Tax is computed per line ~~at settlement~~ and snapshotted on the order**
+//              (01-F18 discipline — never re-derived); integer paisas; rounding rules per
+//              authority spec, fixed at build-time verification." ⚠ **The TRIGGER is superseded
+//              by `16-F32` (R58): tax is computed when the tender channel is chosen, before the
+//              unpaid bill prints, and re-computed on every re-choice, with the snapshot taken at
+//              the settling act. The snapshot DISCIPLINE is unchanged and is the half this file
+//              asserts on.** ⚠ *"rounding rules per authority spec"* binds the COMPLIANT path
+//              only; the posture engine follows `00 §6`'s helpers (`16-F31`), which is what §D
+//              already asserts and is now the FR's own words rather than this file's reading.
+//   16-F6      ~~"Split payments across differently-rated methods: tax apportioned by payment
+//              share per method. Provisional rule pending authority guidance (§9.1)."~~
+//              **SUPERSEDED by `16-F35` (R59, August 2026): differently-rated tenders are two
+//              BILLS, not one apportionment** — so within one bill there is one tender channel,
+//              therefore one cell, therefore nothing to apportion. See §H.
+//   16-F31     "**Tax is INSIDE `billed_total` (R54), and a receipt's *Total* row is that
+//              number.**" — pinned in `tax-inside-billed-total.test.ts`, not here.
+//   01-F82     the kernel half of R54: `billed_total` IS `taxSnapshot`'s `total_paisa`.
 //   01-F18     a snapshotted figure is never re-derived.
 //   01-F53     "a line's `unit_price_paisa` is captured **into the event at the moment the line is
 //              added** and is never re-read from the catalog."
@@ -52,8 +74,12 @@
 //     added to the captured line prices, under `inclusive` it is already inside them. If the
 //     founder means something else by either word, §G is wrong and that is a finding for this
 //     test-owning session, cited by FR — never an edit.
-//  3. **`16-F6`'s SPLIT APPORTIONMENT IS PROVISIONAL AND CIRCULAR, so §H is a GATE, not a rule.**
-//     See §H's own header for the circularity, which the corpus does not resolve.
+//  ~~3. **`16-F6`'s SPLIT APPORTIONMENT IS PROVISIONAL AND CIRCULAR, so §H is a GATE, not a
+//     rule.**~~ **CLOSED by `16-F35` (founder ruling R59, August 2026): there is nothing to
+//     apportion.** §H's assertions are unchanged and every one of them still holds — what changed
+//     is what they MEAN. They were a tripwire keeping an open question open; they are now a pin on
+//     a decided one, and the thing they refuse (a per-method rate parameter) went from *"not yet
+//     ruled"* to *"ruled against"*. See §H's own header.
 //  ~~4. **WHETHER `01-F30`'s BILLED TOTAL INCLUDES TAX.**~~ **RULED — `01-F82` (founder ruling R54,
 //     August 2026): it DOES.** `billed_total` is `taxSnapshot(...).total_paisa`, under all three
 //     postures. §I's arithmetic is unchanged and still green; what expired is its PREMISE that
@@ -101,12 +127,18 @@ type TaxLineInput = {
 };
 
 type TaxSnapshotInput = {
-  /** `16-F2`, already resolved for this order's (channel, payment method) by the caller. */
+  /** `16-F2`, already resolved for this order's cell by the caller. */
   readonly posture: TaxPosture;
-  /** `00 §6` integer basis points, from a `16-F4` rule pack. 1600 = 16%. */
+  /**
+   * `00 §6` integer basis points. 1600 = 16%.
+   *
+   * ⚠ **`rule_pack_version` STOOD BESIDE THIS AND IS GONE (`16-F27`, R55).** `16-F4` is struck by
+   * name: the owner types the rate and there is no pack to version, so requiring one refused to
+   * build a snapshot for an artifact the ruling deleted. `16-F30` returns pack authority for a
+   * certified adapter, which `16-F34` puts post-pilot — so the field returns with a producer or
+   * not at all.
+   */
   readonly rate_bps: number;
-  /** `16-F4`: packs are versioned and effective-dated; the snapshot records which one priced it. */
-  readonly rule_pack_version: string;
   readonly lines: readonly TaxLineInput[];
 };
 
@@ -122,7 +154,6 @@ type TaxLineSnapshot = {
 type TaxSnapshot = {
   readonly posture: TaxPosture;
   readonly rate_bps: number;
-  readonly rule_pack_version: string;
   readonly lines: readonly TaxLineSnapshot[];
   readonly subtotal_paisa: number;
   readonly tax_total_paisa: number;
@@ -193,12 +224,9 @@ const SALE_TAX_TOTAL = 6_684;
 /** The same lines at 16 % — §D's control, and 2160 + 720 + 3600 + 0 by hand. */
 const SALE_TAX_AT_1600 = 6_480;
 
-const PACK = "pk-hypothetical-2026.07";
-
 const exclusiveSale = (over: Partial<TaxSnapshotInput> = {}): TaxSnapshotInput => ({
   posture: "exclusive",
   rate_bps: SALE_RATE_BPS,
-  rule_pack_version: PACK,
   lines: SALE_LINES,
   ...over,
 });
@@ -225,7 +253,6 @@ const TEA_TAX_EXCLUSIVE = 2_160;
 const inclusiveTea = (over: Partial<TaxSnapshotInput> = {}): TaxSnapshotInput => ({
   posture: "inclusive",
   rate_bps: 1_600,
-  rule_pack_version: PACK,
   lines: TEA_LINES,
   ...over,
 });
@@ -417,7 +444,6 @@ describe("§D 00 §6 / DEC-MONEY-005 — exclusive tax IS `applyRateBps`, never 
       const snap = taxOf({
         posture: "exclusive",
         rate_bps: bps,
-        rule_pack_version: PACK,
         lines: [{ line_id: "l", billed_paisa: base }],
       });
       expect(
@@ -503,21 +529,26 @@ describe("§E 01-F34 — no ordering metadata, no clock, no hidden state", () =>
     expect(taxOf(exclusiveSale())).toEqual(taxOf(exclusiveSale()));
   });
 
-  it("16-F4: a pack computed BETWEEN two identical calls does not change the first answer", () => {
-    // MUTANT THIS KILLS: a module-level "current rule pack" cache. `16-F4` says rule-pack updates
-    // "never rewrite past invoices"; a stateful rate makes the second call on the same inputs a
-    // different number, which under `01-F1` is a wrong figure frozen for ever.
+  it("16-F29: a RATE computed BETWEEN two identical calls does not change the first answer", () => {
+    // MUTANT THIS KILLS: a module-level "current rate" cache. ⚠ **The FR id moved and the
+    // property did not.** This cited `16-F4`'s *"rule-pack updates never rewrite past invoices"*;
+    // `16-F27` struck that FR and `16-F29` restates the surviving clause on its new owner —
+    // *"a rate change is a `config.changed` event with an effective date and **never rewrites a
+    // past order**"*. A stateful rate makes the second call on the same inputs a different
+    // number, which under `01-F1` is a wrong figure frozen for ever, whoever typed the rate.
     const first = taxOf(exclusiveSale());
-    taxOf(exclusiveSale({ rate_bps: 800, rule_pack_version: "pk-later-pack" }));
+    taxOf(exclusiveSale({ rate_bps: 800 }));
     const third = taxOf(exclusiveSale());
     expect(third).toEqual(first);
   });
 
   it("01-F45: the snapshot does not read a clock — a moved host clock moves nothing", () => {
     // Law 2: durations need a CONSISTENT clock and a fold applies no offset of its own. A tax
-    // function resolving its own rate by `Date.now()` against `16-F4`'s effective dates would
-    // break both laws at once; the effective-date resolution is the CALLER's, and what arrives
-    // here is an already-chosen `rate_bps` plus the pack version that chose it.
+    // function resolving its own rate by `Date.now()` against `16-F29`'s effective dates would
+    // break both laws at once — and `16-F29` sharpens which clock it would have to be wrong
+    // about: the rate version *"resolves from the order's creation time in branch time, never
+    // from the settlement clock"*. The resolution is the CALLER's and what arrives here is an
+    // already-chosen `rate_bps`.
     const realNow = Date.now;
     const baseline = taxOf(exclusiveSale());
     try {
@@ -536,24 +567,33 @@ describe("§E 01-F34 — no ordering metadata, no clock, no hidden state", () =>
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 describe("§F 16-F5/01-F18 — the snapshot carries what priced it, so nothing re-derives it", () => {
-  it("16-F4: the rule-pack version and the rate are ECHOED onto the snapshot", () => {
-    // Without these two the snapshot is a bare number and `16-F4`'s "never rewrite past invoices"
-    // is unverifiable: nothing on the order says which pack produced it, so a later reader has no
-    // way to tell a correct old figure from a wrong new one.
+  it("16-F27/16-F5: what PRICED the order is ECHOED onto the snapshot", () => {
+    // ⚠ **THIS TEST ASSERTED `rule_pack_version` UNTIL `16-F27` (R55, August 2026) STRUCK
+    // `16-F4` BY NAME.** Its reason — *"nothing on the order says which pack produced it, so a
+    // later reader has no way to tell a correct old figure from a wrong new one"* — survives
+    // whole and lands on the two fields that are left: under `16-F27` what priced the order is
+    // the CELL (posture + rate), because the owner typed it and there is no pack. `16-F5`'s
+    // snapshot discipline is what makes echoing them load-bearing at all.
     const snap = taxOf(exclusiveSale());
-    expect(snap.rule_pack_version).toBe(PACK);
     expect(snap.rate_bps).toBe(SALE_RATE_BPS);
     expect(snap.posture).toBe("exclusive");
   });
 
-  it("16-F4: a missing rule-pack version is refused — anchored by a control", () => {
-    expect(taxOf(exclusiveSale()).rule_pack_version).toBe(PACK);
-
-    const { rule_pack_version: _absent, ...withoutPack } = exclusiveSale();
+  it("16-F27: a snapshot is buildable with NO rule pack — 16-F4's requirement is retired", () => {
+    // ⚠ **THE ASSERTION THIS REPLACES WAS GREEN AND IT DEFENDED AN OVERRULED RULE.** It read
+    // *"a missing rule-pack version is refused"*, against an implementation that threw a
+    // `RangeError` citing `16-F4`. Under `16-F27` the owner types the rate and **no pack exists**,
+    // so the shipped guard refused to build a snapshot for an artifact the ruling had deleted —
+    // which is precisely what blocked tax reaching a bill. `16-F30` keeps packs for the certified
+    // adapter and `16-F34` puts that post-pilot, so the field returns with a producer or not at
+    // all. Inverted rather than deleted, because the direction is the whole finding.
+    const snap = taxOf(exclusiveSale());
+    expect(snap.tax_total_paisa).toBe(SALE_TAX_TOTAL);
     expect(
-      () => taxOf(withoutPack as TaxSnapshotInput),
-      "a snapshot with no pack version cannot be defended to an auditor (16-F4)",
-    ).toThrow();
+      Object.keys(snap),
+      "the snapshot still carries a rule-pack field — 16-F4 is struck and 16-F30 says a pack " +
+        "returns only with a certified adapter, which 16-F34 puts post-pilot",
+    ).not.toContain("rule_pack_version");
   });
 
   it("01-F53: the billed figure handed in is the figure taxed — never adjusted", () => {
@@ -564,12 +604,13 @@ describe("§F 16-F5/01-F18 — the snapshot carries what priced it, so nothing r
     expect(snap.subtotal_paisa).toBe(SALE_SUBTOTAL);
   });
 
-  it("a rate change is a NEW call with a NEW pack — the old snapshot is a value, not a view", () => {
+  it("16-F29: a rate change is a NEW call — the old snapshot is a value, not a view", () => {
     // "A tax rate that changes mid-day must not retroactively alter an open order." The property
     // that makes that true is that a snapshot is a plain value: holding one and computing another
-    // cannot move it.
+    // cannot move it. `16-F29` is where that clause lives now (it was `16-F4`'s, struck by R55),
+    // and it is the same property whether the vendor shipped the rate or the owner typed it.
     const morning = taxOf(exclusiveSale());
-    const afternoon = taxOf(exclusiveSale({ rate_bps: 800, rule_pack_version: "pk-afternoon" }));
+    const afternoon = taxOf(exclusiveSale({ rate_bps: 800 }));
     expect(afternoon.tax_total_paisa).not.toBe(morning.tax_total_paisa);
     expect(morning.tax_total_paisa).toBe(SALE_TAX_TOTAL);
     expect(morning.rate_bps).toBe(SALE_RATE_BPS);
@@ -634,7 +675,7 @@ describe("§G 16-F2 — `exclusive` adds, `inclusive` extracts, and both totals 
     // an implementation that ignores `posture`; every other assertion in §G would survive it if
     // each posture were only ever exercised on its own fixture.
     const at = (posture: TaxPosture): TaxSnapshot =>
-      taxOf({ posture, rate_bps: 1_600, rule_pack_version: PACK, lines: TEA_LINES });
+      taxOf({ posture, rate_bps: 1_600, lines: TEA_LINES });
     expect(at("exclusive").tax_total_paisa).toBe(TEA_TAX_EXCLUSIVE);
     expect(at("inclusive").tax_total_paisa).toBe(TEA_TAX_TOTAL);
     expect(at("none").tax_total_paisa).toBe(0);
@@ -655,26 +696,39 @@ describe("§G 16-F2 — `exclusive` adds, `inclusive` extracts, and both totals 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-// §H — 16-F6: THE SPLIT-PAYMENT GATE. A tripwire, not a rule.
+// §H — 16-F35: ONE BILL, ONE TENDER CHANNEL, ONE CELL. A pin on a decided question.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * `16-F6` is the one FR in this file's scope that the corpus itself marks **provisional**: "tax
- * apportioned by payment share per method. Provisional rule pending authority guidance (§9.1)",
- * and §9.1 names the fallback ("highest-rate-applies") without choosing between them.
+ * ⚠ **THIS SECTION WAS A TRIPWIRE HOLDING AN OPEN QUESTION OPEN, AND THE QUESTION IS CLOSED
+ * (`16-F35`, founder ruling R59, August 2026).** Every assertion below is unchanged and every one
+ * of them still holds; what expired is the REASON, and leaving that reason in place is how a green
+ * test comes to defend an overruled rule.
  *
- * ⚠ **AND UNDER `exclusive` POSTURE THE STATED RULE IS CIRCULAR, which no FR notices.** Apportion
- * tax by payment share ⇒ the tax depends on the split; add tax on top of the bill ⇒ the amount to
- * be split depends on the tax. Rs 1,000 across cash @16 % and card @8 % has no fixed point until
- * someone rules what the shares are shares OF. Under `inclusive` there is no circularity, because
- * the total is fixed before the split.
+ * **What it used to say, kept because the circularity is why the ruling went the way it did.**
+ * `16-F6` apportioned tax by payment share across differently-rated methods and the corpus marked
+ * its own rule *"provisional pending authority guidance (§9.1)"*. Under `exclusive` that rule is
+ * **circular**, which no FR noticed: apportion tax by payment share ⇒ the tax depends on the
+ * split; add tax on top of the bill ⇒ the amount to be split depends on the tax. Rs 1,000 across
+ * cash @16 % and card @8 % has no fixed point until someone rules what the shares are shares OF.
  *
- * So this section asserts ONE thing: `taxSnapshot` takes a single resolved posture and a single
- * rate, and there is **no optional per-method parameter** that could quietly grow an apportionment
- * nobody ruled on. It is the `DEC-MONEY-010` idiom — *an optional zero term is a term with no
- * producer wearing a signature that says it has one*.
+ * **What is ruled.** `16-F35` supersedes `16-F6`: *"differently-rated tenders are two BILLS, not
+ * one apportionment"*. R59 divides a bill into sub-bills, each with its own tender channel, its
+ * own tax and its own total — and `01-F86` makes a sub-bill `02-F5`'s **child order**, so it
+ * settles with its own `payment.recorded`, resolves its own cell and computes its own tax. Within
+ * one bill there is therefore one tender channel, therefore one cell, therefore **nothing to
+ * apportion**. `02-F13`'s split across methods survives as the case where every part lands in the
+ * SAME cell, which this signature already expresses exactly.
+ *
+ * So the absence of a per-method parameter went from *"not yet ruled"* to *"ruled against"*, and
+ * the older reason to refuse one is unchanged and still binding: `DEC-MONEY-010`'s idiom — *an
+ * optional zero term is a term with no producer wearing a signature that says it has one*.
+ *
+ * **What `16-F35` does NOT close, stated so this section is not read as more than it is:** R59
+ * introduces no seat concept and **defers equal-split**, because equal-splitting across differing
+ * tax rates needs a rule nobody has written. Nothing here may be read as having one.
  */
-describe("§H 16-F6 — the split-payment apportionment is NOT decided, and is not smuggled in", () => {
+describe("§H 16-F35 — one bill has ONE cell; no per-method apportionment is smuggled in", () => {
   it("an extra per-method key changes NOTHING — the shape refuses to grow quietly", () => {
     const base = exclusiveSale();
     const withSplit = {
@@ -688,9 +742,13 @@ describe("§H 16-F6 — the split-payment apportionment is NOT decided, and is n
   });
 
   it("one posture and one rate produce one answer — 02-F13's split does not reach this layer", () => {
-    // ⚠ WHEN THIS GOES RED, READ `16-F6` AND `16 §9.1` BEFORE EDITING IT. A per-method rate
-    // arriving here is the moment the provisional rule stops being provisional, and it needs an
-    // authority reading plus a resolution of the circularity above — not an implementer's guess.
+    // ⚠ WHEN THIS GOES RED, READ `16-F35` AND `01-F86` BEFORE EDITING IT. ⚠ *This warning named
+    // `16-F6` and `16 §9.1` and said a per-method rate here would be "the moment the provisional
+    // rule stops being provisional". It is not provisional any more — it is superseded, so a
+    // per-method rate arriving here is now a change AGAINST a ruling rather than the resolution
+    // of an open one.* Differently-rated tenders are separate child orders (`01-F86`), and each
+    // child reaches this function on its own; if two rates ever need to meet inside one call, the
+    // thing to change is the SPLIT, in doc 02, not this signature.
     const snap = taxOf(exclusiveSale());
     expect(snap.rate_bps).toBe(SALE_RATE_BPS);
     expect(snap.tax_total_paisa).toBe(SALE_TAX_TOTAL);
@@ -768,21 +826,35 @@ describe("§I 01-F30 (SUPERSEDED READING, see the §I header) — an exclusive p
 // DEFERRED — what this suite could NOT assert, and who owns each
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 //
-//  1. **THE PER-LINE BILLED AMOUNT HAS NO EXPORT.** `billedCellPaisa` is private to
-//     `packages/sync-client/src/folds/merge.ts:298`; only the ORDER-level
-//     `billedEffectiveFromJsonLines` is exported. `16-F5` computes tax **per line**, so the caller
-//     of `taxSnapshot` cannot obtain its `billed_paisa` inputs without re-deriving fold logic,
-//     which `26 §8` forbids. `packages/escpos/CLAUDE.md` records the identical blocker for the
-//     receipt's extended line amount — **it is the same missing export and it blocks both.** Owner:
-//     `packages/sync-client`'s test-owning session (protected path).
+//  ~~1. **THE PER-LINE BILLED AMOUNT HAS NO EXPORT.**~~ **CLOSED (August 2026).**
+//     `packages/sync-client` exports `billedLinePaisa` — `merge.ts`'s own `billedCellPaisa`,
+//     exported rather than re-derived, so `26 §8` is honoured — and
+//     `packages/sync-client/src/order-tax.ts` is the one place it is joined to `taxSnapshot`.
+//     That module, not this file, is where the join is asserted: this suite still supplies its
+//     `billed_paisa` inputs by hand and deliberately, because a per-line figure is what `16-F5`
+//     says arrives here and an oracle that reached into the fold would be asserting two things
+//     at once.
 //  2. **`config.changed` HAS NO PAYLOAD SCHEMA.** `16-F1` records a posture change as
 //     `config.changed`; the type is in `01 §4`'s catalog and `packages/domain/src/registry.ts`
 //     carries no schema for it, so `01-F4` makes emitting one a runtime error. Enabling tax is
 //     therefore currently **unauditable**, not merely unbuilt. Owner: doc 01 / `registry.ts`.
-//  3. **WHERE THE POSTURE MATRIX LIVES.** `16-F2` is a channel × payment-method matrix and
-//     `00 §7` makes it layer-2 configuration ("presets, not free-form knobs"). This file takes an
-//     already-resolved posture and rate; nothing here asserts how (channel, method) → posture is
-//     stored, validated or distributed. Owner: doc 14's back-office surface + `00 §7`.
+//  3. **WHERE THE POSTURE MATRIX LIVES — STILL DEFERRED, AND THE OWNER MOVED.** `16-F27` makes
+//     the cell (posture *and* rate) layer-2 ORG configuration the owner types, and `01-F87` rules
+//     its carrier: `config` as the fourth `01-F75` reference-data resource. **Neither is built**
+//     (`plans/v0.md` gap 3), so the shipping cell comes from a per-device v0 seed
+//     (`apps/pos-electron/src/main/tax-posture.ts`, which names its own defects). This file takes
+//     an already-resolved cell and asserts nothing about how it is stored, validated or
+//     distributed. Owner: `01-F87`'s carrier + doc 14's `14-F23` surface.
+//  6. **`16-F32`'s TENDER-CHANNEL CHOICE AND `16-F33`'s MULTI-TOTAL BILL.** R58 puts the choice
+//     *before the unpaid bill prints* and lets a `bill` present a totals block per presented
+//     channel; there is no such surface and no `bill` document type in `packages/escpos` at all.
+//     Until then one cell serves every tender, which is `16-F27`'s own default-cell case. Owner:
+//     doc 02 (the choice) + doc 03 (the document).
+//  7. **NOTHING PERSISTS THE SNAPSHOT.** `16-F5`/`01-F18` say a snapshot is taken at the settling
+//     act and never re-derived; no `01 §4` payload carries one, so today the receipt's figures are
+//     recomputed from the order and the cell. `01-F82`'s own note says no tax payload field lands
+//     before `billed_total`'s definition moves — it has now — so this is a protected-path spec act
+//     that is owed rather than refused. Owner: doc 01 / `registry.ts`.
 //  4. **OVERFLOW.** `applyRateBps` THROWS past `Number.MAX_SAFE_INTEGER` while `01-F17` forbids a
 //     throw on the ingest path and law 3 says an unrepresentable total "contributes zero and
 //     raises `money_overflow`". Which policy governs a tax computed at settlement is unresolved,
