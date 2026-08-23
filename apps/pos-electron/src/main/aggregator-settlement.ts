@@ -56,7 +56,7 @@
 import { newId } from "@restos/domain";
 import { billedTotalPaisa, type DeviceStore } from "@restos/sync-client";
 
-import { deviceTaxCell } from "./tax-posture";
+import { deviceChargeRoundingPaisa, deviceTaxCell } from "./tax-posture";
 
 /**
  * `02-F42`'s aggregator channel, named once.
@@ -183,7 +183,7 @@ export const createAggregatorSettlement = (
     // same number the bill states. `16-F2`'s illustrative matrix taxes a foodpanda order *per
     // aggregator invoicing*, which is an ORDER-channel cell `16-F27`'s grid can express and the
     // v0 seed cannot (`tax-posture.ts` names that limit); today one cell serves every channel.
-    const billed = billedTotalPaisa(order.json_lines, deviceTaxCell());
+    const billed = billedTotalPaisa(order.json_lines, deviceTaxCell(), deviceChargeRoundingPaisa());
     // **ONE comparison carrying TWO facts, and it is one line rather than two on purpose.**
     //
     // 1. `01-F31` — **entering twice does not bill twice.** The trigger here is a ROBOT on the

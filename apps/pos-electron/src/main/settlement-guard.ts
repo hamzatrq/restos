@@ -72,7 +72,7 @@
 import { billedTotalPaisa, type DeviceStore } from "@restos/sync-client";
 import { type AppendRequest, AppendRequestSchema, type AppendResult } from "../shared/ipc";
 import type { Gateway } from "./gateway";
-import { deviceTaxCell } from "./tax-posture";
+import { deviceChargeRoundingPaisa, deviceTaxCell } from "./tax-posture";
 
 /** The three money facts a refusal is made of, all read off ONE `open_orders` row. */
 export type AlreadySettled = {
@@ -115,7 +115,7 @@ export const alreadySettled = (order: {
   // `billedEffectiveFromJsonLines` is line-derived and tax-blind, so under `16-F2`'s `exclusive`
   // posture this would have declared an order settled on a tender that did not cover it — the
   // consequence `01-F82` names in terms. `16-F1`'s default cell leaves the number unchanged.
-  const billed = billedTotalPaisa(order.json_lines, deviceTaxCell());
+  const billed = billedTotalPaisa(order.json_lines, deviceTaxCell(), deviceChargeRoundingPaisa());
   if (billed <= 0) return null;
   if (order.pay_total < billed) return null;
   return { order_id: order.order_id, billed_paisa: billed, paid_paisa: order.pay_total };

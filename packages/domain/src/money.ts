@@ -141,6 +141,17 @@ export const applyRateBps = (amount: Paisa, bps: number): Paisa => {
  * Rounding: NONE, and no remainder is returned. `27-F23` says operational screens show no
  * decimals, and no FR in doc 16 requires a sub-rupee DISPLAY value — `16-F5` says "integer
  * paisas; rounding rules per authority spec", which is a ledger rule, not a formatter one.
+ *
+ * ⚠ **THAT REASONING IS INTACT AND ITS SCOPE IS NARROWER THAN IT READS — corrected August 2026
+ * (`02-F63`, founder ruling R70).** It is the rule for a SCREEN, which is what `27-F23` says and
+ * all this function is for; `MoneyValue` and the back office are its callers. It was also read as
+ * the rule for PAPER, and there it truncated a customer's receipt: `packages/escpos`'s
+ * `amountToken` rendered every money figure through here, so an `exclusive` tax — the first thing
+ * this product ever produced that puts paisa in a total — printed `Subtotal Rs 450 · Tax Rs 74 ·
+ * Total Rs 525`, three rows that do not close. Paper's door is `rupeesAndPaisaFromPaisa` below.
+ * **Nothing about this function changed and nothing here is a licence to change it:** widening it
+ * would put decimals back on the counter, which `27-F23` bans and `money-display-contract.test.ts`
+ * §F5 pins at exactly one returned key.
  * An earlier version returned the remainder as `subPaisa` on the strength of a fiscal
  * requirement that greps to nothing (Commandment 2), and that name also collided with the
  * exported binary `subPaisa` subtraction helper on this same public surface.
@@ -155,6 +166,73 @@ export const applyRateBps = (amount: Paisa, bps: number): Paisa => {
 export const rupeesFromPaisa = (amount: Paisa): { rupees: number } => {
   const a = asPaisaInt(amount, "rupeesFromPaisa amount"); // brands are compile-time only (18 §4)
   return { rupees: (a - (a % 100)) / 100 };
+};
+
+/**
+ * Round a money value to the nearest multiple of a granularity step (`02-F63`, founder ruling R70).
+ *
+ * **This is what the customer is CHARGED, and it is not a display rule.** R70: *"round to rupees …
+ * some restaurants round to 10s and some round to rupees … even coins are getting rare."* The step
+ * is `00 §7` layer-2 org configuration (`charge_rounding_paisa`, default 100), so it arrives as an
+ * argument and is never read from anywhere by this function — `01-F87` bans a fold input keyed on
+ * configuration, and a helper that resolved its own step would put the same hazard one layer down.
+ *
+ * Rounding policy: ROUND-HALF-UP, the policy `applyRateBps` already declares, so a charge and the
+ * tax inside it cannot round by two different rules (`02-F63` (d)). Always-down and always-up were
+ * both considered and refused there by name; changing this is a spec act, not an edit here.
+ *
+ * Exact and float-free on all safe integers: the remainder is removed before anything is added, so
+ * every intermediate is an exactly representable integer. A result past `Number.MAX_SAFE_INTEGER`
+ * throws — the `sumPaisa` overflow idiom, never a drifted double. That is the settlement path's
+ * policy and not the ingest path's: `01-F17`'s *"contribute zero, never throw"* protects a device
+ * from a wedged ingest, and a charge computed at the settling act is not that path (`tax.ts` makes
+ * the identical choice for the identical reason).
+ *
+ * A step of `1` is the identity — legal, and deliberately NOT the default: `02-F63` (c) records
+ * that a default of no rounding is a till that asks for a coin which does not exist.
+ */
+export const roundPaisaToGranularity = (amount: Paisa, granularity_paisa: number): Paisa => {
+  const a = asPaisaInt(amount, "roundPaisaToGranularity amount"); // brands are compile-time (18 §4)
+  const g = asPaisaInt(granularity_paisa, "roundPaisaToGranularity granularity");
+  if (g === 0) {
+    throw new RangeError("roundPaisaToGranularity granularity must be >= 1 paisa, got 0");
+  }
+  const r = a % g;
+  // `2r >= g` rather than `r >= g / 2`: the halving is what would introduce a fraction, and on an
+  // ODD step `g / 2` is not representable as an integer at all. Same trick as `extractedTaxPaisa`'s
+  // doubling in `tax.ts`, and for the same reason.
+  return paisa(2 * r >= g ? a - r + g : a - r);
+};
+
+/**
+ * Whole rupees AND the sub-rupee remainder, for a document that may show it (`02-F63` (f)).
+ *
+ * **The sibling of `rupeesFromPaisa`, and the split between them is a SCOPE rather than a
+ * preference.** `27-F23`'s *"no decimals"* is scoped to operational SCREENS, and `rupeesFromPaisa`
+ * is the screen's door — `MoneyValue` and the back office read it, its contract is pinned at
+ * exactly one key, and it stays truncating. Paper is not a screen: `02-F63` (f) settles that a
+ * printed figure carrying a genuine sub-rupee part prints it, because the alternative shipped for
+ * the life of the product and was **dropping** it — a receipt's *Total* short by up to 99 paisa and
+ * `Subtotal + Tax` failing to equal `Total` by a rupee, on the document `02-F15` gives the customer.
+ *
+ * Both parts come back from ONE call, on `directedPaisa`'s stated precedent: if the rupees could be
+ * had without the remainder, a caller could render the rupees alone — which is the truncation this
+ * function exists to end, in a new costume.
+ *
+ * The remainder is `paisa_remainder` and not `subPaisa`: that name collided with the exported
+ * binary subtraction helper on this same public surface, which is the defect an earlier version of
+ * `rupeesFromPaisa` shipped and `money-display-contract.test.ts` still pins. It is money-named on
+ * purpose, so `DEC-MONEY-005`'s ban can SEE arithmetic done on it — the mistake `rupees` made.
+ *
+ * Exact and float-free by construction: the remainder is `a % 100` and the quotient is computed
+ * from `a` with that remainder already removed.
+ */
+export const rupeesAndPaisaFromPaisa = (
+  amount: Paisa,
+): { rupees: number; paisa_remainder: number } => {
+  const a = asPaisaInt(amount, "rupeesAndPaisaFromPaisa amount"); // compile-time brands (18 §4)
+  const r = a % 100;
+  return { rupees: (a - r) / 100, paisa_remainder: r };
 };
 
 /** A signed money value split into the two things a screen needs to show it (`27-F12`). */

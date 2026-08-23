@@ -41,20 +41,48 @@
  * answer the same question. It is reachable only above Rs 90,000,000,000,000 of billable lines.
  */
 
-import { type TaxCell, type TaxSnapshot, taxSnapshot } from "@restos/domain";
+import {
+  paisa,
+  roundPaisaToGranularity,
+  type TaxCell,
+  type TaxSnapshot,
+  taxSnapshot,
+} from "@restos/domain";
 
 import { type BilledLineCell, billedLinePaisa } from "./folds/merge.js";
 
 /**
- * `16-F5`'s snapshot for one projected order — the per-line figures a receipt itemises plus the
- * three totals it prints, computed once so they cannot disagree.
+ * `01-F82` + `02-F63` for one order: the tax snapshot, the rounding adjustment and the charge.
  *
- * `jsonLines` is an `OpenOrderRow`'s `json_lines`, the same string
- * `billedEffectiveFromJsonLines` takes. The map KEY is the line id: `merge.ts` keys the cell map
- * by `line_id` and `16-F5` snapshots per line, so a caller that invented its own ids would produce
- * a snapshot nothing could reconcile against the order.
+ * **Three values from ONE call, on `directedPaisa`'s stated precedent.** If the charge could be had
+ * without the rounding, a caller could print a *Total* that its own *Subtotal* and *Tax* rows do
+ * not add up to — which is the defect `02-F63` was ruled on, in a new costume. And if the rounding
+ * could be had without the charge, a caller would have to add them back together itself, which is
+ * money arithmetic outside `domain` (`DEC-MONEY-005`).
  */
-export const orderTaxSnapshot = (jsonLines: string, cell: TaxCell): TaxSnapshot =>
+export type ChargeSnapshot = {
+  /** `16-F5`'s snapshot, untouched: its `total_paisa` is `subtotal + tax` and is NOT the bill. */
+  readonly tax: TaxSnapshot;
+  /**
+   * `02-F63` (b)'s DERIVED adjustment — `charge_total_paisa − tax.total_paisa`, **signed**, and
+   * deliberately not a stored field on any event: it is recomputable from figures the order already
+   * carries, so persisting it would be `02-F45`'s second source for one fact.
+   *
+   * Signed, and it is a plain `number` for `01-F30`'s own reason: `Paisa` is non-negative because
+   * an append-only ledger cannot subtract from history, so a rounding-DOWN adjustment has no
+   * branded representation. A renderer takes its direction and magnitude through `directedPaisa`.
+   */
+  readonly rounding_paisa: number;
+  /** `01-F82` as amended by `02-F63`: **what the customer owes**, tax included and rounded. */
+  readonly charge_total_paisa: number;
+};
+
+/**
+ * `16-F5`'s per-line tax for one order, in the shape `taxSnapshot` takes. Module-private now that
+ * `orderChargeSnapshot` is the door: an exported tax-only snapshot beside a charge snapshot is two
+ * answers to *what does the customer owe*, which is exactly what this file exists to prevent.
+ */
+const taxSnapshotOf = (jsonLines: string, cell: TaxCell): TaxSnapshot =>
   taxSnapshot({
     posture: cell.posture,
     rate_bps: cell.rate_bps,
@@ -70,6 +98,49 @@ export const orderTaxSnapshot = (jsonLines: string, cell: TaxCell): TaxSnapshot 
   });
 
 /**
+ * `16-F5`'s snapshot plus `02-F63`'s rounding for one projected order — the per-line figures a
+ * receipt itemises, the three tax totals, the rounding row and the amount charged, computed once so
+ * they cannot disagree.
+ *
+ * `jsonLines` is an `OpenOrderRow`'s `json_lines`, the same string
+ * `billedEffectiveFromJsonLines` takes. The map KEY is the line id: `merge.ts` keys the cell map
+ * by `line_id` and `16-F5` snapshots per line, so a caller that invented its own ids would produce
+ * a snapshot nothing could reconcile against the order.
+ *
+ * ⚠ **`rounding_granularity_paisa` IS A REQUIRED PARAMETER AND HAS NO DEFAULT, DELIBERATELY.**
+ * `02-F63` (c) puts the default in the CONFIGURATION (100 paisa), not in this function: a default
+ * here would let a caller that never resolved the org's step look identical to one that did, which
+ * is `16-F1`'s own precedent transcribed one file over — *"`TAX_OFF` is expressed for a CALLER to
+ * pass explicitly, never as a fallback inside this function"*. The compiler is what makes every one
+ * of the five readers supply it, and that is the whole seam.
+ *
+ * ⚠ **THE ROUNDING IS ON THE ORDER TOTAL AND NEVER PER LINE (`02-F63` (e)).** The implementation
+ * this shape invites — round each line, or round the total and push the residue back across the
+ * lines — makes a projected money value depend on the order the cells were serialised in, which is
+ * a live standing-law-1 break (`01-F34`) through entirely schema-valid payloads. What keeps this
+ * safe is that `taxSnapshot`'s total is an exact integer sum over per-line figures each computed
+ * from its own billed amount, so it is order-invariant, and a function of an order-invariant number
+ * is order-invariant.
+ */
+export const orderChargeSnapshot = (
+  jsonLines: string,
+  cell: TaxCell,
+  rounding_granularity_paisa: number,
+): ChargeSnapshot => {
+  const tax = taxSnapshotOf(jsonLines, cell);
+  const charge = roundPaisaToGranularity(paisa(tax.total_paisa), rounding_granularity_paisa);
+  // BigInt, not `subPaisa` and not a bare `-`. `subPaisa` brands its result and `Paisa` is
+  // non-negative, so it would THROW on every rounding-DOWN order — the same wall
+  // `settledConservationResidualPaisa` hit, which `invariants.ts` answers by returning the
+  // difference unbranded and signed. A plain `-` is banned outright (`DEC-MONEY-005`: both
+  // operands are money-named), and the BigInt wrapper is the path that ban explicitly blesses.
+  // No overflow guard is reachable: `|charge − total| < granularity` by construction, and both
+  // operands were already refused above `Number.MAX_SAFE_INTEGER` by `paisa()`.
+  const rounding_paisa = Number(BigInt(charge) - BigInt(tax.total_paisa));
+  return { tax, rounding_paisa, charge_total_paisa: charge };
+};
+
+/**
  * `01-F82`'s `billed_total` for one projected order: **what the customer owes, tax included.**
  *
  * This is the number `01-F30`'s conservation equation, `01-F63`'s attested `billed_paisa`, the
@@ -79,5 +150,8 @@ export const orderTaxSnapshot = (jsonLines: string, cell: TaxCell): TaxSnapshot 
  * fixture sweep rather than asserting it once — because *"the change is ONE POSTURE WIDE"*
  * (`01-F82`) is the property that makes the amendment checkable at all.
  */
-export const billedTotalPaisa = (jsonLines: string, cell: TaxCell): number =>
-  orderTaxSnapshot(jsonLines, cell).total_paisa;
+export const billedTotalPaisa = (
+  jsonLines: string,
+  cell: TaxCell,
+  rounding_granularity_paisa: number,
+): number => orderChargeSnapshot(jsonLines, cell, rounding_granularity_paisa).charge_total_paisa;

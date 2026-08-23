@@ -39,6 +39,8 @@ export {
   ml,
   type Paisa,
   paisa,
+  roundPaisaToGranularity,
+  rupeesAndPaisaFromPaisa,
   rupeesFromPaisa,
   splitPaisa,
   subPaisa,

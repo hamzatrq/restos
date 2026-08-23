@@ -56,6 +56,7 @@
  */
 
 import type { OrderChannel, PaymentMethod, TaxPosture } from "@restos/domain";
+import { directedPaisa } from "@restos/domain";
 import type { BlockRenderer, DocumentSpec } from "./document.js";
 import {
   amountToken,
@@ -193,6 +194,28 @@ export type ReceiptData = {
   /** `03-F37`: "Reprint markers are mandatory **per type**, in a locked region"; `02-F16`. */
   readonly reprint: boolean;
   /**
+   * `02-F63` (b)'s DERIVED rounding adjustment — `total_paisa − (subtotal + tax)`, **signed**,
+   * arriving FINISHED like every other figure here (`27-F24`, `01-F18`).
+   *
+   * **It is not on `ReceiptTax` and that is the whole point of the field's placement.** R70 binds
+   * card as firmly as cash and fires under posture `none`, so an org rounding to Rs 10 rounds an
+   * untaxed bill; hanging it off the tax record would make the rounding invisible on exactly the
+   * receipts where nothing else explains the difference between the lines and the total.
+   *
+   * **Absent or `0` prints nothing**, and the two are the same DOCUMENT on purpose — unlike `tax`,
+   * where absent and zero are different claims (`16-F1`'s "off" versus a configured 0 % rate).
+   * There is no such distinction here: a rounding of zero is not a tax regime, it is an order whose
+   * total already landed on the step, which is every order this product produced before tax existed.
+   *
+   * ⚠ **It arrives DERIVED and is never re-derived here.** `total_paisa − (subtotal + tax)` in this
+   * file would be money arithmetic in a renderer — `DEC-MONEY-005` bans it, and `03-F30` purity is
+   * not the reason: the reason is that two computations of one figure disagree, which is the defect
+   * `packages/sync-client`'s `orderChargeSnapshot` exists to make impossible.
+   *
+   * `| undefined` is explicit for `exactOptionalPropertyTypes`' reason — see `tax` below.
+   */
+  readonly rounding_paisa?: number | undefined;
+  /**
    * `16-F5`'s snapshot, when one exists. **OPTIONAL, and ABSENT means no tax content at all** —
    * `16-F1`: "Tax is off by default", so the ordinary Pakistani restaurant this product ships to
    * prints the document it printed before this field existed, byte for byte.
@@ -222,6 +245,32 @@ const receiptOf = (data: unknown): ReceiptData => data as ReceiptData;
  */
 const labelled = (table: Readonly<Record<string, string>>, key: string): string =>
   table[key] ?? key;
+
+/**
+ * `02-F63`'s rounding row — printed only when there IS one, with its direction as a WORD.
+ *
+ * **`27-F12`: direction is a word, never a minus sign** — *"a lone `-` is one glyph wide, is the
+ * first thing lost at 1–2 m or on a scratched panel, and means nothing to a non-reader"*. The word
+ * lives in the LABEL rather than in front of the figure, which is where `varianceToken` puts it,
+ * and the split is the READER: `OVER`/`SHORT` is drawer vocabulary for a manager reconciling a
+ * till, and *Rounded down Rs 0.07* is the sentence a customer can check against the two rows above
+ * it. `document-parts.ts` states that the vocabulary is the surface's and `domain` owns only the
+ * arithmetic sign, so this is that rule applied rather than a new one.
+ *
+ * **Zero prints NOTHING**, on `varianceToken`'s own precedent — *"`OVER Rs 0` is not a thing anyone
+ * says"* — and because a `Rounded up Rs 0` row on every whole-rupee bill is precisely the
+ * information `27-F55` says paper must carry less of. It also keeps every untaxed receipt this
+ * product has ever printed byte-identical.
+ *
+ * It is DECLARED here rather than in `document-parts.ts` on that file's own rule: a helper becomes
+ * a shared one when it has a SECOND consumer. `03-F31`'s `bill` is that consumer and it has no
+ * spec, no renderer and no producer (`16-F33`), so the row moves there the day the bill is written.
+ */
+const roundingRow = (signed_paisa: number): readonly EncoderPart[] => {
+  const { magnitudePaisa, sign } = directedPaisa(signed_paisa);
+  if (sign === 0) return [];
+  return row(sign === 1 ? "Rounded up" : "Rounded down", amountToken(magnitudePaisa));
+};
 
 // ── the blocks (03-F33's region ladder, in 02-F15's own order) ───────────────────────────────────
 
@@ -342,6 +391,7 @@ const RECEIPT_BLOCK_RENDERERS: Readonly<Record<string, BlockRenderer>> = {
             ...row("Subtotal", amountToken(tax.subtotal_paisa)),
             ...row("Tax", amountToken(tax.tax_total_paisa)),
           ]),
+      ...roundingRow(receipt.rounding_paisa ?? 0),
       ...row("Total", amountToken(receipt.total_paisa)),
       GROUP_BREAK,
     ];

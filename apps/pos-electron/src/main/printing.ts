@@ -22,10 +22,10 @@ import {
   type SpoolerTransport,
 } from "@restos/escpos";
 import type { DeviceStore } from "@restos/sync-client";
-import { orderTaxSnapshot } from "@restos/sync-client";
+import { orderChargeSnapshot } from "@restos/sync-client";
 import type { Alarm, KitchenState } from "../shared/ipc";
 import type { CatalogResolver } from "./gateway";
-import { deviceTaxCell } from "./tax-posture";
+import { deviceChargeRoundingPaisa, deviceTaxCell } from "./tax-posture";
 
 /**
  * K-7 — the wire between `order.confirmed` and the paper, and `03-F5`'s band on the counter.
@@ -1742,9 +1742,15 @@ export const createReceiptPrinter = ({
     // document is reproducible from the order and the cell, and a later rate edit would reprint a
     // different receipt — which is exactly what `16-F29`'s effective-dating exists to stop and
     // exactly what the v0 seed cannot express (`tax-posture.ts`).
+    //
+    // `02-F63` (R70): the amount TAKEN is that snapshot total ROUNDED to the org's charge
+    // granularity, and the receipt's *Total* row is the rounded number. The adjustment travels as
+    // its own field so the document can print a row that closes; it is DERIVED here — one call,
+    // one place — and never re-derived on the paper, which would be money arithmetic in a renderer.
     const tax_cell = deviceTaxCell();
-    const tax = orderTaxSnapshot(order.json_lines, tax_cell);
-    const total_paisa = tax.total_paisa;
+    const charge = orderChargeSnapshot(order.json_lines, tax_cell, deviceChargeRoundingPaisa());
+    const tax = charge.tax;
+    const total_paisa = charge.charge_total_paisa;
     // `01-F31`'s keyed sum, computed by the fold: a disputed attempt contributes ZERO to it and is
     // rendered, never picked. The receipt must agree with that or it would claim money the ledger
     // does not count. `pay_total` also excludes `repays_receivable` (`DEC-MONEY-007`), so a khata
@@ -1812,6 +1818,13 @@ export const createReceiptPrinter = ({
         cashier: cashier(),
         lines,
         total_paisa,
+        // `02-F63` (b) — the derived adjustment, handed over UNCONDITIONALLY like the tax
+        // snapshot beside it and for the same reason: `receipt-document.ts` owns the rule that a
+        // zero prints nothing, and re-deciding it here would be two declarations of one rule
+        // (`16-F33` (a)). Under the seeded default (Rs 1) on whole-rupee, untaxed bills this is
+        // always 0 and the document is byte-identical to the one printed before this field
+        // existed — which is the property that makes the change checkable.
+        rounding_paisa: charge.rounding_paisa,
         tenders,
         // `16-F5`'s snapshot, handed over WHOLE and unconditionally — including under `16-F1`'s
         // `none`, and that is a decision rather than an oversight. `receipt-document.ts` spends a

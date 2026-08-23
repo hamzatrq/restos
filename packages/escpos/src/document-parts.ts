@@ -19,7 +19,7 @@
  */
 
 import type { OrderChannel, PaymentMethod } from "@restos/domain";
-import { directedPaisa, rupeesFromPaisa } from "@restos/domain";
+import { directedPaisa, rupeesAndPaisaFromPaisa } from "@restos/domain";
 import type { EncoderPart } from "./encoder.js";
 
 // ── the money token (27-F22, 27-F23) ─────────────────────────────────────────────────────────────
@@ -52,12 +52,36 @@ const grouped = (whole: number): string => {
  *
  * Routed through `directedPaisa` rather than `rupeesFromPaisa` directly because that is the one
  * call that hands back a BRANDED magnitude (`DEC-MONEY-005`: the paisa→rupee divide is `domain`'s,
- * never a formatter's), and because it refuses a non-integer at the boundary instead of printing
- * a fraction of a rupee onto a document a cashier signs.
+ * never a formatter's), and because it refuses a non-integer at the boundary.
+ *
+ * ⚠ **THE SENTENCE THAT STOOD HERE CLAIMED A PROTECTION THIS FUNCTION DID NOT HAVE, AND IT IS
+ * CORRECTED RATHER THAN DELETED (August 2026, `02-F63`).** It read: *"and because it refuses a
+ * non-integer at the boundary instead of printing a fraction of a rupee onto a document a cashier
+ * signs."* The first half is true — `directedPaisa` refuses a non-integer number of **paisa**. The
+ * second half was false of the very thing it named: a fraction of a rupee was not refused, it was
+ * **dropped**, because `rupeesFromPaisa` truncates. That was inert for the life of the product
+ * (`14-F29` prices are whole rupees, so every pre-tax total was whole) and became a customer-facing
+ * defect the moment an `exclusive` posture put paisa in a total — `Subtotal Rs 450 · Tax Rs 74 ·
+ * Total Rs 525`, three rows that do not close. It is kept because a comment promising a protection
+ * that does not exist is worse than no comment: it retires the assertion the next session would
+ * otherwise write, and this repo has shipped that mistake three times.
+ *
+ * **What it does NOW, and the class it does NOT close.** It renders the sub-rupee part when there
+ * is one and omits it when there is not (`Rs 450.70`, `Rs 450`) — `02-F63` (f): `27-F23`'s *"no
+ * decimals"* is scoped to operational SCREENS and paper is not one. **The conditional is a
+ * DECLARED INTERPRETATION** (`24 §3b`); the named alternative is always two decimals, refused
+ * because `27-F55` makes paper carry LESS, because `03-F36` bans the right-aligned money column
+ * that would be the only reason to pad, and because every whole-rupee document in this package —
+ * which after `02-F63` is every operational one, since the CHARGE is rounded — then stays
+ * byte-identical. **What this does not close: it does not make a figure round.** `02-F63` rounds
+ * the charge one layer up, in `packages/sync-client`'s `billedTotalPaisa`; this function only stops
+ * lying about whatever it is handed, and handed an unrounded total it will faithfully print one.
  */
 export const amountToken = (magnitude_paisa: number): string => {
   const { magnitudePaisa } = directedPaisa(magnitude_paisa);
-  return `${MONEY_SYMBOL} ${grouped(rupeesOf(magnitudePaisa))}`;
+  const { rupees, paisa_remainder } = rupeesAndPaisaFromPaisa(magnitudePaisa);
+  const sub = paisa_remainder === 0 ? "" : `.${String(paisa_remainder).padStart(2, "0")}`;
+  return `${MONEY_SYMBOL} ${grouped(rupees)}${sub}`;
 };
 
 /**
@@ -71,7 +95,12 @@ export const amountToken = (magnitude_paisa: number): string => {
  */
 export const varianceToken = (signed_paisa: number): string => {
   const { magnitudePaisa, sign } = directedPaisa(signed_paisa);
-  const amount = `${MONEY_SYMBOL} ${grouped(rupeesOf(magnitudePaisa))}`;
+  // ONE money token, through `amountToken` — this used to re-spell the format inline, which is the
+  // two-interpretations defect this file's header exists to prevent and which would have left the
+  // shift slip truncating after `02-F63` fixed the receipt. The magnitude comes from
+  // `directedPaisa` and never from `signed < 0 ? -signed : signed`, which `money.ts` names as the
+  // display-edge idiom that hides a negation from the `DEC-MONEY-005` ban.
+  const amount = amountToken(magnitudePaisa);
   if (sign === 1) return `OVER ${amount}`;
   if (sign === -1) return `SHORT ${amount}`;
   return amount;
@@ -238,13 +267,3 @@ export const ownerNote = (value: string): readonly EncoderPart[] => [
 
 /** `27-F55`'s channel 3, and `03 §7`'s `has_cutter` handled inside the encoder. */
 export const TAIL: readonly EncoderPart[] = [{ kind: "feed", lines: 2 }, { kind: "cut" }];
-
-/**
- * Kept last because it is the one line that reads oddly out of context: `rupeesFromPaisa` returns
- * `{ rupees }` and the `DEC-MONEY-005` GritQL ban covers `rupee`-named member expressions, so the
- * value is unwrapped ONCE here, passed as a function argument (which the rule leaves legal, by
- * design) and never used in an arithmetic position anywhere above.
- */
-function rupeesOf(magnitude: Parameters<typeof rupeesFromPaisa>[0]): number {
-  return rupeesFromPaisa(magnitude).rupees;
-}

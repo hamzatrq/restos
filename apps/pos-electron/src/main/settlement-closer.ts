@@ -70,7 +70,7 @@
 
 import { billedTotalPaisa, type DeviceStore, type OpenOrderRow } from "@restos/sync-client";
 import type { Gateway } from "./gateway";
-import { deviceTaxCell } from "./tax-posture";
+import { deviceChargeRoundingPaisa, deviceTaxCell } from "./tax-posture";
 
 /** `01 §4`'s closing act. Named once so a typo cannot make this module emit nothing. */
 const SETTLEMENT_CLOSED = "order.settlement_closed";
@@ -151,7 +151,7 @@ export const closingActFor = (order: OpenOrderRow): Record<string, unknown> | nu
   // `01-F82`/`16-F31` (R54): the ATTESTED `billed_paisa` below is what the customer owes, tax
   // included — the merge rule reads it back as `uncovered_addition`'s ceiling, so a pre-tax
   // figure here would breach the order's own ceiling the moment an exclusive order closed.
-  const billed = billedTotalPaisa(order.json_lines, deviceTaxCell());
+  const billed = billedTotalPaisa(order.json_lines, deviceTaxCell(), deviceChargeRoundingPaisa());
   if (billed <= 0) return null;
   if (order.pay_total < billed) return null;
   return {

@@ -59,6 +59,28 @@ export type DocumentType = (typeof DOCUMENT_TYPES)[number];
  *     business day is six digits of rupees, and every extra digit costs a column on a
  *     58 mm-versus-80 mm purchasing decision. Above it a line takes `03-F36`'s last declared
  *     degradation and wraps — it is never truncated into a different amount.
+ *   * ⚠ **A SUB-RUPEE TOKEN IS `Rs 99,999,999.99` = 16 COLUMNS, AND THE FLOORS BELOW DID NOT MOVE
+ *     — measured, not assumed (`02-F63`, founder ruling R70, August 2026).** A `.NN` costs
+ *     **exactly 3 more columns**, which would take `shift_close_slip` to 38 and `day_summary`'s
+ *     money rows to 27, and would put a `receipt` floor of 35 outside 58 mm paper. **None of that
+ *     happens, and the reason is R70 itself: the CHARGE is rounded to the org's granularity, so
+ *     every figure on these two cash documents is a whole number of rupees by construction** —
+ *     they render tenders, a counted drawer, a float and a variance, and each is either the
+ *     rounded charge or a figure a human keyed in rupees. `amountToken` renders a sub-rupee part
+ *     only where one EXISTS, so a whole figure is byte-identical to what it printed before R70 and
+ *     the derivations below stand unchanged. **The check that keeps this true is
+ *     `cash-documents.test.ts` §A** — it measures what each spec's `example_data` actually renders
+ *     against the number declared here, so a cash figure that ever acquires paisa fails the
+ *     derivation rather than silently over-running the paper.
+ *   * **Where paisa DO appear is the `receipt`, and its floor is the FR's rather than a
+ *     derivation.** `03-F49` states 32 for this type and gives it wrapping as its declared
+ *     degradation (*"a price column genuinely can degrade"*), so a wider row is reflowed and never
+ *     refused. Measured on `02-F63`'s own worked bill, the widest totals rows are `Subtotal
+ *     Rs 450.70` (18) and `Rounded down Rs 0.07` (21); at the PINNED bound the worst case a
+ *     rounding row can reach is `Rounded down Rs 99,999,999.99` = 12 + 1 + 16 = **29**, still
+ *     inside 32. `receipt-rounding-row.test.ts` §D asserts both numbers. ⚠ **The receipt's tender
+ *     rows were ALREADY over the floor before any of this** — `Aggregator receivable` is a
+ *     21-column label, so 21 + 1 + 13 = 35 — and they wrap, which is the same mechanism.
  *   * `shift_close_slip` = **35**: its widest label is 21 columns — `Aggregator receivable`, the
  *     longest `PAYMENT_METHODS` member `02-F23` requires "by method", tied by `02-F43`'s
  *     `Unbound no-sale opens` — so 21 + 1 + 13.

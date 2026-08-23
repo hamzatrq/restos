@@ -95,7 +95,11 @@ export {
 // customer owes" reads `billedTotalPaisa` and not the tax-blind order-level sum above. One join
 // of the two halves — the fold's per-line cells and `@restos/domain`'s posture arithmetic —
 // because two joins of one identity is how a money anomaly becomes a false finding.
-export { billedTotalPaisa, orderTaxSnapshot } from "./order-tax.js";
+// `02-F63` (R70) adds the third half in the SAME join: the charge is rounded to the org's
+// granularity, so `billedTotalPaisa` is the rounded number and `orderChargeSnapshot` is what a
+// document needs to print rows that close. There is no tax-only export any more — one beside the
+// other is two answers to *what does the customer owe*.
+export { billedTotalPaisa, type ChargeSnapshot, orderChargeSnapshot } from "./order-tax.js";
 // 01-F26/F27/F28/F61 — the PIN session and the reference data it verifies against.
 export {
   createMemoryPinAttemptStore,

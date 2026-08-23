@@ -478,11 +478,43 @@ describe("§E 27-F22/27-F23 — one money token, and it is the platform's", () =
     expect(text, "a lakh/crore grouping reached the paper").not.toContain("99,99,999");
   });
 
-  it("27-F23: no decimals — sub-rupee is dropped, never rounded up and never printed", () => {
+  // ⚠ **A GREEN TEST DEFENDING AN OVERRULED RULE, RETIRED IN THE SAME CHANGE AS THE RULING
+  // (August 2026, `02-F63` / founder ruling R70).** It read:
+  //
+  //   it("27-F23: no decimals — sub-rupee is dropped, never rounded up and never printed", () => {
+  //     const text = textOf(draw(with_({ total_paisa: 96_099 })).blocks);
+  //     expect(text).toContain("Total Rs 960");
+  //     expect(text).not.toContain("960.99");
+  //     expect(text).not.toContain("Total Rs 961");
+  //   });
+  //
+  // It was right about `27-F23` and wrong about this document's SCOPE: that FR says "no decimals
+  // **on operational screens**", and paper is not one. What the assertion actually pinned was the
+  // truncation in `rupeesFromPaisa`, which cost a customer's receipt up to 99 paisa on the *Total*
+  // and made `Subtotal + Tax = Total` false by a rupee on the paper — the defect R70 was ruled on.
+  // `receipt-tax-line.test.ts`'s DEFERRED item 1 flagged it as *"the sharpest open question in
+  // R39's scope"* and named its owner as "a founder ruling + an FR"; this is that ruling arriving.
+  //
+  // **Not deleted, and both halves of its property are re-pinned below** — the formatter still
+  // never rounds what it is handed (that is `02-F63`'s job, one layer up in `billedTotalPaisa`),
+  // and a whole-rupee figure still carries no decimal point, which is what keeps every other
+  // document in this package byte-identical.
+  it("02-F63 (f): a sub-rupee figure PRINTS its paisa — never dropped, never rounded here", () => {
     const text = textOf(draw(with_({ total_paisa: 96_099 })).blocks);
-    expect(text).toContain("Total Rs 960");
-    expect(text).not.toContain("960.99");
+    expect(text, "the sub-rupee part was dropped — the R70 defect").toContain("Total Rs 960.99");
+    expect(text, "the FORMATTER rounded; rounding belongs to the charge, not the token").toContain(
+      "Total Rs 960.99",
+    );
     expect(text).not.toContain("Total Rs 961");
+  });
+
+  it("02-F63 (f): a WHOLE-rupee figure carries no decimal point at all", () => {
+    // The half that keeps `27-F23`'s spirit and every existing golden document unchanged: after
+    // R70 the CHARGE is rounded, so an operational figure is whole and prints as it always did.
+    // A `.00` on every row is the named-and-refused alternative in `document-parts.ts`.
+    const text = textOf(draw(with_({ total_paisa: 96_000 })).blocks);
+    expect(text).toContain("Total Rs 960");
+    expect(text, "a whole-rupee figure grew a decimal point").not.toMatch(/Total Rs 960\./);
   });
 
   it("27-F22: every digit on the document is a Western digit", () => {

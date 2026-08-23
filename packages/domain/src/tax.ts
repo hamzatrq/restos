@@ -46,9 +46,27 @@
  * `01-F82` amends `01-F30` in place: `billed_total` stops being *"the sum of line prices"* and
  * becomes **what the customer owes, tax included** — *"precisely `16-F5`'s snapshot total
  * (`taxSnapshot`'s `total_paisa`)"*, and that identity holds under **all three** postures rather
- * than only the one that moves. So the number this function returns as `total_paisa` is the number
+ * than only the one that moves.
+ *
+ * ⚠ **AND IT IS NO LONGER THAT NUMBER EXACTLY — `02-F63` (founder ruling R70, August 2026) puts a
+ * ROUNDING between them, and this paragraph said otherwise for a fortnight after it stopped being
+ * true.** `billed_total` is this function's `total_paisa` **rounded to the org's
+ * `charge_rounding_paisa`** (default 100 — Rs 1), because coins below a rupee have left
+ * circulation and a till that asks for one is asking for a thing that does not exist. The rounding
+ * lives ONE LAYER OUT, in `packages/sync-client`'s `orderChargeSnapshot`, and deliberately not
+ * here: the granularity is not a tax key — it binds card and cash alike and fires under posture
+ * `none` — so putting it on `TaxCell` would make `16-F5`'s per-line snapshot carry a value that has
+ * nothing to do with tax, and every reader of the tax would have to supply one. **What this
+ * function returns is therefore the TAX total and the pre-rounding charge; it is not the bill.**
  * `01-F30`'s equation, `01-F63`'s attested `billed_paisa`, the `pay_total >= billed_effective`
- * cover test, the `shift_cash` fold's expected drawer and the receipt's *Total* row all mean.
+ * cover test, the `shift_cash` fold's expected drawer and the receipt's *Total* row all mean the
+ * ROUNDED number, and the one door that computes it is `billedTotalPaisa`.
+ *
+ * ⚠ **ONE IDENTITY THIS FILE STILL OWNS BECAME NARROWER AT THE SAME MOMENT:** `subtotal + tax =
+ * total_paisa` and `Σ line_total_paisa = total_paisa` are both still exactly true **of this
+ * snapshot**, and both are false of the printed document, where the difference is `02-F63` (b)'s
+ * derived rounding row. A reader who carries either identity onto paper is reading the tax figure
+ * as if it were the bill.
  *
  * ⚠ **THE IDENTITY IS NOW LOAD-BEARING IN FIVE OF SEVEN SHIPPING READERS, AND THE TWO THAT DID
  * NOT MOVE ARE NAMED RATHER THAN LEFT TO BE DISCOVERED (v0 gap 2, August 2026).** The reader is
@@ -66,7 +84,10 @@
  *     reaches a till through `01-F87`'s fourth `01-F75` resource, and that carrier is not built
  *     (`plans/v0.md` gap 3). Under `exclusive` it therefore reads `16-F31`'s excess on every
  *     settled order — the finding `01-F82` was ruled to delete — and this is recorded so nobody
- *     reads a silent Auditor as agreement.
+ *     reads a silent Auditor as agreement. ⚠ **`02-F63` adds a SECOND term it cannot know**: the
+ *     charge granularity rides the same unbuilt carrier, so on any org that has typed one the
+ *     Auditor's recomputation is off by the rounding as well as by the tax. The two are one owed
+ *     item and `02-F63`'s own closing clause names it.
  *
  * **`packages/escpos` ALREADY meant the new thing before any of this** — `receipt-document.ts`
  * renders *Subtotal / Tax / Total* and `receipt-tax-line.test.ts:380` pins `subtotal + tax =
@@ -328,8 +349,10 @@ const lineSnapshot = (
  * rather than as the literal token, because `pnpm seams:check` scans for the token itself and
  * pasting one into a comment attributes it to this file's exports and reddens the rail (the same
  * trap `apps/pos-electron/src/main/hardware-tier.ts` records). `packages/sync-client`'s
- * `orderTaxSnapshot` calls this on the shipping path and five readers in `apps/pos-electron`
- * consume its `total_paisa` as `01-F82`'s `billed_total`. (1) The per-line export arrived —
+ * `orderChargeSnapshot` calls this on the shipping path and five readers in `apps/pos-electron`
+ * consume its `total_paisa` — ROUNDED to `02-F63`'s charge granularity by that same function — as
+ * `01-F82`'s `billed_total`. (This named `orderTaxSnapshot`, which `02-F63` replaced: an exported
+ * tax-only snapshot beside a charge snapshot is two answers to *what does the customer owe*.) (1) The per-line export arrived —
  * `billedLinePaisa` is `billedCellPaisa` exported rather than re-derived, so no caller breaches
  * `26 §8`. (2) Was closed earlier by `01-F82` (R54).
  *

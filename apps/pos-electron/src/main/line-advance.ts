@@ -51,7 +51,7 @@ import type { ServeSignalOwner } from "@restos/device-config";
 import { applyLineState, type OrderLineState } from "@restos/domain";
 import { billedTotalPaisa, type DeviceStore } from "@restos/sync-client";
 import { autoAdvancesLines, type HardwareTier } from "./hardware-tier";
-import { deviceTaxCell } from "./tax-posture";
+import { deviceChargeRoundingPaisa, deviceTaxCell } from "./tax-posture";
 
 /**
  * One line's cell as the fold renders it into `json_lines`. Structurally a subset of
@@ -262,7 +262,8 @@ export const advancesOnSettlement = (order: {
   SETTLEMENT_SERVES.has(order.order_type ?? "") &&
   // `01-F82` (R54) — the same cover test `settlement-guard.ts` and `printing.ts` make, on the
   // same tax-inclusive number. Three call sites, ONE definition (`02-F45`).
-  order.pay_total >= billedTotalPaisa(order.json_lines, deviceTaxCell());
+  order.pay_total >=
+    billedTotalPaisa(order.json_lines, deviceTaxCell(), deviceChargeRoundingPaisa());
 
 export type LineAdvanceDeps = {
   /** The projection this reads `from_states` out of. Narrowed to one method on purpose. */

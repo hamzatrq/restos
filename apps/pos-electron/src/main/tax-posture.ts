@@ -1,9 +1,22 @@
 /**
- * # `16-F27`'s posture cell for THIS device — and it is a **v0 STOPGAP**, stated first
+ * # This device's CHARGE TERMS — `16-F27`'s posture cell and `02-F63`'s rounding step — and both
+ * are a **v0 STOPGAP**, stated first
  *
  * Owning specs: `16-F1` (tax is off by default), `16-F27` (founder ruling R55 — the owner
  * configures his channels and types the rates), `16-F28` (the axis is the *tender* channel),
- * `16-F31`/`01-F82` (tax is inside `billed_total`), `01-F87` (the layer-2 carrier), `00 §7`.
+ * `16-F31`/`01-F82` (tax is inside `billed_total`), `02-F63` (founder ruling R70 — the charge is
+ * rounded and the granularity is the owner's), `01-F87` (the layer-2 carrier), `00 §7`.
+ *
+ * ## ⚠ THE FILE NAME IS NARROWER THAN ITS CONTENTS, AND THAT IS DELIBERATE
+ *
+ * `02-F63`'s `charge_rounding_paisa` is **not a tax key**: it binds card as firmly as cash, it
+ * fires under posture `none`, and it is a fourth layer-2 setting beside R55's rates rather than a
+ * cell of R55's matrix. It is seeded HERE anyway because the five readers of `01-F82`'s
+ * `billed_total` must resolve the posture and the step **together or not at all** — a reader
+ * holding one and not the other computes a number no other reader agrees with, which is the drift
+ * `16-F33` (a) names by name. One stopgap file, two seeded settings, and both die in the same
+ * change: renaming it would cost a churn of source-scan assertions for a file whose whole purpose
+ * is to be deleted.
  *
  * ## ⚠ THIS IS NOT WHERE A TAX RATE BELONGS, AND SAYING SO IS THE POINT
  *
@@ -64,6 +77,18 @@ export const TAX_POSTURE_ENV = "RESTOS_TAX_POSTURE";
 
 /** The seeded rate in integer basis points (`00 §6`, `DEC-MONEY-005`). 1600 = 16 %. */
 export const TAX_RATE_BPS_ENV = "RESTOS_TAX_RATE_BPS";
+
+/** `02-F63`'s charge granularity in paisa. 100 = round to the rupee, 1000 = to ten rupees. */
+export const CHARGE_ROUNDING_ENV = "RESTOS_CHARGE_ROUNDING_PAISA";
+
+/**
+ * `02-F63` (c)'s default: **Rs 1**, in paisa.
+ *
+ * Declared as a constant rather than spelled at the one `??` below, because `00 §7` (d) makes every
+ * layer-2 key's default a stated fact — and because this is the value `01-F87`'s carrier will have
+ * to ship as the build default when it deletes this file.
+ */
+export const DEFAULT_CHARGE_ROUNDING_PAISA = 100;
 
 /**
  * `16-F27`'s cell for this device, from a v0 seed.
@@ -130,3 +155,43 @@ export const resolveTaxCell = (env: Record<string, string | undefined>): TaxCell
  * one enabled channel set drifted silently and nothing could see it."*
  */
 export const deviceTaxCell = (): TaxCell => resolveTaxCell(process.env);
+
+/**
+ * `02-F63`'s charge granularity for this device, from a v0 seed.
+ *
+ * **UNSET is the ordinary case and takes the DEFAULT rather than refusing** — `00 §7` (d): every
+ * layer-2 key declares a default and Rs 1 is `02-F63` (c)'s. That is the opposite of `16-F1`'s
+ * posture, where unset means *no tax regime at all*: there is no "no rounding regime", because
+ * coins below a rupee have left circulation whether or not an owner has typed anything.
+ *
+ * **A value that is SET and unreadable REFUSES**, on `resolveTaxCell`'s stated reasoning one
+ * setting over: defaulting a mistyped granularity to 100 is a rounding silently not applied, and
+ * `11-F22`'s precedent — *"an absent status is not a licence to default"* — is about a value that
+ * was supplied and could not be read. Not an `01-F17` break for the same reason given there:
+ * `01-F17` protects a sale from inventory math, sync and approval timeouts, never from a
+ * configuration an operator typed wrong.
+ *
+ * **Zero is refused explicitly**, because `Number("0")` is a perfectly good integer and a
+ * granularity of zero has no meaning — `roundPaisaToGranularity` would throw one layer down, at the
+ * settling act, where the message names neither the variable nor the operator who typed it.
+ */
+export const resolveChargeRoundingPaisa = (env: Record<string, string | undefined>): number => {
+  const raw = env[CHARGE_ROUNDING_ENV]?.trim();
+  if (raw === undefined || raw === "") return DEFAULT_CHARGE_ROUNDING_PAISA;
+  const step = Number(raw);
+  if (!Number.isSafeInteger(step) || step < 1) {
+    throw new RangeError(
+      `${CHARGE_ROUNDING_ENV} must be a positive integer of PAISA (02-F63 — 100 rounds to the ` +
+        `rupee, 1000 to ten rupees), got "${raw}"`,
+    );
+  }
+  return step;
+};
+
+/**
+ * The shipping resolution — every reader of `01-F82`'s `billed_total` on this device calls THIS,
+ * beside `deviceTaxCell`. Two calls rather than one bag on purpose: the parameter on
+ * `billedTotalPaisa` is REQUIRED, so the compiler is what proves no reader forgot the step, and a
+ * bag would only move that proof one indirection away.
+ */
+export const deviceChargeRoundingPaisa = (): number => resolveChargeRoundingPaisa(process.env);

@@ -45,7 +45,14 @@ import { advancesOnSettlement } from "../line-advance";
 import { createReceiptPrinter, type ReceiptPrinterDeps } from "../printing";
 import { closingActFor } from "../settlement-closer";
 import { alreadySettled } from "../settlement-guard";
-import { resolveTaxCell, TAX_POSTURE_ENV, TAX_RATE_BPS_ENV } from "../tax-posture";
+import {
+  CHARGE_ROUNDING_ENV,
+  DEFAULT_CHARGE_ROUNDING_PAISA,
+  resolveChargeRoundingPaisa,
+  resolveTaxCell,
+  TAX_POSTURE_ENV,
+  TAX_RATE_BPS_ENV,
+} from "../tax-posture";
 
 const SRC = new URL("../", import.meta.url).pathname;
 const readSrc = (rel: string): string => readFileSync(`${SRC}${rel}`, "utf8");
@@ -68,6 +75,17 @@ const SUBTOTAL = 40_500;
  * hands over, so it is what the cover test must demand.
  */
 const GROSS_AT_1600 = 46_980;
+
+/**
+ * Rs 470.00 — `02-F63`'s CHARGE: `GROSS_AT_1600` rounded half-up to the seeded default step of
+ * 100 paisa. 46,980 has a remainder of 80, so it rounds **up** by 20 paisa.
+ *
+ * The fixture is deliberately one that MOVES. Rs 405 of whole-rupee lines at 16 % is exactly the
+ * shape `14-F29` produces, and if the gross had happened to land on a rupee this constant would
+ * equal `GROSS_AT_1600` and every assertion below would pass against an implementation that never
+ * rounds at all.
+ */
+const CHARGED_AT_1600 = 47_000;
 
 const row = (over: Partial<OpenOrderRow> = {}): OpenOrderRow => ({
   order_id: "0199aaaa-0000-7000-8000-00000000000a",
@@ -188,19 +206,66 @@ describe("§B 01-F82 — the cover test is against the TAX-INCLUSIVE total", () 
     expect(closingActFor(row({ pay_total: SUBTOTAL }))).toBeNull();
   });
 
-  it("and IS settled by the gross — with the attested billed_paisa carrying the tax", () => {
+  it("and IS settled by the ROUNDED gross — the attested billed_paisa is what was taken", () => {
+    // ⚠ **AMENDED BY `02-F63` (R70) AND THE OLD NUMBER IS KEPT BESIDE THE NEW ONE.** This asserted
+    // `GROSS_AT_1600` (46,980) in all three places. `billed_total` is now that figure ROUNDED to
+    // the org's step, so what the till demands — and what `01-F63` attests, which the merge rule
+    // reads back as `uncovered_addition`'s CEILING — is Rs 470.00 and not Rs 469.80. A pre-ROUNDING
+    // figure here would be the same defect `01-F82` was ruled on with a smaller number: an order
+    // closing on a tender that did not cover it.
     setPosture("exclusive", "1600");
-    expect(alreadySettled({ order_id: "o", pay_total: GROSS_AT_1600, json_lines: LINES })).toEqual({
+    expect(
+      alreadySettled({ order_id: "o", pay_total: CHARGED_AT_1600, json_lines: LINES }),
+    ).toEqual({
       order_id: "o",
-      billed_paisa: GROSS_AT_1600,
-      paid_paisa: GROSS_AT_1600,
+      billed_paisa: CHARGED_AT_1600,
+      paid_paisa: CHARGED_AT_1600,
     });
     expect(
-      advancesOnSettlement({ order_type: "takeaway", pay_total: GROSS_AT_1600, json_lines: LINES }),
+      advancesOnSettlement({
+        order_type: "takeaway",
+        pay_total: CHARGED_AT_1600,
+        json_lines: LINES,
+      }),
     ).toBe(true);
-    // `01-F63`: the merge rule reads this attestation back as `uncovered_addition`'s CEILING, so a
-    // pre-tax figure here would breach the order's own ceiling the moment it closed.
-    expect(closingActFor(row({ pay_total: GROSS_AT_1600 }))?.billed_paisa).toBe(GROSS_AT_1600);
+    expect(closingActFor(row({ pay_total: CHARGED_AT_1600 }))?.billed_paisa).toBe(CHARGED_AT_1600);
+  });
+
+  it("02-F63: the UNROUNDED gross no longer covers — the rounding is INSIDE what is owed", () => {
+    // ⚠ **THE MUTANT THIS EXISTS FOR, and it is the one a careful session ships by accident:**
+    // rounding applied at the RECEIPT and not inside `billed_total`. Under that implementation the
+    // paper reads Rs 470 while the guard, the closer and `02-F31`'s advance all still accept
+    // Rs 469.80 — the document and the ledger disagreeing about what was taken, permanently under
+    // `01-F1`. All four readers must move together or none of them has moved.
+    setPosture("exclusive", "1600");
+    expect(
+      alreadySettled({ order_id: "o", pay_total: GROSS_AT_1600, json_lines: LINES }),
+      "Rs 469.80 covered a Rs 470.00 bill",
+    ).toBeNull();
+    expect(
+      advancesOnSettlement({ order_type: "takeaway", pay_total: GROSS_AT_1600, json_lines: LINES }),
+    ).toBe(false);
+    expect(closingActFor(row({ pay_total: GROSS_AT_1600 }))).toBeNull();
+  });
+
+  it("02-F63 (a): the step binds under posture `none` too — it is not a tax rule", () => {
+    // R70 binds card as firmly as cash and says nothing about tax; `02-F63` (a) makes that a rule.
+    // MUTANT THIS KILLS: rounding applied only when a posture is configured — which passes every
+    // other assertion in this file, because every other one configures a posture.
+    //
+    // The lines are Rs 405.00, already whole, so the DEFAULT step cannot show this. A step of ten
+    // rupees can: Rs 405 → Rs 410, with no tax anywhere in the arithmetic.
+    setPosture(undefined, undefined);
+    process.env[CHARGE_ROUNDING_ENV] = "1000";
+    try {
+      expect(
+        alreadySettled({ order_id: "o", pay_total: SUBTOTAL, json_lines: LINES }),
+        "Rs 405 covered a Rs 410 bill",
+      ).toBeNull();
+      expect(closingActFor(row({ pay_total: 41_000 }))?.billed_paisa).toBe(41_000);
+    } finally {
+      delete process.env[CHARGE_ROUNDING_ENV];
+    }
   });
 
   it("16-F1's default leaves all three readers byte-identical to the pre-tax product", () => {
@@ -290,9 +355,29 @@ describe("§C — every reader of `billed_total` resolves the SAME cell", () => 
     // rather than a line-derived number with no tax beside it.
     const src = readSrc("printing.ts");
     const settled = src.slice(src.indexOf("const settled = (order_id: string)"));
-    expect(settled).toContain("orderTaxSnapshot(order.json_lines, tax_cell)");
-    expect(settled).toContain("total_paisa = tax.total_paisa");
+    expect(settled).toContain("orderChargeSnapshot(");
+    expect(settled).toContain("charge.charge_total_paisa");
     expect(settled).toContain("tax_total_paisa: tax.tax_total_paisa");
+    // `02-F63` (b): the derived adjustment travels as its own field. MUTANT THIS KILLS: a producer
+    // that rounds the total and hands the document no way to say WHY it differs from its own
+    // Subtotal and Tax rows — three rows that do not close, which is the defect R70 was ruled on.
+    expect(settled).toContain("rounding_paisa: charge.rounding_paisa");
+  });
+
+  it("02-F63: all five readers resolve the step from the ONE resolver, none re-reads the env", () => {
+    // The rounding half of the assertion above, and it matters more than the posture's did: the
+    // posture defaults to `none` (nothing happens), while the step defaults to 100 (something
+    // happens). A reader that re-derived it — or forgot it and got a different default — would
+    // charge a different number from the one on the paper, silently.
+    for (const file of READERS) {
+      const src = readSrc(file);
+      expect(src, `${file} does not resolve the charge step`).toContain(
+        "deviceChargeRoundingPaisa",
+      );
+      expect(src, `${file} reads the rounding environment directly`).not.toContain(
+        "RESTOS_CHARGE_ROUNDING",
+      );
+    }
   });
 
   // ⚠ **NO SOURCE READ FOR `16-F1`'s "`none` PRINTS NOTHING", DELIBERATELY.**
@@ -429,18 +514,29 @@ describe("§D 16-F31/16-F33 — the tax is ON THE PAPER, and the Total is the ta
     expect(paper).not.toContain("Tax");
   });
 
-  it("exclusive: Subtotal Rs 960 · Tax Rs 153.60 · Total Rs 1,113.60, and they close", async () => {
-    // ⚠ **THE WHOLE OF v0 GAP 2 IN ONE ASSERTION.** 16 % per line: 45000×2 = 90000 → 14400, and
-    // 6000 → 960; Σ = 15360 paisa. `01-F82`: the *Total* row IS `billed_total`, so it is the
-    // gross. MUTANT THIS KILLS: the producer handing over a line-derived total with no tax
-    // beside it — the state this product shipped in until v0 gap 2.
+  it("exclusive: the four rows CLOSE as printed — 960 + 153.60 + 0.40 = 1,114", async () => {
+    // ⚠ **THE WHOLE OF v0 GAP 2 IN ONE ASSERTION, AND ITS LAST OPEN HALF.** 16 % per line:
+    // 45000×2 = 90000 → 14400, and 6000 → 960; Σ = 15360 paisa, so the pre-rounding total is
+    // 111,360. `02-F63` rounds that half-up to the seeded rupee: **111,400**, and the difference
+    // is the `Rounded up` row.
+    //
+    // ⚠ **THIS ASSERTED `Subtotal Rs 960 · Tax Rs 153 · Total Rs 1,113` UNTIL R70, and its own
+    // comment said the paisa were "absent because `amountToken` renders WHOLE RUPEES — see §E".**
+    // Those three rows do not add up: 960 + 153 = 1,113 only by luck of the truncation, and the
+    // customer was charged 1,113.60. §E was a FINDING block pinning exactly that, and it is
+    // retired below.
+    //
+    // MUTANT THIS KILLS: the producer handing over a line-derived total with no tax beside it (the
+    // state this product shipped in until v0 gap 2), AND a rounding that never reaches the paper.
     setPosture("exclusive", "1600");
-    const paper = await paperFor(111_360);
+    const paper = await paperFor(111_400);
     expect(paper).toContain("Subtotal Rs 960");
-    expect(paper).toContain("Tax Rs 153");
-    expect(paper).toContain("Total Rs 1,113");
-    // ⚠ The paisa are absent because `amountToken` renders WHOLE RUPEES — see §E, which measures
-    // what that costs now that tax produces the product's first non-round totals.
+    expect(paper, "the tax row dropped its paisa — the R70 defect").toContain("Tax Rs 153.60");
+    expect(paper, "no rounding row, so the rows cannot close").toContain("Rounded up Rs 0.40");
+    expect(paper, "the Total is not the rounded charge").toContain("Total Rs 1,114");
+    // And the *pre*-rounding figure is nowhere on the paper: a customer holding this cannot find a
+    // number she was not charged.
+    expect(paper, "the unrounded total reached the customer's copy").not.toContain("Rs 1,113");
   });
 
   it("inclusive: the Total is unchanged and the tax is CARVED OUT of it", async () => {
@@ -461,7 +557,7 @@ describe("§D 16-F31/16-F33 — the tax is ON THE PAPER, and the Total is the ta
     // no authority invoice number, no fiscal QR, no `FISCAL_LOCKED` block — those exist only when
     // a certified adapter injects them, and `16-F34` puts that post-pilot.
     setPosture("exclusive", "1600");
-    const paper = await paperFor(111_360);
+    const paper = await paperFor(111_400);
     for (const banned of ["FBR", "PRA", "FISCAL", "Invoice No", "USIN"]) {
       expect(paper, `the receipt claims "${banned}"`).not.toContain(banned);
     }
@@ -469,53 +565,43 @@ describe("§D 16-F31/16-F33 — the tax is ON THE PAPER, and the Total is the ta
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-// §E — WHAT WHOLE-RUPEE RENDERING COSTS NOW THAT TAX EXISTS. Measured, not argued.
+// §E — `02-F63` (R70): THE ROWS CLOSE AS PRINTED, AND THE AMOUNT TAKEN IS A WHOLE RUPEE.
 //
-// ⚠ **A FINDING, PINNED AS ONE — every assertion below is GREEN and describes a defect.** The
-// `§I` section of `packages/domain`'s `tax-posture.test.ts` is the corpus's own precedent for this
-// shape: state the cost in rupees so a ruling can be taken against a number rather than a worry.
+// ⚠ **THIS SECTION WAS A FINDING BLOCK — GREEN ASSERTIONS DESCRIBING A DEFECT — AND IT IS RETIRED
+// BY THE RULING IT ASKED FOR.** Its header read *"WHAT WHOLE-RUPEE RENDERING COSTS NOW THAT TAX
+// EXISTS. Measured, not argued."*, and its two tests pinned the truncation: that the printed
+// *Total* under-states `billed_total` by up to 99 paisa, and that `Rs 450 + Rs 74` prints against
+// `Rs 525`. Both were correct. It closed *"NOT FIXED HERE, and the refusal is deliberate …
+// **Owner: doc 27 + `packages/escpos`**"*, and `receipt-tax-line.test.ts`'s DEFERRED item 1 named
+// the same gap as *"the sharpest open question in R39's scope"* with the owner *"a founder ruling
+// + an FR"*.
 //
-// `document-parts.ts`'s `amountToken` renders `rupeesFromPaisa(...).rupees`, and
-// `packages/domain/src/money.ts:157` computes that as `(a - (a % 100)) / 100` — **truncation**,
-// not rounding. That was INERT before this change and is not any more, and the reason is
-// structural rather than bad luck: `14-F29`'s owner types prices and `01-F53` freezes them, so
-// before tax every order total was a whole number of rupees and the paisa field was always zero.
-// **An `exclusive` posture is the first thing in this product that produces a total with paisa in
-// it**, and `01-F82` makes that total the receipt's *Total* row.
-//
-// Two consequences, both measured below rather than reasoned:
-//
-//  1. **The printed *Total* under-states `billed_total` by up to 99 paisa**, on a document
-//     `02-F15` gives the customer as the record of what she paid.
-//  2. **The three printed rows can fail to close by Re 1.** `floor(a) + floor(b)` is either
-//     `floor(a+b)` or one less, so `Subtotal + Tax = Total` — the identity
-//     `packages/escpos/src/__acceptance__/receipt-tax-line.test.ts:380` pins **in paisa**, and
-//     which R39's *"correct totals"* is about — is not an identity **on the paper**.
-//
-// **NOT FIXED HERE, and the refusal is deliberate.** `amountToken` is `packages/escpos`'s and its
-// whole-rupee policy is product-wide (the shift slip and the day summary use it too), so changing
-// it is a protected-path change to a rendering rule with no FR asking for it — commandment 9 and
-// `24 §3b`'s no-drive-by rule both point the same way. `27-F12` governs how money is shown and
-// says nothing about sub-rupee precision. **Owner: doc 27 + `packages/escpos`.**
+// **R70 is that ruling and `02-F63` is that FR, and the two old assertions are INVERTED rather
+// than deleted** — `line-advance.test.ts` §G's precedent, and AGENTS.md's own instruction that
+// when a ruling lands you grep the suites encoding the old rule the same day. Each test below
+// carries the figure the old one asserted, so a reversion is legible rather than silent.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
-describe("§E FINDING — the paper renders WHOLE RUPEES, and tax is what makes that visible", () => {
-  it("the printed Total under-states the tax-inclusive billed_total by its paisa", async () => {
-    // Rs 1,113.60 is tendered and Rs 1,113 is printed. The customer's copy is 60 paisa light.
+describe("§E 02-F63 — sub-rupee is PRINTED, and the charge is rounded", () => {
+  it("the printed Total is the ROUNDED charge, and the pre-rounding figure is nowhere on it", async () => {
+    // WAS: `expect(paper).toContain("Total Rs 1,113")` with `not.toContain("1,113.6")` — the
+    // customer's copy 60 paisa light against a Rs 1,113.60 tender. R70's answer is not to print
+    // the paisa on the Total: it is that Rs 1,113.60 is not what she is charged. She pays Rs 1,114.
     setPosture("exclusive", "1600");
-    const paper = await paperFor(111_360);
-    expect(paper).toContain("Total Rs 1,113");
-    expect(
-      paper,
-      "the paisa reached the paper — re-measure this finding before trusting it",
-    ).not.toContain("1,113.6");
+    const paper = await paperFor(111_400);
+    expect(paper).toContain("Total Rs 1,114");
+    expect(paper, "the unrounded total reached the paper").not.toContain("1,113");
   });
 
-  it("and the three rows can fail to close by Re 1 — Rs 450 + Rs 74 printed against Rs 525", async () => {
-    // The sharp case, chosen by construction rather than found by luck: one line at Rs 450.70 at
-    // 16.5 % gives tax 7437 paisa and a total of 52507. Truncated: 450 + 74 = 524, printed 525.
-    // `receipt-tax-line.test.ts` pins `subtotal + tax = total` and it holds — in PAISA, upstream
-    // of this rendering. R39's "correct totals" is about what the customer reads.
+  it("R70's OWN EXAMPLE: Rs 450.70 + Rs 74.37 − Rs 0.07 = Rs 525, and the rows close", async () => {
+    // ⚠ **THE BILL THE RULING WAS TAKEN ON, printed.** One line at Rs 450.70, exclusive at 16.5 %:
+    // tax 7,437 paisa, pre-rounding total 52,507. The founder's words are *"round to rupees …
+    // there is no concept of paisa"*, so the charge is **Rs 525.00** and the seven paisa become a
+    // named row rather than a silent truncation.
+    //
+    // WAS: `Subtotal Rs 450` / `Tax Rs 74` / `Total Rs 525` — 450 + 74 = 524, printed against 525,
+    // with the file's own comment reading *"the rows on the paper do not close, and the ledger's
+    // do."* Every figure below is the same number rendered honestly.
     setPosture("exclusive", "1650");
     const capability = printerCapability("TH230");
     const sent: Uint8Array[] = [];
@@ -541,14 +627,16 @@ describe("§E FINDING — the paper renders WHOLE RUPEES, and tax is what makes 
             settled: 0,
             table_ids_json: "[]",
             table_conflict: 0,
-            pay_total: 52_507,
+            // The ROUNDED charge. At 52,507 the cover test refuses and nothing prints at all —
+            // which is `02-F63` binding on the guard and the paper as one number.
+            pay_total: 52_500,
             repaid_total: 0,
             refund_total: 0,
             pay_attempts_json: JSON.stringify({
               "attempt-1": [
                 {
                   order_id: RECEIPT_ORDER,
-                  amount_paisa: 52_507,
+                  amount_paisa: 52_500,
                   method: "cash",
                   purpose: "settles_order",
                 },
@@ -574,10 +662,50 @@ describe("§E FINDING — the paper renders WHOLE RUPEES, and tax is what makes 
       cashier: () => "Ayesha Khan",
     }).settled(RECEIPT_ORDER);
     await spooler.pump();
+    // At least one transmit — the spooler is pumped by the printer AND by this test, so a
+    // document can legitimately be handed over twice; what must not happen is ZERO, which is
+    // what a cover test refusing the rounded charge would produce.
+    expect(
+      sent.length,
+      "the cover test refused the rounded charge — nothing printed",
+    ).toBeGreaterThan(0);
     const paper = String.fromCharCode(...(sent[0] as Uint8Array));
-    expect(paper).toContain("Subtotal Rs 450");
-    expect(paper).toContain("Tax Rs 74");
+    expect(paper).toContain("Subtotal Rs 450.70");
+    expect(paper).toContain("Tax Rs 74.37");
+    expect(paper, "the rounding is invisible, so the rows do not close").toContain(
+      "Rounded down Rs 0.07",
+    );
     expect(paper).toContain("Total Rs 525");
-    // 450 + 74 = 524. The rows on the paper do not close, and the ledger's do.
+    // `27-F12`: direction is a WORD. A minus sign is one glyph wide and means nothing to a
+    // non-reader, and this is the row where an implementation reaches for one.
+    expect(paper, "a minus sign reached the paper").not.toContain("-0.07");
+    // And the amount TAKEN is a whole rupee — the physical constraint R70 (d) names.
+    expect(paper).toContain("Cash Rs 525");
+    expect(paper, "a coin that does not exist was asked for").not.toContain("Rs 525.07");
+  });
+
+  it("02-F63 (c): the seeded step is Rs 1, unset means the default, and a bad value REFUSES", () => {
+    // `00 §7` (d): every layer-2 key declares a default and this one's is safe to be wrong about.
+    // The asymmetry with the posture is deliberate and is the mutant worth naming: an unset
+    // POSTURE means no tax regime (nothing happens), an unset STEP means the rupee (something
+    // happens), because coins below a rupee have left circulation whether or not an owner typed
+    // anything. MUTANT THIS KILLS: an unset step defaulting to 1 — no rounding, and the paper goes
+    // back to asking for Rs 525.07.
+    expect(DEFAULT_CHARGE_ROUNDING_PAISA).toBe(100);
+    expect(resolveChargeRoundingPaisa({})).toBe(100);
+    expect(resolveChargeRoundingPaisa({ [CHARGE_ROUNDING_ENV]: "  " })).toBe(100);
+    expect(resolveChargeRoundingPaisa({ [CHARGE_ROUNDING_ENV]: "1000" })).toBe(1_000);
+    // R70 names rupees and tens; the shape is bounded (one integer of paisa) and the VALUE is the
+    // owner's, which is `00 §7`'s own division. A malformed one is refused with the key named,
+    // never defaulted — `11-F22`'s precedent, and `16-F27`'s rate one field over.
+    // `"1e3"` is deliberately NOT in this list: `Number("1e3")` is 1000, a perfectly good
+    // integer of paisa, and refusing an exponent an operator is unlikely to type would be
+    // inventing a rule. What is refused is what is NOT a positive integer.
+    for (const bad of ["0", "-100", "1.5", "one rupee", "100rs", "NaN"]) {
+      expect(
+        () => resolveChargeRoundingPaisa({ [CHARGE_ROUNDING_ENV]: bad }),
+        `"${bad}" was accepted`,
+      ).toThrow(/02-F63/);
+    }
   });
 });
