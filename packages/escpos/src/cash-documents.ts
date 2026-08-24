@@ -41,7 +41,7 @@ import {
   CHANNEL_LABELS,
   GROUP_BREAK,
   METHOD_LABELS,
-  NOT_RECORDED,
+  NOT_TOTALLED,
   ownerNote,
   reprintBand,
   row,
@@ -124,14 +124,25 @@ export type ShiftCloseData = {
  * `02-F24`'s data contract — "a day-summary ticket (sales by channel, voids/comps/discounts,
  * over/short) can be printed via doc 03".
  *
- * **Two of the FR's three groups are carried below and the third is NOT, deliberately.** `01 §4`
- * has no `void.recorded`, `comp.recorded` or `discount.recorded` — `26 §7` states it outright
- * ("`void/comp/discount.recorded` … have **no payload schema at all**") — so there is no fold,
- * no projection and no number. Commandment 2 forbids inventing the events, and a field defaulted
- * to zero would print `Voids Rs 0` on a night with twelve voids, which is worse than absent: it
- * is the "logged but uncounted" shape `02-F43` names, moved onto paper. The group therefore
- * appears on the document as a NAMED GAP (`00 §5.7` — the device reports what it knows), and the
- * field lands here when the event types do.
+ * **Two of the FR's three groups are carried below and the third is NOT, deliberately.** There is
+ * no fold, no projection and no number for voids, comps and discounts, so a field defaulted to
+ * zero would print `Voids Rs 0` on a night with twelve voids — worse than absent: it is the
+ * "logged but uncounted" shape `02-F43` names, moved onto paper. The group therefore appears on
+ * the document as a NAMED GAP (`00 §5.7` — the device reports what it knows), and the field lands
+ * here when the projection does.
+ *
+ * ⚠ **THE REASON THIS PARAGRAPH GAVE WAS TRUE WHEN WRITTEN AND IS NOW FALSE, AND THE WORD ON THE
+ * PAPER MOVED WITH IT (August 2026).** It read: *"`01 §4` has no `void.recorded`, `comp.recorded`
+ * or `discount.recorded` — `26 §7` states it outright"* — and the document said `NOT RECORDED` on
+ * exactly that basis. All three have carried payload schemas in
+ * `packages/domain/src/registry.ts` since `plans/v0.md` gap 1 landed, `apps/pos-electron` emits
+ * all three with an actor and an approver, and `26 §7` itself was amended 2026-08-23 to say so.
+ * What is still missing is one step later: `merge.ts`'s three arms are **projection-inert** while
+ * `DEC-MONEY-010`'s gate condition (iii) — *"an oracle-pinned merge rule in `26 §7`"* — is unmet,
+ * so `01-F30`'s `void_value`, `comp_value` and `discounts` terms do not exist. **The GAP is the
+ * same size and the CLAIM was not:** a manager's slip was telling her nothing had been recorded
+ * about a night that held a void, a comp and three discounts, each with an approver. It prints
+ * `NOT TOTALLED` now — see `DAY_ADJUSTMENTS`.
  */
 export type DaySummaryData = {
   /**
@@ -195,6 +206,34 @@ export type DaySummaryData = {
    */
   readonly undated_sales_paisa: number;
   readonly undated_orders: number;
+  /**
+   * **WHICH CHANNELS that undated money came from, exhaustive over `02-F42`'s closed set.**
+   *
+   * ⚠ **IT EXISTS BECAUSE THE BLOCK ABOVE WAS MAKING A COMPLETENESS CLAIM IT COULD NOT MAKE.**
+   * Reproduced on a real device store, August 2026: a phone order settled with no confirm (`01-F17`
+   * — a bill rung after the food went out) put Rs 893 in `undated_sales_paisa`, and the slip then
+   * read **`Phone Rs 0`** five rows above it. Both figures are individually true — no phone sale
+   * could be DATED to this business day — and together they tell a manager that the phone took
+   * nothing on a night it took Rs 893. `sales_by_channel`'s own contract says an omitted bucket
+   * cannot be told from an uncomputed one; the same argument applies to a bucket that reads zero
+   * beside money the document is holding somewhere else.
+   *
+   * **It is a BREAKDOWN and never a second total.** `undated_sales_paisa` stays the authoritative
+   * figure and is unchanged: an order whose `channel` falls outside `02-F42`'s closed set is
+   * counted in the aggregate and bucketed nowhere, on `DAY_SALES`'s own stated rule that a
+   * mis-bucketed sale is worse than a missing one. So Σ of this map is ≤ the aggregate, and on a
+   * conforming writer they are equal.
+   *
+   * **What it must NOT be read as: a licence to file undated money under a business day.** These
+   * orders carry no delivered branch stamp at all (`01-F45` — a stamp this device does not hold is
+   * not one it may invent), so their money still may not enter `sales_by_channel`. The root fix is
+   * a settlement stamp on the order projection, which is a `packages/sync-client` fold change under
+   * `26 §8`'s oracle; until it lands, naming the channel is the most this document can honestly
+   * say. `apps/pos-electron/src/main/printing.ts` records the sizing at its own walk.
+   *
+   * **NOT defaulted, NOT optional**, for `undated_sales_paisa`'s reason one field up.
+   */
+  readonly undated_by_channel: SalesByChannel;
   readonly reprint: boolean;
 };
 
@@ -213,6 +252,27 @@ const ADJUSTMENTS_LABEL = "Voids/comps/discounts";
  */
 const UNDATED_SALES_LABEL = "Undated sales so far";
 const UNDATED_ORDERS_LABEL = "Undated orders so far";
+
+/**
+ * The per-channel breakdown of the bucket above — see `DaySummaryData.undated_by_channel`.
+ *
+ * **The prefix is what keeps the two blocks apart on paper**, and it is a word rather than an
+ * indent because `03-F36` bans space-as-layout: `Phone Rs 0` and `Phone Rs 893` five rows apart
+ * would be the same label twice with opposite meanings, which is the misreading this breakdown
+ * exists to end.
+ *
+ * **Width, checked rather than assumed.** `Storefront` is the longest `ORDER_CHANNELS` label at 10
+ * columns, so the widest row here is `Undated storefront` = 18 + 1 + 13 = **32** at `MIN_COLUMNS`'
+ * pinned eight-digit bound — inside `day_summary`'s 34 floor, which therefore does not move and
+ * this stays an addition rather than an `03-F49` spec act.
+ *
+ * **`CHANNEL_LABELS` is used verbatim and is deliberately NOT lower-cased after the prefix.** Its
+ * own declaration records that the label is *the product's name* — `whatsapp` is the kernel key
+ * and **WhatsApp** is the thing a manager recognises — so a `.toLowerCase()` that made
+ * `Undated storefront` read better would print `Undated whatsapp` and lose the one label on this
+ * document that carries a brand's own capitalisation.
+ */
+const undatedChannelLabel = (channel: OrderChannel): string => `Undated ${CHANNEL_LABELS[channel]}`;
 
 const shiftOf = (data: unknown): ShiftCloseData => data as ShiftCloseData;
 const dayOf = (data: unknown): DaySummaryData => data as DaySummaryData;
@@ -396,6 +456,22 @@ const DAY_BLOCK_RENDERERS: Readonly<Record<string, BlockRenderer>> = {
         row(CHANNEL_LABELS[channel], amountToken(day.sales_by_channel[channel])),
       ),
       ...row(UNDATED_SALES_LABEL, amountToken(day.undated_sales_paisa)),
+      // ── WHICH CHANNELS THE UNDATED MONEY CAME FROM ────────────────────────────────────────────
+      //
+      // Reproduced August 2026: a phone order settled with no confirm put Rs 893 in the row above
+      // and left `Phone Rs 0` five rows higher — two individually true figures that together tell
+      // a manager the phone took nothing on a night it took Rs 893. The channel is a DELIVERED
+      // field of `order.created` that this document's caller already reads, so naming it invents
+      // nothing and dates nothing (`01-F45`).
+      //
+      // EXHAUSTIVE over `02-F42`'s closed set and printed at zero, on this block's own stated rule
+      // and `SHIFT_DRAWER`'s: a row that appears only on bad nights teaches readers to stop looking
+      // for it — and here the whole point is that a manager can pair `Phone` with `Undated Phone`.
+      // Immediately under the aggregate, before the COUNT, because it decomposes the money and not
+      // the orders.
+      ...ORDER_CHANNELS.flatMap((channel) =>
+        row(undatedChannelLabel(channel), amountToken(day.undated_by_channel[channel])),
+      ),
       // The count is what makes the money readable, on `shifts_closed`'s own argument: `Rs 0` over
       // no undated orders and `Rs 0` over three are the same ink and opposite facts.
       ...row(UNDATED_ORDERS_LABEL, String(day.undated_orders)),
@@ -403,14 +479,20 @@ const DAY_BLOCK_RENDERERS: Readonly<Record<string, BlockRenderer>> = {
     ];
   },
   /**
-   * `02-F24`'s third group, printed as the gap it is. See `DaySummaryData`: `01 §4` has no
-   * void/comp/discount event, so there is nothing to count — and `Rs 0` on a night with twelve
-   * voids is a worse document than one that says so.
+   * `02-F24`'s third group, printed as the gap it is. See `DaySummaryData`: the acts ARE recorded
+   * in the ledger and no fold projects their value, so this slip cannot add them up — and `Rs 0`
+   * on a night with twelve voids is a worse document than one that says so.
    *
-   * This is the widest line either cash document produces, which makes it the line `MIN_COLUMNS`
-   * derives `day_summary`'s floor from.
+   * **`NOT_TOTALLED` and not `NOT_RECORDED`, and the difference is the whole fix.** The stronger
+   * word was true while `01 §4` carried no such event; it became a **false statement on a
+   * manager's own paper** the day the emitters shipped, and it stayed there. The two words are
+   * the same twelve columns, so `MIN_COLUMNS` derives the same 34 and no `03-F49` floor moves —
+   * which is what made this a wording correction rather than a spec act.
+   *
+   * This is still the widest line either cash document produces (tied by `Undated sales so far`),
+   * which makes it the line `MIN_COLUMNS` derives `day_summary`'s floor from.
    */
-  DAY_ADJUSTMENTS: () => [...row(ADJUSTMENTS_LABEL, NOT_RECORDED), GROUP_BREAK],
+  DAY_ADJUSTMENTS: () => [...row(ADJUSTMENTS_LABEL, NOT_TOTALLED), GROUP_BREAK],
   DAY_TOTALS: (data) => {
     const day = dayOf(data);
     return [
@@ -450,6 +532,24 @@ const DAY_SUMMARY_EXAMPLE: DaySummaryData = {
   // by ±1 paisa upward, and a zero leaf would be a DEAD witness in `03-F36`'s build-time gate.
   undated_sales_paisa: 52_100,
   undated_orders: 1,
+  /**
+   * The SAME Rs 521, decomposed — and it lands on `phone` because that is the shape the defect was
+   * measured in: an order taken over the phone, settled with no confirm, so `01-F46` can date
+   * nothing about it. Every leaf is non-zero for `SHIFT_CLOSE_EXAMPLE`'s stated reason —
+   * `render.test.ts`'s data-axis control probes a money leaf by ±1 paisa and a zero leaf is a DEAD
+   * witness in `03-F36`'s build-time gate — and the five sum to `undated_sales_paisa` above,
+   * because an example whose breakdown contradicted its own aggregate would witness the bug rather
+   * than the document. The COLUMN cost of this block is a property of its longest LABEL and not of
+   * these values — `Undated Storefront` at `MIN_COLUMNS`' pinned eight-digit bound is 18 + 1 + 13 =
+   * 32, inside `day_summary`'s 34 — so no example figure can move the floor.
+   */
+  undated_by_channel: {
+    counter: 100,
+    phone: 51_600,
+    storefront: 100,
+    whatsapp: 100,
+    foodpanda: 200,
+  },
   reprint: false,
 };
 

@@ -309,6 +309,44 @@ export type BilledLineCell = {
   notes?: string[];
 };
 
+/**
+ * `01-F30` — **has this line EXITED the order?** A decided single exit state (`01 §4`'s `voided`
+ * or `cancelled`), and nothing else.
+ *
+ * **Extracted August 2026 so that "exited" is declared ONCE and read by more than money.** It was
+ * the first line of `billedCellPaisa` below and nowhere else, so the only question a host app
+ * could ask about an exit was *how much is this line worth*, which `billedLinePaisa` answers with
+ * a **number** — and a number collapses *exited* onto *free* (`01-F60`'s explicit zero) and onto
+ * *zero quantity*. Three different facts, one `0`. Two shipping documents were reading that zero
+ * as their exit test and neither could tell the three apart:
+ *
+ *   * `apps/pos-electron`'s KOT walk had **no exit test at all** — `LineCell` declared no `states`
+ *     field — so a line voided before its chit was printed and cooked. `02-F8`'s two ways of
+ *     taking a line off an order therefore produced two different chits: a pre-confirm
+ *     `order.line_removed` is tombstoned out of `json_lines` (see `Entity.lineTombstones`) and
+ *     never reaches paper, while a `voided` line stays in the map with its state beside it.
+ *   * the receipt's `billedOnPaper` used `unit_price_paisa === 0 || billedLinePaisa(cell) > 0`,
+ *     whose first arm short-circuits **before** the exit is consulted — so a VOIDED line priced
+ *     at zero printed on a customer's copy of an order it had been taken off.
+ *
+ * **It is not a fold arm and it changes no projection** (`01-F34`): it reads one already-projected
+ * cell's `states` and returns a boolean — no ordering metadata, no clock, no envelope id, no
+ * reading-device state. `billedCellPaisa` calls it rather than restating it, so the money and the
+ * paper cannot disagree about which lines left the order (`02-F45`, one fact one source).
+ *
+ * **It deliberately says nothing about a CONTESTED terminal set** (≥2 heads, `CONTESTED_LINE_BILLABLE`).
+ * That is a money POLICY — whether a disputed line is billed — and a kitchen has no business
+ * reading it: a cook makes the dish or does not, and no FR turns that on a billing switch. A
+ * caller that needs the billing answer asks `billedLinePaisa`, which applies both rules.
+ *
+ * **The parameter is `states` alone and NOT a whole `BilledLineCell`, which is `03-F32` reaching
+ * one package over.** The kitchen chit's data model has no price in it *by rule*, so a signature
+ * demanding `unit_price_paisa` would force the one caller that must not hold a price either to
+ * carry one or to pass a fabricated zero — a hole exactly where that FR forbids one.
+ */
+export const lineExited = (cell: Pick<BilledLineCell, "states">): boolean =>
+  cell.states.length === 1 && EXITED.has(cell.states[0] as string);
+
 /** billed_effective of ONE projected cell (01-F30: billed derives from
  * delivered lines, exited lines excluded — "a fully-voided order nets to
  * zero"): a decided single exited state contributes nothing; a contested
@@ -316,7 +354,7 @@ export type BilledLineCell = {
  * policy application, matrix §5.4). Declared ONCE — projectEntity and the
  * exported helper below both read it (T-01-11 fix round F4). */
 const billedCellPaisa = (cell: BilledLineCell): bigint => {
-  if (cell.states.length === 1 && EXITED.has(cell.states[0] as string)) return 0n;
+  if (lineExited(cell)) return 0n;
   const terminalCount = cell.states.filter((s) => TERMINAL.has(s)).length;
   // BigInt: qty × unit_price is a PRODUCT, so it leaves the exact-integer range far
   // sooner than a sum does, and a double product rounds silently (3 × 3002399751580331

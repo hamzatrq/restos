@@ -22,7 +22,7 @@ import {
   type SpoolerTransport,
 } from "@restos/escpos";
 import type { DeviceStore } from "@restos/sync-client";
-import { billedLinePaisa, orderChargeSnapshot } from "@restos/sync-client";
+import { billedLinePaisa, lineExited, orderChargeSnapshot } from "@restos/sync-client";
 import type { Alarm, KitchenState } from "../shared/ipc";
 import type { CatalogResolver } from "./gateway";
 import { deviceChargeRoundingPaisa, deviceTaxCell } from "./tax-posture";
@@ -285,6 +285,28 @@ type LineCell = {
   qty: number;
   /** `02-F6`'s notes as the merge fold projects them; absent on a line with none (`26 §7` M2). */
   notes?: string[];
+  /**
+   * The projected workflow states, for the ONE question the chit may ask of them: **has this line
+   * left the order** (`lineExited`, `packages/sync-client`).
+   *
+   * ⚠ **THIS FIELD DID NOT EXIST UNTIL AUGUST 2026, AND ITS ABSENCE WAS A SHIPPED DEFECT: THE
+   * PRINT PATH STRUCTURALLY COULD NOT SEE A VOID.** `owedChits` walked every entry of
+   * `json_lines` unconditionally, so a naan voided before *Send to kitchen* was pressed printed on
+   * the tandoor chit and was cooked — reproduced on a real device store: the fold row carried
+   * `"l-naan": {"states":["voided"], …}` while the bytes handed to the transport read
+   * `TANDOOR 13:00 / 1 Naan`. `02-F8`'s two ways of taking a line off an order therefore produced
+   * two different chits, because a pre-confirm `order.line_removed` is tombstoned out of
+   * `json_lines` by the fold and never reaches this walk at all.
+   *
+   * `unknown` and cast at the one place that reads it, exactly as `BilledCell` below types it and
+   * for its reason: the real input is a JSON string off a projection this module does not own.
+   *
+   * **It is NOT money and does not breach `03-F32`.** That FR bans a money TOKEN from the chit and
+   * bans a slot that could address one; a workflow state is the same class of fact as the item id
+   * and the quantity already on this cell, and nothing derived from it reaches the paper — the
+   * only thing it decides is whether the line is on the chit at all.
+   */
+  states?: unknown;
 };
 
 /**
@@ -341,18 +363,25 @@ type BilledCell = LineCell & { unit_price_paisa: number; states?: unknown };
  * that excluded one of them); it did not close *a voided line without one*, and the two are one
  * clause apart in the code and nothing alike in the English.
  *
- * **IT IS NOT FIXED HERE, AND THE REASON IS A BOUNDARY RATHER THAN A JUDGEMENT.** The honest
- * predicate is *did this line exit the bill*, and `packages/sync-client` is the only module allowed
- * to answer it: `billedCellPaisa`'s `states.length === 1 && EXITED.has(...)` guard is fold logic
- * that `26 §8` forbids re-deriving outside that package, and `billedLinePaisa` deliberately returns
- * a NUMBER, which collapses "exited" and "free" onto the same zero. Reading `states` in this file
- * would be exactly the re-derivation the paragraph above refuses, so the fix is **owed against
- * `packages/sync-client`** and is sized here rather than taken: one exported predicate beside
- * `billedLinePaisa` (`01-F30`'s "is this line one the bill is built from", declared once, ~10 lines
- * over the `EXITED`/`TERMINAL`/`CONTESTED_LINE_BILLABLE` sets that module already holds), its own
- * suite, and — because that package is a `20 §4.4` protected path — an adversarial review in a
- * separate context. This function then becomes that predicate and the `unit_price_paisa` arm
- * disappears entirely, along with the class of bug it carries.
+ * ✅ **CLOSED (August 2026), AND THE FIX IS THE ONE SIZED HERE RATHER THAN A SECOND ANSWER.** The
+ * paragraph that stood here said the honest predicate is *did this line exit the bill*, that
+ * `packages/sync-client` is the only module allowed to answer it (`26 §8`), and that the fix was
+ * *"one exported predicate beside `billedLinePaisa`"*. That predicate now exists — `lineExited`,
+ * declared over the `EXITED` set `billedCellPaisa` itself reads, so this file re-derives nothing.
+ *
+ * **The `unit_price_paisa` arm survives and did NOT disappear, which is where this departs from
+ * the sizing above.** The two clauses answer different questions and `01-F60` needs both: *has
+ * this line left the order* (`lineExited`) and *is it a deliberately free line rather than a
+ * contested one* (the price arm, guarding `billedLinePaisa`'s zero). Dropping the price arm would
+ * take a Rs 0 item off a customer's copy — the state `01-F60` created the explicit zero to keep
+ * distinguishable from *forgotten* — and dropping the exit test is the defect above. What changed
+ * is the ORDER and the conjunction: the exit is asked FIRST and binds unconditionally, so the
+ * short-circuit can no longer carry a voided line past it.
+ *
+ * **The same predicate decides the KITCHEN chit** (`owedChits`, above). That is the point of it
+ * being one function: a line the customer is not charged for is a dish nobody is given, and
+ * before this the two documents disagreed — the receipt excluded a priced void and the chit
+ * cooked it.
  *
  * ⚠ **THERE IS NO GUARD FOR A CELL WITH NO PROJECTED `states`, AND THAT IS MEASURED RATHER THAN
  * ASSUMED.** A first draft carried one (fail OPEN: print the line) with a test for it, and the
@@ -364,7 +393,9 @@ type BilledCell = LineCell & { unit_price_paisa: number; states?: unknown };
  * on the settlement path that predates this change and is not a printer's to close.
  */
 const billedOnPaper = (cell: BilledCell): boolean =>
-  cell.unit_price_paisa === 0 || billedLinePaisa({ ...cell, states: cell.states as string[] }) > 0;
+  !lineExited({ states: cell.states as string[] }) &&
+  (cell.unit_price_paisa === 0 ||
+    billedLinePaisa({ ...cell, states: cell.states as string[] }) > 0);
 
 /** `03-F3`: "order number + table/channel in large type" — ONE field, filled in that order. */
 const tableOf = (table_ids_json: string, channel: string): string => {
@@ -729,6 +760,31 @@ export const createKotPrinter = ({
     for (const [line_id, cell] of Object.entries(
       JSON.parse(order.json_lines) as Record<string, LineCell>,
     )) {
+      // ── A LINE THAT LEFT THE ORDER IS NOT COOKED ──────────────────────────────────────────────
+      //
+      // `01 §4`'s `voided` / `cancelled` are EXIT states and `01-F30` excludes them from the bill,
+      // so a line the customer is not charged for is a dish nobody is being given. The predicate
+      // is `packages/sync-client`'s — the module `26 §8` makes the only place this may be derived
+      // — and it is the SAME one `billedOnPaper` reads, so the chit and the receipt cannot
+      // disagree about which lines left the order (`02-F45`, one fact one source).
+      //
+      // **DECLARED INTERPRETATION (`24 §3b`), because no FR says "a voided line is not printed"
+      // in those words.** The reading is `02-F20`'s and `02-F8`'s shared boundary: escalation is
+      // required for *"void after KOT"* and removal *"pre-KOT is a plain event; post-KOT it must
+      // be a `void.recorded` with approver"* — the chit is the boundary precisely BECAUSE the
+      // dish is being made once it is on paper. A void before the chit is therefore a dish that
+      // must never be started; if it were not, the escalation the FR puts on the after case would
+      // be protecting nothing. The named alternative is *print it and let the kitchen sort it
+      // out*, which is what shipped and which cooks a dish nobody is charged for.
+      //
+      // ⚠ **WHAT THIS DOES NOT CLOSE, named rather than left to look intentional (`01-F66`'s
+      // lesson): a line voided AFTER its chit has printed.** `03-F55` records the coverage a job
+      // committed to paper, and nothing un-commits it — the cook has the ticket. Cancelling a
+      // dish already sent needs a document `03` does not specify, so this walk deliberately says
+      // nothing about it: it stops an exited line from being sent, never recalls one that was.
+      // The `03-F55` guard below is what keeps the two apart — a line already covered is not
+      // re-sent, and an exited line is not sent in the first place.
+      if (lineExited({ states: cell.states as string[] })) continue;
       const at = station(cell.item_id);
       const lines = byStation.get(at) ?? [];
       lines.push({ line_id, line: kotLineOf(cell) });
@@ -1599,7 +1655,21 @@ export const createCashPrinter = ({
    * gate condition (iii) — *"an oracle-pinned merge rule in `26 §7`"* — is unmet, so `01-F30`'s
    * `void_value`, `comp_value` and `discounts` terms do not exist and there is no number to print.
    * The document therefore still NAMES the gap rather than printing a zero — the same paper, a
-   * different and now-true reason, and one fold arm away from a real figure. See `DaySummaryData`.
+   * different and now-true reason, and one fold arm away from a real figure. ⚠ **And the WORD on
+   * that paper moved in August 2026 for exactly this reason**: it read `NOT RECORDED`, which was
+   * a false statement about a night holding a void, a comp and three discounts with approvers.
+   * It reads `NOT TOTALLED`. See `DaySummaryData`.
+   *
+   * ⚠ **THIS FUNCTION READS THE FOLD AT THE MOMENT `day.closed` LANDS, WHICH IS ONE APPEND BEFORE
+   * `02-F24`'s ACT IS COMPLETE — AND THAT PRINTED `Deposit Rs 0`.** The FR's day close is one act
+   * and two events (`day.closed`, `cash.deposit_recorded`), `main/index.ts` triggers this off the
+   * first of them, and the renderer emitted them in the FR's written order — so the day row this
+   * reads was a fact behind and the slip claimed nothing had gone to the bank. Nothing here was
+   * wrong: the fix is in `renderer/CashSurfaces.tsx`, which now appends the deposit FIRST so that
+   * the triggering event is the LAST event of the act, and its comment states why the trigger was
+   * not moved instead. **Whoever adds a THIRD event to this act inherits the same hazard**: this
+   * document is assembled from a fold, so every fact it prints must be appended before the event
+   * that fires it.
    *
    * **The day's over/short is a SUM of CARRIED shift variances, never a day-level recompute.**
    * `day.closed` carries a count and no expectation, so "expected minus counted" for a whole day
@@ -1651,6 +1721,30 @@ export const createCashPrinter = ({
       fold change in `packages/sync-client` under `26 §8`'s oracle, not an edit in a printer.
     */
     const undated: number[] = [];
+    /*
+      WHICH CHANNELS THE UNDATED MONEY CAME FROM (`02-F24`'s "sales by channel", August 2026).
+
+      The aggregate above was surfaced and its CHANNEL was not, so the document printed
+      `Phone Rs 0` five rows above `Undated sales so far Rs 893` — reproduced on a real device
+      store from a phone order settled with no confirm. Both rows are individually true and
+      together they tell a manager the phone took nothing on a night it took Rs 893.
+
+      The channel is a DELIVERED field of `order.created`, already on the row this loop is reading,
+      so naming it invents nothing and — this is the part that matters — DATES nothing: the money
+      stays out of `sales_by_channel`, because a stamp this device does not hold is not one it may
+      invent (`01-F45`), and filing it under this business day would be choosing a day by whichever
+      one happened to close next. The root fix is still the settlement stamp named at the foot of
+      this comment block; this is what the document can honestly say until that lands.
+
+      Bucketed with the SAME refusal `sales` uses one branch down — a channel outside `02-F42`'s
+      closed set is not folded into another one — but with the opposite disposition on the money:
+      such an order stays counted in `undated` and is bucketed nowhere, so the aggregate remains
+      authoritative and the breakdown can only ever be short of it, never over. `sales` DROPS such
+      an order entirely, which is that block's own stated trade; here the aggregate already exists
+      to hold it and dropping it would be the `02-F43` silent path this whole bucket exists to end.
+    */
+    const undatedByChannel = new Map<OrderChannel, number[]>();
+    for (const channel of ORDER_CHANNELS) undatedByChannel.set(channel, []);
     let undated_orders = 0;
     for (const order of store.openOrders()) {
       if (order.confirmed_at === null) {
@@ -1660,6 +1754,7 @@ export const createCashPrinter = ({
         if (order.pay_total <= 0) continue;
         undated.push(order.pay_total);
         undated_orders += 1;
+        undatedByChannel.get(order.channel as OrderChannel)?.push(order.pay_total);
         continue;
       }
       if (!onBusinessDate(order.confirmed_at, day.business_date)) continue;
@@ -1689,6 +1784,13 @@ export const createCashPrinter = ({
       // through `totalOf` like every other money figure on this document.
       undated_sales_paisa: totalOf(undated),
       undated_orders,
+      // The breakdown of the row above, exhaustive over `02-F42`'s closed set and BigInt-exact
+      // through the same `totalOf` — so `Phone Rs 0` up in `sales_by_channel` is read beside
+      // `Undated Phone Rs 893` rather than on its own. See the loop's comment for why this may
+      // not simply be added into the channel row it names.
+      undated_by_channel: Object.fromEntries(
+        ORDER_CHANNELS.map((channel) => [channel, totalOf(undatedByChannel.get(channel) ?? [])]),
+      ) as DaySummaryData["undated_by_channel"],
       reprint: false,
     });
   };

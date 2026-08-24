@@ -479,11 +479,22 @@ describe("26 §7/02-F43 — what the fold carried is what the paper says", () =>
     expect(text).toContain("Shifts closed 2");
   });
 
-  it("02-F24: the group 01 §4 cannot record is NAMED on the paper, never zeroed", async () => {
+  it("02-F24: the group no fold TOTALS is NAMED on the paper, never zeroed", async () => {
+    // ⚠ **THIS ASSERTION READ `NOT RECORDED` AND WAS RETIRED IN AUGUST 2026, NOT WEAKENED (`L3`).**
+    // Its title said "the group 01 §4 cannot record". `packages/domain`'s registry has carried
+    // payload schemas for `void.recorded`, `comp.recorded` and `discount.recorded` since
+    // `plans/v0.md` gap 1 landed and `apps/pos-electron` emits all three with an actor and an
+    // approver — so a GREEN test was defending a claim the ledger had overruled, and the claim was
+    // printed on a manager's own paper. What is genuinely absent is the PROJECTION
+    // (`DEC-MONEY-010`'s gate condition (iii)), which is a claim about totalling and not about
+    // recording. The gap is the same size; only its description was false. The full argument and
+    // the reproduction are in `packages/escpos/src/__acceptance__/cash-documents.test.ts`.
     const h = recordingHarness();
     h.printer.dayClosed(DAY_ID);
     await h.spooler.pump();
-    expect(textOf(h.sent[0] as Uint8Array)).toContain("Voids/comps/discounts NOT RECORDED");
+    const text = textOf(h.sent[0] as Uint8Array);
+    expect(text).toContain("Voids/comps/discounts NOT TOTALLED");
+    expect(text).not.toContain("NOT RECORDED");
   });
 });
 

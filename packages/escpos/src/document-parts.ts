@@ -211,6 +211,29 @@ export const UNATTRIBUTED = "NOT ATTRIBUTED";
 /** `00 §5.7` — a fact this device does not hold, named rather than printed as a zero or a blank. */
 export const NOT_RECORDED = "NOT RECORDED";
 
+/**
+ * `00 §5.7` — a fact the ledger DOES hold and this document cannot ADD UP, which is a different
+ * statement from `NOT_RECORDED` and must not be said with the same words.
+ *
+ * ⚠ **IT EXISTS BECAUSE `day_summary` WAS MAKING THE STRONGER CLAIM AND IT HAD BECOME FALSE.**
+ * That document printed `Voids/comps/discounts NOT RECORDED` on the reasoning that `01 §4` had no
+ * such event at all. `packages/domain/src/registry.ts` has carried payload schemas for
+ * `void.recorded`, `comp.recorded` and `discount.recorded` since `plans/v0.md` gap 1 landed and
+ * `apps/pos-electron` emits all three with actor and approver — reproduced on a real device store
+ * beside a slip still reading NOT RECORDED. What is genuinely absent is the PROJECTION:
+ * `merge.ts`'s three arms are projection-inert while `DEC-MONEY-010`'s gate condition (iii) is
+ * unmet, so `01-F30`'s `void_value`, `comp_value` and `discounts` terms do not exist and there is
+ * no number to print. The acts are recorded; this slip cannot total them, and now says so.
+ *
+ * **Twelve columns, exactly as `NOT_RECORDED` is, and that is load-bearing rather than a
+ * coincidence.** `min-columns.ts` derives `day_summary`'s floor from `Voids/comps/discounts` +
+ * this word, so a longer one moves a `03-F49` floor — which is a spec act and not a wording
+ * choice. `RECORDED, NOT TOTALLED` was the clearer sentence and it is 21 columns: it would take
+ * the floor from 34 to 43 and make the day summary unprintable on the 42-column heads `03-F49`
+ * already contemplates.
+ */
+export const NOT_TOTALLED = "NOT TOTALLED";
+
 // ── line construction ────────────────────────────────────────────────────────────────────────────
 
 /**
