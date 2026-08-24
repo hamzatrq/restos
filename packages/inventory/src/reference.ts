@@ -14,8 +14,6 @@
  * make. The writer is where the owner is standing and where the fix is one keystroke away.
  */
 
-import type { CountBasis } from "@restos/domain";
-
 /** `00 §6` — quantities are integer mg / ml / units and nothing else. */
 export const BASE_UNITS = ["mg", "ml", "units"] as const;
 export type BaseUnit = (typeof BASE_UNITS)[number];
@@ -196,7 +194,11 @@ const recipeCycles = (recipes: readonly Recipe[]): readonly ReferenceRefusal[] =
   for (const recipe of recipes) walk(recipe.recipe_id, []);
   // One recipe can sit on several cycles; a writer only needs to be told about each recipe once.
   const seen = new Set<string>();
-  return refusals.filter((r) => (seen.has(r.subject) ? false : (seen.add(r.subject), true)));
+  return refusals.filter((r) => {
+    if (seen.has(r.subject)) return false;
+    seen.add(r.subject);
+    return true;
+  });
 };
 
 /**

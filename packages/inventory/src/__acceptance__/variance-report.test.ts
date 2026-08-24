@@ -267,6 +267,48 @@ describe("§C · 10-F29 — a two-area item with ONE line missing reads NOT COUN
   });
 });
 
+// ── §C2 · 10-F33 (a) — the WORST basis wins across an item's areas ─────────────────────────────
+
+describe("§C2 · an item counted two ways carries the LESS precise basis, and its floor with it", () => {
+  it("⚠ exact in the store + ESTIMATED in the kitchen rolls up as ESTIMATED", () => {
+    // Found by MUTATION: V14 (the rollup takes the BEST basis) survived the whole suite, because no
+    // fixture anywhere counted ONE item across TWO areas with DIFFERENT bases — the round-3 defect
+    // verbatim, the mechanism built correctly and never aimed at the case it exists for.
+    //
+    // It matters because `10-F33` (a) computes the noise floor FROM the basis. Taking the best would
+    // license the report to say more about the sum than the worst reading in it supports, which is
+    // the direction that produces an accusation.
+    const [, second] = run([
+      { item_id: "chicken", area_id: "walk-in", counted: true, qty_base: 12 * KG, basis: "exact" },
+      {
+        item_id: "chicken",
+        area_id: "kitchen",
+        counted: true,
+        qty_base: 6 * KG,
+        basis: "estimated",
+      },
+      { item_id: "oil", area_id: "dry-store", counted: true, qty_base: 5 * KG, basis: "estimated" },
+    ]);
+    const row = rowFor(second as VarianceReport, "chicken");
+    expect(row?.count_basis).toBe("estimated");
+    // …and the floor moves with it: `exact` earns a floor of ZERO, `estimated` earns 98 005.03 mg
+    // on a 1 kg container. A rollup taking the best basis would report this gap as reportable at a
+    // floor of 0, which is precisely the over-confidence the tier exists to prevent.
+    //
+    // The RENDERED figure is 98 006 and not 98 005: the report CEILS its display value while the
+    // comparison stays exact, so the number an owner reads never understates the floor the row was
+    // actually judged against. `noise-floor.test.ts` §A asserts the exact side.
+    expect(row?.noise_floor_qty_base).toBe(98_006);
+  });
+
+  it("the CONTROL: both areas exact rolls up as exact, with a zero floor", () => {
+    const [, second] = run([...COMPLETE_CLOSE]);
+    const row = rowFor(second as VarianceReport, "chicken");
+    expect(row?.count_basis).toBe("exact");
+    expect(row?.noise_floor_qty_base).toBe(0);
+  });
+});
+
 // ── §D · 10-F5 — negative theoretical stock is allowed and never throws ────────────────────────
 
 describe("§D · 10-F5 — theoretical stock may go negative, is flagged, and blocks nothing", () => {

@@ -42,7 +42,6 @@ import {
   isSustainedRun,
   noiseFloor,
   SUSTAINED_RUN_PERIODS,
-  vocabularyViolations,
 } from "./noise.js";
 import {
   type CostBasis,
@@ -415,15 +414,18 @@ export const sustainedHints = (
   reports: readonly VarianceReport[],
   wastageLoggedByItem: ReadonlySet<string>,
 ): readonly SustainedHint[] => {
-  // `10-F33` (f) says the vocabulary rule is a **checkable invariant**, and a rule checked only by
-  // a test is a rule about the strings that test remembered. So it runs HERE, on the way out: a
-  // hint that names a banned word or a role never reaches a caller at all.
+  // ⚠ **A RUNTIME VOCABULARY FILTER STOOD HERE AND WAS REMOVED, AND THE REMOVAL IS THE FINDING.**
+  // `pnpm seams:check` Rule A reported `vocabularyViolations` as reached only by tests, and the
+  // obvious fix was to filter every hint through it on the way out. That filter was written, and
+  // then MUTATION measured it: deleting it again killed **0 of 110** tests, because every hint this
+  // module can produce already passes — so nothing could ever exercise the branch.
   //
-  // ⚠ It DROPS rather than throws. A read model that crashed on its own prose would take the
-  // numbers down with the wording, and the numbers are the part an owner needs; and it never
-  // rewrites, because a hint quietly reworded to pass is the rule defeated with better manners.
-  const emit = (hints: readonly SustainedHint[]): readonly SustainedHint[] =>
-    hints.filter((hint) => vocabularyViolations(hint.text).length === 0);
+  // A guard no test can fail is exactly the shape `L8` names ("a constant exported so a test COULD
+  // assert it, and none did") with the sign flipped, and satisfying a reachability rail with one is
+  // how a rail teaches a session to write decorative code. The binding assertion is the SWEEP in
+  // `noise-floor.test.ts` §C, which walks every member of the closed `HINT_KINDS` set — that one
+  // bites, and it catches a sixth rung the day it is written. `vocabularyViolations` keeps an
+  // `@unreached-owed` marker naming its real consumer: the surface that RENDERS a hint.
   const history = new Map<string, (-1 | 0 | 1 | null)[]>();
   const basis = new Map<string, CountBasis | null>();
   for (const report of reports) {
@@ -468,5 +470,5 @@ export const sustainedHints = (
       });
     }
   }
-  return emit(hints);
+  return hints;
 };

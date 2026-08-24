@@ -164,9 +164,32 @@ const history = (closing: readonly Record<string, unknown>[]): SummaryEvent[] =>
     purchase("p2", 5 * KG, 350_000, at(4)),
     countEvent("c1", closing, at(5)),
 
-    // BRANCH_B — a whole second location's history, which no BRANCH_A subject may ever see.
+    // ── BRANCH_B: a whole second location's history, which no BRANCH_A subject may ever see ──
+    //
+    // ⚠ **THE ORDERS HERE ARE THE HALF THAT MAKES §B BITE, AND THE FIRST DRAFT OF THIS FIXTURE HAD
+    // ONLY THE STOCK EVENTS.** Measured: with purchases and counts alone, mutants A2 (the narrowing
+    // deleted) and A3 (the resolver's second filter deleted) killed **0 of 402** — because
+    // `packages/inventory` filters `stock.*` by `payload.location_id` itself, so a leaked BRANCH_B
+    // purchase or count is dropped one layer down and the answer is byte-identical.
+    //
+    // **Order events carry no location.** `order.*` names a BRANCH, and `10-F3` deducts "at the
+    // selling location", so the CALLER is the only thing that scopes them — which means the
+    // narrowing is the ONLY defence for consumption, and consumption is the one term a leak can
+    // move. 20 karahis here is 5 kg of chicken; leaked into BRANCH_A they turn a 1 kg shortfall
+    // into a 4 kg surplus. The round-3 defect verbatim: the mechanism was aimed one case away.
     purchase("pb1", 100 * KG, 6_800_000, at(1), BRANCH_B),
     countEvent("cb0", [{ ...line("walk-in", 100 * KG) }], at(2), BRANCH_B),
+    event(
+      "order.created",
+      { order_id: "ob1", channel: "counter" },
+      { at: at(3), branch_id: BRANCH_B },
+    ),
+    event(
+      "order.line_added",
+      { order_id: "ob1", line_id: "lb1", item_id: "karahi", qty: 20, unit_price_paisa: 45_000 },
+      { at: at(3), branch_id: BRANCH_B },
+    ),
+    event("order.confirmed", { order_id: "ob1" }, { at: at(3), branch_id: BRANCH_B }),
     countEvent("cb1", [{ ...line("walk-in", 40 * KG) }], at(5), BRANCH_B),
   ];
 };
@@ -288,6 +311,7 @@ type Body = {
     readonly is_baseline: boolean;
     readonly rows: readonly Record<string, unknown>[];
     readonly unexplained_usage_paisa: number;
+    readonly surplus_paisa: number;
     readonly is_floor: boolean;
     readonly withheld_row_count: number;
   }[];
@@ -368,7 +392,14 @@ describe("§B · 10-F34 — the narrowing decides which rows are read, and the m
     // BRANCH_B's chicken moved 100 kg → 40 kg, which would dominate any leaked report.
     expect(JSON.stringify(reply.body)).not.toContain("100000000");
     const body = reply.body as Body;
+    // ⚠ The load-bearing half: BRANCH_B's 20 karahis are 5 kg of chicken, and consumption is the
+    // ONE term a leak can move (order events carry no location — see the fixture's note). Leaked
+    // in, BRANCH_A's expected closing falls from 19 kg to 14 kg and this shortfall becomes a
+    // SURPLUS. Asserting only "no BRANCH_B string appears" left mutants A2 and A3 alive.
+    expect(body.periods[1]?.rows[0]?.expected_qty_base).toBe(19_000_000);
+    expect(body.periods[1]?.rows[0]?.gap_qty_base).toBe(-1_000_000);
     expect(body.periods[1]?.unexplained_usage_paisa).toBe(68_500);
+    expect(body.periods[1]?.surplus_paisa).toBe(0);
   });
 
   it("a branch manager asking about ANOTHER branch is refused before any row is read", async () => {
@@ -380,6 +411,61 @@ describe("§B · 10-F34 — the narrowing decides which rows are read, and the m
 
   it("an owner may ask about either branch — Appendix A's 'everything'", async () => {
     expect((await varianceFor(OWNER_ID, { branch_id: BRANCH_B, ...WINDOW })).status).toBe(200);
+  });
+
+  it("⚠ THE SECOND LOCK — a reader that IGNORES the filter is caught by the resolver", async () => {
+    // Both ends have to be exercised separately and the first draft only did one. The shared
+    // `recordingLedger` HONOURS `branch_ids`, so the resolver's own filter never had anything to
+    // drop and mutant A3 (deleting it) killed **0 of 402**. This host's reader returns everything it
+    // holds, whatever it was asked for — a peer that regressed, or a query that lost its predicate.
+    //
+    // On this surface that is not merely a wider answer: `order.*` carries no location, so BRANCH_B's
+    // 20 karahis would be counted as BRANCH_A's consumption and a 1 kg shortfall would render as a
+    // 4 kg SURPLUS. The manager would be shown the opposite of what happened, with a 200.
+    const all = history(COMPLETE);
+    const leakyLedger: DayLedger = {
+      read: (window) =>
+        Promise.resolve({
+          events: all.filter(
+            (e) => e.branch_created_at >= window.from_ms && e.branch_created_at < window.to_ms,
+          ),
+          truncated: false,
+          latest_arrival_ms: at(6),
+        }),
+    };
+    const host = await createApiServer({
+      store: createMemoryUserStore(await users()),
+      sessionSecret: SECRET,
+      now: () => at(6),
+      ledger: leakyLedger,
+      inventory: reference,
+    });
+    const auth = await host.inject({
+      method: "POST",
+      url: "/trpc/auth.login",
+      payload: superjson.serialize({
+        email: "manager-a@inventory.test",
+        password: PASSWORD,
+      }) as object,
+    });
+    const { token } = superjson.deserialize(
+      (auth.json() as { result: { data: unknown } }).result.data as never,
+    ) as { token: string };
+
+    const reply = await host.inject({
+      method: "GET",
+      url: `/trpc/inventory.variance?input=${encodeURIComponent(
+        JSON.stringify(superjson.serialize({ branch_id: BRANCH_A, ...WINDOW })),
+      )}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const body = superjson.deserialize(
+      (reply.json() as { result: { data: unknown } }).result.data as never,
+    ) as Body;
+    // Identical to the honest reader's answer: the leaked rows changed nothing.
+    expect(body.periods[1]?.rows[0]?.expected_qty_base).toBe(19_000_000);
+    expect(body.periods[1]?.rows[0]?.gap_qty_base).toBe(-1_000_000);
+    expect(body.periods[1]?.surplus_paisa).toBe(0);
   });
 });
 

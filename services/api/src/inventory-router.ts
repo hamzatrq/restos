@@ -25,7 +25,7 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { StockScopeRefusal, stockReport } from "./inventory.js";
+import { StockScopeRefusal, stockBranchScope, stockReport } from "./inventory.js";
 import { authorized } from "./trpc.js";
 
 /**
@@ -69,9 +69,25 @@ export const inventoryProcedures = {
       const to_ms = input.to_ms ?? ctx.now();
       const from_ms = input.from_ms ?? to_ms - DEFAULT_WINDOW_DAYS * DAY_MS;
 
+      // ⚠ **THE READER IS ASKED FOR THE NARROWING'S ANSWER, NEVER FOR THE INPUT'S BRANCH.** The
+      // first draft passed `[input.branch_id]` straight through, which looks identical and is not:
+      // the narrowing then had nothing to lock, and mutation measured it at **0 of 402** kills.
+      // `summary-router.ts` states the principle — the middleware answers *may this happen*, only
+      // the resolver answers *how wide is the answer* — and this is where that answer has to be
+      // read for it to mean anything.
+      let branch_ids: readonly string[];
+      try {
+        branch_ids = stockBranchScope(ctx.subject, input.branch_id);
+      } catch (error) {
+        if (error instanceof StockScopeRefusal) {
+          throw new TRPCError({ code: "FORBIDDEN", message: error.message, cause: error });
+        }
+        throw error;
+      }
+
       const [refs, window] = await Promise.all([
         ctx.inventory.read(org_id),
-        ctx.ledger.read({ org_id, branch_ids: [input.branch_id], from_ms, to_ms }),
+        ctx.ledger.read({ org_id, branch_ids, from_ms, to_ms }),
       ]);
 
       try {

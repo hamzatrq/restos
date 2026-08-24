@@ -191,6 +191,13 @@ export type VocabularyViolation = {
  *
  * Word-boundary matching on a lowercased copy: substring matching would ban "flossing" for
  * containing "loss", and a rule that fires on innocent text gets switched off.
+ *
+ * @unreached-owed The consumer is the surface that RENDERS a hint — the back-office variance view
+ * (slice 1 step 7's screen) and, when doc 05's console exists, its alert list. ⚠ A runtime filter
+ * inside `sustainedHints` was written to satisfy this rail and then REMOVED: mutation measured it
+ * at **0 of 110** kills, because every hint this module can produce already passes, so no test
+ * could ever exercise the branch. `variance.ts` carries the full note. The assertion that actually
+ * binds is `noise-floor.test.ts` §C's sweep over the closed `HINT_KINDS` set.
  */
 export const vocabularyViolations = (text: string): readonly VocabularyViolation[] => {
   const tokens = text

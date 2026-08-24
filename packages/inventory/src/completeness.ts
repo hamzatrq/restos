@@ -170,6 +170,17 @@ export type WindowCompleteness = {
    * ratio would declare COMPLETE while a dish nobody costed was sold — which is precisely the
    * confidently-wrong figure `10-F31` R1 exists to refuse. The bp figure is for DISPLAY (it is what
    * `15-F9`'s workbench shows as the ramp's progress); the gate is the equality.
+   *
+   * ⚠ **AND THE GATE'S TWO CLAUSES ARE NOT INDEPENDENT — MEASURED, so this is stated rather than
+   * implied.** `10-F31` names both *"that share is exactly 1"* and *"no sold sellable lacks a
+   * recipe"*, and mutation says the first is REDUNDANT given the second: dropping `costed === total`
+   * killed **0 of 113** tests (mutant V9c), because `blocking` is populated on exactly the dishes
+   * that keep `costed` below `total`. The converse is NOT redundant — dropping `blocking.length ===
+   * 0` kills 1 (V9d), and the case that separates them is a sellable **sold at zero revenue**: it
+   * contributes 0 to both sums, so the share is still exactly 1, and it still has no recipe. A comp
+   * or a free add-on is that case, and `completeness.test.ts` §C has the fixture. The equality
+   * clause is kept as belt: it is the FR's own words and it stops the day someone changes how
+   * `blocking` is built.
    */
   readonly complete: boolean;
   /** Sellables sold in the window that could not be costed, with why. `10-F31` R1's "what would close it". */

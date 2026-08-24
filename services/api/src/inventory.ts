@@ -103,26 +103,30 @@ export type StockReport = {
 };
 
 /**
- * **THE NARROWING.** Which branches this subject's stock answer may cover — from the permission
- * matrix and nothing else. A named export so a test can point at it and a mutant can delete it.
+ * **THE NARROWING, AND IT RETURNS A ONE-ELEMENT LIST FOR EVERY PERMITTED SUBJECT — INCLUDING THE
+ * OWNER.** A named export so a test can point at it, the router can pass it to the reader, and a
+ * mutant can delete it.
  *
- * `summary-router.ts` records what deleting it costs one surface over: a branch manager asking
- * about her OWN branch passes `can()` correctly, and a resolver that then read the whole org would
- * hand her every other branch's takings with a 200. Here the rows are per-item unexplained usage,
- * so the same omission hands one branch's manager another branch's accusations — `10-F19`'s social
- * licence broken by a missing filter rather than by a wrong word.
+ * ⚠ **THIS IS NOT `summaryBranchScope` WITH THE NOUNS CHANGED, AND THE FIRST DRAFT WAS.** That one
+ * answers `null` for an `org` reach, because `12-F22`'s roll-up is legitimately about every branch.
+ * A variance report is about ONE `10-F1` location, so `null` here would not widen the answer — it
+ * would CORRUPT it: `order.*` carries a branch and no location, `10-F3` deducts "at the selling
+ * location", and `packages/inventory` filters only `stock.*` by `payload.location_id`. So an owner
+ * whose reader returned every branch would have every other branch's SALES counted as this
+ * location's consumption, and the report would show a surplus where there is a shortfall.
  *
- * `own_shift` cannot occur (`stockReportScope` never returns it — a `10-F28` period is not a
- * shift), and it refuses anyway rather than falling through: this is the second lock on one door,
- * and the one that survives someone adding a third caller.
+ * That is the asymmetry mutation found: with the router passing `[input.branch_id]` directly,
+ * mutants A2 and A3 killed **0 of 402** — the narrowing was a second lock with nothing to lock,
+ * because the request already named the branch and `can()` had already refused anyone who may not
+ * ask about it. Making the ROUTER read the answer is what puts the lock on the door.
+ *
+ * The reach therefore decides **admission**, not width: `org` and `own_branch` both answer
+ * `[location_id]`, `none` refuses. `own_shift` cannot occur (`stockReportScope` never returns it —
+ * a `10-F28` period is not a shift) and refuses anyway rather than falling through.
  */
-export const stockBranchScope = (
-  subject: AuthSubject,
-  location_id: string,
-): readonly string[] | null => {
+export const stockBranchScope = (subject: AuthSubject, location_id: string): readonly string[] => {
   const reach = stockReportScope(subject, { org_id: subject.org_id, branch_id: location_id });
-  if (reach === "org") return null;
-  if (reach === "own_branch") return [location_id];
+  if (reach === "org" || reach === "own_branch") return [location_id];
   // Fail closed. `can()` has already refused every route that reaches here, so this is the second
   // lock on one door — and the one that survives someone adding a third caller.
   throw new StockScopeRefusal(
@@ -144,10 +148,7 @@ export const stockReport = (request: StockReportRequest): StockReport => {
   // The narrowing applied a SECOND time, to the rows themselves. The reader is asked for the right
   // branches and the answer is checked against the same authorization outcome, because a reader
   // that ignored the filter would leak with a 200 and nothing on this side would know.
-  const permitted =
-    branch_ids === null
-      ? request.events
-      : request.events.filter((event) => branch_ids.includes(event.branch_id));
+  const permitted = request.events.filter((event) => branch_ids.includes(event.branch_id));
 
   const periods = varianceReports({
     location_id: request.location_id,

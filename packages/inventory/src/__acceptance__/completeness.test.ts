@@ -201,6 +201,27 @@ describe("§C · 10-F31 — the window unit, and the rounding trap in its gate",
     expect(answer.complete).toBe(false); // and is not complete
   });
 
+  it("⚠ A ZERO-REVENUE UNCOSTABLE SELLABLE IS THE CASE THAT SEPARATES THE GATE'S TWO CLAUSES", () => {
+    // `10-F31` states BOTH: "that share is exactly 1, AND no sold sellable lacks a recipe". They
+    // look redundant and on almost every fixture they are — `blocking` is populated exactly when a
+    // dish refuses, and a refused dish is exactly what keeps `costed` below `total`. The one case
+    // that separates them is a sellable **sold at zero revenue** — a comp, or a free add-on: it
+    // contributes 0 to both sums, so the share is still exactly 1, and it still has no recipe.
+    //
+    // Found by MUTATION, not by reading: mutant V9d (the equality clause alone, `blocking` dropped)
+    // survived the whole suite until this fixture existed, so the FR's second clause was carried by
+    // the implementation and asserted by nothing.
+    const withFreebie = new Map([
+      ["boti-plate", 400_000],
+      ["free-salad", 0],
+    ]);
+    const answer = windowCompleteness(withFreebie, REFS, priced());
+    expect(answer.costed_revenue_share_bp).toBe(10_000);
+    expect(answer.costed_billed_paisa).toBe(answer.total_billed_paisa);
+    expect(answer.complete).toBe(false);
+    expect(answer.blocking_sellables.map((b) => b.sellable_id)).toEqual(["free-salad"]);
+  });
+
   it("an EMPTY window is not COMPLETE — nothing sold is not everything costed", () => {
     // Vacuous truth is how a margin figure appears on a day with no trade.
     expect(windowCompleteness(new Map(), REFS, priced()).complete).toBe(false);

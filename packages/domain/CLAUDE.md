@@ -233,3 +233,46 @@ was killed by `packages/domain` and by `apps/pos-electron` and by **nothing** in
 `order-tax.test.ts`, because no fixture there landed on an exact half — the round-3 shape exactly.
 `§E` now carries `Rs 45.50` at the rupee and `Rs 45.00` at ten rupees, and the mutant dies there too.
 Reading the suite would not have found that; running the mutant did.
+
+## `10-F34`'s `report.stock_view` + `10-F29`'s count schema — mutated OUT OF TREE, control **141/141**
+
+`10-F34` decides a SECOND scoped action (`STOCK_REPORT_REACH`, `stockReportScope`) and `10-F29` makes
+`counted: false` a distinct value from `qty_base: 0` (a discriminated union plus a `.check` that
+refuses a smuggled quantity). Oracles: `__acceptance__/stock-report-permission.test.ts` (13),
+`__acceptance__/stock-schemas.test.ts` (32).
+
+⚠ **A PERMISSION CELL IS A SECURITY PARAMETER, so every row below ran on a SCRATCHPAD COPY and
+`permissions.ts` was never edited** (`T8`: an agent killed between "weaken" and "revert" strands a
+widened credential with every test green). The driver checksums both real files before and after:
+`permissions.ts` `cfbde0107446` → `cfbde0107446`, `registry.ts` `aec4195a0100` → `aec4195a0100`,
+**UNTOUCHED**. Scope: the four files a mutant can reach (141 tests), not the whole package.
+
+⚠ **THE FIRST RUN MEASURED A CRASHED RUNNER AND REPORTED EVERY FILE AS FAILING.** The scratchpad had
+no resolvable `tsconfig.json`, so vitest loaded 39 files at **0 test** each and the summary line was
+absent. The driver reports `passed=-1` when it cannot find that line, which is what caught it —
+`T1`'s lesson in a new costume: **read the suite's own summary, and treat its absence as a crash
+rather than as a result.**
+
+| # | mutant (exactly one branch) | killed |
+|---|---|---|
+| D1 | **`10-F19` — the CASHIER widened to `own_branch`** (the cell a later session is most likely to "fix") | **3** |
+| D2 | **`10-F34` — the STOREKEEPER narrowed to `none`** (Appendix A's one *stated* cell deleted) | **4** |
+| D3 | **`report.stock_view` resolved through the SALES table** instead of its own | **2** |
+| D4 | **`10-F29` — the `counted: false` refusal deleted: a blank arrives as a zero** | **1** |
+| D5 | `10-F29` — `qty_base` made optional on the `counted: false` arm | **0 — see below** |
+| D6 | **NEGATIVE CONTROL — the `STOCK_REPORT_REACH` rows reordered** | **0** |
+
+**D1 is the one to re-run after any change here.** It is the cell decided by `10-F19` rather than by
+Appendix A, so a reader who checks only the appendix will widen it — and the surface it opens is the
+one naming per-item unexplained usage to the person a gap would otherwise accuse.
+
+**D4's kill count of 1 is honest and small by design**: exactly one of `stock-schemas.test.ts`'s 32
+assertions is pointed at that branch (*"⚠ THE MUTANT'S OWN CASE"*), because the other 31 are about
+the surrounding contract. `packages/inventory`'s V1 is the same defect one layer up and kills 5.
+
+⚠ **D5 SURVIVES AND IT IS CORRECT: the two halves of `counted: false` ≠ `qty_base: 0` are not
+independent.** `00 §6` keeps payloads loose, so the union arm alone would let `{counted: false,
+qty_base: 0}` through as an extra key — the `.check` is what refuses at RUNTIME (D4 proves it), and
+the union arm's value is at COMPILE time: a consumer typed against it cannot reach a quantity that
+is not there, which is what `packages/inventory`'s `rollUpCount` relies on. Both are kept and only
+one is measurable by a runtime test. Recorded rather than left as an unexplained survivor.
