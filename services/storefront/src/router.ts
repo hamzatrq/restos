@@ -74,7 +74,15 @@ export const ENTITLEMENT_EXEMPT = new Set<string>(["health"]);
  * The field is **unrepresentable**, not validated — a price that can be sent and is then compared
  * is a price a later session trusts, and the comparison is one refactor from being dropped.
  * `z.object` also STRIPS unknown keys, so a body that still carries the old field loses it here
- * rather than carrying it one layer deeper; `entitlement-gate.test.ts` §D pins both halves.
+ * rather than carrying it one layer deeper.
+ *
+ * ⚠ **THE CITATION HERE WAS WRONG AND IS CORRECTED (`06-F35` review).** It read *"`entitlement-
+ * gate.test.ts` §D pins both halves"*; §D is three `CrossTenantError` tests and contains no price
+ * assertion at all. Both halves are pinned in **`price-authority.test.ts` §A** — the parsed line's
+ * keys are exactly `item_id, line_id, qty` (absence) and a 1-paisa body becomes the catalog's
+ * Rs 450 line end to end (the strip). `entitlement-gate.test.ts` §C pins the same STRIP property
+ * for a smuggled `org_id`. Both protections were real; the pointer sent the next reader to the
+ * wrong file, which is how a live assertion gets written twice or not at all.
  */
 const CartLineInput = z.object({
   line_id: z.string().min(1),
@@ -87,12 +95,35 @@ const CartLineInput = z.object({
 export const storefrontRouter = t.router({
   health: t.procedure.query(() => ({ ok: true })),
 
+  /**
+   * ⚠ **AND THERE IS NO `order_id` HERE EITHER, WHICH IS `06-F35` AND THE SAME LESSON ONE FIELD
+   * OVER.** This schema declared `order_id: z.string().min(1)` and the origin — which holds no
+   * state and reads none — emitted `order.created` plus a line per request for whatever id the
+   * body named. Reproduced over real HTTP into a real device fold: `web-1` placed, a cashier
+   * accepted it, and a second anonymous request naming `web-1` put **20 × Rs 450 on the confirmed
+   * bill**, with no anomaly, the kitchen told to cook it, and `01-F1` to keep it. `06-N4` names
+   * *"id guessing"* as a probe that must return nothing.
+   *
+   * `06-F33` made *naming a price* unrepresentable and this makes *naming an order*
+   * unrepresentable: the origin mints the id and the response returns it. What that does NOT buy
+   * is the cancel door below — see `06-F35` (c), which decides that gap rather than leaving it
+   * silent.
+   */
   placeOrder: entitledProcedure(STOREFRONT_CAPABILITY)
-    .input(z.object({ order_id: z.string().min(1), lines: z.array(CartLineInput).min(1) }))
+    .input(z.object({ lines: z.array(CartLineInput).min(1) }))
     // `ctx.org_id`, never `input.org_id`: `06-F1` resolves the tenant from the host, and an
     // org taken from a public request body is a cross-tenant write with a form field for a key.
     .mutation(({ ctx, input }) => ctx.placement.place(ctx.org_id, input)),
 
+  /**
+   * ⚠ **THIS ONE STILL NAMES AN ORDER, AND `06-F35` (c) IS WHY — IT IS A DECIDED RESIDUAL, NOT AN
+   * OVERSIGHT.** A cancel has to name the order it cancels, and this service can prove neither
+   * that the order is the caller's (no customer session: `06-F12`) nor that the branch has not
+   * already confirmed it (no branch slice: `06-F30`). `placeOrder`'s mint removes the
+   * enumeration attack — an order id is unguessable now — and leaves a holder-of-the-id able to
+   * cancel late, plus inert junk rows for ids never issued. **Do not "fix" this with a guess:**
+   * the two owed pieces are named in `06-F35` (c) and both belong to the customer surface.
+   */
   cancelOrder: entitledProcedure(STOREFRONT_CAPABILITY)
     .input(z.object({ order_id: z.string().min(1), reason: z.string().min(1) }))
     .mutation(({ ctx, input }) => ctx.placement.cancel(ctx.org_id, input)),

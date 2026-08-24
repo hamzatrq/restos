@@ -60,8 +60,8 @@ let server: ReturnType<typeof createStorefrontServer>;
 let port: number;
 let outbox: ReturnType<typeof recordingOutbox>;
 
+// `06-F35`: the body names no order. The minted id comes back on the response.
 const CART = {
-  order_id: "order-web-1",
   lines: [{ line_id: "l1", item_id: "item-burger", qty: 1 }],
 };
 
@@ -134,9 +134,14 @@ describe("§A 06-F32 — the router is SERVED, and the outbox it was handed is t
   it("POST /trpc/placeOrder writes `order.created` + its line into the handed outbox", async () => {
     const response = await post("/trpc/placeOrder", CART);
     expect(response.status, response.text).toBe(200);
-    expect(JSON.parse(response.text)).toMatchObject({
-      result: { data: { order_id: CART.order_id } },
-    });
+    // `06-F35` (a): the response carries the id the ORIGIN minted, and it is the id that was
+    // written — the customer has no other way to find her order on `06-F17`'s status page.
+    const acked = (JSON.parse(response.text) as { result: { data: { order_id: string } } }).result
+      .data.order_id;
+    expect(acked).toEqual(expect.any(String));
+    for (const event of outbox.all()) {
+      expect((event.payload as { order_id: string }).order_id).toBe(acked);
+    }
 
     // The seam. `outbox: inMemoryOutbox()` inside `createStorefrontServer` — a real deployment
     // passing a durable outbox and having it silently discarded — reddens exactly here.
@@ -162,7 +167,7 @@ describe("§A 06-F32 — the router is SERVED, and the outbox it was handed is t
 
   it("06-F19's cancel is served too — both doors exist, not just the one", async () => {
     const response = await post("/trpc/cancelOrder", {
-      order_id: CART.order_id,
+      order_id: "an-order-this-customer-placed",
       reason: "changed my mind",
     });
     expect(response.status, response.text).toBe(200);

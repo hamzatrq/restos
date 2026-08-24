@@ -57,8 +57,8 @@ const origin = (lamport: LamportSource = counter(), clock = () => 1_755_000_000_
     newId: () => `0193b0f0-0000-7000-8000-${String(++ids).padStart(12, "0")}`,
   });
 
+// `06-F35`: a cart names no order — the origin mints the id and returns it on the batch.
 const CART = {
-  order_id: "order-sf-1",
   lines: [
     { line_id: "line-1", item_id: "item-burger", qty: 1 },
     { line_id: "line-2", item_id: "item-fries", qty: 2 },
@@ -113,7 +113,10 @@ describe("§B 06-F31 — the origin's clock is branch_provisional, for ever", ()
   it("every event this origin mints is branch_provisional, never branch", async () => {
     const o = origin();
     const placed = await o.placeOrder(CART);
-    const cancelled = await o.cancelOrder({ order_id: CART.order_id, reason: "changed my mind" });
+    const cancelled = await o.cancelOrder({
+      order_id: placed.order_id,
+      reason: "changed my mind",
+    });
     for (const e of [...placed.events, ...cancelled.events]) {
       expect(
         e.time_basis,
@@ -140,7 +143,7 @@ describe("§C 01-F3/06-F30 — lamport slots are CONTIGUOUS per origin", () => {
   it("a second order continues the sequence with no gap and no reuse", async () => {
     const o = origin();
     await o.placeOrder(CART);
-    const second = await o.placeOrder({ ...CART, order_id: "order-sf-2" });
+    const second = await o.placeOrder(CART);
     expect(second.events.map((e) => e.lamport_seq)).toEqual([3, 4, 5]);
   });
 
@@ -245,7 +248,10 @@ describe("§D 06-F33/01-F18 — the price is the CATALOG's, resolved by the orig
 
     release();
     const result = await pending;
-    expect(result.order_id).toBe(CART.order_id);
+    // `06-F35` (a): the acknowledged id is the MINTED one, and it is the id that was written.
+    expect(result.order_id).toBe(
+      (outbox.all()[0]?.payload as { order_id: string } | undefined)?.order_id,
+    );
     expect(outbox.all()).toHaveLength(3);
   });
 
@@ -272,12 +278,12 @@ describe("§E 06-F30/02-F9 — a storefront order REACHES A REAL TILL's open-ord
     });
 
   it("the order appears in openOrders() as an UNCONFIRMED `storefront` row — isCloudInbox's exact predicate", async () => {
-    const { events } = await origin().placeOrder(CART);
+    const { events, order_id } = await origin().placeOrder(CART);
     const store = till();
     try {
       store.ingestBatch(events);
       const rows = store.openOrders();
-      const row = rows.find((r) => r.order_id === CART.order_id);
+      const row = rows.find((r) => r.order_id === order_id);
       expect(
         row,
         "06-F30's decisive claim: `02-F9`'s inbox reads the till's fold of its BRANCH stream, so " +
@@ -293,11 +299,11 @@ describe("§E 06-F30/02-F9 — a storefront order REACHES A REAL TILL's open-ord
   });
 
   it("the till folds the LINES at the prices the storefront captured (01-F53 — no re-resolution)", async () => {
-    const { events } = await origin().placeOrder(CART);
+    const { events, order_id } = await origin().placeOrder(CART);
     const store = till();
     try {
       store.ingestBatch(events);
-      const row = store.openOrders().find((r) => r.order_id === CART.order_id);
+      const row = store.openOrders().find((r) => r.order_id === order_id);
       // `json_lines` is a canonical-JSON cell MAP keyed by line_id (`BilledLineCell`), not an
       // array — asserted by key so the shape is stated rather than assumed, and so a reordering
       // of the map could never be read as a price change (`01-F34`: no projected value depends
@@ -340,7 +346,7 @@ describe("§E 06-F30/02-F9 — a storefront order REACHES A REAL TILL's open-ord
     const o = origin();
     const placed = await o.placeOrder(CART);
     const cancelled = await o.cancelOrder({
-      order_id: CART.order_id,
+      order_id: placed.order_id,
       reason: "customer changed their mind before we confirmed",
     });
     const store = till();
@@ -351,7 +357,7 @@ describe("§E 06-F30/02-F9 — a storefront order REACHES A REAL TILL's open-ord
       // disposition is projection-inert and `26 §7` reserves that decision for an oracle
       // (`06-F31`). This assertion pins the CURRENT honest behaviour so that the day a merge rule
       // lands, this test fails and is read — rather than the cancel silently starting to work.
-      expect(store.openOrders().some((r) => r.order_id === CART.order_id)).toBe(true);
+      expect(store.openOrders().some((r) => r.order_id === placed.order_id)).toBe(true);
     } finally {
       store.close();
     }

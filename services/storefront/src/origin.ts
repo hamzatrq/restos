@@ -54,8 +54,18 @@ export class UnpricedItemsError extends Error {
   }
 }
 
+/**
+ * A cart as the CUSTOMER sends it — **and note what is not here either: an order key.**
+ *
+ * `06-F35`. The first version took `order_id` from the public, unauthenticated request body and
+ * this origin, which holds no state and reads none, emitted `order.created` plus a line per
+ * request for whatever id was named. Reproduced over real HTTP into a real device fold: a
+ * stranger named a CONFIRMED order and put 20 × Rs 450 on someone else's bill, with no anomaly
+ * raised and `01-F1` to make it permanent. The origin mints the id now (`placeOrder`), so
+ * *joining an existing order* is unrepresentable rather than checked — the shape `06-F33` used
+ * for the price, for the same stated reason.
+ */
 export type PlaceOrderInput = {
-  readonly order_id: string;
   readonly lines: readonly CartLine[];
   /** `02-F42`'s price key. Pinned to `storefront` by `06-F10` and never taken from the caller. */
   readonly order_type?: string;
@@ -80,7 +90,15 @@ export type OriginDeps = {
    * from the catalog again, silently.
    */
   readonly catalog: StorefrontCatalog;
-  /** Envelope ids. Injected so a test can pin them; production passes `crypto.randomUUID`. */
+  /**
+   * Envelope ids **and, since `06-F35`, the `order_id` itself**. Injected so a test can pin them;
+   * production passes `crypto.randomUUID`.
+   *
+   * ⚠ One source rather than two on purpose: an order key minted from anything weaker than the
+   * source that mints envelope ids is a key a stranger can name, which is the whole defect. If a
+   * later session ever wants a human-readable order handle (`06-F8`'s pickup code is the one the
+   * corpus specifies), it is a SECOND, display-only value — never this one.
+   */
   readonly newId: () => string;
 };
 
@@ -187,15 +205,27 @@ export const createStorefrontOrigin = (deps: OriginDeps) => ({
       .filter((item_id) => !priced.paisa.has(item_id));
     if (unpriced.length > 0) throw new UnpricedItemsError([...new Set(unpriced)]);
 
+    /**
+     * `06-F35` (a) — **THE ORDER ID IS MINTED HERE AND CANNOT COME FROM THE REQUEST.**
+     *
+     * The caller names no order, so it cannot name an order that already exists: the id below is
+     * `deps.newId()` — the same unguessable source the envelope ids come from — and it is what
+     * the response hands back. An implementer reaching for `input.order_id ?? deps.newId()` at
+     * this line is restoring the defect: it makes a stranger's key authoritative again the moment
+     * anything upstream stops stripping it, and `order-identity.test.ts` §A casts one past the
+     * type for exactly that reason.
+     */
+    const order_id = deps.newId();
+
     const first = await deps.lamport.reserve(1 + input.lines.length);
     const created = stamp(deps, first, "order.created", {
-      order_id: input.order_id,
+      order_id,
       channel: STOREFRONT_CHANNEL,
       ...(input.order_type === undefined ? {} : { order_type: input.order_type }),
     });
     const lines = input.lines.map((line, i) =>
       stamp(deps, first + 1 + i, "order.line_added", {
-        order_id: input.order_id,
+        order_id,
         line_id: line.line_id,
         item_id: line.item_id,
         qty: line.qty,
@@ -205,7 +235,7 @@ export const createStorefrontOrigin = (deps: OriginDeps) => ({
         unit_price_paisa: priced.paisa.get(line.item_id) as number,
       }),
     );
-    return { order_id: input.order_id, events: [created, ...lines] };
+    return { order_id, events: [created, ...lines] };
   },
 
   /**
@@ -218,6 +248,19 @@ export const createStorefrontOrigin = (deps: OriginDeps) => ({
    * `reason` is free text by `01-F84`'s ruling — no FR supplies a cancellation list and inventing
    * one is commandment 2 — so the caller's words travel verbatim, including `06-F27`'s
    * machine-written one.
+   *
+   * ⚠ **THIS DOOR TAKES AN `order_id` IT CAN NEITHER OWN NOR AGE-CHECK, AND `06-F35` (c) IS WHERE
+   * THAT IS DECIDED — it is not an oversight and it must not be read as one.** `06-F19` permits a
+   * customer cancel *"any time before `order.confirmed`"* and this origin can check **neither**
+   * half: it holds no branch slice (`06-F30`), so it cannot know whether the branch confirmed,
+   * and there is no customer session, so it cannot know whose order this is. `placeOrder`'s mint
+   * closed the ENUMERATION half — an order id is an unguessable value now rather than `web-1` —
+   * and what is left is a caller who already HOLDS an id, plus junk rows for ids that were never
+   * issued (inert: `26 §3`'s sidecar keys on the payload's order id, so they reach no
+   * projection). The two pieces that close it are `06-F12`'s signed customer session and
+   * `06 §5`'s order-status read model, both of which belong to the unbuilt customer surface.
+   * `order-identity.test.ts` §B pins the hole so the day one of them lands, a test fails and is
+   * read rather than the cancel quietly starting to be safe.
    */
   cancelOrder: async (input: { order_id: string; reason: string }): Promise<OriginBatch> => {
     const seq = await deps.lamport.reserve(1);

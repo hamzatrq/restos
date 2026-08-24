@@ -132,7 +132,6 @@ describe("§A 06-F33 — `unit_price_paisa` is not a field of the request", () =
      */
     const { placement, outbox } = placementOn(fixedCatalog({ "item-burger": 45_000 }));
     await placement.place(ORG, {
-      order_id: "smuggled-1",
       lines: [{ line_id: "l1", item_id: "item-burger", qty: 1, unit_price_paisa: 1 } as never],
     });
     expect(pricesOf(outbox)).toEqual([45_000]);
@@ -149,7 +148,6 @@ describe("§B 06-F33/01-F60 — the catalog is the price authority", () => {
       fixedCatalog({ "item-burger": 45_000, "item-fries": 32_000 }),
     );
     await placement.place(ORG, {
-      order_id: "order-1",
       lines: [
         { line_id: "l1", item_id: "item-burger", qty: 1 },
         { line_id: "l2", item_id: "item-fries", qty: 2 },
@@ -164,7 +162,6 @@ describe("§B 06-F33/01-F60 — the catalog is the price authority", () => {
     const { placement, outbox } = placementOn(fixedCatalog({ "item-burger": 45_000 }));
     await expect(
       placement.place(ORG, {
-        order_id: "order-2",
         lines: [
           { line_id: "l1", item_id: "item-burger", qty: 1 },
           { line_id: "l2", item_id: "item-ghost", qty: 1 },
@@ -179,7 +176,6 @@ describe("§B 06-F33/01-F60 — the catalog is the price authority", () => {
     // `if (!price)` refuses a legal free add-on."* A free item must ring at 0, not be refused.
     const { placement, outbox } = placementOn(fixedCatalog({ "item-water": 0 }));
     await placement.place(ORG, {
-      order_id: "order-3",
       lines: [{ line_id: "l1", item_id: "item-water", qty: 1 }],
     });
     expect(pricesOf(outbox)).toEqual([0]);
@@ -194,7 +190,6 @@ describe("§B 06-F33/01-F60 — the catalog is the price authority", () => {
     const { placement, outbox } = placementOn(broken);
     await expect(
       placement.place(ORG, {
-        order_id: "order-4",
         lines: [{ line_id: "l1", item_id: "item-burger", qty: 1 }],
       }),
     ).rejects.toBeInstanceOf(CatalogUnreadableError);
@@ -205,7 +200,6 @@ describe("§B 06-F33/01-F60 — the catalog is the price authority", () => {
     const catalog = fixedCatalog({ "item-burger": 45_000, "item-fries": 32_000 });
     const { placement } = placementOn(catalog);
     await placement.place(ORG, {
-      order_id: "order-5",
       lines: [
         { line_id: "l1", item_id: "item-burger", qty: 1 },
         { line_id: "l2", item_id: "item-fries", qty: 1 },
@@ -233,7 +227,6 @@ describe("§B 06-F33/01-F60 — the catalog is the price authority", () => {
     });
     await expect(
       origin.placeOrder({
-        order_id: "order-6",
         lines: [{ line_id: "l1", item_id: "item-ghost", qty: 1 }],
       }),
     ).rejects.toBeInstanceOf(UnpricedItemsError);

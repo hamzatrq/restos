@@ -176,6 +176,18 @@ const developmentEntitlement =
  * read from the gateway, and a host that was not told where the gateway is refuses to start rather
  * than defaulting — `01-F65`'s posture, for the same reason. A storefront that guessed a price
  * would write it permanently (`01-F1`).
+ *
+ * ⚠ **THAT SENTENCE WAS A CLAIM WITH NOTHING BEHIND IT UNTIL 2026-08-24, AND IT IS `L11` IN THIS
+ * FILE FOR THE SECOND TIME** (the first was `outbox`'s "moves the failure to compile time", one
+ * screen up). Measured by the adversarial re-review: replacing `createGatewayCatalog(link,
+ * identity)` below with an inline stub pricing every item at **1 paisa** left the suite at
+ * **59 passed (59), exit 0** — `startable.test.ts` booted the declared script and read only
+ * `/health`, so nothing ever placed an order through the spawned process and the prose was the
+ * only thing asserting it. What holds it now is `startable.test.ts`'s *"prices from the REAL
+ * gateway artifact"*: it serves one priced entry from a fake gateway, orders through the booted
+ * host, and asserts both that the gateway was ASKED (with this org and the service credential)
+ * and that an item the artifact does not price is REFUSED. A stub answers without asking and
+ * prices everything, so it fails both.
  */
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
   console.error(

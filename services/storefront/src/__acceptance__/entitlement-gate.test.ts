@@ -64,8 +64,8 @@ const placement = (source: EntitlementSource) =>
     entitlement: source,
   });
 
+// `06-F35`: a cart names no order. The id is the origin's, and it comes back on the result.
 const CART = {
-  order_id: "order-sf-1",
   lines: [{ line_id: "line-1", item_id: "item-burger", qty: 1 }],
 };
 
@@ -190,7 +190,9 @@ describe("§C 06-F32 (ii)/28-F4 — the RUNTIME resolution actually happens, and
     // The control. Without it, an implementation that threw unconditionally would pass the test
     // above and prove nothing about attribution.
     const result = await placement(entitledOrgs(ORG)).place(ORG, CART);
-    expect(result.order_id).toBe(CART.order_id);
+    // `06-F35` (a): the id is MINTED, so the control asserts that a placement happened rather
+    // than that an id echoed back. `order-identity.test.ts` owns the mint's own properties.
+    expect(result.order_id).toMatch(/^0193b0f0-0000-7000-8000-\d{12}$/);
   });
 
   it("06-F19's CANCEL is gated too — a second door into the same ledger", async () => {

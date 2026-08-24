@@ -1,7 +1,7 @@
 # @restos/storefront-service
 
-**Owning spec: `specs/06-storefront.md` — read `06-F30`, `06-F31`, `06-F32`, `06-F33` and `06-F34`
-before touching anything here.** Also `01-F62` (the wall), `01-F84` (`order.cancelled`), `28-F4`/`28-F6`
+**Owning spec: `specs/06-storefront.md` — read `06-F30`..`06-F35` before touching anything here.**
+Also `01-F62` (the wall), `01-F84` (`order.cancelled`), `28-F4`/`28-F6`
 (entitlement), `02-F9` (the till's inbox this feeds).
 
 ## What this is, in one paragraph
@@ -152,6 +152,88 @@ origin a line with a price cast **past** the type, which kills it. The lesson is
 an incidental protection is one refactor from being gone, and only a mutant tells you it is
 incidental.
 
+## ⚠ THE RE-REVIEW (2026-08-24) — the same defect class, one field over
+
+The fix commit above was re-reviewed in a fresh context. All eight prior findings re-ran clean; the
+verdict was still **DO NOT SHIP**, for a defect the price work had walked straight past.
+
+**N1 — `order_id` WAS AN UNAUTHENTICATED CALLER-CHOSEN KEY (`06-F35`, now the FR).** `06-F33` made
+*naming a price* unrepresentable and left *naming an order* free text. This origin holds no state
+and reads none, so it emitted `order.created` + a line per request for whatever id the body named.
+Reproduced over real HTTP into a real `packages/sync-client` fold:
+
+```
+place web-1 (1 × item-burger)                       -> 200
+cashier accepts   (order.confirmed)
+BEFORE  confirmed_at=1755000050000  lines={l1: qty 1 @ 45000}          kitchen lines_total=1
+POST /trpc/placeOrder {"order_id":"web-1","lines":[{"line_id":"stranger",…,"qty":20}]}  -> 200
+AFTER   lines={l1: qty 1 @ 45000, stranger: qty 20 @ 45000}  exceptions=[]  lines_total=2
+```
+
+**Rs 9,000 onto a stranger's CONFIRMED bill, no anomaly, the kitchen told to cook it, permanent
+under `01-F1`** — and `06-N4` names *"id guessing"* as a probe that must return nothing. Closed the
+way D1 was closed: the field is **deleted from the wire type**, the origin mints the id from the
+same source it mints envelope ids from, and the response returns it. Same probe after the fix, with
+the stranger handed the *real* id (which she could not have known):
+
+```
+place  -> 200 {"order_id":"0ba034a2-2ac8-4daa-96a1-95e045fd9ac0"}   (cashier accepts)
+stranger names that exact id, 20 × burger -> 200 {"order_id":"f10ff117-…"}   ← her OWN order
+AFTER   lines={l1: qty 1 @ 45000}   lines_total=1                            ← the bill is untouched
+```
+
+⚠ **What that does NOT close is `cancelOrder`, and `06-F35` (c) DECIDES that rather than leaving it
+silent.** `06-F19` allows a cancel *"any time before `order.confirmed`"* and this origin can check
+neither half — no branch slice (`06-F30`) means it cannot see the confirmation, no customer session
+(`06-F12`) means it cannot see ownership. The mint kills the enumeration attack; a holder of an id
+can still cancel late, and junk cancels for never-issued ids still land (inert — `26 §3`'s sidecar
+keys on the payload's order id). `order-identity.test.ts` §B **pins the hole**, so the day
+`06-F12`'s session or `§5`'s status read model lands, a test fails and is read.
+
+**N2 — THE ONLY SHIPPING HOST COULD HAND A STUB CATALOG AND THE SUITE STAYED GREEN.** Replacing
+`createGatewayCatalog(link, identity)` in `server.ts`'s `pnpm start` block with a stub pricing
+everything at 1 paisa: **59 passed (59), REAL_EXIT=0** — while the comment three lines up asserted
+*"the catalog is NOT stubbed"*. That is `L11` in the file that had just fixed `L11` for the outbox,
+and it is F1 one layer out: `startable.test.ts` booted the declared script and read only `/health`,
+so nothing ever placed an order **through the spawned process**. Closed by doing exactly that: a
+fake gateway serving one priced entry, an order posted through the booted host, and two assertions
+— the gateway was **asked** (this org, the service credential, `28-F5` (b′)) and an item the
+artifact does not price is **refused**. A stub answers without asking and prices everything.
+
+**N5 — a citation pointed at the wrong section.** `router.ts` said *"`entitlement-gate.test.ts` §D
+pins both halves"* of the price strip; §D is three `CrossTenantError` tests with no price assertion
+in it. Both protections were real — `price-authority.test.ts` §A owns both halves and
+`entitlement-gate.test.ts` §C owns the strip for `org_id` — so this was a misdirected pointer, which
+is how a live assertion gets written twice or not at all. Corrected in place.
+
+### Re-review mutation matrix — out of tree (`T8`), control **67/67** green, `REAL_EXIT` in the log
+
+| # | mutant (one branch) | killed |
+|---|---|---|
+| R1 | **N1 restored in full** — the schema takes `order_id` again and the origin writes it | 29 † |
+| R1b | **N1 restored, fixtures intact** — schema `order_id?` + origin `input.order_id ?? newId()` | **4** |
+| R2 | the ORIGIN prefers an `order_id` smuggled PAST the schema (the price suite's survivor shape) | **1** |
+| R3 | the mint REPEATS — one key per origin, so two carts join one order | 4 |
+| R4 | the ACKNOWLEDGED id is not the WRITTEN id (a status page pointing at nothing) | 8 |
+| R5 | the key is DERIVED from the cart (`line_id`s joined) rather than minted | 4 |
+| R6 | **⚠ SEAM (inert supply) — the shipping host hands a 1-paisa STUB catalog** (was **0**) | **1** |
+| R7 | **⚠ SEAM (deleted call site) — the `catalog` argument is removed** | compile ‡ |
+| R8 | the residual PIN's tripwire — cancel starts refusing ids it did not mint | 2 |
+| NC1 | **⚠ NEGATIVE CONTROL — behaviour-preserving refactor of the mint + emit block** | **0** |
+| NC2 | **⚠ NEGATIVE CONTROL — the dev-host lamport pinned to `0`, same block as R6** | **0** |
+
+† R1's count is inflated and is reported as such: restoring the field also breaks every fixture that
+no longer sends one, so it is not attribution. **R1b is the honest row** — it keeps the old
+behaviour for a cart with no key and reddens only the four assertions aimed at this property,
+including the end-to-end reproduction. ‡ R7 does not run: `ServerOptions.catalog` is required, so
+`tsc` refuses it (`TS2741`). The dangerous form of a seam mutant is not the deleted argument, it is
+the **inert supply** — R6 — which is what stayed green for a whole review cycle.
+
+**NC2 is the row that makes R6 attributable**: the reviewer's own control on the *same* dev-host
+block still passes 67/67, so R6's kill is the catalog line and not the fact that the block was
+edited at all. **R8 is what makes the residual pin non-vacuous** — a pin that stays green when the
+behaviour it pins changes is a comment with a test's name on it.
+
 ## What is OWED here, named so it is not discovered in the field
 
 - **The durable outbox.** `outbox.ts` is a PORT and the only implementation is `inMemoryOutbox`,
@@ -169,10 +251,13 @@ incidental.
   new kind (that is `06-F30`'s strongest argument) but the client, the `push_ack` write-checkpoint
   and device registration via `provision-device --class storefront_cloud` are unbuilt. **So the
   outbox fills and nothing drains it** — an order placed today reaches no till until this lands.
-- **`apps/storefront`** — the Next.js customer surface — is still a two-line stub, and two things
-  travel with it: `06-F5`'s cart invalidation (which is what closes `06-F33`'s stated residual —
-  the price is resolved at APPEND and `06-F6` says add-to-cart), and the **refusal → HTTP status
-  mapping**. Today `UnpricedItemsError`, `NotEntitledError`, `EntitlementUnreadableError` and
+- **`apps/storefront`** — the Next.js customer surface — is still a two-line stub, and **three**
+  things travel with it: `06-F5`'s cart invalidation (which is what closes `06-F33`'s stated
+  residual — the price is resolved at APPEND and `06-F6` says add-to-cart); **`06-F35` (c)'s cancel
+  ownership**, which needs `06-F12`'s signed session for *whose order is this* and `§5`'s
+  order-status read model for *has the branch confirmed it* (both are that surface's, neither is
+  invented here, and `order-identity.test.ts` §B fails the day either lands); and the **refusal →
+  HTTP status mapping**. Today `UnpricedItemsError`, `NotEntitledError`, `EntitlementUnreadableError` and
   `CrossTenantError` all reach a caller as a tRPC `INTERNAL_SERVER_ERROR`; only `06-F1`'s 404 is
   specified, and inventing codes for the rest ahead of the surface that renders them would be
   inventing policy.
@@ -209,8 +294,10 @@ join key has three ends and no error message, and `06-F34` (a) added the fourth:
 public host cannot refuse a request naming another one). It also refuses without a gateway link,
 because that is where prices come from and `01-F60` admits no fallback — `01-F65`'s posture, one
 service over. The boot line names the origin, its class, `06-F31`'s clock ruling **and the host it
-serves**. `__acceptance__/startable.test.ts` spawns the **declared** script for all three refusals
-and for the happy path.
+serves**. `__acceptance__/startable.test.ts` spawns the **declared** script for all three refusals,
+for the happy path, and — since the re-review — for one whole order placed **through the spawned
+process** against a fake gateway, which is the only thing that can tell a real price authority from
+a stub (N2).
 
 The ordering surface is `POST /trpc/placeOrder` and `POST /trpc/cancelOrder`, and the `Host` header
 decides the tenant — a request that does not name `RESTOS_STOREFRONT_HOST` gets a neutral 404.
@@ -220,7 +307,7 @@ item and a body that tried to set the price to 1 paisa:
 ```
 BOOT: storefront: origin org-karachi/branch-clifton as device-sf (class storefront_cloud,
       06-F31 clock permanently branch_provisional) serving https://burger-house.restos.pk/trpc on :7392
-POST /trpc/placeOrder  Host: burger-house.restos.pk  →  {"result":{"data":{"order_id":"web-1"}}}
+POST /trpc/placeOrder  Host: burger-house.restos.pk  →  {"result":{"data":{"order_id":"<minted>"}}}
 POST /trpc/placeOrder  Host: someone-else.pk         →  404
 POST /trpc/placeOrder  item with no cell             →  06-F33/01-F60: no storefront price for item-ghost …
 ```
