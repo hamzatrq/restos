@@ -406,11 +406,79 @@ export type SummaryHonesty = {
   readonly anomalies: readonly string[];
 };
 
+/**
+ * **THE PREMISE AN OMISSION RESTS ON, AS DATA A TEST CAN EVALUATE RATHER THAN PROSE A READER MUST
+ * RE-CHECK.**
+ *
+ * Every `OMISSIONS` entry is a sentence about the state of this codebase, RENDERED TO AN OWNER. It
+ * therefore goes stale silently, and when it does it tells her that a number she is reading cannot
+ * be affected by something that is affecting it. That has now happened twice — the voids/comps/
+ * discounts entry (all three of its clauses false in one day's commits, see the entry below) and
+ * the prep-time entry, whose *"RestOS is T1-only today"* survived `apps/pass-kds` shipping a
+ * production ready-mark. **Both were found by a human comparing a screen against the ledger; no
+ * suite could see either**, because the claim was in a string.
+ *
+ * So each entry now declares the facts it depends on, in a shape
+ * `__acceptance__/omission-premises.test.ts` evaluates against `@restos/domain` and
+ * `@restos/sync-protocol` on every run. **A premise that stops holding is a RED test, not a wrong
+ * sentence.** The four axes are not decoration — each is the way one of these entries can actually
+ * become false — and the suite asserts that every axis is exercised by at least one entry, so a
+ * check cannot go inert behind the others (`24-F14`).
+ *
+ * ⚠ **What it does NOT cover, stated so a green run is not read as total coverage.** It cannot see
+ * a missing *estimation job*, a missing *threshold default*, or a spec act that opens
+ * `DEC-MONEY-010`'s gate (iii). Those clauses are still prose and still rot; the premise narrows
+ * the surface rather than closing it. Where a checkable proxy stands in for an uncheckable claim,
+ * the entry says which.
+ */
+export type OmissionPremise = {
+  /**
+   * Event types that must have **no payload schema in `packages/domain`** for this entry to be
+   * true. That is the executable form of *"nothing in this product can produce one"*: `parseEvent`
+   * throws `UnknownEventTypeError` on a type with no schema and it gates BOTH ends of the ledger —
+   * `packages/sync-client/src/device-store.ts`'s append and `services/sync-gateway/src/gateway.ts`'s
+   * ingest — so a type absent from the registry cannot be written by any device or accepted by the
+   * cloud. It is a stronger claim than "no emitter today", and it is checkable in one call.
+   */
+  readonly unemittable_types: readonly string[];
+  /**
+   * Event types that must **have** a payload schema. An entry can rot in this direction too, and
+   * two do: entry 1's honesty depends on voids, comps and discounts being RECORDED (it points the
+   * owner at a block that measures them), and entry 5's depends on ready-marks EXISTING. If either
+   * set lost its schema the sentence would overstate what the product does.
+   */
+  readonly emittable_types: readonly string[];
+  /**
+   * `01 §4` line states that must NOT exist (`ORDER_LINE_STATES`). Entry 1 turns on the fact that a
+   * comp is not a line exit; a `comped` state appearing is exactly the change that would make it
+   * false, and it would be made in `packages/domain` by someone with no reason to read this file.
+   */
+  readonly absent_line_states: readonly string[];
+  /**
+   * The **complete** key set of the catalog entry this plane publishes (`CatalogEntryWire`), as it
+   * stands. Any change — added key or removed — reddens.
+   *
+   * A list of FORBIDDEN names was the first draft and it is the weaker design: entry 3 rests on no
+   * cost figure for a sold item reaching this plane, and nothing here can anticipate whether that
+   * field arrives as `cost_paisa`, `unit_cost_paisa` or `recipe`. Pinning the whole set trades a
+   * little noise on an unrelated field for a check that cannot be walked around by a name.
+   */
+  readonly catalog_entry_fields: readonly string[];
+};
+
 /** One thing this report does NOT contain, and the FR that decides it is absent. See `OMISSIONS`. */
 export type Omission = {
   readonly block: string;
   readonly reason: string;
   readonly fr: string;
+  /**
+   * ⚠ **REQUIRED, and that is the point of the field.** A separate premise table keyed by `block`
+   * was the alternative and it is weaker in exactly the way this table keeps failing: a parallel
+   * list is enforced by a test someone must remember to extend, while a required member means a
+   * new entry **cannot be written at all** without declaring what it depends on. It rides the wire
+   * with the answer; the owner's screen renders `block`, `reason` and `fr` and ignores it.
+   */
+  readonly premise: OmissionPremise;
 };
 
 export type NightlySummary = {
@@ -438,10 +506,35 @@ export type NightlySummary = {
  * product cannot answer today, with the reason and the FR that governs it. It is DATA, rendered by
  * the surface, so a block cannot quietly go missing and be mistaken for a zero.
  *
- * Each entry was checked against `packages/domain/src/registry.ts` — the emittable event set — and
- * against the emitters, **not** against the `01 §4` catalog. A type in the catalog with no payload
- * schema and no producer is vocabulary, not data, and that distinction is the whole list: four of
- * these blocks would look buildable to anyone who read `01 §4` and stopped there.
+ * Each entry is checked against `packages/domain/src/registry.ts` — the emittable event set — and
+ * **not** against the `01 §4` catalog. A type in the catalog with no payload schema is vocabulary,
+ * not data, and that distinction is the whole list: **five of the seven entries below** rest on a
+ * type the `01 §4` catalog names and `packages/domain` does not carry, so they would look
+ * buildable to anyone who read the catalog and stopped there — purchases/wastage and margin on
+ * `stock.*`, exception alerts on `alert.raised`, prep-time on `eta.estimates_published`, and open
+ * tables on `table.state_changed`. Tips are the exception in the other direction: `tip.pooled` and
+ * `tip.paid_out` are not even vocabulary yet.
+ *
+ * **Five of `12-F10`'s seven blocks are now ANSWERED** — sales by channel, cash per cashier,
+ * `12-F10` bullet 3's voids/comps/discounts, top items, the hourly curve — and two are not:
+ * purchases/wastage and `12-F11`'s margin. ⚠ *This paragraph said FOUR for as long as the
+ * corrections block has existed, which is the same staleness the entries themselves keep
+ * producing, one level up.*
+ *
+ * ── ⚠ WHY EVERY ENTRY CARRIES A `premise`, AND WHY IT IS A REQUIRED FIELD ─────────────────────
+ *
+ * See `OmissionPremise`. In short: this table has told an owner something false **twice**, both
+ * times because a sentence about the codebase outlived the codebase, and both times it was caught
+ * by a person rather than by a suite. The premise is the part a suite can hold —
+ * `__acceptance__/omission-premises.test.ts` evaluates every entry's premise on every run, so an
+ * omission that becomes MEASURABLE reddens a test instead of going on lying on a screen. That
+ * suite runs in CI (`.github/workflows/ci.yml` runs `test`), which four of this repo's rails do
+ * not.
+ *
+ * **The premise is not the whole reason and must not be read as one.** An entry's prose still
+ * carries claims nothing can check — that no estimation job exists, that no threshold default is
+ * stated anywhere in the corpus, that a gate in `26 §7` is unmet. Where a checkable fact stands in
+ * for one of those, the entry names the substitution rather than hiding it.
  */
 export const OMISSIONS: readonly Omission[] = [
   /**
@@ -458,6 +551,10 @@ export const OMISSIONS: readonly Omission[] = [
    * than a measurement: the counts and the values are now reported (`corrections`), the void's
    * money is already out of the day's total through the line exit, and the comp's and the
    * discount's are not out of anything.
+   *
+   * **Its premise is the only one on this table that is mostly POSITIVE**, and deliberately: this
+   * entry points an owner at a block that measures three things, so it rots if those three stop
+   * being measurable just as surely as the others rot if theirs start.
    */
   {
     block: "Comps and discounts NETTED OUT of the day's takings",
@@ -470,40 +567,150 @@ export const OMISSIONS: readonly Omission[] = [
       "were charged, and a comped dish is inside it. A void IS out of it: the line exits, and " +
       "01-F63's attested billed_paisa never contained it.",
     fr: "DEC-MONEY-010",
+    premise: {
+      // Gate (i) is CLOSED — all three ship a schema and an emitter, which is what makes the
+      // "ARE now reported" clause true. Losing one would make this entry overstate the product.
+      emittable_types: ["void.recorded", "comp.recorded", "discount.recorded"],
+      // The clause "neither is a line exit". A `comped` state in `01 §4` is precisely the change
+      // that would make a comp net out on its own, and it lands in `packages/domain`.
+      absent_line_states: ["comped", "discounted"],
+      unemittable_types: [],
+      catalog_entry_fields: [],
+    },
   },
   {
     block: "Purchases and wastage logged",
     reason:
-      "the stock.* family is Wave 3 (00 §1 rates module 10 at wave 3). No purchase, wastage or " +
-      "count event can be emitted by anything shipping today.",
+      "no purchase, wastage, count or movement event can be emitted or ingested by anything " +
+      "shipping today: the stock.* family is 01 §4 catalog vocabulary with no payload schema in " +
+      "packages/domain, so parseEvent refuses one at both ends of the ledger. Module 10 is Wave 3 " +
+      "(00 §1).",
     fr: "12-F10",
+    premise: {
+      unemittable_types: [
+        "stock.purchase_recorded",
+        "stock.wastage_recorded",
+        "stock.count_recorded",
+        "stock.movement_recorded",
+      ],
+      emittable_types: [],
+      absent_line_states: [],
+      catalog_entry_fields: [],
+    },
   },
+  /**
+   * The one entry whose premise is a CATALOG SHAPE rather than an event type, because margin is a
+   * cost question and a cost is not an act. `13-F5`'s precondition is recipe coverage on items
+   * representing ≥ 60% of period revenue; today it is 0%, and the two ways a cost could reach this
+   * plane at all are pinned below.
+   */
   {
     block: "Estimated gross margin",
     reason:
-      "12-F11 omits the margin line whenever recipe coverage is below 13-F5's precondition. " +
-      "Recipe data does not exist at all, so coverage is 0% and the FR's own rule applies " +
-      "verbatim — never guessed, never shown as zero.",
+      "12-F11 omits the margin line whenever recipe coverage is below 13-F5's precondition " +
+      "(recipe coverage on items representing at least 60% of period revenue). No cost figure " +
+      "for a sold item reaches this plane by any route: the catalog entry it publishes carries a " +
+      "price and no cost, and stock.movement_recorded — the deduction chain that would value one " +
+      "— has no payload schema. Coverage is 0%, so the FR's own rule applies verbatim: never " +
+      "guessed, never shown as zero.",
     fr: "12-F11",
+    premise: {
+      unemittable_types: ["stock.movement_recorded"],
+      emittable_types: [],
+      absent_line_states: [],
+      // `CatalogEntryWire`, exactly as it stands. A cost field is what would make this entry
+      // false and no forbidden-name list can guess what it will be called, so the whole set is
+      // pinned and any change reddens.
+      catalog_entry_fields: [
+        "kind",
+        "id",
+        "name",
+        "kitchen_name",
+        "parent_id",
+        "sort",
+        "deleted",
+        "prices",
+        "station",
+      ],
+    },
   },
+  /**
+   * ⚠ **THIS ENTRY WAS STALE IN ITS ARITHMETIC AND THE ARITHMETIC IS KEPT, WITH THE PREMISE THAT
+   * MAKES IT CHECKABLE.** It said *"four of 13-F10's six detectors read events that do not
+   * exist"* and named the surviving two as cash variance and no-sale opens. Measured 2026-08-24
+   * against `registry.ts`: `void.recorded`, `comp.recorded` and `discount.recorded` all ship
+   * schemas and an emitter, so detectors 1 and 2 moved — it is **two** of six that read absent
+   * events (stock variance after a count, supplier price spikes) and **four** that do not.
+   *
+   * A bare count is exactly the clause that rots, which is why both halves are in the premise: if
+   * `stock.count_recorded` gains a schema, or `void.recorded` loses one, the count is re-derived
+   * by a failing test rather than by whoever next reads the screen.
+   */
   {
     block: "What's odd (exception alerts)",
     reason:
       "13-F14a puts every alert class in this block from Wave 1, and no class can fire. " +
-      "alert.raised has no payload schema and no producer (services/intelligence is a scaffold " +
-      "stub); four of 13-F10's six detectors read events that do not exist; and the two that do — " +
-      "cash variance at shift close, no-sale opens — each need a threshold that 00 §7 places at " +
-      "layer 2, with no default stated anywhere in the corpus and no layer-2 config plane built. " +
-      "The anomalies reported above are the ledger's own 01-F31/02-F37/02-F43 facts. They are not " +
-      "alerts and are not labelled as any.",
+      "alert.raised has no payload schema in packages/domain — so nothing can emit or ingest one " +
+      "— and services/intelligence is a scaffold stub. Two of 13-F10's six detectors also read " +
+      "events that do not exist (stock variance after a count, supplier price spikes). The other " +
+      "four now read events that DO — voids, comps and discounts, cash over/short at shift " +
+      "close, no-sale drawer opens — and each still needs a threshold that 00 §7 places at layer " +
+      "2, with no default stated anywhere in the corpus and no layer-2 config plane built (00 §7 " +
+      "(f)). The anomalies reported above are the ledger's own 01-F31/02-F37/02-F43 facts. They " +
+      "are not alerts and are not labelled as any.",
     fr: "13-F14a",
+    premise: {
+      unemittable_types: [
+        "alert.raised",
+        "alert.acknowledged",
+        // 13-F10's two detectors that still read nothing.
+        "stock.count_recorded",
+        "stock.purchase_recorded",
+      ],
+      // 13-F10's other four, which is the half this entry got wrong.
+      emittable_types: [
+        "void.recorded",
+        "comp.recorded",
+        "discount.recorded",
+        "shift.closed",
+        "cash.drawer_opened",
+      ],
+      absent_line_states: [],
+      catalog_entry_fields: [],
+    },
   },
+  /**
+   * ⚠ **THIS ENTRY TOLD AN OWNER THAT HER KITCHEN PRODUCES NO TIMING SAMPLES, AFTER THE PRODUCT
+   * HAD SHIPPED THE EMITTER THAT PRODUCES THEM.** It read: *"03-F26 gives a T1 branch no
+   * ready-marks, so it honestly produces no samples, and 03-F28's confidence gate then yields NO
+   * estimate rather than a guess. RestOS is T1-only today."* The last sentence is false:
+   * `apps/pass-kds` ships `main/ready-mark.ts` and `main/serve-mark.ts` behind a declared `start`
+   * script, and its own header calls it *"the second production emitter of
+   * `order.line_state_changed`"* — on a branch that is T2 by `02-F31`'s own detection rule. The
+   * first clause is a correct quotation of `03-F26` aimed at a tier this product is no longer
+   * limited to.
+   *
+   * **Which half moved matters, so it is stated rather than smoothed over:** stage 2 is now
+   * satisfiable and stages 3–5 are not. The entry survives, for a completely different reason
+   * than the one it used to give.
+   */
   {
     block: "Prep-time and ETA figures",
     reason:
-      "03-F26 gives a T1 branch no ready-marks, so it honestly produces no samples, and 03-F28's " +
-      "confidence gate then yields NO estimate rather than a guess. RestOS is T1-only today.",
+      "03-F26's samples ARE produced now — apps/pass-kds ships a production ready-mark, so " +
+      "confirm-to-ready durations reach the ledger on any branch running the pass screen. " +
+      "Everything downstream is absent: 03-F27's estimation job (median and p80 over a rolling " +
+      "60-day window) has no code, and 03-F29's eta.estimates_published has no payload schema, " +
+      "so no gated estimate can be published or delivered. 03-F28's gate also needs at least 30 " +
+      "samples in that window, which one business day is not.",
     fr: "03-F28",
+    premise: {
+      unemittable_types: ["eta.estimates_published"],
+      // The sample source. If this lost its schema the first sentence above would be false.
+      emittable_types: ["order.line_state_changed"],
+      absent_line_states: [],
+      catalog_entry_fields: [],
+    },
   },
   {
     block: "Tips",
@@ -512,13 +719,32 @@ export const OMISSIONS: readonly Omission[] = [
       "tip.paid_out enter the 01 §4 catalog. They have not, so no tip figure may appear — " +
       "including inside the cash reconciliation, where a tip is drawer cash outside billed_total.",
     fr: "DEC-MONEY-004",
+    premise: {
+      // ⚠ A PROXY, and it fires LATE by design rather than by oversight. The FR's gate is entry
+      // into the `01 §4` catalog, which no runtime value can see; the payload schema is the next
+      // step and DEC-MONEY-004 puts the spec PR "before any code", so a schema appearing means
+      // the catalog gate has already opened. Late is the safe direction here: the sentence is
+      // about what the PRODUCT may show, and it cannot show a tip before a schema exists.
+      unemittable_types: ["tip.pooled", "tip.paid_out"],
+      emittable_types: [],
+      absent_line_states: [],
+      catalog_entry_fields: [],
+    },
   },
   {
     block: "Open orders and open tables (the live view)",
     reason:
-      "12-F5..F8's live ticker is a different surface from the nightly summary and needs a table " +
-      "map this tier does not have. This report is the closed day, never the running one.",
+      "12-F5..F8's live ticker is a different surface from the nightly summary, and 12-F6 counts " +
+      "tables only where the tier has a table map. table.state_changed — 05-F10's input, T3 only " +
+      "— has no payload schema, so no table map can be folded at all. This report is the closed " +
+      "day, never the running one.",
     fr: "12-F5",
+    premise: {
+      unemittable_types: ["table.state_changed"],
+      emittable_types: [],
+      absent_line_states: [],
+      catalog_entry_fields: [],
+    },
   },
 ];
 

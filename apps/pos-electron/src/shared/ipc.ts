@@ -263,6 +263,71 @@ export const OpenOrderSchema = z.object({
    * "payment".
    */
   paid_paisa: z.number().int().nonnegative(),
+  /**
+   * **`16-F5`'s two figures, supplied exactly when the LINE ROWS DO NOT ALREADY CARRY THE TAX.**
+   *
+   * `lines[].billed_paisa` below is the fold's per-line billed amount and `total_paisa` above is
+   * `01-F82`'s `billed_total` — *tax included and rounded*. Under `exclusive` those are two
+   * different quantities, and the cart rendered both with nothing between them: **rows adding to
+   * Rs 853 under `TOTAL Rs 989`**, measured on shipping code. This is the Rs 136.
+   *
+   * **The MAIN process decides presence, not the renderer, and the decision is a fact about this
+   * payload rather than a policy.** `main/gateway.ts` already resolves the org's `TaxCell` to
+   * compute `total_paisa`; whether the per-line figures it just produced contain the tax is
+   * something only that resolution knows. Sending the posture instead would put `16-F2`'s
+   * vocabulary and a tax reading on the renderer, which `18 §6` and `21-F1` both push the other
+   * way. So: present under `exclusive`, absent under `inclusive` (the rows already sum to the
+   * total) and absent under `none` (there is no tax, and a `Tax Rs 0` row is a claim about a tax
+   * regime the org is not in — `receipt-document.ts`'s own stated rule for paper).
+   *
+   * **`.optional()` and the four Orders-tab fields below are the precedent, including its cost.**
+   * A required key is a compile error in every fixture that builds an `OpenOrder` through
+   * `(over: Partial<OpenOrder> = {}) => ({ … })`, which is most of the renderer's oracle files.
+   * The degrade is `01-F54`'s — a host that does not say renders the surface exactly as it
+   * rendered before this field existed — and it is genuinely weaker than required, because
+   * "declined to say" and "there is nothing to say" are the same absence here. What closes that
+   * is a hand-written assertion rather than a rail: `__acceptance__/cart-breakdown-seam.test.ts`
+   * fails if the shipped gateway stops supplying it. **Required is where this belongs once those
+   * fixtures catch up**, and it is the same sentence the four fields below already carry.
+   *
+   * `charge_`-prefixed, not `tax_`, because the sibling below is `02-F63`'s rounding and that is
+   * NOT a tax term — it fires under `none`. One prefix for "the terms of the charge" keeps a
+   * reader from filing the rounding under doc 16.
+   */
+  charge_tax: z
+    .object({
+      subtotal_paisa: z.number().int().nonnegative(),
+      tax_total_paisa: z.number().int().nonnegative(),
+    })
+    .optional(),
+  /**
+   * `02-F63` (b)'s rounding adjustment — a **magnitude** and the **word** for its direction.
+   *
+   * **It crosses as a magnitude on purpose, and `ipc-money-seam.test.ts` is why in two ways.**
+   * That rail derives the seam's signed set from `domain/registry.ts`, and `02-F63` (b) forbids
+   * a stored rounding field there by name (*"the adjustment is exactly `billed_total − (subtotal
+   * + tax)`, recomputable … so persisting it creates two answers that can disagree"*) — so a
+   * signed `rounding_paisa` here would be a money field the rail has no source for and would
+   * demand `.nonnegative()` of anyway. Its closing test states the shape that IS blessed: *"a
+   * signed field reaches the screen as a MAGNITUDE … `directedPaisa` hands back both halves from
+   * one call so a caller cannot render the magnitude and silently drop the direction (`27-F12`)"*.
+   * That call happens once, in `main/gateway.ts`, and no sign ever reaches the renderer.
+   *
+   * **ONE object, so the two halves cannot be half-supplied** — the same argument `Cart`'s
+   * `offBill` makes for a fill beside a word.
+   *
+   * **ABSENT is the zero adjustment and there is no other way to spell it.** `Rounded up Rs 0` is
+   * not a sentence anyone says (`roundingRow`'s and `varianceToken`'s precedent), so the sign-0
+   * case has no renderable direction and is expressed by omission at the producer. That is what
+   * makes `.optional()` safe on this one where it is merely tolerable on the sibling above: an
+   * absent value and a zero value are the same statement.
+   */
+  charge_rounding: z
+    .object({
+      magnitude_paisa: z.number().int().nonnegative(),
+      direction: z.enum(["up", "down"]),
+    })
+    .optional(),
   lines: z.array(
     z.object({
       line_id: z.string(),

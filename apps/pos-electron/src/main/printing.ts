@@ -326,6 +326,34 @@ type BilledCell = LineCell & { unit_price_paisa: number; states?: unknown };
  * zero to keep distinguishable from *forgotten*. A comparison against a money field is legal by
  * name (`DEC-MONEY-005`: "comparisons and plain assignment stay legal on purpose").
  *
+ * ⚠ **AND THAT ARM CANNOT TELL A FREE LINE FROM A VOIDED FREE ONE — THE CASE THIS PARAGRAPH
+ * ARGUED ONE DIRECTION OF AND DID NOT NAME (measured on shipping code, August 2026).** For a cell
+ * priced at zero the arm short-circuits *before* `billedLinePaisa` is consulted, so a line in
+ * state `["voided"]` at `unit_price_paisa: 0` prints — reproduced as `1 Water (with meal) Rs 0
+ * each` on a customer's copy of an order it had been taken off. **The arithmetic still closes**
+ * (it contributes zero to `Subtotal`, `Tax` and `Total` alike), so this is an honesty wart and not
+ * a money defect; what a customer holds is a receipt naming a dish nobody is being charged for and
+ * nobody is being given.
+ *
+ * **This is `01-F66`'s lesson failing in the session that would have read it** — *"state the class
+ * you actually closed, and name the neighbouring case you did not"*. The filter above genuinely
+ * closed *a voided line with a price*, which was the measured defect (four rows over a `Subtotal`
+ * that excluded one of them); it did not close *a voided line without one*, and the two are one
+ * clause apart in the code and nothing alike in the English.
+ *
+ * **IT IS NOT FIXED HERE, AND THE REASON IS A BOUNDARY RATHER THAN A JUDGEMENT.** The honest
+ * predicate is *did this line exit the bill*, and `packages/sync-client` is the only module allowed
+ * to answer it: `billedCellPaisa`'s `states.length === 1 && EXITED.has(...)` guard is fold logic
+ * that `26 §8` forbids re-deriving outside that package, and `billedLinePaisa` deliberately returns
+ * a NUMBER, which collapses "exited" and "free" onto the same zero. Reading `states` in this file
+ * would be exactly the re-derivation the paragraph above refuses, so the fix is **owed against
+ * `packages/sync-client`** and is sized here rather than taken: one exported predicate beside
+ * `billedLinePaisa` (`01-F30`'s "is this line one the bill is built from", declared once, ~10 lines
+ * over the `EXITED`/`TERMINAL`/`CONTESTED_LINE_BILLABLE` sets that module already holds), its own
+ * suite, and — because that package is a `20 §4.4` protected path — an adversarial review in a
+ * separate context. This function then becomes that predicate and the `unit_price_paisa` arm
+ * disappears entirely, along with the class of bug it carries.
+ *
  * ⚠ **THERE IS NO GUARD FOR A CELL WITH NO PROJECTED `states`, AND THAT IS MEASURED RATHER THAN
  * ASSUMED.** A first draft carried one (fail OPEN: print the line) with a test for it, and the
  * test failed for a reason worth recording — `orderChargeSnapshot` runs three statements ABOVE

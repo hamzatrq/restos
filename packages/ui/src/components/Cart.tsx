@@ -92,10 +92,115 @@ export type CartProps = {
    * with the number all the way from the fold to the glyph.
    */
   totalPaisa: Paisa;
+  /**
+   * **`16-F5`'s two figures, and they are present exactly when the LINE ROWS ABOVE DO NOT ALREADY
+   * CARRY THE TAX.**
+   *
+   * The cart's money column is `billedLinePaisa` — the fold's per-line billed amount — and the
+   * TOTAL below it is `01-F82`'s `billed_total`, *tax included and rounded*. Under `exclusive`
+   * those are two different quantities, so a cart with only the two of them showed **rows adding
+   * to Rs 853 under `TOTAL Rs 989`** with nothing on the surface naming the Rs 136 between them.
+   * That is the defect `packages/escpos`'s `receipt-document.ts` names one plane over — *"a
+   * receipt whose lines do not add up to its total is worse than one that asks the reader to
+   * multiply"* — moved onto the glass.
+   *
+   * **The words are the receipt's, verbatim** (`Subtotal` / `Tax` / `Rounded up|down` / `Total`),
+   * because a cashier and the customer holding the paper must not learn two vocabularies for one
+   * decomposition — `03-F40`'s two sensor bit layouts is this corpus's own worked example.
+   *
+   * **ONE optional object rather than two optional figures**, on this file's own `offBill`
+   * precedent: two props can be half-supplied and this one cannot, so no arrangement of props
+   * renders a `Subtotal` with no `Tax` under it.
+   *
+   * **ABSENT means the rows above already carry whatever tax there is — it is not "no tax".**
+   * Under `inclusive` the fold's per-line billed amount is the tax-INCLUSIVE price, so the money
+   * column already sums to the total and a `Subtotal Rs 735` row beneath rows summing to Rs 853
+   * would be a smaller number wearing a label that reads like their sum: the same
+   * non-reconciliation this prop exists to remove, one row down. Under `none` there is no tax and
+   * a `Tax Rs 0` row is a claim about a tax regime the org is not in — `receipt-document.ts`'s own
+   * stated reason for printing nothing there. **The caller decides**, exactly as it supplies
+   * `offBill`'s word: `16-F2`'s posture is the kernel's vocabulary and this package is a closed
+   * vocabulary of PRESENTATION (`21-F1`, `18 §2`).
+   *
+   * ⚠ **WHAT THIS CANNOT CLOSE, MEASURED RATHER THAN GUESSED — `27-F23` DENIES THIS SCREEN
+   * DECIMALS AND THE TAX GENUINELY HAS THEM.** `MoneyValue` renders through `rupeesFromPaisa`,
+   * which truncates. Under `exclusive` at 16 % on three whole-rupee lines totalling Rs 853 the tax
+   * is `13_648` paisa: the rows read `Subtotal Rs 853` + `Tax Rs 136` = Rs 989 and the total IS
+   * Rs 989, but move the rate so the tax's sub-rupee part reaches half a rupee and the same three
+   * rows read Rs 989 under a `TOTAL Rs 990`. **The residue is at most Rs 1 and it appears only
+   * under `exclusive`**; `none` and `inclusive` close exactly at every step `02-F63` (c) admits,
+   * because a whole-rupee step over whole-rupee prices makes every term a whole number of rupees.
+   * The only fix is paisa on the glass, which `02-F63` (c) refuses by name and hands to doc 27 —
+   * *"it is a `27-F23` act, it moves every money surface in the product"* — and `02-F63` (f) is
+   * where the exact close already lives: the printed receipt, which may show `Rs 450.70`. Recorded
+   * as a finding for doc 27, not fixed here.
+   */
+  tax?: { subtotalPaisa: Paisa; taxPaisa: Paisa } | undefined;
+  /**
+   * `02-F63` (b)'s rounding adjustment — a MAGNITUDE and the WORD for its direction.
+   *
+   * `27-F12`: *"a lone `-` is one glyph wide, is the first thing lost at 1–2 m or on a scratched
+   * panel, and means nothing to a non-reader"*, so the direction is a word and it lives in the
+   * LABEL — the same split `receipt-document.ts`'s `roundingRow` makes for paper, and the same two
+   * words. An org that rounds to Rs 10 (R70: *"some restaurants round to 10s"*) moves a Rs 853
+   * bill to Rs 850 **under posture `none` with no tax anywhere**, so this row is not a tax row and
+   * is absent from the object above on purpose: the two terms have different presence conditions
+   * and one bag would tie them together.
+   *
+   * **ABSENT means the row would carry no figure, which is a wider case than "no adjustment" and
+   * is the whole reason this one may be optional where `billedPaisa` may not.** `Rounded up Rs 0`
+   * is not a sentence anyone says (`roundingRow`'s precedent, and `varianceToken`'s), and `27-F23`
+   * denies this screen decimals — so at `02-F63` (c)'s default step of 100, where the adjustment
+   * is under a rupee by construction, EVERY taxed order would otherwise carry a row reading
+   * `Rs 0`. The caller omits it when it would render zero, using the same `rupeesFromPaisa` this
+   * component formats through, so an absent value and an unrenderable one are one statement and
+   * there is no zero case here to get wrong. The signed number the fold produces reaches this
+   * shape through `domain`'s `directedPaisa`, in the host's main process, so no sign ever crosses
+   * onto the screen.
+   */
+  rounding?: { magnitudePaisa: Paisa; direction: "up" | "down" } | undefined;
   onRemove?: ((id: string) => void) | undefined;
 };
 
-export const Cart = ({ lines, totalPaisa, onRemove }: CartProps) => {
+/**
+ * One labelled term standing between the cart's line rows and its TOTAL (`Subtotal`, `Tax`,
+ * `Rounded up|down`).
+ *
+ * **Module-private and it stays that way.** `21-F1` makes this package a CLOSED vocabulary, and an
+ * exported "row with a caption and a money figure" is a component a caller can put any word into —
+ * which is how a second decomposition vocabulary appears beside the receipt's four words. The words
+ * are spelled at the two call sites below, where they can be read against the total they explain.
+ *
+ * It renders at `MoneyValue`'s default `body`, deliberately not at the TOTAL's `hero`: `27-F25`
+ * gives the REGION's payload to the largest element, and a subtotal competing with the one figure
+ * the cashier quotes would spend that hierarchy on a term she is not asked to act on. It is the
+ * same size the line totals above it use, which is what makes the column read as a column.
+ */
+const ChargeRow = ({ label, paisa }: { label: string; paisa: Paisa }) => {
+  const color = useColor();
+  const type = typography["text-label"];
+  return (
+    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+      <span
+        style={{
+          fontFamily: type.fontFamily,
+          fontSize: type.fontSize,
+          // `fgColor-muted`, not `fgColor-default`: these terms EXPLAIN the total and must not
+          // compete with it or with a dish name. It is a foreground token on a foreground
+          // property (`27-F40`) and `discipline.test.ts` holds it AA against every surface, so
+          // the step down is a hierarchy step and never a legibility trade.
+          color: color["fgColor-muted"],
+        }}
+      >
+        {label}
+      </span>
+      {/* `27-F16` again: a subtotal, a tax and a rounding adjustment are all EXPECTED figures. */}
+      <MoneyValue paisa={paisa} />
+    </div>
+  );
+};
+
+export const Cart = ({ lines, totalPaisa, tax, rounding, onRemove }: CartProps) => {
   const color = useColor();
   const label = typography["text-label"];
   return (
@@ -278,20 +383,52 @@ export const Cart = ({ lines, totalPaisa, onRemove }: CartProps) => {
         ))
       )}
 
+      {/*
+        ── THE TERMS BETWEEN THE ROWS AND THE TOTAL, IN ONE BOX WITH IT ────────────────────────
+
+        The rule and its consequence: what the money column above does NOT already carry gets a
+        LABELLED ROW, and nothing else does. `Subtotal`/`Tax` arrive together or not at all
+        (`tax`); the rounding row arrives when there is an adjustment (`rounding`); a `Tax Rs 0`
+        row on every untaxed order and a `Rounded up Rs 0` row on every whole-rupee one are the
+        noise `27-F55`'s argument bans from paper, and this surface has less room than paper.
+
+        ⚠ **ONE bordered box rather than free siblings, and it was NOT a styling choice.** The
+        rule is placed once, between what was RUNG and what it COMES TO; rows dropped in above
+        the old border would read as cart lines with odd names, which is how a `Subtotal` row
+        becomes a dish. The inner `gap` is one step tighter than the section's so the block reads
+        as one statement and the line list above it stays the coarser rhythm.
+      */}
       <div
         style={{
           display: "flex",
-          alignItems: "baseline",
-          justifyContent: "space-between",
+          flexDirection: "column",
+          gap: space["space-2"],
           paddingTop: space["space-3"],
           borderTop: `1px solid ${color["borderColor-default"]}`,
         }}
       >
-        <span style={{ fontFamily: label.fontFamily, fontSize: label.fontSize }}>TOTAL</span>
-        {/* 27-F16: not coloured. Colour on a number means "this number is abnormal", and the
-            total is the commonest number on the screen — colouring it would spend the whole
-            preattentive channel on the base case. */}
-        <MoneyValue paisa={totalPaisa} size="hero" />
+        {tax === undefined ? null : (
+          <>
+            <ChargeRow label="Subtotal" paisa={tax.subtotalPaisa} />
+            <ChargeRow label="Tax" paisa={tax.taxPaisa} />
+          </>
+        )}
+        {rounding === undefined ? null : (
+          // `27-F12` — the direction is a WORD and it lives in the LABEL, which is exactly where
+          // `receipt-document.ts`'s `roundingRow` puts it for paper, in these same two words. A
+          // sign in front of the figure is the one glyph a scratched panel eats first.
+          <ChargeRow
+            label={rounding.direction === "up" ? "Rounded up" : "Rounded down"}
+            paisa={rounding.magnitudePaisa}
+          />
+        )}
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+          <span style={{ fontFamily: label.fontFamily, fontSize: label.fontSize }}>TOTAL</span>
+          {/* 27-F16: not coloured. Colour on a number means "this number is abnormal", and the
+              total is the commonest number on the screen — colouring it would spend the whole
+              preattentive channel on the base case. */}
+          <MoneyValue paisa={totalPaisa} size="hero" />
+        </div>
       </div>
     </section>
   );

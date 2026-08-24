@@ -710,4 +710,25 @@ describe("§G · Commandment 2 — the OMISSIONS entry says what is true TODAY",
     expect(blocks).toContain("Tips");
     expect(blocks).toContain("Purchases and wastage logged");
   });
+
+  /**
+   * ⚠ **THE SECOND ONE, FOUND THE SAME WAY AND NOT BY A SUITE.** The prep-time entry went on
+   * telling an owner *"RestOS is T1-only today"* after `apps/pass-kds` shipped a production
+   * ready-mark — its own header calls the app *"the second production emitter of
+   * `order.line_state_changed`"*. The block is still omitted and its REASON changed completely:
+   * `03-F26`'s samples are producible now, and `03-F27`/`03-F29` are what is missing.
+   *
+   * This assertion pins the retired claim by its words. The durable half — that
+   * `eta.estimates_published` is still unemittable — is `__acceptance__/omission-premises.test.ts`,
+   * which is the mechanism; this is the tripwire on the one sentence that was false.
+   */
+  it("no longer claims RestOS is T1-only, which stopped being true when pass-kds shipped", () => {
+    const entry = fold(theDay()).omissions.find((row) => row.block === "Prep-time and ETA figures");
+    expect(entry).toBeDefined();
+    expect(entry?.reason).not.toContain("T1-only");
+    // And it does not merely delete the claim: it says which half moved, so the next reader is
+    // not left wondering whether the samples exist.
+    expect(entry?.reason).toContain("03-F27");
+    expect(entry?.reason).toContain("pass-kds");
+  });
 });

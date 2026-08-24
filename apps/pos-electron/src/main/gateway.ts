@@ -1,6 +1,11 @@
-import { newId } from "@restos/domain";
+import { directedPaisa, newId, rupeesFromPaisa } from "@restos/domain";
 import type { BlockedCursor, DeviceStore } from "@restos/sync-client";
-import { billedLinePaisa, billedTotalPaisa, wallClock } from "@restos/sync-client";
+import {
+  billedLinePaisa,
+  billedTotalPaisa,
+  orderChargeSnapshot,
+  wallClock,
+} from "@restos/sync-client";
 import {
   type AddLineRequest,
   AddLineRequestSchema,
@@ -331,6 +336,92 @@ const noteFrom = (notes: readonly string[] | undefined): string | null =>
  */
 type SavedAddress = { address_id: string; address_text: string };
 
+/**
+ * `16-F5`'s two rows and `02-F63` (b)'s adjustment for one order — **the terms that stand between
+ * the cart's line rows and its TOTAL**, in the shape `shared/ipc.ts` declares them.
+ *
+ * ── THE DEFECT THIS CLOSES, MEASURED ON SHIPPING CODE ───────────────────────────────────────
+ *
+ * `linesFrom` sends `billed_paisa` per line and the field above sends `01-F82`'s `billed_total`.
+ * Under `exclusive` those are two different quantities and NOTHING named the difference, so the
+ * counter showed rows adding to **Rs 853** under **`TOTAL Rs 989`**. Measured across all three
+ * postures on three whole-rupee lines totalling Rs 853 at 16 %: `none` step 100 → gap 0;
+ * `inclusive` step 100 → gap 0; `exclusive` step 100 → **gap Rs 136**. And the brief that reported
+ * it measured only the default step: at `charge_rounding_paisa = 1000`, which `02-F63` (c) blesses
+ * by name (*"1000 rounds to ten rupees"*), posture **`none`** shows rows of Rs 853 under a
+ * `TOTAL Rs 850` — **a Rs 3 gap with no tax anywhere in the product.** So this is a rounding
+ * defect as much as a tax one, and it is live at the shipped default posture.
+ *
+ * ── WHY THE PRESENCE RULE IS THE POSTURE AND NOT "IS THE TAX NON-ZERO" ──────────────────────
+ *
+ * The question a row answers is *does the money column above already contain this?*, and only
+ * `16-F2`'s posture answers it. Under `inclusive` `taxSnapshot` sets `line_total_paisa = billed`,
+ * so the fold's per-line figure is the tax-INCLUSIVE price: the rows already sum to the total, and
+ * a `Subtotal Rs 735` row under rows reading Rs 853 would be a smaller number wearing a label that
+ * reads like their sum — the same non-reconciliation this function exists to remove, one row down.
+ * Under `none` there is no tax at all. Under `exclusive` the tax is added on top and is exactly
+ * what is missing. The named alternative (`24 §3b`) is to send the block whenever
+ * `tax_total_paisa > 0`, which is the same set today and differs the moment a rate of 0 bps is
+ * typed under `inclusive` — where it would show a `Subtotal` that is *not* the rows above it.
+ *
+ * ── ⚠ TWO CALLS OF ONE PURE FUNCTION, AND THE ALTERNATIVE WAS REFUSED FOR A STATED REASON ───
+ *
+ * `billedTotalPaisa` IS `orderChargeSnapshot(...).charge_total_paisa` — one implementation, so the
+ * two calls cannot disagree — and folding them into one would rewrite `total_paisa`'s expression,
+ * which `__acceptance__/tax-on-the-bill.test.ts` §C pins **by source text** as the guard against a
+ * silent return to the tax-blind sum. Editing an acceptance file to make an implementation compile
+ * is `24 §3` step 2's own prohibition, so the duplicate call stays and the consolidation is OWED,
+ * to be taken with that oracle's owner. `01-F34` is untouched either way: this reads an
+ * already-projected `json_lines` and a resolved cell, and no clock, ordering key or device state.
+ *
+ * ── ⚠ THE ROUNDING ROW IS OMITTED WHEN IT WOULD READ `Rs 0`, AND `sign === 0` IS NOT ENOUGH ──
+ *
+ * `27-F23` gives an operational screen no decimals and `MoneyValue` renders through
+ * `rupeesFromPaisa`, which TRUNCATES. **At `02-F63` (c)'s default step of 100 the adjustment is
+ * always under a rupee by construction**, so a plain sign test would have put `Rounded down Rs 0`
+ * on essentially every `exclusive` order this product sells — a row that carries no information,
+ * on the surface with the least room in the product, under a rule the corpus already states twice
+ * (`roundingRow`: *"a `Rounded up Rs 0` row on every whole-rupee bill is precisely the information
+ * `27-F55` says paper must carry less of"*; `varianceToken`: *"`OVER Rs 0` is not a thing anyone
+ * says"*). The test is therefore *does this row render a figure*, asked with the SAME function the
+ * renderer formats through, so the producer's decision and the glass cannot disagree. At a step of
+ * 1000 — R70's *"some restaurants round to 10s"* — the adjustment reaches Rs 1–5 and the row
+ * appears, which is exactly the case a cashier needs it for.
+ *
+ * **It can THROW, and that is the same refusal `total_paisa` beside it already carries** — a
+ * posture an operator mistyped is not what `01-F17` protects a sale from, and a fallback here
+ * would put a breakdown on the glass that the settlement path never agreed to.
+ */
+const chargeTerms = (jsonLines: string): Pick<OpenOrder, "charge_tax" | "charge_rounding"> => {
+  const charge = orderChargeSnapshot(jsonLines, deviceTaxCell(), deviceChargeRoundingPaisa());
+  // `directedPaisa` rather than a comparison and a negation: `27-F12`'s direction and the
+  // magnitude come back from ONE call precisely so a caller cannot keep one and drop the other,
+  // and `DEC-MONEY-005` bans the `signed < 0 ? -signed : signed` that would otherwise appear here.
+  // `sign === 0` is the whole of "no adjustment": there is no direction word for it, so the field
+  // is OMITTED and `Cart` has no zero case to get wrong.
+  const { magnitudePaisa, sign } = directedPaisa(charge.rounding_paisa);
+  return {
+    ...(charge.tax.posture === "exclusive"
+      ? {
+          charge_tax: {
+            subtotal_paisa: charge.tax.subtotal_paisa,
+            tax_total_paisa: charge.tax.tax_total_paisa,
+          },
+        }
+      : {}),
+    ...(rupeesFromPaisa(magnitudePaisa).rupees === 0
+      ? {}
+      : {
+          charge_rounding: {
+            magnitude_paisa: magnitudePaisa,
+            // `sign === 0` cannot reach here: `rupeesFromPaisa(0).rupees` is 0 and is filtered
+            // above, so the ternary is total over what survives rather than defaulting a direction.
+            direction: sign === 1 ? ("up" as const) : ("down" as const),
+          },
+        }),
+  };
+};
+
 const linesFrom = (jsonLines: string, catalog: CatalogResolver): OpenOrder["lines"] =>
   Object.entries(JSON.parse(jsonLines) as Record<string, LineCell>).map(([line_id, cell]) => ({
     line_id,
@@ -526,6 +617,7 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
             deviceTaxCell(),
             deviceChargeRoundingPaisa(),
           ),
+          ...chargeTerms(row.json_lines),
           // The fold's keyed sum (01-F30/01-F31), never re-derived here — same rule as the
           // billed total directly above, and for the same reason.
           paid_paisa: row.pay_total,

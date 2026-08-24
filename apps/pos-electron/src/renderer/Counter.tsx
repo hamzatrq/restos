@@ -2777,6 +2777,38 @@ export const Counter = () => {
                   // branded integer paisa and never re-summed here (00 §6, 26 §8).
                   totalPaisa={paisa(current?.total_paisa ?? 0)}
                   /*
+                    ⚠ **THE ROWS AND THE TOTAL WERE TWO DIFFERENT QUANTITIES AND NOTHING SAID SO.**
+                    The money column above is `billedLinePaisa`; `totalPaisa` is `01-F82`'s
+                    `billed_total`, tax included and rounded. Measured on a real till under
+                    `exclusive` 16 %: rows **Rs 853** under **`TOTAL Rs 989`**, and no `Subtotal`
+                    or `Tax` anywhere on the counter — the shape `receipt-document.ts` refuses on
+                    paper (*"a receipt whose lines do not add up to its total is worse than one
+                    that asks the reader to multiply"*), moved onto the glass.
+
+                    **Both props are a PASS-THROUGH and this file decides nothing.** Presence is
+                    `main/gateway.ts`'s call, because whether the per-line figures already contain
+                    the tax is a fact about the projection it produced, and `16-F2`'s posture is
+                    kernel vocabulary that `18 §6` keeps off this plane. `paisa()` only restores
+                    `00 §6`'s brand to numbers `OpenOrderSchema` has already narrowed to
+                    non-negative integers — the identical move `billedPaisa` above makes.
+                  */
+                  {...(current?.charge_tax === undefined
+                    ? {}
+                    : {
+                        tax: {
+                          subtotalPaisa: paisa(current.charge_tax.subtotal_paisa),
+                          taxPaisa: paisa(current.charge_tax.tax_total_paisa),
+                        },
+                      })}
+                  {...(current?.charge_rounding === undefined
+                    ? {}
+                    : {
+                        rounding: {
+                          magnitudePaisa: paisa(current.charge_rounding.magnitude_paisa),
+                          direction: current.charge_rounding.direction,
+                        },
+                      })}
+                  /*
                   `C8`/`02-F8` — **this prop is what the whole track turned on.** `Cart` has
                   declared `onRemove` since it was written and this line never passed it, so the
                   component rendered no control at all: a prop, a `27-F9` comment about where a

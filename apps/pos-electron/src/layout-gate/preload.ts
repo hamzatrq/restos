@@ -161,8 +161,27 @@ const MENU: MenuItem[] = [
 const ORDER: OpenOrder = {
   order_id: "order-gate-1",
   reference: "A-014",
-  total_paisa: 487_500,
+  total_paisa: 487_000,
   paid_paisa: 0,
+  /**
+   * **THE CART'S CHARGE BREAKDOWN, AND THIS FIXTURE IS THE ONLY THING THAT PUTS IT IN FRONT OF THE
+   * GATE** — the same argument the voided line below makes, and the same one `SECOND_ORDER`'s aging
+   * badge makes: *"it only sees states its FIXTURE produces"*. `Subtotal`, `Tax` and `Rounded
+   * up|down` add up to three rows between the line list and `TOTAL`, inside a column whose height
+   * is what `PANEL_FLOOR_MM` rests on. With these two fields absent the gate measures a cart that
+   * cannot exist on a taxed org and reports green for a column that clips one.
+   *
+   * **The WORST case on purpose: all three rows at once.** `main/gateway.ts` sends `charge_tax`
+   * only under `exclusive` and `charge_rounding` only when it renders a figure, so a fixture at
+   * `02-F63` (c)'s default step would show two rows and never the third.
+   *
+   * The figures are a real `exclusive` order at 16 % with a Rs 10 step (R70: *"some restaurants
+   * round to 10s"*), and they close in whole rupees so the fixture is not itself an instance of the
+   * ≤ Rs 1 display residue `Cart`'s own header records: 420_000 + 67_200 = 487_200, rounded down to
+   * 487_000, which is `Rs 4,200 + Rs 672 − Rs 2 = Rs 4,870`.
+   */
+  charge_tax: { subtotal_paisa: 420_000, tax_total_paisa: 67_200 },
+  charge_rounding: { magnitude_paisa: 200, direction: "down" },
   lines: [
     {
       line_id: "line-1",
