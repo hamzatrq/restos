@@ -2,6 +2,7 @@ import {
   type AuthOutcome,
   type AuthScope,
   type AuthSubject,
+  type CampaignCitation,
   can,
   canDiscount,
   canPayOut,
@@ -144,6 +145,17 @@ export const WRITE_ACTIONS: Readonly<Record<string, PermissionAction>> = {
   // it was not. Third instance of the shape `02-F46` and `14-F30` each record.
   "customer.created": "customer.record",
   "customer.address_added": "customer.record",
+  // `02-F64` → `02-F47`'s action, and it is the THIRD type that clause governs. **No new action is
+  // minted**, on `02-F47`'s own argument: `customer.record` and `order.create` carry identical
+  // cells (cashier ✔ · branch manager ✔ · storekeeper — · owner ✔), so two actions here would
+  // differ in nothing an implementation can observe. `customer.record` is chosen over
+  // `order.create` because the act is about the customer file's reach into an order, and because a
+  // cashier who may not file a caller must not be able to attach one by another route.
+  //
+  // ⚠ Without this row the type hits the fail-closed default below and every link is DENIED for
+  // every role including owner — which is why `02-F27`'s creation clause could not be BUILT before
+  // `02-F47`, not merely why it was not. Fourth instance of the shape `02-F46` and `14-F30` record.
+  "order.customer_linked": "customer.record",
 };
 
 /** The one event type whose verdict needs an amount, so it never reaches `WRITE_ACTIONS`. */
@@ -171,6 +183,25 @@ type MatrixLimits = {
    * when this device has no such open order. Never the payload's — Commandment 8.
    */
   readonly orderTotalPaisa: ((order_id: string) => number | null) | undefined;
+  /**
+   * `17-F24` / `17-F12` — resolve the campaign a discount CLAIMS, on the trusted side.
+   *
+   * ⚠ **`undefined` MEANS "THIS HOST SERVES NO CAMPAIGNS", AND THAT IS THE OPPOSITE DIRECTION
+   * FROM `orderTotalPaisa` DIRECTLY ABOVE — deliberately, and the asymmetry is the safe one.** An
+   * absent order total DENIES, because a threshold with no base cannot be judged at all. An absent
+   * campaign resolver falls through to the ordinary discretionary predicate, because that predicate
+   * is the STRICTER of the two: a large discount then asks for a manager instead of being
+   * pre-approved by a campaign nobody could look up. `17-F22` says the same thing about the wire —
+   * *"a device that has never received the artifact has no campaigns, which is the safe direction
+   * and never blocks a sale"*.
+   *
+   * Takes the amount because `17-F24`'s pre-approval is bounded by the campaign's own `cap_paisa`,
+   * and the whole point of `within_campaign_bounds` being a separate field from the id is that
+   * citing a campaign is not the same as being inside it.
+   */
+  readonly campaignCitation:
+    | ((order_id: string, campaign_id: string, amount_paisa: number) => CampaignCitation | null)
+    | undefined;
 };
 
 /**
@@ -246,11 +277,16 @@ export type AuthorizedWrites = {
   toggleAvailability: (req: unknown) => AppendResult;
   /** `02-F27`/`02-F47` — filing the caller, guarded like every other renderer-originated append. */
   recordCustomer: (req: unknown) => AppendResult;
+  /** `02-F64`/`02-F47` — attaching an order to a customer, guarded like the four above it. */
+  linkCustomer: (req: unknown) => AppendResult;
 };
 
 export type AuthorizedWritesDeps = {
   /** The unguarded writes this wraps. Narrowed by name so nothing else can slip past. */
-  writes: Pick<Gateway, "append" | "addLine" | "toggleAvailability" | "recordCustomer">;
+  writes: Pick<
+    Gateway,
+    "append" | "addLine" | "toggleAvailability" | "recordCustomer" | "linkCustomer"
+  >;
   /**
    * `01-F26`/`01-F28` — the assignments come from the SYNCED staff registry on this device, and
    * `store.identity` is where the org and branch come from. Neither is anything the renderer
@@ -297,6 +333,22 @@ export type AuthorizedWritesDeps = {
    * host from `gateway.openOrders()` so the number is the engine's own (`26 §8`).
    */
   orderTotalPaisa?: (order_id: string) => number | null;
+  /**
+   * `17-F24` — resolve the campaign a `discount.recorded` CLAIMS, against THIS device's own
+   * `17-F22` artifact. Supplied by the host from `main/campaigns.ts`'s `campaignCitationFor`.
+   *
+   * Optional on `discountApprovalThresholdBps`'s precedent and with its own safe direction: absent
+   * means this host serves no campaigns, so every discount takes the ordinary discretionary
+   * predicate — the STRICTER of the two, and the same disposition `17-F22` gives a device that has
+   * never received the artifact. `seams:check` Rule B watches it from here, so a host that stops
+   * supplying it reddens `pnpm verify:full` — which is the only rail that can see this seam at all,
+   * because a stub supply is still a supply and no behavioural test injects the shipped wiring.
+   */
+  campaignCitation?: (
+    order_id: string,
+    campaign_id: string,
+    amount_paisa: number,
+  ) => CampaignCitation | null;
 };
 
 const refused = (refusal: WriteRefusal): WriteRefusedError => {
@@ -402,6 +454,14 @@ const limitsOf = (deps: AuthorizedWritesDeps): MatrixLimits => ({
     deps.orderTotalPaisa === undefined
       ? undefined
       : (order_id) => deps.orderTotalPaisa?.(order_id) ?? null,
+  // Same shape and the same reason: read off `deps` at call time so the artifact and the order
+  // projection are both consulted at VERDICT time. A citation captured at construction would judge
+  // a discount against a campaign that has since been paused.
+  campaignCitation:
+    deps.campaignCitation === undefined
+      ? undefined
+      : (order_id, campaign_id, amount_paisa) =>
+          deps.campaignCitation?.(order_id, campaign_id, amount_paisa) ?? null,
 });
 
 /**
@@ -495,10 +555,22 @@ const verdictFor = (
     if (typeof order_id !== "string") return denied();
     const order_total_paisa = orderTotalPaisa(order_id);
     if (order_total_paisa === null) return denied();
+    // `17-F24` — **the payload's `campaign_id` is a CLAIM and the resolver is the judge**
+    // (Commandment 8). The renderer may say a discount cites campaign X; whether X exists in this
+    // device's own artifact, reaches this order and bounds this amount is decided here, from the
+    // trusted side. Anything unreadable — a non-string id, no resolver, an unknown campaign, an
+    // amount over its cap — is `null`, which means the discretionary predicate below runs
+    // untouched (`17-F12`'s last clause).
+    const claimed = payload.campaign_id;
+    const campaign =
+      typeof claimed === "string" && limits.campaignCitation !== undefined
+        ? limits.campaignCitation(order_id, claimed, amount)
+        : null;
     const decision = canDiscount(subject, scope, {
       amount_paisa: amount,
       order_total_paisa,
       threshold_bps,
+      campaign,
     });
     return decision.outcome === "allow" ? ALLOWED : from(decision);
   }
@@ -595,6 +667,25 @@ export const authorizeWrites = (deps: AuthorizedWritesDeps): AuthorizedWrites =>
       guard("customer.created", {});
       guard("customer.address_added", {});
       return deps.writes.recordCustomer(req);
+    },
+    /**
+     * `02-F64`/`02-F47` — attaching an order to a customer. The event type is fixed by the channel
+     * (`gateway.linkCustomer` appends `order.customer_linked` and nothing else), so the action is
+     * known before the request is read, exactly as for the three above.
+     *
+     * **The action is `customer.record` and no new one is minted** — `02-F64` argues it: that row
+     * and `order.create` carry identical cells, and `02-F47`'s reasoning is that two actions whose
+     * cells are identical differ in nothing an implementation can observe. `customer.record` is
+     * chosen over `order.create` so a cashier who may not file a caller cannot attach one by
+     * another route.
+     *
+     * ⚠ **`01-F17` IS NOT WEAKENED BY GUARDING THIS.** A refused link leaves the order, its lines,
+     * its tender and its close exactly as they were; what is lost is a loyalty counter, a phone
+     * search and a khata, which is the state every order in this product was in before `02-F64`.
+     */
+    linkCustomer: (req: unknown): AppendResult => {
+      guard("order.customer_linked", {});
+      return deps.writes.linkCustomer(req);
     },
   };
 };

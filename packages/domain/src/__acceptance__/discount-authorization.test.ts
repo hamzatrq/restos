@@ -31,7 +31,14 @@ const who = (role: AuthSubject["assignments"][number]["role"]): AuthSubject => (
 const BILL = 100_000;
 const BPS = 1000;
 const ask = (amount_paisa: number, subject = who("cashier")) =>
-  canDiscount(subject, scope, { amount_paisa, order_total_paisa: BILL, threshold_bps: BPS });
+  canDiscount(subject, scope, {
+    amount_paisa,
+    order_total_paisa: BILL,
+    threshold_bps: BPS,
+    // `17-F24` made `campaign` REQUIRED. Every case in this file is a DISCRETIONARY discount, so
+    // `null` is the value that leaves each assertion meaning exactly what it meant before.
+    campaign: null,
+  });
 
 describe("§A — the amount chooses WHICH ROW, and that is the whole predicate", () => {
   it("a discount within the threshold is the cashier's own act", () => {
@@ -68,6 +75,7 @@ describe("§A — the amount chooses WHICH ROW, and that is the whole predicate"
       amount_paisa: 20_000,
       order_total_paisa: 1_000_000,
       threshold_bps: BPS,
+      campaign: null,
     });
     expect(big.outcome, "Rs 200 off Rs 10,000 is 2%, well within").toBe("allow");
     expect(ask(20_000).outcome, "the same Rs 200 off Rs 1,000 is 20%").toBe("escalate");
@@ -93,6 +101,7 @@ describe("§B — the rows themselves, read off the matrix and not re-decided he
         amount_paisa: 1,
         order_total_paisa: BILL,
         threshold_bps: BPS,
+        campaign: null,
       }).outcome,
     ).toBe("deny");
     expect(
@@ -111,6 +120,7 @@ describe("§C — the arithmetic, which is money and therefore load-bearing", ()
       amount_paisa: 1,
       order_total_paisa: 0,
       threshold_bps: BPS,
+      campaign: null,
     });
     expect(verdict.outcome).toBe("escalate");
   });
@@ -121,6 +131,7 @@ describe("§C — the arithmetic, which is money and therefore load-bearing", ()
         amount_paisa: 0,
         order_total_paisa: 0,
         threshold_bps: BPS,
+        campaign: null,
       }).outcome,
     ).toBe("allow");
     expect(ask(0).outcome).toBe("allow");
@@ -152,6 +163,7 @@ describe("§C — the arithmetic, which is money and therefore load-bearing", ()
       amount_paisa: amount,
       order_total_paisa: total,
       threshold_bps: 7,
+      campaign: null,
     });
     expect(verdict.outcome, "exact says above the threshold; a double says within it").toBe(
       "escalate",

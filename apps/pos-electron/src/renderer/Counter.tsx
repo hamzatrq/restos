@@ -25,6 +25,7 @@ import type {
   EscalationOffer,
   EscalationRefusal,
   KitchenState,
+  LoyaltyStatus,
   MenuItem,
   OpenOrder,
   RosterMember,
@@ -716,6 +717,21 @@ export const Counter = () => {
    */
   const [callerRevision, setCallerRevision] = useState(0);
   /**
+   * `17-F17` — *"phone lookup → reward visible → apply"*, first half.
+   *
+   * **A RENDER and never a cache, which is why it is asked beside the lookup rather than derived
+   * from anything held here.** `17-F23` puts the division by `17-F14`'s `N` at read time because
+   * `01-F87` forbids a fold reading configuration; a renderer that held this across a campaign
+   * change would be showing a reward computed under a rule that no longer applies. It is re-asked
+   * on exactly the signals the lookup is.
+   *
+   * `null` covers every ordinary reason there is nothing to say — no campaign artifact on this
+   * device, no active `account_loyalty` programme, a programme scoped to another branch, or a
+   * number that is not yet a number. None of them is an error and none reaches the sale
+   * (`01-F17`).
+   */
+  const [loyalty, setLoyalty] = useState<LoyaltyStatus | null>(null);
+  /**
    * `02-F6`/`02-F50` — the org's kitchen quick-tags, and in Wave 1 `C7`'s ONLY input.
    *
    * **Read ONCE, in its own effect, and deliberately NOT inside `reload()`.** Measured: putting it
@@ -906,6 +922,52 @@ export const Counter = () => {
     // A record that succeeded changed the answer to this exact question, and nothing else in the
     // renderer re-asks it.
   }, [pendingChannel, dialled, callerRevision]);
+
+  /**
+   * `17-F17`'s reward, asked of MAIN for the number the trusted side resolved.
+   *
+   * ── IT KEYS ON `caller?.phone_e164`, NOT ON `dialled` — and that is the load-bearing part ────
+   *
+   * `dialled` is the digits as pressed; `caller.phone_e164` is `01-F23`'s key as
+   * `normalizeDialledPhone` resolved it. Asking with the raw digits would put a second
+   * normalization on the untrusted side of the bridge, and two normalizers that each look correct
+   * key one number two ways — the defect `registry.ts` spends a paragraph on, arriving through a
+   * reward line. It also means this asks once per resolved identity rather than once per keystroke.
+   *
+   * `orders` is a dependency for the reason `callerRevision` is one on the lookup: this reads a
+   * FOLD (`02-F64`'s links and `17-F23`'s redemptions), and the fold moves when the order this
+   * caller is on settles, and `reload` replaces `orders` on every one of main's `changed`
+   * pushes. Without it the strip would go on saying *"1 more order"* after the order that
+   * completed the tenth one was paid.
+   */
+  // `orders` is a RE-ASK signal rather than a value this effect reads — the same idiom, and the
+  // same lint exemption, as `callerRevision` on the lookup directly above. Biome sees a dependency
+  // the body never touches; what it is is *the answer to this question changed underneath it*.
+  // Dropping it is the change that reads as tidying and silently makes the reward line stale for
+  // the rest of the call.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a re-ask signal — see just above.
+  useEffect(() => {
+    const phone = caller?.phone_e164 ?? null;
+    if (phone === null) {
+      setLoyalty(null);
+      return;
+    }
+    const answer = window.restos.loyaltyFor?.(phone);
+    if (answer === undefined) return;
+    let live = true;
+    void answer
+      .then((a) => {
+        if (live) setLoyalty(a);
+      })
+      .catch(() => {
+        // `00 §5.7` / `01-F17` — a surface that cannot answer shows nothing rather than a stale
+        // reward. Offering a free coffee this till can no longer justify is the harmful direction.
+        if (live) setLoyalty(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [caller?.phone_e164, orders]);
 
   // `01-F17` — a sale is never blocked. A shell that has not loaded its device state yet is
   // the one case where there is genuinely nothing to draw, so it says so in a word rather
@@ -1117,6 +1179,34 @@ export const Counter = () => {
         refs: [],
       }),
     );
+    /**
+     * `02-F64` — **THE LINK, and it is the field four features waited on.**
+     *
+     * Emitted here because this is the one moment the renderer holds both halves: the `order_id`
+     * it just minted, and the caller it is about to clear. `clearCaller()` three lines below is
+     * what used to throw the identity away — the hole `shared/ipc.ts` recorded in a comment for
+     * the life of the gap.
+     *
+     * ── IT IS SENT *AFTER* `order.created` AND THAT NEEDS NO ORDERING GUARANTEE ─────────────────
+     *
+     * `02-F64` carries `01-F23`'s key ON the link rather than a handle to anything, so a link that
+     * merges before its order is not parked and not lost (`01-F10`, `26 §4`). Nothing here depends
+     * on the two arriving in order — which is the whole reason the FR refused the cheaper shape.
+     *
+     * ── AND IT CANNOT BLOCK THE SALE (`01-F17`, Commandment 4) ──────────────────────────────────
+     *
+     * `write` swallows the rejection into `02-F57`'s refusal state, the order is already appended
+     * by the call above, and `setCartOrderId` below runs unconditionally. A refused link costs a
+     * loyalty counter, a phone search and a khata — never an order.
+     *
+     * ⚠ **The digits are sent, not `caller.phone_e164`.** Main normalizes, because
+     * `registry.ts` puts normalization at the WRITER: a renderer that sent a key it had resolved
+     * itself would be the second normalizer that makes one human two identities, permanently.
+     */
+    if (pendingChannel === PHONE_CHANNEL && caller?.phone_e164 != null && dialled !== "") {
+      const link = window.restos.linkCustomer?.({ order_id, dialled });
+      if (link !== undefined) write(link);
+    }
     // **THE ORDER THIS TILL JUST STARTED IS NOW ITS CART** — see `cartOrderId`. Set from the id
     // minted two lines above rather than from the reload that follows, because `orders` is a
     // BRANCH-wide list (`02-F11`) with no "mine" in it: picking the new row out of the refreshed
@@ -1776,6 +1866,38 @@ export const Counter = () => {
                 {a.address_text}
               </p>
             ))}
+            {/*
+              `17-F17`'s *"reward visible"* and `17-F16`'s *"2 more orders to your free deal"*,
+              as ONE line with two arms.
+
+              **It is a WORD and a NUMBER and carries no control** — `27-F12`, and the same shape
+              `02-F47`'s *"Not filed"* line above takes. Applying the reward is a money act on the
+              Pay surface and belongs with the discount, not on a caller card; a tappable reward
+              here would put a `discount.recorded` behind a control the cashier meets before the
+              bill exists.
+
+              **Nothing renders when there is nothing to say** (`27-F16`): no campaign, no
+              programme, another branch's programme, or an unresolved number all read as `null`,
+              and a permanent `No rewards` line is the base-case spend that made two blocks on the
+              status strip meaningless.
+
+              ⚠ **`orders_to_next` is `0` exactly when `available` is positive**, so the two arms
+              cannot both be true and neither can be silently wrong: `loyaltyOrdersToNextReward`
+              returns 0 in that case precisely so this surface has to choose the reward sentence.
+            */}
+            {loyalty === null ? null : loyalty.available > 0 ? (
+              <p style={{ ...STATE_LINE, color: color["fgColor-default"], marginLeft: 0 }}>
+                {loyalty.available === 1
+                  ? "1 reward to claim"
+                  : `${loyalty.available} rewards to claim`}
+              </p>
+            ) : (
+              <p style={{ ...STATE_LINE, color: color["fgColor-muted"], marginLeft: 0 }}>
+                {loyalty.orders_to_next === 1
+                  ? "1 more order to a reward"
+                  : `${loyalty.orders_to_next} more orders to a reward`}
+              </p>
+            )}
           </Readout>
         )}
       </div>

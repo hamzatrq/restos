@@ -98,6 +98,8 @@ const rig = (opts: {
         toggleAvailability: vi.fn(() => ({ id: "evt-3" })),
         // `02-F27`/`02-F47` — the fourth (August 2026).
         recordCustomer: vi.fn(() => ({ id: "evt-4" })),
+        // `02-F64` stub — this fixture has no opinion about a customer link.
+        linkCustomer: vi.fn(() => ({ id: "evt-4" })),
       },
       store,
       session: () => (assignments === null ? null : { user_id, display_name: "Stub" }),
@@ -684,6 +686,8 @@ describe("§J 05-F19 — the threshold cannot be omitted", () => {
         addLine: () => ({ id: "y" }),
         toggleAvailability: () => ({ id: "z" }),
         recordCustomer: () => ({ id: "w" }),
+        // `02-F64` stub — this fixture has no opinion about a customer link.
+        linkCustomer: () => ({ id: "w" }),
       },
       store,
       session: () => null,

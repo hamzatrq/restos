@@ -286,6 +286,8 @@ const rig = (opts: { signedInAs?: string | null; pinOk?: boolean } = {}): Rig =>
       toggleAvailability: () => ({ id: "evt-toggle" }),
       // `02-F27`/`02-F47` — the fourth member of the trusted write surface (August 2026).
       recordCustomer: () => ({ id: "evt-customer" }),
+      // `02-F64` stub — this fixture has no opinion about a customer link.
+      linkCustomer: () => ({ id: "evt-customer" }),
     },
     store,
     session,

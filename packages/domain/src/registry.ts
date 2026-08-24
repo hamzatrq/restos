@@ -2,6 +2,10 @@
 // error, never silent acceptance. Seed catalog per 01 §4 — the full catalog lands
 // with its consuming modules via spec-cited PRs.
 import { z } from "zod";
+// `17-F22`'s proof vocabulary, declared ONCE in `campaign.ts` (`18 §4`). The campaign row states
+// which proof it REQUIRES and `loyalty.reward_redeemed` states which was PRESENTED, so they are one
+// closed set and not two that could drift into a campaign demanding a proof no redemption can name.
+import { CAMPAIGN_PROOF_KINDS } from "./campaign.js";
 import { type EventEnvelopeT, parseEnvelope } from "./envelope.js";
 import { ORDER_LINE_STATES } from "./states.js";
 
@@ -552,6 +556,52 @@ const payloadSchemas = {
   "order.settlement_closed": z.looseObject({
     order_id: z.string().min(1),
   }),
+  /**
+   * `02-F64` — **the event that says which customer an order is for**, and until August 2026 no
+   * event in this corpus could say it. `order.created` declares `order_id`, `channel`,
+   * `order_type?` and `table_id?` and nothing else, so `02-F10`'s search by phone, `02-F14`'s
+   * khata, `02-F27`'s order history and doc 17's account loyalty (`17-F23`) were **four features
+   * blocked on one field**. `apps/pos-electron/src/shared/ipc.ts` carried the measurement in a
+   * comment for the life of that gap.
+   *
+   * ── WHY A TYPE AND NOT AN OPTIONAL FIELD ON `order.created` ─────────────────────────────────
+   *
+   * The cheaper act was costed and refused, and `02-F64` records the cost so the refusal stays
+   * checkable. `order.created.customer_phone_e164?` is additive under `looseObject` and `00 §6`,
+   * needs no `01 §4` act and no protected-path review — and it can only ever make the link **at
+   * creation**. `02-F14`'s khata is decided at SETTLEMENT (a walk-in who says *"put it on my tab"*
+   * after eating) and `17-F17`'s POS flow is *"phone lookup → reward visible → apply"* MID-ORDER,
+   * so the cheap shape satisfies `02-F27`'s phone path and **neither of the two FRs that asked for
+   * the field**. Adding the late case afterwards means taking this act anyway, on top.
+   *
+   * ── `phone_e164` IS `01-F23`'s KEY ITSELF, NEVER A HANDLE ───────────────────────────────────
+   *
+   * Carried exactly as `customer.address_added` carries it, for the identical reason: `26 §4`'s
+   * late-resolving-entity trap names resolving a key through a parent as the defect and a
+   * one-field schema addition as the fix (`01-F29` already applied it to `payment.refunded`). So
+   * an order links even if the customer's `customer.created` never arrives or arrives later, and
+   * `01-F10` never parks the link. No `customer_id` exists anywhere in this corpus.
+   *
+   * ⚠ **AND IT MUST NOT BECOME A SECOND SOURCE FOR THE CUSTOMER'S IDENTITY** (`02-F64`). No name,
+   * no address, no anything a customer file could disagree with. Two fields is the whole schema,
+   * and a later field claiming to describe the customer belongs on `customer.created`.
+   *
+   * **Merge rule (`01-F34`), declared here because `folds/customer-orders.ts` must implement it:**
+   * per order, a G-set of linked phone keys — grow-only, order-free, duplicate delivery collapses.
+   * Two DISTINCT phones on one order (two tills, one partition) take `01-F31`'s disposition: both
+   * retained, the link contested, an anomaly raised, no winner picked.
+   *
+   * **Authorization is `customer.record`** (`02-F47`, `02-F64`), which mints no action: that row
+   * and `order.create` carry identical cells, and `02-F47`'s own argument is that two actions whose
+   * cells are identical differ in nothing an implementation can observe.
+   */
+  "order.customer_linked": z.looseObject({
+    order_id: z.string().min(1),
+    // Validated as E.164 HERE for the reason `customer.created` states at length: if the local
+    // dialling form parsed too, one customer would be TWO identities in a ledger `01-F1` forbids
+    // correcting in place. Normalization belongs at the WRITER, upstream of `parseEvent`.
+    phone_e164: PhoneE164,
+  }),
   // ── The service surface (02-F21..F26): shifts, the business day, the drawer. ──────────
   // `26 §7` decides the shape of all seven: bucketing is a CARRIED KEY, duplicate shift/day
   // open needs a CARRIED CAUSAL LINK (`prev_shift_id`), and over/short is a CARRIED FACT.
@@ -734,12 +784,62 @@ const payloadSchemas = {
     approver_user_id: z.union([z.string().min(1), z.null()]),
     adjustment_attempt_id: z.string().min(1), // 01-F83
   }),
+  /**
+   * ⚠ **`campaign_id` / `campaign_version` — declared August 2026 (`17-F12`, `17-F24`), and they
+   * are the two fields that decide whether this act needed a manager.**
+   *
+   * `17 §2` promised them since Draft 1 (*"`discount.recorded` gains an optional `campaign_id`
+   * payload field (additive change under the same schema version, `00 §6`)"*), and until now they
+   * rode the `looseObject` undeclared — which `01-F4` permits and which means nothing validated
+   * them. `17-F24` makes them load-bearing: a discount citing a campaign takes `17-F12`'s
+   * pre-approved path *regardless of magnitude*, so an unvalidated pair is an unbounded discount
+   * with no manager, permanently (`01-F1`).
+   *
+   * **`.optional()` and NOT required-and-nullable, which is the opposite of this file's usual
+   * rule and is the correct call here.** Elsewhere `null` is a stated fact and `undefined` is a
+   * writer who forgot. A discretionary discount is not a discount whose campaign somebody forgot
+   * — it is the ordinary case and the overwhelming majority — so there is nothing for `null` to
+   * state. The rule this file actually follows is *make absence mean one thing*, and here absence
+   * means discretionary.
+   *
+   * **`campaign_version` matters for the same reason `01-F53` freezes a price**: `01-F56` applies
+   * artifacts monotonically per key, so the row that authorised this discount is knowable only if
+   * the act names the version it read. It is what lets `17-F25`'s reconciliation answer *under what
+   * rule?* years later, when the campaign has been edited nine times.
+   *
+   * ⚠ **THE PAIRING IS NOT ENFORCED HERE, AND THE FIRST DRAFT OF THIS SCHEMA ENFORCED IT — the
+   * mistake is worth more than the fix, because two GREEN oracles caught it and the reasoning is
+   * general (August 2026).** A `superRefine` demanded `campaign_version` whenever `campaign_id` was
+   * present. It reddened `adjustment-attempt-key.test.ts` §E and `escalatable-write-schemas.test.ts`
+   * §F, both of which probe `00 §6`'s additive tolerance using `campaign_id` as their extra field —
+   * chosen years ago precisely BECAUSE `17 §2` promised it as the canonical undeclared additive
+   * field. **They were right and the refinement was wrong, for a reason that has nothing to do with
+   * those tests:** this schema is applied by `parseEvent`, and `readAllParsed()` runs it over the
+   * FULL LEDGER at store open. So a retroactive tightening is not "refused on the way in" — it is a
+   * **till that will not start**, on the next launch and every launch after, because `01-F1` makes
+   * the event permanent. `void.recorded`'s note above states that consequence at length and
+   * `order.settlement_closed` is deliberately not tightened for the identical reason.
+   *
+   * **Where the pairing IS enforced: at the WRITER, structurally.**
+   * `apps/pos-electron/src/main/campaigns.ts` resolves the citation from the device's own artifact
+   * and takes `campaign_version` off that artifact, so an emitter cannot produce one without the
+   * other. That is the same division `registry.ts` already applies to `01-F23`'s phone key —
+   * validate the VALUE here, put the POLICY at the writer — and it is what `01-F17` requires:
+   * never throw on the ingest path.
+   *
+   * **What is deliberately NOT here: the amount's derivation.** `amount_paisa` stays the single
+   * money field. A payload that also carried `benefit.form` and `value` would let a reader
+   * recompute the discount and disagree with the number actually taken — `02-F45`'s two-sources
+   * argument, and `01-F1` makes the disagreement permanent.
+   */
   "discount.recorded": z.looseObject({
     order_id: z.string().min(1),
     amount_paisa: z.number().int().nonnegative(),
     reason: z.string().min(1),
     approver_user_id: z.union([z.string().min(1), z.null()]),
     adjustment_attempt_id: z.string().min(1), // 01-F83
+    campaign_id: z.string().min(1).optional(),
+    campaign_version: z.number().int().min(1).optional(),
   }),
   /**
    * The override names ONE line and the price it becomes. Unlike a void it is definitionally
@@ -957,6 +1057,74 @@ const payloadSchemas = {
     address_id: z.string().min(1),
     // 06-F9's "free-text address". Unicode, min 1 — a rider cannot deliver to an empty string.
     address_text: z.string().min(1),
+  }),
+  /**
+   * ── LOYALTY (`17-F17`, `17-F21`, `17-F25`) ───────────────────────────────────────────────────
+   *
+   * `loyalty.reward_redeemed` is the ONE loyalty event in the `01 §4` catalog. Its twin
+   * `loyalty.reward_earned` was **WITHDRAWN** in the same August-2026 change (`17-F15` (ii),
+   * `17-F23`): `17-F15` said progress is *derived* and then said crossing the threshold *emits*,
+   * and a derivation is not an act — every device would compute the crossing independently, so
+   * either all of them emit or one does and the others do not, and either way a projected value
+   * would depend on which device folded first (`01-F34`, standing law 1). `17-F23`'s arithmetic
+   * makes the event unnecessary rather than unbuilt. **An event nobody can legitimately emit is
+   * worse than a missing one**, so it is not declared here and never was.
+   *
+   * ── THE LEDGER RECORDS AN ATTESTATION, NOT A VERIFICATION (`17-F25`) ────────────────────────
+   *
+   * Three of these fields answer three different questions a reviewer will ask, and the fourth
+   * answer is deliberately NOT a field: `campaign_id` + `campaign_version` answer *under what
+   * rule?*, `proof_kind` + `proof_ref` answer *what did she hold in her hand?*, and **who
+   * attested is the envelope's `actor_user_id`** (`02-F41`/`02-F45`) — never a payload copy,
+   * because a second source for one identity can disagree with the first permanently.
+   *
+   * The honest limit is stated in `17-F25` and not softened here: a cashier can give a free coffee
+   * to a friend and record a card that never existed. The control is statistical and after the
+   * fact, never preventive.
+   *
+   * ── `phone_e164` IS REQUIRED-AND-NULLABLE, AND `null` IS THE WHOLE OF `17-F21` ──────────────
+   *
+   * `null` says *bearer* — the card IS the identity and there is no customer record to key
+   * (`17-F21`: account loyalty and a bearer card *"differ in exactly one field"*). `undefined`
+   * would be a writer who forgot which of the two this was, on this file's standing rule, and an
+   * `.optional()` field could not tell them apart afterwards.
+   *
+   * ── `orders_consumed` IS A CARRIED FACT, NOT A RESET (`17-F17` as amended, `17-F23`) ────────
+   *
+   * A reset is sequence-dependent and therefore illegal (`01-F34`); consuming `N` is the same fact
+   * stated as arithmetic. It is carried rather than recomputed for the reason `01-F53` freezes a
+   * price and `01-F85` snapshots a tender's posture: **a redemption taken at `N = 10` consumed ten
+   * orders and goes on consuming ten forever**, so an owner who moves `N` from 10 to 8 cannot
+   * silently re-award every customer in the org in a ledger `01-F1` forbids correcting.
+   * `0` is the bearer case and is not a missing number — `17-F21`: no account counter moves,
+   * because the counter was paper.
+   *
+   * ── THE KEY IS THE ACCOMPANYING DISCOUNT'S ─────────────────────────────────────────────────
+   *
+   * `adjustment_attempt_id` is `01-F31`/`01-F83`'s org-global, UI-minted, UUID-class token, and a
+   * redemption **shares the one its `discount.recorded` carries** because they are one operator
+   * act: a double-tapped *Apply reward* re-emits both under one key and both dedupe, and the two
+   * rows are joinable years later without an ordering comparison. ⚠ **The hazard that buys, said
+   * out loud:** `01-F31`'s disputed-member rule is *"the payload minus its key is the immutable
+   * intent"*, so two events sharing a key would look mutually divergent to any fold that put them
+   * in ONE map. None does — `folds/customer-orders.ts` keys only redemptions and the money folds
+   * key only the discount — and a future fold that mixes them must key on the pair, not the token.
+   */
+  "loyalty.reward_redeemed": z.looseObject({
+    // `01-F30` conserves per ORDER and `26 §3`'s sidecar answers `order:<payload.order_id>`; a
+    // redemption naming no order reaches no projection and reconciles against nothing.
+    order_id: z.string().min(1),
+    campaign_id: z.string().min(1),
+    campaign_version: z.number().int().min(1),
+    phone_e164: z.union([PhoneE164, z.null()]),
+    orders_consumed: z.number().int().nonnegative(),
+    proof_kind: z.enum(CAMPAIGN_PROOF_KINDS),
+    // The serial off a printed card, a coupon code, or `null` for a card that carries no serial —
+    // `17-F21` leaves serialized-versus-plain to the org and says why: a photocopy of a plain card
+    // is indistinguishable from the real thing forever, and its only controls are the physical
+    // card in the drawer and `17-F25`'s statistical report.
+    proof_ref: z.union([z.string().min(1), z.null()]),
+    adjustment_attempt_id: z.string().min(1), // 01-F31 / 01-F83 — see the note above.
   }),
 } as const;
 

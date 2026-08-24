@@ -1,4 +1,11 @@
-import { directedPaisa, newId, rupeesFromPaisa } from "@restos/domain";
+import {
+  type CampaignRow,
+  directedPaisa,
+  loyaltyAvailable,
+  loyaltyOrdersToNextReward,
+  newId,
+  rupeesFromPaisa,
+} from "@restos/domain";
 import type { BlockedCursor, DeviceStore } from "@restos/sync-client";
 import {
   billedLinePaisa,
@@ -20,6 +27,9 @@ import {
   type KitchenState,
   type KitchenTicket,
   KitchenTicketSchema,
+  type LinkCustomerRequest,
+  LinkCustomerRequestSchema,
+  type LoyaltyStatus,
   MenuChannelSchema,
   type MenuItem,
   type OpenOrder,
@@ -30,6 +40,7 @@ import {
   type ToggleAvailabilityRequest,
   ToggleAvailabilityRequestSchema,
 } from "../shared/ipc";
+import type { CampaignArtifact } from "./campaigns";
 import { normalizeDialledPhone } from "./customer-phone";
 import { assertRemovableLine } from "./line-removal-guard";
 import { deviceChargeRoundingPaisa, deviceTaxCell } from "./tax-posture";
@@ -60,6 +71,10 @@ export type Gateway = {
   lookupCustomer: (dialled: unknown) => CustomerLookup;
   /** `02-F27` — file an unknown caller. One act, one or two events, one normalization rule. */
   recordCustomer: (req: unknown) => AppendResult;
+  /** `02-F64` — attach an order to `01-F23`'s identity. A WRITE, guarded like the four above it. */
+  linkCustomer: (req: unknown) => AppendResult;
+  /** `17-F17` — what this customer may claim, RENDERED. A read; nothing is appended. */
+  loyaltyFor: (phone_e164: unknown) => LoyaltyStatus | null;
 };
 
 /**
@@ -99,6 +114,36 @@ export type GatewayDeps = {
   catalog: CatalogResolver;
   menu: CatalogList;
   priceOf: PriceResolver;
+  /**
+   * `17-F22`'s campaign artifact as THIS device holds it — the input `loyaltyFor` renders against.
+   *
+   * A FUNCTION and not a value, for `deviceTaxCell`'s stated reason: an artifact read once at
+   * construction is an artifact that disagrees with the seed an operator has since corrected. The
+   * shipping value is `main/campaigns.ts`'s `deviceCampaignArtifact`.
+   *
+   * ── OPTIONAL, AND THE CHOICE IS STATED RATHER THAN DEFAULTED INTO ────────────────────────────
+   *
+   * `panelFit` and `catalogRefusal` are REQUIRED so a host that forgets them is a typecheck error,
+   * and that is the stronger shape. It is not taken here for two reasons, one principled and one
+   * practical, and the practical one is the weaker of the two — say so.
+   *
+   * (1) **An absent artifact is a LEGAL STATE for this resource and not a lie.** `17-F22`: *"a
+   * device that has never received the artifact has no campaigns, which is the safe direction and
+   * never blocks a sale"*, and `01-F77`'s omitted-never-zero rule makes an org that has published
+   * none indistinguishable from a gateway that does not serve the resource. So `undefined` here
+   * means exactly what `{ rows: [], version: 0 }` means, which is not true of a panel fit or a
+   * catalog refusal — those describe THIS device and an absent one is a host that forgot.
+   * (2) Making it required moves **17 acceptance files** that construct `GatewayDeps`, and those
+   * are read-only to an implementing session (`24 §3`).
+   *
+   * ⚠ **WHAT THAT COSTS, MEASURED RATHER THAN WAVED AT.** `seams:check` Rule B watches an optional
+   * member of an options bag on a factory shipping code already calls, so a host that stops
+   * supplying it reddens `pnpm verify:full` **by name** — that is the rail this repo built for
+   * exactly this shape. What Rule B cannot see is a supply that is a STUB (`() => EMPTY` is a
+   * supply), so `__acceptance__/loyalty-seam.test.ts` is the hand-written assertion that
+   * `index.ts` passes the REAL resolver. Both are needed; neither alone is enough (`L7`).
+   */
+  campaigns?: () => CampaignArtifact;
   /**
    * What `DeviceState.actor` reads when NOBODY is signed in — not the operator's name.
    *
@@ -1086,6 +1131,130 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
     // The CREATE's envelope id. One act has one result, and the create is the event that brings
     // `01-F23`'s identity into existence — the address is a fact about an identity that now exists.
     return { id: envelope.id };
+  },
+
+  /**
+   * `02-F64` — **the emitter for the event four features waited on.**
+   *
+   * `apps/pos-electron/src/shared/ipc.ts` carried the measurement in a comment for the life of the
+   * gap (*"no event in the corpus can say which customer an order is for"*), and this is the call
+   * that closes it. `02-F10`'s search by phone, `02-F14`'s khata, `02-F27`'s order history and
+   * `17-F23`'s loyalty counter all read what this writes.
+   *
+   * ── `01-F23`'s KEY IS DERIVED HERE, NEVER ACCEPTED FROM THE RENDERER ─────────────────────────
+   *
+   * The same `normalizeDialledPhone` `lookupCustomer` and `recordCustomer` use, and the sharing is
+   * the whole point: two normalizers that are each self-consistent and disagree with each other
+   * would link an order under a key no lookup will ever produce, permanently (`01-F1`).
+   *
+   * ── A REFUSAL HERE REFUSES NOTHING ELSE (`01-F17`, Commandment 4) ────────────────────────────
+   *
+   * `02-F64` states it: an order with no link is an ordinary order that no loyalty counter, phone
+   * search or khata can reach — which is the state every order in this product was in before that
+   * FR. The order, its lines, its confirm, its tender and its close are untouched by this call, and
+   * an unusable number throws rather than inventing a key by padding or truncating.
+   *
+   * ── IT IS DELIBERATELY NOT IDEMPOTENT AND DOES NOT NEED TO BE ────────────────────────────────
+   *
+   * `02-F64`'s merge rule is a G-set of claimant phones per order, so re-linking the same number is
+   * absorbed by the fold and costs a duplicate row and nothing else. Deduping here would need a
+   * projection read on the write path for no correctness gain — and `01-F8` already covers a
+   * transport duplicate.
+   */
+  linkCustomer: (req: unknown): AppendResult => {
+    const parsed: LinkCustomerRequest = LinkCustomerRequestSchema.parse(req);
+    const phone_e164 = normalizeDialledPhone(parsed.dialled);
+    if (phone_e164 === null) {
+      throw new Error(
+        `linkCustomer: ${JSON.stringify(parsed.dialled)} is not a phone number this device can ` +
+          "key (01-F23) — linking an order under a number no lookup will ever produce is " +
+          "permanent (01-F1). NOT an 01-F17 block: the order is unaffected",
+      );
+    }
+    const identity = deps.store.identity;
+    const envelope = deps.store.append({
+      id: newId(),
+      org_id: identity.org_id,
+      branch_id: identity.branch_id,
+      device_id: identity.device_id,
+      // `02-F41`/`02-F45` — attribution rides the envelope, read at APPEND rather than cached.
+      actor_user_id: deps.session()?.user_id ?? null,
+      device_created_at: wallClock.now(),
+      type: "order.customer_linked",
+      schema_version: 1,
+      // Two fields, and `02-F64` forbids a third that describes the customer: the link must never
+      // become a second source for an identity the customer file already owns.
+      payload: { order_id: parsed.order_id, phone_e164 },
+      refs: [],
+    });
+    return { id: envelope.id };
+  },
+
+  /**
+   * `17-F17`'s *"reward visible"*, and `17-F16`'s *"2 more orders to your free deal"* — **RENDERED
+   * HERE, on every call, from `17-F23`'s two counts and this device's `17-F22` artifact.**
+   *
+   * ⚠ **NOTHING MEMOIZES THIS AND NOTHING MAY.** `17-F23` names the break: the moment the answer is
+   * stored, it stops being recomputed per read and becomes a PROJECTED value, and two tills holding
+   * different artifact versions then project different rewards from an identical event set —
+   * standing law 1 broken through a cache. That is why the fold projects counts, why the division
+   * lives in `@restos/domain`'s `loyaltyAvailable`, and why this function reads both inputs fresh.
+   *
+   * **ONE active `account_loyalty` campaign, per `17-F14`** (*"one active program per org"*). More
+   * than one is an artifact the writer should have refused, and picking between them here would
+   * make the reward depend on array position — `01-F34`'s defect arriving through a seed file. So
+   * `null` is returned and the surface says nothing, which is the safe direction: a reward this
+   * device cannot name unambiguously is a reward it must not offer.
+   *
+   * `null` is also the ordinary case — no artifact, no account campaign, or a campaign whose scope
+   * excludes this branch — and is never an error (`01-F17`).
+   */
+  loyaltyFor: (phone_e164: unknown): LoyaltyStatus | null => {
+    if (typeof phone_e164 !== "string") return null;
+    // `17-F22`: no artifact is the ordinary state of a device the resource has never reached, and
+    // it is the same answer as an artifact with no rows. See `GatewayDeps.campaigns`.
+    const artifact = deps.campaigns?.() ?? { rows: [], version: 0, malformed: false };
+    const active = artifact.rows.filter(
+      (row) => row.kind === "account_loyalty" && row.status === "active" && row.every_n !== null,
+    );
+    if (active.length !== 1) return null;
+    const campaign = active[0] as CampaignRow;
+    const every_n = campaign.every_n as number;
+    // `17-F22`'s branch axis is DATA (`01-F60`'s precedent): `null` is the whole org.
+    if (campaign.branches !== null && !campaign.branches.includes(deps.store.identity.branch_id)) {
+      return null;
+    }
+    const row = deps.store.customerOrders().find((r) => r.phone_e164 === phone_e164);
+    // `17-F23`: a customer with no linked orders has an empty counter, not an absent one — the
+    // countdown is `every_n` and the surface can say "N more orders". Distinguishing "no row" from
+    // "zero eligible" here would be a distinction the FR does not make.
+    const eligible =
+      row === undefined
+        ? 0
+        : row.linked_orders.filter(
+            (o) =>
+              o.settled &&
+              !o.link_contested &&
+              !o.billed_contested &&
+              // `01-F63`'s snapshot: an ABSENT attestation asserts nothing, so it can only satisfy
+              // a campaign that asks nothing of the amount. A CONTESTED one is excluded above and
+              // contributes zero whatever the minimum, which is `01-F31`'s disposition and not
+              // this predicate's judgement.
+              (o.billed_paisa === null
+                ? campaign.min_order_paisa === 0
+                : o.billed_paisa >= campaign.min_order_paisa),
+          ).length;
+    // The string→BigInt hop happens HERE and nowhere else — `folds/customer-orders.ts` projects a
+    // decimal string precisely so standing law 3's accumulator is not narrowed at the fold's edge.
+    const orders_consumed_total = row === undefined ? 0n : BigInt(row.orders_consumed_total);
+    const counts = { eligible, orders_consumed_total, every_n };
+    return {
+      campaign_id: campaign.campaign_id,
+      campaign_version: artifact.version,
+      available: loyaltyAvailable(counts),
+      orders_to_next: loyaltyOrdersToNextReward(counts),
+      eligible,
+    };
   },
 });
 

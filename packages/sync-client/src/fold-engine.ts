@@ -24,6 +24,19 @@ export {
   foldCustomerFile,
   projectCustomerFile,
 } from "./folds/customer-file.js";
+// The `customer_orders` fold (`02-F64`'s link, `17-F23`'s counter) — exported here for the same
+// reason as the one above it: the cloud Auditor's independent refold (`01-F7`, `20 §4.2`) must
+// reach EVERY fold or its diff leg silently stops covering one, and this subpath is the one it can
+// import without the better-sqlite3 addon.
+export {
+  type CustomerOrdersProjection,
+  type CustomerOrdersRow,
+  type CustomerOrdersState,
+  emptyCustomerOrders,
+  foldCustomerOrders,
+  type LinkedOrderRow,
+  projectCustomerOrders,
+} from "./folds/customer-orders.js";
 export {
   type ApplyResult,
   type BilledLineCell,

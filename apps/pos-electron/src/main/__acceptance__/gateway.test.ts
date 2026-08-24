@@ -133,13 +133,43 @@ describe("18 §6 / 18 §9 — the renderer's whole surface", () => {
     // append the create and lose the address would leave a delivery order with nowhere to send
     // the food. Still a CLOSED vocabulary: it names a number, a name and an address text, and it
     // APPENDS — no table, no filter, no mutation.
+    //
+    // TWELVE since `02-F64`/`17-F17` (August 2026), and both widenings are acknowledged on the
+    // same terms as the six above them. This assertion is the register that FORCES that, and it
+    // did its job: adding the two channels reddened it before anything else in the repo noticed.
+    //
+    // `linkCustomer` is `recordCustomer`'s argument with an ORDER in place of an address. The
+    // event needs a field the renderer must not supply — `01-F23`'s identity again — so routing
+    // it through the generic `append` would put the key itself on the untrusted end of the
+    // bridge, and a second normalizer makes one human two rows permanently (`01-F1`). It is a
+    // SEPARATE channel from `recordCustomer` rather than a field on it, because the two acts are
+    // independent in both directions: `02-F28`'s repeat caller is linked with nothing to record,
+    // and a caller may be filed with no order in play. Still a CLOSED vocabulary: it names an
+    // order and a number, and it APPENDS — no table, no filter, no mutation.
+    //
+    // `loyaltyFor` is a READ and cannot arrive through the other reads: `openOrders` and
+    // `kitchenQueue` are order-scoped, `menu` is reference data, `cashState` is the shift
+    // projection and `lookupCustomer` is the customer FILE — while `17-F17`'s reward is a
+    // RENDER over the `customer_orders` fold AND the `17-F22` campaign artifact together, which
+    // no other channel can reach. ⚠ It is deliberately not a field on `lookupCustomer`'s answer:
+    // `17-F23` makes the reward a render and never a projection, and folding it into a lookup
+    // that a screen holds in state is one step from the memoization `01-F87` names as the break.
+    // Still a CLOSED vocabulary: ONE value in, one fixed answer out, exactly as `menu` takes a
+    // channel. No table, no filter.
+    //
+    // ⚠ **THE TEST'S NAME SAYS "seven" AND THE LIST HAS HELD MORE THAN SEVEN SINCE `02-F7`.**
+    // Reported rather than renamed — the name is this oracle's identity and changing it is the
+    // test owner's call — but a reader who trusts the title and skips the list is reading a
+    // number four widenings out of date, which is `L1` on the one assertion built to prevent it.
     expect(Object.keys(createGateway(deps())).sort()).toEqual([
       "addLine",
       "append",
       "cashState",
       "deviceState",
       "kitchenQueue",
+      "linkCustomer",
       "lookupCustomer",
+      "loyaltyFor",
       "menu",
       "openOrders",
       "recordCustomer",

@@ -57,6 +57,7 @@ import {
   DISCOUNT_APPROVAL_THRESHOLD_BPS,
   PAID_OUT_APPROVAL_THRESHOLD_PAISA,
 } from "./authorize";
+import { campaignCitationFor, deviceCampaignArtifact } from "./campaigns";
 import {
   catalogBootSummary,
   catalogResolver,
@@ -889,6 +890,13 @@ const counterBoot = app.whenReady().then(async () => {
     menu: sellableMenu(store),
     priceOf: priceResolver(store),
     /**
+     * `17-F22`'s campaign artifact, from the v0 seed (`plans/v0.md` gap 3 — the tax cell, R70's
+     * rounding granularity and R71's campaigns are the three, and `01-F87`'s carrier deletes them
+     * together). The function, not its value: an artifact read once at boot disagrees with the
+     * variable an operator has since corrected — `deviceTaxCell`'s stated reasoning.
+     */
+    campaigns: deviceCampaignArtifact,
+    /**
      * The LOCKED value of `DeviceState.actor`, and nothing else — `gateway.ts` derives the
      * operator's name from `session` below.
      *
@@ -1237,6 +1245,25 @@ const counterBoot = app.whenReady().then(async () => {
    */
   const voidGuarded = voidExitsLine({ writes: tenderGuarded, store });
 
+  /**
+   * `17-F24`'s campaign citation resolver, built ONCE and handed to both `authorizeWrites`
+   * constructions below. Every input is this device's own: the seeded `17-F22` artifact, the
+   * engine's open-order projection, `02-F64`'s link out of the `customer_orders` fold, branch time
+   * (`01-F43` — the device clock plus the measured offset, never raw), and the store's identity.
+   */
+  const campaignCitations = campaignCitationFor({
+    artifact: deviceCampaignArtifact,
+    openOrders: () => store.openOrders(),
+    orderTotalPaisa: (order_id: string) =>
+      gateway.openOrders().find((row) => row.order_id === order_id)?.total_paisa ?? null,
+    // `17-F22`'s `requires_customer`. Read from the fold rather than from the payload, because a
+    // renderer that could assert a link would be asserting the precondition of its own discount.
+    orderHasLinkedCustomer: (order_id: string) =>
+      store.customerOrders().some((row) => row.linked_orders.some((o) => o.order_id === order_id)),
+    branchNowMs: () => wallClock.now() + store.branchTimeStatus().offset_ms,
+    branchId: () => store.identity.branch_id,
+  });
+
   const writes = authorizeWrites({
     writes: voidGuarded,
     store,
@@ -1251,6 +1278,19 @@ const counterBoot = app.whenReady().then(async () => {
      */
     orderTotalPaisa: (order_id: string) =>
       gateway.openOrders().find((row) => row.order_id === order_id)?.total_paisa ?? null,
+    /**
+     * `17-F24` / `17-F12` — **the campaign arm of `canDiscount`, resolved on the trusted side.**
+     *
+     * R71 routes `17-F12`'s predicate rather than inventing one: a discount citing a campaign whose
+     * scope matches and whose amount is inside its own `cap_paisa` takes the within-threshold row
+     * regardless of magnitude (the *"50% off with visa signature, capped at 10,000pkr"* case), and
+     * anything else falls through to the discretionary percentage untouched.
+     *
+     * The renderer's `campaign_id` is a CLAIM; every fact that decides the verdict is read here
+     * from this device's own state — the artifact, the order's channel and total, and `02-F64`'s
+     * link. Commandment 8, and the same rule `orderTotalPaisa` directly above follows.
+     */
+    campaignCitation: campaignCitations,
   });
 
   /**
@@ -1332,6 +1372,10 @@ const counterBoot = app.whenReady().then(async () => {
     discountApprovalThresholdBps: DISCOUNT_APPROVAL_THRESHOLD_BPS,
     orderTotalPaisa: (order_id: string) =>
       gateway.openOrders().find((row) => row.order_id === order_id)?.total_paisa ?? null,
+    // `17-F24`, the SAME resolver the write guard above is given. Two constructions of one
+    // predicate is `02-F45`'s disagreement with no rule for which wins — a discount the escalation
+    // path judged pre-approved and the write path judged discretionary, or the reverse.
+    campaignCitation: campaignCitations,
     verifyApprover: async (user_id, pin) => (await approvals.unlock(user_id, pin)).ok,
   });
 
@@ -1849,6 +1893,27 @@ const counterBoot = app.whenReady().then(async () => {
     const result = writes.recordCustomer(req);
     notifyChanged();
     return result;
+  });
+  /**
+   * `02-F64` — the order→customer link, through the SAME authorized surface as every other
+   * renderer-originated append. `notifyChanged()` because the link moves a fold the screen reads:
+   * `17-F17`'s reward line is computed from `customerOrders()` and would otherwise sit stale until
+   * the next unrelated push.
+   */
+  ipcMain.handle(CHANNELS.linkCustomer, (_event, req: unknown) => {
+    touch();
+    const result = writes.linkCustomer(req);
+    notifyChanged();
+    return result;
+  });
+  /**
+   * `17-F17` — *"phone lookup → reward visible"*. A READ; nothing is appended and nothing is
+   * authorized here, exactly as for `lookupCustomer` above. The answer is RENDERED on every call
+   * (`17-F23`: the counter is a render, never a projection), so there is nothing to invalidate.
+   */
+  ipcMain.handle(CHANNELS.loyaltyFor, (_event, phone_e164: unknown) => {
+    touch();
+    return gateway.loyaltyFor(phone_e164);
   });
   ipcMain.handle(CHANNELS.append, (_event, req: unknown) => {
     touch();

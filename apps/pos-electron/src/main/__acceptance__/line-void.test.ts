@@ -125,6 +125,8 @@ const till = (opts: { confirm?: boolean; failAppend?: number } = {}): Till => {
     addLine: () => ({ id: "unused" }),
     toggleAvailability: () => ({ id: "unused" }),
     recordCustomer: () => ({ id: "unused" }),
+    // `02-F64` stub — this fixture has no opinion about a customer link.
+    linkCustomer: () => ({ id: "unused" }),
   };
 
   const row = (order_id = ORDER_ID) => store.openOrders().find((o) => o.order_id === order_id);

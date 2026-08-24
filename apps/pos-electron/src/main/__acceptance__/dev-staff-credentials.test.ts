@@ -331,6 +331,8 @@ const writesFor = (store: DeviceStore, user_id: string | null) => {
       addLine: vi.fn(() => ({ id: "evt-2" }) as never),
       toggleAvailability: vi.fn(() => ({ id: "evt-3" }) as never),
       recordCustomer: vi.fn(() => ({ id: "evt-4" }) as never),
+      // `02-F64` stub — this fixture has no opinion about a customer link.
+      linkCustomer: vi.fn(() => ({ id: "evt-4" }) as never),
     },
     store,
     session: () => (user_id === null ? null : { user_id, display_name: "n/a" }),

@@ -56,6 +56,8 @@ const rig = (
         addLine: vi.fn(() => ({ id: "evt-2" })),
         toggleAvailability: vi.fn(() => ({ id: "evt-3" })),
         recordCustomer: vi.fn(() => ({ id: "evt-4" })),
+        // `02-F64` stub — this fixture has no opinion about a customer link.
+        linkCustomer: vi.fn(() => ({ id: "evt-4" })),
       },
       store,
       session: () => ({ user_id: "u", display_name: "Stub" }),

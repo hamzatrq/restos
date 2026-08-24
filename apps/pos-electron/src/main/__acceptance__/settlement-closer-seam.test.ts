@@ -177,6 +177,8 @@ describe("§D — the composed chain refuses exactly two things and lands the re
       addLine: () => ({ id: "unused" }),
       toggleAvailability: () => ({ id: "unused" }),
       recordCustomer: () => ({ id: "unused" }),
+      // `02-F64` stub — this fixture has no opinion about a customer link.
+      linkCustomer: () => ({ id: "unused" }),
     };
     // The composition `index.ts` ships, minus the matrix (commandment 8 is `authorization.test.ts`'s
     // subject and wrapping it here would test that instead of this).

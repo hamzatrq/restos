@@ -183,7 +183,7 @@ const settlementRefused = (fact: AlreadySettled): SettlementRefusedError => {
  */
 export type RendererWrites = Pick<
   Gateway,
-  "append" | "addLine" | "toggleAvailability" | "recordCustomer"
+  "append" | "addLine" | "toggleAvailability" | "recordCustomer" | "linkCustomer"
 >;
 
 export type SettlementGuardDeps = {
@@ -234,6 +234,8 @@ export const refuseDoubleSettlement = (deps: SettlementGuardDeps): RendererWrite
   // tender: `DEC-MONEY-009` is about `payment.recorded` against an order already covered, and this
   // event carries no money and names no order. Written out rather than spread, per the note above.
   recordCustomer: (req: unknown): AppendResult => deps.writes.recordCustomer(req),
+  // `02-F64` — passed straight through: this guard has no opinion about a customer link.
+  linkCustomer: (req: unknown): AppendResult => deps.writes.linkCustomer(req),
 });
 
 /**
