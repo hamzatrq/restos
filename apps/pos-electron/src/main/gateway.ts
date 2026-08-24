@@ -4,6 +4,7 @@ import {
   loyaltyAvailable,
   loyaltyOrdersToNextReward,
   newId,
+  paisa,
   rupeesFromPaisa,
 } from "@restos/domain";
 import type { BlockedCursor, DeviceStore } from "@restos/sync-client";
@@ -419,19 +420,28 @@ type SavedAddress = { address_id: string; address_text: string };
  * to be taken with that oracle's owner. `01-F34` is untouched either way: this reads an
  * already-projected `json_lines` and a resolved cell, and no clock, ordering key or device state.
  *
- * ── ⚠ THE ROUNDING ROW IS OMITTED WHEN IT WOULD READ `Rs 0`, AND `sign === 0` IS NOT ENOUGH ──
+ * ── ⚠ THE ROUNDING ROW CLOSES THE ROWS; IT IS NOT "THE LEDGER'S ADJUSTMENT, IF IT RENDERS" ──
  *
- * `27-F23` gives an operational screen no decimals and `MoneyValue` renders through
- * `rupeesFromPaisa`, which TRUNCATES. **At `02-F63` (c)'s default step of 100 the adjustment is
- * always under a rupee by construction**, so a plain sign test would have put `Rounded down Rs 0`
- * on essentially every `exclusive` order this product sells — a row that carries no information,
- * on the surface with the least room in the product, under a rule the corpus already states twice
- * (`roundingRow`: *"a `Rounded up Rs 0` row on every whole-rupee bill is precisely the information
- * `27-F55` says paper must carry less of"*; `varianceToken`: *"`OVER Rs 0` is not a thing anyone
- * says"*). The test is therefore *does this row render a figure*, asked with the SAME function the
- * renderer formats through, so the producer's decision and the glass cannot disagree. At a step of
- * 1000 — R70's *"some restaurants round to 10s"* — the adjustment reaches Rs 1–5 and the row
- * appears, which is exactly the case a cashier needs it for.
+ * **This block said the opposite until August 2026 and the rule it described was the defect.**
+ * It read: *"The test is therefore ‘does this row render a figure’, asked with the SAME function
+ * the renderer formats through, so the producer's decision and the glass cannot disagree"* — and
+ * that reasoning is sound about the ROW and silent about the ROWS AROUND IT. `27-F23` truncates
+ * every figure on this surface, so suppressing a sub-rupee adjustment leaves the *other* rows'
+ * truncations unaccounted for, and the surface stops adding up.
+ *
+ * Measured on shipping code at the shipped default (step 100), `exclusive` 1600 bps, two
+ * whole-rupee lines totalling Rs 510: `Subtotal Rs 510 · Tax Rs 81 · TOTAL Rs 592`, and
+ * **510 + 81 = 591**. Rs 0.60 was lost truncating a Rs 81.60 tax and Rs 0.40 was lost
+ * suppressing a 40-paisa adjustment; the two are invisible separately and are exactly Rs 1
+ * together. The old rule was right that `Rounded up Rs 0` is noise — and three numbers that do
+ * not add up are worse, which is the trade this rule is now decided on.
+ *
+ * So the row carries `02-F63` (b)'s own subtraction evaluated over the DISPLAYED figures, and
+ * it is present exactly when the rows above do not reach the total. At `02-F63` (c)'s default
+ * step it appears on `exclusive` orders whose tax has a sub-rupee part and nowhere else; at a
+ * step of 1000 — R70's *"some restaurants round to 10s"* — it reaches Rs 1–5 as it always did.
+ * See `chargeTerms`' body for the arithmetic and for why `magnitude_paisa` is a whole number of
+ * rupees on this seam while the printed receipt keeps its paisa (`02-F63` (f)).
  *
  * **It can THROW, and that is the same refusal `total_paisa` beside it already carries** — a
  * posture an operator mistyped is not what `01-F17` protects a sale from, and a fallback here
@@ -444,9 +454,58 @@ const chargeTerms = (jsonLines: string): Pick<OpenOrder, "charge_tax" | "charge_
   // and `DEC-MONEY-005` bans the `signed < 0 ? -signed : signed` that would otherwise appear here.
   // `sign === 0` is the whole of "no adjustment": there is no direction word for it, so the field
   // is OMITTED and `Cart` has no zero case to get wrong.
-  const { magnitudePaisa, sign } = directedPaisa(charge.rounding_paisa);
+  const exclusive = charge.tax.posture === "exclusive";
+  /**
+   * `02-F63` (b)'s adjustment, **evaluated at the precision the glass renders in** — the whole
+   * of the fix, and the reason the old expression was wrong rather than merely coarse.
+   *
+   * (b) defines it exactly: *"the adjustment is exactly `billed_total − (subtotal + tax)`"*. The
+   * previous code computed that in PAISA (`charge.rounding_paisa`) and then asked whether it
+   * would RENDER, while every other row on the surface is truncated to whole rupees by
+   * `rupeesFromPaisa` under `27-F23`. Two precisions for one identity do not close, and the
+   * measured consequence was three numbers on the counter that do not add up.
+   *
+   * **Measured on shipping code**, two whole-rupee lines totalling Rs 510 at `exclusive` 1600 bps,
+   * step 100 (the shipped default): subtotal `51_000`, tax `8_160`, charge `59_200`, so
+   * `rounding_paisa` is `40`. The glass truncated the tax to **Rs 81** (losing Rs 0.60) and
+   * suppressed the row because `rupeesFromPaisa(40).rupees === 0` (losing Rs 0.40) — so it read
+   * `Subtotal Rs 510 · Tax Rs 81 · TOTAL Rs 592` and **510 + 81 = 591**. The Rs 1 missing is the
+   * two truncations added together, and neither half is visible on its own.
+   *
+   * Computing (b)'s subtraction over the DISPLAYED figures makes the surface close by
+   * construction, in every posture, at every step: the row is `Rounded up Rs 1` here, and
+   * 510 + 81 + 1 = 592. **The presence rule changes with it and that is the point** — it was
+   * *does this row render a non-zero figure*, which at `02-F63` (c)'s default step is false by
+   * construction (the adjustment is sub-rupee), and it is now *do the rows above fail to reach
+   * the total*. A row reading `Rs 0` is still never emitted, because a zero difference is
+   * exactly the case where the rows already close and there is nothing to say (`roundingRow`'s
+   * precedent on paper, and `varianceToken`'s).
+   *
+   * ⚠ **`magnitude_paisa` IS THEREFORE A WHOLE NUMBER OF RUPEES ON THIS SEAM, and it is a
+   * GLASS quantity rather than a ledger one.** Nothing else reads it: `01-F30` needs no term
+   * (`02-F63` (b): the rounding is *inside* `billed_total`, so Σ payments already contains it),
+   * and the printed receipt keeps the exact paisa through `receipt-document.ts`'s own
+   * `roundingRow`, which `02-F63` (f) permits decimals on precisely because paper is not an
+   * operational screen. So the two surfaces disagree by design and each is right for its own
+   * medium — the receipt closes at paisa, the counter closes at rupees.
+   *
+   * The subtraction is on numbers already narrowed to whole rupees, so it is ordinary integer
+   * arithmetic and not a money operation `DEC-MONEY-005` governs; it reaches `directedPaisa`
+   * below for the same reason the old expression did — one call yields the magnitude and the
+   * `27-F12` direction word together, so a caller cannot keep one and drop the other.
+   */
+  const shownRupees = (p: number): number => rupeesFromPaisa(paisa(p)).rupees;
+  const shownAbove = exclusive
+    ? shownRupees(charge.tax.subtotal_paisa) + shownRupees(charge.tax.tax_total_paisa)
+    : // Under `inclusive` and `none` there is no Subtotal/Tax pair: the cart's own line rows are
+      // the terms above the total, and `tax.total_paisa` is their sum before rounding in every
+      // posture (`rounding_paisa` is defined as `charge − tax.total_paisa`).
+      shownRupees(charge.tax.total_paisa);
+  const { magnitudePaisa, sign } = directedPaisa(
+    (shownRupees(charge.charge_total_paisa) - shownAbove) * 100,
+  );
   return {
-    ...(charge.tax.posture === "exclusive"
+    ...(exclusive
       ? {
           charge_tax: {
             subtotal_paisa: charge.tax.subtotal_paisa,
@@ -454,13 +513,11 @@ const chargeTerms = (jsonLines: string): Pick<OpenOrder, "charge_tax" | "charge_
           },
         }
       : {}),
-    ...(rupeesFromPaisa(magnitudePaisa).rupees === 0
+    ...(sign === 0
       ? {}
       : {
           charge_rounding: {
             magnitude_paisa: magnitudePaisa,
-            // `sign === 0` cannot reach here: `rupeesFromPaisa(0).rupees` is 0 and is filtered
-            // above, so the ternary is total over what survives rather than defaulting a direction.
             direction: sign === 1 ? ("up" as const) : ("down" as const),
           },
         }),
