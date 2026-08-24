@@ -342,11 +342,17 @@ describe("§B 04-F27 — there is ONE guarded append and both callers reach it",
     ).toContain("assertRemovableLine(parsed, store)");
   });
 
-  it("B2 — all FOUR order-event producers delegate, and none builds an envelope of its own", () => {
-    // The four are two pairs of twins: `append`/`createVerifiedAppend` and
+  it("B2 — all FIVE order-event producers delegate, and none builds an envelope of its own", () => {
+    // Four are two pairs of twins: `append`/`createVerifiedAppend` and
     // `addLine`/`createVerifiedAddLine`. Each pair differs in exactly one thing — where the actor
     // comes from — and each was a hand-written envelope beside its twin, which is how one pair
     // came to carry `02-F49` and the other not.
+    //
+    // ⚠ **THE FIFTH IS `createCausedAppend` AND THIS LIST IS WHY IT IS SAFE TO HAVE ADDED ONE.**
+    // `04-F27` (c) needed an append whose actor is `string | null`, and a producer added beside
+    // the road rather than on it is exactly the fork (a) closed — a fourth-and-a-half envelope,
+    // guarded by nothing, reachable from a tablet. It is listed here on the same terms as the
+    // other four, so building its own envelope is a red test rather than a silent second road.
     //
     // ⚠ SCOPE, stated: `toggleAvailability` and `recordCustomer` build their own envelopes and are
     // deliberately untouched. They are single-producer acts with no terminal twin, so there is no
@@ -357,6 +363,7 @@ describe("§B 04-F27 — there is ONE guarded append and both callers reach it",
       ["Gateway.addLine", "  addLine: (req: unknown): AppendResult =>"],
       ["createVerifiedAppend", "export const createVerifiedAppend"],
       ["createVerifiedAddLine", "export const createVerifiedAddLine"],
+      ["createCausedAppend", "export const createCausedAppend"],
     ];
     for (const [name, anchor] of bodies) {
       const at = gatewaySrc.indexOf(anchor);
