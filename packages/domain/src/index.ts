@@ -96,6 +96,9 @@ export {
   type Role,
   type RoleAssignment,
   reportScope,
+  // `10-F34` — how wide a STOCK report may be. A separate reach from `reportScope`: the two tables
+  // differ in the cashier and storekeeper columns, and a `10-F28` period is not a shift.
+  stockReportScope,
 } from "./permissions.js";
 // 01-F26 / 01-F61 — the PIN credential primitive. `01-F28` verifies against these hashes
 // on-device, offline, so the algorithm is platform law and lives here (18 §2).
@@ -119,6 +122,10 @@ export {
   // 14-F3 — one moved price cell on `catalog.changed`, so the history can render "450 → 480".
   CatalogPriceChange,
   type CatalogPriceChangeT,
+  // 10-F29 — the closed basis set on a count line. `packages/inventory` computes 10-F33's noise
+  // floor FROM it, so it is a domain type and not a report label.
+  COUNT_BASES,
+  type CountBasis,
   eventRegistry,
   isAuditEvent,
   // 01-F23 / 02-F27 — is this string the E.164 form the customer file is keyed by? The writer

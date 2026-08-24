@@ -549,6 +549,38 @@ const NON_FOLD_TYPES = {
    * as evidence about a money-bearing type, the exact case that doc warns about.
    */
   "printer.status_changed": "03-F53",
+  /**
+   * `10-F13` / `10-F16` / `10-F17` (August 2026) — the supply plane's three physical acts, which
+   * got payload schemas with `specs/10` slice 1 and therefore entered this registry for the first
+   * time.
+   *
+   * **Structural, exactly as `printer.status_changed` above:** none of the three names an order,
+   * and the `item_id` they carry is an `01-F21` **InventoryItem**, not the sellable
+   * `availability.changed` keys `item:` by — so `26 §3`'s sidecar has no key to answer with, and
+   * `keysFor`'s `payload.order_id` fallback would mint `order:undefined` and hand a phantom row to
+   * the engine.
+   *
+   * ⚠ **THE CLAIM, at its real strength, per this set's own doc — and here it is a SETTLED
+   * DISPOSITION rather than the stated debt the void/comp/discount arms below carry.** `10-F4`
+   * makes sale deduction a **derived** row in a cloud read model and the physical acts kernel
+   * events that feed it; `10 §8` puts the whole module in the cloud service. And the count is
+   * BLIND *by construction* — `10 §4` Flow A step 2 (amended August 2026) computes with the
+   * currently published recipe version in the cloud, `00 §5.1` forbids an in-branch act requiring
+   * WAN, and `plans/inventory/design.md` §5.3 draws the consequence: **a device cannot hold a
+   * correct expected-stock number at all**, which is why `10-F17`'s sheet shows no suggested
+   * quantity. So "no fold in this package reads these" is not a deferral of a merge rule; a device
+   * fold over them would be a second, WRONG stock number beside the cloud's.
+   *
+   * That is still weaker than `catalog.changed`'s `01-F52`, which forbids any fold for all time.
+   * The reopen trigger is named rather than left to a reader: `10-F21`'s par alert wants a level a
+   * device could show, and if that is ever wanted **on-device** these rows move and the compiler
+   * says so. ⚠ The measured hole this file records one entry up applies here unchanged — moving a
+   * row to `OTHER_FOLD_TYPES` is runtime-identical and reddens nothing — so treat membership as a
+   * sentence a reader believes, not as evidence.
+   */
+  "stock.purchase_recorded": "10-F4",
+  "stock.wastage_recorded": "10-F4",
+  "stock.count_recorded": "10-F17",
 } as const satisfies Partial<Record<KnownEventType, string>>;
 type NonFoldEventType = keyof typeof NON_FOLD_TYPES;
 const isNonFold = (t: string): t is NonFoldEventType => t in NON_FOLD_TYPES;

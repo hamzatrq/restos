@@ -1,0 +1,240 @@
+/**
+ * `10-F29` + `10-F30` — the count, rolled up from area lines to items.
+ *
+ * **The whole file turns on one rule and it is `10-F29`'s:** an item is counted **iff every one of
+ * its area lines is counted**. Anything else reads *not counted*, contributes nothing in either
+ * unit, and makes the report's PKR total a floor. The mainstream treats a blank as a zero and then
+ * reports the untouched item as *variance is, by definition, zero* — so on the page the owner reads,
+ * an item nobody counted looks exactly like an item counted perfectly. That is the honesty rule
+ * broken at the quietest possible place, and `packages/domain`'s schema plus this rollup are the two
+ * halves that close it.
+ *
+ * **Declared areas decide COMPLETENESS; the lines present decide the SUM. The required set is the
+ * UNION of the two, and the union is the fix for the review's sixth finding.**
+ *
+ *   · Reference data is what makes a *missing* line visible: if the sheet decided which areas an
+ *     item has, omitting a whole area from the submission would make the item *complete* — the same
+ *     hole with an extra step. So every DECLARED area must carry a line or the item is
+ *     `area_line_missing`.
+ *   · A line naming an area the item is **not** declared in still counts. It used to be dropped in
+ *     silence: `required = declared.length > 0 ? declared : present` meant a sheet carrying
+ *     `store 5 kg` **and** `kitchen 15 kg` for an item declared only in `store` came back
+ *     `{counted: true, qty_base: 5 kg, area_count: 1}` — 15 kg vanishing with total confidence,
+ *     understating the count, inflating the gap and producing an accusation. `10-F30` says the
+ *     item's counted quantity is *"the **sum** of its area lines"*, and it also says a counter who
+ *     finds an item in a room it is not declared in *"counts it into an existing area, and the
+ *     owner fixes the reference data after"* — so reference data lagging the shelf is a case the FR
+ *     contemplates, and a coercion to zero is `10-F29`'s blank-as-zero defect wearing the other
+ *     sign. **What is refused is a MISSING reading, never an extra one.**
+ *
+ * An item with no lines at all is `no_line`.
+ */
+
+import type { CountBasis } from "@restos/domain";
+import { groupByKey, resolve } from "./contested.js";
+import type { InventoryEvent } from "./event.js";
+import type { AreaMembership } from "./reference.js";
+
+export type CountLine = {
+  readonly item_id: string;
+  readonly area_id: string;
+  readonly counted: boolean;
+  readonly qty_base?: number;
+  readonly basis: CountBasis;
+};
+
+type CountPayload = {
+  readonly count_id: string;
+  readonly location_id: string;
+  readonly lines: readonly CountLine[];
+};
+
+/**
+ * One closing act. Several `count_id`s sharing a boundary merge here rather than becoming two
+ * adjacent periods, one of which would be empty and report a spurious zero variance on every item.
+ *
+ * ⚠ **"SHARING A BOUNDARY" MEANS THE SAME BRANCH MILLISECOND, EXACTLY, AND NOTHING ELSE.** This
+ * comment used to name *"two devices submitting"* as the case it covered, and it does not: the
+ * merge key is `String(count.boundary)`, so two devices splitting §4.7's own headline case (the
+ * kitchen sheet and the store sheet) **1 ms apart produce two periods** — measured — in which every
+ * item of the second reads `area_line_missing`. What is genuinely covered is a re-append of ONE
+ * `count_id` (`01-F8`/`01-F31`'s redelivery, which the min-register above collapses) and the
+ * coincidence of an identical stamp.
+ *
+ * **It is left as it is on purpose, and the gap is a finding for `10-F28` rather than a fix here.**
+ * That FR defines a period as opened by *"the previous `stock.count_recorded`"* and closed by *"the
+ * next"*, so two counts are two periods by its own words; merging on a time window would mean
+ * inventing the window, and commandment 2 says a policy with no FR is invented policy. The honest
+ * statement of the consequence is `L11`'s rule: the class closed here is *"one count, re-appended"*,
+ * and the class left open is *"one closing act, two devices, two milliseconds"*.
+ */
+export type CountObservation = {
+  /** `branch_created_at`. See `periodsFor` for why this clock and no other. */
+  readonly boundary: number;
+  readonly count_ids: readonly string[];
+  /** Keyed `item_id \u0000 area_id`. */
+  readonly lines: ReadonlyMap<string, ReturnType<typeof resolve<CountLine>>>;
+};
+
+export const areaKey = (item_id: string, area_id: string): string => `${item_id}\u0000${area_id}`;
+
+/**
+ * ⚠ **THE ONLY CLOCK THIS MODULE READS, AND WHY IT IS LEGAL.**
+ *
+ * `01-F34` bans a fold reading ordering metadata — `global_seq`, `lamport_seq`, the **device**
+ * clock, or an envelope-id comparison that reaches a projected value. `branch_created_at` is none
+ * of those: law 2 (`01-F43`..`F46`, `DEC-TIME-001`) makes it the **branch-consensus business
+ * clock**, stamped at append and travelling INSIDE the event precisely so durations are computable
+ * without a fold applying its own offset. `services/api/src/ledger.ts` and
+ * `services/sync-gateway/src/day-ledger.ts` already window on it for exactly this reason, and
+ * `01-F46` derives the business day from it.
+ *
+ * A period is a duration, so it needs that clock and nothing weaker will do. `device_created_at` is
+ * an untrusted forensic hint with one sanctioned reader (`01-N2`) and is never read here.
+ *
+ * **A `count_id` observed at two stamps takes the MINIMUM**, which is a min-register: commutative,
+ * associative, idempotent, so it converges. The reading is *"the branch time at which this count
+ * was first stated"* — a re-append of one count (a double-tapped submit, which is what `01-F31`
+ * mints business keys for) is a redelivery of an act that happened at the earlier time, not a
+ * second act.
+ */
+export const countObservations = (
+  events: readonly InventoryEvent[],
+  location_id: string,
+): readonly CountObservation[] => {
+  type Row = { readonly payload: CountPayload; readonly stamp: number };
+  const rows: Row[] = [];
+  for (const event of events) {
+    if (event.type !== "stock.count_recorded") continue;
+    const payload = event.payload as CountPayload;
+    if (payload.location_id !== location_id) continue;
+    rows.push({ payload, stamp: event.envelope.branch_created_at });
+  }
+
+  // Step 1 — one count per `count_id`, with its boundary and its line observations.
+  type Count = {
+    readonly count_id: string;
+    readonly boundary: number;
+    readonly lines: CountLine[];
+  };
+  const counts: Count[] = [];
+  for (const [count_id, group] of groupByKey(rows, (row) => row.payload.count_id)) {
+    let boundary = Number.POSITIVE_INFINITY;
+    for (const row of group) if (row.stamp < boundary) boundary = row.stamp;
+    counts.push({ count_id, boundary, lines: group.flatMap((row) => row.payload.lines) });
+  }
+
+  // Step 2 — one closing observation per boundary, merging any counts that share it.
+  const observations: CountObservation[] = [];
+  for (const [boundaryKey, group] of groupByKey(counts, (count) => String(count.boundary))) {
+    const lines = new Map<string, ReturnType<typeof resolve<CountLine>>>();
+    const all = group.flatMap((count) => count.lines);
+    for (const [key, observed] of groupByKey(all, (line) => areaKey(line.item_id, line.area_id))) {
+      lines.set(key, resolve(observed));
+    }
+    observations.push({
+      boundary: Number(boundaryKey),
+      count_ids: group.map((count) => count.count_id).sort(),
+      lines,
+    });
+  }
+  observations.sort((a, b) => a.boundary - b.boundary);
+  return observations;
+};
+
+/** Why an item has no reading. Each is a DIFFERENT fact and none of them is a zero. */
+export type NotCountedReason =
+  | "no_line" // the sheet carried nothing for this item at all
+  | "area_line_missing" // a declared area had no line — the founder's ketchup, half done
+  | "declared_not_counted" // a line said `counted: false` — the counter stated the absence
+  | "contested"; // one (item, area) arrived with two different quantities
+
+export type CountedItem =
+  | {
+      readonly item_id: string;
+      readonly counted: true;
+      readonly qty_base: number;
+      /** The WORST basis across the item's area lines — see `worstBasis`. */
+      readonly basis: CountBasis;
+      readonly area_count: number;
+    }
+  | { readonly item_id: string; readonly counted: false; readonly reason: NotCountedReason };
+
+/**
+ * `exact < weighed < estimated`, and the roll-up takes the **worst**.
+ *
+ * The design does not state this and it has to be decided somewhere: an item counted exactly in the
+ * dry store and eyeballed in the kitchen has one summed quantity carrying two precisions, and
+ * `10-F33` (a) computes its noise floor from the basis. Taking the best would license the report to
+ * say more about the sum than the worst reading in it supports — which is the direction that
+ * produces an accusation, so the rule falls out of `10-F19`'s licence rather than from taste.
+ * A max over a ranked set is order-free, so it costs nothing under law 1.
+ */
+const BASIS_RANK: Readonly<Record<CountBasis, number>> = { exact: 0, weighed: 1, estimated: 2 };
+export const worstBasis = (bases: readonly CountBasis[]): CountBasis =>
+  bases.reduce((worst, basis) => (BASIS_RANK[basis] > BASIS_RANK[worst] ? basis : worst), "exact");
+
+/**
+ * Roll an observation's area lines up to items, for the items the caller asks about.
+ *
+ * `item_ids` is the `is_counted` set from reference data (`10-F31`), NOT the set of items the sheet
+ * happens to mention. An item in the counting scope that the sheet omitted entirely must appear as
+ * `no_line`; if the sheet decided the roster, a skipped item would vanish from the report instead of
+ * being named as unread — which is the blank-as-zero defect one level up.
+ */
+export const rollUpCount = (
+  observation: CountObservation,
+  item_ids: readonly string[],
+  areas: readonly AreaMembership[],
+  location_id: string,
+): readonly CountedItem[] =>
+  item_ids.map((item_id) => {
+    const declared = areas
+      .filter((row) => row.item_id === item_id && row.location_id === location_id)
+      .map((row) => row.area_id);
+
+    const present = [...observation.lines.keys()]
+      .filter((key) => key.startsWith(`${item_id}\u0000`))
+      .map((key) => key.slice(item_id.length + 1));
+
+    // The sheet said NOTHING about this item. That is a different fact from "one of its two rooms
+    // was skipped", and an owner acts on it differently — the first is a roster problem, the second
+    // is a half-finished walk. Reported separately for that reason.
+    if (present.length === 0) {
+      return { item_id, counted: false as const, reason: "no_line" as const };
+    }
+    // The UNION — see the header. `present` is non-empty by the check above, so the required set
+    // is non-empty too; the emptiness guard that stood here could not fire and is deleted rather
+    // than kept as an unreachable branch (the same finding as `opening_unknown`, one file over).
+    const required = [...new Set([...declared, ...present])].sort();
+
+    let total = 0;
+    const bases: CountBasis[] = [];
+    for (const area_id of required) {
+      const resolution = observation.lines.get(areaKey(item_id, area_id));
+      if (resolution === undefined || resolution.kind === "absent") {
+        return { item_id, counted: false as const, reason: "area_line_missing" as const };
+      }
+      if (resolution.kind === "contested") {
+        return { item_id, counted: false as const, reason: "contested" as const };
+      }
+      const line = resolution.value;
+      if (!line.counted) {
+        return { item_id, counted: false as const, reason: "declared_not_counted" as const };
+      }
+      // `qty_base` is required by the schema on a counted line, so `?? 0` here would be a coercion
+      // of exactly the kind this FR forbids. An absent one is a defect, not a zero.
+      if (line.qty_base === undefined) {
+        return { item_id, counted: false as const, reason: "contested" as const };
+      }
+      total += line.qty_base;
+      bases.push(line.basis);
+    }
+    return {
+      item_id,
+      counted: true as const,
+      qty_base: total,
+      basis: worstBasis(bases),
+      area_count: required.length,
+    };
+  });

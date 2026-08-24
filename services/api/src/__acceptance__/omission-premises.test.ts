@@ -242,25 +242,50 @@ describe("§C · mutation — each premise kills the change it claims to own", (
     ]);
   });
 
-  it("stock.wastage_recorded gaining a schema reddens the purchases-and-wastage entry", () => {
+  /**
+   * ⚠ **THESE THREE MUTANTS WERE REWRITTEN August 2026 AND THE REWRITE IS A DIRECTION CHANGE, NOT
+   * A RELABEL — read it before assuming the pins were loosened.** `specs/10` slice 1 gave
+   * `stock.purchase_recorded`, `stock.wastage_recorded` and `stock.count_recorded` payload
+   * schemas, so `worldWithSchema("stock.wastage_recorded")` stopped being a mutant at all: it
+   * equals `REAL`, and a test asserting "this mutant reddens X" over a world identical to the real
+   * one asserts nothing about the mutation and everything about the tree. The premises those
+   * entries carry moved with the tree — the three types are now on `emittable_types` — so the
+   * mutation that exercises them is the OTHER direction, `worldWithoutSchema`, and it is a
+   * genuinely stronger check than the one it replaces: the entries now claim the product CAN
+   * record these acts, which is the overstating direction `L4` names as the dangerous one.
+   */
+  it("stock.wastage_recorded LOSING its schema reddens the purchases-and-wastage entry", () => {
+    const stale = stalePremises(OMISSIONS, worldWithoutSchema("stock.wastage_recorded"));
+    expect(blocksNamed(stale)).toEqual(["Purchases and wastage logged"]);
+    expect(stale[0]?.axis).toBe("emittable_types");
+  });
+
+  it("stock.count_recorded losing its schema reddens BOTH entries that rest on it, and only those two", () => {
+    // 13-F10's detector count and 12-F10's purchases block rest on the same type. A mutant that
+    // reddened only one would mean the other's clause was never really checked. Both now rest on
+    // it being PRESENT rather than absent, which is the change slice 1 made to the world.
     expect(
-      blocksNamed(stalePremises(OMISSIONS, worldWithSchema("stock.wastage_recorded"))),
-    ).toEqual(["Purchases and wastage logged"]);
+      blocksNamed(stalePremises(OMISSIONS, worldWithoutSchema("stock.count_recorded"))),
+    ).toEqual(["Purchases and wastage logged", "What's odd (exception alerts)"]);
   });
 
-  it("stock.count_recorded reddens BOTH entries that depend on it, and only those two", () => {
-    // 13-F10's detector count and 12-F10's purchases block rest on the same absent type. A mutant
-    // that reddened only one would mean the other's clause was never really checked.
-    expect(blocksNamed(stalePremises(OMISSIONS, worldWithSchema("stock.count_recorded")))).toEqual([
-      "Purchases and wastage logged",
-      "What's odd (exception alerts)",
-    ]);
-  });
-
-  it("stock.movement_recorded reddens the margin entry too", () => {
+  it("stock.movement_recorded gaining a schema reddens the purchases and margin entries", () => {
+    // The one `stock.*` type slice 1 deliberately did NOT write (design.md §7's omit list), and
+    // the only one still on an `unemittable_types` axis. It is the derived deduction row, so it is
+    // simultaneously what the purchases block would total and the only route by which a COST could
+    // reach this plane at all — which is why one type reddens two entries.
     expect(
       blocksNamed(stalePremises(OMISSIONS, worldWithSchema("stock.movement_recorded"))),
     ).toEqual(["Purchases and wastage logged", "Estimated gross margin"]);
+  });
+
+  it("stock.price_spike_flagged gaining a schema reddens the exception-alerts entry", () => {
+    // 13-F10's sixth detector, and the last `stock.*` clause in that entry that is still an
+    // absence. Without this row the exception-alerts entry would have no live `unemittable_types`
+    // member from this family and its detector arithmetic would stop being checked at all.
+    const stale = stalePremises(OMISSIONS, worldWithSchema("stock.price_spike_flagged"));
+    expect(blocksNamed(stale)).toEqual(["What's odd (exception alerts)"]);
+    expect(stale[0]?.axis).toBe("unemittable_types");
   });
 
   it("comp.recorded LOSING its schema reddens the netting entry — the other direction", () => {

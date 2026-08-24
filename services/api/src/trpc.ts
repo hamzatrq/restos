@@ -40,6 +40,7 @@ import { z } from "zod";
 import type { DeviceDirectory } from "./devices.js";
 import { IntegrationError } from "./errors.js";
 import type { ExportRequests } from "./exports.js";
+import type { InventoryReference } from "./inventory.js";
 import type { DayLedger } from "./ledger.js";
 import type { CatalogRuntime } from "./publish.js";
 import { verifySessionToken } from "./session.js";
@@ -76,6 +77,15 @@ export type ApiContext = {
    * render `Rs 0 · 0 orders` over a day that took any amount at all. See `ledger.ts`.
    */
   readonly ledger: DayLedger;
+  /**
+   * `10-F18`'s reference data. Required for `catalog`'s reason and one sharper, which is the
+   * sharpest in this list: the fallback `createApiServer` resolves REFUSES every read, because a
+   * source answering `{ items: [] }` renders a **complete, confident, entirely empty** variance
+   * report — no rows, no floor flag, no unexplained usage — for a location that may be short any
+   * amount at all. That is `10-F29`'s blank-count defect one level up, wearing the whole report.
+   * See `unconfiguredInventoryReference`.
+   */
+  readonly inventory: InventoryReference;
   /**
    * `01-F68`/`01-F69`. Required for `catalog`'s reason and one sharper: the fallback
    * `createApiServer` resolves REFUSES every read rather than answering emptily, because

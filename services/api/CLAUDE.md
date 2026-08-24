@@ -735,3 +735,71 @@ resolver never saw one and behaviour was unchanged. It survived 230/230 and woul
 as a coverage hole that does not exist. N4b puts `org_id` in the single schema and dies. `migratable`'s
 N5 and `summary`'s S4x are the same lesson: **check what a mutant does before recording what its
 survival means.**
+
+## `specs/10` slice 1 — the variance report, and the action that had to exist first
+
+`inventory.ts` (the fold beside `can()` + a REFUSING reference port), `inventory-router.ts` (one
+gated procedure), oracle `__acceptance__/inventory-variance.test.ts` (15).
+
+- ⚠ **THE PROCEDURE WAS UNBUILDABLE, NOT UNBUILT, AND `plans/inventory/design.md` §6 MISSED IT while
+  correctly naming the identical gap one line over.** §6 says *"Permissions — slice 1 invents none"*
+  and then flags `stock.production_recorded` as having no action. The same was true of slice 1's OWN
+  headline deliverable: `assertEveryProcedureIsGated` refuses at boot, the three shipped `stock.*`
+  actions are all WRITES, and `permissions.ts` had deliberately declined to invent a stock-report
+  reach from Appendix A's row about SALES. `10-F34` decides it — `report.stock_view`, a SCOPED
+  action, three of whose four cells are a PINNED INTERPRETATION.
+- **The fold lives HERE and not in the gateway, which reverses `plans/inventory/design.md` §3's
+  recommendation and answers its §9 q1.** The branch narrowing is an AUTHORIZATION outcome;
+  computing on the far side of it means a second service deciding who sees what. `summary.ts`
+  already resolves it that way and `ledger.ts` states the split.
+- ⚠ **`stockBranchScope` RETURNS A ONE-ELEMENT LIST FOR EVERY PERMITTED SUBJECT, INCLUDING THE
+  OWNER — it is not `summaryBranchScope` with the nouns changed.** `null` there is `12-F22`'s
+  legitimate org roll-up; `null` here would CORRUPT the answer, because `order.*` carries a branch
+  and no location and `10-F3` deducts *"at the selling location"*, so every other branch's sales
+  would be counted as this location's consumption. The reach decides **admission**, not width.
+- **The fallback REFUSES; it is not a memory stub.** A source answering `{items: []}` renders a
+  complete, confident, entirely EMPTY variance report for a location that is short Rs 685, and
+  nothing on that screen says anything is missing — `10-F29`'s blank-count defect one level up,
+  wearing the whole report.
+- ⚠ **`start()` supplies nothing, so a real deployment refuses every variance read.** On
+  `seams:check`'s register with a marker naming what is owed: amendment **A1** (`01-F75`'s
+  `inventory` resource) plus the editors that write it and the device surface that produces the
+  events. Nothing was invented.
+
+### Mutation matrix — round-3 law. Control **403/403** green, negative control **0 kills**
+
+In-tree with a restore trap, every row sha256-verified byte-identical after (`.runlogs/mutate.py`).
+Every row is the FULL package suite.
+
+| # | mutant (exactly one branch) | killed |
+|---|---|---|
+| A1 | **THE SEAM MUTANT — `stockReport` never calls `varianceReports`; it hand-builds an empty answer** | **5** |
+| A2 | **THE NARROWING NEUTERED — the router reads the whole org instead of the narrowing's answer** | **1 (after §B's new fixture; 0 before)** |
+| A3 | **THE SECOND FILTER DELETED — the resolver trusts whatever the reader returned** | **1 (after §B's leaky-reader host; 0 before)** |
+| A4 | **THE STUB IS A SUPPLY — the port answers `{items: []}` instead of refusing** | **1** |
+| A5 | the procedure built with `sessionProcedure` — the boot gate refuses | 56 |
+| A6 | the window dropped from the answer — a bounded report presented as unbounded | 1 |
+| A7 | **NEGATIVE CONTROL — behaviour-preserving restructuring of `stockReport` and its adapter** | **0** |
+
+**A1 is the one to re-run after any change here.** Under it the host boots, logs in, gates
+correctly and answers `200` with a well-formed report containing no periods — and `packages/inventory`'s
+own 113 tests are all still green, which is `L8` exactly.
+
+⚠ **A2 AND A3 SURVIVED THE FIRST RUN — 0 of 402 EACH — AND EACH FOR A DIFFERENT REASON. BOTH ARE
+WORTH KEEPING.**
+
+- **A2 was a real DESIGN defect, not a test gap.** The first router passed `[input.branch_id]`
+  straight to the reader, so `stockBranchScope` was a second lock with nothing to lock: the request
+  already named the branch and `can()` had already refused anyone who may not ask about it. The fix
+  is that the ROUTER reads the narrowing's answer — which is what `summary-router.ts` does and what
+  makes the principle (*the middleware answers may-this-happen; only the resolver answers
+  how-wide*) mean anything here.
+- **A3 was the fixture.** The shared `recordingLedger` HONOURS `branch_ids`, so the resolver's own
+  filter never had anything to drop. §B now boots a second host whose reader returns everything it
+  holds, whatever it was asked for.
+- **And the fixture had a third hole underneath both.** With BRANCH_B carrying only purchases and
+  counts, a leak changed NOTHING — `packages/inventory` filters `stock.*` by `payload.location_id`
+  itself, so leaked stock rows are dropped one layer down. **Order events carry no location**, so
+  consumption is the one term a leak can move: BRANCH_B now sells 20 karahis, and leaked in they turn
+  a 1 kg shortfall into a 4 kg surplus. Three layers of "the mechanism was aimed one case away" in
+  one section.

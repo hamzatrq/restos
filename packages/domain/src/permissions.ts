@@ -232,14 +232,36 @@ export const PERMISSION_ACTIONS = [
   "history.edit_delete",
   "approval.grant",
   "report.sales_view",
+  // ── Reading a stock report (`10-F34`, which decides it alone). ─────────────────────────
+  // ⚠ Appendix A's `View sales reports` row gives the storekeeper the cell "stock reports" and
+  // NOTHING ELSE anywhere states a stock-report reach, which is exactly why `REPORT_REACH`'s own
+  // note declined to invent this action from a row about SALES. That was right, and its
+  // consequence had not been drawn: `specs/10` slice 1's whole deliverable is a variance report,
+  // `services/api` refuses AT BOOT to host a procedure naming no action, and the three shipped
+  // `stock.*` actions are all WRITES — so the report was **unbuildable rather than unbuilt**, the
+  // fifth instance of the shape `02-F46`, `02-F47`, `14-F30` and `14-F39` each record.
+  //
+  // Gating it behind `stock.count_entry` would have been the cheap way out and is worse than
+  // leaving it unbuilt: it hands whoever may TYPE a count the authority to READ every item's
+  // unexplained usage, which is the surface `10-F19` exists to keep away from the people a gap
+  // would otherwise accuse.
+  "report.stock_view",
 ] as const;
 
 export type PermissionAction = (typeof PERMISSION_ACTIONS)[number];
 
 const KNOWN_ACTIONS: ReadonlySet<string> = new Set(PERMISSION_ACTIONS);
 
-/** The one row whose cells are scopes rather than verdicts — see `REPORT_REACH`. */
-type ScopedAction = "report.sales_view";
+/**
+ * The rows whose cells are scopes rather than verdicts — see `REPORT_REACH` and
+ * `STOCK_REPORT_REACH`.
+ *
+ * ⚠ **TWO now, and the second is not a copy of the first.** A `10-F28` stock period is not a shift,
+ * so `own_shift` has no meaning on it at all; and the two reaches genuinely differ in TWO columns —
+ * the storekeeper's cells are exact inverses — which is why they are separate tables rather than
+ * one table read twice.
+ */
+type ScopedAction = "report.sales_view" | "report.stock_view";
 
 type VerdictAction = Exclude<PermissionAction, ScopedAction>;
 
@@ -615,6 +637,34 @@ const REPORT_REACH: Readonly<Record<Role, ReportReach>> = {
 };
 
 /**
+ * `10-F34` — how far a subject's STOCK-report view reaches. A separate table from `REPORT_REACH`
+ * above, and the differences are the reason it exists rather than a widening of that one.
+ *
+ * - **`cashier: "none"`** — decided by `10-F19` rather than by Appendix A. A variance report names
+ *   unexplained usage per item, and a cashier reading it is precisely the surface *"hints, never
+ *   accusation"* exists to prevent. Appendix A gives her *"own shift only"* for SALES, and a
+ *   `10-F28` count period is not a shift, so `own_shift` cannot even be expressed here.
+ * - **`storekeeper: "own_branch"`** — the ONE cell Appendix A states, in words: its `View sales
+ *   reports` row reads *"stock reports"* for her. She works at a location and `reportScope` has no
+ *   finer grain than a branch, so `own_branch` is the reading. Note it is the exact INVERSE of her
+ *   sales cell, which is `none` — the two tables cross over here, and one table could not.
+ * - **`branch_manager: "own_branch"`** — `10 §2` puts this module's low-stock, discrepancy and
+ *   count-overdue alerts on doc 05's console, which is hers.
+ * - **`owner: "org"`** — Appendix A's *"everything"*, and `10 §2` routes variance, purchase and
+ *   wastage views to doc 12.
+ *
+ * ⚠ **Three of the four cells are a PINNED INTERPRETATION and `10-F34` says so.** Widening any of
+ * them is additive and needs a ruling; narrowing later is not additive and would stop a surface
+ * somebody is already using — the asymmetry `14-F30` records.
+ */
+const STOCK_REPORT_REACH: Readonly<Record<Role, ReportReach>> = {
+  cashier: "none", // 10-F19's social licence — see the note above
+  branch_manager: "own_branch", // 10 §2 → doc 05's console
+  storekeeper: "own_branch", // Appendix A's "stock reports" cell, the one that IS stated
+  owner: "org", // Appendix A's "everything"; 10 §2 → doc 12
+};
+
+/**
  * Appendix A's opening sentence — "in small restaurants one person wears several hats" — so a
  * subject holding two roles at one location gets the most permissive of them. Ranked, not
  * boolean, because `escalate` sits strictly between the other two.
@@ -684,6 +734,25 @@ export const reportScope = (subject: AuthSubject, scope: AuthScope): ReportReach
 };
 
 /**
+ * `10-F34` — how far a subject's STOCK-report view reaches at this location.
+ *
+ * Exported for `reportScope`'s reason, and it is the load-bearing one: `can()` decides whether ONE
+ * request may happen, and only the resolver can decide **how wide the answer is**.
+ * `services/api/src/summary-router.ts` records what skipping that second half costs — a branch
+ * manager asking about her own branch passes `can()` correctly, and a resolver that then read the
+ * whole org would hand her every other branch's takings with a 200. Here the rows are per-item
+ * unexplained usage, so the same omission would hand one branch's manager another branch's
+ * accusations, which is `10-F19`'s social licence broken by a missing narrowing.
+ */
+export const stockReportScope = (subject: AuthSubject, scope: AuthScope): ReportReach => {
+  if (subject.org_id !== scope.org_id) return "none";
+  return rolesAt(subject, scope.branch_id).reduce<ReportReach>((widest, role) => {
+    const reach = STOCK_REPORT_REACH[role];
+    return REACH_RANK[reach] > REACH_RANK[widest] ? reach : widest;
+  }, "none");
+};
+
+/**
  * The single authorization helper (`18 §`). Server-side on every operation (`01-F27`), and the
  * only reader of the matrix — an inline role check anywhere else is a violation.
  *
@@ -710,6 +779,15 @@ export const can = (
     const permitted =
       reach === "own_shift" ? scope.subject_user_id === subject.user_id : reach !== "none";
     return { outcome: permitted ? "allow" : "deny", action };
+  }
+
+  // `10-F34`. A `10-F28` stock period is not a shift, so there is no `own_shift` case to resolve
+  // and no `subject_user_id` to compare against — a variance report names ITEMS, never people,
+  // which is `10-F19`'s whole posture. `none` is the only refusing reach, and the cashier is the
+  // role that holds it.
+  if (action === "report.stock_view") {
+    const reach = stockReportScope(subject, scope);
+    return { outcome: reach === "none" ? "deny" : "allow", action };
   }
 
   // `02-F38`: a requester never approves their own request — "refused server-side by the

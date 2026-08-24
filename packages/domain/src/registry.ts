@@ -65,6 +65,30 @@ export const APPROVAL_TYPES = ["void", "comp", "discount", "price_override", "pa
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
 /**
+ * `10-F29`'s count-line **basis** — how precise this one reading is. Declared once, here, on the
+ * `18 §4` rule the sets above follow.
+ *
+ * **CLOSED**, on `06-F20`'s test rather than by preference: the FR names exactly three and calls
+ * them the line's basis. An open string would let a typo become a fourth precision class
+ * permanently (`01-F1`), and the value is not a report label — `10-F33` (a) computes the noise
+ * floor FROM it, so an unrecognised basis is an unrecognised error term and the floor silently
+ * becomes whatever the default branch says.
+ *
+ * - `exact` — a sealed, whole-container reading. Sachets, eggs, tins.
+ * - `weighed` — the opened container's contents on a scale. Legal only where the partial unit and
+ *   the base unit share a dimension (`10-F29`); no tare weight is stored anywhere.
+ * - `estimated` — the tenths chip row. The honest choice for an opaque bottle nobody will weigh,
+ *   and the reason the basis has to travel at all.
+ *
+ * ⚠ **The error magnitudes these map to are NOT declared here** and must not be: they are a
+ * `10-F33` (a) input, they rest on one published ten-bottle head-to-head rather than a study, and
+ * that weakness has to be stated where the numbers are declared rather than inherited silently by
+ * anything that imports this list.
+ */
+export const COUNT_BASES = ["exact", "weighed", "estimated"] as const;
+export type CountBasis = (typeof COUNT_BASES)[number];
+
+/**
  * `06-F20`'s rejection reasons, transcribed: *"The branch may reject a queued order
  * (`order.rejected`, reason: closed, item unavailable, out of delivery range); the status page
  * states the reason plainly."* Declared once, here, on the `18 §4` rule the four sets above follow —
@@ -1142,6 +1166,198 @@ const payloadSchemas = {
     // card in the drawer and `17-F25`'s statistical report.
     proof_ref: z.union([z.string().min(1), z.null()]),
     adjustment_attempt_id: z.string().min(1), // 01-F31 / 01-F83 — see the note above.
+  }),
+
+  /**
+   * ── THE SUPPLY PLANE'S THREE PHYSICAL ACTS (`10-F13`, `10-F16`, `10-F17`) ────────────────────
+   *
+   * `stock.*` has been `01 §4` catalog vocabulary since Wave 0 with **no payload schema**, so
+   * `01-F4` made the whole family **unemittable rather than merely unbuilt** — the same shape the
+   * void/comp/park notes above record, and the reason two `services/api` `OMISSIONS` entries rest
+   * on it. Slice 1 of `specs/10` writes exactly three: `purchase_recorded`, `wastage_recorded`,
+   * `count_recorded`. The other seven stay unemittable and that is deliberate, not an oversight
+   * (`plans/inventory/design.md` §7's omit list; `stock.production_recorded` additionally has **no
+   * permission action**, so under the fail-closed default it is denied for every role including
+   * owner and is unbuildable rather than unbuilt).
+   *
+   * **ALL THREE ARE BRANCH-SCOPED DEVICE APPENDS, AND THAT IS DECIDED RATHER THAN ASSUMED.**
+   * `01-F62`'s org-scoped set is fixed at five types and holds no `stock.*`, so every one of these
+   * requires `branch_id` / `device_id` / `branch_created_at` / `time_basis` stamped at append by an
+   * originating device (`01-F43`..`F46`). **A cloud web page for the count is therefore ILLEGAL** —
+   * the exact wall `05-F28` hit for the manager console, and it is written here because the count
+   * sheet is the surface a session will most want to build in Next.js beside `apps/backoffice`.
+   *
+   * **NO `org_id`, NO `branch_id`, NO `actor_user_id` in any of these payloads.** The envelope
+   * carries all three and `02-F45` forbids a payload copy: a second source for one fact can
+   * disagree with the first permanently under `01-F1`. The `location_id` field below is a
+   * different thing and is NOT redundant — `10-F1` puts stock at a `01-F25` location, a storekeeper
+   * on the branch till records a delivery **into the storage location**, and the two ids differ.
+   *
+   * **QUANTITIES ARE INTEGER BASE UNITS (mg / ml / units), NEVER A DISPLAY UNIT** (`00 §6`,
+   * commandment 3). "2 cases of 24 × 400 g" is resolved at the writer through the supplier item's
+   * pack triple (`01-F21`) and reaches the ledger as `19_200_000` mg. A display unit in the ledger
+   * would make every historical movement depend on a reference row a later edit can change, and
+   * `01-F1` allows no edit.
+   */
+  /**
+   * `10-F13` — the storekeeper's confirm form. Photo ref is **absent in slice 1 by design** and
+   * rides `looseObject` additively when object storage lands (`10-N4`); a no-photo record is a
+   * complete record, which is that NFR's own position.
+   *
+   * ⚠ **A LINE CARRIES `(qty_base, line_total_paisa)` AND NOT A UNIT PRICE, AND THIS CORRECTS THE
+   * DESIGN DOCUMENT.** `plans/inventory/design.md` §4.2 puts `last_price_paisa` on the supplier
+   * item for this form's prefill — correct, that is reference data — but the **event** must not
+   * carry a rate: `10-F28`'s own argument is that a cost per base unit will not be an integer, and
+   * a receipt for 2 cases at Rs 1,150 each over 19.2 kg is 5.99 paisa/g exactly nowhere. The pair
+   * is what the period average consumes (`10-F28`), it is what the invoice physically says, and it
+   * is exact. A unit price would have had to be rounded at the writer and the rounding error would
+   * then be permanent in an append-only ledger.
+   *
+   * **`qty_base: 0` is legal and `10-F31` is why.** A delivery-charge or minimum-order line has
+   * money and no goods; it must reach `10-F14`'s khata (money spent is money spent) and must NOT
+   * reach the valuation (R365 excludes zero- and negative-quantity lines from weighted average, and
+   * dividing by a zero-quantity line's quantity is the arithmetic form of the same rule). The FR
+   * says *non-positive*; only `0` is reachable through this schema, because a **negative** receipt
+   * line is a supplier credit and purchase orders/returns are `DEC-SUPPLY-001`'s W4 scope. Widening
+   * to `z.number().int()` later is additive; it is not invented here (`24 §3b`).
+   */
+  "stock.purchase_recorded": z.looseObject({
+    // A minted business key, `01-F31`'s pattern: a re-emitted confirm is ONE purchase, and
+    // `26 §8` is ratified ground that "one intent may legitimately exist under two envelope ids".
+    // Deriving it from the envelope is refused for `void.recorded.adjustment_attempt_id`'s reason.
+    purchase_id: z.string().min(1),
+    supplier_id: z.string().min(1),
+    // `10-F1`: stock always exists AT a location. See the family note — not the envelope's branch.
+    location_id: z.string().min(1),
+    lines: z
+      .array(
+        z.looseObject({
+          // Stable within the purchase, so a duplicate delivery of the same event is idempotent
+          // per line rather than per invoice. NOT an ordering field: nothing reads its magnitude.
+          line_no: z.number().int().nonnegative(),
+          item_id: z.string().min(1),
+          // `01-F21`'s supplier item — the row that carries brand and the pack triple. REQUIRED
+          // and NULLABLE on `payment.recorded.shift_id`'s standing rule: `null` states that this
+          // line was typed free-hand against no catalogued supplier item, which `10-F13`'s
+          // "confirms/edits item" permits, and `undefined` would be a writer who forgot.
+          supplier_item_id: z.union([z.string().min(1), z.null()]),
+          qty_base: z.number().int().nonnegative(),
+          line_total_paisa: z.number().int().nonnegative(),
+        }),
+      )
+      .min(1),
+    // `10-F14`'s khata. Stated by the invoice rather than summed from the lines: the two can
+    // legitimately differ (a document-level discount, a rounding line the storekeeper did not
+    // type), and a khata that silently re-derived its own total would disagree with the paper an
+    // owner is holding. A read model may compare them and say so; it may not overwrite this.
+    invoice_total_paisa: z.number().int().nonnegative(),
+  }),
+  /**
+   * `10-F16` — "available to any staff: item, qty, reason (quick-tags + optional note)". The
+   * matrix already ships `stock.wastage_record` as a **cashier allow**, so this needs no
+   * escalation, and `10-F32` routes two of the three shrink sinks through it. `10-F33` moves it
+   * ahead of the variance report in the build order: published waste is 4–10% of purchases, it is
+   * the largest measured non-noise term in a variance gap, and its named failure is capture at the
+   * point of discard.
+   *
+   * **`reason` is an OPEN string, deliberately**, and the contrast is `cash.drawer_opened.reason`
+   * fifty lines up rather than `ORDER_REJECTION_REASONS`: `10 §7` places the **wastage quick-tag
+   * set at layer 2**, so the values are an org's configuration and closing them here would be
+   * inventing an FR. `note` is `.optional()` and not required-nullable, because the FR itself
+   * calls it optional; there is no "stated absence" to distinguish from a writer who forgot.
+   */
+  "stock.wastage_recorded": z.looseObject({
+    wastage_id: z.string().min(1),
+    location_id: z.string().min(1),
+    item_id: z.string().min(1),
+    // A magnitude. Direction comes from the event type — `cash.paid_out.amount_paisa`'s argument,
+    // one plane over: a negative wastage is a production entry in disguise and would net the
+    // theoretical balance the wrong way, silently.
+    qty_base: z.number().int().nonnegative(),
+    reason: z.string().min(1),
+    note: z.string().min(1).optional(),
+  }),
+  /**
+   * `10-F17` + `10-F29` + `10-F30` — the guided count, and **the most important schema in this
+   * module**.
+   *
+   * ⚠ **`counted: false` IS A DISTINCT VALUE FROM `qty_base: 0`, AND IT IS ENFORCED HERE RATHER
+   * THAN DOWNSTREAM.** The line is a **discriminated union on `counted`**, so an uncounted line
+   * has no `qty_base` field at all and the `.check` below refuses one that smuggles it as a loose
+   * extra. That is deliberate belt and braces: `00 §6` keeps payloads loose for additive evolution,
+   * and a loose union alone would let `{counted: false, qty_base: 0}` through, where the
+   * "treat a blank as zero" implementation this FR exists to forbid would read it.
+   *
+   * **Why it matters more than it looks.** The mainstream treats a blank count box as zero, prints
+   * an asterisk, and reports *"variance is, by definition, zero for uncounted items"* — so a
+   * half-finished count produces a clean-looking report and an uncounted item is indistinguishable
+   * on the owner's page from a perfect count. `counted: true, qty_base: 0` means *I looked and
+   * there is none*, which is a measurement and a large, real variance. The two must never collapse.
+   *
+   * **The line is keyed `(item_id, area_id)` and NOT by a minted `line_id`** — `10-F30`: an item is
+   * counted in one or more areas, one line per area, summed to the item. A minted line id would
+   * make two submissions of the same physical count two lines instead of one observation, which is
+   * precisely the last-write-wins hazard a `(item, area)` key removes by construction.
+   *
+   * **No period key on the payload, and this CORRECTS the design document.** `design.md` §4.8 says
+   * the count "carries the period key it closes". It cannot: `10-F28` defines a period as *opened
+   * by the previous count and closed by the next*, so a device stamping a period key would have to
+   * read which count came before it — an ordering read `01-F34` forbids — and two devices counting
+   * one location would stamp the same key from different premises. The period is **derived in the
+   * read model** from the count set, ordered by `branch_created_at` (law 2's branch-consensus
+   * business clock, which is what `01-F46` and `services/api/src/ledger.ts` already window on), and
+   * never by `global_seq`, a device clock or an envelope id.
+   *
+   * **`basis` is CLOSED** — `10-F29` names exactly three and calls them the line's basis, which is
+   * `06-F20`'s test for closing a set: a fourth is an FR, and an open string would let a typo
+   * become a fourth precision class permanently (`01-F1`). It travels to the variance row because
+   * `00 §7 (e)` requires a resolved source to travel with its value, and because `10-F33` computes
+   * the noise floor FROM it — an unlabelled estimate and an exact reading are the same number on
+   * the wire and a factor of ~10 apart in what they license anyone to say.
+   */
+  "stock.count_recorded": z.looseObject({
+    count_id: z.string().min(1),
+    location_id: z.string().min(1),
+    lines: z
+      .array(
+        z
+          .discriminatedUnion("counted", [
+            z.looseObject({
+              item_id: z.string().min(1),
+              // `10-F30`. An org that declares no areas has exactly ONE implicit area, so this is
+              // required rather than optional: an absent area is not a fact about the sheet, and
+              // the implicit area is a NAME the writer supplies, not a null a reader guesses.
+              area_id: z.string().min(1),
+              counted: z.literal(true),
+              qty_base: z.number().int().nonnegative(),
+              basis: z.enum(COUNT_BASES),
+            }),
+            z.looseObject({
+              item_id: z.string().min(1),
+              area_id: z.string().min(1),
+              counted: z.literal(false),
+              // NO `qty_base`. See the header — this absence IS the FR.
+              basis: z.enum(COUNT_BASES),
+            }),
+          ])
+          .check((ctx) => {
+            if (ctx.value.counted === false && "qty_base" in ctx.value) {
+              ctx.issues.push({
+                code: "custom",
+                input: ctx.value,
+                path: ["qty_base"],
+                message:
+                  "10-F29: an uncounted line carries NO qty_base — `counted: false` is a distinct " +
+                  "value from `qty_base: 0`, and a blank that arrives as a zero is the defect " +
+                  "this rule exists to prevent",
+              });
+            }
+          }),
+      )
+      // A count with no lines states nothing and would still close a period (`10-F28`), silently
+      // freezing every item at `not counted`. `10 §4` Flow E already covers the count that is
+      // abandoned; an EMPTY submitted count is neither that nor a measurement.
+      .min(1),
   }),
 } as const;
 

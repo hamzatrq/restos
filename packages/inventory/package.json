@@ -1,0 +1,20 @@
+{
+  "name": "@restos/inventory",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "build": "echo 'no build yet — scaffold stub'"
+  },
+  "dependencies": {
+    "@restos/domain": "workspace:*"
+  },
+  "devDependencies": {
+    "fast-check": "4.9.0",
+    "vitest": "4.1.10"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}
