@@ -27,22 +27,36 @@
 //   01-F60  price resolves per (branch, channel) with no fallback; the channel is the ORDER's.
 //   01-F19  two orders may stand on one table; a fold never picks a winner.
 //
-// ⚠ WHAT THIS SUITE DOES NOT CLAIM. It says nothing about a browser: `terminal.ts` is the trust
-// boundary and `terminal-server.ts` is the wire, and §G drives that wire through its own handler
-// rather than over a socket. No tablet has ever connected to this till, and no assertion here may
-// be read as evidence that one can. It also says nothing about `04-F22` (a)'s founder call — a
-// browser TRUSTING the certificate is the open question, and §G asserts only that no certificate
-// means no listener.
+// ⚠ WHAT THIS SUITE DOES NOT CLAIM — REWRITTEN, because the old wording was the cover the
+// `04-F36` defects hid under. It said "it says nothing about a browser … no tablet has ever
+// connected to this till", which read as a scope statement and was really an admission that the
+// only assertions about the wire were written against a hand-copy of the wire. §I now signs with
+// `crypto.subtle`, the pad's only primitive; §J drives the SHIPPING client module. What is still
+// true: no assertion here is evidence about `04-F22` (a)'s founder call — a browser TRUSTING a
+// certificate is the open question, §J's transport waves the rig's own certificate through, and §G
+// asserts only that no certificate means no listener. And nothing here runs on Electron, which is
+// why §K exists: `verify(null, …)` answers on Node and throws on BoringSSL, so a suite on this
+// platform can never be the rail for that class.
 
-import { createHash, generateKeyPairSync, type KeyObject, sign } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { request as httpsRequest } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hashPin } from "@restos/domain";
 import { createOrgIssuer } from "@restos/lan-pki";
 import { type DeviceStore, openStore } from "@restos/sync-client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+/**
+ * `04-F36` — **the module the tablet actually loads.** §J drives THIS, not a restatement of it:
+ * a helper in this file that hand-copies the till's convention is how two defects shipped green,
+ * and the measurement is in §I's `signAs` header.
+ *
+ * ⚠ **This import crosses `18 §69`'s app-to-app ban.** It is recorded in `04-F36` and OWED. The
+ * precedent is `apps/pass-kds/src/layout-gate/main.ts`, which imports the counter's layout probe;
+ * this is a test edge rather than production coupling, and the honest resolution — one shared wire
+ * module both ends derive from — is named in the FR and is NOT done here.
+ */
+import { createTerminalClient } from "../../../../waiter/src/terminal-client";
 import { authorizeTerminal } from "../authorize";
 import { createGateway, createVerifiedAddLine, createVerifiedAppend } from "../gateway";
 import { createTerminal, normalizeTableLabel, type Terminal } from "../terminal";
@@ -649,11 +663,8 @@ describe("§I 04-F22 (b) — proof of possession over a real TLS socket", () => 
     for (const s of servers.splice(0)) await s.close();
   });
 
-  /** A browser's `crypto.subtle.sign` emits IEEE P1363; Node's default is DER. This mimics the browser. */
   /**
-   * What a browser's `crypto.subtle.sign` would produce: ECDSA P-256 over the same LENGTH-PREFIXED
-   * bytes the till hashes, in IEEE P1363 form (Node's default is DER, which is why the server sets
-   * `dsaEncoding`).
+   * The LENGTH-PREFIXED bytes both ends agree on: `len32BE(nonce) || nonce || body`.
    *
    * The prefix, rather than a separator character, is deliberate on both sides and this suite found
    * out why the hard way: the shipped file was first written with a SEPARATOR and one byte of it
@@ -662,17 +673,43 @@ describe("§I 04-F22 (b) — proof of possession over a real TLS socket", () => 
    * length prefix has no character anyone can get wrong invisibly, and it also removes the
    * concatenation ambiguity a separator carries whenever it can occur in the nonce.
    */
-  const signAs = (privateKey: KeyObject, nonce: string, body: string): string => {
+  const prefixed = (nonce: string, body: string): Uint8Array<ArrayBuffer> => {
     const n = Buffer.from(nonce, "utf8");
     const length = Buffer.alloc(4);
     length.writeUInt32BE(n.length);
-    const digest = createHash("sha256")
-      .update(length)
-      .update(n)
-      .update(Buffer.from(body, "utf8"))
-      .digest();
-    return sign(null, digest, { key: privateKey, dsaEncoding: "ieee-p1363" }).toString("base64url");
+    return new Uint8Array(Buffer.concat([length, n, Buffer.from(body, "utf8")]));
   };
+
+  /**
+   * ⚠ **SIGNED WITH THE BROWSER'S OWN PRIMITIVE, AND `04-F36` IS WHY THAT SENTENCE IS THE WHOLE
+   * ASSERTION.** This helper used to compute `sha256(...)` itself and call `sign(null, digest, …)`
+   * — a HAND-COPY of the till's convention, and a call no browser has. It therefore agreed with
+   * the implementation, disagreed with the shipping pad, and ran on the one platform where a null
+   * algorithm is legal at all: measured against the shipping server, browser-shaped signatures got
+   * **401** while this helper's got **200**, and on Electron 43's BoringSSL the server's own
+   * `verify(null, …)` threw `ERR_OSSL_EVP_NO_DEFAULT_DIGEST` into a `catch` that returned "not
+   * admitted". Every signed request from every tablet, for ever, and 38 green tests.
+   *
+   * `crypto.subtle.sign({ ECDSA, SHA-256 }, key, bytes)` is the ONLY thing the pad can do, and it
+   * hashes its input exactly once — WebCrypto exposes no pre-hashed mode. So an implementation
+   * that hashes twice cannot be made to pass this, whatever the server's helper is later rewritten
+   * to return. It emits IEEE P1363 (`r||s`), which is why the server sets `dsaEncoding`.
+   */
+  const signAs = async (privateKey: CryptoKey, nonce: string, body: string): Promise<string> =>
+    Buffer.from(
+      await crypto.subtle.sign(
+        { name: "ECDSA", hash: "SHA-256" },
+        privateKey,
+        prefixed(nonce, body),
+      ),
+    ).toString("base64url");
+
+  /** The pad's own keypair, generated exactly as `terminal-client.ts` generates it. */
+  const padKeys = async (): Promise<CryptoKeyPair> =>
+    (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, [
+      "sign",
+      "verify",
+    ])) as CryptoKeyPair;
 
   const wired = async () => {
     const r = await rig();
@@ -689,8 +726,8 @@ describe("§I 04-F22 (b) — proof of possession over a real TLS socket", () => 
     servers.push(server);
     const port = await server.boundPort();
     if (port === null) throw new Error("the terminal server did not bind");
-    const keys = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
-    const spki = keys.publicKey.export({ format: "der", type: "spki" });
+    const keys = await padKeys();
+    const spki = Buffer.from(await crypto.subtle.exportKey("spki", keys.publicKey));
     return { r, server, port, keys, spki };
   };
 
@@ -747,7 +784,7 @@ describe("§I 04-F22 (b) — proof of possession over a real TLS socket", () => 
   ) => {
     const raw = JSON.stringify(body);
     const nonce = await nonceFor(w.port, terminal_id);
-    const signature = signAs(w.keys.privateKey, nonce, raw);
+    const signature = await signAs(w.keys.privateKey, nonce, raw);
     return post(w.port, "/rpc", tamper === undefined ? raw : tamper(raw), {
       "x-restos-terminal": terminal_id,
       "x-restos-nonce": nonce,
@@ -779,7 +816,7 @@ describe("§I 04-F22 (b) — proof of possession over a real TLS socket", () => 
     const terminal_id = await enrolled(w);
     const raw = JSON.stringify({ op: "roster" });
     const nonce = await nonceFor(w.port, terminal_id);
-    const signature = signAs(w.keys.privateKey, nonce, raw);
+    const signature = await signAs(w.keys.privateKey, nonce, raw);
     const headers = {
       "x-restos-terminal": terminal_id,
       "x-restos-nonce": nonce,
@@ -818,13 +855,13 @@ describe("§I 04-F22 (b) — proof of possession over a real TLS socket", () => 
   it("I5 — a WRONG key is refused even with a valid nonce", async () => {
     const w = await wired();
     const terminal_id = await enrolled(w);
-    const impostor = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+    const impostor = await padKeys();
     const raw = JSON.stringify({ op: "roster" });
     const nonce = await nonceFor(w.port, terminal_id);
     const res = await post(w.port, "/rpc", raw, {
       "x-restos-terminal": terminal_id,
       "x-restos-nonce": nonce,
-      "x-restos-signature": signAs(impostor.privateKey, nonce, raw),
+      "x-restos-signature": await signAs(impostor.privateKey, nonce, raw),
     });
     expect(res.status).toBe(401);
   });
@@ -896,5 +933,265 @@ describe("§I 04-F22 (b) — proof of possession over a real TLS socket", () => 
     expect(res.status).toBe(200);
     expect(JSON.parse(res.body)).toEqual({ ok: false, reason: "not_permitted" });
     expect(w.r.events()).toEqual([]);
+  });
+});
+
+describe("§J 04-F36 — the REAL pad client against this till, over the real socket", () => {
+  const servers: { close: () => Promise<void> }[] = [];
+  const globals = globalThis as unknown as { indexedDB?: unknown; fetch?: unknown };
+  let savedFetch: unknown;
+
+  beforeEach(() => {
+    savedFetch = globals.fetch;
+    const cell = new Map<string, unknown>();
+    const soon = (fn: () => void): void => void setTimeout(fn, 0);
+    type Req = { onsuccess?: () => void; onerror?: () => void; result?: unknown };
+    globals.indexedDB = {
+      open() {
+        const db = {
+          transaction: () => ({
+            objectStore: () => ({
+              get(key: string) {
+                const r: Req = {};
+                soon(() => {
+                  r.result = cell.get(key);
+                  r.onsuccess?.();
+                });
+                return r;
+              },
+              put(value: unknown, key: string) {
+                const r: Req = {};
+                soon(() => {
+                  cell.set(key, value);
+                  r.onsuccess?.();
+                });
+                return r;
+              },
+            }),
+          }),
+        };
+        const request: Req = { result: db };
+        soon(() => request.onsuccess?.());
+        return request;
+      },
+    };
+    globals.fetch = (url: string, init: { method: string; body: string; headers: HeadersInit }) =>
+      new Promise((done, fail) => {
+        const target = new URL(url);
+        const req = httpsRequest(
+          {
+            host: target.hostname,
+            port: target.port,
+            path: target.pathname,
+            method: init.method,
+            headers: init.headers as Record<string, string>,
+            // The rig's own certificate — see this section's header.
+            rejectUnauthorized: false,
+          },
+          (res) => {
+            const chunks: Buffer[] = [];
+            res.on("data", (c: Buffer) => chunks.push(c));
+            res.on("end", () =>
+              done({
+                status: res.statusCode,
+                json: async () => JSON.parse(Buffer.concat(chunks).toString("utf8")),
+              }),
+            );
+          },
+        );
+        req.on("error", fail);
+        req.end(init.body);
+      });
+  });
+
+  afterEach(async () => {
+    globals.fetch = savedFetch;
+    globals.indexedDB = undefined;
+    for (const s of servers.splice(0)) await s.close();
+  });
+
+  /** A real till, a real TLS socket, and the shipping client pointed at it. */
+  const pad = async () => {
+    const r = await rig();
+    const issuer = await createOrgIssuer("terminal-test", NOW);
+    const server = createTerminalServer({
+      terminal: r.terminal,
+      tls: { cert: issuer.certPem, key: issuer.privateKeyPem },
+      port: 0,
+      bundleDir: null,
+      now: () => r.now.value,
+      log: () => {},
+    });
+    servers.push(server);
+    const port = await server.boundPort();
+    if (port === null) throw new Error("the terminal server did not bind");
+    const client = createTerminalClient(`https://127.0.0.1:${port}`);
+    return { r, server, client };
+  };
+
+  it("J1 — 04-F22 (b): the shipping client enrols and its FIRST signed request is admitted", async () => {
+    const p = await pad();
+    expect(await p.client.enrol(p.server.mintEnrolmentCode())).toBe(true);
+    // This is the assertion the suite did not have. BOTH shipped defects — the double hash, and
+    // the null digest algorithm BoringSSL refuses — make this line throw "no longer admitted".
+    const roster = (await p.client.call({ op: "roster" })) as {
+      roster: { display_name: string }[];
+    };
+    expect(roster.roster.map((m) => m.display_name)).toContain("Sana");
+  });
+
+  it("J2 — a SECOND call from the same client lands too: the nonce path is the client's own", async () => {
+    const p = await pad();
+    await p.client.enrol(p.server.mintEnrolmentCode());
+    await p.client.call({ op: "roster" });
+    // A client reusing its first nonce would be refused here — the till consumes each one on
+    // first use (§I3) — and the fresh-nonce-per-call rule lives in the CLIENT, not in the till.
+    expect(await p.client.call({ op: "roster" })).toHaveProperty("roster");
+  });
+
+  it("J3 — 02-F41/04-F21: a pad SEND records the WAITER, not whoever is at the till", async () => {
+    const p = await pad();
+    await p.client.enrol(p.server.mintEnrolmentCode());
+    const signIn = (await p.client.call({ op: "sign_in", user_id: WAITER, pin: PIN })) as {
+      handle: string;
+    };
+    const opened = (await p.client.call({
+      op: "act",
+      handle: signIn.handle,
+      intent: { kind: "open", table_id: " Roof  3 " },
+    })) as { order_id: string };
+    await p.client.call({
+      op: "act",
+      handle: signIn.handle,
+      intent: { kind: "add_line", order_id: opened.order_id, item_id: KARAHI, qty: 1 },
+    });
+    await p.client.call({
+      op: "act",
+      handle: signIn.handle,
+      intent: { kind: "confirm", order_id: opened.order_id },
+    });
+
+    // The till's own session is Ayesha for this whole rig (`rig()`'s `session:`). Read out of the
+    // REAL store, never off a return value.
+    expect(p.r.events().map((e) => `${e.type}:${e.actor_user_id}`)).toEqual([
+      `order.created:${WAITER}`,
+      `order.line_added:${WAITER}`,
+      `order.confirmed:${WAITER}`,
+    ]);
+    expect(p.r.events().map((e) => e.actor_user_id)).not.toContain(CASHIER);
+    // `04-F25` — normalized at the writer, and it survives the real client's own serialization.
+    expect(p.r.events()[0]?.payload.table_id).toBe("Roof 3");
+  });
+
+  it("J4 — 02-F49: removing a line AFTER the KOT is refused, from the real pad", async () => {
+    const p = await pad();
+    await p.client.enrol(p.server.mintEnrolmentCode());
+    const { handle } = (await p.client.call({ op: "sign_in", user_id: WAITER, pin: PIN })) as {
+      handle: string;
+    };
+    const { order_id } = (await p.client.call({
+      op: "act",
+      handle,
+      intent: { kind: "open", table_id: "12" },
+    })) as { order_id: string };
+    await p.client.call({
+      op: "act",
+      handle,
+      intent: { kind: "add_line", order_id, item_id: KARAHI, qty: 1 },
+    });
+    const line_id = p.r.events().find((e) => e.type === "order.line_added")?.payload.line_id;
+    expect(typeof line_id, "no line to remove — J4 would measure nothing").toBe("string");
+
+    // PRE-confirm, a removal is a CORRECTION and must land (`01-F17`): the guard has to be aimed
+    // at the confirm boundary, not at the pad. Without this half, J4 passes against a terminal
+    // that refuses every removal.
+    const before = (await p.client.call({
+      op: "act",
+      handle,
+      intent: { kind: "remove_line", order_id, line_id },
+    })) as { ok: boolean };
+    expect(before.ok, "the guard over-fired on a pre-confirm correction (01-F17)").toBe(true);
+
+    await p.client.call({
+      op: "act",
+      handle,
+      intent: { kind: "add_line", order_id, item_id: NAAN, qty: 2 },
+    });
+    const cooking = p.r
+      .events()
+      .filter((e) => e.type === "order.line_added")
+      .at(-1)?.payload.line_id;
+    await p.client.call({ op: "act", handle, intent: { kind: "confirm", order_id } });
+
+    const after = (await p.client.call({
+      op: "act",
+      handle,
+      intent: { kind: "remove_line", order_id, line_id: cooking },
+    })) as { ok: boolean; reason?: string; detail?: string };
+    // 200 with a refusal, never a transport status: the tablet is admitted and the ACT is not.
+    expect(after.ok, "the pad removed a line the kitchen is already cooking (02-F49)").toBe(false);
+    expect(after.reason).toBe("refused");
+    // `02-F49` requires the refusal to carry the way OUT, and the waiter is the person reading it,
+    // so the words have to survive the wire as well as the boundary.
+    expect(after.detail ?? "").toMatch(/void|approv/i);
+    expect(
+      p.r.events().filter((e) => e.type === "order.line_removed"),
+      "a post-KOT removal reached the ledger, permanently (01-F1)",
+    ).toHaveLength(1);
+  });
+});
+
+describe("§K 04-F36 (a) — no Electron-hosted file may leave a digest to the platform", () => {
+  /**
+   * The rail the fix needs, and it exists because the SUITE cannot be the rail: vitest runs on
+   * Node, where `verify(null, …)` is legal and returns an answer, and the product runs on Electron,
+   * where it throws. A mutant restoring `null` at `terminal-server.ts`'s call site is GREEN in
+   * every test above and dead on a real till — measured, both platforms, in the session report.
+   *
+   * Deliberately NOT a repo-wide sweep: `services/` really does run on Node, and a rail firing
+   * there would be wrong rather than strict.
+   */
+  const hosted = (dir: string): { file: string; source: string }[] =>
+    readdirSync(dir, { withFileTypes: true, recursive: true })
+      .filter((e) => e.isFile() && e.name.endsWith(".ts") && !e.name.includes(".test."))
+      .map((e) => ({
+        file: join(e.parentPath, e.name),
+        source: readFileSync(join(e.parentPath, e.name), "utf8"),
+      }));
+
+  const ELECTRON_HOSTED = [
+    join(import.meta.dirname, "..", ".."),
+    join(import.meta.dirname, "..", "..", "..", "..", "pass-kds", "src"),
+    join(import.meta.dirname, "..", "..", "..", "..", "..", "packages", "sync-client", "src"),
+  ];
+
+  it("K1 — sign/verify name their digest, everywhere the main process can reach", () => {
+    const offenders: string[] = [];
+    let scanned = 0;
+    for (const root of ELECTRON_HOSTED) {
+      for (const { file, source } of hosted(root)) {
+        scanned += 1;
+        // `verify(\n  null,` as well as `sign(null,` — the newline is how the shipped call hid
+        // from a single-line grep.
+        if (/\b(sign|verify)\w*\(\s*(null|undefined)\s*,/.test(source)) offenders.push(file);
+      }
+    }
+    // `24-F14` — a rename or a moved directory must not silently disable this.
+    expect(scanned, "K1 scanned nothing — the roots moved and this rail is inert").toBeGreaterThan(
+      40,
+    );
+    expect(offenders, "a defaulted digest is ERR_OSSL_EVP_NO_DEFAULT_DIGEST on BoringSSL").toEqual(
+      [],
+    );
+  });
+
+  it("K2 — the wire's own verification NAMES sha256, so K1 cannot pass vacuously", () => {
+    // K1 is a negative assertion and stays green against a file that stopped verifying at all.
+    // This is the positive half, on the one call `04-F36` is about.
+    const source = readFileSync(join(import.meta.dirname, "..", "terminal-server.ts"), "utf8");
+    expect(source).toMatch(/verifySignature\(\s*"sha256"/);
+    // And the fault is RECORDED rather than swallowed — `04-F36` (a)'s second half.
+    expect(source).toMatch(/catch \(cause\)/);
+    expect(source).toMatch(/verifyFaultLogged/);
   });
 });
