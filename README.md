@@ -322,7 +322,8 @@ different orders still converge.
 | `apps/pass-kds` | **The kitchen screen.** Cooks see the branch queue oldest-first with an aging timer per ticket and press DONE. Electron. | `pnpm -C apps/pass-kds start` |
 | `apps/backoffice` | **The owner's admin site.** Write the menu, price it per branch and channel, publish to every till, see registered devices, read the nightly summary. Next.js. | `pnpm -C apps/backoffice dev` |
 | `apps/manager` | Phone app for branch managers. Expo. **Starts, but the only screen is three diagnostic readings** — a feasibility probe, not the console. | `pnpm -C apps/manager start` |
-| `apps/owner` · `apps/waiter` · `apps/rider` · `apps/storefront` · `apps/pos-rn` · `apps/platform-admin` | **Scaffolds. Nothing is built yet.** | — |
+| `apps/waiter` | **The waiter's order pad.** A browser the till serves over TLS on its own port (`04-F21`): identify → pick a table → ring → SEND to the kitchen. It holds no store and no device identity; every act travels to the till as an intent. | `pnpm -C apps/waiter build`, then start the till with `RESTOS_TERMINAL_CERT` / `_KEY` / `_BUNDLE` |
+| `apps/owner` · `apps/rider` · `apps/storefront` · `apps/pos-rn` · `apps/platform-admin` | **Scaffolds. Nothing is built yet.** | — |
 
 ### Services
 

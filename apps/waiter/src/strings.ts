@@ -11,6 +11,14 @@
  * translated or folded** — a table called `چھت ٣` renders as the operator typed it.
  */
 export const STRINGS = {
+  // Enrolment (`04-F22` (b)) — the one screen an unenrolled tablet can reach. These four were
+  // hardcoded in `Enrol.tsx` while this file's header claimed to hold "every word this pad puts on
+  // glass", which is a promise a catalogue either keeps or should not make.
+  setUpTablet: "Set up this tablet",
+  codeFromTill: "Code from the till",
+  setUp: "Set up",
+  codeRefused: "That code did not work. Ask for a new one at the till.",
+
   // Identify (`01-F61`'s grid, then the pad).
   whoAreYou: "Who are you?",
   unlock: "Unlock",
@@ -30,10 +38,18 @@ export const STRINGS = {
   // `01-F19` — two orders stand on one table and nothing here picks between them.
   contested: "(two orders)",
 
+  // `04-F30`/`02-F41` — the way out. Without it the only exit was a ten-minute idle lock, and a
+  // tablet handed on inside that window attributed the next waiter's orders to the last one.
+  signOut: "Sign out",
+
   // Capture (`04-F6`) and `04-F24`'s honesty.
   send: "Send to kitchen",
   notSent: "— not sent",
   onTheTill: "Already sent",
+  // `00 §5.7` — the till answered and said no. Its own sentence is not shown: it is written for a
+  // counter and it carries FR ids, which `14-F38` keeps off glass. What a waiter can do about it
+  // is the one thing this says.
+  tillRefused: "The till would not take that. Ask at the counter.",
 
   // `00 §5.7` — the honesty strip. The pad's availability IS the till's (`04-F21`).
   till: "Till",

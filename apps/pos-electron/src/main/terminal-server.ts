@@ -64,6 +64,16 @@ export type TerminalServer = {
   readonly listening: boolean;
   readonly reason: string;
   /**
+   * `04-F32`/`00 §5.7` — **what stopped this port coming up, live, or `null`.**
+   *
+   * A bind failure is ASYNCHRONOUS: `listen()` returns, the `error` arrives on a later tick, and
+   * until August 2026 there was no listener for it — so a second counter, a stale process or
+   * anything else already holding the port took the whole till down with an uncaught
+   * `EADDRINUSE` (reproduced: exit 7). It is caught now, and this is where the answer lives so
+   * the host can put it on the honesty strip rather than leaving a dead pad looking healthy.
+   */
+  failure: () => string | null;
+  /**
    * `04-F22` (b) — mint a one-time enrolment code for ONE tablet. Single use, and it expires:
    * a code read aloud across a restaurant and left valid for the shift is a bearer credential
    * with a long life, which is the thing being avoided.
@@ -140,6 +150,10 @@ export const createTerminalServer = (deps: TerminalServerDeps): TerminalServer =
     return {
       listening: false,
       reason,
+      // Not a failure: `04-F22` (a) makes an absent certificate the deliberate OFF state, and a
+      // till with no pad is the ordinary case. What `failure` reports is a pad that was asked for
+      // and did not come up.
+      failure: () => null,
       mintEnrolmentCode,
       enrolments: () => [],
       revoke: () => false,
@@ -213,7 +227,57 @@ export const createTerminalServer = (deps: TerminalServerDeps): TerminalServer =
     }
   };
 
-  const https = createHttpsServer({ cert: deps.tls.cert, key: deps.tls.key });
+  /**
+   * `04-F32`/`01-F17` — **certificate MATERIAL that cannot be used is "no pad", never a till that
+   * will not start.**
+   *
+   * `createHttpsServer` parses the PEM synchronously and THROWS on anything it cannot read —
+   * reproduced against real OpenSSL: garbage gives `ERR_OSSL_PEM_NO_START_LINE`, a truncated file
+   * gives `ERR_OSSL_PEM_BAD_END_LINE`. That throw left this module, left `counterBoot`, and
+   * reached the fatal handler, which exits non-zero with *"The device store could not be
+   * opened"* — a till that will not turn on, and a message naming the wrong subsystem. The host
+   * already guarded the READ (`terminalTls` catches a missing file) and could not guard the
+   * CONTENTS, because only this call knows whether they parse.
+   */
+  let https: Server;
+  try {
+    https = createHttpsServer({ cert: deps.tls.cert, key: deps.tls.key });
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    const reason = `the terminal certificate could not be used — the order pad is OFF: ${detail}`;
+    deps.log(`terminal: ${reason} (04-F32: the pad never stops the till)`);
+    return {
+      listening: false,
+      reason,
+      // A pad WAS configured and did not come up, so unlike the absent-certificate case above
+      // this is a failure and the strip says so (`00 §5.7`).
+      failure: () => reason,
+      mintEnrolmentCode,
+      enrolments: () => [],
+      revoke: () => false,
+      close: async () => {},
+      boundPort: async () => null,
+    };
+  }
+
+  /**
+   * `04-F32`/`01-F17` — **nothing on the shop Wi-Fi, and nothing about this port, may take the
+   * till down.** `transport-ws.ts` already answers the identical question for the mesh listener
+   * (*"`01-F17` says nothing about the LAN may take the till down"*), and this port had neither
+   * handler: an `error` on an emitter with no listener is an uncaught exception in the main
+   * process.
+   *
+   * `error` is the bind failure (`EADDRINUSE`, a privileged port, an interface that went away);
+   * `tlsClientError` is every handshake a stranger can start — a port scanner, a browser dialling
+   * `http://` at an `https://` socket, or an attacker doing it on purpose. Both are recorded, and
+   * `error` is kept because the honesty strip reads it.
+   */
+  let bindFailure: string | null = null;
+  https.on("error", (cause: Error) => {
+    bindFailure = `the order pad's port ${deps.port} did not come up: ${cause.message}`;
+    deps.log(`terminal: ${bindFailure} (04-F32 — the till goes on selling)`);
+  });
+  https.on("tlsClientError", () => undefined);
 
   https.on("request", (req: IncomingMessageLike, res: ServerResponseLike) => {
     void handle(req, res).catch(() => {
@@ -371,6 +435,7 @@ export const createTerminalServer = (deps: TerminalServerDeps): TerminalServer =
   return {
     listening: true,
     reason: "listening",
+    failure: () => bindFailure,
     mintEnrolmentCode,
     enrolments: () => [...enrolments.keys()],
     revoke: (terminal_id: string) => {

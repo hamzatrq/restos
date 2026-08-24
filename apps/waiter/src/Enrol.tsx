@@ -1,5 +1,6 @@
 import { Panel, TextEntry, Tile, WorkSurface } from "@restos/ui";
 import { useState } from "react";
+import { STRINGS } from "./strings";
 import type { TerminalClient } from "./terminal-client";
 
 /**
@@ -26,13 +27,13 @@ export const Enrol = ({
   return (
     <WorkSurface>
       <Panel
-        title="Set up this tablet"
-        note={refused ? "That code did not work. Ask for a new one at the till." : undefined}
+        title={STRINGS.setUpTablet}
+        note={refused ? STRINGS.codeRefused : undefined}
         tone={refused ? "abnormal" : "neutral"}
       >
         <TextEntry
           posture="handheld"
-          caption="Code from the till"
+          caption={STRINGS.codeFromTill}
           value={code}
           onChange={(next) => {
             setCode(next);
@@ -41,7 +42,7 @@ export const Enrol = ({
         />
         <Tile
           posture="handheld"
-          label="Set up"
+          label={STRINGS.setUp}
           onPress={async () => {
             const ok = await client.enrol(code);
             setCode("");

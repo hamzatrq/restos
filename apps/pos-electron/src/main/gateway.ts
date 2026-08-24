@@ -551,6 +551,27 @@ const linePayloadFor = (
   };
 };
 
+/**
+ * `04-F27` — **`C5`'s half of the one append.** The price decision (`linePayloadFor`) was already
+ * shared between the counter's line-add and the terminal's; the ENVELOPE was not, so the two
+ * differed in more than the actor and either would have missed a guard added to the other.
+ * Routing both through `checkedAppend` closes that the same way and for the same reason.
+ *
+ * `02-F49`'s boundary is a no-op for `order.line_added` — it refuses removals and nothing else —
+ * and that is the point rather than an argument against: which guards apply to an event is the
+ * guard's business, and a producer does not get to decide which ones it passes through.
+ */
+const checkedAddLine = (
+  deps: { store: Pick<DeviceStore, "identity" | "append" | "openOrders">; priceOf: PriceResolver },
+  actor_user_id: string | null,
+  req: unknown,
+): AppendResult =>
+  checkedAppend(deps.store, actor_user_id, {
+    type: "order.line_added",
+    payload: linePayloadFor(deps, req),
+    refs: [],
+  });
+
 export const createGateway = (deps: GatewayDeps): Gateway => ({
   deviceState: () => {
     const b = deps.blockedCursor();
@@ -963,37 +984,13 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
       "cash state",
     ),
 
-  append: (req: unknown): AppendResult => {
-    // Validated HERE, on the trusted side. The renderer is the untrusted end of this bridge
-    // even though we ship it: a buggy or compromised renderer must not be able to hand the
-    // store a shape it did not expect.
-    const parsed: AppendRequest = AppendRequestSchema.parse(req);
-    // `02-F49` — `02-F8`'s confirm boundary, BEFORE the envelope is built. One synchronous read of
-    // this device's own projection; no peer, no lock, no clock, no network (`00 §5.1`). It refuses
-    // only a `order.line_removed` against an order this device already holds as confirmed — the
-    // POST-confirm act is a `void.recorded` with an approver and still lands, which is what keeps
-    // the correction path open (`01-F17`). See `line-removal-guard.ts`.
-    assertRemovableLine(parsed, deps.store);
-    const identity = deps.store.identity;
-    const envelope = deps.store.append({
-      id: newId(),
-      org_id: identity.org_id,
-      branch_id: identity.branch_id,
-      device_id: identity.device_id,
-      // 02-F41/02-F45 — read at APPEND from the session, never from the payload and never
-      // cached: a device that auto-locked (01-F26) must attribute to nobody rather than to
-      // whoever walked away, and 01-F1 makes a false attribution permanent.
-      actor_user_id: deps.session()?.user_id ?? null,
-      // An untrusted forensic hint with exactly one sanctioned reader (01-F45, 01-N2 skew
-      // detection). The store stamps the authoritative `branch_created_at` itself.
-      device_created_at: wallClock.now(),
-      type: parsed.type,
-      schema_version: 1,
-      payload: parsed.payload,
-      refs: parsed.refs,
-    });
-    return { id: envelope.id };
-  },
+  // 02-F41/02-F45 — the actor is read at APPEND from the session, never from the payload and
+  // never cached: a device that auto-locked (01-F26) must attribute to nobody rather than to
+  // whoever walked away, and 01-F1 makes a false attribution permanent. Everything else about
+  // this append — the validation, `02-F49`'s boundary, the envelope — is `checkedAppend` below,
+  // which the TERMINAL's append also passes through (`04-F27`).
+  append: (req: unknown): AppendResult =>
+    checkedAppend(deps.store, deps.session()?.user_id ?? null, req),
 
   /**
    * `C5` — the counter's highest-frequency act (~300×/shift), and the one place a price enters
@@ -1003,24 +1000,11 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
    * creation and never inferred), the branch from this device's own identity (`01-F60`), and the
    * price from the catalog those two key into. The renderer supplied none of it.
    */
-  addLine: (req: unknown): AppendResult => {
-    const identity = deps.store.identity;
-    const envelope = deps.store.append({
-      id: newId(),
-      org_id: identity.org_id,
-      branch_id: identity.branch_id,
-      device_id: identity.device_id,
-      // The SECOND append site, and it needs the same read as the first: `02-F19` names "line
-      // added" an attributed action, and it is the counter's highest-frequency one (~300×/shift).
-      actor_user_id: deps.session()?.user_id ?? null,
-      device_created_at: wallClock.now(),
-      type: "order.line_added",
-      schema_version: 1,
-      payload: linePayloadFor(deps, req),
-      refs: [],
-    });
-    return { id: envelope.id };
-  },
+  // `04-F27` — the same road as `append` above. The actor read is the one thing this caller
+  // decides (`02-F19` names "line added" an attributed action, and it is the counter's
+  // highest-frequency one, ~300×/shift); every rule the event passes is `checkedAppend`'s.
+  addLine: (req: unknown): AppendResult =>
+    checkedAddLine(deps, deps.session()?.user_id ?? null, req),
 
   /**
    * `02-F27`'s lookup — *"customer file lookup by normalized phone → name, saved addresses"* —
@@ -1144,6 +1128,69 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
 });
 
 /**
+ * `04-F27` — **THE ONE APPEND. Every guard this product applies to an event on its way into the
+ * ledger is applied HERE, and both write paths reach the ledger through it.**
+ *
+ * ── Why this function exists at all ──────────────────────────────────────────────────────────
+ *
+ * `02-F49`'s confirm boundary was called from `Gateway.append` — the RENDERER's path — and
+ * `createVerifiedAppend` below built its own envelope beside it. So when `04-F21`'s terminal
+ * landed, a second producer reached `store.append` with no boundary on it, and a waiter's tablet
+ * removed a line the counter refuses **by name**, off an order the kitchen was already cooking.
+ * Measured on a real store with the real matrix and the real verified appends: the counter
+ * refused `(order_id, line_id)` with `02-F49`'s own sentence, the pad landed the identical pair,
+ * `order.line_removed` count went to 1 and the order's total went 45000 → 0. `01-F30` has no
+ * `removed_value` term to reconcile it and `01-F1` makes it permanent.
+ *
+ * ── Why it is a SHARED FUNCTION rather than a second call to the guard ───────────────────────
+ *
+ * Copying `assertRemovableLine` into the verified append would have closed that instance and left
+ * the CLASS open: the next guard added to one path would be absent from the other, silently, and
+ * nothing in the type system or in any suite would say so. The two paths differ in exactly one
+ * thing — **where the actor comes from** — so that is the only thing either caller supplies, and
+ * every rule lives on the one road they share. `__acceptance__/terminal-write-path.test.ts` §A
+ * drives both paths over one store and §C asserts the single call site, so a later copy is a red
+ * test rather than a silent fork.
+ *
+ * **What it deliberately does not decide: WHO.** `actor_user_id` is written verbatim — a session
+ * read by one caller, an explicitly verified id by the other — because a function that chose
+ * would need a session dep, and `createVerifiedAppend`'s whole safety property is that it has
+ * none (see its header).
+ */
+const checkedAppend = (
+  store: Pick<DeviceStore, "identity" | "append" | "openOrders">,
+  actor_user_id: string | null,
+  req: unknown,
+): AppendResult => {
+  // Validated HERE, on the trusted side. The renderer is the untrusted end of the IPC bridge even
+  // though we ship it, and a terminal on the shop Wi-Fi is further from trusted than that: a buggy
+  // or compromised producer must not be able to hand the store a shape it did not expect.
+  const parsed: AppendRequest = AppendRequestSchema.parse(req);
+  // `02-F49` — `02-F8`'s confirm boundary, BEFORE the envelope is built. One synchronous read of
+  // this device's own projection; no peer, no lock, no clock, no network (`00 §5.1`). It refuses
+  // only a `order.line_removed` against an order this device already holds as confirmed — the
+  // POST-confirm act is a `void.recorded` with an approver and still lands, which is what keeps
+  // the correction path open (`01-F17`). See `line-removal-guard.ts`.
+  assertRemovableLine(parsed, store);
+  const identity = store.identity;
+  const envelope = store.append({
+    id: newId(),
+    org_id: identity.org_id,
+    branch_id: identity.branch_id,
+    device_id: identity.device_id,
+    actor_user_id,
+    // An untrusted forensic hint with exactly one sanctioned reader (01-F45, 01-N2 skew
+    // detection). The store stamps the authoritative `branch_created_at` itself.
+    device_created_at: wallClock.now(),
+    type: parsed.type,
+    schema_version: 1,
+    payload: parsed.payload,
+    refs: parsed.refs,
+  });
+  return { id: envelope.id };
+};
+
+/**
  * An append whose actor is **STATED** rather than read from the live session.
  *
  * `05-F29` (a) — *"only (a) puts the verified credential and the ledger write in the same
@@ -1185,32 +1232,24 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
 export type VerifiedAppend = (actor_user_id: string, req: unknown) => AppendResult;
 
 export type VerifiedAppendDeps = {
-  /** The store alone. No session, and that absence is the safety property — see above. */
-  store: Pick<DeviceStore, "identity" | "append">;
+  /**
+   * The store alone. **No session**, and that absence is the safety property — see above.
+   *
+   * `openOrders` is here for `04-F27`: it is what `02-F49`'s boundary reads, and this append is a
+   * caller of the same `checkedAppend` the renderer's is. Widening the type is the point rather
+   * than a cost — a store that cannot answer "is this order confirmed?" cannot be appended to
+   * through either path, so the guard cannot be reached with a store that would skip it.
+   */
+  store: Pick<DeviceStore, "identity" | "append" | "openOrders">;
 };
 
 export const createVerifiedAppend =
   (deps: VerifiedAppendDeps): VerifiedAppend =>
-  (actor_user_id: string, req: unknown): AppendResult => {
-    // The SAME schema and the SAME envelope construction as `append` above, so the fields
-    // `01-F43` stamps at append cannot be lost by a second, hand-written envelope beside it —
-    // `02-F45`'s "two sources for one fact", arrived at through duplication.
-    const parsed: AppendRequest = AppendRequestSchema.parse(req);
-    const identity = deps.store.identity;
-    const envelope = deps.store.append({
-      id: newId(),
-      org_id: identity.org_id,
-      branch_id: identity.branch_id,
-      device_id: identity.device_id,
-      actor_user_id,
-      device_created_at: wallClock.now(),
-      type: parsed.type,
-      schema_version: 1,
-      payload: parsed.payload,
-      refs: parsed.refs,
-    });
-    return { id: envelope.id };
-  };
+  (actor_user_id: string, req: unknown): AppendResult =>
+    // `04-F27` — the SAME road as `Gateway.append`, and the actor is the only difference. It was a
+    // second envelope built beside that one until August 2026, which is how `02-F49`'s boundary
+    // came to guard the counter and not the pad.
+    checkedAppend(deps.store, actor_user_id, req);
 
 /**
  * `04-F21`/`04-F22` (c) — **`addLine` for an actor the caller has just verified**, and it is the
@@ -1246,19 +1285,8 @@ export type VerifiedAddLineDeps = {
 
 export const createVerifiedAddLine =
   (deps: VerifiedAddLineDeps): VerifiedAddLine =>
-  (actor_user_id: string, req: unknown): AppendResult => {
-    const identity = deps.store.identity;
-    const envelope = deps.store.append({
-      id: newId(),
-      org_id: identity.org_id,
-      branch_id: identity.branch_id,
-      device_id: identity.device_id,
-      actor_user_id,
-      device_created_at: wallClock.now(),
-      type: "order.line_added",
-      schema_version: 1,
-      payload: linePayloadFor(deps, req),
-      refs: [],
-    });
-    return { id: envelope.id };
-  };
+  (actor_user_id: string, req: unknown): AppendResult =>
+    // `04-F27` — the same road as `Gateway.addLine`, and the actor is the only difference. It was
+    // a second envelope built beside that one until August 2026, which is the fork that let
+    // `02-F49`'s boundary guard the counter and not the pad, one function over.
+    checkedAddLine(deps, actor_user_id, req);

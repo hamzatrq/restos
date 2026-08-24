@@ -153,6 +153,11 @@ const rig = async (): Promise<Rig> => {
     authorize: authorizeTerminal({ store }),
     appendAs: createVerifiedAppend({ store }),
     addLineAs: createVerifiedAddLine({ store, priceOf }),
+    // `04-F27` — REQUIRED, so this rig has to say something about it. It says nothing on purpose:
+    // every assertion in this file is about what reaches the LEDGER, and what a completed append
+    // then causes is `terminal-write-path.test.ts`'s subject, driven there against a recording
+    // seam and against `main/index.ts`'s own wiring.
+    onAppended: () => {},
     reads: gateway,
     store,
     idle_lock_ms: 10 * 60_000,

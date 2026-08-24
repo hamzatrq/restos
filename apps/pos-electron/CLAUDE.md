@@ -691,7 +691,12 @@ in principle**, but see the owed item below — the manifest table itself was no
   assertion that used to separate it was rewritten — see the note in `order-list.dom.test.tsx`.
 - **The handhelds are unmeasured.** `27-F68` makes targets *grow* on anything above 160 PPI:
   `27 §1a`'s ~224-PPI tablet and ~405-PPI phone are 1.4x and 2.5x their old rendered size. No
-  rail looks at either, and `apps/waiter` / `apps/rider` are stubs.
+  rail looks at either. ⚠ *This ended "and `apps/waiter` / `apps/rider` are stubs", which stopped
+  being true of the first in August 2026: `04-F21`'s order pad ships and runs on exactly that
+  ~224-PPI tablet class.* That makes the gap worse rather than academic — the pad is a browser
+  served by this till, it has no `BrowserWindow` for a gate to import, and its density is a PIN
+  (`27 §1a`'s figure, passed in `main.tsx`) rather than a measurement. `apps/rider` is still a
+  stub.
 
 ## THE GROUPING ROUND (August 2026) — Cash, Me, Orders and ManagerApproval, and what LOOKING cost
 

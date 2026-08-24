@@ -156,8 +156,13 @@ const PANELS = [
    *
    * `27 §1a` puts the counter POS at **15.6″** and the 10.1″ Android in the *waiter tablet* row,
    * whose posture is `handheld` (64 dp) rather than `keypad` (126 dp). The counter renderer on it
-   * is not a shipping configuration — `apps/waiter` is a stub — so measuring it here is a stress
-   * probe, not a product claim.
+   * is not a shipping configuration, so measuring it here is a stress probe, not a product claim.
+   *
+   * ⚠ *The reason used to be "`apps/waiter` is a stub". It is not one — `04-F21`'s pad ships — and
+   * the conclusion is unchanged and now sharper: the pad is a BROWSER the till serves, so what runs
+   * on that 10.1″ glass is the waiter surface and never this renderer. What that surface costs is
+   * that it has no row on this gate AT ALL: `apps/waiter` has no `BrowserWindow` whose options
+   * could be imported, so nothing measures it in Blink.*
    *
    * It matters that it cannot GATE, because the only way to make the counter fit 126 mm of glass
    * height is to shrink `27-F8`'s 20 mm keys, which `27-F68` (b) and `DEC-UI-001` forbid by name:

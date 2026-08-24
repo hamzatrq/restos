@@ -123,12 +123,18 @@ export const tierFromRoster = (roster: readonly DeviceClass[]): HardwareTier => 
  * neutral default and the choice has to be argued rather than defaulted.
  *
  * It is T1 because T1 is what is *true* of every deployment that can exist right now, which is the
- * same kind of claim `REFERENCE_COUNTER_DIAGONAL_IN` makes one file over: `apps/pass-kds` is a
- * one-file stub, `apps/waiter` does not exist, and `03-F24`'s ready-signal-ownership assignment
- * has no representation anywhere in code — so no device can be registered that would run a pass
- * screen, and nothing else in the product can move a line. The harm the other default guards
- * against (auto-advance racing the human who owns the signal) is unreachable until one of those
- * three changes.
+ * same kind of claim `REFERENCE_COUNTER_DIAGONAL_IN` makes one file over.
+ *
+ * ⚠ **THE EVIDENCE THIS PARAGRAPH RESTED ON HAS MOVED, AND ONLY HALF OF IT IS THIS SESSION'S TO
+ * CORRECT.** It read *"`apps/pass-kds` is a one-file stub, `apps/waiter` does not exist"*. The
+ * waiter half is wrong: `04-F21`'s order pad ships. It does not change the conclusion — `04-F23`
+ * closes the pad's event set at four order events, `order.line_state_changed` is not among them,
+ * so a tablet still cannot move a line and the harm the other default guards against (auto-advance
+ * racing the human who owns the signal) is still unreachable from a waiter surface. **The
+ * `apps/pass-kds` half is ALSO stale — that app runs — and it is REPORTED rather than corrected
+ * here**, because whether a running pass screen changes this default is `02-F31`'s question and
+ * not a drive-by in a waiter fix (`24 §3b`). `03-F24`'s ready-signal-ownership assignment still has
+ * no representation in the device registry, which is the leg the default actually stands on.
  *
  * When one of them changes this is the line that must change with it, which is why the boot line
  * names the correction out loud instead of logging a tier and moving on.

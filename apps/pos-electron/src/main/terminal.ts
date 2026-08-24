@@ -71,6 +71,21 @@ export type TerminalDeps = {
   /** `04-F22` (c) — appends naming an explicitly verified actor. Neither reads a session. */
   appendAs: VerifiedAppend;
   addLineAs: VerifiedAddLine;
+  /**
+   * `04-F27` — **what a COMPLETED append causes on this till, and it is the host's own function
+   * rather than this module's list.**
+   *
+   * A confirm rung at the counter reaches the kitchen because `main/index.ts` hangs the KOT
+   * handoff, `02-F31`'s line advance and the renderer's re-read off the completed append. A
+   * confirm rung on a tablet reached NONE of them: every consequence lived inside the renderer's
+   * IPC handler, so `04-F24`'s one load-bearing ack — *"a KOT that has not reached the spooler is
+   * food that is not being cooked"* — was false on this surface from the first order.
+   *
+   * It is REQUIRED, so a host that forgets it is a typecheck error, and it takes the request this
+   * module just appended rather than an intent: the consequences are keyed on `01 §4` event types
+   * and a second vocabulary here would be a fork of the host's own reading (`02-F45`).
+   */
+  onAppended: (req: { type: string; payload: Record<string, unknown> }) => void;
   /** The till's own converged projections. The pad renders these and holds none of them. */
   reads: Pick<Gateway, "menu" | "openOrders">;
   /** `01-F61`'s identification grid — `active` members only, in the roster's own order. */
@@ -92,8 +107,20 @@ export type SignInResult =
  *
  * **`user_id` is absent on purpose and its absence is a security property, not a tidiness one.**
  * The tablet is shown a NAME (`02-F19`: attribution is never anonymous) and never the identifier
- * the ledger is keyed by, so there is nothing on the glass — or in the response body, or in the
- * browser's storage — for a compromised pad to put in an actor field. `04-F22` (c).
+ * the ledger is keyed by. `04-F22` (c).
+ *
+ * ⚠ **THE CLAIM HERE USED TO BE WIDER THAN THE PROPERTY, AND THE PROPERTY IS THE INTERESTING ONE.**
+ * It said there was nothing *"on the glass — or in the response body, or in the browser's
+ * storage"* for a compromised pad to put in an actor field. That is true of THIS shape and false
+ * of the wire: `roster()` returns every active member's `user_id` to any enrolled terminal BEFORE
+ * any sign-in, because that is how a person is named at sign-in, and `Pad.tsx` sends one back.
+ * What actually holds — and what `04-F22` (c) is really about — is that **an actor is never taken
+ * from anything the tablet sends**: it is resolved from the handle in `resolve()`, and
+ * `authorizeTerminal` and `appendAs` are reached with that resolved id and with nothing else. A
+ * pad that posted a colleague's `user_id` in every field of every request would change no
+ * envelope. *Stated precisely because a prose claim retires the assertion the next session would
+ * have written (`AGENTS.md` `L11`) — and a security claim that overstates is the direction that
+ * invites someone to "harden" a path that was never the weak one.*
  */
 export type TerminalView = {
   readonly waiter: string;
@@ -311,17 +338,18 @@ export const createTerminal = (deps: TerminalDeps): Terminal => {
             const table_id = normalizeTableLabel(act.table_id);
             if (table_id === null) return refuse("malformed");
             const order_id = newId();
-            deps.appendAs(session.user_id, {
-              type: "order.created",
-              // `02-F1`'s two axes, supplied by this module and never by the tablet.
-              payload: {
-                order_id,
-                channel: TERMINAL_CHANNEL,
-                order_type: TERMINAL_ORDER_TYPE,
-                table_id,
-              },
-              refs: [],
-            });
+            // `02-F1`'s two axes, supplied by this module and never by the tablet.
+            const payload = {
+              order_id,
+              channel: TERMINAL_CHANNEL,
+              order_type: TERMINAL_ORDER_TYPE,
+              table_id,
+            };
+            deps.appendAs(session.user_id, { type: "order.created", payload, refs: [] });
+            // `04-F27` — AFTER the append, never before and never instead: the ledger is the
+            // durable point (`01-F2`) and a consequence that ran first would be a screen telling
+            // a kitchen about food no store holds.
+            deps.onAppended({ type: "order.created", payload });
             return { ok: true, order_id };
           }
           case "add_line": {
@@ -330,26 +358,53 @@ export const createTerminal = (deps: TerminalDeps): Terminal => {
               item_id: act.item_id,
               qty: act.qty,
             });
+            /**
+             * `04-F27`, and the payload here is deliberately NOT the appended one.
+             *
+             * `addLineAs` resolves the price itself (`01-F60`, `01-F53`) and hands back an id, so
+             * this module never holds the money-bearing payload — and re-stating one would be a
+             * second source for a figure the ledger already owns (`02-F45`). The TYPE and the
+             * ORDER ID are the whole of what a consequence reads, and the counter's own
+             * `CHANNELS.addLine` handler reaches exactly one of them (the re-read) for the same
+             * reason: no `01 §4` consequence hangs off a line-add.
+             */
+            deps.onAppended({
+              type: "order.line_added",
+              payload: { order_id: act.order_id },
+            });
             return { ok: true, order_id: act.order_id };
           }
           case "remove_line": {
-            // `02-F49`'s confirm boundary is NOT re-implemented here — `appendAs` reaches
-            // `store.append`, and the guard that refuses a post-confirm removal lives on the
-            // gateway's own path. A second reading of that boundary is how a terminal comes to
-            // permit what the counter refuses.
-            deps.appendAs(session.user_id, {
-              type: "order.line_removed",
-              payload: { order_id: act.order_id, line_id: act.line_id },
-              refs: [],
-            });
+            /**
+             * `02-F49`'s confirm boundary is not re-implemented here — and until August 2026 that
+             * sentence stood beside an append that **did not reach it at all**.
+             *
+             * ⚠ **The claim was true of `Gateway.append` and false of `appendAs`.** The guard had
+             * exactly one call site, inside the RENDERER's method, and `createVerifiedAppend`
+             * built its own envelope beside it — so a tablet removed a line off a confirmed,
+             * cooking order that the counter refuses by name, permanently (`01-F1`) and with no
+             * `01-F30` term to reconcile it. `04-F27` moved every rule onto one road
+             * (`gateway.ts`'s `checkedAppend`), so this comment is now a description of where the
+             * boundary IS rather than a promise about where it might be.
+             *
+             * The refusal arrives here as a throw and leaves as `refused` with the till's own
+             * sentence, which is what carries `02-F49`'s way out — a `void.recorded` with an
+             * approver at the counter — to the waiter holding the tablet.
+             */
+            const payload = { order_id: act.order_id, line_id: act.line_id };
+            deps.appendAs(session.user_id, { type: "order.line_removed", payload, refs: [] });
+            deps.onAppended({ type: "order.line_removed", payload });
             return { ok: true, order_id: act.order_id };
           }
           case "confirm": {
-            deps.appendAs(session.user_id, {
-              type: "order.confirmed",
-              payload: { order_id: act.order_id },
-              refs: [],
-            });
+            const payload = { order_id: act.order_id };
+            deps.appendAs(session.user_id, { type: "order.confirmed", payload, refs: [] });
+            // `04-F27`/`03-F2` — **THE KITCHEN HANDOFF, and it is the reason this seam exists.**
+            // The confirm is already in the ledger by the line above; only then does paper get
+            // involved (`01-F17` — a sale is never blocked by a printer). Without this call the
+            // pad's SEND is a screen that says the food is on the till while no station has been
+            // told, which is exactly what `04-F24` forbids.
+            deps.onAppended({ type: "order.confirmed", payload });
             return { ok: true, order_id: act.order_id };
           }
         }

@@ -41,13 +41,22 @@ import type { TerminalClient } from "./terminal-client";
  * `MoneyValue` directly. **The closed vocabulary held; the assumption that a screen could be
  * copied did not.**
  *
- * ## `04-F24` — what the pad does when it cannot reach the till
+ * ## `04-F24`/`04-F29` — what the pad does when it cannot reach the till
  *
- * Lines rung while the till is unreachable are held HERE and rendered as **not sent**, and **SEND
- * is disabled** while it stays unreachable. `01-F2`'s durable point is the till, so a line on this
+ * Lines rung while the till is unreachable are held HERE and rendered as **not sent**, and SEND
+ * **refuses in place**, with its reason, while it stays unreachable (`27-F5` — an inert primary
+ * control is that FR's own named failure). `01-F2`'s durable point is the till, so a line on this
  * glass is not yet a fact; a KOT that has not reached the spooler is food that is not being cooked
- * and no screen may imply otherwise. The pad never retries a write on its own — a lost response is
- * ambiguous and `01-F1` makes a duplicated line permanent — it re-reads what the till holds.
+ * and no screen may imply otherwise.
+ *
+ * ⚠ **THE PAD DOES NOT RETRY, AND FOR ONE ROUND THAT SENTENCE HID A DUPLICATE-ORDER DEFECT.** The
+ * SEND loop cleared its captured rows only when the CONFIRM answered, so a dropped confirm
+ * response left every landed line still on the glass — and the waiter, with no ticket in the
+ * kitchen, pressed SEND again and rang all of them a second time. Not retrying is what makes an
+ * ambiguous failure safe only if what has already LANDED stops being pending: each row is trimmed
+ * on its own `ok` now, and the confirm is owed separately (`04-F29`). What survives is a stated
+ * residual — a lost answer to a line that did land is sent again on the next press, because
+ * `order.line_added` has no idempotency key in `01 §4` the way `01-F31` gives a settlement one.
  *
  * ⚠ **THIS SURFACE HAS NO `layout:check` ROW AND HAS NEVER BEEN MEASURED IN BLINK.** The root
  * script sweeps the two Electron apps, and a browser served from the till has no `BrowserWindow`
@@ -60,7 +69,23 @@ import type { TerminalClient } from "./terminal-client";
 const POSTURE = "handheld";
 
 type Person = { user_id: string; display_name: string };
-type MenuRow = { id: string; label: string; unavailable?: boolean; unavailableReason?: string };
+/**
+ * `01-F59`/`01-F60` — **`sold_out` is carried, and it is what stops this pad blocking a sale.**
+ *
+ * `unavailable` is the till's DISPLAY verdict and it collapses two dispositions `01-F60` calls
+ * opposites: an 86'd item (price known, deliberately still sellable) and an unpriced one (no
+ * number to sell at). The till has always sent both facts — `menu()` spreads `sold_out` and
+ * `contested` beside the display pair for exactly this reason — and this type dropped them, so
+ * the pad refused a tap on an 86'd item that the till itself accepts. Measured: two taps on a
+ * sold-out tile captured nothing while the identical `add_line` landed at the till.
+ */
+type MenuRow = {
+  id: string;
+  label: string;
+  unavailable?: boolean;
+  unavailableReason?: string;
+  sold_out?: boolean;
+};
 type Table = {
   table_ids: readonly string[];
   order_id: string;
@@ -89,6 +114,26 @@ export const Pad = ({ client }: { client: TerminalClient }): React.JSX.Element =
   const [label, setLabel] = useState("");
   const [page, setPage] = useState(0);
   const [unsent, setUnsent] = useState<Unsent[]>([]);
+  /**
+   * `04-F29` — the lines have landed and the KITCHEN has not been told, as far as this pad knows.
+   *
+   * It exists because a lost `confirm` response is not a lost order: the rows are gone from
+   * `unsent` (each was trimmed on its own `ok`), so without this SEND would read *nothing to send*
+   * over an order sitting on the till that no station has a ticket for — `04-F24`'s named failure
+   * with the food already on the bill. Pressing SEND again re-sends the CONFIRM alone. The cost is
+   * stated rather than hidden: if the first confirm landed and only its answer was lost, the
+   * second is a duplicate `order.confirmed`, permanent under `01-F1` — which prints nothing extra
+   * (`03-F55` sends only lines no chit covers) and is the cheaper of the two errors.
+   */
+  const [owedConfirm, setOwedConfirm] = useState(false);
+  /**
+   * `00 §5.7` — the last thing the till REFUSED, in this pad's own words.
+   *
+   * The till's sentence is not rendered: it carries FR ids (`14-F38` bans them from glass) and it
+   * is written for a counter, where `02-F49`'s way out — a manager's approval — is two steps away.
+   * A waiter holding a tablet can act on one thing, so that is what it says.
+   */
+  const [refused, setRefused] = useState(false);
   // `27-F11c` — the grid's capacity is a PHYSICAL question, so the box is MEASURED rather than
   // assumed. The ref goes on the element `ItemGrid` fills; until it resolves the grid draws
   // nothing, which is the honest state of a surface nobody has measured yet.
@@ -216,6 +261,18 @@ export const Pad = ({ client }: { client: TerminalClient }): React.JSX.Element =
   }
 
   const table = view?.tables.find((t) => t.order_id === orderId) ?? null;
+  /**
+   * `04-F29` — **what SEND still owes the kitchen, read from the TILL and not from a local guess.**
+   *
+   * Three ways an order can owe the kitchen a ticket: rows captured here and not yet sent; rows
+   * this pad has just sent whose confirm was not acknowledged; and — the case only the till knows
+   * — an order the till holds lines for and has never confirmed, which is where a pad that lost
+   * its answer, or a colleague's abandoned capture, leaves the work. `01-F2` puts the durable
+   * point at the till, so the till's own converged view is the authority for the third.
+   */
+  const sendable =
+    orderId !== null &&
+    (unsent.length > 0 || owedConfirm || (table !== null && table.lines > 0 && !table.confirmed));
   const tabs: Tab[] = [
     { id: "tables", label: STRINGS.tables },
     { id: "order", label: STRINGS.order },
@@ -244,6 +301,9 @@ export const Pad = ({ client }: { client: TerminalClient }): React.JSX.Element =
               onPress={() => {
                 setOrderId(row.order_id);
                 setUnsent([]);
+                // `04-F29` — both flags belong to the order that was open, not to the pad.
+                setOwedConfirm(false);
+                setRefused(false);
                 setTab("order");
               }}
             />
@@ -253,6 +313,39 @@ export const Pad = ({ client }: { client: TerminalClient }): React.JSX.Element =
             caption={STRINGS.newTable}
             value={label}
             onChange={setLabel}
+          />
+          {/*
+            `04-F30`/`02-F41` — **the way out, and it was missing entirely.**
+
+            `Terminal.signOut` and the wire's `sign_out` op both existed and this app called
+            neither: the only exit was `01-F26`'s ten-minute idle lock, so a tablet handed from
+            Sana to Ayesha inside that window attributed Ayesha's orders to Sana — permanently
+            (`01-F1`), on the surface `02-F41` exists to keep honest.
+
+            It sits at the END of this panel, so no control an operator has learned moves
+            (`27-F4`), and it is on the TABLES screen rather than the order screen because signing
+            out mid-capture would discard lines a waiter has typed and not sent.
+          */}
+          <Tile
+            posture={POSTURE}
+            label={STRINGS.signOut}
+            onPress={async () => {
+              // The till is TOLD, so the handle dies with the act rather than at the idle lock —
+              // but the local state goes either way. A pad that could not reach the till and
+              // therefore stayed signed in as the last waiter is the mis-attribution this control
+              // exists to prevent; the till's own `01-F26` lock retires the handle regardless.
+              await call({ op: "sign_out", handle });
+              setHandle(null);
+              setChosen(null);
+              setView(null);
+              setOrderId(null);
+              // Captured-but-unsent lines are the previous waiter's work and are NOT carried into
+              // the next session: sending them later would append them under her successor's id.
+              setUnsent([]);
+              setOwedConfirm(false);
+              setRefused(false);
+              setPin("");
+            }}
           />
           <Tile
             posture={POSTURE}
@@ -267,6 +360,8 @@ export const Pad = ({ client }: { client: TerminalClient }): React.JSX.Element =
               if (r?.ok === true) {
                 setOrderId(r.order_id as string);
                 setUnsent([]);
+                setOwedConfirm(false);
+                setRefused(false);
                 setTab("order");
                 await refresh();
               }
@@ -285,9 +380,25 @@ export const Pad = ({ client }: { client: TerminalClient }): React.JSX.Element =
               onPageChange={setPage}
               onSelect={(id) => {
                 const row = view?.menu.find((m) => m.id === id);
-                // `01-F60` — the till would refuse an unpriced item anyway; refusing here means the
-                // grid does not offer a tile the append will decline (`menu()`'s own rule).
-                if (row === undefined || row.unavailable === true) return;
+                if (row === undefined) return;
+                /**
+                 * `01-F59`/`04-F28` — **an 86'd item is CAPTURED; only the unpriced one is not.**
+                 *
+                 * This read `row.unavailable === true` and refused both, which is the one thing
+                 * `01-F17` says a platform must never do: withhold a sale on availability state.
+                 * `01-F59` keeps an 86'd item deliberately sellable and `02-F31` owns the oversell
+                 * path; the counter's own grid fires `onPress` on a greyed tile for that reason
+                 * and `Tile` never sets `disabled`.
+                 *
+                 * The unpriced case is the opposite disposition and stays refused: `01-F60` gives
+                 * it no number, so the till would decline the append and offering it would be the
+                 * grid lying about what is sellable.
+                 *
+                 * The predicate is `unavailable && !sold_out` — greyed for a reason that is not
+                 * the 86 — and the direction of any future error is toward OFFERING, where the
+                 * till refuses with its own sentence, rather than toward a silent client-side no.
+                 */
+                if (row.unavailable === true && row.sold_out !== true) return;
                 setUnsent((rows) => {
                   const at = rows.findIndex((r) => r.item_id === id);
                   if (at === -1) return [...rows, { item_id: id, label: row.label, qty: 1 }];
@@ -298,8 +409,15 @@ export const Pad = ({ client }: { client: TerminalClient }): React.JSX.Element =
           </div>
           <Panel
             title={STRINGS.order}
-            note={offline ?? (table === null ? undefined : table.table_ids.join(" / "))}
-            tone={tone}
+            note={
+              offline ??
+              (refused
+                ? STRINGS.tillRefused
+                : table === null
+                  ? undefined
+                  : table.table_ids.join(" / "))
+            }
+            tone={refused ? "abnormal" : tone}
           >
             {table === null ? null : (
               <QuantityItemLine quantity={table.lines} name={STRINGS.onTheTill} />
@@ -319,14 +437,33 @@ export const Pad = ({ client }: { client: TerminalClient }): React.JSX.Element =
             <Tile
               posture={POSTURE}
               label={STRINGS.send}
-              // `04-F24` — DISABLED while the till is unreachable and while there is nothing to
-              // send. `27-F5` keeps it visible and in place; what changes is that it refuses,
-              // with its reason on the strip above.
-              unavailable={!reachable || unsent.length === 0 || orderId === null}
+              // `04-F24` — it REFUSES IN PLACE while the till is unreachable and while the till
+              // owes the kitchen nothing. `27-F5` keeps it visible and at the same rect; what
+              // changes is that it states why and appends nothing.
+              unavailable={!reachable || !sendable}
               unavailableReason={reachable ? STRINGS.nothingToSend : STRINGS.padOffline}
               onPress={async () => {
-                if (orderId === null || !reachable || unsent.length === 0) return;
-                for (const row of unsent) {
+                if (orderId === null || !reachable || !sendable) return;
+                setRefused(false);
+                /**
+                 * `04-F29` — **each row is trimmed on its OWN `ok`, and that is the whole fix.**
+                 *
+                 * This loop used to clear `unsent` only after the confirm answered, so a dropped
+                 * confirm response left every landed line still on the glass: the waiter, seeing
+                 * no ticket in the kitchen, pressed SEND again and rang all of them a SECOND time.
+                 * Measured on this pad's own harness — two naan captured, one press, a lost
+                 * confirm, one more press — `{"appended":[naan×2, naan×2],"confirms":2}`. Four
+                 * naan on the ledger and on the KOT, permanent under `01-F1`.
+                 *
+                 * It still does not RETRY: a row whose answer never arrives stays on the glass and
+                 * the loop stops, because the till may have appended it and `01-F1` makes a
+                 * duplicate permanent. ⚠ **The residual is stated rather than closed** — a lost
+                 * response to a line that DID land will be sent again on the next press, and
+                 * nothing in `01 §4` gives `order.line_added` an idempotency key the way `01-F31`
+                 * gives a settlement one. What the pad can do is show the till's own count of what
+                 * it holds, which the panel above does (`04-F24` — re-read, never guess).
+                 */
+                for (const row of [...unsent]) {
                   const r = await call({
                     op: "act",
                     handle,
@@ -337,21 +474,23 @@ export const Pad = ({ client }: { client: TerminalClient }): React.JSX.Element =
                       qty: row.qty,
                     },
                   });
-                  // No retry, and the loop STOPS: `01-F1` makes a duplicated line permanent, so an
-                  // ambiguous failure is re-read rather than guessed at.
                   if (r === null || r.ok !== true) {
+                    if (r !== null) setRefused(true);
                     await refresh();
                     return;
                   }
+                  setUnsent((rows) => rows.filter((held) => held.item_id !== row.item_id));
+                  // From here the till holds a line the kitchen has no ticket for, so the confirm
+                  // is OWED whatever happens next.
+                  setOwedConfirm(true);
                 }
                 const confirmed = await call({
                   op: "act",
                   handle,
                   intent: { kind: "confirm", order_id: orderId },
                 });
-                // Cleared ONLY on a confirmed round trip. Clearing optimistically is `01-F66`'s
-                // recorded disaster with a guest sitting at the table.
-                if (confirmed?.ok === true) setUnsent([]);
+                if (confirmed?.ok === true) setOwedConfirm(false);
+                else if (confirmed !== null) setRefused(true);
                 await refresh();
               }}
             />

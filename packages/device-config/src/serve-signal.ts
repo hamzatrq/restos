@@ -121,12 +121,17 @@ const PASS_OR_KDS: DeviceClass = "kitchen";
  *
  * ## ⚠ A `waiter`-ONLY ROSTER DERIVES `settlement`, AND THAT IS A PINNED READING
  *
- * `02-F31`'s rule names three device kinds and this maps two of them. The third is deliberate:
- * `04-F14`'s handheld is unbuilt (`apps/waiter` does not exist — `03-F52`'s own OWED item 3 says
- * so), so deriving `waiter` would hand the act to a surface that cannot perform it and leave that
- * branch with **no producer at all** — the exact defect this FR closes. `DEC-HW-003` (b) reads the
- * roster as a **capability set**, and a device class whose app does not ship supplies no
- * capability.
+ * `02-F31`'s rule names three device kinds and this maps two of them. The third is deliberate,
+ * and ⚠ **its REASON changed in August 2026 while the reading did not** — this said *"`apps/waiter`
+ * does not exist"*, and it does: `04-F21`'s order pad ships as a terminal of the till. What has not
+ * changed is the capability. `04-F23` fixes the pad's event set at four order events and
+ * `order.line_state_changed` is not among them, so a waiter's tablet **still cannot emit a serve
+ * signal**, and deriving `waiter` would hand the act to a surface that cannot perform it and leave
+ * that branch with **no producer at all** — the exact defect this FR closes. `DEC-HW-003` (b) reads
+ * the roster as a **capability set**, and an app that ships without the capability supplies none.
+ * *The correction is kept rather than rewritten because the two sentences are one keystroke apart
+ * in English and opposite in what they would license: "the app does not exist" invites the
+ * derivation the day it does.*
  *
  * **The alternative is named**: derive `waiter` from a waiter device, faithful to `02-F31`'s
  * three-noun sentence. It is refused for the reason above and it is cheap to change — when
