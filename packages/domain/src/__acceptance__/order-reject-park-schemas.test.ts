@@ -243,15 +243,24 @@ describe("§A 01-F4 — the three types parse rather than throwing at emit", () 
    * still most likely to sweep in, and the new file carries its own anti-sweep list over exactly
    * those five.
    *
-   * `order.cancelled` is deliberately in the list even though `06-F20` mentions it in the same
-   * breath as `order.rejected` ("If no confirmation arrives within an org-configured window …
-   * the customer is told and offered cancel"), and `06-F27` makes the auto-close an
-   * `order.cancelled`. It is the neighbour this track is most likely to sweep in, so it is the one
-   * worth naming.
+   * `order.cancelled` WAS deliberately in the list — `06-F20` mentions it in the same breath as
+   * `order.rejected` ("If no confirmation arrives within an org-configured window … the customer
+   * is told and offered cancel"), and `06-F27` makes the auto-close an `order.cancelled` — which
+   * is exactly why it was the one worth naming.
+   *
+   * ── AMENDED August 2026 (`01-F84` landed) ────────────────────────────────────────────────────
+   * ⚠ `order.cancelled` has come OUT of the list, on the precedent
+   * `escalatable-write-schemas.test.ts` set when `order.rejected` and `order.unparked` came out of
+   * its own: **the list's job is to name types that are still unregistered.** `01-F84` registered
+   * this one with its own FR, its own oracle (`order-cancelled-schema.test.ts`) and its own
+   * `06-F31` producer — which is this tripwire WORKING, not being worked around: it named, at the
+   * point of the change, exactly which neighbours must not ride along, and the remaining names do
+   * that job unchanged. `payment.split_recorded` in particular is still schema-less and is still
+   * nobody's FR (`01-F84`'s own note records `order.split`/`order.merged`/`order.channel_tagged`
+   * and it as the four types `01-F4` still refuses).
    */
   it("the neighbours a session would be tempted to sweep in are still unregistered", () => {
     for (const type of [
-      "order.cancelled",
       "order.merged",
       "order.split",
       "order.channel_tagged",
