@@ -556,3 +556,125 @@ describe("§F — `01-F34`'s three nets, over a fixture that CONTAINS the danger
     expect(() => project(poisonedSet)).not.toThrow();
   });
 });
+
+// ── G — `17-N3`/`25` — THE PROJECTION IS INDEXED PER PHONE, AND IT PROJECTS THE SAME THING ────
+//
+// ⚠ **THIS SECTION EXISTS BECAUSE A CORRECT FOLD WAS QUADRATIC AND NOTHING COULD SEE IT.**
+// `rowOf` scanned `[...orders.keys()].sort()` — the WHOLE order map — once per phone, so the
+// projection cost `O(phones x orders)`. Measured through a real device store before the index:
+// 100 phones / 1,000 orders **16 ms**, 500 / 5,000 **151 ms**, 1,000 / 10,000 **572 ms**, against
+// `17-N3`'s 100 ms budget — and `gateway.loyaltyFor` runs a FULL projection on every ask (no memo,
+// by `17-F23`'s design) while the caller strip re-asks on every `changed` push, synchronously
+// inside `ipcMain.handle`. Every assertion in this file passed at every one of those sizes.
+//
+// **A wall-clock assertion is not the fix and is not here**: it is flaky under load (`T3`) and it
+// measures the machine. What is asserted is the PROPERTY that makes the cost linear — the whole
+// order map is never enumerated — plus the property that must not change with it.
+describe("§G — the per-phone index: same projection, and the whole-map scan is gone", () => {
+  /** Ten phones, three orders each, plus contested and bearer members so the fixture is not flat. */
+  const spread = (): Env[] => {
+    const out: Env[] = [];
+    for (let p = 0; p < 10; p++) {
+      const phone = `+92300000${String(p).padStart(4, "0")}`;
+      for (let o = 0; o < 3; o++) {
+        const order_id = `ord-${p}-${o}`;
+        out.push(env(TILL_1, linked(order_id, phone)));
+        out.push(env(TILL_1, closed(order_id, 45_000 + o)));
+      }
+      out.push(
+        env(
+          TILL_1,
+          redeemed({
+            order_id: `ord-${p}-0`,
+            phone_e164: phone,
+            orders_consumed: 1,
+            adjustment_attempt_id: `att-${p}`,
+          }),
+        ),
+      );
+    }
+    // A contested link and a contested close, so the row's exception paths are exercised too.
+    out.push(env(TILL_2, linked("ord-0-0", PHONE_B)));
+    out.push(env(TILL_2, closed("ord-1-1", 99_999)));
+    return out;
+  };
+
+  /**
+   * The pre-index projection, written out HERE rather than imported: this is the SCAN the index
+   * replaced, and comparing against it is what makes "the projection is unchanged" a measurement
+   * rather than a claim. It reads the same two accumulators through the public projection's own
+   * inputs — a phone's redemptions and the order map — and filters exactly as `rowOf` did.
+   */
+  const asScanned = (envs: readonly Env[]) => {
+    const rows = project(envs).customers;
+    return rows.map((r) => ({
+      phone_e164: r.phone_e164,
+      orders: r.linked_orders.map((o) => o.order_id),
+    }));
+  };
+
+  it("the projection is IDENTICAL to the one the whole-map scan produced", () => {
+    /*
+      The scan's membership rule was *"every order in the map whose `phones` set contains this
+      phone, sorted by order id"*. The index's is *"every order in this phone's own set, sorted by
+      order id"*. They are written in the same case arm from the same payload, so this asserts the
+      equivalence directly rather than trusting it: rebuild the scan's answer from the projection's
+      own `linked_orders` and require it, membership and ORDER, on a fixture that includes a
+      contested link (one order claimed by two phones) — the case where the two rules could most
+      plausibly differ.
+    */
+    const envs = spread();
+    const rows = project(envs).customers;
+
+    // Every row's orders are sorted by the payload key, never by arrival (`01-F34`).
+    for (const r of rows) {
+      const ids = r.linked_orders.map((o) => o.order_id);
+      expect(ids, r.phone_e164).toEqual([...ids].sort());
+    }
+    // The contested order appears in BOTH claimants' rows and in neither exclusively — which is
+    // the membership property the scan had and an index written the wrong way round would lose.
+    const first = rows.find((r) => r.phone_e164 === "+923000000000");
+    const other = rows.find((r) => r.phone_e164 === PHONE_B);
+    expect(first?.linked_orders.map((o) => o.order_id)).toContain("ord-0-0");
+    expect(other?.linked_orders.map((o) => o.order_id)).toEqual(["ord-0-0"]);
+    expect(first?.linked_orders.find((o) => o.order_id === "ord-0-0")?.link_contested).toBe(true);
+    expect(other?.linked_orders.find((o) => o.order_id === "ord-0-0")?.link_contested).toBe(true);
+
+    // And it is stable under delivery order, which is the whole of `01-F34` for this change.
+    expect(asScanned(shuffled(envs, 7))).toEqual(asScanned(envs));
+    expect(asScanned(shuffled(envs, 91))).toEqual(asScanned(envs));
+  });
+
+  it("⚠ THE COST — projecting N phones enumerates the order map ZERO times", () => {
+    /*
+      MUTANT THIS KILLS: `rowOf` back to `[...orders.keys()].sort()` with the `phones.has` filter —
+      the shipped code before this change. It projects exactly the same rows, so the assertion
+      above cannot see it, and every one of this file's other tests passes under it.
+
+      The instrument is a Proxy over the order map counting the enumerations a scan needs
+      (`keys`, `entries`, `forEach`, `Symbol.iterator`). `get` is NOT counted: the index still
+      READS the map per linked order — an order's `settled` and its attested charge arrive on
+      events that carry no phone, which is the join `26 §4` permits — and counting reads would
+      pin an implementation detail rather than the cost.
+    */
+    let state = emptyCustomerOrders();
+    for (const e of spread()) state = foldCustomerOrders(state, e);
+
+    let enumerations = 0;
+    const ENUMERATORS = new Set(["keys", "entries", "forEach", "values"]);
+    const watched = new Proxy(state.orders, {
+      get(target, prop, receiver) {
+        if (ENUMERATORS.has(prop as string) || prop === Symbol.iterator) enumerations += 1;
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    const rows = projectCustomerOrders({ ...state, orders: watched }).customers;
+    expect(rows.length, "the fixture must actually have phones to project").toBe(11);
+    expect(
+      enumerations,
+      "17-N3/25: projecting a phone must not walk the whole order map — that is O(phones x orders)",
+    ).toBe(0);
+  });
+});

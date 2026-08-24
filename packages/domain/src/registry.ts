@@ -820,12 +820,29 @@ const payloadSchemas = {
    * the event permanent. `void.recorded`'s note above states that consequence at length and
    * `order.settlement_closed` is deliberately not tightened for the identical reason.
    *
-   * **Where the pairing IS enforced: at the WRITER, structurally.**
-   * `apps/pos-electron/src/main/campaigns.ts` resolves the citation from the device's own artifact
-   * and takes `campaign_version` off that artifact, so an emitter cannot produce one without the
-   * other. That is the same division `registry.ts` already applies to `01-F23`'s phone key —
-   * validate the VALUE here, put the POLICY at the writer — and it is what `01-F17` requires:
-   * never throw on the ingest path.
+   * **Where the pairing IS enforced: at the WRITER, structurally (`17-F27` (c)).**
+   * `apps/pos-electron/src/main/campaigns.ts`'s `stampCampaignVersion` wraps the renderer's write
+   * channel INSIDE `authorizeWrites`, on both the ordinary and the escalated route: a
+   * `discount.recorded` whose `campaign_id` names a row in THIS device's artifact has its
+   * `campaign_version` overwritten from that artifact, and one whose id names nothing this device
+   * holds loses both keys. So an emitter cannot produce one without the other, and cannot produce
+   * either against a rule this device cannot state. That is the same division this file already
+   * applies to `01-F23`'s phone key — validate the VALUE here, put the POLICY at the writer — and
+   * it is what `01-F17` requires: never throw on the ingest path.
+   *
+   * ⚠ **THIS PARAGRAPH WAS FALSE WHEN IT WAS WRITTEN, and it is corrected in place rather than
+   * quietly replaced (`L11`).** It described the stamp in the present tense in the same change
+   * that declared these two fields — and `campaigns.ts` contained the string `campaign_version`
+   * **zero** times. `campaignCitationFor` returned `{ campaign_id, within_campaign_bounds }` and
+   * nothing else; the only production write of the version anywhere was `gateway.loyaltyFor`, a
+   * READ returning `LoyaltyStatus` to a screen. Measured on a real store by an adversarial review:
+   * a `discount.recorded` carrying `campaign_id` and **no** version was accepted and persisted,
+   * and so was one carrying `campaign_version: 999` against an artifact at version 1 — `17-F25`'s
+   * *"under what rule?"* unanswerable for both, permanently (`01-F1`). **A protection claimed in
+   * prose retires the assertion the next session would have written**, and this one sat inside a
+   * paragraph that (correctly, and at length) congratulates itself for catching a different false
+   * claim in `campaign.ts`'s own header. The mechanism exists now and
+   * `apps/pos-electron/src/main/__acceptance__/loyalty-seam.test.ts` §G is what keeps it true.
    *
    * **What is deliberately NOT here: the amount's derivation.** `amount_paisa` stays the single
    * money field. A payload that also carried `benefit.form` and `value` would let a reader

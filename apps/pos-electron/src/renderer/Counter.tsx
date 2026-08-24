@@ -19,6 +19,7 @@ import { useCallback, useEffect, useState } from "react";
 import type {
   Alarm,
   AppendRequest,
+  CampaignOffer,
   CashState,
   CustomerLookup,
   DeviceState,
@@ -563,6 +564,14 @@ export const Counter = () => {
    * for which order this terminal is on).
    */
   const [correcting, setCorrecting] = useState(false);
+  /**
+   * `17-F27` (a) — the campaigns main says reach the order this surface is about to correct.
+   *
+   * Empty until asked, and empty is the ordinary answer (no artifact, none reaching this order, or
+   * a scope this till cannot resolve). It is renderer state and never a ledger fact: what the
+   * cashier cites travels on the payload and is re-resolved at the writer (Commandment 8).
+   */
+  const [campaignOffers, setCampaignOffers] = useState<readonly CampaignOffer[]>([]);
 
   const [pending, setPending] = useState<{ req: AppendRequest; offer: EscalationOffer } | null>(
     null,
@@ -968,6 +977,43 @@ export const Counter = () => {
       live = false;
     };
   }, [caller?.phone_e164, orders]);
+
+  /**
+   * `17-F27` (a) — asked when the correction surface opens, for the order it is about.
+   *
+   * **Asked, never cached across an order**, on `loyaltyFor`'s reason directly above: the answer
+   * is a render over this device's `17-F22` artifact against ONE order's total, channel and
+   * customer link, so a list held from a previous order would offer a campaign that does not reach
+   * this one — and the writer would then refuse the citation the screen had just shown.
+   *
+   * `orders` is a re-ask signal rather than a value this effect reads, exactly as it is on the
+   * loyalty effect: a line added or voided moves the order total, and the total decides both
+   * `min_order_paisa` and the bound each offer carries.
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a re-ask signal — see just above.
+  useEffect(() => {
+    const order_id = current?.order_id ?? null;
+    if (!correcting || order_id === null) {
+      setCampaignOffers([]);
+      return;
+    }
+    const answer = window.restos.campaignOffers?.(order_id);
+    if (answer === undefined) return;
+    let live = true;
+    void answer
+      .then((offers) => {
+        if (live) setCampaignOffers(offers);
+      })
+      .catch(() => {
+        // `00 §5.7` / `01-F17` — a surface that cannot answer offers nothing rather than a stale
+        // campaign. Every discount is then discretionary, which is the safe direction and is the
+        // behaviour that existed before `17-F27`.
+        if (live) setCampaignOffers([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [correcting, current?.order_id, orders]);
 
   // `01-F17` — a sale is never blocked. A shell that has not loaded its device state yet is
   // the one case where there is genuinely nothing to draw, so it says so in a word rather
@@ -1401,6 +1447,26 @@ export const Counter = () => {
         reason: correction.reason,
         approver_user_id: null,
         adjustment_attempt_id: newId(),
+        /*
+          `17-F27` (b) — **THE CITATION, and this line is the producer `17-F24` did not have.**
+
+          Until it existed this payload was five literal fields, so `payload.campaign_id` was
+          `undefined` on every `discount.recorded` any surface in the product could emit,
+          `authorize.ts`'s `claimed` was never a string, `canDiscount`'s campaign arm could never
+          fire, and `campaignCitationFor` / `campaignApplies` / `campaignBenefitPaisa` were never
+          asked a question with a non-null answer. A missing producer for a payload KEY is the one
+          shape `seams:check` says out loud it cannot see.
+
+          **Spread conditionally so a discretionary discount carries NO key at all.** `registry.ts`
+          declares the field `.optional()` and states why: absence means discretionary, which is
+          the ordinary case, so there is nothing for a `null` to state. Writing `campaign_id: null`
+          would make the commonest event in this family carry a field that says nothing.
+
+          **It is a CLAIM.** `campaign_version` is not here and must not be: the writer stamps it
+          from this device's own artifact (`17-F27` (c)), because a version the renderer supplied
+          answers `17-F25`'s *"under what rule?"* with a number no publisher minted.
+        */
+        ...(correction.campaign_id === null ? {} : { campaign_id: correction.campaign_id }),
       },
       refs: [correction.line_id],
     });
@@ -1886,10 +1952,31 @@ export const Counter = () => {
               returns 0 in that case precisely so this surface has to choose the reward sentence.
             */}
             {loyalty === null ? null : loyalty.available > 0 ? (
+              /*
+                `17-F23` as amended (August 2026) — **THIS ARM RENDERED A CLAIMABLE COUNT THAT
+                NOTHING IN THE PRODUCT CAN CONSUME, and the count is what had to go.**
+
+                `available` is `floor((eligible − orders_consumed_total) / every_n)` and
+                `orders_consumed_total` moves only on `loyalty.reward_redeemed`, which **no surface
+                here emits** (`17-F17`'s *"→ apply"* has no producer). So the subtrahend is
+                structurally zero and the number only ever climbs: measured on a real store at 50
+                settled linked orders it read **"5 rewards to claim"** against
+                `orders_consumed_total` `"0"`, so a regular who had already taken five free coffees
+                was presented to the cashier as owed five more — for the life of the ledger.
+                `use_limit: once_per_customer` bounds nothing, because the counter does not read
+                the row.
+
+                `00 §5.7` — the degradation is NAMED rather than hidden, and no number is offered
+                against a balance nobody can decrement. The countdown arm below is untouched and
+                correct: a customer who has redeemed nothing has consumed nothing.
+
+                **The day a producer lands, the count comes back.** Nothing in the code can see
+                that day arrive, so the tripwire is a hand-written assertion —
+                `__acceptance__/loyalty-seam.test.ts` §F fails the moment anything in this app
+                emits `loyalty.reward_redeemed`, and it names this line.
+              */
               <p style={{ ...STATE_LINE, color: color["fgColor-default"], marginLeft: 0 }}>
-                {loyalty.available === 1
-                  ? "1 reward to claim"
-                  : `${loyalty.available} rewards to claim`}
+                Reward threshold passed — this till cannot record a redemption yet
               </p>
             ) : (
               <p style={{ ...STATE_LINE, color: color["fgColor-muted"], marginLeft: 0 }}>
@@ -2358,6 +2445,10 @@ export const Counter = () => {
           */
           <LineCorrection
             lines={current.lines}
+            // `17-F27` (a) — resolved in MAIN from this device's own `17-F22` artifact, never
+            // here: a renderer that assembled its own offer list would be reading configuration
+            // on the untrusted side of the plane (`18 §9`, Commandment 8).
+            campaigns={campaignOffers}
             onSubmit={correctLine}
             onCancel={() => setCorrecting(false)}
           />

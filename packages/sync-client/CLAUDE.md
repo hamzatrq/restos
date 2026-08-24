@@ -204,3 +204,36 @@ suite would not have found that; running the mutant did.**
 fold directly and blesses a subsystem the product never reaches. Neither file alone is evidence.
 
 **M20 is what makes every red row mean anything.**
+
+### `folds/customer-orders.ts` — the projection was quadratic (August 2026, adversarial review)
+
+`rowOf` scanned `[...orders.keys()].sort()` — the **whole** order map — once per phone, so
+`projectCustomerOrders` cost `O(phones x orders)`. Measured through a real device store:
+
+| phones | orders | projection |
+|---|---|---|
+| 100 | 1,000 | 16 ms |
+| 500 | 5,000 | **151 ms** |
+| 1,000 | 10,000 | **572 ms** |
+
+`17-N3` budgets 100 ms. `gateway.loyaltyFor` runs a FULL projection on every ask (no memo, by
+`17-F23`'s design) and the caller strip re-asks on every `changed` push while a caller is latched —
+**synchronously inside `ipcMain.handle`, blocking every other IPC including `append`**. At a few
+months of one till's volume the read blows the budget. `specs/25` owns this.
+
+`PhoneAcc` now holds its own G-set of order ids — the **inverse** of `OrderAcc.phones`, written in
+the same case arm from the same payload so the two cannot disagree — and `rowOf` walks that set.
+**It is an INDEX, not a memo**: nothing is cached and no projected value is stored (`17-F23`'s named
+break is memoizing the RENDER, one layer up and untouched). Membership and order are identical to
+the filter it replaces, and the sort is still on the payload key, never arrival (`01-F34`).
+
+**Mutation (control sync-client 1028 pass / 1 known-red):** restoring the scan verbatim kills
+**exactly one** test — `customer-orders-fold.test.ts` §G *"THE COST — projecting N phones enumerates
+the order map ZERO times"* — and **nothing else in the file**, because the two produce identical
+rows. That is the attribution: the projection assertions are structurally blind to the cost, and a
+wall-clock assertion would measure the machine and flake under load (`T3`), so the instrument is a
+Proxy over the order map counting enumerations (`keys`/`entries`/`values`/`forEach`/`Symbol.iterator`)
+and requiring zero. `get` is deliberately NOT counted: the index still READS the map per linked
+order, because an order's `settled` and its attested charge arrive on events carrying no phone —
+the join `26 §4` permits.
+

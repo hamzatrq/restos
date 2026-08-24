@@ -16,6 +16,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AppendRequest,
+  CampaignOffer,
   DeviceState,
   EscalationOffer,
   EscalationResult,
@@ -94,7 +95,20 @@ let escalated: { req: AppendRequest; approver: string }[];
  * append always succeeds measures the manager's path never.
  */
 const mount = (
-  opts: { orders?: OpenOrder[]; refuse?: boolean; offer?: EscalationOffer | null } = {},
+  opts: {
+    orders?: OpenOrder[];
+    refuse?: boolean;
+    offer?: EscalationOffer | null;
+    /**
+     * `17-F27` (a) — the campaign offers main resolves for this order.
+     *
+     * **UNDEFINED means the bridge does not serve the channel at all**, which is both the
+     * pre-`17-F27` product and a real shipping state (`campaignOffers` is optional on the
+     * contract). Every test above mounts that way, so they are the control for §F below: no
+     * panel, no citation, every discount discretionary.
+     */
+    campaigns?: readonly CampaignOffer[];
+  } = {},
 ) => {
   appended = [];
   escalated = [];
@@ -120,6 +134,9 @@ const mount = (
       return { ok: true, id: "evt-approved" };
     }),
     addLine: vi.fn(async () => ({ id: "evt-line" })),
+    ...(opts.campaigns === undefined
+      ? {}
+      : { campaignOffers: vi.fn(async () => opts.campaigns as readonly CampaignOffer[]) }),
     quickTags: vi.fn(async () => ["less spicy"]),
     onChanged: vi.fn(() => () => {}),
   };
@@ -380,5 +397,119 @@ describe("§D DEC-MONEY-010 — what each act does to the bill is stated, not in
     await pick(/naan/i);
     await pick(/^void/i);
     expect(screen.getAllByText(/comes off the bill now/i).length).toBeGreaterThan(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// §F — `17-F27` — THE CITATION, DRIVEN. The producer `17-F24` assumed and never had.
+//
+// ⚠ **THIS IS THE BEHAVIOURAL HALF, and it exists because the seam assertion beside it is a
+// SOURCE-STRING match.** `loyalty-seam.test.ts` §E SEAM 5 reads `Counter.tsx` for the payload
+// spread — the same weak instrument `line-advance-seam.test.ts` §A uses, and it proves the line
+// exists and nothing about what reaches the ledger. Everything below presses real controls and
+// reads what `append` was actually called with.
+//
+// The defect it is aimed at: before `17-F27` this payload was five literal fields, so
+// `payload.campaign_id` was `undefined` on every `discount.recorded` any surface could emit,
+// `canDiscount`'s campaign arm could never fire, and three campaign functions were dead. Nothing
+// in 1,372 tests could tell that from a working implementation.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+const OFFER: CampaignOffer = { campaign_id: "camp-bank", bound_paisa: 1_000_000 };
+
+describe("§F 17-F27 — a cashier can CITE a campaign, and the citation reaches the payload", () => {
+  const enter = async (digits: string) => {
+    for (const key of digits)
+      fireEvent.click(await screen.findByRole("button", { name: new RegExp(`^${key}$`) }));
+  };
+
+  it("the cited campaign travels on `discount.recorded`", async () => {
+    mount({ campaigns: [OFFER] });
+    await openSurface();
+    await pick(/karahi/i);
+    await pick(/^discount/i);
+    await pick(/camp-bank/i);
+    await enter("100");
+    await pick(new RegExp(CORRECTION_REASONS[0], "i"));
+
+    await waitFor(() => expect(appendsOf("discount.recorded")).toHaveLength(1));
+    const payload = appendsOf("discount.recorded")[0]?.payload as Record<string, unknown>;
+    expect(payload).toMatchObject({ amount_paisa: 10_000, campaign_id: "camp-bank" });
+    // ⚠ **The renderer does NOT send a version.** `17-F27` (c) puts the stamp at the writer,
+    // because a version the renderer supplied answers `17-F25`'s "under what rule?" with a number
+    // no publisher minted. A screen that sent one would be the untrusted side asserting the rule.
+    expect(payload).not.toHaveProperty("campaign_version");
+  });
+
+  it("`No offer` is a real control, and a discretionary discount carries NO key at all", async () => {
+    // `registry.ts` declares the field `.optional()` and says why: absence means discretionary,
+    // which is the ordinary case, so there is nothing for a `null` to state. MUTANT this kills:
+    // `campaign_id: correction.campaign_id` unconditionally, which writes `null` into the
+    // commonest event in this family — permanently (`01-F1`).
+    mount({ campaigns: [OFFER] });
+    await openSurface();
+    await pick(/karahi/i);
+    await pick(/^discount/i);
+    await pick(/camp-bank/i);
+    await pick(/no offer/i);
+    await enter("100");
+    await pick(new RegExp(CORRECTION_REASONS[0], "i"));
+
+    await waitFor(() => expect(appendsOf("discount.recorded")).toHaveLength(1));
+    expect(appendsOf("discount.recorded")[0]?.payload).not.toHaveProperty("campaign_id");
+  });
+
+  it("a VOID and a COMP never cite a campaign, whatever was selected", async () => {
+    // `17-F24`'s arm is `canDiscount`'s alone. MUTANT this kills: the citation carried on every
+    // act, which would put a campaign id on a void — a rule that authorised nothing.
+    mount({ campaigns: [OFFER] });
+    await openSurface();
+    await pick(/karahi/i);
+    await pick(/^discount/i);
+    await pick(/camp-bank/i);
+    // ...and she changes her mind about the ACT, which must clear the citation with it.
+    await pick(/^comp/i);
+    await pick(new RegExp(CORRECTION_REASONS[0], "i"));
+    await waitFor(() => expect(appendsOf("comp.recorded")).toHaveLength(1));
+    expect(appendsOf("comp.recorded")[0]?.payload).not.toHaveProperty("campaign_id");
+  });
+
+  it("⚠ THE CONTROL — a bridge that serves no offers shows no panel and still emits", async () => {
+    /*
+      This is the state every other test in this file mounts, and it is a real shipping one: the
+      channel is optional on the contract, a device may hold no artifact, and `17-F24` as amended
+      refuses a campaign whose scope this till cannot resolve. The surface must behave EXACTLY as
+      it did before `17-F27` — which is what makes the three tests above evidence about the
+      citation rather than about the surface having changed.
+    */
+    mount();
+    await openSurface();
+    await pick(/karahi/i);
+    await pick(/^discount/i);
+    expect(screen.queryByText(/under which offer/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /no offer/i })).toBeNull();
+    await enter("100");
+    await pick(new RegExp(CORRECTION_REASONS[0], "i"));
+    await waitFor(() => expect(appendsOf("discount.recorded")).toHaveLength(1));
+    expect(appendsOf("discount.recorded")[0]?.payload).toMatchObject({ amount_paisa: 10_000 });
+  });
+
+  it("the offer names the campaign and the bound it allows — a citation is not an instruction", async () => {
+    // `17-F27` (b): no tile applies an amount. The bound is shown so a cashier knows what she may
+    // give; the number she enters stays hers, and the writer decides whether the pair is
+    // pre-approved. MUTANT this kills: a tile that sets the entry, which would have to resolve
+    // `item_scope`'s base — the refusal `17-F24`'s amendment records.
+    mount({ campaigns: [OFFER] });
+    await openSurface();
+    await pick(/karahi/i);
+    await pick(/^discount/i);
+    const tile = await screen.findByRole("button", { name: /camp-bank/i });
+    expect(within(tile).getByText(/10,000/)).toBeTruthy();
+    fireEvent.click(tile);
+    // Selecting an offer must not enter an amount: the `Why` panel is gated on a positive entry,
+    // so if the tile had applied one the reasons would be on screen already.
+    expect(
+      screen.queryByRole("button", { name: new RegExp(CORRECTION_REASONS[0], "i") }),
+    ).toBeNull();
   });
 });

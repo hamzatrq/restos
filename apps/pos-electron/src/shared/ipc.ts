@@ -798,6 +798,32 @@ export const LoyaltyStatusSchema = z.object({
 export type LoyaltyStatus = z.infer<typeof LoyaltyStatusSchema>;
 
 /**
+ * `17-F27` (a)/(b) — one campaign a cashier may CITE on this order, as the trusted side resolved it.
+ *
+ * ⚠ **THIS TYPE EXISTS BECAUSE `campaign_id` HAD NO PRODUCER.** `registry.ts` declared
+ * `discount.recorded.campaign_id`, `authorize.ts` read it and `canDiscount` gained an arm for it —
+ * and no surface in the product ever set it, so the arm could not fire and every campaign function
+ * behind it was asked a question with no non-null answer. A payload key with no producer is `L8`'s
+ * shape that no rail can see (a key in an object literal is not an export).
+ *
+ * **It carries no verdict and no amount to apply.** `bound_paisa` is what the campaign ALLOWS on
+ * this order — shown so a cashier knows what she may give — and the amount she enters stays hers
+ * (`17-F27` (b): a tile that set the amount would have to resolve `item_scope`'s base, which is the
+ * refusal `17-F24`'s amendment records). Whether the pair is pre-approved is decided again at the
+ * writer, from this device's own artifact, on every append (Commandment 8).
+ *
+ * **`campaign_id` is the label, because `17-F22`'s row has no display name.** Inventing one would
+ * be a field no FR asked for (Commandment 2); the authoring surface `14-F43` gates is where a name
+ * belongs.
+ */
+export const CampaignOfferSchema = z.object({
+  campaign_id: z.string().min(1),
+  /** `17-F24`'s bound for THIS order, integer paisa. `applyRateBps` then `min(cap)`, never a float. */
+  bound_paisa: z.number().int().nonnegative(),
+});
+export type CampaignOffer = z.infer<typeof CampaignOfferSchema>;
+
+/**
  * `02-F27`'s lookup answer — *"customer file lookup by normalized phone → name, saved
  * addresses"*.
  *
@@ -1050,6 +1076,20 @@ export const CHANNELS = {
    */
   loyaltyFor: "restos:loyalty-for",
   /**
+   * `17-F27` (a) — which campaigns reach THIS order, for the correction surface to cite one from.
+   * A READ: nothing is appended and nothing is authorized on this channel (`escalationFor`'s
+   * precedent, one FR over).
+   *
+   * ⚠ **A forged answer buys a renderer nothing**, and that is the property that makes a
+   * display-only read safe here: `authorizeWrites` resolves the citation again from this device's
+   * own `17-F22` artifact before the matrix is asked, so a screen that invents an offer gets a
+   * discount judged discretionary — the same verdict it would have got citing nothing.
+   *
+   * It is asked per order and per opening of the surface, never cached across one, for
+   * `loyaltyFor`'s reason directly above: the answer is a render over the campaign artifact.
+   */
+  campaignOffers: "restos:campaign-offers",
+  /**
    * `02-F20` — "would a manager credential close this?", asked of the matrix and answered for
    * display only. A READ: nothing is appended and nothing is authorized on this channel.
    *
@@ -1258,6 +1298,20 @@ export type RestosBridge = {
    * (`17-F22`: a device that has never received the artifact has no campaigns).
    */
   loyaltyFor?: (phone_e164: string) => Promise<LoyaltyStatus | null>;
+  /**
+   * `17-F27` (a) — the campaigns a discount on this order may cite. Empty when this device holds
+   * no artifact, when none reaches the order, or when the ones that do carry a scope this till
+   * cannot resolve (`17-F24` as amended) — all of which are ordinary states and never errors
+   * (`01-F17`).
+   *
+   * **OPTIONAL for the reason `escalationFor` records below**: three renderer oracles close their
+   * harnesses with `satisfies RestosBridge` and predate this channel. The cost is the same shape
+   * and is named: a host that does not serve it offers no campaign tile, so every discount is
+   * discretionary — which is exactly the behaviour that existed before `17-F27`, never a silent
+   * pre-approval. The shipped preload DOES serve it and `loyalty-seam.test.ts` §E fails if it
+   * stops.
+   */
+  campaignOffers?: (order_id: string) => Promise<readonly CampaignOffer[]>;
   /**
    * `02-F20`'s local path, and both members are **OPTIONAL for the reason `cashState` and
    * `alarms` above record**: `unlock-gate.dom.test.tsx` closes its harness with

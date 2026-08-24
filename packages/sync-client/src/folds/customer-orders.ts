@@ -122,8 +122,31 @@ type OrderAcc = {
   attested: Set<number>;
 };
 
-/** Per phone: the redemption ledger. Linked orders are resolved from `orders` at project time. */
+/** Per phone: the orders this key claims, and its redemption ledger. */
 type PhoneAcc = {
+  /**
+   * `02-F64`'s G-set of order ids this phone claims — **the INVERSE of `OrderAcc.phones`, written
+   * in the same case arm so the two can never disagree.**
+   *
+   * ⚠ **It exists because `rowOf` was quadratic and `17-N3` budgets 100 ms.** The projection used
+   * to scan `[...orders.keys()].sort()` — the WHOLE order map — once per phone, so the cost was
+   * `O(phones x orders)`. Measured on this fold through a real store before the index: 100 phones
+   * / 1,000 orders 16 ms, 500 / 5,000 **151 ms**, 1,000 / 10,000 **572 ms**. `gateway.loyaltyFor`
+   * calls `store.customerOrders()` — a full projection, no memo, by `17-F23`'s design — on every
+   * ask, and the caller strip re-asks on every `changed` push while a caller is latched, so at a
+   * few months of one till's volume the read blew `17-N3` **synchronously inside `ipcMain.handle`,
+   * blocking every other IPC including `append`**. This is `specs/25`'s territory and it is an
+   * INDEX, not a memo: nothing is cached and no projected value is stored (`17-F23`'s named break
+   * is memoizing the RENDER, which is one layer up and untouched).
+   *
+   * **It changes no projected value and cannot.** Membership is identical to the filter it
+   * replaces — both are written in the `order.customer_linked` arm from the same payload — and
+   * `rowOf` still sorts on the order id, which is a payload VALUE and never arrival order
+   * (`01-F34`). `customer-orders-fold.test.ts` §I asserts BOTH halves: the projection is
+   * byte-identical to the scan it replaces, and the scan is gone (a Proxy counts `keys()` on the
+   * order map and requires ZERO calls per phone).
+   */
+  orders: Set<string>;
   /** `adjustment_attempt_id` → (canonical member bytes → member). `01-F31`'s keyed map. */
   redemptions: Map<string, Map<string, { orders_consumed: number }>>;
 };
@@ -176,7 +199,7 @@ const orderOf = (state: CustomerOrdersState, order_id: string): OrderAcc =>
   }));
 
 const phoneOf = (state: CustomerOrdersState, phone_e164: string): PhoneAcc =>
-  sub(state.phones, phone_e164, () => ({ redemptions: new Map() }));
+  sub(state.phones, phone_e164, () => ({ orders: new Set<string>(), redemptions: new Map() }));
 
 /**
  * Fold one envelope. Types outside this fold's vocabulary change nothing — a payment delivered in
@@ -196,11 +219,17 @@ export const foldCustomerOrders = (
   switch (event.type) {
     case "order.customer_linked": {
       const phone = payload.phone_e164 as string;
-      orderOf(state, payload.order_id as string).phones.add(phone);
+      const order_id = payload.order_id as string;
+      orderOf(state, order_id).phones.add(phone);
       // The phone row is created even when this is the only thing we know about it, so a linked
       // order with no settlement and no redemption still renders. `01-F10` never parks the link —
       // the event carries its whole projection key.
-      phoneOf(state, phone);
+      //
+      // **Both directions are written HERE, from one payload, in one statement pair** — see
+      // `PhoneAcc.orders`. Two G-sets that are inverses of each other can only diverge if one of
+      // them is written somewhere the other is not, so they are written together and nowhere else.
+      // Both are idempotent and commutative, so duplicate delivery collapses on each (`01-F34`).
+      phoneOf(state, phone).orders.add(order_id);
       return state;
     }
     case "order.settlement_closed": {
@@ -255,9 +284,18 @@ const rowOf = (
   const linked: LinkedOrderRow[] = [];
   // Sorted on the KEY, which is a payload value. Returning insertion order would make delivery
   // order observable (`01-F34`) — the exact defect `folds/customer-file.ts` records for its rows.
-  for (const order_id of [...orders.keys()].sort()) {
-    const o = orders.get(order_id) as OrderAcc;
-    if (!o.phones.has(phone_e164)) continue;
+  //
+  // **This walks THIS phone's own order set, not the whole map** (`PhoneAcc.orders`): the set is
+  // the inverse of the `o.phones.has(phone_e164)` filter it replaces, written in the same arm from
+  // the same payload, so membership is identical and the sort is still on the payload value. The
+  // `orders` map is still read — an order's `settled` and its attested charge arrive on events
+  // that carry NO phone, which is the join `26 §4` permits — but it is no longer SCANNED.
+  for (const order_id of [...acc.orders].sort()) {
+    const o = orders.get(order_id) as OrderAcc | undefined;
+    // A link whose order has produced no other event still has an `OrderAcc` (the link arm creates
+    // it), so this is unreachable in practice and is a refusal to guess rather than a `!`: a row
+    // this fold cannot describe is left out, never rendered as an unsettled order with no charge.
+    if (o === undefined) continue;
     const link_contested = o.phones.size > 1;
     if (link_contested) exceptions.add(LINK_CONTESTED);
     const billed_contested = o.attested.size > 1;

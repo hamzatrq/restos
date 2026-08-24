@@ -28,6 +28,8 @@ import {
   campaignBenefitPaisa,
 } from "@restos/domain";
 import type { OpenOrderRow } from "@restos/sync-client";
+import { AppendRequestSchema, type AppendResult, type CampaignOffer } from "../shared/ipc";
+import type { RendererWrites } from "./settlement-guard";
 
 /** The v0 seed: a JSON array of `17-F22` rows. Deleted by `01-F87`'s carrier. */
 export const CAMPAIGNS_ENV = "RESTOS_CAMPAIGNS";
@@ -142,12 +144,50 @@ export type CampaignCitationDeps = {
  * and is the honest one, because pre-approving an amount we cannot bound is the defect `17-F24`'s
  * `within_campaign_bounds` field exists to prevent.
  */
-export const campaignCitationFor =
+/**
+ * (17-F24 AS AMENDED) THE THREE ROW FIELDS THIS PREDICATE CANNOT EVALUATE, AND THE REFUSAL IS THE
+ * WHOLE FIX (August 2026, adversarial review).
+ *
+ * The first build read none of these and still answered *within bounds*, which is the round-3
+ * shape on a money field: the mechanism was correct and was never aimed at the case that matters.
+ * Measured on this branch before the fix:
+ *
+ * - `item_scope` — `campaignBenefitPaisa`'s own docstring says the base is *"the scoped lines'
+ *   total when `item_scope` names some"* and this resolver passed the ORDER total regardless. A
+ *   *20% off pizzas* campaign on a Rs 10,000 bill carrying one Rs 500 pizza pre-approved
+ *   **Rs 2,000** — 20x the intended bound, with no manager, permanently (`01-F1`).
+ * - `use_limit` — `once_per_order` / `once_per_customer` need a count of prior citations and this
+ *   function has no history. Measured: one citation repeated 50 times, every one within bounds.
+ * - `proof` — `code` / `bearer_card` / `attested` name a thing the cashier must be holding and
+ *   **nothing in this product collects one**, so a `coupon` campaign was pre-approved with no code.
+ *
+ * **`free_item`'s exit is the precedent and it is a few lines below:** a bound this predicate
+ * cannot compute is not a blessing, so the row resolves to `null`, the discretionary predicate runs
+ * untouched (`17-F12`'s last clause), and a large one asks for a manager. **The class this closes
+ * and the one it does not (`L11`):** it closes *the arm blessing an amount it never bounded*; it
+ * implements none of the three — an item-scoped campaign is REFUSED, not scoped. Whoever builds the
+ * scoped base, the use counter or the proof capture DELETES an arm here rather than adding one.
+ *
+ * It lives here rather than in `campaignApplies` deliberately — see that function's own note. The
+ * domain predicate answers *does this campaign reach this ORDER*, and none of these three is that
+ * question; this is the caller that resolves the base, so this is where a base it cannot resolve
+ * has to be refused.
+ */
+const unresolvableScope = (row: CampaignRow): boolean =>
+  row.item_scope !== null || row.use_limit !== "unlimited" || row.proof !== "none";
+
+/**
+ * The ONE resolution both readers share (`02-F45`: two resolutions of one question disagree, and
+ * here the disagreement is a cashier offered a campaign the write guard then refuses).
+ *
+ * Returns the bound this campaign allows on this order, or `null` for every reason a campaign does
+ * not apply. `17-F27` (a) requires the offer list and the citation to come from this function and
+ * not from two that look alike.
+ */
+const reachOf =
   (deps: CampaignCitationDeps) =>
-  (order_id: string, campaign_id: string, amount_paisa: number): CampaignCitation | null => {
-    const artifact = deps.artifact();
-    const row = artifact.rows.find((r) => r.campaign_id === campaign_id);
-    if (row === undefined) return null;
+  (order_id: string, row: CampaignRow): { readonly bound_paisa: number } | null => {
+    if (unresolvableScope(row)) return null;
 
     const order = deps.openOrders().find((o) => o.order_id === order_id);
     if (order === undefined) return null;
@@ -168,5 +208,117 @@ export const campaignCitationFor =
 
     const bound = campaignBenefitPaisa(row.benefit, order_total_paisa);
     if (bound === null) return null;
-    return { campaign_id, within_campaign_bounds: amount_paisa <= bound };
+    return { bound_paisa: bound };
   };
+
+export const campaignCitationFor =
+  (deps: CampaignCitationDeps) =>
+  (order_id: string, campaign_id: string, amount_paisa: number): CampaignCitation | null => {
+    const row = deps.artifact().rows.find((r) => r.campaign_id === campaign_id);
+    if (row === undefined) return null;
+    const reach = reachOf(deps)(order_id, row);
+    if (reach === null) return null;
+    return { campaign_id, within_campaign_bounds: amount_paisa <= reach.bound_paisa };
+  };
+
+/**
+ * `17-F27` (a) — **the offer list, and it is the PRODUCER half of `17-F24` that did not exist.**
+ *
+ * Until this shipped, nothing anywhere in the product put a `campaign_id` on a `discount.recorded`:
+ * the only emitter built five literal fields, so `payload.campaign_id` was `undefined` on every
+ * event any surface could emit, `canDiscount`'s campaign arm could never fire, and this file's own
+ * citation resolver was never asked a question with a non-null answer. That is `L8` in the shape
+ * `seams:check` says out loud it cannot see — a missing producer for a payload KEY.
+ *
+ * **Display-only, and it authorizes nothing** (`02-F20`'s `escalationFor` precedent). A renderer
+ * that forged this list gains nothing: every fact that decides the verdict is re-read at the writer
+ * from this same `reachOf`, so an offer the screen invents is refused there (Commandment 8).
+ *
+ * **The tile carries the `campaign_id` itself**, because `17-F22`'s row has no display name and
+ * inventing one here would be a field no FR asked for (Commandment 2). `17-F27` records that a name
+ * belongs to the authoring surface.
+ *
+ * Order is the ARTIFACT's, which is the writer's, and it is not sorted here: sorting by
+ * `bound_paisa` would put the biggest discount first on a surface a cashier is choosing from.
+ */
+export const campaignOffersFor =
+  (deps: CampaignCitationDeps) =>
+  (order_id: string): readonly CampaignOffer[] => {
+    const offers: CampaignOffer[] = [];
+    for (const row of deps.artifact().rows) {
+      const reach = reachOf(deps)(order_id, row);
+      if (reach === null) continue;
+      offers.push({ campaign_id: row.campaign_id, bound_paisa: reach.bound_paisa });
+    }
+    return offers;
+  };
+
+const DISCOUNT_RECORDED = "discount.recorded";
+
+export type CampaignVersionStampDeps = {
+  readonly writes: RendererWrites;
+  /** The device's own `17-F22` artifact — the same getter the citation resolver is built from. */
+  readonly artifact: () => CampaignArtifact;
+};
+
+/**
+ * `17-F27` (c) — **`campaign_version` is stamped by the WRITER, from this device's own artifact.**
+ *
+ * (L11) `registry.ts` CLAIMED THIS PROTECTION BEFORE IT EXISTED, and that is why this module
+ * carries it rather than the payload schema. Its `discount.recorded` header said *"Where the
+ * pairing IS enforced: at the WRITER, structurally. `apps/pos-electron/src/main/campaigns.ts` …
+ * takes `campaign_version` off that artifact, so an emitter cannot produce one without the
+ * other."* This file contained the string for that field **zero** times; measured on a real store,
+ * a `discount.recorded` carrying a campaign id and NO version was accepted and persisted, and so
+ * was one carrying version 999 against an artifact at version 1. `17-F25`'s *"under what rule?"*
+ * was unanswerable for both, permanently (`01-F1`). A protection claimed in prose retires the
+ * assertion the next session would have written.
+ *
+ * **The renderer's version is OVERWRITTEN, not compared** — `line-void.ts` overwrites
+ * `amount_paisa` from the device's own derivation for the same reason (`18 §9` makes the renderer
+ * the untrusted side), and a version the renderer supplied answers `17-F25` with a number no
+ * publisher minted.
+ *
+ * **A cited campaign this device's artifact does not hold cannot be paired, so the CLAIM IS
+ * DROPPED.** The authorization has already fallen through to the discretionary predicate
+ * (`campaignCitationFor` answers `null` for an unknown id), so keeping the id would record a rule
+ * this device cannot state beside a verdict that says discretionary — two facts that disagree, for
+ * ever. Dropping it makes the payload say what the act actually was.
+ *
+ * It does **NOT** refuse the write, and must not. A discount is not blocked because a campaign is
+ * unknown (`01-F17`, Commandment 4); the citation simply does not survive.
+ *
+ * **Where it sits:** INSIDE `authorizeWrites`, in the same chain as `voidExitsLine`, so BOTH the
+ * ordinary and the escalated write paths reach it. A stamp on one path only is a discount whose
+ * recorded rule depends on whether a manager was asked.
+ */
+export const stampCampaignVersion = (deps: CampaignVersionStampDeps): RendererWrites => ({
+  append: (req: unknown): AppendResult => {
+    // Re-parsed rather than read raw, on `voidExitsLine`'s posture: `req` is `unknown` from an
+    // untrusted renderer, and on anything malformed this narrowing MISSES and the request goes on
+    // to the real validator. Fail-open here, fail-closed there.
+    const parsed = AppendRequestSchema.safeParse(req);
+    if (!parsed.success || parsed.data.type !== DISCOUNT_RECORDED) return deps.writes.append(req);
+    const claimed = parsed.data.payload.campaign_id;
+    const artifact = deps.artifact();
+    const known =
+      typeof claimed === "string" && artifact.rows.some((row) => row.campaign_id === claimed);
+    if (!known) {
+      // No citation this device can state. The id goes with the version rather than riding alone:
+      // a version with no rule, or a rule this device does not hold, each answer `17-F25` with
+      // something no publisher minted.
+      const { campaign_id: _id, campaign_version: _version, ...payload } = parsed.data.payload;
+      return deps.writes.append({ ...parsed.data, payload });
+    }
+    return deps.writes.append({
+      ...parsed.data,
+      payload: { ...parsed.data.payload, campaign_version: artifact.version },
+    });
+  },
+  // Untouched, and written out rather than spread, on `voidExitsLine`'s reasoning: a member added
+  // to `RendererWrites` later must be a decision here and not something a spread carries through.
+  addLine: (req: unknown): AppendResult => deps.writes.addLine(req),
+  toggleAvailability: (req: unknown): AppendResult => deps.writes.toggleAvailability(req),
+  recordCustomer: (req: unknown): AppendResult => deps.writes.recordCustomer(req),
+  linkCustomer: (req: unknown): AppendResult => deps.writes.linkCustomer(req),
+});

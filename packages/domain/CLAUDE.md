@@ -288,3 +288,34 @@ holds behaviour and not shape.
 **M7 and M8 are two halves of one FR and neither subsumes the other.** M7 is the cap computed wrong
 (this package); M8 is the cap not consulted at all (`apps/pos-electron`). Each is invisible to the
 other's suite — the `L7` "you need BOTH properties" split, landing on `17-F24`.
+
+### `campaign.ts` — two arithmetic defects an adversarial review found (August 2026)
+
+**`percent_bps` had no upper bound while five other `superRefine` arms existed.** A seed typo of
+`500000` for `5000` parsed clean; `campaignBenefitPaisa` then clamps to the base, and `17-F24`
+pre-approves a within-bounds citation *regardless of magnitude* — so the result is the **entire
+bill discounted with no manager, permanently** (`01-F1`). Measured on the shipped resolver before
+the fix: `malformed: false`, one row, whole bill within bounds. `17-F22` as amended bounds it at
+10,000 bps (100%, the largest discount that can exist) and **refuses rather than clamps**, on
+`01-F75`'s rule: a writer that published 5000% did not mean 100%.
+
+**`loyaltyOrdersToNextReward` stuck at `every_n` while overdrawn.** `17-F13`'s ruled partition
+outcome puts consumed above eligible, and the old `remaining <= 0n ? 0n : remaining % every_n` then
+answered `every_n` across the whole range — eligible 10 through 19 all returned 10, where the truth
+is 20 then 11. The correct form needs no branch: this line is reached only when
+`remaining < every_n`, so `every_n − remaining` is the answer on both sides of zero. Latent today
+because nothing emits `loyalty.reward_redeemed`, which is exactly the condition under which a wrong
+arm survives a whole wave.
+
+**`campaignApplies` is deliberately blind to `item_scope`, `use_limit` and `proof`, and the refusal
+for all three lives at the CALLER** (`apps/pos-electron/src/main/campaigns.ts`). None of the three
+is a question about whether a campaign reaches an ORDER — the first changes the BASE, the second
+needs a count of prior citations, the third names something the cashier must be holding — and this
+module has an order total and no lines, no history and no hands. An arm added here would make the
+citation resolver's refusal untestable and would still scope nothing; both docstrings say so.
+
+**Kills (control domain 820 pass / 44 known-red):** the bound removed → **1**
+(`campaign-model.test.ts` §A2); the modulo form restored → **1** (§D). Negative control (a real
+destructuring refactor of `loyaltyOrdersToNextReward`) → **0**, reproducing the control exactly.
+Full matrix in `apps/pos-electron/CLAUDE.md`.
+

@@ -59,6 +59,7 @@ import {
   useColor,
 } from "@restos/ui";
 import { useState } from "react";
+import type { CampaignOffer } from "../shared/ipc";
 
 /** One line as this surface needs it — the subset of `OpenOrder["lines"]` it can act on. */
 export type CorrectableLine = {
@@ -132,10 +133,32 @@ export type LineCorrectionSubmit = {
   readonly line_id: string;
   readonly amount_paisa: number;
   readonly reason: string;
+  /**
+   * `17-F27` (b) — which campaign this discount is taken under, or `null` for a discretionary one.
+   *
+   * **`null` is the ordinary case and is a stated fact, not an omission**: the overwhelming
+   * majority of discounts cite nothing, which is why `registry.ts` declares the payload field
+   * `.optional()` rather than required-and-nullable. It is `null` for a void and a comp always —
+   * `17-F24`'s arm is `canDiscount`'s and neither of the other two acts has a campaign to cite.
+   */
+  readonly campaign_id: string | null;
 };
 
 export type LineCorrectionProps = {
   readonly lines: readonly CorrectableLine[];
+  /**
+   * `17-F27` (a) — the campaigns THIS device says reach THIS order, resolved in main.
+   *
+   * Empty is the ordinary state (no artifact, none reaching the order, or one whose scope this
+   * till cannot resolve — `17-F24` as amended), and then this surface behaves exactly as it did
+   * before `17-F27`: no offer panel, every discount discretionary.
+   *
+   * ⚠ **It is display data and never a verdict** (Commandment 8). `authorizeWrites` resolves the
+   * citation again from the device's own artifact, so a screen that showed a campaign that does
+   * not apply would produce a discount judged discretionary — the same answer as citing nothing,
+   * never a pre-approval this surface invented.
+   */
+  readonly campaigns: readonly CampaignOffer[];
   readonly onSubmit: (correction: LineCorrectionSubmit) => void;
   readonly onCancel: () => void;
 };
@@ -160,11 +183,15 @@ export const correctionUnavailable = (line: CorrectableLine): string | null => {
   return null;
 };
 
-export const LineCorrection = ({ lines, onSubmit, onCancel }: LineCorrectionProps) => {
+export const LineCorrection = ({ lines, campaigns, onSubmit, onCancel }: LineCorrectionProps) => {
   const color = useColor();
   const [lineId, setLineId] = useState<string | null>(null);
   const [act, setAct] = useState<CorrectionAct | null>(null);
   const [entry, setEntry] = useState("");
+  // `17-F27` (b) — the citation. `null` is *no offer*, which is a chosen state here and not an
+  // absence: the `No offer` tile below is a real control, so a cashier who means "this is my own
+  // decision" says so with a tap rather than by not tapping.
+  const [campaignId, setCampaignId] = useState<string | null>(null);
   const line = lines.find((l) => l.line_id === lineId);
   const lineTotal = line?.billed_paisa ?? 0;
   // A discount may not exceed the line it is taken off: `01-F30` SUBTRACTS the term, and a
@@ -202,6 +229,10 @@ export const LineCorrection = ({ lines, onSubmit, onCancel }: LineCorrectionProp
                 onPress={() => {
                   setLineId(l.line_id);
                   setEntry("");
+                  // `17-F27` — a citation is about one act on one line. Carrying it across a
+                  // change of line would attribute the next discount to a campaign the cashier
+                  // chose for a different dish, permanently (`01-F1`).
+                  setCampaignId(null);
                 }}
               >
                 <MoneyValue paisa={paisa(l.billed_paisa ?? 0)} />
@@ -226,6 +257,7 @@ export const LineCorrection = ({ lines, onSubmit, onCancel }: LineCorrectionProp
                 onPress={() => {
                   setAct(a);
                   setEntry("");
+                  setCampaignId(null);
                 }}
               >
                 {/*
@@ -241,6 +273,76 @@ export const LineCorrection = ({ lines, onSubmit, onCancel }: LineCorrectionProp
           </div>
         </Panel>
       )}
+
+      {/*
+        `17-F27` (a)/(b) — THE CITATION, and it is the producer `17-F24` assumed and never had.
+
+        Until this panel existed nothing in the product put a `campaign_id` on a
+        `discount.recorded`: the payload was five literal fields, so `canDiscount`'s campaign arm
+        could not fire and every campaign function behind it was dead. A cashier applying a
+        campaign discount must be able to CITE one, and this is where she does it.
+
+        **⚠ `27-F4` — this is a positional change to a shipped surface and here is its PR
+        justification, recorded in the file rather than in a commit message so it is checkable.**
+        (i) **Nothing is added to, removed from or reordered within any existing GRID**: the line
+        tiles, the act tiles, the keypad and the reason tiles all keep their contents and their
+        order, which is the governing rule `27-F4`'s August-2026 amendment states in terms — *a
+        mode may change where a thing is, never what is there or in what order*. What changes is
+        that `How much` and `Why` sit one panel lower **in the discount arm only**.
+        (ii) **It must precede the amount, and that is why it is not appended at the bottom.** The
+        tile carries the bound the campaign allows; a cashier who keys an amount first and learns
+        the cap second has to re-enter it, on a surface `02-F37` says nothing may come between her
+        and the customer.
+        (iii) **It does not appear and disappear under her hands.** The offer list is a render over
+        this device's `17-F22` artifact, which is configuration and stable within a shift; a till
+        that holds no campaigns shows this panel never and behaves exactly as it did before.
+        A dev-pilot acclimation window is owed, per this FR's own requirement.
+
+        **⚠ AND THE LAYOUT COST IS UNMEASURED, which is a finding rather than a claim of safety.**
+        `layout:check` has never reached this surface at all — its fixture navigates to the tabs,
+        the unlock pad and `ManagerApproval`, and there is no press of `Correct a line` anywhere in
+        it — so the correction surface was outside the sweep before this panel and is outside it
+        now (`L9`: the fixture is the coverage boundary, not the assertions). This adds one Panel
+        of chrome in the discount arm when a campaign reaches the order, on a surface that clips
+        rather than scrolls (`27-F2`). Whoever adds this surface to the gate should drive it with a
+        campaign served.
+
+        **No tile applies an amount.** `17-F27` (b): the campaign's base is the ORDER and this
+        discount is per line, and resolving one into the other is exactly the scoped-base problem
+        `17-F24`'s amendment refuses. A tile that silently clamped would be that refusal undone at
+        the surface.
+      */}
+      {act === "discount" && line !== undefined && campaigns.length > 0 ? (
+        <Panel
+          title="Under which offer?"
+          note={campaignId === null ? "none — the usual approval rules apply" : "cited"}
+        >
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center" }}>
+            <Tile
+              posture="counter"
+              label="No offer"
+              selected={campaignId === null}
+              onPress={() => setCampaignId(null)}
+            />
+            {campaigns.map((c) => (
+              <Tile
+                key={c.campaign_id}
+                posture="counter"
+                label={c.campaign_id}
+                selected={c.campaign_id === campaignId}
+                onPress={() => setCampaignId(c.campaign_id)}
+              >
+                {/*
+                  `27-F12` — a word and a number: what this offer allows on THIS order, computed in
+                  main from the campaign's own `benefit` (`applyRateBps` then `min(cap)`). It is a
+                  bound and not an instruction, and the cashier still keys what she gives.
+                */}
+                <MoneyValue paisa={paisa(c.bound_paisa)} />
+              </Tile>
+            ))}
+          </div>
+        </Panel>
+      ) : null}
 
       {act === "discount" && line !== undefined ? (
         <Panel title="How much" note="off this line">
@@ -267,7 +369,15 @@ export const LineCorrection = ({ lines, onSubmit, onCancel }: LineCorrectionProp
                 posture="counter"
                 label={reason}
                 onPress={() =>
-                  onSubmit({ act, line_id: line.line_id, amount_paisa: amount, reason })
+                  onSubmit({
+                    act,
+                    line_id: line.line_id,
+                    amount_paisa: amount,
+                    reason,
+                    // `17-F24`'s arm is `canDiscount`'s alone, so a void and a comp cite nothing
+                    // even if a campaign was somehow selected before the act changed.
+                    campaign_id: act === "discount" ? campaignId : null,
+                  })
                 }
               />
             ))}

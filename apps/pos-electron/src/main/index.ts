@@ -57,7 +57,12 @@ import {
   DISCOUNT_APPROVAL_THRESHOLD_BPS,
   PAID_OUT_APPROVAL_THRESHOLD_PAISA,
 } from "./authorize";
-import { campaignCitationFor, deviceCampaignArtifact } from "./campaigns";
+import {
+  campaignCitationFor,
+  campaignOffersFor,
+  deviceCampaignArtifact,
+  stampCampaignVersion,
+} from "./campaigns";
 import {
   catalogBootSummary,
   catalogResolver,
@@ -1251,7 +1256,7 @@ const counterBoot = app.whenReady().then(async () => {
    * engine's open-order projection, `02-F64`'s link out of the `customer_orders` fold, branch time
    * (`01-F43` — the device clock plus the measured offset, never raw), and the store's identity.
    */
-  const campaignCitations = campaignCitationFor({
+  const campaignDeps = {
     artifact: deviceCampaignArtifact,
     openOrders: () => store.openOrders(),
     orderTotalPaisa: (order_id: string) =>
@@ -1262,10 +1267,43 @@ const counterBoot = app.whenReady().then(async () => {
       store.customerOrders().some((row) => row.linked_orders.some((o) => o.order_id === order_id)),
     branchNowMs: () => wallClock.now() + store.branchTimeStatus().offset_ms,
     branchId: () => store.identity.branch_id,
+  };
+  const campaignCitations = campaignCitationFor(campaignDeps);
+  /**
+   * `17-F27` (a) — the OFFER half, built from the SAME deps as the citation above.
+   *
+   * One dependency set, not two: `02-F45`'s argument is that two resolutions of one question
+   * disagree, and the disagreement here is a cashier shown a campaign the write guard then
+   * refuses. `campaigns.ts` shares the resolution itself (`reachOf`); this shares its inputs.
+   */
+  const campaignOffers = campaignOffersFor(campaignDeps);
+
+  /**
+   * `17-F27` (c) — **THE WRITER-SIDE `campaign_version` STAMP, and its position is the decision.**
+   *
+   * The chain a renderer write travels is now **matrix → campaign version → amount → duplicate →
+   * void exit → ledger**.
+   *
+   * - **Inside `authorizeWrites`**, on `voidExitsLine`'s reasoning directly above and for the same
+   *   consequence: this is what puts it on BOTH routes an approved write takes, the handler below
+   *   and `authorizeEscalation.approve`. A stamp on one route only is a discount whose recorded
+   *   rule depends on whether a manager was asked — and the escalated route is precisely the one
+   *   an over-cap campaign citation takes.
+   * - **Outside the money guards**, because it appends nothing and refuses nothing: it rewrites
+   *   one payload key and hands the request on. Anything those guards refuse is refused whether or
+   *   not a citation was stamped.
+   *
+   * It is handed the DEVICE's artifact getter, never the citation resolver: what it needs is the
+   * version this till holds, and reading it from anywhere else would be a second answer to
+   * `17-F25`'s *"under what rule?"*.
+   */
+  const campaignStamped = stampCampaignVersion({
+    writes: voidGuarded,
+    artifact: deviceCampaignArtifact,
   });
 
   const writes = authorizeWrites({
-    writes: voidGuarded,
+    writes: campaignStamped,
     store,
     session,
     paidOutApprovalThresholdPaisa: PAID_OUT_APPROVAL_THRESHOLD_PAISA,
@@ -1363,7 +1401,11 @@ const counterBoot = app.whenReady().then(async () => {
      * minus the matrix layer, which is exactly what the sentence above asks for: the money guards
      * and the void's own consequence still apply, and commandment 8 is not asked twice.
      */
-    writes: voidGuarded,
+    // `17-F27` (c) — the SAME stamped chain the write guard above is given, for the reason that
+    // paragraph states: an over-cap campaign citation is refused and comes back through here, so a
+    // stamp missing on this route would make the recorded rule depend on whether a manager was
+    // asked. `voidGuarded` is inside it, so the void's own consequence is unchanged.
+    writes: campaignStamped,
     store,
     // The REQUESTER, and it stays the requester: `subjectOf` reads this for `02-F38`'s
     // self-approval rule and `gateway.append` reads it for `02-F41`'s attribution.
@@ -1911,6 +1953,14 @@ const counterBoot = app.whenReady().then(async () => {
    * authorized here, exactly as for `lookupCustomer` above. The answer is RENDERED on every call
    * (`17-F23`: the counter is a render, never a projection), so there is nothing to invalidate.
    */
+  /**
+   * `17-F27` (a) — display-only, and it authorizes nothing (`CHANNELS.escalationFor`'s precedent).
+   * A renderer that forged this list gains nothing: `authorizeWrites` resolves the citation again
+   * from this device's own artifact before the matrix is asked.
+   */
+  ipcMain.handle(CHANNELS.campaignOffers, (_event, order_id: unknown) =>
+    typeof order_id === "string" ? campaignOffers(order_id) : [],
+  );
   ipcMain.handle(CHANNELS.loyaltyFor, (_event, phone_e164: unknown) => {
     touch();
     return gateway.loyaltyFor(phone_e164);

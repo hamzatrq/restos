@@ -141,6 +141,59 @@ describe("§A — `17-F22`'s row is validated at the WRITER, and both directions
   });
 });
 
+describe("§A2 — `17-F22`'s percentage bound, the arm the row did not have", () => {
+  it("⚠ `percent_bps` ABOVE 10,000 is REFUSED at the writer — a seed typo is not a 100% discount", () => {
+    /*
+      THE DEFECT VERBATIM (August 2026, adversarial review): the row carried five `superRefine`
+      arms and no upper bound on the rate, so `500000` typed for `5000` parsed **clean**. It then
+      reaches `campaignBenefitPaisa`, which clamps to the base — and `17-F24` pre-approves a
+      within-bounds citation *regardless of magnitude*, so the result is the **entire bill**
+      discounted with no manager, permanently (`01-F1`). Measured on the shipped resolver before
+      the fix: `malformed: false`, one row, whole bill within bounds.
+
+      10,000 bps is 100%, which is the largest discount that can exist — a benefit can never
+      exceed what it is taken off.
+    */
+    const typo = row({
+      benefit: { form: "percent_bps", value: 500_000, item_id: null, cap_paisa: null },
+    });
+    const parsed = CampaignRowSchema.safeParse(typo);
+    expect(parsed.success).toBe(false);
+    expect(JSON.stringify(parsed.error?.issues)).toContain("percent_bps");
+
+    // BOTH DIRECTIONS, which is this file's own convention: the boundary itself is legal.
+    expect(
+      CampaignRowSchema.safeParse(
+        row({ benefit: { form: "percent_bps", value: 10_000, item_id: null, cap_paisa: null } }),
+      ).success,
+      "100% is a real campaign — a giveaway is not a malformed row",
+    ).toBe(true);
+    expect(
+      CampaignRowSchema.safeParse(
+        row({ benefit: { form: "percent_bps", value: 10_001, item_id: null, cap_paisa: null } }),
+      ).success,
+      "one basis point over 100% is refused",
+    ).toBe(false);
+
+    // ...and it is REFUSED rather than clamped (`01-F75`): a writer that published 5000% did not
+    // mean 100%, and honouring a number nobody typed is how a bad row becomes invisible.
+    expect(parsed.data).toBeUndefined();
+  });
+
+  it("the bound is on the PERCENTAGE form only — a large `amount_paisa` is a real campaign", () => {
+    // The arm must not spread to the other form: Rs 50,000 off is an ordinary big promotion, and
+    // 50,000 paisa is not 500%. A guard aimed at the wrong field is this repo's most-recorded
+    // test defect, so both are pinned.
+    expect(
+      CampaignRowSchema.safeParse(
+        row({
+          benefit: { form: "amount_paisa", value: 5_000_000, item_id: null, cap_paisa: null },
+        }),
+      ).success,
+    ).toBe(true);
+  });
+});
+
 describe("§B — `17-F24`'s money: `applyRateBps` then `min(cap)`, in that order", () => {
   const benefit = (over: Partial<CampaignBenefit> = {}): CampaignBenefit => ({
     form: "percent_bps",
@@ -309,5 +362,39 @@ describe("§D — `17-F23`'s arithmetic, and the property that stops an owner re
     expect(
       loyaltyOrdersToNextReward({ eligible: 12, orders_consumed_total: 10n, every_n: 10 }),
     ).toBe(8);
+  });
+
+  it("⚠ OVERDRAWN — the countdown counts back from the DEBT, and does not stick at `every_n`", () => {
+    /*
+      `17-F13`'s ruled partition outcome: two tills each redeem against the same ten orders, so
+      consumed is twenty against ten eligible. **The countdown was wrong there and this assertion
+      is why it is not now** (August 2026, adversarial review): it read
+      `towards = remaining <= 0n ? 0n : remaining % every_n`, so it answered `every_n` for the
+      WHOLE range of the overdraw and stayed there — eligible 10 through 19 all returned 10, where
+      the truth is 20 then 11.
+
+      The correct number is `every_n − remaining`, which needs no branch at all: this function is
+      reached only when `available` is 0, i.e. when `remaining < every_n`, and the subtraction is
+      the answer on both sides of zero. A cashier reading *"10 more orders"* to a customer who
+      needs twenty is a promise the till will not keep.
+
+      It is LATENT today and asserted anyway, because nothing emits `loyalty.reward_redeemed` yet
+      (`17-F23` as amended) so consumed is always zero — which is exactly the condition under
+      which a wrong arm survives a whole wave.
+    */
+    const at = (eligible: number, consumed: bigint) =>
+      loyaltyOrdersToNextReward({ eligible, orders_consumed_total: consumed, every_n: 10 });
+    expect(at(10, 20n), "ten eligible against twenty consumed").toBe(20);
+    expect(at(19, 20n), "one short of clearing the debt").toBe(11);
+    expect(at(20, 20n), "the debt exactly cleared — a full cycle to go").toBe(10);
+    expect(at(29, 20n)).toBe(1);
+    // ...and the boundary the other way: at 30 a reward IS available, so the countdown is 0.
+    expect(at(30, 20n)).toBe(0);
+    // The whole range is monotone decreasing by one, which is what "counts back from the debt"
+    // means and what a stuck arm cannot produce.
+    const walk = Array.from({ length: 21 }, (_, i) => at(10 + i, 20n));
+    expect(walk).toEqual([
+      20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
+    ]);
   });
 });

@@ -181,6 +181,22 @@ export const CampaignRowSchema = z
         message: "17-F22: item_id belongs to a free_item benefit only",
       });
     }
+    // `17-F22` as amended (August 2026): **a percentage benefit is bounded at 10,000 bps.**
+    // 10,000 bps is 100%, which is the largest discount that can exist — a benefit can never
+    // exceed what it is taken off, and `campaignBenefitPaisa` already clamps to the base for
+    // that reason. Without this arm a seed typo of `500000` for `5000` parses clean, and
+    // `17-F24` then pre-approves `min(gross, base)` = the whole bill with no manager,
+    // permanently (`01-F1`). REFUSED rather than clamped, on `01-F75`'s rule: a writer that
+    // published 5000% did not mean 100%, and honouring a number nobody typed is how a bad row
+    // becomes invisible. The five arms around this one bounded every OTHER field of the
+    // benefit and left the one that multiplies the bill unbounded.
+    if (row.benefit.form === "percent_bps" && row.benefit.value > 10_000) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["benefit", "value"],
+        message: "17-F22: percent_bps may not exceed 10000 (100%)",
+      });
+    }
     // `17-F10`: a coupon IS its code. A `coupon` row with no code cannot be entered at a till.
     if (row.kind === "coupon" && row.code === null) {
       ctx.addIssue({
@@ -202,6 +218,16 @@ export type CampaignRow = z.infer<typeof CampaignRowSchema>;
  * `base_paisa` is what the benefit applies TO — the order's billed total for a whole-order
  * campaign, or the scoped lines' total when `item_scope` names some. **Resolving that base is the
  * CALLER's**, because it needs the order's lines and this module has no order.
+ *
+ * ⚠ **AND THE ONLY SHIPPING CALLER RESOLVES ONLY THE FIRST OF THOSE TWO — it REFUSES the second
+ * (`17-F24` as amended, August 2026).** The sentence above stated the obligation and the caller
+ * dropped it silently: `apps/pos-electron/src/main/campaigns.ts` passed the ORDER total for an
+ * item-scoped row, so a *20% off pizzas* campaign pre-approved 20% of a Rs 10,000 bill — 20× its
+ * intended bound, with no manager, permanently (`01-F1`). The fix is at that caller and it takes
+ * `free_item`'s exit below rather than inventing a base: an `item_scope` row resolves to `null`
+ * and the discretionary predicate runs. **This function is unchanged and correct**; what is
+ * recorded here is that *"resolving that base is the CALLER's"* is a load-bearing obligation and
+ * not a note, so the next caller either resolves it or refuses it in terms.
  *
  * **`free_item` returns `null` rather than a number, and that is a refusal to guess.** Its value is
  * the LINE's snapshotted `unit_price_paisa` (`01-F53`), which lives on the order and not on the
@@ -246,6 +272,18 @@ export type CampaignContext = {
  * ⚠ **A `false` here NEVER refuses a sale** (Commandment 4, `01-F17`). It says one campaign does
  * not apply; the order, its lines, its tender and its close are untouched. A device that has never
  * received the artifact has no campaigns at all, which is the safe direction.
+ *
+ * ⚠ **WHAT THIS PREDICATE DELIBERATELY DOES NOT READ, and where the refusal for each lives
+ * (`17-F24` as amended, August 2026).** `item_scope`, `use_limit` and `proof` are `17-F22` row
+ * fields and **none of them is a question about whether a campaign reaches an ORDER** — the first
+ * changes the BASE the benefit is taken of, the second needs a count of prior citations, the
+ * third names something the cashier must be holding. This function has an order total and no
+ * lines, no history and no hands, so an arm here would be a guess. The refusal is at the caller
+ * that resolves the base (`campaignCitationFor`), which answers `null` for all three, and
+ * `campaign-model.test.ts` §D pins that this function is blind to them ON PURPOSE. **Adding an
+ * arm here is not the fix and would hide the one that is:** an implementation that returned
+ * `false` for an item-scoped row would make the citation resolver's refusal untestable and would
+ * still not scope anything. See `17-F24` for the class this closes and the one it does not.
  *
  * **The window is compared as ISO business DATES, which is a string compare and is correct** —
  * `YYYY-MM-DD` sorts lexicographically iff it sorts chronologically. That is deliberate rather
@@ -310,6 +348,15 @@ export const loyaltyAvailable = (input: {
  * it is here rather than in the UI so both readings come from one arithmetic.
  *
  * Returns `0` when a reward is already available, which is what the caller should say instead.
+ *
+ * ⚠ **THE OVERDRAWN ARM WAS WRONG AND IS FIXED (August 2026, adversarial review).** It read
+ * `towards = remaining <= 0n ? 0n : remaining % every_n`, so while `17-F13`'s partition had
+ * consumed MORE than the eligible count it answered `every_n` and stayed there — eligible 10
+ * through 19 against consumed 20 all returned 10, where the truth is 20 then 11. The correct
+ * form needs no branch at all: this line is only reached when `available` is 0, i.e. when
+ * `remaining < every_n`, and the orders still owed are `every_n − remaining` for EVERY such
+ * remaining including a negative one. A negative remaining is `17-F13`'s ruled outcome and not
+ * an error, so it must produce a number the surface can say rather than a floor it sticks at.
  */
 export const loyaltyOrdersToNextReward = (input: {
   readonly eligible: number;
@@ -317,7 +364,8 @@ export const loyaltyOrdersToNextReward = (input: {
   readonly every_n: number;
 }): number => {
   if (loyaltyAvailable(input) > 0) return 0;
+  // Reached only when `remaining < every_n` (that is what `available === 0` means), so the
+  // subtraction is the whole answer on both sides of zero and no `%` is needed.
   const remaining = BigInt(input.eligible) - input.orders_consumed_total;
-  const towards = remaining <= 0n ? 0n : remaining % BigInt(input.every_n);
-  return input.every_n - Number(towards);
+  return input.every_n - Number(remaining);
 };
