@@ -2111,3 +2111,67 @@ was killed by `packages/domain` and by `apps/pos-electron` and by **nothing** in
 `order-tax.test.ts`, because no fixture there landed on an exact half — the round-3 shape exactly.
 `§E` now carries `Rs 45.50` at the rupee and `Rs 45.00` at ten rupees, and the mutant dies there too.
 Reading the suite would not have found that; running the mutant did.
+
+
+## ✅ `02-F64`'s LINK AND `17-F24`'s CAMPAIGN ARM REACH THE TILL (August 2026)
+
+`shared/ipc.ts` recorded the hole in a comment for the life of the gap — *"no event in the corpus can
+say which customer an order is for"* — and **four** features were blocked on that one field
+(`02-F10`'s search by phone, `02-F14`'s khata, `02-F27`'s order history, `17-F23`'s loyalty). The
+chain now runs: `Counter.tsx` `startOrder` → `CHANNELS.linkCustomer` → `authorizeWrites.linkCustomer`
+(matrix-guarded under `02-F47`'s `customer.record`) → `gateway.linkCustomer` (which derives `01-F23`'s
+key with the SAME `normalizeDialledPhone` the lookup uses) → the `customer_orders` fold →
+`gateway.loyaltyFor` → the caller strip's reward line.
+
+**`main/campaigns.ts` is the v0 seed for `17-F22`'s artifact** (`RESTOS_CAMPAIGNS`,
+`RESTOS_CAMPAIGNS_VERSION`), built on `tax-posture.ts`'s shape deliberately so `01-F87`'s carrier
+deletes two files with one argument. ⚠ **It differs from the tax cell in exactly ONE way and that is
+the point of `17-F22`:** a malformed tax cell THROWS and the till does not start; a malformed campaign
+artifact yields **no campaigns** and the till starts and sells. That is `01-F56`'s `malformed` scoped
+to the thing that was malformed, which is the whole argument for a fifth `01-F75` resource rather than
+a key inside `config`. An implementation that threw here would undo the FR it implements.
+
+**⚠ WHAT IS OWED AND IS NAMED RATHER THAN LEFT TO LOOK INTENTIONAL.**
+- **Only the PHONE channel links.** `startOrder` emits the link when `pendingChannel` is
+  `PHONE_CHANNEL` and a caller is latched, because the caller strip is the only surface that resolves
+  one. A counter walk-in who is on file cannot be linked, so `17-F14`'s coffee-shop regular — the
+  founder's own case — accrues nothing unless she orders by phone. The surface for that is doc 02's.
+- **Linking LATER is possible and has no surface.** `02-F64` chose a separate event precisely so
+  `02-F14`'s khata-after-eating and `17-F17`'s mid-order lookup work; the schema, the guard, the fold
+  and the channel all support it and nothing calls it after `startOrder`. **The expensive half of
+  Shape B is paid and the cheap half is unbuilt** — say so rather than letting the FR read as done.
+- **Applying a reward is not built.** `loyaltyFor` shows what is claimable; nothing emits
+  `loyalty.reward_redeemed`, so `17-F17`'s *"→ apply"* has no producer. The fold consumes the type,
+  the schema exists, and the act does not — which is this file's most-recorded shape and is recorded
+  here as owed rather than discovered later.
+- **`17-F25`'s bearer reconciliation has nothing to read.** Bearer redemptions carry
+  `phone_e164: null`, so they belong to no phone row and the fold holds no count of them; the
+  end-of-day *"6 bearer redemptions on this till"* is a report surface that does not exist.
+
+### Mutation matrix — control **pos 1372 pass / 5 env-red**, sync **1025/1**, domain **817/44**
+
+The 5 env-red are `startup-integrity.test.ts` spawning real Electron with no display (`T-01-07`) —
+**attributed, not assumed**: the same 5 fail at the parent commit with every file of this change
+reverted. In-tree, byte-exact restore, `sha256`-verified, full suites.
+
+| # | mutant (exactly one branch) | pos | sync/domain |
+|---|---|---|---|
+| M9 | **THE SEAM** — `index.ts` drops `campaignCitation` from a write guard | **1** | — |
+| M10 | **THE SEAM** — `Counter.tsx` never calls `linkCustomer` (the pre-`02-F64` tree) | **1** | — |
+| M11 | **THE SEAM** — the store never folds the link | **4** | **4** (sync) |
+| M12 | **THE STUB SUPPLY** — the citation resolver is handed an empty artifact literal | **1** | — |
+| M13 | a malformed artifact THROWS instead of yielding no campaigns (`17-F22` undone) | **1** | — |
+| M14 | one bad row SKIPPED instead of refusing the artifact (`01-F56`) | **2** | — |
+| M15 | two active programmes → pick the first (array position decides the reward) | **1** | — |
+| M16 | an UNSETTLED linked order counts toward the reward (`17-F15` says settled) | **1** | — |
+| M8 | `within_campaign_bounds := campaign_id !== null` — citing becomes being inside | **3** | 0 (domain) |
+| M20 | **NEGATIVE CONTROL** | **0** | **0** |
+
+**M9, M10 and M12 are the rows to re-run after any change here, and their column is the point: each
+kills exactly ONE test and leaves all 1371 others green.** `seams:check` Rule B sees M9 (an optional
+member of an options bag no call site passes) and is blind to M10 and M12 — a method on a returned
+object is neither an unreached export nor an optional member, and **a port supplied with a STUB is
+still a supply**. `__acceptance__/loyalty-seam.test.ts` is the hand-written assertion for all three.
+
+**M8's split with the domain package is the `L7` pair on one FR:** the cap computed wrong is domain's
+(M7, 2 kills there and 0 here), the cap not consulted is this app's (M8, 3 kills here and 0 there).

@@ -233,3 +233,58 @@ was killed by `packages/domain` and by `apps/pos-electron` and by **nothing** in
 `order-tax.test.ts`, because no fixture there landed on an exact half — the round-3 shape exactly.
 `§E` now carries `Rs 45.50` at the rupee and `Rs 45.00` at ten rupees, and the mutant dies there too.
 Reading the suite would not have found that; running the mutant did.
+
+
+## `campaign.ts` — `17-F22`/`17-F23`/`17-F24`, and the retroactive tightening two GREEN oracles caught
+
+R71 (the discount threshold) and R79 (three loyalty forms) landed together, August 2026. What is
+declared here: `17-F22`'s campaign row, validated **at the writer** per `01-F75`; `17-F24`'s money
+(`applyRateBps` then `min(cap)`, in that order, never a float); and `17-F23`'s **render-time**
+division, which lives here because `01-F87` forbids a fold reading `every_n`.
+
+**⚠ THE FINDING OF THE ROUND, and it is about `parseEvent`'s blast radius rather than about
+campaigns.** The first draft of `discount.recorded` required `campaign_version` whenever
+`campaign_id` was present — a `superRefine` on the payload schema. It reddened
+`adjustment-attempt-key.test.ts` §E and `escalatable-write-schemas.test.ts` §F, both of which probe
+`00 §6`'s additive tolerance **using `campaign_id` as their extra field**, chosen years ago precisely
+because `17 §2` promised it as the canonical undeclared additive field. Two green oracles, one
+change, and **they were right**: `readAllParsed()` runs `parseEvent` over the FULL LEDGER at store
+open, so a retroactive tightening is not a refusal on the way in — it is **a till that will not
+start**, on that launch and every launch after, because `01-F1` makes the event permanent.
+`void.recorded`'s own note states that consequence at length and `order.settlement_closed` is
+deliberately not tightened for the identical reason. The pairing is enforced at the WRITER instead
+(`apps/pos-electron/src/main/campaigns.ts` takes the version off the artifact it resolved the
+campaign from), which is where `01-F17` permits a refusal. **The generalisable rule: a constraint
+that spans two payload fields belongs at the emitter, never at `parseEvent`, unless you are willing
+to brick every device holding an older event.**
+
+**⚠ AND ONE OF THIS MODULE'S OWN COMMENTS WAS FALSE WHEN WRITTEN (`L11`).** `CampaignRowSchema`'s
+header said *"A STRICT OBJECT"* over a plain `z.object`, which SILENTLY STRIPS an unknown key rather
+than refusing it — written in the same change that made the rest of the sentence true. It was caught
+by `campaign-model.test.ts` §A on its first run, and that assertion existed only because the round-3
+law makes writing it mandatory. The schema is `z.strictObject` now.
+
+### Mutation matrix — control **domain 817 pass / 44 known-red**, sync **1025/1**, pos **1372/5**
+
+In-tree, one branch per mutant, byte-exact restore with a `sha256` trap that is asserted after every
+row (`T8`: nothing here is a security constant — each mutant reds a test rather than downgrading a
+credential). Every row is the FULL suite of the packages named. **In EVERY row the only failing file
+beyond the control's own known-red set is one of the four files this change authored**, so every
+kill is attributable.
+
+| # | mutant (exactly one branch) | domain | pos |
+|---|---|---|---|
+| M7 | **CAP BEFORE RATE** — `min(cap)` returned unconditionally, so 50%-capped-at-10,000 gives Rs 10,000 off a Rs 100 bill | **2** | 0 |
+| M17 | **`z.strictObject` → `z.object`** — the defect verbatim: an unknown artifact key is stripped, not refused | **1** | — |
+| M18 | `17-F22`'s `every_n` MIRROR dropped — a number nothing divides by rides a published artifact | **1** | — |
+| M19 | `branches: []` read as "the whole org" — a campaign scoped to NO branch applies everywhere | **1** | 0 |
+| M8 | `within_campaign_bounds := campaign_id !== null` — every campaign becomes an unbounded pre-approval | 0 | **3** |
+| M20 | **NEGATIVE CONTROL** — a real refactor of `loyaltyAvailable` (destructure, early-return → ternary) | **0** | **0** |
+
+**M20 is what makes every red row mean anything:** a genuine one-branch restructuring of the very
+function under test reddens nothing and reproduces the control's three numbers exactly, so the suite
+holds behaviour and not shape.
+
+**M7 and M8 are two halves of one FR and neither subsumes the other.** M7 is the cap computed wrong
+(this package); M8 is the cap not consulted at all (`apps/pos-electron`). Each is invisible to the
+other's suite — the `L7` "you need BOTH properties" split, landing on `17-F24`.

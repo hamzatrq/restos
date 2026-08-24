@@ -288,8 +288,36 @@ describe("§C — `17-F21`'s bearer card: `phone_e164: null` moves NO account co
       ),
     ];
     expect(rowOf(set, PHONE_A).orders_consumed_total).toBe("0");
-    // MUTATION THIS CATCHES: bucketing a bearer redemption onto the order's linked customer, which
-    // would silently spend an account customer's progress on a stranger's paper card.
+  });
+
+  it("⚠ AND IT HOLDS FOR A NON-ZERO `orders_consumed` — the rule is the KEY, not the amount", () => {
+    // ⚠ **THIS FIXTURE EXISTS BECAUSE THE MUTANT ABOVE SURVIVED, and that is the round-3 law
+    // landing on this suite's own work.** The mechanism was built correctly and the fixture was
+    // safe: `17-F21` gives a bearer redemption `orders_consumed: 0`, so an implementation that
+    // bucketed it onto the order's linked customer added ZERO and was indistinguishable from the
+    // correct one. Measured: the bucketing mutant passed all 1025 tests.
+    //
+    // The fold's rule is *"`phone_e164: null` belongs to no phone row"*, NOT *"a bearer redemption
+    // happens to consume nothing"*. The difference is only observable on a payload that is
+    // well-formed by the schema and wrong by the FR — which is exactly the payload a buggy emitter
+    // writes, and `01-F1` makes it permanent. So the assertion is aimed there.
+    const set = [
+      env(TILL_1, linked(ORDER_1, PHONE_A)),
+      env(TILL_1, closed(ORDER_1, 45_000)),
+      env(
+        TILL_1,
+        redeemed({
+          order_id: ORDER_1,
+          phone_e164: null,
+          orders_consumed: 10,
+          adjustment_attempt_id: "att-b",
+        }),
+      ),
+    ];
+    expect(
+      rowOf(set, PHONE_A).orders_consumed_total,
+      "a bearer redemption must not spend an account customer's progress, whatever it claims",
+    ).toBe("0");
   });
 });
 

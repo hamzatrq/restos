@@ -150,3 +150,57 @@ was killed by `packages/domain` and by `apps/pos-electron` and by **nothing** in
 `order-tax.test.ts`, because no fixture there landed on an exact half — the round-3 shape exactly.
 `§E` now carries `Rs 45.50` at the rupee and `Rs 45.00` at ten rupees, and the mutant dies there too.
 Reading the suite would not have found that; running the mutant did.
+
+
+## `folds/customer-orders.ts` — the EIGHTH fold (`02-F64`'s link, `17-F23`'s counter), August 2026
+
+`shared/ipc.ts` carried the measurement in a comment for the life of the gap: *"no event in the
+corpus can say which customer an order is for"*. `02-F64` is the event; this is the fold that reads
+it, plus `order.settlement_closed` and `loyalty.reward_redeemed`.
+
+**It projects COUNTS and never an ANSWER**, and that is the whole arrangement of the file:
+`01-F87` forbids a fold reading configuration, so a fold that divided by `17-F14`'s `N` would make a
+projected value depend on the reading device's **campaign artifact version** — two tills at
+different versions projecting different rewards from an identical event set. The division is
+`@restos/domain`'s `loyaltyAvailable`, at render time. `apps/pos-electron`'s `gateway.loyaltyFor` is
+the one caller. **The break is one `const cached =` away and it would pass every test in this
+package.**
+
+**Both new types are in `merge.ts`'s `OTHER_FOLD_TYPES`, and `order.customer_linked` is the row a
+reader will want to move.** It carries an `order_id` and is still not order-keyed here: the link is a
+fact about a CUSTOMER's orders and carries no money, so putting it through the order-keyed switch
+would mean designing a merge rule inside the money engine whose dispositions
+`merge-workcounter.test.ts` pins. The day an ORDER projection needs to render its customer, that row
+moves and `keysFor` answers two keys — which is why it returns a LIST.
+
+### Mutation matrix — control **sync 1025 pass / 1 known-red**, domain **817/44**, pos **1372/5**
+
+In-tree, byte-exact restore, `sha256`-verified after every row, full package suites throughout.
+
+| # | mutant (exactly one branch) | sync | pos |
+|---|---|---|---|
+| M1 | **THE ONE THIS SUITE EXISTS FOR** — a redemption RESETS instead of consuming (`17-F17`'s amendment undone) | **6** | — |
+| M2 | `02-F64`'s contested link RESOLVED — one order silently awarded to one of two claimants | **3** | — |
+| M3 | two attested charges resolved by `sort()[0]` — convergent, clock-free, and `01-F31`-illegal | **1** | — |
+| M5 | a DISPUTED redemption key counts instead of contributing zero (`01-F31`) | **2** | — |
+| M6 | the fold reads `lamport_seq` — standing law 1 broken through a monotone flag | **1** | — |
+| M11 | **THE SEAM** — `device-store.ts`'s `applyFold` never calls the fold | **4** | **4** |
+| M4 | **bearer redemption BUCKETED onto the order's linked customer** | **0 → 1** | — |
+| M20 | **NEGATIVE CONTROL** — `.filter().length` rewritten as a counting loop | **0** | **0** |
+
+**⚠ M4 SURVIVED ITS FIRST RUN AT 1025/1 AND THE FIXTURE THAT KILLS IT WAS ADDED BECAUSE OF THAT.**
+`17-F21` gives a bearer redemption `orders_consumed: 0`, so an implementation that bucketed it onto
+the order's linked customer added **zero** and was indistinguishable from the correct one — the
+round-3 shape exactly: the mechanism was right and the fixture was safe. The fold's rule is *"`null`
+belongs to no phone row"*, not *"a bearer redemption happens to consume nothing"*, and the difference
+is only observable on a payload well-formed by the schema and wrong by the FR — which is the payload
+a buggy emitter writes, permanently (`01-F1`). §C now carries a bearer redemption claiming
+`orders_consumed: 10`, and the mutant dies there (1025/2 against a control of 1026/1). **Reading the
+suite would not have found that; running the mutant did.**
+
+**M11's two columns are the `L7` split on one call.** Deleting the fold's call site from ingest reds
+4 in this package (`customer-orders-store.test.ts`) and 4 in `apps/pos-electron`
+(`loyalty-seam.test.ts`) — and **zero** in `customer-orders-fold.test.ts`, which exercises the pure
+fold directly and blesses a subsystem the product never reaches. Neither file alone is evidence.
+
+**M20 is what makes every red row mean anything.**
