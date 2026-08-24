@@ -69,7 +69,12 @@ import {
   stationResolver,
 } from "./catalog";
 import { printerTransport } from "./file-printer";
-import { createGateway, createVerifiedAddLine, createVerifiedAppend } from "./gateway";
+import {
+  createCausedAppend,
+  createGateway,
+  createVerifiedAddLine,
+  createVerifiedAppend,
+} from "./gateway";
 import {
   describeHardwareTier,
   HARDWARE_TIER_ENV,
@@ -1468,14 +1473,25 @@ const counterBoot = app.whenReady().then(async () => {
    * definition the case *"where no device exists to signal them"*, i.e. an act nobody performs.
    * `line-advance.ts`'s `append` dep carries the full argument and the limits on it.
    */
+  /**
+   * `04-F27` (c) — **the append a CONSEQUENCE makes, and it must not read the session.**
+   *
+   * `gateway.append` stamps `deps.session()?.user_id ?? null`, which is right for a renderer act
+   * (the person at the counter IS the actor) and wrong for anything hanging off a completed
+   * append, because a `04-F21` pad is a second producer whose actor the till's session never is.
+   * Measured before it was fixed: a waiter's SEND wrote an `order.line_state_changed` naming the
+   * CASHIER, and named nobody when the counter was locked. Every consequence below takes the
+   * actor of the act that caused it, or `null` where the device itself is the cause.
+   */
+  const causedAppend = createCausedAppend({ store });
   const lines = createLineAdvance({
     store,
     tier: () => hardwareTier().tier,
     // `03-F52` — the settlement half's trigger. `printEvent` still reads `tier` above; only this
     // one moved, and the assignment comes out of the shared declaration both apps read.
     serveOwner: () => serveSignal().owner,
-    append: (type, payload) => {
-      gateway.append({ type, payload, refs: [] });
+    append: (caused_by, type, payload) => {
+      causedAppend(caused_by, { type, payload, refs: [] });
       notifyChanged();
     },
   });
@@ -1498,8 +1514,11 @@ const counterBoot = app.whenReady().then(async () => {
    */
   const aggregator = createAggregatorSettlement({
     store,
-    append: (type, payload) => {
-      gateway.append({ type, payload, refs: [] });
+    // `04-F27` (c) — `causedAppend`, not `gateway.append`: `02-F30` makes the ENTRY the
+    // settlement, so this money belongs to whoever confirmed the order, and that is a waiter at a
+    // pad as readily as the cashier the till's session happens to hold.
+    append: (caused_by, type, payload) => {
+      causedAppend(caused_by, { type, payload, refs: [] });
       notifyChanged();
     },
   });
@@ -1701,7 +1720,14 @@ const counterBoot = app.whenReady().then(async () => {
    * as an `AppendRequest` — `CHANNELS.addLine`'s own request, say — falls through every arm and
    * reaches `notifyChanged()`, which is what that channel already did on its own.
    */
-  const appended = (req: unknown): void => {
+  /**
+   * `04-F27` (c) — **`caused_by` is the actor of the append this hangs off, and it is required.**
+   *
+   * The renderer's handler passes the session it appended under; the terminal passes the waiter it
+   * verified. Every consequence below that appends carries it, so a permanent record can no longer
+   * name whoever happened to be signed in at the counter when a tablet acted.
+   */
+  const appended = (req: unknown, caused_by: string | null): void => {
     // Re-parsed rather than read raw: `req` is `unknown` from an untrusted renderer, and
     // `gateway.append` does not hand back what it parsed. It has already thrown on anything
     // malformed, so `safeParse` here is a narrowing, not a second validation.
@@ -1716,7 +1742,7 @@ const counterBoot = app.whenReady().then(async () => {
         // that signals a confirm is this one, on every tier — and that reading is an
         // INTERPRETATION stated in full on `LineAdvance.confirmed`. Before the print, because the
         // print's own advance reads the state this one writes.
-        lines.confirmed(order_id);
+        lines.confirmed(order_id, caused_by);
         kot.confirmed(order_id);
         // `02-F30`/`08-F8`/`08-F17` — **THE AGGREGATOR SEAM.** *"manual quick-entry orders are
         // confirmed by the act of entry"*, and an aggregator order *"settles at creation/entry"*
@@ -1738,7 +1764,7 @@ const counterBoot = app.whenReady().then(async () => {
         // matched the sentence instead. Same shape as `hardware-tier.ts`'s header quoting a literal
         // `seams:check` marker, with the sign flipped — there prose reddened a rail, here it
         // silenced one. Write the meaning, never the token.
-        aggregator.confirmed(order_id);
+        aggregator.confirmed(order_id, caused_by);
       }
     }
     // S-7 — THE SAME HANDOFF FOR THE TWO CASH DOCUMENTS, and it hangs off the same completed
@@ -1776,7 +1802,7 @@ const counterBoot = app.whenReady().then(async () => {
         // `lines.settled` where a suite can drive the real branch — never here, where a test could
         // only hand-copy it. That is `K-3`'s dead-oracle defect, and this file has already paid
         // for it once (mutant M10 of the producer round was killed by a source string alone).
-        lines.settled(order_id);
+        lines.settled(order_id, caused_by);
         // `01-F63` — **THE CLOSING-ACT SEAM**, and it is the same trigger as the two calls above
         // for the reason `01-F63` gives by name: *"one definition of settlement completes, not
         // four"*. `02-F45` refuses a second source for one fact, and this product already had
@@ -2155,7 +2181,11 @@ const counterBoot = app.whenReady().then(async () => {
     // no longer the only producer: `04-F21`'s terminal appends the same four order events from a
     // tablet, and a consequence living inside this handler is one the pad cannot reach. See
     // `appended` above for what that cost.
-    appended(req);
+    //
+    // `04-F27` (c) — the actor is the one `gateway.append` just stamped, read from the SAME getter
+    // rather than re-derived, so a consequence can never name a different person from the act it
+    // is a consequence of (`02-F45`).
+    appended(req, session()?.user_id ?? null);
     return result;
   });
 

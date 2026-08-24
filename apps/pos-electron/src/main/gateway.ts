@@ -1290,3 +1290,43 @@ export const createVerifiedAddLine =
     // a second envelope built beside that one until August 2026, which is the fork that let
     // `02-F49`'s boundary guard the counter and not the pad, one function over.
     checkedAddLine(deps, actor_user_id, req);
+
+/**
+ * `04-F27` (c) — **an append made BECAUSE another append landed, naming the actor of that act.**
+ *
+ * ── The defect it exists for, measured on a real store ───────────────────────────────────────
+ *
+ * `04-F27` (b) put both producers on ONE consequence function, and every append that function
+ * makes went through `Gateway.append`, which reads the till's live session. That was right while
+ * the renderer was the only producer — the session's owner IS the person who acted — and wrong
+ * the moment a tablet could reach it. Waiter Sana at the pad, cashier Ayesha at the till: her
+ * SEND wrote `order.created`, `order.line_added` and `order.confirmed` naming SANA, and the
+ * `order.line_state_changed` it caused naming **AYESHA**. With the counter locked the same act
+ * named **nobody**. `02-F41` broken, permanent under `01-F1`, and invisible to every behavioural
+ * test in this repo because the order is still correct and only the envelope names the wrong
+ * person.
+ *
+ * ── Why it is a THIRD factory and not a widening of `createVerifiedAppend` ───────────────────
+ *
+ * The actor here is `string | null`, and `null` is a real answer rather than a missing one:
+ * `02-F31` defines its auto-advance as the case *"where no device exists to signal them"*, so a
+ * line advanced because a KOT printed was advanced by nobody. `VerifiedAppend` must NOT gain that
+ * nullability — `05-F29`'s grant is the caller whose whole safety property is that an
+ * unattributed approval cannot be expressed, and widening the type to admit `null` would delete
+ * that compile-time guarantee for a caller that has nothing to do with this one.
+ *
+ * It decides nothing else: the road is `checkedAppend`, exactly as the other four producers'
+ * is, so every guard `04-F27` (a) put on that road applies here too and a guard added later
+ * cannot miss it.
+ */
+export type CausedAppend = (caused_by: string | null, req: unknown) => AppendResult;
+
+export type CausedAppendDeps = {
+  /** The store alone — **no session**, which is the whole point (see above). */
+  store: Pick<DeviceStore, "identity" | "append" | "openOrders">;
+};
+
+export const createCausedAppend =
+  (deps: CausedAppendDeps): CausedAppend =>
+  (caused_by: string | null, req: unknown): AppendResult =>
+    checkedAppend(deps.store, caused_by, req);

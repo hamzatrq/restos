@@ -86,6 +86,17 @@ type MenuRow = {
   unavailableReason?: string;
   sold_out?: boolean;
 };
+/**
+ * `04-F34` — **`kitchen` is carried, and it is what stops SEND going quiet over food nobody is
+ * cooking.**
+ *
+ * `confirmed` answers *has this order ever been fired*; `02-F55`'s three-state `kitchen` answers
+ * *does any station still lack a chit*, which is the question `04-F24` asks. The pad bridged the
+ * gap with a local flag and one table re-selection cleared it, so SEND read *nothing new to send*
+ * over an order the till itself called `owed`. The till has always projected the fact — main
+ * computes it off `03-F4`'s durable spool — and this type, and the terminal row it comes from,
+ * dropped it.
+ */
 type Table = {
   table_ids: readonly string[];
   order_id: string;
@@ -93,6 +104,7 @@ type Table = {
   total_paisa: number;
   confirmed: boolean;
   conflict: boolean;
+  kitchen?: "none" | "sent" | "owed";
 };
 type View = { waiter: string; menu: MenuRow[]; tables: Table[] };
 
@@ -115,17 +127,14 @@ export const Pad = ({ client }: { client: TerminalClient }): React.JSX.Element =
   const [page, setPage] = useState(0);
   const [unsent, setUnsent] = useState<Unsent[]>([]);
   /**
-   * `04-F29` — the lines have landed and the KITCHEN has not been told, as far as this pad knows.
-   *
-   * It exists because a lost `confirm` response is not a lost order: the rows are gone from
-   * `unsent` (each was trimmed on its own `ok`), so without this SEND would read *nothing to send*
-   * over an order sitting on the till that no station has a ticket for — `04-F24`'s named failure
-   * with the food already on the bill. Pressing SEND again re-sends the CONFIRM alone. The cost is
-   * stated rather than hidden: if the first confirm landed and only its answer was lost, the
-   * second is a duplicate `order.confirmed`, permanent under `01-F1` — which prints nothing extra
-   * (`03-F55` sends only lines no chit covers) and is the cheaper of the two errors.
+   * ⚠ **`owedConfirm` LIVED HERE AND IS DELETED (`04-F34`).** It held *"the lines landed and this
+   * pad never had its confirm acknowledged"*, which is a real fact and the wrong instrument: it
+   * was cleared on every table re-selection, on a browser reload, on a sign-out and on a second
+   * pad, so SEND went quiet over an unticketed addendum after one ordinary gesture — `04-F24`'s
+   * named failure, measured on this pad's own harness. `02-F55` had already ruled that this
+   * cannot be a client-side flag and already projects the answer on the order row, so SEND reads
+   * `table.kitchen` and this pad holds nothing.
    */
-  const [owedConfirm, setOwedConfirm] = useState(false);
   /**
    * `00 §5.7` — the last thing the till REFUSED, in this pad's own words.
    *
@@ -262,17 +271,25 @@ export const Pad = ({ client }: { client: TerminalClient }): React.JSX.Element =
 
   const table = view?.tables.find((t) => t.order_id === orderId) ?? null;
   /**
-   * `04-F29` — **what SEND still owes the kitchen, read from the TILL and not from a local guess.**
+   * `04-F29`/`04-F34` — **what SEND still owes the kitchen, read from the TILL and not from a
+   * local guess — INCLUDING the half that used to be a local guess.**
    *
-   * Three ways an order can owe the kitchen a ticket: rows captured here and not yet sent; rows
-   * this pad has just sent whose confirm was not acknowledged; and — the case only the till knows
-   * — an order the till holds lines for and has never confirmed, which is where a pad that lost
-   * its answer, or a colleague's abandoned capture, leaves the work. `01-F2` puts the durable
-   * point at the till, so the till's own converged view is the authority for the third.
+   * Two ways an order can owe the kitchen a ticket: rows captured here and not yet sent, and —
+   * the case only the till can answer — lines it holds that no station has a chit for. `01-F2`
+   * puts the durable point at the till, so its own converged view is the authority for the
+   * second, and `02-F55` projects it as `kitchen` off `03-F4`'s durable spool: `owed` is
+   * `03-F55`'s addendum, `none` is an order the kitchen has never been told about, and `sent` is
+   * the only state in which SEND has nothing to do.
+   *
+   * **The degrade is `01-F54`'s and it is the till's silence, not a guess about the kitchen:** a
+   * host that supplies no projector omits the field, and this falls back to `04-F29`'s third
+   * fact — lines held, never confirmed — which is exactly what this pad knew before `04-F34`.
    */
-  const sendable =
-    orderId !== null &&
-    (unsent.length > 0 || owedConfirm || (table !== null && table.lines > 0 && !table.confirmed));
+  const kitchenOwes =
+    table !== null &&
+    table.lines > 0 &&
+    (table.kitchen === undefined ? !table.confirmed : table.kitchen !== "sent");
+  const sendable = orderId !== null && (unsent.length > 0 || kitchenOwes);
   const tabs: Tab[] = [
     { id: "tables", label: STRINGS.tables },
     { id: "order", label: STRINGS.order },
@@ -301,8 +318,7 @@ export const Pad = ({ client }: { client: TerminalClient }): React.JSX.Element =
               onPress={() => {
                 setOrderId(row.order_id);
                 setUnsent([]);
-                // `04-F29` — both flags belong to the order that was open, not to the pad.
-                setOwedConfirm(false);
+                // `04-F29` — the flag belongs to the order that was open, not to the pad.
                 setRefused(false);
                 setTab("order");
               }}
@@ -342,7 +358,6 @@ export const Pad = ({ client }: { client: TerminalClient }): React.JSX.Element =
               // Captured-but-unsent lines are the previous waiter's work and are NOT carried into
               // the next session: sending them later would append them under her successor's id.
               setUnsent([]);
-              setOwedConfirm(false);
               setRefused(false);
               setPin("");
             }}
@@ -360,7 +375,6 @@ export const Pad = ({ client }: { client: TerminalClient }): React.JSX.Element =
               if (r?.ok === true) {
                 setOrderId(r.order_id as string);
                 setUnsent([]);
-                setOwedConfirm(false);
                 setRefused(false);
                 setTab("order");
                 await refresh();
@@ -480,17 +494,16 @@ export const Pad = ({ client }: { client: TerminalClient }): React.JSX.Element =
                     return;
                   }
                   setUnsent((rows) => rows.filter((held) => held.item_id !== row.item_id));
-                  // From here the till holds a line the kitchen has no ticket for, so the confirm
-                  // is OWED whatever happens next.
-                  setOwedConfirm(true);
                 }
                 const confirmed = await call({
                   op: "act",
                   handle,
                   intent: { kind: "confirm", order_id: orderId },
                 });
-                if (confirmed?.ok === true) setOwedConfirm(false);
-                else if (confirmed !== null) setRefused(true);
+                // `04-F34` — nothing is remembered about the confirm. Whether the kitchen still
+                // owes a chit is the TILL's answer and it arrives on the next `refresh()` below,
+                // so a lost response, a reload and a second pad all reach the same conclusion.
+                if (confirmed !== null && confirmed.ok !== true) setRefused(true);
                 await refresh();
               }}
             />

@@ -316,7 +316,7 @@ const rig = (
     store,
     tier: () => opts.tier ?? "T1",
     serveOwner: () => opts.serveOwner ?? "settlement",
-    append: (type, payload) => {
+    append: (_caused_by, type, payload) => {
       appended.push({ type, payload });
       put(type, payload as unknown as Record<string, unknown>);
     },
@@ -366,7 +366,7 @@ describe("§C 01 §4 — the kernel accepts these edges and the projection MOVES
 
   it("01 §4 — confirm advances the lines to `confirmed`, with NO anomaly", () => {
     const r = open();
-    r.lines.confirmed(ORDER_ID);
+    r.lines.confirmed(ORDER_ID, null);
     expect(r.cells()[LINE_A]?.states).toEqual(["confirmed"]);
     expect(r.cells()[LINE_B]?.states).toEqual(["confirmed"]);
     // An empty anomaly map is the assertion that `preds: []` is correct here rather than merely
@@ -377,7 +377,7 @@ describe("§C 01 §4 — the kernel accepts these edges and the projection MOVES
 
   it("02-F31 — kot.printed then advances them to `in_prep`, still with NO anomaly", () => {
     const r = open();
-    r.lines.confirmed(ORDER_ID);
+    r.lines.confirmed(ORDER_ID, null);
     r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
     expect(r.cells()[LINE_A]?.states).toEqual(["in_prep"]);
     expect(r.cells()[LINE_A]?.anomalies ?? {}).toEqual({});
@@ -389,7 +389,7 @@ describe("§C 01 §4 — the kernel accepts these edges and the projection MOVES
 
   it("03-F2 — a SECOND station's print appends nothing at all", () => {
     const r = open();
-    r.lines.confirmed(ORDER_ID);
+    r.lines.confirmed(ORDER_ID, null);
     r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
     r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
     r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
@@ -409,7 +409,7 @@ describe("§C 01 §4 — the kernel accepts these edges and the projection MOVES
   it("02-F31 — a T2 device does NOT auto-advance on print, and STILL confirms", () => {
     // The CONTROL for the tier gate, in the fold: exactly one input differs from the T1 rig.
     const r = open({ tier: "T2" });
-    r.lines.confirmed(ORDER_ID);
+    r.lines.confirmed(ORDER_ID, null);
     r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
     // `03-F24` — on T2 the pass screen owns the signal and auto-advancing would race a human.
     expect(r.cells()[LINE_A]?.states).toEqual(["confirmed"]);
@@ -418,7 +418,7 @@ describe("§C 01 §4 — the kernel accepts these edges and the projection MOVES
 
   it("01-F17 — an unknown order is a no-op, never a throw", () => {
     const r = open();
-    expect(() => r.lines.confirmed("0199ffff-0000-7000-8000-00000000dead")).not.toThrow();
+    expect(() => r.lines.confirmed("0199ffff-0000-7000-8000-00000000dead", null)).not.toThrow();
     expect(r.appended).toHaveLength(0);
   });
 });
@@ -445,7 +445,7 @@ describe("§D 01-F34 — the emitted edge reads no ordering metadata", () => {
     const b = rig({ idPrefix: "0199eeee", clock: 1_500_000_000_000 });
     rigs.push(a, b);
     for (const r of [a, b]) {
-      r.lines.confirmed(ORDER_ID);
+      r.lines.confirmed(ORDER_ID, null);
       r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
     }
     // Byte-identical, not merely equivalent: an emitter that put an envelope id into `preds`, or
@@ -458,7 +458,7 @@ describe("§D 01-F34 — the emitted edge reads no ordering metadata", () => {
   it("no emitted payload contains an envelope id from any store", () => {
     const r = rig();
     rigs.push(r);
-    r.lines.confirmed(ORDER_ID);
+    r.lines.confirmed(ORDER_ID, null);
     r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
     const ids = new Set(r.store.readAllEvents().map((e) => (e as { id: string }).id));
     const text = JSON.stringify(r.appended);
@@ -530,12 +530,12 @@ describe("§E DEC-HW-002/01 §4 — `served` has a legal predecessor at T1, and 
       } as never,
       tier: () => "T1",
       serveOwner: () => "settlement",
-      append: (type, payload) => appended.push({ type, payload }),
+      append: (_caused_by, type, payload) => appended.push({ type, payload }),
     });
     expect(Object.keys(lines).sort()).toEqual(["confirmed", "printEvent", "settled"]);
-    lines.confirmed(ORDER_ID);
+    lines.confirmed(ORDER_ID, null);
     lines.printEvent("kot.printed", { order_id: ORDER_ID });
-    lines.settled(ORDER_ID);
+    lines.settled(ORDER_ID, null);
     // Exactly one event — the settlement edge. `confirmed` and `in_prep` are both already past.
     expect(appended).toHaveLength(1);
     expect(appended[0]?.payload.state).toBe("served");
@@ -568,9 +568,10 @@ describe("§F 02-F31/01 §4 — delivery lines are NEVER advanced by settlement"
       } as never,
       tier: () => "T1",
       serveOwner: () => "settlement",
-      append: (type: string, payload: LineStateChangedPayload) => appended.push({ type, payload }),
+      append: (_caused_by: string | null, type: string, payload: LineStateChangedPayload) =>
+        appended.push({ type, payload }),
     });
-    lines.settled(ORDER_ID);
+    lines.settled(ORDER_ID, null);
     return appended;
   };
 
@@ -633,9 +634,10 @@ describe("§G 02-F31/03-F52 — the settlement gate, and what counts as settleme
       // is no longer an input to this trigger and a rig that varied it would be measuring nothing.
       tier: () => "T1",
       serveOwner: () => opts.serveOwner ?? "settlement",
-      append: (type: string, payload: LineStateChangedPayload) => appended.push({ type, payload }),
+      append: (_caused_by: string | null, type: string, payload: LineStateChangedPayload) =>
+        appended.push({ type, payload }),
     });
-    lines.settled(ORDER_ID);
+    lines.settled(ORDER_ID, null);
     return appended;
   };
 
@@ -680,7 +682,7 @@ describe("§G 02-F31/03-F52 — the settlement gate, and what counts as settleme
       serveOwner: () => "settlement",
       append: () => {},
     });
-    expect(() => lines.settled("0199ffff-0000-7000-8000-00000000dead")).not.toThrow();
+    expect(() => lines.settled("0199ffff-0000-7000-8000-00000000dead", null)).not.toThrow();
   });
 });
 
@@ -707,11 +709,11 @@ describe("§H 01 §4 — the kernel accepts the settlement edge and the line rea
     // edge this module thinks is well-formed and the kernel does not fails HERE rather than in a
     // unit assertion about our own object.
     const r = open();
-    r.lines.confirmed(ORDER_ID);
+    r.lines.confirmed(ORDER_ID, null);
     r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
     expect(r.cells()[LINE_A]?.states).toEqual(["in_prep"]);
     r.payFull();
-    r.lines.settled(ORDER_ID);
+    r.lines.settled(ORDER_ID, null);
     expect(r.cells()[LINE_A]?.states).toEqual(["served"]);
     expect(r.cells()[LINE_B]?.states).toEqual(["served"]);
   });
@@ -730,10 +732,10 @@ describe("§H 01 §4 — the kernel accepts the settlement edge and the line rea
     //    ledger, and a refold clears it the day `preds` can be built;
     //  - the cloud Auditor filters to `illegal_transition` by name, so this raises no finding.
     const r = open();
-    r.lines.confirmed(ORDER_ID);
+    r.lines.confirmed(ORDER_ID, null);
     r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
     r.payFull();
-    r.lines.settled(ORDER_ID);
+    r.lines.settled(ORDER_ID, null);
     const flags = Object.values(r.cells()[LINE_A]?.anomalies ?? {});
     expect(flags).toEqual(["terminal_regression", "terminal_regression"]);
     // The point of the row: NOT `illegal_transition`. If that ever appears the EDGE is wrong and
@@ -747,10 +749,10 @@ describe("§H 01 §4 — the kernel accepts the settlement edge and the line rea
     // because the fixture is the coverage boundary: `01 §4` sends these lines down
     // `picked_up → delivered` on a rider event this device does not emit.
     const r = open({ orderType: "delivery" });
-    r.lines.confirmed(ORDER_ID);
+    r.lines.confirmed(ORDER_ID, null);
     r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
     r.payFull();
-    r.lines.settled(ORDER_ID);
+    r.lines.settled(ORDER_ID, null);
     expect(r.cells()[LINE_A]?.states).toEqual(["in_prep"]);
     // And no anomaly either — refusing to emit is silent, not a rejected edge in the ledger.
     expect(r.cells()[LINE_A]?.anomalies ?? {}).toEqual({});
@@ -762,9 +764,9 @@ describe("§H 01 §4 — the kernel accepts the settlement edge and the line rea
     // `restaurant-os.md:47` defines T1 as "terminal + printers", so this is outside the corpus
     // rather than a gap in it (`DEC-HW-001` sub-question 2).
     const r = open();
-    r.lines.confirmed(ORDER_ID);
+    r.lines.confirmed(ORDER_ID, null);
     r.payFull();
-    r.lines.settled(ORDER_ID);
+    r.lines.settled(ORDER_ID, null);
     expect(r.cells()[LINE_A]?.states).toEqual(["confirmed"]);
     expect(r.cells()[LINE_A]?.anomalies ?? {}).toEqual({});
   });
@@ -775,10 +777,10 @@ describe("§H 01 §4 — the kernel accepts the settlement edge and the line rea
     const a = open({ idPrefix: "0199bbbb", clock: 1_754_300_000_000 });
     const b = open({ idPrefix: "0199eeee", clock: 1_500_000_000_000 });
     for (const r of [a, b]) {
-      r.lines.confirmed(ORDER_ID);
+      r.lines.confirmed(ORDER_ID, null);
       r.lines.printEvent("kot.printed", { order_id: ORDER_ID });
       r.payFull();
-      r.lines.settled(ORDER_ID);
+      r.lines.settled(ORDER_ID, null);
     }
     expect(JSON.stringify(a.appended)).toBe(JSON.stringify(b.appended));
     // Anchored: the payloads are not empty, so the equality above is not two empty arrays.

@@ -69,8 +69,18 @@ export type TerminalServer = {
    * A bind failure is ASYNCHRONOUS: `listen()` returns, the `error` arrives on a later tick, and
    * until August 2026 there was no listener for it — so a second counter, a stale process or
    * anything else already holding the port took the whole till down with an uncaught
-   * `EADDRINUSE` (reproduced: exit 7). It is caught now, and this is where the answer lives so
-   * the host can put it on the honesty strip rather than leaving a dead pad looking healthy.
+   * `EADDRINUSE` (reproduced: exit 7). It is caught now, and kept here rather than logged and
+   * dropped.
+   *
+   * ⚠ **NO SURFACE READS IT, and this sentence used to imply one did** (`04-F35`). It said the
+   * answer lives here *"so the host can put it on the honesty strip rather than leaving a dead pad
+   * looking healthy"* — true of what the value is FOR and false as a description of the product:
+   * the only production caller is `terminal-console.ts`, which is TTY-only, and no shipping file
+   * carries this to `DeviceState`, `ConnectionFacts` or `PanelHealth`. `04-F22` (a)'s strip clause
+   * is recorded in the FR as OWED with its cost measured, and a comment that reads as though it
+   * were built retires the assertion the next session would have written (`AGENTS.md` `L11`).
+   * `terminal-operations.test.ts` §F pins the two together: the words above are legal only while
+   * `failure()` reaches no surface.
    */
   failure: () => string | null;
   /**
@@ -250,7 +260,14 @@ export const createTerminalServer = (deps: TerminalServerDeps): TerminalServer =
       listening: false,
       reason,
       // A pad WAS configured and did not come up, so unlike the absent-certificate case above
-      // this is a failure and the strip says so (`00 §5.7`).
+      // this is a FAILURE rather than an "off", and it is kept as a live fact for a surface to
+      // report.
+      //
+      // ⚠ **This comment said "and the strip says so (`00 §5.7`)" and the strip does not**
+      // (`04-F35`): `failure()`'s only production caller is the TTY console, and `04-F22` (a)'s
+      // strip clause is recorded in the FR as owed. The distinction it draws — configured and
+      // dead, versus never configured — is real and is what a strip would render; what was false
+      // was the claim that anything renders it today.
       failure: () => reason,
       mintEnrolmentCode,
       enrolments: () => [],

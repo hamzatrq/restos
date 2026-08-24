@@ -92,7 +92,7 @@ const FP_2_BILL = 32_000 * 3; // Rs 960
 type Harness = {
   store: DeviceStore;
   /** The SHIPPED emitter, wired to this store and appending into it. */
-  entry: { confirmed: (order_id: string) => void };
+  entry: { confirmed: (order_id: string, caused_by: string | null) => void };
   /** Everything the emitter appended, in order. */
   emitted: { type: string; payload: Record<string, unknown> }[];
   /** `01-F31`'s keyed tender sum for an order, off the REAL merge engine. */
@@ -176,7 +176,7 @@ const harness = ({ openShift = true }: { openShift?: boolean } = {}): Harness =>
   const emitted: { type: string; payload: Record<string, unknown> }[] = [];
   const entry = createAggregatorSettlement({
     store,
-    append: (type, payload) => {
+    append: (_caused_by, type, payload) => {
       emitted.push({ type, payload });
       raw(type, payload);
     },
@@ -216,7 +216,7 @@ describe("§A 08-F17/01-F32 — a foodpanda order settles at entry, with no cash
     const h = harness();
     expect(h.payTotal(FP_1)).toBe(0); // before: nothing has settled it
 
-    h.entry.confirmed(FP_1);
+    h.entry.confirmed(FP_1, null);
 
     const paid = payments(h);
     expect(paid).toHaveLength(1);
@@ -231,7 +231,7 @@ describe("§A 08-F17/01-F32 — a foodpanda order settles at entry, with no cash
 
   it("lands in pay_total, not repaid_total — 01-F32's keyed-sum exclusion", () => {
     const h = harness();
-    h.entry.confirmed(FP_1);
+    h.entry.confirmed(FP_1, null);
 
     // THE ASSERTION THAT KILLS `purpose: "repays_receivable"`. `pay_total` is what
     // `01-F30` conservation is evaluated over, what `settlement-guard.ts` reads, and what
@@ -245,7 +245,7 @@ describe("§A 08-F17/01-F32 — a foodpanda order settles at entry, with no cash
 
   it("carries 01-F31's settlement_attempt_id — a non-empty key, so the fold can dedupe", () => {
     const h = harness();
-    h.entry.confirmed(FP_1);
+    h.entry.confirmed(FP_1, null);
     const key = payments(h)[0]?.settlement_attempt_id;
     expect(typeof key).toBe("string");
     expect(key).not.toBe("");
@@ -256,7 +256,7 @@ describe("§A 08-F17/01-F32 — a foodpanda order settles at entry, with no cash
 
   it("emits nothing but the payment — no invented event types (commandment 2)", () => {
     const h = harness();
-    h.entry.confirmed(FP_1);
+    h.entry.confirmed(FP_1, null);
     expect(h.emitted.map((e) => e.type)).toEqual(["payment.recorded"]);
   });
 });
@@ -274,8 +274,8 @@ describe("§A 08-F17/01-F32 — a foodpanda order settles at entry, with no cash
 describe("§B 02-F23/08-F5 — no cash is expected at the branch", () => {
   it("moves the aggregator_receivable bucket and leaves the CASH bucket at zero", () => {
     const h = harness();
-    h.entry.confirmed(FP_1);
-    h.entry.confirmed(FP_2);
+    h.entry.confirmed(FP_1, null);
+    h.entry.confirmed(FP_2, null);
 
     const expected = h.expectedByMethod();
     expect(expected.aggregator_receivable).toBe(FP_1_BILL + FP_2_BILL);
@@ -288,7 +288,7 @@ describe("§B 02-F23/08-F5 — no cash is expected at the branch", () => {
 
   it("binds the settlement to the OPEN SHIFT, so 02-F23's Aggregator row is not always Rs 0", () => {
     const h = harness();
-    h.entry.confirmed(FP_1);
+    h.entry.confirmed(FP_1, null);
 
     // `26 §7`: the shift is a CARRIED key, never resolved at fold time from the reading device's
     // state. A constant `null` here is not a cosmetic default — `Counter.tsx` records that exact
@@ -302,7 +302,7 @@ describe("§B 02-F23/08-F5 — no cash is expected at the branch", () => {
 
   it("still settles with NO shift open, recording the null reference — 02-F37, 01-F17", () => {
     const h = harness({ openShift: false });
-    expect(() => h.entry.confirmed(FP_1)).not.toThrow();
+    expect(() => h.entry.confirmed(FP_1, null)).not.toThrow();
 
     // "Never a modal, never a block": the order still closes. The `shift_id` KEY is present and
     // null rather than absent — `payment.recorded` requires it, and an absent key is an `01-F4`
@@ -327,14 +327,14 @@ describe("§B 02-F23/08-F5 — no cash is expected at the branch", () => {
 describe("§C 02-F30/02-F42 — only the foodpanda channel is aggregator-collected", () => {
   it("does NOT settle a counter order — the cashier still takes the money", () => {
     const h = harness();
-    h.entry.confirmed(COUNTER_1);
+    h.entry.confirmed(COUNTER_1, null);
     expect(h.emitted).toEqual([]);
     expect(h.payTotal(COUNTER_1)).toBe(0);
   });
 
   it("does NOT settle a phone order — 02-F28 is settled at the counter like any other", () => {
     const h = harness();
-    h.entry.confirmed(PHONE_1);
+    h.entry.confirmed(PHONE_1, null);
     expect(h.emitted).toEqual([]);
     expect(h.payTotal(PHONE_1)).toBe(0);
   });
@@ -347,9 +347,9 @@ describe("§C 02-F30/02-F42 — only the foodpanda channel is aggregator-collect
     expect(h.billed(FP_2)).toBe(h.billed(COUNTER_1));
     expect(h.billed(FP_2)).toBe(h.billed(PHONE_1));
 
-    h.entry.confirmed(FP_2);
-    h.entry.confirmed(COUNTER_1);
-    h.entry.confirmed(PHONE_1);
+    h.entry.confirmed(FP_2, null);
+    h.entry.confirmed(COUNTER_1, null);
+    h.entry.confirmed(PHONE_1, null);
 
     expect(payments(h).map((p) => p.order_id)).toEqual([FP_2]);
     expect(h.payTotal(FP_2)).toBe(FP_2_BILL);
@@ -361,7 +361,7 @@ describe("§C 02-F30/02-F42 — only the foodpanda channel is aggregator-collect
     // A sweep over `openOrders()` that ignores its own argument would settle FP_1 and FP_2 on one
     // call, double-billing an order the cashier has not finished entering.
     const h = harness();
-    h.entry.confirmed(FP_2);
+    h.entry.confirmed(FP_2, null);
     expect(payments(h).map((p) => p.order_id)).toEqual([FP_2]);
     expect(h.payTotal(FP_1)).toBe(0);
   });
@@ -378,8 +378,8 @@ describe("§C 02-F30/02-F42 — only the foodpanda channel is aggregator-collect
 describe("§D 01-F30 — the receivable equals the order's billed total", () => {
   it("tracks two different bills across two orders, including qty > 1", () => {
     const h = harness();
-    h.entry.confirmed(FP_1);
-    h.entry.confirmed(FP_2);
+    h.entry.confirmed(FP_1, null);
+    h.entry.confirmed(FP_2, null);
 
     const byOrder = new Map(payments(h).map((p) => [p.order_id, p.amount_paisa]));
     expect(byOrder.get(FP_1)).toBe(FP_1_BILL);
@@ -393,14 +393,14 @@ describe("§D 01-F30 — the receivable equals the order's billed total", () => 
 
   it("counts quantity — FP_2 is 3 x Rs 320, not Rs 320", () => {
     const h = harness();
-    h.entry.confirmed(FP_2);
+    h.entry.confirmed(FP_2, null);
     expect(payments(h)[0]?.amount_paisa).toBe(96_000);
   });
 
   it("satisfies 01-F30 conservation: paid − refunded = billed, with no counter settlement", () => {
     const h = harness();
-    h.entry.confirmed(FP_1);
-    h.entry.confirmed(FP_2);
+    h.entry.confirmed(FP_1, null);
+    h.entry.confirmed(FP_2, null);
     for (const id of [FP_1, FP_2]) {
       const row = h.store.openOrders().find((r) => r.order_id === id);
       expect(row?.pay_total).toBe(h.billed(id));
@@ -429,15 +429,15 @@ describe("§D 01-F30 — the receivable equals the order's billed total", () => 
 describe("§E 01-F31 — repeat entry is idempotent in the money", () => {
   it("does not double the receivable when the entry act fires twice", () => {
     const h = harness();
-    h.entry.confirmed(FP_1);
-    h.entry.confirmed(FP_1);
+    h.entry.confirmed(FP_1, null);
+    h.entry.confirmed(FP_1, null);
     expect(h.payTotal(FP_1)).toBe(FP_1_BILL);
     expect(h.payTotal(FP_1)).not.toBe(FP_1_BILL * 2);
   });
 
   it("does not double it across five firings, and the drawer is unmoved", () => {
     const h = harness();
-    for (let i = 0; i < 5; i += 1) h.entry.confirmed(FP_1);
+    for (let i = 0; i < 5; i += 1) h.entry.confirmed(FP_1, null);
     expect(h.payTotal(FP_1)).toBe(FP_1_BILL);
     expect(h.expectedByMethod().aggregator_receivable).toBe(FP_1_BILL);
     // `attempt_divergence` is `01-F31`'s disputed-key anomaly: two DIFFERENT payloads under one
@@ -464,7 +464,7 @@ describe("§F 01-F30 — a foodpanda order with no lines carries no receivable",
   it("leaves pay_total at zero for an empty order", () => {
     const h = harness();
     expect(h.billed(FP_EMPTY)).toBe(0);
-    h.entry.confirmed(FP_EMPTY);
+    h.entry.confirmed(FP_EMPTY, null);
     expect(h.payTotal(FP_EMPTY)).toBe(0);
     expect(h.expectedByMethod().aggregator_receivable ?? 0).toBe(0);
   });
@@ -483,7 +483,7 @@ describe("§F 01-F30 — a foodpanda order with no lines carries no receivable",
 describe("§G 01-F17 — an unreadable order costs nothing", () => {
   it("returns quietly for an order id this device does not hold", () => {
     const h = harness();
-    expect(() => h.entry.confirmed("0199bbbb-0000-7000-8000-0000000fffff")).not.toThrow();
+    expect(() => h.entry.confirmed("0199bbbb-0000-7000-8000-0000000fffff", null)).not.toThrow();
     expect(h.emitted).toEqual([]);
   });
 
@@ -510,7 +510,7 @@ describe("§G 01-F17 — an unreadable order costs nothing", () => {
       },
       refs: [],
     });
-    expect(() => h.entry.confirmed(orphan)).not.toThrow();
+    expect(() => h.entry.confirmed(orphan, null)).not.toThrow();
     expect(h.emitted).toEqual([]);
   });
 });
@@ -822,7 +822,18 @@ describe("§H 02-F30 — the shipped app reaches the emitter", () => {
     expect(args).toMatch(/\bstore[,:]/);
     // The "port supplied with a STUB" case AGENTS.md measures as invisible to every rail in this
     // repo: `append: () => {}` satisfies a required member and ships no money anywhere.
-    expect(args).toContain("gateway.append(");
+    //
+    // `04-F27` (c) — and it must not be the SESSION-READING append. This read `gateway.append(`
+    // until August 2026: `02-F30` makes the entry act the settlement, so this receivable belongs
+    // to whoever confirmed the order, and `Gateway.append` names whoever is standing at the
+    // counter instead — a different person the moment a `04-F21` pad is the producer.
+    expect(args).toContain("causedAppend(caused_by,");
+    expect(args, "the receivable's append drops 04-F27 (c)'s actor").toMatch(
+      /append:\s*\(caused_by,\s*type,\s*payload\)/,
+    );
+    expect(args, "the receivable is back on the session-reading append").not.toContain(
+      "gateway.append(",
+    );
   });
 
   it("fires it from the order.confirmed append, beside the kitchen handoff", () => {
@@ -835,7 +846,7 @@ describe("§H 02-F30 — the shipped app reaches the emitter", () => {
     // by a string literal. §H0 pins the position-preservation this line rests on.
     const block = strict.slice(at, end);
     // The neighbours, so this cannot pass by measuring the wrong block.
-    expect(block).toContain("lines.confirmed(order_id)");
+    expect(block).toContain("lines.confirmed(order_id, caused_by)");
     expect(block).toContain("kot.confirmed(order_id)");
     // **The binding is READ, not assumed** — the host may name it anything; what is asserted is
     // that whatever `createAggregatorSettlement` returned is reached from the confirm branch.
@@ -877,6 +888,13 @@ describe("§H 02-F30 — the shipped app reaches the emitter", () => {
       `${bound as string}.confirmed is CONDITIONAL here, or carries an id that is not this ` +
         "branch's order_id. 01-F32's receivable hangs off the confirm itself or it is not a " +
         "receivable — a flag that ships OFF settles nothing and passes every other assertion.",
-    ).toMatch(new RegExp(`^\\s*(?:void\\s+)?${bound as string}\\.confirmed\\(order_id\\);\\s*$`));
+    ).toMatch(
+      // `04-F27` (c) — with the branch's own `order_id` AND the actor of the append that caused
+      // it. A call that dropped the second argument would not compile, but one that passed a
+      // freshly read session would: this pins the parameter the handler was given.
+      new RegExp(
+        `^\\s*(?:void\\s+)?${bound as string}\\.confirmed\\(order_id,\\s*caused_by\\);\\s*$`,
+      ),
+    );
   });
 });

@@ -1,7 +1,7 @@
 import { newId } from "@restos/domain";
 import type { DeviceStore, UnlockRefusal, UnlockResult } from "@restos/sync-client";
 import { z } from "zod";
-import type { MenuItem, OpenOrder } from "../shared/ipc";
+import type { KitchenState, MenuItem, OpenOrder } from "../shared/ipc";
 import type { TerminalAuthorization } from "./authorize";
 import type { Gateway, VerifiedAddLine, VerifiedAppend } from "./gateway";
 
@@ -84,8 +84,19 @@ export type TerminalDeps = {
    * It is REQUIRED, so a host that forgets it is a typecheck error, and it takes the request this
    * module just appended rather than an intent: the consequences are keyed on `01 §4` event types
    * and a second vocabulary here would be a fork of the host's own reading (`02-F45`).
+   *
+   * ── `04-F27` (c) — it also carries WHO, and that half was missing ────────────────────────────
+   *
+   * Handing the pad the host's consequence function handed it appends that read the till's live
+   * SESSION, so a waiter's SEND wrote an `order.line_state_changed` naming the CASHIER standing
+   * at the counter — or nobody, if the till was locked. The actor of the append this module just
+   * made travels WITH it: it is the resolved waiter, never a session, and never anything the
+   * tablet sent (`04-F22` (c)).
    */
-  onAppended: (req: { type: string; payload: Record<string, unknown> }) => void;
+  onAppended: (
+    req: { type: string; payload: Record<string, unknown> },
+    actor_user_id: string,
+  ) => void;
   /** The till's own converged projections. The pad renders these and holds none of them. */
   reads: Pick<Gateway, "menu" | "openOrders">;
   /** `01-F61`'s identification grid — `active` members only, in the roster's own order. */
@@ -148,6 +159,23 @@ export type TerminalTable = {
   readonly confirmed: boolean;
   /** `01-F19` — this order's table assignment is contested and nothing here resolves it. */
   readonly conflict: boolean;
+  /**
+   * `02-F55`/`04-F34` — **whether the KITCHEN has this order's lines**, projected by main off
+   * `03-F4`'s durable spool, and NOT the same question as `confirmed` above.
+   *
+   * `04-F29` read what SEND owes from *"the till holds lines and has never confirmed"*, which is
+   * `confirmed`'s question; `04-F24`'s is *"does any station lack a chit"*. The pad bridged the
+   * gap with a local flag, and one table re-selection cleared it — so SEND read *nothing to send*
+   * over an order whose own state was `owed`. `02-F55` had already ruled that no client may hold
+   * this (*"a renderer flag is defeated by a relaunch and by `02-F11`'s second terminal"*) and
+   * this row DROPPED the field it ships on, which is `04-F28`'s defect one field over.
+   *
+   * **Optional, because the projection is** (`GatewayDeps.kot` is a supplied-or-not seam): absent
+   * means *this host did not say*, which `01-F54` degrades to what the pad knew before it, and
+   * `"none"` means *said, and the kitchen has not been told*. Both leave SEND live; only one is a
+   * claim.
+   */
+  readonly kitchen?: KitchenState;
 };
 
 export type TerminalActResult =
@@ -272,6 +300,16 @@ export const createTerminal = (deps: TerminalDeps): Terminal => {
   const refuse = (reason: TerminalRefusalReason, detail?: string): TerminalActResult =>
     detail === undefined ? { ok: false, reason } : { ok: false, reason, detail };
 
+  /**
+   * `04-F12`/`04-F33` — **the orders this surface can see, in ONE place.**
+   *
+   * `view()` renders this list and `act()` refuses anything outside it, from the same read: two
+   * readings of one scope can disagree, and the disagreement that matters is the permissive one
+   * (`02-F45`).
+   */
+  const visibleOrders = (): TerminalTable[] =>
+    deps.reads.openOrders().filter(hasTable).map(tableOf);
+
   return {
     roster: () =>
       deps.store.staff.list().map((member) => ({
@@ -306,14 +344,13 @@ export const createTerminal = (deps: TerminalDeps): Terminal => {
     view: (handle: unknown): TerminalView | null => {
       const session = resolve(handle);
       if (session === null) return null;
-      const orders = deps.reads.openOrders();
       return {
         waiter: session.display_name,
         // The channel is the TERMINAL's, not a parameter, so the grid greys exactly what
         // `addLineAs` will refuse (`01-F60`) — the same identity `menu()`'s own note requires
         // between what a surface offers and what its append accepts.
         menu: deps.reads.menu(TERMINAL_CHANNEL),
-        tables: orders.filter(hasTable).map(tableOf),
+        tables: visibleOrders(),
       };
     },
 
@@ -332,6 +369,24 @@ export const createTerminal = (deps: TerminalDeps): Terminal => {
       const verdict = deps.authorize(session.user_id, EVENT_TYPE_OF[act.kind]);
       if (!verdict.ok) return refuse("not_permitted");
 
+      /**
+       * `04-F33` — **the pad may act only on an order its own view lists**, and this was missing
+       * entirely: `04-F23` bounds this surface by EVENT TYPE, and every intent but `open` carries
+       * an order id nothing checked.
+       *
+       * Measured with `view()` listing NO tables at all: the pad removed a Rs 450 line off a
+       * COUNTER order (total 45000 → 0, permanent under `01-F1`) and confirmed a `foodpanda`
+       * order, whose `08-F17` receivable then landed as a `payment.recorded` — the very type
+       * gate 1 refuses by name, arriving as a CONSEQUENCE rather than as an act.
+       *
+       * **Not an `01-F17` block:** an order this pad opened names a table by construction, so it
+       * is in this list; an order that is not is one no waiter standing at a table is ringing.
+       * Refused BEFORE anything is appended, so nothing is left behind (`01-F1`).
+       */
+      if (act.kind !== "open" && !visibleOrders().some((row) => row.order_id === act.order_id)) {
+        return refuse("not_permitted");
+      }
+
       try {
         switch (act.kind) {
           case "open": {
@@ -349,7 +404,7 @@ export const createTerminal = (deps: TerminalDeps): Terminal => {
             // `04-F27` — AFTER the append, never before and never instead: the ledger is the
             // durable point (`01-F2`) and a consequence that ran first would be a screen telling
             // a kitchen about food no store holds.
-            deps.onAppended({ type: "order.created", payload });
+            deps.onAppended({ type: "order.created", payload }, session.user_id);
             return { ok: true, order_id };
           }
           case "add_line": {
@@ -368,10 +423,13 @@ export const createTerminal = (deps: TerminalDeps): Terminal => {
              * `CHANNELS.addLine` handler reaches exactly one of them (the re-read) for the same
              * reason: no `01 §4` consequence hangs off a line-add.
              */
-            deps.onAppended({
-              type: "order.line_added",
-              payload: { order_id: act.order_id },
-            });
+            deps.onAppended(
+              {
+                type: "order.line_added",
+                payload: { order_id: act.order_id },
+              },
+              session.user_id,
+            );
             return { ok: true, order_id: act.order_id };
           }
           case "remove_line": {
@@ -393,7 +451,7 @@ export const createTerminal = (deps: TerminalDeps): Terminal => {
              */
             const payload = { order_id: act.order_id, line_id: act.line_id };
             deps.appendAs(session.user_id, { type: "order.line_removed", payload, refs: [] });
-            deps.onAppended({ type: "order.line_removed", payload });
+            deps.onAppended({ type: "order.line_removed", payload }, session.user_id);
             return { ok: true, order_id: act.order_id };
           }
           case "confirm": {
@@ -404,7 +462,7 @@ export const createTerminal = (deps: TerminalDeps): Terminal => {
             // involved (`01-F17` — a sale is never blocked by a printer). Without this call the
             // pad's SEND is a screen that says the food is on the till while no station has been
             // told, which is exactly what `04-F24` forbids.
-            deps.onAppended({ type: "order.confirmed", payload });
+            deps.onAppended({ type: "order.confirmed", payload }, session.user_id);
             return { ok: true, order_id: act.order_id };
           }
         }
@@ -438,4 +496,9 @@ const tableOf = (order: OpenOrder): TerminalTable => ({
   // The fold's own flag, never re-derived from the set's length: `merge.ts` owns what counts as a
   // conflict and a second reading here could disagree with the badge every other surface draws.
   conflict: order.table_conflict === 1,
+  // `04-F34` — the till's own `02-F55` fact, carried and never re-derived. The key is OMITTED
+  // when the projection omitted it, so `01-F54`'s distinction between "this host did not say" and
+  // "said, and the kitchen has not been told" survives the plane boundary intact — writing
+  // `"none"` here would turn a silence into a claim.
+  ...(order.kitchen === undefined ? {} : { kitchen: order.kitchen }),
 });

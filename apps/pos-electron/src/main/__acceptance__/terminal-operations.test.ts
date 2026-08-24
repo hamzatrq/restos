@@ -30,7 +30,7 @@
 // deliberately. Nothing here is evidence about a packaged Windows till, which has no console at
 // all — a limit `04-F31` states rather than hides.
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { createOrgIssuer } from "@restos/lan-pki";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Terminal } from "../terminal";
@@ -317,5 +317,81 @@ describe("§D 04-F31 — the shipped host reaches the console with the REAL serv
     const bound = /const\s+(\w+)\s*=\s*createTerminalConsole\(/.exec(mainSrc)?.[1];
     expect(bound).toBeTruthy();
     expect(after).toContain(`${bound as string}.command(`);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// §F — `04-F35`: A COMMENT MAY NOT CLAIM A PROTECTION THE PRODUCT DOES NOT HAVE.
+//
+// `terminal-server.ts` said of a pad that was configured and did not come up: *"this is a failure
+// and **the strip says so** (`00 §5.7`)"*. It does not. `failure()`'s only production caller is
+// the till's TTY console, and no shipping file carries it to `DeviceState`, `ConnectionFacts` or
+// `PanelHealth` — `04-F22` (a)'s strip clause is recorded in the FR as OWED, with its cost
+// measured, and the code beside it read as though it were built.
+//
+// **A claim in prose retires the assertion the next session would have written** (`AGENTS.md`
+// `L11`), which is why this is an assertion and not a tidier sentence. It binds the two together
+// in BOTH directions: while `failure()` reaches no surface, the file must say so; and the day a
+// surface does read it, F1 fails and the words have to be rewritten in the same change.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+describe("§F 04-F35 — what the pad-port comments claim is what the product does", () => {
+  /** Every shipping file in this app: `src/**`, minus tests, oracles and the layout-gate fixture. */
+  const productionFiles = (): string[] => {
+    const root = new URL("../../", import.meta.url).pathname;
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const path = `${dir}${entry.name}`;
+        if (entry.isDirectory()) return entry.name === "__acceptance__" ? [] : walk(`${path}/`);
+        if (!/\.tsx?$/.test(entry.name)) return [];
+        if (/\.test\.tsx?$/.test(entry.name) || /\.oracle\./.test(entry.name)) return [];
+        return [path];
+      });
+    return walk(root);
+  };
+
+  it("F0 — is actually reading the files it guards", () => {
+    const files = productionFiles();
+    // `24-F14`: a sweep over nothing reports clean, and this whole section would be vacuous.
+    expect(files.length, "the production sweep found no files").toBeGreaterThan(20);
+    expect(files.some((f) => f.endsWith("main/terminal-server.ts"))).toBe(true);
+    expect(files.some((f) => f.endsWith("main/index.ts"))).toBe(true);
+  });
+
+  it("F1 — `failure()` reaches exactly one production caller, and it is the TTY console", () => {
+    const callers = productionFiles().filter(
+      (file) =>
+        !file.endsWith("main/terminal-server.ts") &&
+        /\.failure\(\)/.test(readFileSync(file, "utf8")),
+    );
+    expect(
+      callers.map((f) => f.slice(f.indexOf("src/"))),
+      "a NEW reader of the pad's failure appeared — if it is a surface, `04-F22` (a)'s strip clause is no longer owed and BOTH the FR and terminal-server.ts's comments must be rewritten in this change (04-F35)",
+    ).toEqual(["src/main/terminal-console.ts"]);
+  });
+
+  it("F2 — no shipping file carries a pad failure to the honesty strip", () => {
+    // The property the corrected comment now states. `terminal-console.ts` is TTY-only, so a
+    // packaged double-clicked till reports a dead pad NOWHERE.
+    for (const file of productionFiles()) {
+      const src = readFileSync(file, "utf8");
+      if (!/\.failure\(\)/.test(src)) continue;
+      expect(
+        /deviceState|ConnectionFacts|PanelHealth|CatalogHealth/.test(src),
+        `${file} reads the pad's failure AND a honesty-strip symbol — 04-F22 (a)'s clause may now be built, and 04-F35 requires the comments and the FR to say so`,
+      ).toBe(false);
+    }
+  });
+
+  it("F3 — and while that holds, the file states the limit rather than claiming the strip", () => {
+    const src = readSrc("terminal-server.ts");
+    // The anti-rot direction: deleting the disclaimer while the gap remains is the defect
+    // returning. It must name the owed clause and say what does NOT read the value.
+    expect(src).toContain("04-F22");
+    expect(src).toContain("04-F35");
+    expect(
+      /only production caller/.test(src),
+      "terminal-server.ts no longer says who reads `failure()` — a comment that stops naming the limit is how the claim came back",
+    ).toBe(true);
   });
 });

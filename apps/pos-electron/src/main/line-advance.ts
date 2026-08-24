@@ -307,8 +307,25 @@ export type LineAdvanceDeps = {
    * absence of one — *"where no device exists to signal them"*. The two human acts that DO produce
    * this event type (`03-F16` ready-marking, `03-F19` a station bump) are not built and will need
    * their own matrix row when they are; this must not be read as a precedent for those.
+   *
+   * ── `04-F27` (c): `caused_by` is the FIRST argument, and it is REQUIRED ──────────────────────
+   *
+   * The host's closure appended through a SESSION-READING append until August 2026, so the edge
+   * this module emits named whoever happened to be signed in at the counter: a waiter's confirm
+   * at a `04-F21` pad wrote an `order.line_state_changed` naming the CASHIER, and named nobody
+   * when the till was locked. The actor of a consequence is the actor of the act that caused it,
+   * so it arrives as data with the call and is never read from ambient state.
+   *
+   * **First and required, never trailing and optional**, on `01-F60`'s precedent about
+   * completeness inputs: a trailing parameter is satisfied by every existing two-parameter
+   * closure, so a host that quietly ignored it would still compile and go on stamping the
+   * session — the defect unchanged, behind a signature that looks fixed.
    */
-  readonly append: (type: string, payload: LineStateChangedPayload) => void;
+  readonly append: (
+    caused_by: string | null,
+    type: string,
+    payload: LineStateChangedPayload,
+  ) => void;
 };
 
 export type LineAdvance = {
@@ -337,7 +354,7 @@ export type LineAdvance = {
    * A reviewer who disagrees should say so: this is the one behaviour here that no FR states
    * outright, and it is deliberately in its own method so it can be gated in one line.
    */
-  readonly confirmed: (order_id: string) => void;
+  readonly confirmed: (order_id: string, caused_by: string | null) => void;
   /**
    * `02-F31` — *"`kot.printed` → lines `in_prep`"*, on T1 only.
    *
@@ -409,7 +426,7 @@ export type LineAdvance = {
    *    exists). Widening the table again to reach it would be inventing past the ruling.
    *  - It writes **no `preds`**, and the consequence is measured and named on `advanceEdgesFor`.
    */
-  readonly settled: (order_id: string) => void;
+  readonly settled: (order_id: string, caused_by: string | null) => void;
 };
 
 /** `01 §4` vocabulary, named once so a typo cannot make this module advance nothing. */
@@ -422,7 +439,7 @@ const LINE_STATE_CHANGED = "order.line_state_changed";
 const KOT_PRINTED = "kot.printed";
 
 export const createLineAdvance = (deps: LineAdvanceDeps): LineAdvance => {
-  const advance = (order_id: string, to: OrderLineState): void => {
+  const advance = (order_id: string, to: OrderLineState, caused_by: string | null): void => {
     const order = deps.store.openOrders().find((row) => row.order_id === order_id);
     // A settled or unknown order is not an error here. `01-F17` — nothing about a line's workflow
     // may cost the operator the act that triggered it, and both callers are downstream of an
@@ -430,11 +447,11 @@ export const createLineAdvance = (deps: LineAdvanceDeps): LineAdvance => {
     if (order === undefined) return;
     const payload = advanceEdgesFor(order, to);
     if (payload === null) return;
-    deps.append(LINE_STATE_CHANGED, payload);
+    deps.append(caused_by, LINE_STATE_CHANGED, payload);
   };
 
   return {
-    confirmed: (order_id) => advance(order_id, CONFIRMED),
+    confirmed: (order_id, caused_by) => advance(order_id, CONFIRMED, caused_by),
     printEvent: (type, payload) => {
       if (type !== KOT_PRINTED) return;
       if (!autoAdvancesLines(deps.tier())) return;
@@ -442,9 +459,15 @@ export const createLineAdvance = (deps: LineAdvanceDeps): LineAdvance => {
       // this is the printer's own callback and not the store's, so the narrowing is real — and it
       // must survive a null: `01-F17`, the print is downstream of a sale that already completed.
       const order_id = (payload as { order_id?: unknown } | null)?.order_id;
-      if (typeof order_id === "string") advance(order_id, IN_PREP);
+      // `04-F27` (c) — **NOBODY, and that is an answer rather than a missing one.** This edge
+      // fires because a PRINTER answered, which is `02-F31`'s own case: *"line statuses
+      // auto-advance where no device exists to signal them"*. There is no human act to attribute
+      // it to, and whoever happens to be signed in at the counter when the paper came out is not
+      // one — she may have gone home between the confirm and the print, and `01-F1` would keep
+      // her name on it. Until August 2026 the host's closure read the session here.
+      if (typeof order_id === "string") advance(order_id, IN_PREP, null);
     },
-    settled: (order_id) => {
+    settled: (order_id, caused_by) => {
       // `03-F52` — the trigger is the ASSIGNMENT and no longer the tier. Read INSIDE the method
       // for `printEvent`'s reason: a host cannot forget it and no suite can assert against a copy
       // of it. `settlement` is `03-F52`'s own word for *"no device signals handover"*, so this is
@@ -459,7 +482,7 @@ export const createLineAdvance = (deps: LineAdvanceDeps): LineAdvance => {
       if (!advancesOnSettlement(order)) return;
       const payload = advanceEdgesFor(order, SERVED);
       if (payload === null) return;
-      deps.append(LINE_STATE_CHANGED, payload);
+      deps.append(caused_by, LINE_STATE_CHANGED, payload);
     },
   };
 };

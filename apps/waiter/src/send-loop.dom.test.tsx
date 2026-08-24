@@ -86,9 +86,38 @@ const MENU: Record<string, Row> = {
  * harness. `T11` is the standing version of this: nothing in this file is evidence that a waiter
  * can reach a control.
  */
-const till = (options: { dropConfirm?: boolean; failAddLine?: number; menu?: string[] } = {}) => {
+/**
+ * `04-F34` — **the fixture carries `kitchen`, because the real terminal does.**
+ *
+ * `02-F55` projects three states on the open-order row off `03-F4`'s durable spool, and
+ * `main/__acceptance__/terminal-write-path.test.ts` §F5 asserts the shipped terminal carries the
+ * field onto its table row — so a fixture without it would be measuring a till this product does
+ * not ship. `state.kitchen` moves exactly as the till's projector does: a line added to a
+ * confirmed order leaves the kitchen OWED an addendum (`03-F55`), a confirm that lands spools the
+ * chits and leaves it SENT, and an order the kitchen has never been told about is NONE.
+ *
+ * ⚠ **`dropConfirm` models a confirm that never reached the till at all** (the request was lost on
+ * the way out), which is why the state does not move under it. The other half — it landed and the
+ * ANSWER was lost — is the case the till's own `kitchen` answers correctly without any help from
+ * this pad, and `A7` is the gesture that used to defeat the local flag.
+ */
+const till = (
+  options: {
+    dropConfirm?: boolean;
+    failAddLine?: number;
+    menu?: string[];
+    /** Omitted entirely when `false` — `01-F54`'s "this host did not say" (`A8`). */
+    projectsKitchen?: boolean;
+  } = {},
+) => {
   const calls: Call[] = [];
-  const state = { reachable: true, lines: 0, confirmed: false, adds: 0 };
+  const state = {
+    reachable: true,
+    lines: 0,
+    confirmed: false,
+    adds: 0,
+    kitchen: "none" as "none" | "sent" | "owed",
+  };
   const client: TerminalClient = {
     enrolled: () => true,
     enrol: async () => true,
@@ -113,6 +142,7 @@ const till = (options: { dropConfirm?: boolean; failAddLine?: number; menu?: str
                 total_paisa: state.lines * 6_000,
                 confirmed: state.confirmed,
                 conflict: false,
+                ...(options.projectsKitchen === false ? {} : { kitchen: state.kitchen }),
               },
             ],
           },
@@ -122,6 +152,9 @@ const till = (options: { dropConfirm?: boolean; failAddLine?: number; menu?: str
         state.adds += 1;
         if (options.failAddLine === state.adds) return { ok: false, reason: "refused" };
         state.lines += 1;
+        // `03-F55` — a line landing on a CONFIRMED order leaves a station without a chit for it;
+        // on an unconfirmed one the kitchen has simply never been told.
+        state.kitchen = state.confirmed ? "owed" : "none";
         return { ok: true, order_id: "o1" };
       }
       if (call.op === "act" && call.intent?.kind === "confirm") {
@@ -129,6 +162,9 @@ const till = (options: { dropConfirm?: boolean; failAddLine?: number; menu?: str
         // whatever landed permanent, so the pad cannot know which happened.
         if (options.dropConfirm === true) throw new Error("the response never came back");
         state.confirmed = true;
+        // The confirm landed, so `03-F55`'s walk found the owed lines and spooled their chits:
+        // `02-F55`'s state (iii), the only one in which SEND has nothing left to do.
+        state.kitchen = "sent";
         return { ok: true, order_id: "o1" };
       }
       return { ok: true, order_id: "o1" };
@@ -313,6 +349,11 @@ describe("§A 04-F29 — a lost confirm answer never re-rings a line that landed
     const rig = till({ dropConfirm: true });
     rig.state.lines = 2;
     rig.state.confirmed = true;
+    // The opening round printed: the kitchen HAS those two lines and owes nothing until the
+    // addendum lands (`02-F55` state (iii)). ⚠ This starting state was implicit while the pad
+    // answered from its own flag; under `04-F34` it is the fact SEND reads, so the fixture states
+    // it rather than leaving the field at its default.
+    rig.state.kitchen = "sent";
     mounted(rig.client);
     await signIn();
     press("7");
@@ -334,6 +375,76 @@ describe("§A 04-F29 — a lost confirm answer never re-rings a line that landed
     await waitFor(() => expect(confirms(rig.calls).length).toBe(2));
     // …and it re-sent the CONFIRM alone. The line that landed is not rung twice.
     expect(addLines(rig.calls)).toHaveLength(1);
+  });
+
+  /**
+   * ⚠ **A7 IS THE RE-REVIEW'S FINDING AND IT IS ONE GESTURE AWAY FROM A6 (`04-F34`).**
+   *
+   * A6 proves SEND stays live over an unticketed addendum *while the pad still remembers sending
+   * it*. The pad remembered with a local flag, and the flag was cleared on every table
+   * re-selection — so a waiter who glanced at Tables and tapped her table again (a browser
+   * reload, a sign-out, or a second pad does the same) got *Nothing new to send* over food on the
+   * bill that no station had a chit for. Measured on this harness before the fix:
+   *
+   *     after SEND:       tillLines=3 kitchen=owed  sendLabel="Send to kitchen"
+   *     after RE-SELECT:  tillLines=3 kitchen=owed  sendLabel="Send to kitchen — Nothing new to send"
+   *     pressing SEND anyway: new confirms=0
+   *
+   * `02-F55` had already ruled that no client may hold this fact. The gesture is the assertion.
+   */
+  it("A7 — after a table RE-SELECTION, SEND still owes the kitchen what the till says is owed", async () => {
+    const rig = till({ dropConfirm: true });
+    rig.state.lines = 2;
+    rig.state.confirmed = true;
+    rig.state.kitchen = "sent";
+    mounted(rig.client);
+    await signIn();
+    press("7");
+    press("Naan");
+    press(STRINGS.send);
+    await waitFor(() => expect(addLines(rig.calls).length).toBe(1));
+    await waitFor(() => expect(confirms(rig.calls).length).toBe(1));
+    // The till holds the addendum and no station has a chit for it.
+    expect(rig.state.kitchen).toBe("owed");
+
+    // ONE ORDINARY GESTURE: back to Tables, and into the same table again.
+    press(STRINGS.tables);
+    press("7");
+    await waitFor(() => expect(screen.getAllByText(STRINGS.send).length).toBeGreaterThan(0));
+    await waitFor(() => {
+      const send = screen.getAllByText(STRINGS.send)[0]?.closest("button");
+      expect(
+        send?.getAttribute("aria-label") ?? "",
+        "SEND went quiet after a re-selection while the till still owed the kitchen a chit (04-F24/04-F34)",
+      ).not.toContain(STRINGS.nothingToSend);
+    });
+    press(STRINGS.send);
+    await waitFor(() => expect(confirms(rig.calls).length).toBe(2));
+    // The addendum is not rung a second time: only the confirm goes again.
+    expect(addLines(rig.calls)).toHaveLength(1);
+  });
+
+  it("A8 — a till that projects no kitchen state degrades to what this pad knew before (01-F54)", async () => {
+    // `02-F55` instructs the degrade by name — a host that does not supply the projector leaves
+    // the control pressable — and `04-F29`'s third fact is what this pad knew before `04-F34`:
+    // the till holds lines and has never confirmed them.
+    const rig = till({ projectsKitchen: false });
+    rig.state.lines = 2;
+    mounted(rig.client);
+    await signIn();
+    press("7");
+    await waitFor(() => {
+      const send = screen.getAllByText(STRINGS.send)[0]?.closest("button");
+      expect(send?.getAttribute("aria-label") ?? "").not.toContain(STRINGS.nothingToSend);
+    });
+    press(STRINGS.send);
+    await waitFor(() => expect(confirms(rig.calls).length).toBe(1));
+    // …and once the till says it is confirmed, the degraded reading goes quiet rather than
+    // pressing for ever: absence must not mean "always owed".
+    await waitFor(() => {
+      const send = screen.getAllByText(STRINGS.send)[0]?.closest("button");
+      expect(send?.getAttribute("aria-label") ?? "").toContain(STRINGS.nothingToSend);
+    });
   });
 });
 
