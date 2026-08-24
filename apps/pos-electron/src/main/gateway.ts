@@ -1149,7 +1149,7 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
  * nothing in the type system or in any suite would say so. The two paths differ in exactly one
  * thing — **where the actor comes from** — so that is the only thing either caller supplies, and
  * every rule lives on the one road they share. `__acceptance__/terminal-write-path.test.ts` §A
- * drives both paths over one store and §C asserts the single call site, so a later copy is a red
+ * drives both paths over one store and §B asserts the single call site, so a later copy is a red
  * test rather than a silent fork.
  *
  * **What it deliberately does not decide: WHO.** `actor_user_id` is written verbatim — a session
