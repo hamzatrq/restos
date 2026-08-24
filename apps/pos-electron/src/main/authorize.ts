@@ -156,6 +156,40 @@ export const WRITE_ACTIONS: Readonly<Record<string, PermissionAction>> = {
   // every role including owner — which is why `02-F27`'s creation clause could not be BUILT before
   // `02-F47`, not merely why it was not. Fourth instance of the shape `02-F46` and `14-F30` record.
   "order.customer_linked": "customer.record",
+  /**
+   * `10-F13` receiving, `10-F17`/`10-F29`/`10-F30` the blind guided count, `10-F16` the wastage
+   * log — the three `stock.*` acts `plans/inventory/design.md` §7 slice 1 puts on a DEVICE.
+   *
+   * **They live here and cannot live on the cloud plane.** `stock.*` is not in `01-F62`'s
+   * org-scoped set, so every one of these needs a branch-scoped envelope stamped at append by an
+   * originating device (`01-F43`..`F46`). A back-office page emitting one is the exact wall
+   * `05-F28` records for the manager console — which is why the count is a till surface and not a
+   * screen beside the menu editor. `10-F17`'s August 2026 amendment makes the till explicit: the
+   * device is a layer-3 choice, so *"a till surface is in contract and a phone port is a port"*.
+   *
+   * ⚠ **NO ACTION IS MINTED, AND THAT IS WHAT MAKES THIS DIFFERENT FROM THE FOUR ROWS ABOVE.**
+   * `02-F46`, `02-F47`, `02-F64` and `14-F30` each had to invent the action first, because
+   * Appendix A carried no row. All three of these ship in `PERMISSION_ACTIONS` ALREADY, with role
+   * cells, off Appendix A's own rows — `Receive stock / transfers`, `Physical count entry`,
+   * `Record wastage`. So the authority to count has existed for this module's whole life and the
+   * ROUTE to it did not: measured 2026-08-25 before this change, `WRITE_ACTIONS` held no `stock.*`
+   * key at all, so all three fell to the fail-closed `action === null` default below and were
+   * **DENIED for every role including owner** — while `can(owner, "stock.count_entry", …)`
+   * answered `allow`. Inventory was therefore UNBUILDABLE rather than merely unbuilt, and no
+   * device surface anyone wrote could have appended a count. `10-F34` records the identical shape
+   * one surface over, for the READ.
+   *
+   * The mapping is 1:1 and Appendix A is why. `stock.receive`'s row reads *"Receive stock /
+   * transfers"*, so `stock.transfer_sent`/`transfer_received` belong on this same action when
+   * slice 2 builds them; they are absent here because nothing emits them yet and a row for an
+   * unemittable type is a claim this file cannot keep. `stock.production_recorded` is absent for a
+   * DIFFERENT and load-bearing reason — it has no action anywhere in the matrix, so it is
+   * unbuildable in the `02-F46` sense and needs amendment **A7** first (design §6). Adding a row
+   * pointing it at one of these three would be inventing policy (commandment 2).
+   */
+  "stock.purchase_recorded": "stock.receive",
+  "stock.count_recorded": "stock.count_entry",
+  "stock.wastage_recorded": "stock.wastage_record",
 };
 
 /** The one event type whose verdict needs an amount, so it never reaches `WRITE_ACTIONS`. */

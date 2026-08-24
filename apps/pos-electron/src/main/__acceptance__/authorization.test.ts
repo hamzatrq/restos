@@ -695,3 +695,107 @@ describe("§J 05-F19 — the threshold cannot be omitted", () => {
     expect(writes).toBeDefined();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// §L — THE `stock.*` WRITE ACTS (`10-F13` receiving, `10-F16` wastage, `10-F17` the count).
+//
+// This section exists because inventory was UNBUILDABLE rather than unbuilt. `PERMISSION_ACTIONS`
+// has carried `stock.receive` / `stock.count_entry` / `stock.wastage_record` with full role cells
+// for this module's whole life, and `WRITE_ACTIONS` carried no `stock.*` key at all — so every
+// one of the three fell to §F's fail-closed default and was DENIED for every role INCLUDING the
+// owner, while `can(owner, "stock.count_entry", …)` answered `allow`. No device surface anyone
+// wrote could have appended a count.
+//
+// ⚠ **THE CASHIER IS THE ONLY FIXTURE THAT ATTRIBUTES ANYTHING HERE, AND THAT IS THE POINT.**
+// A storekeeper is `allow` on all three, so a suite that tested only her would pass an
+// implementation that mapped all three types onto ONE action — the "guard aimed one case away"
+// shape this repo names. Appendix A separates them on exactly one role: the cashier may log what
+// she threw away (`10-F16`'s staff-protection framing — "we threw it away" is provable) and may
+// neither receive stock nor enter a count. So `deny · deny · allow` across the three is the
+// one-branch difference the mapping has to reproduce, and §L2 is the assertion that reads it.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+describe("§L 10-F13/10-F16/10-F17 — the three `stock.*` acts are reachable from a device", () => {
+  const asStorekeeper = (over: Parameters<typeof rig>[0] = {}) =>
+    rig({ assignments: [{ role: "storekeeper", branch_id: BRANCH }], ...over });
+
+  const RECEIPT = event("stock.purchase_recorded", { supplier_id: "sup-1", lines: [] });
+  const COUNT = event("stock.count_recorded", { count_id: "c-1", location_id: BRANCH, lines: [] });
+  const WASTAGE = event("stock.wastage_recorded", { item_id: "it-1", qty_base: 500 });
+
+  it("§L1 a storekeeper may receive, count and log wastage — all three reach the ledger", () => {
+    // The role doc 10 §1 names first: "storekeeper/purchaser (photo invoices, counts, transfers)".
+    const r = asStorekeeper();
+    for (const e of [RECEIPT, COUNT, WASTAGE]) r.writes.append(e);
+    expect(r.appended).toHaveLength(3);
+    expect(r.appended.map((a) => (a as { type: string }).type)).toEqual([
+      "stock.purchase_recorded",
+      "stock.count_recorded",
+      "stock.wastage_recorded",
+    ]);
+  });
+
+  it("§L2 a cashier is refused receiving and the count, and ALLOWED wastage (Appendix A)", () => {
+    // ⚠ The discriminating case. Collapse the three onto one action — any one — and exactly one
+    // of these three expectations breaks, whichever way it is collapsed. Nothing else in this
+    // file can tell `stock.receive` from `stock.wastage_record`.
+    const receiving = asCashier();
+    expect(refusalOf(() => receiving.writes.append(RECEIPT))).toMatchObject({
+      outcome: "deny",
+      // NOT `null`. "The matrix said no" and "this type carries no permission action at all" are
+      // different refusals (§F), and it is this field that tells the row's ABSENCE from its
+      // DENIAL — so deleting the `stock.purchase_recorded` row reddens here rather than passing
+      // as a still-refused cashier.
+      action: "stock.receive",
+    });
+    expect(receiving.appended).toEqual([]);
+
+    const counting = asCashier();
+    expect(refusalOf(() => counting.writes.append(COUNT))).toMatchObject({
+      outcome: "deny",
+      action: "stock.count_entry",
+    });
+    expect(counting.appended).toEqual([]);
+
+    // `10-F16` — "available to any staff". A cashier who cannot log the dropped tray is a cashier
+    // whose unlogged waste lands in `10-F18`'s variance as somebody's suspected theft.
+    const wasting = asCashier();
+    wasting.writes.append(WASTAGE);
+    expect(wasting.appended).toHaveLength(1);
+  });
+
+  it("§L3 an owner may do all three — the fail-closed default denied her before this", () => {
+    const r = asOwner();
+    for (const e of [RECEIPT, COUNT, WASTAGE]) r.writes.append(e);
+    expect(r.appended).toHaveLength(3);
+  });
+
+  it("§L4 01-F27 — a locked device counts nothing, receives nothing, wastes nothing", () => {
+    for (const e of [RECEIPT, COUNT, WASTAGE]) {
+      const r = rig({ assignments: null });
+      expect(refusalOf(() => r.writes.append(e)).outcome).toBe("deny");
+      expect(r.appended).toEqual([]);
+    }
+  });
+
+  it("§L5 01-F26 — a storekeeper at ANOTHER branch is a stranger at this one", () => {
+    const r = rig({ assignments: [{ role: "storekeeper", branch_id: OTHER_BRANCH }] });
+    expect(refusalOf(() => r.writes.append(COUNT))).toMatchObject({
+      outcome: "deny",
+      action: "stock.count_entry",
+    });
+    expect(r.appended).toEqual([]);
+  });
+
+  it("§L6 stock.production_recorded stays unmapped — A7 is owed and this pins it", () => {
+    // `10-F9`/`10-F10`'s production entry is slice 2 and has NO action anywhere in the matrix, so
+    // it is unbuildable in the `02-F46` sense. Pinned so the session that builds it learns the
+    // action is owed FIRST, rather than pointing it at one of §L's three and inventing policy.
+    const r = asOwner();
+    expect(refusalOf(() => r.writes.append(event("stock.production_recorded", {})))).toMatchObject({
+      outcome: "deny",
+      action: null,
+    });
+    expect(r.appended).toEqual([]);
+  });
+});
