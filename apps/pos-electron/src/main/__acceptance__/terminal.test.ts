@@ -1159,27 +1159,40 @@ describe("§K 04-F36 (a) — no Electron-hosted file may leave a digest to the p
         source: readFileSync(join(e.parentPath, e.name), "utf8"),
       }));
 
-  const ELECTRON_HOSTED = [
-    join(import.meta.dirname, "..", ".."),
-    join(import.meta.dirname, "..", "..", "..", "..", "pass-kds", "src"),
-    join(import.meta.dirname, "..", "..", "..", "..", "..", "packages", "sync-client", "src"),
+  /**
+   * ⚠ **THE FLOOR IS PER ROOT, and a global one was measured INERT.** The first draft asserted one
+   * total `> 40`; narrowing the counter's root to a single subdirectory left the other two roots
+   * carrying the count and the mutant passed all 49 tests. That is `AGENTS.md` `L8`'s recorded
+   * instance verbatim — *"asserted per scope half, because widening one walk once left the old
+   * tripwire inert behind a still-non-zero global count"* — reproduced here by mutating rather
+   * than found by reading. Each floor sits a few files under its root's real population, so a
+   * deletion or two is legal and a root going dark is not.
+   */
+  const ELECTRON_HOSTED: readonly (readonly [string, string, number])[] = [
+    ["the counter's main process", join(import.meta.dirname, "..", ".."), 20],
+    ["the pass screen", join(import.meta.dirname, "..", "..", "..", "..", "pass-kds", "src"), 10],
+    [
+      "sync-client, which both Electron hosts load",
+      join(import.meta.dirname, "..", "..", "..", "..", "..", "packages", "sync-client", "src"),
+      35,
+    ],
   ];
 
   it("K1 — sign/verify name their digest, everywhere the main process can reach", () => {
     const offenders: string[] = [];
-    let scanned = 0;
-    for (const root of ELECTRON_HOSTED) {
-      for (const { file, source } of hosted(root)) {
-        scanned += 1;
+    for (const [name, root, floor] of ELECTRON_HOSTED) {
+      const files = hosted(root);
+      // `24-F14`, per root — see the note above.
+      expect(
+        files.length,
+        `K1 scanned ${files.length} files of ${name} — this rail went inert`,
+      ).toBeGreaterThanOrEqual(floor);
+      for (const { file, source } of files) {
         // `verify(\n  null,` as well as `sign(null,` — the newline is how the shipped call hid
         // from a single-line grep.
         if (/\b(sign|verify)\w*\(\s*(null|undefined)\s*,/.test(source)) offenders.push(file);
       }
     }
-    // `24-F14` — a rename or a moved directory must not silently disable this.
-    expect(scanned, "K1 scanned nothing — the roots moved and this rail is inert").toBeGreaterThan(
-      40,
-    );
     expect(offenders, "a defaulted digest is ERR_OSSL_EVP_NO_DEFAULT_DIGEST on BoringSSL").toEqual(
       [],
     );
