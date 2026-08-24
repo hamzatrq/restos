@@ -26,6 +26,7 @@ import {
   type TransportHandlers,
 } from "@restos/sync-protocol";
 import { type RawData, WebSocket, WebSocketServer } from "ws";
+import { classifyCloudUrl } from "./cloud-url.js";
 
 /** Default cloud reconnect cadence (contract (f)); a gateway that re-listens resumes. */
 const DEFAULT_RECONNECT_MS = 1_000;
@@ -507,6 +508,34 @@ export const createWsCloudTransport = (config: {
   reconnect_ms?: number;
 }): CloudTransport => {
   const { url, clock } = config;
+  /**
+   * `00 §5.4` — **refused at CONSTRUCTION, before a socket exists.**
+   *
+   * `dial()` below was `new WebSocket(url)` with the string taken verbatim and no scheme check,
+   * on the one leg that crosses the public internet — while `createWsLanTransport` above
+   * hard-codes `wss://` with mutual TLS and a certificate pin on a restaurant's own private
+   * network (`01-F72`). `01-F72` (c) names the gap in the corpus: *"a law this leg has never
+   * met"*. `cloud-url.ts` holds the reading; this is one of its two enforcement points.
+   *
+   * **It is here as well as at each host's boot because the two close different things.** A boot
+   * check is what an operator meets, on the boot line, with the variable named — and it protects
+   * only the host that remembered to write it. This protects the DIAL, so a host added later, or
+   * a spike, cannot reach cleartext by omission. That is the difference between closing the
+   * instance and closing the class, which this repository has already paid to learn (`01-F66`).
+   *
+   * **Throwing is correct here and is not an `01-F17` risk**, because a transport is constructed
+   * once at start and never on the append path: in both Electron hosts this lands in the boot
+   * catch, which returns non-zero with the sentence (`01-F67`). A misconfigured deployment must
+   * not become a running till.
+   */
+  const scheme = classifyCloudUrl(url);
+  if (scheme.kind === "refused") {
+    throw new Error(
+      `this cloud transport cannot be dialled: ${scheme.reason}. 00 §5.4 requires TLS on this ` +
+        "leg; cleartext ws:// is permitted only to 127.0.0.1, localhost or [::1]. The host that " +
+        "configured this URL is where an operator changes it",
+    );
+  }
   const reconnectMs = config.reconnect_ms ?? DEFAULT_RECONNECT_MS;
 
   let handlers: CloudTransportHandlers | null = null;

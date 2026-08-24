@@ -37,6 +37,12 @@ export {
   type CloudSessionStatus,
   createCloudSession,
 } from "./cloud-session.js";
+// `00 §5.4` — the cloud leg's scheme, decided once (`cloud-url.ts`). `classifyCloudUrl` is
+// deliberately NOT re-exported: it is the PREDICATE, its one production caller is
+// `transport-ws.ts` inside this package, and a second door onto it is a second chance for a
+// caller to ask the question and ignore the answer. Hosts get the two things a host needs — the
+// boot refusal and the boot line.
+export { type CloudUrlVerdict, cloudUrlRefusal, describeCloudUrl } from "./cloud-url.js";
 export {
   AckBeyondAppendedError,
   type AppendInput,

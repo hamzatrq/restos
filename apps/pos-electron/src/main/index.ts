@@ -36,7 +36,14 @@ import {
 } from "@restos/device-config";
 import { businessDate } from "@restos/domain";
 import { createSpooler, printerCapability } from "@restos/escpos";
-import { createPinAuditSink, createPinSession, openStore, wallClock } from "@restos/sync-client";
+import {
+  cloudUrlRefusal,
+  createPinAuditSink,
+  createPinSession,
+  describeCloudUrl,
+  openStore,
+  wallClock,
+} from "@restos/sync-client";
 // No `dialog`: `01-F67` (iii) took the modal off the refusal path, and `fatal` was its only caller
 // here. A box that blocks until somebody clicks is not a refusal on an unattended till.
 import { app, BrowserWindow, ipcMain, screen } from "electron";
@@ -638,6 +645,53 @@ app.on("second-instance", () => {
   window.focus();
 });
 
+/**
+ * `00 §5.4` — **a till pointed at a CLEARTEXT cloud endpoint does not start.**
+ *
+ * `00 §5.4` has said *"TLS everywhere"* since Draft 1 and `01-F72` (c) records that this is *"a law
+ * this leg has never met"*. Measured 2026-08-23: this file passed `process.env.RESTOS_CLOUD_URL`
+ * into `createUplink` **verbatim**, `createWsCloudTransport` dialled it verbatim, `README.md`
+ * specified the variable as `ws://host:8080/sync`, and `wss://` appeared in no document here. So
+ * the leg crossing the public internet — `01-F28`'s Argon2id staff hashes, `01-F47`'s device
+ * token, `01-F81`'s `device_roster`, every event — took whatever an env file said, while the
+ * branch LAN one file over gets mutual TLS and a certificate pin on the restaurant's own network.
+ *
+ * **AT MODULE SCOPE, and that is the point rather than a detail.** `deviceTaxCell()` is this
+ * repository's worked example of the alternative: resolved lazily at five money sites and at no
+ * boot, so a bad value started a till, rang a full order and threw at settlement. A refusal that
+ * arrives when the socket is first used is a till that traded a morning. Here nothing has run yet
+ * — no store, no window, no roster, no socket — so the operator gets one sentence naming the
+ * variable and the process is over. It is deliberately the same shape as the `01-F66` block above
+ * it: stderr, because `01-F67` (i) puts the sentence on the stream the launcher captured, and
+ * `app.exit(1)` because `01-F67` (iii) forbids delivering a refusal by waiting for a human and
+ * `ops/startup/restos-counter.bat` distinguishes a permanent refusal from a crash by the SHAPE of
+ * a non-zero return, then holds the message on screen and re-reads the env file.
+ *
+ * **This is not an `01-F17` exception.** An **unset** key is an offline till, which is legal,
+ * normal and untouched — `cloudUrlRefusal` returns `null` for `undefined`. Only a key that is SET
+ * to a cleartext non-loopback endpoint refuses, and that is a deployment mistake rather than a bad
+ * link. `ws://127.0.0.1`, `ws://localhost` and `ws://[::1]` still start: that is `00 §5.4` (i)'s
+ * carve-out and it is what every runbook and demo in this repository uses.
+ *
+ * The reading itself is `packages/sync-client`'s (`cloud-url.ts`), not this file's, and
+ * `createWsCloudTransport` enforces the same verdict at the dial — one predicate, two enforcement
+ * points, because a boot check protects only the host that wrote it (`01-F66`'s lesson: state the
+ * class you closed).
+ *
+ * **OWED, named:** `apps/pass-kds` carries this same decision in its own `index.ts`, so one
+ * interpretation lives in two files — exactly as the `01-F66` block above already concedes about
+ * itself, and for the same reason. `DEC-ARCH-001` rules EXTRACT at the second consumer and
+ * `@restos/device-config` is where the other shared host decisions went; this change's allowlist
+ * is the two app entry points, and moving the key name there is a separate surgical piece of work
+ * (`24 §3b`).
+ */
+const CLOUD_URL_ENV = "RESTOS_CLOUD_URL";
+const cloudRefusal = cloudUrlRefusal(process.env[CLOUD_URL_ENV], CLOUD_URL_ENV);
+if (cloudRefusal !== null) {
+  process.stderr.write(`RestOS Counter cannot start (00 §5.4)\n\n${cloudRefusal}`);
+  app.exit(1);
+}
+
 const counterBoot = app.whenReady().then(async () => {
   // Resolved BEFORE the store, and inside `whenReady` so a refusal reaches `fatal`'s dialog
   // rather than dying at module load with no window and nothing on screen.
@@ -1058,6 +1112,18 @@ const counterBoot = app.whenReady().then(async () => {
    * loud when there are none.
    */
   console.log(describeMeshOutcome(lan, mesh));
+
+  /**
+   * `00 §5.7`, and beside the mesh line above because the two are one reachability picture: that
+   * one names the LAN route, this one names the WAN route's TRANSPORT. It is here for the property
+   * every other line on this page shares — **a cleartext uplink and a TLS one look identical from
+   * the glass.** Every screen behaves the same, every sale rings, and the difference is observable
+   * only to somebody sitting on the path between this till and the gateway. The module-scope guard
+   * at the top has already refused the cleartext non-loopback case, so this line's job is the two
+   * states that DO start: TLS, and `00 §5.4` (i)'s loopback carve-out saying out loud that it is
+   * for local runs only.
+   */
+  console.log(describeCloudUrl(process.env[CLOUD_URL_ENV], CLOUD_URL_ENV));
 
   /**
    * **Say what the grid will actually show, at boot.** Without this the till renders item names

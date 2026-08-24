@@ -21,7 +21,13 @@ import {
   seedDevStaff,
 } from "@restos/device-config";
 import { businessDate } from "@restos/domain";
-import { createPinAuditSink, openStore, wallClock } from "@restos/sync-client";
+import {
+  cloudUrlRefusal,
+  createPinAuditSink,
+  describeCloudUrl,
+  openStore,
+  wallClock,
+} from "@restos/sync-client";
 // No `dialog`: `01-F67` (iii) took the modal off the refusal path, and it was this host's only
 // caller. A blocking box on an unattended kitchen screen is the defect, not the delivery.
 import { app, BrowserWindow, ipcMain, screen } from "electron";
@@ -549,6 +555,16 @@ const boot = async (): Promise<void> => {
           "above when the branch has one, and over the cloud otherwise — a WAN outage no longer " +
           "stops this screen learning about new orders while the counter goes on selling.",
       /**
+       * `00 §5.7` — a DIFFERENT fact from the clause above it, which names the ROUTE. This names
+       * the transport's SECURITY, and it earns its own line for the property that put every other
+       * line on this page here: **a cleartext uplink and a TLS one look identical from the
+       * glass.** The queue draws, tickets arrive, nothing is visibly wrong. Printed only when the
+       * key is set, because the offline branch above already says that at length.
+       */
+      env.RESTOS_CLOUD_URL === undefined
+        ? ""
+        : `  ${describeCloudUrl(env.RESTOS_CLOUD_URL, CLOUD_URL_ENV)}`,
+      /**
        * `03-F53` — what an operator cannot see from the glass: whether anyone CAN sign in. A
        * device whose registry never synced draws a door with nothing on it, and the door says so
        * (`00 §5.7`), but the boot line is where the person who set the machine up is looking.
@@ -670,6 +686,32 @@ app.on("second-instance", () => {
   if (window.isMinimized()) window.restore();
   window.focus();
 });
+
+/**
+ * `00 §5.4` — **a pass screen pointed at a CLEARTEXT cloud endpoint does not start.**
+ *
+ * The same refusal, the same shape and the same reading as `apps/pos-electron`'s, because this host
+ * dials the same leg: it passes `RESTOS_CLOUD_URL` into `createPassUplink` and on into
+ * `createWsCloudTransport`, so a cleartext value here carries `01-F28`'s Argon2id staff hashes,
+ * `01-F47`'s device token, `01-F81`'s `device_roster` and every event across the public internet
+ * exactly as it would on a till. Guarding one host and not the other would be `01-F66`'s lesson
+ * again — a protection aimed one case away from a case one keystroke to its left.
+ *
+ * **At module scope, before `boot()`**, so nothing has opened: `01-F67` (i)'s stderr, `01-F67`
+ * (iii)'s no-modal, and a non-zero exit that `ops/startup/restos-kitchen.bat` reads. An **unset**
+ * key is untouched and still means offline (`01-F17`, `00 §5.1`) — with the LAN mesh configured
+ * this screen works with no internet at all — and `ws://` to `127.0.0.1`, `localhost` or `[::1]`
+ * still starts, which is `00 §5.4` (i)'s carve-out and what every runbook here uses.
+ *
+ * **OWED, named:** one interpretation in two entry points, exactly as the `01-F66` block above
+ * concedes about itself and for the same reason (`DEC-ARCH-001`, `24 §3b`).
+ */
+const CLOUD_URL_ENV = "RESTOS_CLOUD_URL";
+const cloudRefusal = cloudUrlRefusal(process.env[CLOUD_URL_ENV], CLOUD_URL_ENV);
+if (cloudRefusal !== null) {
+  process.stderr.write(`RestOS pass screen cannot start (00 §5.4)\n\n${cloudRefusal}`);
+  app.exit(1);
+}
 
 /**
  * `00 §5.7` — **a launch that cannot start must SAY SO.** `void boot()` with no catch is an

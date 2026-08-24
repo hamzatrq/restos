@@ -220,7 +220,7 @@ export RESTOS_DEVICE_TOKEN="$DEV_TOKEN"
 
 # ── 7c. run it ───────────────────────────────────────────────────────────────
 ELECTRON_DISABLE_SANDBOX=1 \
-RESTOS_CLOUD_URL=ws://127.0.0.1:8080/sync \
+RESTOS_CLOUD_URL=ws://127.0.0.1:8080/sync \   # loopback: the ONE form `ws://` is admitted in (00 §5.4 (i)). A deployed gateway is wss://
 RESTOS_DEV_PIN=4821 \
 RESTOS_DEV_PIN_BILAL=5137 \
 RESTOS_DEV_PIN_HINA=9064 \
@@ -675,7 +675,7 @@ about the wrong ledger), `REDIS_URL` (**required**), `AUDITOR_INTERVAL_MS` (defa
 | var | default | notes |
 |---|---|---|
 | `RESTOS_ORG_ID` / `RESTOS_BRANCH_ID` / `RESTOS_DEVICE_ID` | **counter: dev seed · pass: REFUSES** | **resolved per key**, and the two apps differ on purpose (`01-F65`). `apps/pos-electron` falls back per key to a marked dev seed — the FR's single exemption, for its documented no-environment `pnpm start` — so a *production* till left unset starts, reports success on every line, and never sees a menu. `apps/pass-kds` calls `requireDeviceIdentity` and **refuses to start** on any absent key, because falling back there would adopt *the counter's* identity and put two hosts on one store. Set all three on every device |
-| `RESTOS_CLOUD_URL` | unset ⇒ fully offline | full WebSocket URL **including the path**: `ws://host:8080/sync` |
+| `RESTOS_CLOUD_URL` | unset ⇒ fully offline | full WebSocket URL **including the path**. **Production is `wss://host:8080/sync` — `00 §5.4` requires TLS on this leg and the till REFUSES to start without it, naming this key on the boot line.** `ws://` is admitted for **loopback only** (`127.0.0.1`, `localhost`, `[::1]`), which is what every example in this file and in the runbook uses. ⚠ Cleartext to any other host carries `01-F28`'s staff PIN hashes, this device's `01-F47` token and `01-F81`'s roster across the public internet, and is refused. ⚠ **`wss://` obliges certificate verification against the system trust store, so a SELF-SIGNED certificate on a deployed gateway yields *no cloud*, not an insecure one** — a real certificate is a deployment prerequisite, not an optional hardening. |
 | `RESTOS_DEVICE_TOKEN` | unset ⇒ offline | minted for that exact device id; renewals are persisted, so this is a bootstrap |
 | `RESTOS_LAN_PORT` / `_HOST` / `_PEERS` | unset ⇒ **mesh off** | the port is what turns the LAN mesh on; peers without a port is a boot refusal |
 | `RESTOS_PANEL_PPI` | measured, else assumed 15.6″ | being wrong here **looks exactly like being right** — every touch target renders at the wrong physical size and nothing looks broken |

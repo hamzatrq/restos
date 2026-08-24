@@ -448,7 +448,9 @@ till, and no process compares them — see §0.
 
 ## 6. `apps/pos-electron` — the till
 
-### 6a. The native addon — TEST BEFORE YOU BUILD
+#> ⚠ **`ws://` here is loopback, and loopback is the only place it is legal.** `00 §5.4` requires TLS on the cloud leg and the till now **refuses to start** against cleartext to any non-loopback host, naming `RESTOS_CLOUD_URL` on the boot line. For a gateway on a real server the value is **`wss://host:8080/sync`**, and that obliges certificate verification against the system trust store — **a self-signed certificate yields no cloud rather than an insecure one**, so a real certificate is a prerequisite for any deployment beyond this machine. The three admitted loopback spellings are `127.0.0.1`, `localhost` and `[::1]`; the host is compared against a **parsed** URL, so `ws://127.0.0.1.evil.com` and `ws://127.0.0.1@evil.com` are both refused (in the second, `127.0.0.1` is *userinfo* and the host Node would dial is `evil.com`).
+
+## 6a. The native addon — TEST BEFORE YOU BUILD
 
 ⚠ **DO NOT run `rebuild:native` reflexively. Ask first whether it is already done** — this step
 said *"ONCE per checkout"* with no test, and on a tree where the Electron build already exists the
@@ -566,7 +568,7 @@ that is fine, and re-running `provision-device --reissue` to "refresh" it is not
 ### 6c. Run the till
 
 ```sh
-RESTOS_CLOUD_URL=ws://127.0.0.1:8080/sync \
+RESTOS_CLOUD_URL=ws://127.0.0.1:8080/sync \   # loopback only — see the ⚠ below
 RESTOS_DEVICE_TOKEN="$RESTOS_DEVICE_TOKEN" \
 RESTOS_DEV_PIN=4821 \
 RESTOS_DEV_PIN_BILAL=5137 \
@@ -585,7 +587,7 @@ the teardown a `rm -rf`:
 ```sh
 cd apps/pos-electron
 pnpm exec electron-vite build
-RESTOS_CLOUD_URL=ws://127.0.0.1:8080/sync \
+RESTOS_CLOUD_URL=ws://127.0.0.1:8080/sync \   # loopback only — see the ⚠ below
 RESTOS_DEVICE_TOKEN="$RESTOS_DEVICE_TOKEN" \
 RESTOS_DEV_PIN=4821 \
 RESTOS_DEV_PIN_BILAL=5137 \
