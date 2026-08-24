@@ -145,8 +145,8 @@ export type CampaignCitationDeps = {
  * `within_campaign_bounds` field exists to prevent.
  */
 /**
- * (17-F24 AS AMENDED) THE THREE ROW FIELDS THIS PREDICATE CANNOT EVALUATE, AND THE REFUSAL IS THE
- * WHOLE FIX (August 2026, adversarial review).
+ * (17-F24 AS AMENDED TWICE) WHAT THIS PREDICATE CANNOT EVALUATE, AND THE REFUSAL IS THE WHOLE FIX
+ * (August 2026, adversarial review; widened from three FIELDS to the KIND on re-review).
  *
  * The first build read none of these and still answered *within bounds*, which is the round-3
  * shape on a money field: the mechanism was correct and was never aimed at the case that matters.
@@ -163,18 +163,50 @@ export type CampaignCitationDeps = {
  *
  * **`free_item`'s exit is the precedent and it is a few lines below:** a bound this predicate
  * cannot compute is not a blessing, so the row resolves to `null`, the discretionary predicate runs
- * untouched (`17-F12`'s last clause), and a large one asks for a manager. **The class this closes
- * and the one it does not (`L11`):** it closes *the arm blessing an amount it never bounded*; it
- * implements none of the three — an item-scoped campaign is REFUSED, not scoped. Whoever builds the
- * scoped base, the use counter or the proof capture DELETES an arm here rather than adding one.
+ * untouched (`17-F12`'s last clause), and a large one asks for a manager.
+ *
+ * ── ⚠ AND THE THREE-FIELD GUARD WAS AIMED ONE CASE AWAY (re-review, August 2026) ─────────────
+ *
+ * The `kind` decides whether the cashier is holding or has earned anything, and the three fields
+ * above do not have to agree with it. `17-F22` closes `kind` at four values and **three of them
+ * name something this predicate has no access to**:
+ *
+ * - `account_loyalty` — the benefit is EARNED. `17-F23`'s reward exists only when
+ *   `eligible − orders_consumed_total ≥ every_n`, and this function has neither count and never
+ *   reads `every_n`. Measured on this branch before the fix, with Como's own *custom punch card
+ *   (%, fixed)* shape (`benefit: amount_paisa 45_000`, `every_n: 10`, `requires_customer: true`,
+ *   `use_limit: "unlimited"`, `proof: "none"` — a legal row): on a customer's **first ever**
+ *   linked order the offer list carried `{camp-punch, bound_paisa: 45000}` and the citation
+ *   answered `within_campaign_bounds: true`. The reward was given away at order #1, and again at
+ *   #2, and nothing decrements anything (`17-F23`'s subtrahend has no producer).
+ * - `coupon` — the code is the campaign (`17-F10`), and `proof` is a SEPARATE field a writer may
+ *   leave at `none`. So `{kind: "coupon", code: "ABCD", proof: "none"}` slipped straight past the
+ *   `proof` arm and was pre-approved with no coupon ever presented — the very defect that arm was
+ *   written for, one field over.
+ * - `bearer_card` — the card is the identity (`17-F21`), same shape as `coupon`.
+ *
+ * **`auto_deal` is the one kind that asks for nothing**, so the gate is a WHITELIST and not a list
+ * of refusals: a kind added to `17-F22` later (`17-F26`'s wallet pass is costed and unbuilt) is
+ * refused until someone decides it belongs, rather than pre-approved by omission.
+ *
+ * **The class this closes and the one it does not (`L11`):** it closes *the arm blessing a benefit
+ * whose precondition this device cannot check*. It does **not** implement any of them — an
+ * item-scoped campaign is REFUSED not scoped, a loyalty reward is REFUSED not claimed — and
+ * whoever builds the scoped base, the use counter, the proof capture or `17-F17`'s redemption
+ * producer DELETES an arm here rather than adding one. **And it does not bound an ORDER:** see
+ * `campaignCitationFor`'s own note, which is the neighbouring case this guard is still aimed away
+ * from.
  *
  * It lives here rather than in `campaignApplies` deliberately — see that function's own note. The
- * domain predicate answers *does this campaign reach this ORDER*, and none of these three is that
+ * domain predicate answers *does this campaign reach this ORDER*, and none of these is that
  * question; this is the caller that resolves the base, so this is where a base it cannot resolve
  * has to be refused.
  */
-const unresolvableScope = (row: CampaignRow): boolean =>
-  row.item_scope !== null || row.use_limit !== "unlimited" || row.proof !== "none";
+const unresolvableRow = (row: CampaignRow): boolean =>
+  row.kind !== "auto_deal" ||
+  row.item_scope !== null ||
+  row.use_limit !== "unlimited" ||
+  row.proof !== "none";
 
 /**
  * The ONE resolution both readers share (`02-F45`: two resolutions of one question disagree, and
@@ -187,7 +219,7 @@ const unresolvableScope = (row: CampaignRow): boolean =>
 const reachOf =
   (deps: CampaignCitationDeps) =>
   (order_id: string, row: CampaignRow): { readonly bound_paisa: number } | null => {
-    if (unresolvableScope(row)) return null;
+    if (unresolvableRow(row)) return null;
 
     const order = deps.openOrders().find((o) => o.order_id === order_id);
     if (order === undefined) return null;
@@ -211,6 +243,30 @@ const reachOf =
     return { bound_paisa: bound };
   };
 
+/**
+ * ⚠ **`within_campaign_bounds` BOUNDS ONE ACT AND NOT AN ORDER (`17-F24` as amended, re-review
+ * August 2026) — stated here because the FR did not say it and the field's name suggests
+ * otherwise.**
+ *
+ * `01-F30`'s discount is per LINE and a campaign's `cap_paisa` is per CITATION, and **nothing in
+ * this product counts citations**: there is no projection of `discount.recorded` anywhere on the
+ * device (`DEC-MONEY-010` holds `01-F30`'s `discounts` term absent, so the fold does not carry
+ * one), and `readAllEvents()` is the whole ledger, which `17-N3`'s 100 ms budget forbids and the
+ * quadratic-fold defect this same review just closed is the worked example of. So a cashier who
+ * corrects five lines and cites the same campaign each time gets five pre-approvals. Measured on
+ * this branch with R71's own row (50% off, capped at Rs 10,000) against a Rs 30,000 bill and a
+ * falling total: `1_000_000, 1_000_000, 500_000, 250_000, 125_000` = **Rs 28,750 pre-approved off
+ * a Rs 30,000 bill, every one `allow`, no manager, permanently (`01-F1`)**.
+ *
+ * **Why it is not closed here rather than closed quietly.** The two shapes that would bound an
+ * order — `use_limit: "once_per_order"`, and a running per-order citation total — are the SAME
+ * missing input, and `unresolvableRow` above already refuses the first by name. Closing it needs a
+ * projection this device does not have, which is a `packages/sync-client` fold and a founder call
+ * on which jaw to close (`17-F24` records both); inventing either here would be commandment 2. The
+ * refusal above narrows the exposure to `auto_deal` rows with no proof and no limit, and
+ * `loyalty-seam.test.ts` §D pins the measurement so the day a counter lands, this note and that
+ * assertion move together.
+ */
 export const campaignCitationFor =
   (deps: CampaignCitationDeps) =>
   (order_id: string, campaign_id: string, amount_paisa: number): CampaignCitation | null => {

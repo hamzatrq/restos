@@ -37,6 +37,14 @@ import { applyRateBps, type Paisa, paisa } from "./money.js";
  * building it. A fourth kind here would be a name on a wire with nothing at either end —
  * `01-F81`'s rule about not letting a name land ahead of the thing that serves it.
  */
+/**
+ * The ceiling `loyaltyOrdersToNextReward` clamps a `17-F13` overdraw against — the largest count a
+ * `number` holds exactly. Declared here beside the arithmetic that uses it rather than imported
+ * from `money.ts`: this is a count of ORDERS and not paisa, and `DEC-MONEY-005`'s branded types
+ * exist so the two are never interchanged.
+ */
+const SAFE_COUNT = BigInt(Number.MAX_SAFE_INTEGER);
+
 export const CAMPAIGN_KINDS = ["auto_deal", "coupon", "bearer_card", "account_loyalty"] as const;
 export type CampaignKind = (typeof CAMPAIGN_KINDS)[number];
 
@@ -278,9 +286,16 @@ export type CampaignContext = {
  * fields and **none of them is a question about whether a campaign reaches an ORDER** — the first
  * changes the BASE the benefit is taken of, the second needs a count of prior citations, the
  * third names something the cashier must be holding. This function has an order total and no
- * lines, no history and no hands, so an arm here would be a guess. The refusal is at the caller
- * that resolves the base (`campaignCitationFor`), which answers `null` for all three, and
- * `campaign-model.test.ts` §D pins that this function is blind to them ON PURPOSE. **Adding an
+ * lines, no history and no hands, so an arm here would be a guess. **The `kind` is a fourth, on
+ * the same reasoning** (re-review, August 2026): `account_loyalty`'s benefit is EARNED against
+ * `17-F23`'s two counts, `coupon`'s and `bearer_card`'s against something in her hand, and this
+ * predicate holds none of them. The refusal is at the caller that resolves the base
+ * (`campaignCitationFor`), which answers `null` for all four, and
+ * `campaign-model.test.ts` **§C** pins that this function is blind to them ON PURPOSE. ⚠ *That
+ * pointer said §D and §D is the loyalty arithmetic — and no section of that file asserted this at
+ * all until the re-review, so this sentence was `L11` exactly: a protection claimed in prose,
+ * retiring the assertion the next session would have written. The assertion exists now and the
+ * pointer names its section.* **Adding an
  * arm here is not the fix and would hide the one that is:** an implementation that returned
  * `false` for an item-scoped row would make the citation resolver's refusal untestable and would
  * still not scope anything. See `17-F24` for the class this closes and the one it does not.
@@ -357,6 +372,17 @@ export const loyaltyAvailable = (input: {
  * `remaining < every_n`, and the orders still owed are `every_n − remaining` for EVERY such
  * remaining including a negative one. A negative remaining is `17-F13`'s ruled outcome and not
  * an error, so it must produce a number the surface can say rather than a floor it sticks at.
+ *
+ * ⚠ **AND THE FIX OPENED THE OTHER END, WHICH THE OLD CLAMPED FORM HAD CLOSED BY ACCIDENT
+ * (`17-F23` as amended, re-review August 2026).** `every_n − Number(remaining)` is a **float**
+ * subtraction the moment `remaining` leaves the safe-integer range: `registry.ts` bounds
+ * `loyalty.reward_redeemed.orders_consumed` only by `int().nonnegative()`, the fold sums them in
+ * BigInt precisely so standing law 3's hazard is not narrowed at its edge — and this function then
+ * narrowed it anyway. Measured before the fix: `orders_consumed_total: 10n ** 30n` returned
+ * **`1e+30`**, a non-safe float from a function whose contract is *a count of orders*. The
+ * subtraction happens in BigInt now and the result is clamped to the safe-integer range, because a
+ * count past 2^53 is not a count — it is standing law 3's own hazard one layer up from the
+ * accumulation. **Exact where representable, clamped past it, never silently drifted.**
  */
 export const loyaltyOrdersToNextReward = (input: {
   readonly eligible: number;
@@ -365,7 +391,9 @@ export const loyaltyOrdersToNextReward = (input: {
 }): number => {
   if (loyaltyAvailable(input) > 0) return 0;
   // Reached only when `remaining < every_n` (that is what `available === 0` means), so the
-  // subtraction is the whole answer on both sides of zero and no `%` is needed.
+  // subtraction is the whole answer on both sides of zero and no `%` is needed. Kept in BigInt to
+  // the last step: `Number(remaining)` first would lose the precision the fold went to BigInt for.
   const remaining = BigInt(input.eligible) - input.orders_consumed_total;
-  return input.every_n - Number(remaining);
+  const owed = BigInt(input.every_n) - remaining;
+  return owed > SAFE_COUNT ? Number.MAX_SAFE_INTEGER : Number(owed);
 };

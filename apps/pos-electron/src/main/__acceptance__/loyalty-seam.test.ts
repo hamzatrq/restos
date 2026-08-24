@@ -495,6 +495,99 @@ describe("§D 17-F24/Commandment 8 — the payload's `campaign_id` is a CLAIM, n
     expect(citations()("ord-1", "camp-bank", 1)?.within_campaign_bounds).toBe(true);
   });
 
+  it("⚠ `account_loyalty` — THE REWARD IS EARNED, and the arm never asked whether it had been", () => {
+    /*
+      THE DEFECT VERBATIM (re-review, August 2026). The three-field guard above was aimed at
+      `item_scope` / `use_limit` / `proof` and **not at the `kind`**, so a punch-card row whose
+      benefit is computable — Como's own *custom punch card (%, fixed)*, which `17 §10` says this
+      model was taken from — sailed through it. Nothing on this path reads `every_n` (its only
+      production readers are `gateway.ts`'s caller strip and the schema) and nothing calls
+      `loyaltyAvailable`, so the reward was offered and pre-approved on the customer's FIRST EVER
+      linked order, and again on her second, and nothing decrements anything (`17-F23`'s
+      subtrahend has no producer).
+
+      Measured on this branch before the fix, with the row below and one linked order:
+        offers  [{"campaign_id":"camp-punch","bound_paisa":45000}]
+        cite    {"campaign_id":"camp-punch","within_campaign_bounds":true}   → cashier: allow
+
+      ⚠ **THE FIXTURE IS THE FINDING.** Every campaign fixture in this repo before this test was
+      `auto_deal` or a `free_item` loyalty row — and `free_item` exits at `campaignBenefitPaisa`
+      for a different reason — so `kind` was never VARIED against a computable benefit and an
+      implementation blind to it passed everything. `L10`'s shape on a money field, again.
+    */
+    const PUNCH_ROW = {
+      ...LOYALTY_ROW,
+      campaign_id: "camp-punch",
+      benefit: { form: "amount_paisa", value: 45_000, item_id: null, cap_paisa: 45_000 },
+    } as const;
+    const punch = () => artifactOf([PUNCH_ROW]);
+    const linked = { artifact: punch, orderHasLinkedCustomer: () => true };
+    expect(citations(linked)("ord-1", "camp-punch", 45_000)).toBe(null);
+    expect(citations(linked)("ord-1", "camp-punch", 1), "at any amount").toBe(null);
+    expect(
+      campaignOffersFor({
+        artifact: punch,
+        openOrders: () => [{ order_id: "ord-1", channel: "counter" } as never],
+        orderTotalPaisa: () => 3_000_000,
+        orderHasLinkedCustomer: () => true,
+        branchNowMs: () => Date.parse("2026-08-24T12:00:00+05:00"),
+        branchId: () => IDENTITY.branch_id,
+      })("ord-1"),
+      "and it is not on the screen either — one resolution, both readers",
+    ).toEqual([]);
+    // CONTROL — the SAME row as an `auto_deal` (the one kind that asks for nothing) is offered
+    // and cited. Without this the test would pass against a resolver that refused everything.
+    const asDeal = () =>
+      artifactOf([{ ...PUNCH_ROW, kind: "auto_deal", every_n: null, requires_customer: false }]);
+    expect(
+      citations({ artifact: asDeal })("ord-1", "camp-punch", 45_000)?.within_campaign_bounds,
+    ).toBe(true);
+  });
+
+  it('`coupon` and `bearer_card` are refused BY KIND, even with `proof: "none"`', () => {
+    // The `proof` arm was one field away from these two: `17-F10` makes a coupon its CODE and
+    // `17-F21` makes a bearer card the IDENTITY, and neither is `proof`, which a writer may leave
+    // at `none` on any row. Measured before the fix: `{kind: "coupon", code: "ABCD", proof:
+    // "none"}` was pre-approved with no coupon ever presented — the defect the `proof` arm was
+    // written for, arriving through the field beside it.
+    const coupon = () => artifactOf([{ ...BANK_ROW, kind: "coupon", code: "ABCD", proof: "none" }]);
+    expect(citations({ artifact: coupon })("ord-1", "camp-bank", 1)).toBe(null);
+    const bearer = () => artifactOf([{ ...BANK_ROW, kind: "bearer_card", proof: "none" }]);
+    expect(citations({ artifact: bearer })("ord-1", "camp-bank", 1)).toBe(null);
+    // CONTROL — `auto_deal`, the same row otherwise, is within bounds.
+    expect(citations()("ord-1", "camp-bank", 1)?.within_campaign_bounds).toBe(true);
+  });
+
+  it("⚠ THE BOUND IS ONE ACT AND NOT AN ORDER — measured, stated, and NOT closed here", () => {
+    /*
+      `17-F24` as amended (re-review, August 2026). `cap_paisa` bounds ONE citation and nothing in
+      this product counts citations, so N corrections citing one campaign pre-approve N × cap. The
+      field is called `within_campaign_bounds`, which reads like a claim about the order, and the
+      FR did not say otherwise until this round.
+
+      **This assertion pins the measurement rather than a fix**, because closing it needs a
+      per-order citation count — a `discount.recorded` projection this device does not have
+      (`DEC-MONEY-010` holds `01-F30`'s discount term absent) — and a founder call on which jaw of
+      `17-F24`'s pincer to close. It is the `17-F23` tripwire idiom pointed at a money bound: when
+      a counter lands, this test fails, and whoever lands it updates the FR in the same change
+      rather than discovering the semantics afterwards.
+    */
+    let total = 3_000_000;
+    const given: number[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      const amount = Math.min(1_000_000, Math.floor(total / 2));
+      const verdict = citations({ orderTotalPaisa: () => total })("ord-1", "camp-bank", amount);
+      expect(verdict?.within_campaign_bounds, `citation ${i + 1}`).toBe(true);
+      given.push(amount);
+      total -= amount;
+    }
+    const sum = given.reduce((a, b) => a + b, 0);
+    expect(sum, "Rs 28,750 pre-approved off a Rs 30,000 bill under a Rs 10,000 cap").toBe(
+      2_875_000,
+    );
+    expect(sum, "…and that is 2.875x the cap the row states").toBeGreaterThan(1_000_000);
+  });
+
   it("a `free_item` campaign is `null` — a bound this predicate cannot compute is not a blessing", () => {
     // `campaignBenefitPaisa` answers `null` because the value is the LINE's snapshotted price
     // (`01-F53`) and this predicate has no line. The SAFE direction: it takes the discretionary

@@ -192,6 +192,56 @@ describe("§A2 — `17-F22`'s percentage bound, the arm the row did not have", (
       ).success,
     ).toBe(true);
   });
+
+  it("⚠ `amount_paisa` and `cap_paisa` are bounded by the MONEY DOMAIN and by nothing narrower", () => {
+    /*
+      A re-review asked why `percent_bps` carries a stated ceiling and these two carry none —
+      *"same class, one field away"*, since `campaignBenefitPaisa`'s `min(gross, base)` means a
+      mistyped `4500000` for `45000` yields the whole bill, pre-approved.
+
+      **The answer is that the two are not the same class, and this test is the answer written
+      down** (`17-F22` as amended). 10,000 bps is a MATHEMATICAL maximum — a percentage above 100%
+      describes a discount larger than the thing it is taken off, so the row is refusable without
+      knowing anything about the restaurant. An absolute amount has no such maximum: Rs 45,000 off
+      is a mistype at a chai stall and a Tuesday promotion at a wedding hall, and a refusal would
+      have to be a number this FR invented (commandment 2). What CAN be stated is the domain:
+      integer paisa a `Paisa` holds exactly (`DEC-MONEY-005`, standing law 3).
+
+      **It is not decoration — it is the assertion that keeps a `paisa()` RangeError off the
+      authorization path.** `campaignBenefitPaisa` calls `paisa(benefit.value)`, which throws on a
+      non-safe integer, and its shipping caller is inside `apps/pos-electron`'s write guard: a row
+      the schema admitted but the money type cannot hold would turn a discount into an exception,
+      which is commandment 4 (`01-F17`) broken by a promotion. Measured: `1e15` parses (it is a
+      safe integer), `1e16` and `1e30` are refused.
+    */
+    const amountAt = (value: number) =>
+      CampaignRowSchema.safeParse(
+        row({ benefit: { form: "amount_paisa", value, item_id: null, cap_paisa: null } }),
+      ).success;
+    expect(amountAt(1e15), "a safe integer is a legal amount, however large").toBe(true);
+    expect(amountAt(Number.MAX_SAFE_INTEGER), "the boundary itself is legal").toBe(true);
+    expect(amountAt(Number.MAX_SAFE_INTEGER + 2), "one step past the domain is refused").toBe(
+      false,
+    );
+    expect(amountAt(1e30), "and a number no drawer could hold is refused").toBe(false);
+    // `cap_paisa` is the same field one level down and is asserted separately, because the arm
+    // that bounds one does not bound the other — which is the shape of the finding that produced
+    // this test in the first place.
+    const capAt = (cap_paisa: number) =>
+      CampaignRowSchema.safeParse(
+        row({ benefit: { form: "percent_bps", value: 5000, item_id: null, cap_paisa } }),
+      ).success;
+    expect(capAt(1e15)).toBe(true);
+    expect(capAt(1e30)).toBe(false);
+    // And the money helper agrees with the schema at the boundary rather than throwing behind it.
+    expect(
+      campaignBenefitPaisa(
+        { form: "amount_paisa", value: Number.MAX_SAFE_INTEGER, item_id: null, cap_paisa: null },
+        300_000,
+      ),
+      "clamped to the base, never a RangeError on the write path",
+    ).toBe(300_000);
+  });
 });
 
 describe("§B — `17-F24`'s money: `applyRateBps` then `min(cap)`, in that order", () => {
@@ -292,6 +342,45 @@ describe("§C — `17-F22`'s scope predicate, and the two conventions that are N
     expect(
       campaignApplies(row({ requires_customer: true }), ctx({ has_linked_customer: true })),
     ).toBe(true);
+  });
+
+  it("⚠ BLIND TO `item_scope`, `use_limit`, `proof` AND `kind` ON PURPOSE — the refusal is the CALLER's", () => {
+    /*
+      ⚠ **THIS ASSERTION EXISTS BECAUSE `campaign.ts` CLAIMED IT ALREADY DID (`L11`, re-review
+      August 2026).** `campaignApplies`'s docstring said *"`campaign-model.test.ts` §D pins that
+      this function is blind to them ON PURPOSE"* — and no section of this file mentioned
+      `item_scope` outside a fixture default. A protection claimed in prose retires the assertion
+      the next session would have written; this is that assertion, and the pointer now names the
+      section it is in.
+
+      The property is not cosmetic and both directions of it matter. `17-F24` as amended REFUSES
+      these rows, and the refusal lives at `apps/pos-electron`'s citation resolver because that is
+      the caller with the order's lines, its history and the cashier's hands. If an arm were added
+      HERE — returning `false` for a scoped row, which is the tempting "fix" — the caller's refusal
+      would become untestable (every such row would already be out of reach), the offer list and
+      the citation would agree for the wrong reason, and **nothing would be scoped**: the base
+      would still be the order's total for every row that survived.
+
+      So: a row that sets all four still REACHES the order. What it must not get is a BOUND, and
+      that is `loyalty-seam.test.ts` §D's assertion, one package over.
+    */
+    const reaching = ctx({ order_total_paisa: 100_000, has_linked_customer: true });
+    expect(campaignApplies(row({ item_scope: ["item-pizza"] }), reaching)).toBe(true);
+    expect(campaignApplies(row({ item_scope: [] }), reaching)).toBe(true);
+    for (const use_limit of ["once_per_order", "once_per_customer"] as const) {
+      expect(campaignApplies(row({ use_limit }), reaching), use_limit).toBe(true);
+    }
+    for (const proof of ["code", "bearer_card", "attested"] as const) {
+      expect(campaignApplies(row({ proof }), reaching), proof).toBe(true);
+    }
+    // And the KIND, which the caller's guard was widened to on re-review: an `account_loyalty`
+    // row whose reward has NOT been earned still reaches the order here, because this function
+    // holds neither of `17-F23`'s two counts and an arm keyed on the kind would be a guess.
+    expect(
+      campaignApplies(row({ kind: "account_loyalty", every_n: 10 }), reaching),
+      "reaching is not the same question as earned",
+    ).toBe(true);
+    expect(campaignApplies(row({ kind: "coupon", code: "ABCD" }), reaching)).toBe(true);
   });
 });
 
@@ -396,5 +485,31 @@ describe("§D — `17-F23`'s arithmetic, and the property that stops an owner re
     expect(walk).toEqual([
       20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
     ]);
+  });
+
+  it("⚠ AN OVERDRAW PAST 2^53 IS CLAMPED — the countdown never returns a float (standing law 3)", () => {
+    /*
+      The fix above opened the other end and a re-review measured it: `every_n − Number(remaining)`
+      narrows a BigInt the fold went to BigInt to protect. `registry.ts` bounds
+      `loyalty.reward_redeemed.orders_consumed` by `int().nonnegative()` alone, so
+      `orders_consumed_total: 10n ** 30n` is reachable — and the countdown answered **`1e+30`**,
+      a non-safe float from a function whose contract is *a count of orders*.
+
+      `Number(bigint)` past 2^53 loses precision SILENTLY, which is the same hazard standing law 3
+      states for a running double one layer down. Exact where representable, clamped past it.
+    */
+    const at = (eligible: number, consumed: bigint) =>
+      loyaltyOrdersToNextReward({ eligible, orders_consumed_total: consumed, every_n: 10 });
+    const huge = at(0, 10n ** 30n);
+    expect(Number.isSafeInteger(huge), "a count a surface can say, not 1e+30").toBe(true);
+    expect(huge).toBe(Number.MAX_SAFE_INTEGER);
+    // The boundary, both sides: an overdraw whose answer still fits is EXACT and not clamped, so
+    // the clamp cannot be mistaken for "large debts all read the same".
+    const exact = BigInt(Number.MAX_SAFE_INTEGER) - 10n;
+    expect(at(0, exact), "one that fits is answered exactly").toBe(Number.MAX_SAFE_INTEGER);
+    expect(at(1, exact)).toBe(Number.MAX_SAFE_INTEGER - 1);
+    // ...and nothing about the ordinary range moved (the walk above is the same arithmetic).
+    expect(at(10, 20n)).toBe(20);
+    expect(at(19, 20n)).toBe(11);
   });
 });

@@ -142,9 +142,12 @@ type PhoneAcc = {
    * **It changes no projected value and cannot.** Membership is identical to the filter it
    * replaces — both are written in the `order.customer_linked` arm from the same payload — and
    * `rowOf` still sorts on the order id, which is a payload VALUE and never arrival order
-   * (`01-F34`). `customer-orders-fold.test.ts` §I asserts BOTH halves: the projection is
+   * (`01-F34`). `customer-orders-fold.test.ts` **§G** asserts BOTH halves: the projection is
    * byte-identical to the scan it replaces, and the scan is gone (a Proxy counts `keys()` on the
-   * order map and requires ZERO calls per phone).
+   * order map and requires ZERO calls per phone). ⚠ *This said §I, and that section does not
+   * exist — the file runs A–G. A pointer to a section nobody can open sends the next reader away
+   * empty-handed and is `L11`'s weakest form: the claim is true, and it cannot be checked where
+   * it says it can. Corrected on re-review, August 2026.*
    */
   orders: Set<string>;
   /** `adjustment_attempt_id` → (canonical member bytes → member). `01-F31`'s keyed map. */

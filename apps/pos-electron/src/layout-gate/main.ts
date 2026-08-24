@@ -562,6 +562,18 @@ let lockStepsMeasured = 0;
  */
 let fontPanelsMeasured = 0;
 
+/**
+ * `24-F14` — how many `02-F61` correction surfaces were actually driven (two per panel).
+ *
+ * Same argument as the lock steps: `MIN_SURFACES` sits one whole panel low by design, so dropping
+ * two surfaces from **every** panel still clears it — which is precisely how `01-F61`'s PIN pad
+ * went unmeasured for the life of this rail. The correction surface reached the sweep only in
+ * August 2026 and it took a fixture change (`states` on a cart line, and one served campaign
+ * offer) to be reachable at all, so the way it leaves coverage again is a reverted fixture line,
+ * silently, with every surface still reporting clean.
+ */
+let correctionSurfacesMeasured = 0;
+
 /** Totals, so the rail can prove to itself that it actually looked at something. */
 let surfacesMeasured = 0;
 let controlsMeasured = 0;
@@ -1051,6 +1063,32 @@ const run = async (): Promise<number> => {
          return named(/name/i) && named(/address/i) &&
            [...main.querySelectorAll('button')]
              .some((b) => /Save caller/.test(b.getAttribute('aria-label') || b.textContent || ''));
+       })()`,
+    );
+
+  /**
+   * **`24-F14` — is `17-F27`'s offer panel actually on the correction surface?**
+   *
+   * The same argument as `callerStripPresent` above, aimed at the chrome this step was added for.
+   * `LineCorrection` draws the *Under which offer?* panel only when the host answers with at least
+   * one offer, so a fixture that stopped serving `campaignOffers` — or a `Counter.tsx` that
+   * stopped passing them — would leave the gate measuring the PRE-`17-F27` geometry and reporting
+   * it green. That is `escalationFor: () => null` verbatim.
+   *
+   * It asks the DOM in the work area only, for the panel's own caption AND for a tile carrying the
+   * campaign id the fixture serves, so both ends are checked: a `No offer` tile alone would pass a
+   * caption-only probe while the campaign tiles — the part that wraps and the part that costs
+   * height — were gone.
+   */
+  const correctionOfferPresent = (): Promise<boolean> =>
+    window.webContents.executeJavaScript(
+      `(() => {
+         const main = document.querySelector('main');
+         if (main === null) return false;
+         const text = main.textContent || '';
+         return /Under which offer\\?/.test(text) &&
+           [...main.querySelectorAll('button')]
+             .some((b) => /0198c1d4/.test(b.getAttribute('aria-label') || b.textContent || ''));
        })()`,
     );
 
@@ -1761,6 +1799,71 @@ const run = async (): Promise<number> => {
       }
     }
 
+    // -------------------------------------------------------------------------------------
+    // `02-F61` / `17-F27` — THE CORRECTION SURFACE, reached the way a cashier reaches it.
+    //
+    // ⚠ **THIS SURFACE HAS NEVER BEEN IN THE SWEEP.** `LineCorrection` takes the whole work area,
+    // stacks four `Panel`s in the discount arm — the line list, the act row, `17-F27`'s offer
+    // panel and a `27-F8` money keypad with its readout — and `layout:check` pressed
+    // `Correct a line` NOWHERE. The fixture could not have reached it either: both live cart
+    // lines carried no `states`, so every tile on step one was greyed. Both halves are fixed
+    // together, because either alone measures nothing (`24-F14`).
+    //
+    // It is driven in the **alarm** state, which is the tighter budget (`03-F5`'s band costs the
+    // work area 102 px) and the ordinary one on a till that ships `unattachedPrinter`.
+    //
+    // Driven through the real controls — `Correct a line` → the dish → `Discount` → the offer
+    // tile → three digits — rather than by poking state, on the escalation block's own reasoning:
+    // a fixture that mounted its own copy of the surface would prove the copy fits.
+    // -------------------------------------------------------------------------------------
+    if (orderTab !== -1) {
+      await click(orderTab);
+      await new Promise((r) => setTimeout(r, 350));
+      const opened = await press("Correct a line");
+      await new Promise((r) => setTimeout(r, 350));
+      const picked = opened ? await press("1 × Chicken Karahi") : false;
+      await new Promise((r) => setTimeout(r, 250));
+      const acted = picked ? await press("Discount") : false;
+      await new Promise((r) => setTimeout(r, 350));
+      if (!opened || !picked || !acted) {
+        failures.push({
+          surface: on("correction"),
+          state: "alarm",
+          detail:
+            `EMPTY MATCH — the correction sequence did not find its controls (open ${opened}, ` +
+            `line ${picked}, act ${acted}), so 02-F61's surface went unmeasured on this panel. ` +
+            "The line tile is greyed unless the fixture projects `states` for it, which is how " +
+            "this surface stayed outside the sweep for the whole life of this rail (24-F14).",
+        });
+      } else if (!(await correctionOfferPresent())) {
+        failures.push({
+          surface: on("correction:cited"),
+          state: "alarm",
+          detail:
+            "EMPTY MATCH — 17-F27's *Under which offer?* panel did not render, so the chrome " +
+            "this step exists to measure is not on the screen. Either `preload.ts` stopped " +
+            "serving `campaignOffers` or `Counter.tsx` stopped passing them, and the sweep would " +
+            "otherwise report the PRE-17-F27 geometry as if it were the shipped one (24-F14).",
+        });
+      } else {
+        // The offer panel is up and the keypad is below it: this is the tallest state of this
+        // surface and the one `17-F27` added chrome to.
+        judge(on("correction:cited"), "alarm", await measure());
+        correctionSurfacesMeasured += 1;
+        await shoot(window, `${panel.label}--alarm--correction-cited`);
+        // Citing, then keying — `27-F29`'s refusal-at-the-keystroke means the digits must land
+        // under the line's own total, so `300` is Rs 300 of a Rs 450 line.
+        await press("0198c1d4");
+        for (const digit of ["3", "0", "0"]) await press(digit);
+        await new Promise((r) => setTimeout(r, 350));
+        judge(on("correction:reason"), "alarm", await measure());
+        correctionSurfacesMeasured += 1;
+        await shoot(window, `${panel.label}--alarm--correction-reason`);
+      }
+      await press("Back");
+      await new Promise((r) => setTimeout(r, 300));
+    }
+
     // `03-F5` — acknowledging clears it, which is how the gate reaches the quiet state through
     // the real contract rather than a second fixture.
     await window.webContents.executeJavaScript("window.restos.acknowledgeAlarm('alarm-1')");
@@ -1839,6 +1942,21 @@ const run = async (): Promise<number> => {
         "every panel still clears it. That is exactly how the PIN pad went unmeasured — the " +
         "fixture called `unlock()` and skipped straight past the surface an operator meets 20–60 " +
         "times a shift (24-F14).",
+    });
+  }
+
+  if (correctionSurfacesMeasured < PANELS.length * 2) {
+    failures.push({
+      surface: "gate",
+      state: "quiet",
+      detail:
+        `EMPTY MATCH — only ${correctionSurfacesMeasured} of ${PANELS.length * 2} correction ` +
+        `surfaces were measured (02-F61's cited state and its reason state, on ${PANELS.length} ` +
+        "panels). A step that is not driven is a step that is not measured, and the grand total " +
+        "does not notice: MIN_SURFACES sits one whole panel low by design. This surface reached " +
+        "the sweep only in August 2026, and it needs BOTH halves of a fixture — `states` on a " +
+        "cart line so the tile is not greyed, and one served `campaignOffers` so 17-F27's panel " +
+        "renders — so the way it leaves coverage again is one reverted fixture line (24-F14).",
     });
   }
 

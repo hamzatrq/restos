@@ -2180,6 +2180,120 @@ of chrome in the discount arm when a campaign reaches the order, on a surface th
 scrolls (`27-F2`). Whoever puts that surface in the gate must drive it with a campaign served.
 The `27-F4` PR justification for the panel's position is in `LineCorrection.tsx` at the panel.
 
+### ✅ THE RE-REVIEW'S THREE (August 2026) — a guard aimed one case away, a bound that was never an order's, and a panel nobody had measured
+
+A second adversarial pass over `17-F27` confirmed the producer reaches the product and then found what
+the fix introduced. All three are closed here; the numbers below are kills ABOVE a control of
+**pos-electron 1397 pass / 5 env-red** (`startup-integrity.test.ts` spawns real Electron — an
+environment prerequisite, `T-01-07`), **domain 823 / 44 known-red**, **sync-client 1028 / 1**.
+
+**F1 — `unresolvableScope` refused three FIELDS and never asked about the `kind`, so the loyalty
+reward was given away on order #1.** `17-F22` closes `kind` at four values and three of them name
+something this device cannot check: `account_loyalty`'s benefit is EARNED (`17-F23`'s two counts,
+neither of which this path holds — its only production readers of `every_n` are `gateway.ts`'s
+caller strip and the schema), and `coupon`/`bearer_card` name a thing in her hand while `proof` is a
+SEPARATE field a writer may leave at `none`. Reproduced before the fix, with Como's own *custom
+punch card (%, fixed)* shape on a customer's first ever linked order:
+`offers [{"campaign_id":"camp-punch","bound_paisa":45000}]` and
+`cite {"campaign_id":"camp-punch","within_campaign_bounds":true}` — allow, again next order, with
+nothing decrementing anything. `{kind: "coupon", code: "ABCD", proof: "none"}` was pre-approved with
+no coupon presented, which is the defect the `proof` arm was written for arriving one field over.
+**Only `auto_deal` takes the arm now, as a WHITELIST** so a kind added later is refused rather than
+pre-approved by omission (`17-F24` as amended).
+
+**F2 — `within_campaign_bounds` bounds ONE ACT and not an order, and no FR said so.** Nothing counts
+citations: there is no `discount.recorded` projection on the device (`DEC-MONEY-010` holds `01-F30`'s
+discount term absent) and the whole-ledger read that would substitute is what `17-N3`'s 100 ms budget
+forbids. Measured with R71's own row (50% off, capped at Rs 10,000) against a Rs 30,000 bill:
+`1_000_000, 1_000_000, 500_000, 250_000, 125_000` = **Rs 28,750 pre-approved, no manager,
+permanently**. **Not closed in code, and that is the honest answer** — both jaws of the pincer
+`17-F24` now records need a per-order citation count (a `packages/sync-client` projection) plus a
+founder call on which to build, and the F2 row below measures what the nearer jaw costs today.
+`loyalty-seam.test.ts` §D pins the measurement so the day a counter lands, the FR and the assertion
+move together.
+
+**F3 — the correction surface entered `layout:check` for the first time, and the offer panel had
+taken the one shipping panel that was at zero off it.** Two fixture halves were needed and either
+alone measures nothing: `states` on a cart line (without it `correctionUnavailable` greys every line
+tile) and one served `campaignOffers` (without it the offer region does not render). The gate drives
+`Correct a line → the dish → Discount → cite → 3,0,0` and judges two states per panel, with a
+`24-F14` counter demanding 22 of them.
+
+| panel | pre-`17-F27` (no offer) | the shipped panel | **beside the pad (fixed)** |
+|---|---|---|---|
+| **laptop-1280** (`ships`) | 0 px, 0 unreachable | **34 px, 3 unreachable** (`C` `0` `⌫`) | **0 px, 0 unreachable** |
+| counter-1366 / 1920 | 2 painted-over | **19 painted-over** | 4 painted-over |
+| tablet-11.6 | 27 px | 73 px | 27 px |
+| laptop-13.3-hd | 30 px | 84 px | 30 px |
+| laptop-12.5 | 69 px | 119 px | 69 px |
+| netbook-1024 (`ships`) | 110 px | 147 px | 110 px |
+| tablet-10.1 (`ships`) | 125 px | 159 px | 125 px |
+| probe-below-floor (`ships: false`) | 177 px, 6 unreachable | 204 px, 6 | 177 px, **8** |
+
+**The fix is the AXIS and not the chrome.** The offers sit beside the `27-F8` keypad inside `How
+much` rather than in a region above it: the pad is four rows tall and the offer column two, so the
+region costs no height at all, and **every panel's overflow returns to its no-offer number exactly**.
+Trimming chrome was tried first and measured WORSE — merging the two regions into one un-shrinkable
+panel took `laptop-1280` to 321 px and 6 unreachable, because the surface's panels currently shrink
+past their content rather than overflowing. What the offers still cost is two controls: on panels
+where this surface already overlaps itself they land inside the overlap, and on the below-floor probe
+they are +2 unreachable.
+
+**⚠ AND THE MEASUREMENT FOUND A BIGGER DEFECT THAT IS NOT THIS CHANGE'S — REPORTED, NOT FIXED.**
+`LineCorrection` **overlaps its own controls on every panel with no offer served at all**: the
+pre-`17-F27` control reports 3 and 2 painted-over controls on `counter-1366`'s two states, 6 and 13
+on `laptop-1280`, 12 on `tablet-10.1` — while `main` reports NO overflow on the counter, because the
+root is `height: 100%` and its `Panel` children shrink below their content, so tiles spill and paint
+over the region beneath. The keypad's digit rows and the reason tiles land on the same pixels: a
+cashier reaching for *Wrong item* can hit `7`. That is a Wave-1 `02-F61` defect, invisible to all
+1,402 tests here and invisible to this gate until the fixture reached the surface, and the remedy is
+an arrangement decision for that surface's owner (`24 §3b`). **`27-F2` bans reaching a control by
+scrolling, so "make it scroll" is not the fix either.**
+
+**Two comments were pointing at assertions that do not exist (`L11`), both corrected in place:**
+`Counter.tsx`'s reward line cited `loyalty-seam.test.ts` §F for the redemption tripwire (it is §H;
+§F is the offer list), and `packages/sync-client`'s `customer-orders.ts` cited §I of a file whose
+sections run A–G. A third was worse and is recorded in `packages/domain/CLAUDE.md`.
+
+#### Mutation matrix — control **pos 1397 / 5 env-red**, **domain 823 / 44**, one branch per row
+
+In-tree, byte-exact restore with a **sha256 trap asserted after every row** and a no-op-mutant guard;
+`REAL_EXIT` inside each log and the counts read off vitest's own `Tests` line (`T2`). Nothing here is
+a security constant, which is the narrow case `T8` leaves in-tree.
+
+| # | mutant (exactly one branch) | pos | domain |
+|---|---|---|---|
+| NC | **NEGATIVE CONTROL** — `unresolvableRow` as an early-return chain | **0** | — |
+| NC2 | **NEGATIVE CONTROL** — `loyaltyOrdersToNextReward`'s guard destructured | — | **0** |
+| S1 | **THE SEAM DELETED** — `Counter.tsx`'s payload drops the citation spread | **2** | — |
+| S2 | **THE SEAM INERT** — the call site stays and the handler answers `[]` | **1** | — |
+| F1a | **THE DEFECT VERBATIM** — the guard back to its three fields | **2** | — |
+| F1b | **AIMED ONE CASE AWAY** — `kind === "account_loyalty"` only, so a coupon slips through | **1** | — |
+| F2 | the nearer jaw closed blind — a cap-carrying row refused | **11** | — |
+| F5a | the countdown back to `every_n − Number(remaining)` | — | **1** |
+| F5b | the benefit's money domain opened (`.int()` dropped) | — | **1** |
+| F4c | `campaignApplies` gains an `item_scope` arm — the "fix" the corrected comment invites | — | **1** |
+
+**In every row the only failing files beyond the control's known-red set are files this change
+authored or amended.** **S1 against S2 is `L7`'s pair and the two numbers the task asked for: the
+call site deleted kills 2 (one of them the behavioural DOM test), the supply made inert kills 1 —
+neither subsumes the other, and R71 has behaviour because both are non-zero.** **F2's 11 is the row
+to read before closing that jaw:** refusing a cap-carrying row is one of the two remedies the review
+named, and it is not free — it takes out eleven assertions that exist because R71's own case carries
+a cap.
+
+**Layout mutants (the fixture is the coverage boundary):** removing `states` from the fixture's cart
+line → **11 EMPTY MATCHes + `0 of 22 correction surfaces measured`**; `campaignOffers` back to `[]`
+→ **11 EMPTY MATCHes + the same counter**. Both directions, both loud. ⚠ **And one of them fired for
+real during the work:** writing the region's caption upper-case at the call site (instead of
+`Panel`'s rule — sentence case, capitals in CSS) made the probe blind and the gate reported 22 empty
+matches rather than a clean sweep. The tripwire caught the tripwire's own blind spot.
+
+⚠ **RUN THE GATE ON A DISPLAY LARGER THAN THE LARGEST PANEL.** Every number above was re-measured
+under `xvfb-run -a -s "-screen 0 2560x1600x24"`. The first pass used `xvfb-run`'s 1280x1024 default,
+which clamps the 1366- and 1920-wide windows and makes the gate accuse `useContentSize` of a defect
+that exists only in the rig — this file already records that trap and it cost a set of numbers here.
+
 #### Mutation matrix — control **pos 1394 pass / 5 env-red**, domain **820/44**, sync **1028/1**
 
 In-tree, one branch per mutant, restored from a pre-run SNAPSHOT (not `git checkout --`: the fixes

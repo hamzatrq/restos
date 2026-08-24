@@ -1972,8 +1972,12 @@ export const Counter = () => {
 
                 **The day a producer lands, the count comes back.** Nothing in the code can see
                 that day arrive, so the tripwire is a hand-written assertion —
-                `__acceptance__/loyalty-seam.test.ts` §F fails the moment anything in this app
-                emits `loyalty.reward_redeemed`, and it names this line.
+                `__acceptance__/loyalty-seam.test.ts` **§H** fails the moment anything in this app
+                emits `loyalty.reward_redeemed`, and it names this line. ⚠ *This said §F, which is
+                the offer list. The tripwire is the one thing on this surface a reader has to be
+                able to find, so a pointer at the wrong section is the `L11` shape at its quietest:
+                the protection exists and the sentence sends you to the wrong place. Corrected on
+                re-review, August 2026.*
               */
               <p style={{ ...STATE_LINE, color: color["fgColor-default"], marginLeft: 0 }}>
                 Reward threshold passed — this till cannot record a redemption yet

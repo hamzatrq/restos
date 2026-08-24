@@ -298,55 +298,60 @@ export const LineCorrection = ({ lines, campaigns, onSubmit, onCancel }: LineCor
         that holds no campaigns shows this panel never and behaves exactly as it did before.
         A dev-pilot acclimation window is owed, per this FR's own requirement.
 
-        **⚠ AND THE LAYOUT COST IS UNMEASURED, which is a finding rather than a claim of safety.**
-        `layout:check` has never reached this surface at all — its fixture navigates to the tabs,
-        the unlock pad and `ManagerApproval`, and there is no press of `Correct a line` anywhere in
-        it — so the correction surface was outside the sweep before this panel and is outside it
-        now (`L9`: the fixture is the coverage boundary, not the assertions). This adds one Panel
-        of chrome in the discount arm when a campaign reaches the order, on a surface that clips
-        rather than scrolls (`27-F2`). Whoever adds this surface to the gate should drive it with a
-        campaign served.
+        **⚠ THE OFFERS SIT BESIDE THE PAD AND NOT IN A PANEL ABOVE IT — MEASURED, and the first
+        build put them in a `Panel` of their own (`L9`, re-review August 2026).** The layout cost
+        was reported *unmeasured* here, because `layout:check` had never pressed `Correct a line`
+        at all. It is measured now — the gate drives this surface in both its states on all eleven
+        panels — and the panel the first build added took **`laptop-1280`, the `ships: true` BYO
+        laptop `AGENTS.md` admits precisely because it renders every surface with zero violations,
+        from 0 px of overflow to 34, stranding `C`, `0` and `⌫` of the discount keypad below the
+        viewport.** A cashier there could not clear a mis-key or type a zero — defect 2's shape
+        verbatim, one surface along. On `counter-1366` it took the reason state from 2 painted-over
+        controls to **19**.
+
+        **The fix is the AXIS, and it is worth more than trimming the chrome.** A stacked region
+        costs its own height on every panel; beside the pad it costs the height of nothing, because
+        the keypad is four rows tall and the offer column is two. The tiles cannot shrink
+        (`27-F8`/`27-F68` (b) forbid it by name) and the caption is `Readout`'s own treatment, so
+        what was removed is a whole row of stacking rather than a few pixels of inset. Measured
+        against the pre-`17-F27` geometry (the same sweep with `campaignOffers` answering `[]`,
+        everything else identical): **every panel's overflow returns to its no-offer number
+        exactly** — `laptop-1280` 34 → 0 px and 3 → 0 unreachable, `tablet-10.1` 159 → 125,
+        `netbook-1024` 147 → 110, `tablet-11.6` 73 → 27, `laptop-13.3-hd` 84 → 30, `laptop-12.5`
+        119 → 69, `counter-1366`'s reason state 19 → 4 painted-over. **So this panel now costs the
+        surface no vertical room at all.** What it still costs is two controls: on the panels where
+        this surface already overlaps itself, the two new tiles land inside that overlap (+2
+        `COVERED`), and on `probe-below-floor` — the `ships: false` row that exists to fail — +2
+        unreachable.
+
+        **⚠ AND THE MEASUREMENT FOUND A BIGGER DEFECT THAT IS NOT THIS PANEL'S: this surface
+        overlaps its own controls on EVERY panel, with no offer served at all.** The pre-`17-F27`
+        control reports 3 and 2 painted-over controls on `counter-1366`'s two states, 6 and 13 on
+        `laptop-1280`, 12 on `tablet-10.1` — while `main` reports no overflow on the counter at
+        all, because the root is `height: 100%` and its `Panel` children shrink below their
+        content rather than overflowing it, so the tiles spill and paint over the region below.
+        The keypad's rows and the reason tiles land on the same pixels: a cashier reaching for
+        *Wrong item* can hit `7`. That is a Wave-1 `02-F61` defect this change did not create and
+        does not close, and it is reported rather than fixed here because the remedy is an
+        arrangement decision for that surface's owner (`24 §3b`). It is invisible to all 1,402
+        tests in this package and was invisible to this gate too, until the fixture and the step
+        below reached the surface.
 
         **No tile applies an amount.** `17-F27` (b): the campaign's base is the ORDER and this
         discount is per line, and resolving one into the other is exactly the scoped-base problem
         `17-F24`'s amendment refuses. A tile that silently clamped would be that refusal undone at
         the surface.
       */}
-      {act === "discount" && line !== undefined && campaigns.length > 0 ? (
-        <Panel
-          title="Under which offer?"
-          note={campaignId === null ? "none — the usual approval rules apply" : "cited"}
-        >
-          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center" }}>
-            <Tile
-              posture="counter"
-              label="No offer"
-              selected={campaignId === null}
-              onPress={() => setCampaignId(null)}
-            />
-            {campaigns.map((c) => (
-              <Tile
-                key={c.campaign_id}
-                posture="counter"
-                label={c.campaign_id}
-                selected={c.campaign_id === campaignId}
-                onPress={() => setCampaignId(c.campaign_id)}
-              >
-                {/*
-                  `27-F12` — a word and a number: what this offer allows on THIS order, computed in
-                  main from the campaign's own `benefit` (`applyRateBps` then `min(cap)`). It is a
-                  bound and not an instruction, and the cashier still keys what she gives.
-                */}
-                <MoneyValue paisa={paisa(c.bound_paisa)} />
-              </Tile>
-            ))}
-          </div>
-        </Panel>
-      ) : null}
-
       {act === "discount" && line !== undefined ? (
         <Panel title="How much" note="off this line">
-          <div style={{ display: "flex", gap: space["space-4"], alignItems: "flex-start" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: space["space-4"],
+              alignItems: "flex-start",
+              flexWrap: "wrap",
+            }}
+          >
             <NumericKeypad
               value={entry}
               onChange={setEntry}
@@ -356,6 +361,65 @@ export const LineCorrection = ({ lines, campaigns, onSubmit, onCancel }: LineCor
             <Readout caption="DISCOUNT">
               <MoneyValue paisa={paisa(entered)} />
             </Readout>
+            {campaigns.length > 0 ? (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: space["space-2"],
+                  minWidth: 0,
+                }}
+              >
+                {/*
+                  The region's own question, as a caption beside the pad rather than a second
+                  `Panel` above it — `Readout`'s caption treatment, which is the one this surface
+                  already uses for `DISCOUNT` two elements to the left.
+                */}
+                <p
+                  style={{
+                    ...label,
+                    // `Panel`'s own rule, and its reason: the capitals are applied in CSS so an
+                    // acceptance oracle (and this surface's `24-F14` layout probe) keeps matching
+                    // natural-language text. Written upper-case at the call site, the gate's
+                    // probe went blind and reported an EMPTY MATCH — which is the tripwire
+                    // working, and the reason this is a token treatment rather than a string.
+                    letterSpacing: "0.12em",
+                    textTransform: "uppercase",
+                    color: color["fgColor-muted"],
+                    margin: 0,
+                  }}
+                >
+                  {campaignId === null
+                    ? "Under which offer? — none, so the usual approval rules apply"
+                    : "Under which offer? — cited"}
+                </p>
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center" }}>
+                  <Tile
+                    posture="counter"
+                    label="No offer"
+                    selected={campaignId === null}
+                    onPress={() => setCampaignId(null)}
+                  />
+                  {campaigns.map((c) => (
+                    <Tile
+                      key={c.campaign_id}
+                      posture="counter"
+                      label={c.campaign_id}
+                      selected={c.campaign_id === campaignId}
+                      onPress={() => setCampaignId(c.campaign_id)}
+                    >
+                      {/*
+                        `27-F12` — a word and a number: what this offer allows on THIS order,
+                        computed in main from the campaign's own `benefit` (`applyRateBps` then
+                        `min(cap)`). It is a bound and not an instruction, and the cashier still
+                        keys what she gives.
+                      */}
+                      <MoneyValue paisa={paisa(c.bound_paisa)} />
+                    </Tile>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
         </Panel>
       ) : null}

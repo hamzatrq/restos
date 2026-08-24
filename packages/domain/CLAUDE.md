@@ -235,6 +235,41 @@ was killed by `packages/domain` and by `apps/pos-electron` and by **nothing** in
 Reading the suite would not have found that; running the mutant did.
 
 
+### `campaign.ts` — the re-review's two arithmetic findings, and a comment that claimed an assertion nobody had written (August 2026)
+
+Control **823 pass / 44 known-red**; every row below is the FULL package suite, in-tree, byte-exact
+restore with a `sha256` trap, and in every row **the only failing file beyond the control's three
+known-red is `campaign-model.test.ts`**.
+
+**`loyaltyOrdersToNextReward` narrowed a BigInt the fold went to BigInt to protect.** The August fix
+replaced a stuck modulo with `every_n − Number(remaining)` — correct across `17-F13`'s ruled overdraw
+and wrong at the other end: `registry.ts` bounds one `orders_consumed` only by `int().nonnegative()`,
+so `orders_consumed_total: 10n ** 30n` returned **`1e+30`** from a function whose contract is *a count
+of orders*, and `Number(bigint)` past 2^53 loses precision silently. The subtraction stays in BigInt
+and clamps at `Number.MAX_SAFE_INTEGER` — exact where representable, clamped past it. Mutant (the
+narrowing form restored) → **1**; negative control (the guard destructured) → **0**.
+
+**`benefit.value` under `amount_paisa`, and `cap_paisa`, are bounded by the MONEY DOMAIN and by
+nothing narrower — and the reason is now written down.** The review asked for a bound or a reason,
+because a mistyped `4500000` for `45000` gives away `min(gross, base)`. The two fields are not the
+same class as `percent_bps`: 10,000 bps is a mathematical maximum, refusable knowing nothing about
+the restaurant; an absolute amount has none, and any narrower bound would be a number no FR states
+(commandment 2). What IS stated is the domain — measured, `1e15` parses and `1e16` and `1e30` do not
+— and it is load-bearing rather than decorative: `campaignBenefitPaisa` calls `paisa()` inside the
+till's write guard, so a row the schema admitted but the money type cannot hold would turn a discount
+into a `RangeError` on the authorization path (`01-F17`, commandment 4). Mutant (`.int()` dropped) →
+**1**.
+
+**⚠ AND `campaignApplies`'s DOCSTRING CITED AN ASSERTION THAT DID NOT EXIST (`L11`, the third
+instance in this module).** It read *"`campaign-model.test.ts` §D pins that this function is blind to
+them ON PURPOSE"* — §D is the loyalty arithmetic, and **no section of that file mentioned
+`item_scope` outside a fixture default.** The claim was true of the code and unfalsifiable in the
+suite, which is exactly the shape that retires the assertion the next session would write. §C now
+asserts it — a row setting all four of `item_scope`, `use_limit`, `proof` and an unearned
+`account_loyalty` `kind` still REACHES the order here, because the refusal belongs to the caller that
+resolves the base — and the pointer names §C. Mutant (an `item_scope` arm added here, which is the
+"fix" a reader of the old comment would reach for) → **1**.
+
 ## `campaign.ts` — `17-F22`/`17-F23`/`17-F24`, and the retroactive tightening two GREEN oracles caught
 
 R71 (the discount threshold) and R79 (three loyalty forms) landed together, August 2026. What is

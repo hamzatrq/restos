@@ -237,3 +237,10 @@ and requiring zero. `get` is deliberately NOT counted: the index still READS the
 order, because an order's `settled` and its attested charge arrive on events carrying no phone —
 the join `26 §4` permits.
 
+## ⚠ One comment in `folds/customer-orders.ts` pointed at a section that does not exist (August 2026)
+
+The per-phone index's header cited `customer-orders-fold.test.ts` **§I** for the two halves it rests
+on; that file's sections run **A–G** and the assertions are **§G**. Corrected in place, and recorded
+here rather than fixed quietly because it is `L11`'s weakest and commonest form: the claim is TRUE,
+and a reader who goes looking for it finds nothing and concludes the protection is missing. No
+behaviour changed and no assertion moved.
