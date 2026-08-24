@@ -138,6 +138,8 @@ export type ReferenceRefusal = {
     | "recipe_cycle"
     | "recipe_component_missing"
     | "prep_recipe_yield_missing"
+    | "prep_recipe_missing"
+    | "duplicate_prep_producer"
     | "weight_tier_dimension"
     | "reference_cost_zero_qty"
     | "duplicate_item"
@@ -274,6 +276,54 @@ export const referenceRefusals = (refs: ReferenceData): readonly ReferenceRefusa
   }
 
   refusals.push(...recipeCycles(refs.recipes));
+
+  // ⚠ **THE PREPARED CHAIN'S TWO REFUSALS, BOTH ADDED AFTER THE ADVERSARIAL REVIEW — AND THE
+  // REACHABILITY IS THE POINT, NOT THE RULES.** `10-F3`'s chain is *"menu recipe → raw + prepared;
+  // prepared → prep recipe"*, and this function refused neither of its two ways of being broken, so
+  // a reference set the writer ACCEPTED could reach the fold and fail mid-explosion. That is how a
+  // dish came to be reported as not deducted and partially deducted at once (fixed in
+  // `deduction.ts` too, because a writer rule is not a fold's excuse for a half-applied act).
+  const producers = new Map<string, string[]>();
+  for (const recipe of refs.recipes) {
+    if (recipe.produces_item_id === null) continue;
+    const seen = producers.get(recipe.produces_item_id) ?? [];
+    if (!seen.includes(recipe.recipe_id)) seen.push(recipe.recipe_id);
+    producers.set(recipe.produces_item_id, seen);
+  }
+  for (const [item_id, recipe_ids] of [...producers].sort(([a], [b]) => (a < b ? -1 : 1))) {
+    if (recipe_ids.length < 2) continue;
+    refusals.push({
+      fr: "10-F3",
+      code: "duplicate_prep_producer",
+      subject: item_id,
+      detail:
+        `${[...recipe_ids].sort().join(" and ")} both produce this item, and 10-F3's chain has no ` +
+        "rule for choosing between them. Two producers are an AMBIGUITY (10-F8's shape, the same " +
+        "one two menu recipes sharing a sellable id get), never a guess: keep one, or split the " +
+        "item in two so the kitchen's two things are two things here as well.",
+    });
+  }
+  const preparedComponents = new Set<string>();
+  for (const recipe of refs.recipes) {
+    for (const line of recipe.lines) {
+      if (line.component.kind !== "item") continue;
+      if (items.get(line.component.id)?.type === "prepared") {
+        preparedComponents.add(line.component.id);
+      }
+    }
+  }
+  for (const item_id of [...preparedComponents].sort()) {
+    if (producers.has(item_id)) continue;
+    refusals.push({
+      fr: "10-F3",
+      code: "prep_recipe_missing",
+      subject: item_id,
+      detail:
+        "a recipe consumes this PREPARED item and no prep recipe produces it, so 10-F3's chain " +
+        "stops here. Every dish above it is uncostable (10-F31 R2) and must be named as a " +
+        "coverage gap rather than deducted down to the last line that happened to resolve.",
+    });
+  }
 
   for (const recipe of refs.recipes) {
     if (recipe.produces_item_id !== null && (recipe.yield_qty_base ?? 0) <= 0) {

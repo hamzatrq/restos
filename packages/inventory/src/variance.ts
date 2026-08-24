@@ -46,20 +46,32 @@ import {
 import {
   type CostBasis,
   costBasisOf,
+  inWindow,
+  type OpeningPair,
   type Period,
   periodsFor,
   physicalFacts,
   type ResolvedCost,
   valueOrNull,
 } from "./period.js";
-import type { ReferenceData, ValueQtyPair } from "./reference.js";
+import type { ReferenceData } from "./reference.js";
 
-/** Why a row carries no gap. Every one of these is a DIFFERENT fact and none of them is a zero. */
+/**
+ * Why a row carries no gap. Every one of these is a DIFFERENT fact and none of them is a zero.
+ *
+ * ⚠ **`opening_unknown` WAS A FIFTH MEMBER AND IT COULD NOT OCCUR.** Its branch tested
+ * `carry.get(item_id) === undefined`, and the baseline period sets a carry for **every** item in
+ * `countedItems` before it `continue`s, so the condition was `undefined` never — a mutant replacing
+ * it with `false` killed **0 of 113**. Worse, its comment described *"a carry with no VALUE"*,
+ * which is a real case that is handled elsewhere (`openingUsable` in `costBasisOf`) under a
+ * different label, `no_cost_basis`. A documented report variant a reader can look for and a
+ * surface can render, which the arithmetic cannot produce, is `L8`'s shape wearing a union member;
+ * it is deleted rather than re-aimed, because the case it claimed already has an owner.
+ */
 export type WithheldReason =
   | { readonly kind: "not_counted"; readonly reason: NotCountedReason }
   | { readonly kind: "below_noise_floor" }
   | { readonly kind: "consumption_unresolved" }
-  | { readonly kind: "opening_unknown" }
   | { readonly kind: "no_cost_basis" };
 
 export type VarianceRow = {
@@ -130,13 +142,28 @@ export type VarianceInput = {
   readonly refs: ReferenceData;
 };
 
-/** The carried closing state of one item, period to period. `value` is null when unvaluable. */
-type Carry = { readonly qty_base: number; readonly value_paisa: number | null };
+/**
+ * The carried closing state of one item, period to period. `value` is null when unvaluable.
+ *
+ * ⚠ **`basis` IS HERE BECAUSE A PROVENANCE THAT DOES NOT TRAVEL BECOMES A LIE ONE PERIOD LATER.**
+ * The carry used to be `(qty, value)` alone, so a quantity valued at the owner's typed
+ * `reference` price arrived in the next period as an opening with a value and no history —
+ * `costBasisOf` saw `opening_qty > 0` with money attached and answered `receipted`. Measured: every
+ * row read `"cost_basis":"receipted"` in fixtures containing **zero** `stock.purchase_recorded`
+ * events. `10-F31`'s triple is rendered to an owner as provenance (*"all from invoices"* against
+ * *"3 lines on reference prices"*), and `00 §7 (e)` requires the resolved source to travel with
+ * the value; it did not survive one period.
+ */
+type Carry = {
+  readonly qty_base: number;
+  readonly value_paisa: number | null;
+  readonly basis: CostBasis;
+};
 
-const carryPair = (carry: Carry | undefined): ValueQtyPair | null =>
+const carryPair = (carry: Carry | undefined): OpeningPair | null =>
   carry === undefined || carry.value_paisa === null
     ? null
-    : { value_paisa: carry.value_paisa, qty_base: carry.qty_base };
+    : { value_paisa: carry.value_paisa, qty_base: carry.qty_base, basis: carry.basis };
 
 /**
  * Every period of one location, oldest first. Periods are computed as a CHAIN because each one's
@@ -161,13 +188,21 @@ const reportFor = (
   countedItems: ReferenceData["items"],
   carry: Map<string, Carry>,
 ): VarianceReport => {
-  const inPeriod = input.events.filter(
-    (event) =>
-      event.envelope.branch_created_at <= period.closed_at &&
-      (period.opened_after === null || event.envelope.branch_created_at > period.opened_after),
-  );
+  // ⚠ **NOTHING IS WINDOWED EVENT BY EVENT HERE, AND THE PRE-WINDOWED LIST THAT USED TO STAND ON
+  // THIS LINE IS THE REVIEW'S FIRST DEFECT.** `10-F3` deducts *"for every order for which an
+  // `order.confirmed` exists"* — unqualified over the ledger. Handing `consumption` a slice made
+  // *exists* mean *exists in this window*, so an order whose lines were rung before a count and
+  // confirmed after it was deducted in **neither** period: measured at `gap −5 kg`,
+  // `gap_value_paisa: −340000`, Rs 3,400 of "unexplained usage" manufactured from a correctly sold
+  // order and ranked to the top of the page by `10-F33` (b). A count is taken at closing time,
+  // which is exactly when orders are open, so it is the normal case rather than an edge — and this
+  // module's whole social licence is `10-F19`'s *hints, never accusation*.
+  //
+  // Every fact is now resolved over the FULL event list and windowed by its ACT's own stamp, which
+  // is what `physicalFacts` has always done for a purchase and a wastage.
+  const window = (stamp: number): boolean => inWindow(period, stamp);
   const facts = physicalFacts(input.events, input.location_id, period);
-  const used = consumption(inPeriod, input.refs);
+  const used = consumption(input.events, input.refs, window);
   const rollup = rollUpCount(
     period.observation,
     countedItems.map((item) => item.item_id),
@@ -176,7 +211,11 @@ const reportFor = (
   );
   const byItem = new Map<string, CountedItem>(rollup.map((row) => [row.item_id, row]));
   const unresolved = new Set([...used.unresolved_items, ...facts.unresolved_items]);
-  const voidCount = inPeriod.filter((event) => event.type === "void.recorded").length;
+  // A void is one event and one act, so its own stamp IS its act's stamp — but it is windowed
+  // through the same predicate as everything else, so no reader has to check which rule applies.
+  const voidCount = input.events.filter(
+    (event) => event.type === "void.recorded" && window(event.envelope.branch_created_at),
+  ).length;
 
   const rows: VarianceRow[] = [];
   const usageValues: Paisa[] = [];
@@ -202,13 +241,17 @@ const reportFor = (
       carry.set(
         item.item_id,
         observed?.counted === true
-          ? { qty_base: observed.qty_base, value_paisa: valueOrNull(observed.qty_base, cost) }
-          : { qty_base: expected, value_paisa: null },
+          ? {
+              qty_base: observed.qty_base,
+              value_paisa: valueOrNull(observed.qty_base, cost),
+              basis: cost.basis,
+            }
+          : { qty_base: expected, value_paisa: null, basis: cost.basis },
       );
       continue;
     }
 
-    const row = buildRow(item, observed, expected, cost, unresolved.has(item.item_id), carry);
+    const row = buildRow(item, observed, expected, cost, unresolved.has(item.item_id));
     rows.push(row);
     if (row.withheld !== null) {
       if (row.withheld.kind === "below_noise_floor") withinNoiseRows += 1;
@@ -228,8 +271,12 @@ const reportFor = (
     carry.set(
       item.item_id,
       observed?.counted === true
-        ? { qty_base: observed.qty_base, value_paisa: valueOrNull(observed.qty_base, cost) }
-        : { qty_base: expected, value_paisa: valueOrNull(expected, cost) },
+        ? {
+            qty_base: observed.qty_base,
+            value_paisa: valueOrNull(observed.qty_base, cost),
+            basis: cost.basis,
+          }
+        : { qty_base: expected, value_paisa: valueOrNull(expected, cost), basis: cost.basis },
     );
   }
 
@@ -281,7 +328,6 @@ const buildRow = (
   expected: number,
   cost: ResolvedCost,
   consumptionUnresolved: boolean,
-  carry: ReadonlyMap<string, Carry>,
 ): VarianceRow => {
   // Order of refusals is deliberate and is the `10-F33` (g) ladder's first rung: what a reader is
   // told is the FIRST thing that made the row unreadable, and "nobody counted it" outranks
@@ -308,20 +354,6 @@ const buildRow = (
       null,
     );
   }
-  // A carry with no VALUE is an item whose previous period could not be valued; the quantity chain
-  // is still sound, so the quantity gap is real, but there is no basis to price it at.
-  if (carry.get(item.item_id) === undefined) {
-    return withheldRow(
-      item,
-      cost,
-      { kind: "opening_unknown" },
-      null,
-      observed.qty_base,
-      observed.basis,
-      null,
-    );
-  }
-
   const gap = observed.qty_base - expected;
   const floor = noiseFloor(observed.basis, item.count_units.primary_size_base);
   const floorQty = Math.ceil(Number(floor.n) / Number(floor.d));

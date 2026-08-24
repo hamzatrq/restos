@@ -17,7 +17,7 @@ routing). Design and build plan: `plans/inventory/design.md`; this package is §
   `round(qty × value / qty_base)` from `10-F28`'s PAIR, in BigInt, rounded once. Every business key
   that arrives with two different payloads is a **contested set**, never last-write-wins.
 
-## ⚠ FIVE PLACES `plans/inventory/design.md` MET AN IMPLEMENTATION AND LOST
+## ⚠ EIGHT PLACES `plans/inventory/design.md` MET AN IMPLEMENTATION AND LOST
 
 The design had never been built when this landed. These are the corrections, each with the FR that
 decides it — a finding for the design's next revision, not a licence to change one.
@@ -46,6 +46,29 @@ decides it — a finding for the design's next revision, not a licence to change
    discrepancy because nobody had typed a price. Caught by `variance-report.test.ts` §D, not by
    reading.
 
+**6–8 were found by the ADVERSARIAL REVIEW rather than by building (August 2026), and the third is
+the expensive kind.**
+
+6. **§4.13's `receipted` is too wide, and so was `10-F31` as first written.** Both say the basis is
+   the period pair *"when `opening_qty + purchase_qty > 0`"*, full stop. Two cases break it: an
+   opening valued at the owner's typed `reference` price makes the pair *not* an invoice (so the
+   basis must carry the **worst** provenance in it, as `worstBasis` already does for the count
+   basis), and `10-F5`'s negative theoretical stock makes a pair whose signs disagree — a
+   **negative unit cost** that inverts the money. `10-F31` is amended for both; the design's next
+   revision should follow.
+7. **NEITHER THE DESIGN NOR THE FRs SAID WHICH PERIOD A DERIVED FACT BELONGS TO, and the omission
+   was worth Rs 3,400 an order.** §5.2 restates `10-F3` as an order-free set difference — correctly
+   — and then says nothing about windowing it, so the first implementation windowed the EVENTS.
+   That silently turns *"for every order for which an `order.confirmed` exists"* into *exists in
+   this window*, and an order rung before a count and confirmed after it is deducted in **neither**
+   period. `10-F28` now carries the rule: a fact belongs to the period holding its **act**, stamped
+   at the minimum `branch_created_at` of that act's observations. **An omission in a design reads
+   exactly like a decision that was made, which is why this one survived a build and a suite.**
+8. **§4.6 argues the ambiguity rule for MENU recipes and never for PREP recipes.** Two mapping rows
+   sharing a sellable id are correctly *"an AMBIGUITY … never a guess between them"*; two prep
+   recipes producing one item were resolved by `refs.recipes.find(...)` — array order deciding a
+   money value. The same argument now applies at both ends, plus a writer refusal.
+
 **Decisions the design does not make, made here and stated at their declarations:** the WORST basis
 wins when an item is counted across two areas; usage and surplus are never netted; the first period
 is a BASELINE with no rows; `exact` carries a **zero** error term, so `k` alone cannot silence the
@@ -60,10 +83,39 @@ direction it will move is **up**. `BASIS_ERROR_BP` states, where it is declared,
 rest on **one ten-bottle head-to-head** rather than a study, and that **nothing models container
 opacity** — so an opaque bottle's floor here is roughly half what its real error deserves.
 
-## Mutation matrix — round-3 law. Control **113/113** green, negative control **0 kills**
+## ⚠ WHAT IS STILL OWED, MEASURED — READ THIS BEFORE TRUSTING A CLOSED PERIOD
 
-In-tree with a **restore trap**: every row is sha256-verified byte-identical after the run
-(`.runlogs/mutate.py`). Nothing here is a security constant — each mutant is an arithmetic or
+Two findings from the August 2026 review are **recorded and not fixed**, each with a named tripwire
+in `__acceptance__/period-boundary.test.ts` §D. Both tripwires assert behaviour an FR contradicts:
+**if you make one fail, you have probably fixed something** — delete it and take the debt off this
+list.
+
+- **`10-F28`'s freeze does not exist.** *"A closed period's derived movements, valuation and
+  variance report are IMMUTABLE"* — and `varianceReports` recomputes the whole chain from live
+  `refs` on every read, so editing a recipe rewrites closed periods (measured: a 500 g → 600 g
+  recipe line moved a **closed** period from `gap −1 kg / −68 000 paisa` to `gap 0`). Editing a
+  `reference_cost`, an `is_counted` flag or an area membership does the same, and a late
+  `order.line_removed` now reaches back into a closed period because `10-F3`'s set difference is
+  over the ledger. **It cannot be closed here:** a freeze needs the closed period's derived rows
+  STORED (`10 §5`), and this package is pure by ruling. The debt is the read model's —
+  `services/api/src/inventory.ts` recomputes from the baseline on every read — and it is slice 2.
+  ⚠ `period.ts`'s header claimed the freeze in the present tense until the review; that is `L11`,
+  and the correction is in place saying what was false.
+- **The count merge is exact-millisecond only.** Two devices submitting the kitchen sheet and the
+  store sheet 1 ms apart are **two counts and therefore two periods** (`10-F28`'s own words), and
+  every item of the second reads `area_line_missing`. `count.ts`'s comment named *"two devices
+  submitting"* as a case it covered and it did not. Merging on a time window would mean inventing
+  the window (commandment 2), so `10-F30` now records the consequence and the operational answer:
+  **one closing act reuses one `count_id`.**
+
+## Mutation matrix — round-3 law. Control **145/145** green, negative controls **0 kills**
+
+In-tree with a **restore trap**: every row is sha256-verified byte-identical after the run, and the
+driver refuses to continue if one is not. ⚠ **The driver is a scratchpad script, not a committed
+one** — the path `.runlogs/mutate.py` named here has never existed in the tree, so re-deriving the
+table means re-writing it; the table below is the record. **The V-rows were measured on the
+113-test suite** and are not re-stated here (`L1`); V1 and V2 were re-run on the 145-test suite in
+the review round below, at 8 and 3. Nothing here is a security constant — each mutant is an arithmetic or
 control-flow branch that reds a test rather than downgrading a credential, which is the narrow case
 AGENTS.md `T8` leaves in-tree. The permission cells were mutated OUT of tree; see
 `packages/domain/CLAUDE.md`. Every row is the FULL package suite.
@@ -97,6 +149,47 @@ this module found in its own implementation.
 
 **V16 is what makes the red rows mean anything:** a genuine restructuring of three files under test
 reddens **nothing**.
+
+### The REVIEW round — every row is the defect re-applied, measured 2026-08-24 on 145 tests
+
+Same driver, same restore trap (sha256-verified byte-identical after every row). **All three DO NOT
+SHIP defects failed 0 of the 113 tests that existed before this round**, which is the number to keep:
+the arithmetic inside one period was correct and heavily asserted, and the crossing between two
+periods was not asserted at all.
+
+| # | mutant (the defect, re-applied) | killed |
+|---|---|---|
+| R1 | **D1 — `consumption` is handed a PRE-WINDOWED event list (the shipped defect)** | **4** |
+| R1b | D1's other half — the window is simply not passed (the optional-parameter hazard) | 8 |
+| R1c | the act's stamp is the MAXIMUM observation, so a redelivery moves the act | 1 |
+| R2 | **D2 — the carried opening is branded through `paisa()`, which refuses a negative** | **6** |
+| R2b | **D2 over-fixed — a pair whose signs disagree is admitted as a cost** | **2 — was 0, see below** |
+| R3 | **D3 — the explosion writes into the caller's totals line by line** | **3** |
+| R4 | F7 — the producing prep recipe comes from `refs.recipes` array order | 2 |
+| R5 | F6 — an undeclared area line is dropped and the item still reads counted | 2 |
+| R5b | F6 over-fixed — the SHEET decides the roster, so a skipped declared area vanishes | 6 |
+| R6 | F5 — a pair is always `receipted`, whatever its opening was valued at | 2 |
+| R6b | F5's rank inverted — the pair reads the BEST of its halves | 2 |
+| R7 | F9 — the deleted `opening_unknown` comes back, taking the quantity column with it | 2 |
+| R8 | the two new WRITER refusals deleted | 2 |
+| V1 | **REGRESSION — the blank-as-zero mutant, re-run per this file's own instruction** | **8** |
+| V2 | **REGRESSION — last-write-wins in `resolve()`** | **3** |
+| N1 | **NEGATIVE CONTROL — behaviour-preserving rewrites in four files** | **0** |
+| N2 | **NEGATIVE CONTROL 2 — the scratch merge and the refusal loop rewritten** | **0** |
+
+**The seam is unchanged and was re-measured, not assumed:** unwiring `inventory: inventoryRouter`
+in `services/api/src/router.ts` reddens **14 of 403** api tests.
+
+### ⚠ R2b KILLED 0 ON ITS FIRST RUN, AND THE SURVIVOR WAS IN THE FIX RATHER THAN THE DEFECT
+
+`10-F5`'s negative carry crashed the report, and the obvious repair is *"stop refusing negatives"*.
+Widening the guard all the way — `qty !== 0 && value !== null` instead of `qty > 0 && value >= 0` —
+killed **0 of 143**, because every fixture in the suite happened to make the two rates coincide.
+That is `L10` pointed at the repair: the mechanism was right and nothing was aimed at the case that
+decides it. The case is a pair whose **signs disagree** — a negative opening plus a positive receipt
+— which divides to a **negative unit cost** and renders a 2 kg shortfall as **Rs 1 356 of surplus**.
+Two assertions now own it and the mutant dies. **A fix earns a mutant of its own, not only the
+defect it repairs.**
 
 ### ⚠ Three survivors, and each is a finding rather than a coverage gap
 
