@@ -66,14 +66,33 @@ describe("§A 02-F31 — main/index.ts wires the line advance", () => {
     // was passed.
     expect(args).toContain("store,");
     expect(args).toContain("tier:");
-    expect(args).toContain("gateway.append(");
+    /**
+     * `04-F27` (c) — **the append must reach the ledger AND must not read the session.**
+     *
+     * This read `gateway.append(` until August 2026, which is exactly what the host passed and
+     * exactly what was wrong: `Gateway.append` stamps `deps.session()?.user_id ?? null`, so a
+     * waiter's confirm at a `04-F21` pad wrote an `order.line_state_changed` naming the CASHIER
+     * at the counter (measured), or nobody when the till was locked. The actor now arrives with
+     * the call, so what is pinned is that the host forwards it rather than dropping it — a
+     * closure that ignored its first parameter and called `gateway.append` would compile,
+     * behave identically on the counter, and restore the defect on the pad.
+     */
+    expect(args).toContain("causedAppend(caused_by,");
+    expect(args, "the host's append closure drops 04-F27 (c)'s actor").toMatch(
+      /append:\s*\(caused_by,\s*type,\s*payload\)/,
+    );
+    expect(args, "the line advance is back on the session-reading append").not.toContain(
+      "gateway.append(",
+    );
   });
 
   it("triggers the confirm edge from the order.confirmed append — 01 §4's precondition", () => {
     // Without this the KOT advance can never fire: `LEGAL_NEXT.placed` excludes `in_prep`.
     const handler = mainSrc.slice(mainSrc.indexOf('confirm.data.type === "order.confirmed"'));
+    // `04-F27` (c) — with the actor of the act that caused it, not with a session read one layer
+    // down: this branch is reached by the renderer's handler AND by a `04-F21` terminal.
     expect(handler.slice(0, handler.indexOf("kot.confirmed"))).toContain(
-      "lines.confirmed(order_id)",
+      "lines.confirmed(order_id, caused_by)",
     );
   });
 
@@ -126,7 +145,7 @@ describe("§B 02-F31 — the KOT callback's contract, driven", () => {
       // constant because it is not an input here — `serve-signal-settlement.test.ts` §C is the
       // assertion that it stays that way.
       serveOwner: () => "settlement",
-      append: (type, payload) => appended.push({ type, payload }),
+      append: (_caused_by, type, payload) => appended.push({ type, payload }),
     });
     return { appended, lines };
   };
@@ -198,7 +217,7 @@ describe("§D 02-F31/DEC-HW-002 — the settlement trigger is PRESENT, reachable
       mainSrc.indexOf('confirm.data.type === "payment.recorded"'),
     );
     const body = settleHandler.slice(0, 1400);
-    expect(body).toContain("lines.settled(order_id)");
+    expect(body).toContain("lines.settled(order_id, caused_by)");
     // It hangs off the SAME narrowing the receipt does rather than adding a second one — two
     // definitions of "a payment landed" on one event is the `02-F45` shape.
     expect(body).toContain("receipts.settled(order_id)");
@@ -231,9 +250,9 @@ describe("§D 02-F31/DEC-HW-002 — the settlement trigger is PRESENT, reachable
         } as never,
         tier: () => "T1",
         serveOwner: () => owner,
-        append: (type, payload) => appended.push({ type, payload }),
+        append: (_caused_by, type, payload) => appended.push({ type, payload }),
       });
-      lines.settled(ORDER_ID);
+      lines.settled(ORDER_ID, null);
       return appended;
     };
     // It fires, and it fires with the state `02-F31` names.

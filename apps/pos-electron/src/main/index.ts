@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,6 +55,7 @@ import { recordApprovals } from "./approval-record";
 import {
   authorizeEscalation,
   authorizeReads,
+  authorizeTerminal,
   authorizeWrites,
   DISCOUNT_APPROVAL_THRESHOLD_BPS,
   PAID_OUT_APPROVAL_THRESHOLD_PAISA,
@@ -72,7 +75,12 @@ import {
   stationResolver,
 } from "./catalog";
 import { printerTransport } from "./file-printer";
-import { createGateway, createVerifiedAppend } from "./gateway";
+import {
+  createCausedAppend,
+  createGateway,
+  createVerifiedAddLine,
+  createVerifiedAppend,
+} from "./gateway";
 import {
   describeHardwareTier,
   HARDWARE_TIER_ENV,
@@ -105,6 +113,9 @@ import {
   type StationRouting,
 } from "./station-routing";
 import { createUplink } from "./sync";
+import { createTerminal } from "./terminal";
+import { createTerminalConsole } from "./terminal-console";
+import { createTerminalServer, type TerminalTls } from "./terminal-server";
 import { counterWindowOptions, describePanelFit, resolvePanelFit } from "./window-options";
 import { refuseZeroTender } from "./zero-tender-guard";
 
@@ -192,6 +203,47 @@ const IDLE_LOCK_MS = 10 * 60_000;
  * keeping online guessing at ~13 bits hopeless against the five-minute cooldown.
  */
 const MAX_FAILED_ATTEMPTS = 5;
+
+/**
+ * `04-F22` (a) — the terminal port, a `00 §7` layer-3 device setting.
+ *
+ * Not 443: this is an Electron app running as an ordinary user on a Windows till, and a privileged
+ * port would need the app to be elevated for a feature most branches will not use. Not the mesh's
+ * port either — `01-F72`'s listener must keep its own socket and its own admission, and sharing
+ * one would be the weakening this FR forbids by name.
+ */
+const TERMINAL_PORT = Number(process.env.RESTOS_TERMINAL_PORT ?? 8443);
+
+/**
+ * `04-F22` (a) — **the certificate, and there is deliberately no fallback that invents one.**
+ *
+ * Both halves must be present or the answer is `null` and nothing listens. A half-configured
+ * install (a cert path with no key, a typo in one of the two) is the case that must not silently
+ * become something else: `01-F48`'s direction is that a state which cannot be read is refused, and
+ * the alternative here — a self-signed certificate minted on the spot — trains an operator to tap
+ * through a browser warning, which is worth more to an attacker on the shop Wi-Fi than the
+ * certificate is to us.
+ *
+ * ⚠ **Which certificate to put here is a FOUNDER CALL that `04-F22` (a) names and this file does
+ * not answer**: cloud-issued and publicly trusted (zero tablet setup, costs a DNS zone and an ACME
+ * pipeline), or an org root CA installed on each tablet (no cloud work, costs a manual step and a
+ * root CA on a staff tablet). Neither can be borrowed from `01-F73`'s branch PKI, because
+ * `store.setLanCredential` has no shipping caller and therefore no till holds one.
+ *
+ * Read at construction rather than cached at module scope so a test can drive both states, and
+ * failures are swallowed to `null`: an unreadable file is "no pad", never a till that will not
+ * start (`01-F17`).
+ */
+const terminalTls = (): TerminalTls | null => {
+  const certPath = process.env.RESTOS_TERMINAL_CERT;
+  const keyPath = process.env.RESTOS_TERMINAL_KEY;
+  if (!certPath || !keyPath) return null;
+  try {
+    return { cert: readFileSync(certPath, "utf8"), key: readFileSync(keyPath, "utf8") };
+  } catch {
+    return null;
+  }
+};
 
 /**
  * `03-F25` — how often the counter re-reads its own aging timers. See the interval itself for why
@@ -885,6 +937,15 @@ const counterBoot = app.whenReady().then(async () => {
   const businessDay = (): string =>
     businessDate(wallClock.now() + store.branchTimeStatus().offset_ms);
 
+  /**
+   * `01-F60`'s resolver, built ONCE and shared by the gateway and by `04-F21`'s terminal.
+   *
+   * It was inline in the gateway's deps until the terminal landed. Two constructions would be two
+   * readings of the same catalog at two moments, which is `02-F45`'s "two sources for one fact" on
+   * the one input that decides what a line costs.
+   */
+  const priceOf = priceResolver(store);
+
   const gateway = createGateway({
     store,
     // T-C6 — all three read the device catalog the uplink fills, and all three live in
@@ -893,7 +954,7 @@ const counterBoot = app.whenReady().then(async () => {
     // `01-F55`'s sellable set, `01-F60`'s own-branch price.
     catalog: catalogResolver(store),
     menu: sellableMenu(store),
-    priceOf: priceResolver(store),
+    priceOf,
     /**
      * `17-F22`'s campaign artifact, from the v0 seed (`plans/v0.md` gap 3 — the tax cell, R70's
      * rounding granularity and R71's campaigns are the three, and `01-F87`'s carrier deletes them
@@ -1498,14 +1559,25 @@ const counterBoot = app.whenReady().then(async () => {
    * definition the case *"where no device exists to signal them"*, i.e. an act nobody performs.
    * `line-advance.ts`'s `append` dep carries the full argument and the limits on it.
    */
+  /**
+   * `04-F27` (c) — **the append a CONSEQUENCE makes, and it must not read the session.**
+   *
+   * `gateway.append` stamps `deps.session()?.user_id ?? null`, which is right for a renderer act
+   * (the person at the counter IS the actor) and wrong for anything hanging off a completed
+   * append, because a `04-F21` pad is a second producer whose actor the till's session never is.
+   * Measured before it was fixed: a waiter's SEND wrote an `order.line_state_changed` naming the
+   * CASHIER, and named nobody when the counter was locked. Every consequence below takes the
+   * actor of the act that caused it, or `null` where the device itself is the cause.
+   */
+  const causedAppend = createCausedAppend({ store });
   const lines = createLineAdvance({
     store,
     tier: () => hardwareTier().tier,
     // `03-F52` — the settlement half's trigger. `printEvent` still reads `tier` above; only this
     // one moved, and the assignment comes out of the shared declaration both apps read.
     serveOwner: () => serveSignal().owner,
-    append: (type, payload) => {
-      gateway.append({ type, payload, refs: [] });
+    append: (caused_by, type, payload) => {
+      causedAppend(caused_by, { type, payload, refs: [] });
       notifyChanged();
     },
   });
@@ -1528,8 +1600,11 @@ const counterBoot = app.whenReady().then(async () => {
    */
   const aggregator = createAggregatorSettlement({
     store,
-    append: (type, payload) => {
-      gateway.append({ type, payload, refs: [] });
+    // `04-F27` (c) — `causedAppend`, not `gateway.append`: `02-F30` makes the ENTRY the
+    // settlement, so this money belongs to whoever confirmed the order, and that is a waiter at a
+    // pad as readily as the cashier the till's session happens to hold.
+    append: (caused_by, type, payload) => {
+      causedAppend(caused_by, { type, payload, refs: [] });
       notifyChanged();
     },
   });
@@ -1709,6 +1784,255 @@ const counterBoot = app.whenReady().then(async () => {
    */
   const agingTick = setInterval(notifyChanged, AGE_TICK_MS);
   app.on("will-quit", () => clearInterval(agingTick));
+
+  /**
+   * `04-F27` — **WHAT A COMPLETED APPEND CAUSES ON THIS TILL, in one place, because there are two
+   * producers and only one of them used to reach any of it.**
+   *
+   * Every line below was inside the renderer's own append handler until August 2026, which was
+   * correct while the renderer was the only thing that could append an order event.
+   *
+   * ⚠ **The handler is NOT named in this comment, and that is deliberate.** Three suites locate
+   * that handler by its literal registration text and slice from the FIRST occurrence, so a
+   * comment that spelled it out would hand them this block instead — the defeat
+   * `aggregator-settlement.test.ts` §H0 exists for, met live while this paragraph was written. `04-F21`'s
+   * terminal is the second, and it reached none of them: a waiter's SEND put `order.confirmed`
+   * into the ledger and **no KOT was ever spooled** — measured by grep, `kot.confirmed` having
+   * exactly one call site, inside a handler a tablet cannot reach. A pad that acked an unsent
+   * kitchen ticket is `04-F24`'s named failure with a guest sitting at the table.
+   *
+   * **It takes `unknown` and re-parses, exactly as the handler did**, so a caller that is not the
+   * renderer cannot be asked to hand over a shape it does not have. Anything that does not parse
+   * as an `AppendRequest` — `CHANNELS.addLine`'s own request, say — falls through every arm and
+   * reaches `notifyChanged()`, which is what that channel already did on its own.
+   */
+  /**
+   * `04-F27` (c) — **`caused_by` is the actor of the append this hangs off, and it is required.**
+   *
+   * The renderer's handler passes the session it appended under; the terminal passes the waiter it
+   * verified. Every consequence below that appends carries it, so a permanent record can no longer
+   * name whoever happened to be signed in at the counter when a tablet acted.
+   */
+  const appended = (req: unknown, caused_by: string | null): void => {
+    // Re-parsed rather than read raw: `req` is `unknown` from an untrusted renderer, and
+    // `gateway.append` does not hand back what it parsed. It has already thrown on anything
+    // malformed, so `safeParse` here is a narrowing, not a second validation.
+    const confirm = AppendRequestSchema.safeParse(req);
+    if (confirm.success && confirm.data.type === "order.confirmed") {
+      const order_id = confirm.data.payload.order_id;
+      if (typeof order_id === "string") {
+        // `01 §4`'s first transition — `placed → confirmed` — and it is the PRECONDITION for
+        // `02-F31`'s auto-advance rather than part of it: `LEGAL_NEXT.placed` excludes `in_prep`,
+        // so without this edge the KOT advance below can never fire and lines stay at `placed`
+        // for ever (which is what they have done). It is deliberately NOT tier-gated — the device
+        // that signals a confirm is this one, on every tier — and that reading is an
+        // INTERPRETATION stated in full on `LineAdvance.confirmed`. Before the print, because the
+        // print's own advance reads the state this one writes.
+        lines.confirmed(order_id, caused_by);
+        kot.confirmed(order_id);
+        // `02-F30`/`08-F8`/`08-F17` — **THE AGGREGATOR SEAM.** *"manual quick-entry orders are
+        // confirmed by the act of entry"*, and an aggregator order *"settles at creation/entry"*
+        // with `01-F32`'s receivable — so the confirm IS the entry act and this is where the money
+        // side closes without a cashier. AFTER the kitchen handoff, deliberately: `01-F17` and
+        // `02-F30`'s *"behave identically downstream: KOT print…"* both put the food first, and
+        // nothing about the money may sit between a confirm and its ticket.
+        //
+        // The channel test, the bill, the `02-F37` shift resolution and `01-F31`'s no-double-record
+        // guard all live inside the emitter's own method, where a suite can drive the real branch —
+        // never here, where a test could only hand-copy them (`K-3`'s dead-oracle defect, which
+        // this file has already paid for once).
+        //
+        // ⚠ **DO NOT WRITE THE BINDING NAME FOLLOWED BY A DOT ANYWHERE IN THIS COMMENT.** The only
+        // guard on this seam is a SOURCE READ — `main/index.ts` builds an Electron app at module
+        // scope and no suite in this package can import it — and it searches this block for
+        // `<binding>.`. The first draft of this comment wrote the call's own name in prose, and the
+        // mutant that DELETES the line below was measured **surviving at 678/678**: the assertion
+        // matched the sentence instead. Same shape as `hardware-tier.ts`'s header quoting a literal
+        // `seams:check` marker, with the sign flipped — there prose reddened a rail, here it
+        // silenced one. Write the meaning, never the token.
+        aggregator.confirmed(order_id, caused_by);
+      }
+    }
+    // S-7 — THE SAME HANDOFF FOR THE TWO CASH DOCUMENTS, and it hangs off the same completed
+    // append for the same reason: `02-F23`'s slip carries facts the fold projects off
+    // `shift.closed`, so the event has to be IN before the paper can be assembled, and `01-F17`
+    // says a close is never blocked by a printer. Both calls are synchronous and `void`.
+    if (confirm.success && confirm.data.type === "shift.closed") {
+      const shift_id = confirm.data.payload.shift_id;
+      if (typeof shift_id === "string") cash.shiftClosed(shift_id);
+    }
+    if (confirm.success && confirm.data.type === "day.closed") {
+      const day_id = confirm.data.payload.day_id;
+      if (typeof day_id === "string") cash.dayClosed(day_id);
+    }
+    // `C16` — THE CUSTOMER'S COPY, and it hangs off the same completed append for the same reason
+    // as the three above: `02-F15`'s receipt carries `01-F30`'s billed total and `01-F31`'s keyed
+    // tender sums, both projected from THIS event, so the payment has to be IN before the paper
+    // can be assembled — and `01-F17` says a sale is never blocked by a printer. `settled()` reads
+    // the fold and returns without printing unless the order is now tendered for in full, which is
+    // what makes a `02-F13` split print one receipt rather than one per tender.
+    if (confirm.success && confirm.data.type === "payment.recorded") {
+      const order_id = confirm.data.payload.order_id;
+      if (typeof order_id === "string") {
+        receipts.settled(order_id);
+        // `02-F31` — **THE SETTLEMENT SEAM**: *"settlement → lines `served` —
+        // dine-in/takeaway/pickup only"*. Blocked in the kernel until `DEC-HW-002` ruled
+        // `LEGAL_NEXT.in_prep` gains `served`; the whole argument is in `line-advance.ts`.
+        //
+        // It hangs off the completed append for the same reason the three handoffs above do
+        // (`01-F17` — the money is already in the ledger and a customer may not be held at the
+        // counter), and it reads the SAME narrowing the receipt does rather than adding a second
+        // one: two definitions of "a payment landed" on one event is the `02-F45` shape.
+        //
+        // The tier gate, the delivery exclusion and the tendered-in-full test all live inside
+        // `lines.settled` where a suite can drive the real branch — never here, where a test could
+        // only hand-copy it. That is `K-3`'s dead-oracle defect, and this file has already paid
+        // for it once (mutant M10 of the producer round was killed by a source string alone).
+        lines.settled(order_id, caused_by);
+        // `01-F63` — **THE CLOSING-ACT SEAM**, and it is the same trigger as the two calls above
+        // for the reason `01-F63` gives by name: *"one definition of settlement completes, not
+        // four"*. `02-F45` refuses a second source for one fact, and this product already had
+        // three call sites asking whether the bill is tendered for in full; the act joins them
+        // here rather than inventing a fourth, so a `02-F13` split closes ONCE.
+        //
+        // LAST in the branch, deliberately. The paper (`02-F15`) and the food (`02-F31`) come
+        // first — `01-F17` puts the customer ahead of the bookkeeping — and this is the only one
+        // of the three whose own append changes the row the other two read. Ordering it after
+        // them means nothing they do can be altered by whether the act fired.
+        //
+        // The edge test, the at-most-once check and the whole attested payload live inside the
+        // emitter's own method, where a suite drives the real branch — never here, where a test
+        // could only hand-copy them (`K-3`'s dead-oracle defect, which this file has paid for
+        // once already).
+        closer.settled(order_id);
+      }
+    }
+    // NOTIFY FROM INSIDE THE HANDLER. This was `ipcMain.on(CHANNELS.append, notifyChanged)`,
+    // which never fired once: `invoke` dispatches only to the `handle` table, and `.on` is the
+    // `send`/`sendSync` table — two different registries on one channel name. So the renderer
+    // was never told the folds moved, and the counter stayed stale until relaunch. An order
+    // was appended, the store held it, and the cart still read "Nothing added yet / Rs 0".
+    //
+    // Latent only because `onSelect` is still a no-op; it is the core POS loop. Nothing caught
+    // it because nothing tests this file — the gateway suite injects every dependency and
+    // never exercises the wiring, which is exactly the seam a defect like this lives in.
+    notifyChanged();
+  };
+
+  /**
+   * `04-F21`/`04-F22` — **the waiter's order pad, as a terminal of this till.**
+   *
+   * Constructed UNCONDITIONALLY, exactly as the spooler above is and for the same reason: a
+   * subsystem built only when some option is set is this wave's recurring defect wearing a
+   * configuration flag. What the configuration decides is whether it LISTENS, not whether it
+   * exists — `createTerminalServer` reports `listening: false` with a reason when there is no
+   * certificate, and `04-F22` (a) makes that the required behaviour rather than a degradation:
+   * absent means OFF, never absent means plaintext.
+   *
+   * ── The three arguments that carry the security model ────────────────────────────────────────
+   *
+   * **`verifyWaiter` is a THIRD `createPinSession`, and it must not be either of the other two.**
+   * `pins` above holds the counter's session and `unlock()` MOVES it, so verifying a waiter
+   * through it would sign the cashier out of the till she is standing at and re-attribute her next
+   * orders (`02-F41` + `01-F1` — permanently). `approvals` is the escalation's, and sharing it
+   * would be harmless today and wrong tomorrow: the two surfaces have different lifetimes and one
+   * is reachable from the shop Wi-Fi. What all three DO share is the thing that matters — the same
+   * `store.staff` Argon2id hashes (`01-F28`) and the same **durable** `store.pinAttempts`, so
+   * `01-F61`'s per-(device, user) lockout counts a waiter's failures at the pad and at the counter
+   * once, and survives a relaunch. A hand-rolled verifier here would be a third credential surface
+   * with its own lockout to forget.
+   *
+   * **`authorize` is `authorize.ts`'s, not a second reading.** Commandment 8 is asked of the
+   * terminal by the same module, the same `subjectOf` and the same matrix the renderer's writes go
+   * through; `04-F23`'s closed event set is the extra gate, and it sits beside that reading rather
+   * than replacing it.
+   *
+   * **`appendAs` / `addLineAs` name the actor explicitly.** Every one of `gateway`'s own append
+   * sites reads `deps.session()`, which is right for the counter and wrong here: the pad's act is
+   * the WAITER's while the till's session is a cashier's or nobody's. Wiring either of these to
+   * anything session-reading is the defect this whole surface exists to avoid, and — as the
+   * approval record's own note says one screen up — it is invisible to every behavioural test:
+   * the order would still be correct and only the envelope would name the wrong person.
+   */
+  const terminal = createTerminal({
+    verifyWaiter: (user_id, pin) =>
+      createPinSession({
+        registry: store.staff,
+        device: { device_id: store.identity.device_id, registered: true },
+        idle_lock_ms: IDLE_LOCK_MS,
+        max_failed_attempts: MAX_FAILED_ATTEMPTS,
+        now: () => wallClock.now(),
+        // `01-F5`'s `audit.login` is deliberately not written here, on the same reasoning the
+        // escalation's session records: a waiter authenticating at a pad HAS logged in, so this is
+        // a genuine gap rather than a wrong record — but the sink hardcodes the till's own device
+        // and the subtype question is `01-F5`'s, not this surface's. OWED and named.
+        audit: () => {},
+        attempts: store.pinAttempts,
+      }).unlock(user_id, pin),
+    authorize: authorizeTerminal({ store }),
+    appendAs: createVerifiedAppend({ store }),
+    addLineAs: createVerifiedAddLine({ store, priceOf }),
+    reads: gateway,
+    /**
+     * `04-F27` — **the SAME consequences a counter confirm has, reached by the same call.**
+     *
+     * This is the argument the pad's whole purpose rests on: `04-F24` says the one ack that must
+     * stay truthful is the KOT's, and until August 2026 a waiter's SEND appended `order.confirmed`
+     * and reached NOTHING — no kitchen handoff, no `02-F31` line advance, no push to the counter's
+     * own screen — because every consequence lived inside the renderer's IPC handler. The food was
+     * on the bill and nobody in the kitchen had been told, which is `03-F55`'s defect arriving by
+     * a different door.
+     *
+     * It is `appended`, the function the renderer's handler calls, and not a copy of it: a second
+     * list of consequences is the fork this FR exists to forbid.
+     */
+    onAppended: appended,
+    store,
+    idle_lock_ms: IDLE_LOCK_MS,
+    now: () => wallClock.now(),
+    newHandle: () => randomBytes(32).toString("base64url"),
+  });
+
+  const terminalServer = createTerminalServer({
+    terminal,
+    tls: terminalTls(),
+    port: TERMINAL_PORT,
+    bundleDir: process.env.RESTOS_TERMINAL_BUNDLE ?? null,
+    now: () => wallClock.now(),
+    log: (line) => console.log(line),
+  });
+  /**
+   * `04-F31` — **the operator's three acts on the pad port, and the reason there is a console at
+   * all.**
+   *
+   * `mintEnrolmentCode` had exactly ONE call site — the boot line below — so exactly one tablet
+   * could ever enrol per launch; and `enrolments()`/`revoke()` had **zero** production callers, so
+   * `04-F22` (b)'s *"enrolments are listed and revocable at the till"* was a sentence with no way
+   * to say it. That is the register's eleventh-and-a-half instance repeated on a new surface, and
+   * `seams:check` cannot see it because both are object members rather than exports.
+   *
+   * The vocabulary and every decision live in `terminal-console.ts`, where a suite drives them;
+   * this is the stream and nothing else. ⚠ **`isTTY` is the stated limit**: a packaged till that
+   * was double-clicked has no console, so on that till the boot line's single code is still the
+   * only enrolment there is. `14-F13`'s device list is what closes it.
+   */
+  const padConsole = createTerminalConsole({
+    server: terminalServer,
+    log: (line) => console.log(line),
+  });
+  if (process.stdin.isTTY === true) {
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk: string) => {
+      for (const line of chunk.split("\n")) padConsole.command(line);
+    });
+  }
+  if (terminalServer.listening) {
+    // `04-F22` (b) — the operator reads this off the till once per tablet. It is a BOOT LINE and
+    // not a screen, which is the honest limit of build 1: `14-F13`'s device list is where an
+    // owner-facing enrolment belongs, and putting it there is owed rather than done. A SECOND
+    // tablet no longer needs a restart — `pad enrol` on the console mints the next one.
+    console.log(`terminal: enrolment code ${terminalServer.mintEnrolmentCode()} (04-F22 (b))`);
+  }
 
   // One channel, one gateway method, no dispatcher. A generic handler that switched on a
   // channel name would reintroduce exactly the free-form surface `18 §9` bans.
@@ -1968,114 +2292,15 @@ const counterBoot = app.whenReady().then(async () => {
   ipcMain.handle(CHANNELS.append, (_event, req: unknown) => {
     touch();
     const result = writes.append(req);
-    // `C9`/`03-F2` — THE KITCHEN HANDOFF. The confirm is already in the ledger by the line
-    // above, and only then does paper get involved: `01-F17` says a sale is never blocked by a
-    // printer, so the print hangs off a completed append rather than gating one. `confirmed()`
-    // is synchronous and `void`, so there is nothing here to await even by accident.
+    // `04-F27` — the consequences, and they are a CALL rather than a block because this handler is
+    // no longer the only producer: `04-F21`'s terminal appends the same four order events from a
+    // tablet, and a consequence living inside this handler is one the pad cannot reach. See
+    // `appended` above for what that cost.
     //
-    // Re-parsed rather than read raw: `req` is `unknown` from an untrusted renderer, and
-    // `gateway.append` does not hand back what it parsed. It has already thrown on anything
-    // malformed, so `safeParse` here is a narrowing, not a second validation.
-    const confirm = AppendRequestSchema.safeParse(req);
-    if (confirm.success && confirm.data.type === "order.confirmed") {
-      const order_id = confirm.data.payload.order_id;
-      if (typeof order_id === "string") {
-        // `01 §4`'s first transition — `placed → confirmed` — and it is the PRECONDITION for
-        // `02-F31`'s auto-advance rather than part of it: `LEGAL_NEXT.placed` excludes `in_prep`,
-        // so without this edge the KOT advance below can never fire and lines stay at `placed`
-        // for ever (which is what they have done). It is deliberately NOT tier-gated — the device
-        // that signals a confirm is this one, on every tier — and that reading is an
-        // INTERPRETATION stated in full on `LineAdvance.confirmed`. Before the print, because the
-        // print's own advance reads the state this one writes.
-        lines.confirmed(order_id);
-        kot.confirmed(order_id);
-        // `02-F30`/`08-F8`/`08-F17` — **THE AGGREGATOR SEAM.** *"manual quick-entry orders are
-        // confirmed by the act of entry"*, and an aggregator order *"settles at creation/entry"*
-        // with `01-F32`'s receivable — so the confirm IS the entry act and this is where the money
-        // side closes without a cashier. AFTER the kitchen handoff, deliberately: `01-F17` and
-        // `02-F30`'s *"behave identically downstream: KOT print…"* both put the food first, and
-        // nothing about the money may sit between a confirm and its ticket.
-        //
-        // The channel test, the bill, the `02-F37` shift resolution and `01-F31`'s no-double-record
-        // guard all live inside the emitter's own method, where a suite can drive the real branch —
-        // never here, where a test could only hand-copy them (`K-3`'s dead-oracle defect, which
-        // this file has already paid for once).
-        //
-        // ⚠ **DO NOT WRITE THE BINDING NAME FOLLOWED BY A DOT ANYWHERE IN THIS COMMENT.** The only
-        // guard on this seam is a SOURCE READ — `main/index.ts` builds an Electron app at module
-        // scope and no suite in this package can import it — and it searches this block for
-        // `<binding>.`. The first draft of this comment wrote the call's own name in prose, and the
-        // mutant that DELETES the line below was measured **surviving at 678/678**: the assertion
-        // matched the sentence instead. Same shape as `hardware-tier.ts`'s header quoting a literal
-        // `seams:check` marker, with the sign flipped — there prose reddened a rail, here it
-        // silenced one. Write the meaning, never the token.
-        aggregator.confirmed(order_id);
-      }
-    }
-    // S-7 — THE SAME HANDOFF FOR THE TWO CASH DOCUMENTS, and it hangs off the same completed
-    // append for the same reason: `02-F23`'s slip carries facts the fold projects off
-    // `shift.closed`, so the event has to be IN before the paper can be assembled, and `01-F17`
-    // says a close is never blocked by a printer. Both calls are synchronous and `void`.
-    if (confirm.success && confirm.data.type === "shift.closed") {
-      const shift_id = confirm.data.payload.shift_id;
-      if (typeof shift_id === "string") cash.shiftClosed(shift_id);
-    }
-    if (confirm.success && confirm.data.type === "day.closed") {
-      const day_id = confirm.data.payload.day_id;
-      if (typeof day_id === "string") cash.dayClosed(day_id);
-    }
-    // `C16` — THE CUSTOMER'S COPY, and it hangs off the same completed append for the same reason
-    // as the three above: `02-F15`'s receipt carries `01-F30`'s billed total and `01-F31`'s keyed
-    // tender sums, both projected from THIS event, so the payment has to be IN before the paper
-    // can be assembled — and `01-F17` says a sale is never blocked by a printer. `settled()` reads
-    // the fold and returns without printing unless the order is now tendered for in full, which is
-    // what makes a `02-F13` split print one receipt rather than one per tender.
-    if (confirm.success && confirm.data.type === "payment.recorded") {
-      const order_id = confirm.data.payload.order_id;
-      if (typeof order_id === "string") {
-        receipts.settled(order_id);
-        // `02-F31` — **THE SETTLEMENT SEAM**: *"settlement → lines `served` —
-        // dine-in/takeaway/pickup only"*. Blocked in the kernel until `DEC-HW-002` ruled
-        // `LEGAL_NEXT.in_prep` gains `served`; the whole argument is in `line-advance.ts`.
-        //
-        // It hangs off the completed append for the same reason the three handoffs above do
-        // (`01-F17` — the money is already in the ledger and a customer may not be held at the
-        // counter), and it reads the SAME narrowing the receipt does rather than adding a second
-        // one: two definitions of "a payment landed" on one event is the `02-F45` shape.
-        //
-        // The tier gate, the delivery exclusion and the tendered-in-full test all live inside
-        // `lines.settled` where a suite can drive the real branch — never here, where a test could
-        // only hand-copy it. That is `K-3`'s dead-oracle defect, and this file has already paid
-        // for it once (mutant M10 of the producer round was killed by a source string alone).
-        lines.settled(order_id);
-        // `01-F63` — **THE CLOSING-ACT SEAM**, and it is the same trigger as the two calls above
-        // for the reason `01-F63` gives by name: *"one definition of settlement completes, not
-        // four"*. `02-F45` refuses a second source for one fact, and this product already had
-        // three call sites asking whether the bill is tendered for in full; the act joins them
-        // here rather than inventing a fourth, so a `02-F13` split closes ONCE.
-        //
-        // LAST in the branch, deliberately. The paper (`02-F15`) and the food (`02-F31`) come
-        // first — `01-F17` puts the customer ahead of the bookkeeping — and this is the only one
-        // of the three whose own append changes the row the other two read. Ordering it after
-        // them means nothing they do can be altered by whether the act fired.
-        //
-        // The edge test, the at-most-once check and the whole attested payload live inside the
-        // emitter's own method, where a suite drives the real branch — never here, where a test
-        // could only hand-copy them (`K-3`'s dead-oracle defect, which this file has paid for
-        // once already).
-        closer.settled(order_id);
-      }
-    }
-    // NOTIFY FROM INSIDE THE HANDLER. This was `ipcMain.on(CHANNELS.append, notifyChanged)`,
-    // which never fired once: `invoke` dispatches only to the `handle` table, and `.on` is the
-    // `send`/`sendSync` table — two different registries on one channel name. So the renderer
-    // was never told the folds moved, and the counter stayed stale until relaunch. An order
-    // was appended, the store held it, and the cart still read "Nothing added yet / Rs 0".
-    //
-    // Latent only because `onSelect` is still a no-op; it is the core POS loop. Nothing caught
-    // it because nothing tests this file — the gateway suite injects every dependency and
-    // never exercises the wiring, which is exactly the seam a defect like this lives in.
-    notifyChanged();
+    // `04-F27` (c) — the actor is the one `gateway.append` just stamped, read from the SAME getter
+    // rather than re-derived, so a consequence can never name a different person from the act it
+    // is a consequence of (`02-F45`).
+    appended(req, session()?.user_id ?? null);
     return result;
   });
 

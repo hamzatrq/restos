@@ -322,7 +322,8 @@ different orders still converge.
 | `apps/pass-kds` | **The kitchen screen.** Cooks see the branch queue oldest-first with an aging timer per ticket and press DONE. Electron. | `pnpm -C apps/pass-kds start` |
 | `apps/backoffice` | **The owner's admin site.** Write the menu, price it per branch and channel, publish to every till, see registered devices, read the nightly summary. Next.js. | `pnpm -C apps/backoffice dev` |
 | `apps/manager` | Phone app for branch managers. Expo. **Starts, but the only screen is three diagnostic readings** — a feasibility probe, not the console. | `pnpm -C apps/manager start` |
-| `apps/owner` · `apps/waiter` · `apps/rider` · `apps/storefront` · `apps/pos-rn` · `apps/platform-admin` | **Scaffolds. Nothing is built yet.** | — |
+| `apps/waiter` | **The waiter's order pad.** A browser the till serves over TLS on its own port (`04-F21`): identify → pick a table → ring → SEND to the kitchen. It holds no store and no device identity; every act travels to the till as an intent. | `pnpm -C apps/waiter build`, then start the till with `RESTOS_TERMINAL_CERT` / `_KEY` / `_BUNDLE` |
+| `apps/owner` · `apps/rider` · `apps/storefront` · `apps/pos-rn` · `apps/platform-admin` | **Scaffolds. Nothing is built yet.** | — |
 
 ### Services
 
@@ -690,6 +691,9 @@ about the wrong ledger), `REDIS_URL` (**required**), `AUDITOR_INTERVAL_MS` (defa
 | `RESTOS_DEV_PIN_HINA` | unset ⇒ **no day can be opened** | the branch manager. `02-F22` gives day open and float entry to a manager only, so a till without this starts, looks correct, and **cannot record a sale** |
 | `RESTOS_DEV_MENU` | unset | dev seed; applied only when the catalog is at version 0 |
 | `RESTOS_PRINT_TO_FILE` | unset | a directory; writes each document as a PDF. Opt-in on purpose — the default must never claim it printed |
+| `RESTOS_TERMINAL_CERT` / `_KEY` | unset ⇒ **the order pad is OFF** | counter only (`04-F22` (a)). Both halves or **nothing listens** — absent means off, never plaintext, and there is no self-signing fallback: a till that minted its own certificate is a till whose operator is trained to tap through a browser warning. Material that will not parse, and a port already bound, are both *"no pad"* and never a till that will not start (`04-F32`) |
+| `RESTOS_TERMINAL_BUNDLE` | unset ⇒ API only | the built pad (`pnpm -C apps/waiter build` ⇒ `apps/waiter/dist`). Leaving it off is the dev split: the till serves the API and Vite serves the app |
+| `RESTOS_TERMINAL_PORT` | `8443` | the pad's own socket. It never shares `01-F72`'s mesh port, which is mutual-TLS pinned on a client certificate a browser cannot present |
 
 ⚠ **Give the three PINs three DIFFERENT numbers, and never reuse one.** There is deliberately **no
 fallback between members**: a member nobody configured is absent from the grid rather than reachable

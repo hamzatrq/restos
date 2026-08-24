@@ -85,7 +85,7 @@ const rig = (input: {
     } as never,
     tier: () => input.tier,
     serveOwner: () => input.owner,
-    append: (type, payload) => appended.push({ type, payload }),
+    append: (_caused_by, type, payload) => appended.push({ type, payload }),
   });
   return { lines, appended };
 };
@@ -101,12 +101,12 @@ describe("§A 03-F52/DEC-HW-003 — the trigger is the ASSIGNMENT, not the tier"
     // owner check as an ADDITIONAL `&&` guard beside it, which is the change a careful session
     // makes when it does not want to break anything — fails here and nowhere else in this file.
     const served = rig({ tier: "T2", owner: "settlement" });
-    served.lines.settled(ORDER_ID);
+    served.lines.settled(ORDER_ID, null);
     expect(served.appended).toHaveLength(1);
     expect(served.appended[0]?.payload.state).toBe("served");
     // …and T3, so "T2" cannot be read as the new special case.
     const t3 = rig({ tier: "T3", owner: "settlement" });
-    t3.lines.settled(ORDER_ID);
+    t3.lines.settled(ORDER_ID, null);
     expect(t3.appended).toHaveLength(1);
   });
 
@@ -117,11 +117,11 @@ describe("§A 03-F52/DEC-HW-003 — the trigger is the ASSIGNMENT, not the tier"
     // auto-served while a pass person was walking the plate out would race the human who owns the
     // act, and `served` is terminal under `01-F35`.
     const owned = rig({ tier: "T1", owner: "pass" });
-    owned.lines.settled(ORDER_ID);
+    owned.lines.settled(ORDER_ID, null);
     expect(owned.appended).toEqual([]);
     // The same fixture with the assignment back: `02-F31` unchanged in behaviour.
     const settlement = rig({ tier: "T1", owner: "settlement" });
-    settlement.lines.settled(ORDER_ID);
+    settlement.lines.settled(ORDER_ID, null);
     expect(settlement.appended).toHaveLength(1);
     expect(settlement.appended[0]?.payload.state).toBe("served");
   });
@@ -132,7 +132,7 @@ describe("§A 03-F52/DEC-HW-003 — the trigger is the ASSIGNMENT, not the tier"
     // `owner !== "pass"` passes the row above and fails only here.
     for (const owner of ["pass", "counter", "waiter"] as const) {
       const r = rig({ tier: "T1", owner });
-      r.lines.settled(ORDER_ID);
+      r.lines.settled(ORDER_ID, null);
       expect(r.appended, owner).toEqual([]);
     }
   });
@@ -158,12 +158,12 @@ describe("§A 03-F52/DEC-HW-003 — the trigger is the ASSIGNMENT, not the tier"
       } as never,
       tier: () => "T1",
       serveOwner: () => owner,
-      append: (_type, payload) => appended.push(payload),
+      append: (_caused_by, _type, payload) => appended.push(payload),
     });
-    lines.settled(ORDER_ID);
+    lines.settled(ORDER_ID, null);
     expect(appended).toEqual([]);
     owner = "settlement";
-    lines.settled(ORDER_ID);
+    lines.settled(ORDER_ID, null);
     expect(appended).toHaveLength(1);
   });
 });
@@ -179,10 +179,10 @@ describe("§B 02-F31 — unchanged in behaviour, changed in trigger", () => {
     // pass-side suite uses, and the thing that separates "refused for the right reason" from any
     // refusal.
     const delivery = rig({ tier: "T1", owner: "settlement", order_type: "delivery" });
-    delivery.lines.settled(ORDER_ID);
+    delivery.lines.settled(ORDER_ID, null);
     expect(delivery.appended).toEqual([]);
     const unknown = rig({ tier: "T1", owner: "settlement", order_type: "kerbside" });
-    unknown.lines.settled(ORDER_ID);
+    unknown.lines.settled(ORDER_ID, null);
     expect(unknown.appended).toEqual([]);
   });
 
@@ -195,7 +195,7 @@ describe("§B 02-F31 — unchanged in behaviour, changed in trigger", () => {
     // the gap by widening `LEGAL_NEXT` instead — a `packages/domain` change, protected, and the
     // thing `03-F52` was written to make unnecessary.
     const fresh = rig({ tier: "T2", owner: "settlement", state: "confirmed" });
-    fresh.lines.settled(ORDER_ID);
+    fresh.lines.settled(ORDER_ID, null);
     expect(fresh.appended).toEqual([]);
   });
 });

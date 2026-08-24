@@ -703,6 +703,68 @@ Sign in with any of the seeded staff — **Ayesha** (`RESTOS_DEV_PIN`), **Bilal*
 seeds Ayesha and nobody else. Only Hina can open the day (`02-F22`) — so a run with only the one
 key set can neither open a day nor record a sale, and the boot line says so.
 
+### 6c-bis. The waiter's order pad (`04-F21`) — the till's own port, and it is OFF by default
+
+The pad is a **browser the till serves**, not a device in the ledger's sense: it holds no store, no
+device identity and no credential beyond a session handle, and every act travels to the till as an
+intent the till verifies, authorizes and appends. Nothing below changes any of §6 — a till with no
+certificate configured starts no listener at all and sells exactly as it does now (`04-F22` (a):
+absent means OFF, never plaintext).
+
+```sh
+pnpm -C apps/waiter build                       # produces apps/waiter/dist
+
+RESTOS_TERMINAL_CERT=/path/cert.pem \
+RESTOS_TERMINAL_KEY=/path/key.pem \
+RESTOS_TERMINAL_BUNDLE="$PWD/apps/waiter/dist" \
+RESTOS_TERMINAL_PORT=8443 \
+RESTOS_DEV_PIN=4821 RESTOS_DEV_PIN_BILAL=5137 RESTOS_DEV_PIN_HINA=9064 \
+pnpm -C apps/pos-electron start
+```
+
+| key | default | what it decides |
+|---|---|---|
+| `RESTOS_TERMINAL_CERT` / `_KEY` | unset ⇒ **the pad is OFF** | both halves or nothing listens. There is no self-signing fallback: a till that minted its own certificate is a till whose operator is trained to tap through a browser warning |
+| `RESTOS_TERMINAL_BUNDLE` | unset ⇒ the API serves and the app does not | the built pad. A dev split, useful when the pad is running from `pnpm -C apps/waiter dev` |
+| `RESTOS_TERMINAL_PORT` | `8443` | its own socket. It never shares `01-F72`'s mesh port, which is mutual-TLS pinned on a client certificate a browser cannot present |
+
+⚠ **A BROWSER TRUSTING THAT CERTIFICATE IS A FOUNDER CALL AND IS BUILD 1's REAL BLOCKER**
+(`04-F22` (a)): a cloud-issued publicly-trusted certificate, or an org root CA installed per
+tablet. Neither can be borrowed from `01-F73`'s branch PKI, because no shipping till holds one.
+Serving TLS is the easy half.
+
+**The three operator acts, on the till's console** (`04-F31`). They exist because the boot line
+mints exactly one single-use code with a five-minute life, so without them a second tablet meant
+restarting the counter — which un-enrols the first — and a stolen tablet could be revoked only the
+same way:
+
+```
+pad                      # list the tablets this till has admitted
+pad enrol                # mint the NEXT one-time code, valid five minutes
+pad revoke <terminal>    # stop admitting that tablet, now
+```
+
+Type them into the terminal the till was launched from. ⚠ **A packaged till that was
+double-clicked has no console and therefore none of these**; that is build 1's honest limit, and
+`14-F13`'s device list is what closes it.
+
+**What the till says when the pad is off, or when it did not come up** — all three are boot lines,
+and none of them stops the till selling (`04-F32`):
+
+```
+terminal: no terminal certificate configured — the order pad is OFF and nothing is listening (04-F22 (a): absent means off, never plaintext)
+terminal: the terminal certificate could not be used — the order pad is OFF: error:0480006C:PEM routines::no start line (04-F32: the pad never stops the till)
+terminal: the order pad's port 8443 did not come up: listen EADDRINUSE: address already in use :::8443 (04-F32 — the till goes on selling)
+```
+
+⚠ **`04-F22` (a) also asks for that state on `00 §5.7`'s strip and the strip clause is NOT built** —
+the boot line is where it lives today, and the FR records the gap and its cost.
+
+**What the pad still does not do:** no own-day view (`04-F20`), no table roster or table states
+(build 2), no settlement (`04-F9` — that is the counter's), and no serve signal (`04-F23` closes
+its event set at four order events). Enrolments and sessions are **process-local**: a till restart
+signs every pad out and un-enrols every tablet.
+
 ### 6d. Switch a device OFF — the stolen-tablet path (`01-F25`/`01-F48`)
 
 The other half of §6b, and the one you run under pressure. It needs `DATABASE_URL` and **nothing

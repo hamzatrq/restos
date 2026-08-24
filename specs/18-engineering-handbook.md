@@ -103,7 +103,10 @@ restos/
 
 Every screen in every app belongs to exactly one data plane; mixing planes on one screen requires an explicit sync-age label (00 §5.7):
 
-**Local plane (operational, offline-first):** POS, pass/KDS, waiter, manager-in-branch. Source of truth is the device event log via `sync-client`:
+**Local plane (operational, offline-first):** POS, pass/KDS, ~~waiter~~, manager-in-branch. Source of truth is the device event log via `sync-client`:
+
+⚠ **`waiter` is struck because it is a TERMINAL of the POS rather than a `sync-client` host (`04-F21`, August 2026).** It is a browser the till serves; it holds no store, no device identity and no data layer, and every act reaches the ledger as an intent the till verifies, authorizes and appends. That is not a third plane and not a commandment-5 exception: the reads and writes still happen through `sync-client` in the till's main process, which §9 already makes the trusted side, and a surface with no data layer at all satisfies the plane law more strongly than one that has to be trusted to use it correctly. `04-F22` owns its admission. The tree line above still reads `waiter/ # T3 handheld (Expo, BYOD-friendly)` and is superseded by the same FR plus `04-F26`.
+
 - Writes = append a domain event through `sync-client.append()`. The UI updates from the fold, not from an optimistic cache — there is no "pending server state" because the device IS authoritative (01-F2). No TanStack Query mutations on this plane.
 - Reads = `sync-client` **reactive queries**: named, typed queries over materialized fold state (e.g. `openOrders(branch)`, `kitchenQueue(station)`), subscribed in React via `useSyncExternalStore` hooks from `@restos/sync-client/react`. Components NEVER touch SQLite or fold internals.
 - Folds live in `sync-client` (shared by every app), are pure functions `(state, event) → state`, and are property-tested (01-N1). Apps may register app-specific derived views but not new folds without a `sync-client` PR.

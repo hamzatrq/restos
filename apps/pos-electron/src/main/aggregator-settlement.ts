@@ -109,8 +109,21 @@ export type AggregatorSettlementDeps = {
    * Rs 0 Foodpanda row restored by a different route. `refuseDoubleSettlement` is bypassed for the
    * same reason and costs nothing: the covered-bill guard below is the same reading that guard
    * makes, on the same two numbers.
+   *
+   * ── `04-F27` (c): `caused_by` is the FIRST argument, and it is REQUIRED ──────────────────────
+   *
+   * "No human act" is not "no actor": `02-F30` says the ENTRY is the settlement, so the person
+   * whose confirm entered the order is who this money is attributed to. The host's closure read
+   * the till's live SESSION until August 2026, which answers that correctly only while the till's
+   * session is the person who confirmed — and a `04-F21` pad is a second producer for whom it
+   * never is. First and required rather than trailing and optional, on `line-advance.ts`'s
+   * argument: a trailing parameter is satisfied by the closure that ignores it.
    */
-  readonly append: (type: string, payload: AggregatorPaymentPayload) => void;
+  readonly append: (
+    caused_by: string | null,
+    type: string,
+    payload: AggregatorPaymentPayload,
+  ) => void;
 };
 
 export type AggregatorSettlement = {
@@ -122,8 +135,11 @@ export type AggregatorSettlement = {
    * nothing here may sit between a confirm and its KOT.
    *
    * Returns quietly for every non-aggregator order and for every order this device cannot read.
+   *
+   * `caused_by` is `04-F27` (c)'s: the actor of the `order.confirmed` this hangs off, carried
+   * rather than re-read, because the till's session is not that person on every road.
    */
-  readonly confirmed: (order_id: string) => void;
+  readonly confirmed: (order_id: string, caused_by: string | null) => void;
 };
 
 /**
@@ -164,7 +180,7 @@ const openShiftIdOf = (shifts: readonly OpenShiftFacts[]): string | null =>
 export const createAggregatorSettlement = (
   deps: AggregatorSettlementDeps,
 ): AggregatorSettlement => ({
-  confirmed: (order_id) => {
+  confirmed: (order_id, caused_by) => {
     const order = deps.store.openOrders().find((row) => row.order_id === order_id);
     // `01-F17` — this hangs off an `order.confirmed` that has ALREADY landed, beside the kitchen
     // handoff. An order this device cannot read (never converged, or seen only through later
@@ -210,7 +226,7 @@ export const createAggregatorSettlement = (
     // inventing a second definition of "this bill is covered" is the point: two definitions of one
     // fact is the shape `02-F45` names and refuses.
     if (order.pay_total >= billed) return;
-    deps.append(PAYMENT_RECORDED, {
+    deps.append(caused_by, PAYMENT_RECORDED, {
       order_id,
       amount_paisa: billed,
       method: AGGREGATOR_RECEIVABLE,

@@ -1029,3 +1029,148 @@ export const authorizeReads = (deps: AuthorizedReadsDeps): AuthorizedReads => ({
     }
   },
 });
+
+/**
+ * `04-F23` — **THE TERMINAL'S GATE, AND IT IS TWO GATES RATHER THAN ONE.**
+ *
+ * A `04-F21` terminal is a browser on the shop Wi-Fi holding no store, no device identity and no
+ * credential beyond a session handle. The till verifies its waiter, authorizes the act and
+ * appends. This is the authorize step, and it lives in THIS file for the reason the file's own
+ * header already gives for the escalation: *"A second copy of this reasoning for the approver is
+ * how an escalation quietly widens a cell the guard narrows — so there is one."* A terminal guard
+ * assembled anywhere else would be a second reading of `01-F26`'s assignments and of the matrix,
+ * and two readings of one fact can disagree.
+ *
+ * ── Gate 1: the SURFACE (`TERMINAL_EVENT_TYPES`) ─────────────────────────────────────────────
+ *
+ * `04-F23` rules that the narrowing a `waiter` COLUMN was wanted for is delivered by the terminal
+ * and not by the role: *"A role narrows a person across every surface; this narrows a surface
+ * across every person."* Every role that holds `order.create` also holds the settle action, so
+ * the matrix alone cannot express "may ring, may not settle" — and the pad's whole blast-radius
+ * claim (`04-F22`: a stolen tablet can ring food and cannot settle, refund, open a drawer, pay
+ * out, void after KOT or read cash) rests on this list being closed. **It refuses
+ * `payment.recorded` for an OWNER**, which is the property no matrix cell can state.
+ *
+ * ── Gate 2: the PERSON (`verdictFor`, unchanged) ─────────────────────────────────────────────
+ *
+ * Commandment 8, asked exactly as the renderer's guard asks it, of a subject assembled by the
+ * same `subjectOf` and narrowed by the same `roleOf`. A member `01-F42` revoked between sign-in
+ * and this call has no assignments and is refused here, which is why the subject is rebuilt per
+ * request rather than captured at sign-in.
+ *
+ * **Both must pass and neither substitutes for the other.** Dropping gate 1 leaves a pad that can
+ * settle; dropping gate 2 leaves a pad that authorizes nothing at all.
+ */
+export const TERMINAL_EVENT_TYPES = [
+  "order.created",
+  "order.line_added",
+  "order.line_removed",
+  "order.confirmed",
+] as const;
+
+const TERMINAL_TYPES: ReadonlySet<string> = new Set(TERMINAL_EVENT_TYPES);
+
+/**
+ * `04-F23`'s verdict. A discriminated result rather than the `WriteRefusal` the renderer's guard
+ * throws, because a terminal request crosses a wire: the caller has to turn this into a response
+ * body, and an exception carrying a frozen sentinel compared by identity does not survive that.
+ */
+export type TerminalVerdict =
+  | { readonly ok: true }
+  /** `not_a_terminal_act` is gate 1; everything else is the matrix's own word (gate 2). */
+  | { readonly ok: false; readonly refusal: WriteRefusal | "not_a_terminal_act" };
+
+export type TerminalAuthorization = (user_id: string, event_type: string) => TerminalVerdict;
+
+export type TerminalAuthorizationDeps = {
+  /** `01-F26`/`01-F28` — the SYNCED registry, exactly as the renderer's guard reads it. */
+  store: Pick<DeviceStore, "identity" | "staff">;
+};
+
+/**
+ * `04-F22` (c) — the actor is an ARGUMENT this factory is handed, never a session it reads.
+ *
+ * There is no `session` dep and that absence is the safety property, on `createVerifiedAppend`'s
+ * own reasoning one file over: a terminal guard that could reach the till's PIN session would
+ * authorize a waiter's intent against whoever is standing at the counter. The caller has just
+ * verified this `user_id` against `01-F28`'s hashes and `01-F61`'s durable counter; nothing here
+ * may soften that into "somebody is signed in".
+ *
+ * **`user_id` never arrives from the tablet.** `04-F22` (c) forbids it — *"the tablet receives an
+ * opaque handle and never a user id it could edit"* — and `terminal.ts` is where that is enforced,
+ * because that is where the handle is resolved. This function cannot tell a resolved id from a
+ * claimed one and must not be asked to.
+ */
+export const authorizeTerminal =
+  (deps: TerminalAuthorizationDeps): TerminalAuthorization =>
+  (user_id: string, event_type: string): TerminalVerdict => {
+    // Gate 1 FIRST, and the order is deliberate: an act outside the terminal's surface is refused
+    // without consulting the roster at all, so a request naming `payment.recorded` can never be
+    // answered "allowed" by a matrix that would have allowed it at the counter.
+    if (!TERMINAL_TYPES.has(event_type)) return { ok: false, refusal: "not_a_terminal_act" };
+    const subject = subjectOf({
+      store: deps.store,
+      // `subjectOf` reads only `user_id` off a session; `display_name` is required by the type
+      // and never consulted, which is the same construction `authorizeEscalation` uses for the
+      // approver — one shape, one reading.
+      session: () => ({ user_id, display_name: user_id }),
+    });
+    // A verified PIN for an id the registry does not carry cannot normally happen (`01-F28`
+    // verifies against that registry), but `01-F42` can revoke a member between the two reads and
+    // the answer that cannot be right is the permissive one (`01-F48`).
+    if (subject === null) {
+      return {
+        ok: false,
+        refusal: {
+          event_type,
+          outcome: "deny",
+          action: WRITE_ACTIONS[event_type] ?? null,
+          satisfied_by: [],
+        },
+      };
+    }
+    const verdict = verdictFor(
+      subject,
+      scopeOf(deps.store),
+      // `04-F23`: the terminal's action set is `order.create` alone. None of `TERMINAL_EVENT_TYPES`
+      // reaches `verdictFor`'s amount-dependent branches, so there is no threshold and no order
+      // total to supply — and supplying a `paidOutApprovalThresholdPaisa` here would be a number
+      // this surface can never spend, i.e. a value whose only effect is to look configured.
+      //
+      // ⚠ `campaignCitation` IS THE SAME ANSWER AND IT IS A DECISION RATHER THAN A DEFAULT — said
+      // out loud because it arrived as a COMPILE ERROR when `17-F24`'s arm made the member
+      // required, and the mechanical fix and the correct one look identical from the diff.
+      // `verdictFor` reads it inside its `discount.recorded` branch and nowhere else, and gate 1
+      // above refuses that type by name for **every** person including an owner — so no campaign
+      // is ever resolved on this road, and `campaignCitationFor`'s five inputs (the artifact, the
+      // open-order projection, `02-F64`'s link, branch time, the branch id) are none of them things
+      // `TerminalAuthorizationDeps` is handed. Widening this gate's deps to carry a resolver it
+      // cannot spend is the shape `paidOutApprovalThresholdPaisa` directly above already refuses.
+      //
+      // **Not a gap waiting to be filled in.** Doc 04 §1 puts *"void/comp/discount approval"* off
+      // the handheld by design and `17-F27` (b) makes the CASHIER the one who cites, at `02-F61`'s
+      // correction surface, which is a counter screen. **The neighbouring case, named rather than
+      // left one keystroke away (`AGENTS.md` `L11`):** what is closed here is *the pad resolves no
+      // campaign*; what is NOT closed is *the pad's road would not STAMP one either* — `17-F27`
+      // (c)'s `campaign_version` writer lives in the renderer's `writes` chain, which
+      // `createTerminal` is not built over. Both halves are held together by
+      // `__acceptance__/terminal-write-path.test.ts` §F3, so the day `discount.recorded` joins
+      // `TERMINAL_EVENT_TYPES` — a doc-04 spec act, not an implementer's — that test goes red and
+      // the stamp has to be decided in the same change. `undefined` stays the safe direction
+      // meanwhile: it falls through to the stricter discretionary predicate, whose `escalate` this
+      // gate refuses outright (`04-F8` — the handheld initiates, never approves).
+      {
+        paidOutApprovalThresholdPaisa: 0,
+        discountApprovalThresholdBps: undefined,
+        orderTotalPaisa: undefined,
+        campaignCitation: undefined,
+      },
+      event_type,
+      {},
+    );
+    // `escalate` is a REFUSAL here, not an offer. `02-F20`'s local path needs a manager standing
+    // at the pad, and there is no manager-approval surface on a terminal (`04-F8`: the handheld
+    // initiates, never approves) — so an escalatable act reaching this gate is refused with the
+    // matrix's own word, and the waiter walks to the till, which is `05-F27`'s budgeted walk.
+    return allows(verdict) ? { ok: true } : { ok: false, refusal: verdict };
+  };

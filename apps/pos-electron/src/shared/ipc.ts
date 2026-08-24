@@ -407,6 +407,28 @@ export const OpenOrderSchema = z.object({
   /** `01-F33` — 0/1, matching the fold's column. A settled order is recall-only (`02-F10`). */
   settled: z.number().int().optional(),
   /**
+   * `04-F12`/`04-F25` — **the tables this order is assigned to, as a SET, and the set is not a
+   * convenience.**
+   *
+   * The fold has projected `table_ids_json` and `table_conflict` since the kernel landed and this
+   * boundary dropped both, so `order.created.table_id` reached the ledger and nothing downstream
+   * could read it back. It is surfaced now because `04-F21`'s pad groups its work by table.
+   *
+   * ⚠ **It is an ARRAY because `01-F19` says two orders may stand on one table and the fold may
+   * not pick a winner** — `order.table_assigned`'s supersedes DAG can leave a genuinely divergent
+   * set, and `merge.ts` writes `table_conflict` for exactly that case. A scalar here would have to
+   * choose, which is a fold decision taken at a plane boundary (`01-F31`: a fold never picks a
+   * winner). The commonest case is one element and the ordinary one is zero — a counter order has
+   * no table at all.
+   *
+   * Optional for the reason the four fields above are: a fixture built before this field existed
+   * is still a valid `OpenOrder`, and `02-F45`'s one-source rule is satisfied because this is the
+   * fold's own column carried through rather than re-derived.
+   */
+  table_ids: z.array(z.string()).optional(),
+  /** `01-F19`/`04-F12` — 0/1, the fold's own column. The badge renders on EVERY surface. */
+  table_conflict: z.number().int().optional(),
+  /**
    * `03-F25`'s aging timer for THIS order — whole minutes since the confirm anchor, plus
    * `03-F14`'s two threshold minutes for this order's TYPE.
    *

@@ -88,7 +88,12 @@ describe("§B 01-F63 — the closing act has a production emitter, and the host 
     // And it is the SAME call site as the receipt and the line advance — `01-F63`'s "one
     // definition of settlement completes, not four" (`02-F45`). Three consequences, one trigger.
     expect(arm).toContain("receipts.settled(order_id)");
-    expect(arm).toContain("lines.settled(order_id)");
+    // `04-F27` (c) — the line advance carries the actor of the act that caused it; this read
+    // `lines.settled(order_id)` until the actor was threaded. `closer.settled` above deliberately
+    // does NOT: it appends through the raw gateway, and the only road that reaches this arm is a
+    // renderer `payment.recorded`, whose session IS the settling cashier (`04-F33` refuses a pad
+    // intent against an order it cannot see, and gate 1 refuses the type outright).
+    expect(arm).toContain("lines.settled(order_id, caused_by)");
   });
 
   it("is the ONLY construction of the emitter in the shipped app", () => {

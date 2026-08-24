@@ -691,7 +691,12 @@ in principle**, but see the owed item below — the manifest table itself was no
   assertion that used to separate it was rewritten — see the note in `order-list.dom.test.tsx`.
 - **The handhelds are unmeasured.** `27-F68` makes targets *grow* on anything above 160 PPI:
   `27 §1a`'s ~224-PPI tablet and ~405-PPI phone are 1.4x and 2.5x their old rendered size. No
-  rail looks at either, and `apps/waiter` / `apps/rider` are stubs.
+  rail looks at either. ⚠ *This ended "and `apps/waiter` / `apps/rider` are stubs", which stopped
+  being true of the first in August 2026: `04-F21`'s order pad ships and runs on exactly that
+  ~224-PPI tablet class.* That makes the gap worse rather than academic — the pad is a browser
+  served by this till, it has no `BrowserWindow` for a gate to import, and its density is a PIN
+  (`27 §1a`'s figure, passed in `main.tsx`) rather than a measurement. `apps/rider` is still a
+  stub.
 
 ## THE GROUPING ROUND (August 2026) — Cash, Me, Orders and ManagerApproval, and what LOOKING cost
 
@@ -1570,6 +1575,51 @@ the drawer and the algebra was right while the fixture was not. (2) A renderer f
       an **anti-scope guard** that still holds — but ⚠ **its comment now gives a stale reason**
       (*"Nothing advances a line past `placed`"*). The assertion is right and the rationale is not;
       that is a finding for the file's test owner, not an edit for an implementing session.
+
+## ⚠ A CONSEQUENCE'S OWN APPEND NO LONGER READS THE SESSION — `04-F27` (c) (August 2026)
+
+**The change is small, it is on the COUNTER's road as well as the pad's, and one of its effects is
+a deliberate attribution change — so read this before assuming a `order.line_state_changed` row
+means what it used to.**
+
+`04-F27` (b) put both producers on one consequence function (`appended`), and every append that
+function makes went through `gateway.append`, which stamps `deps.session()?.user_id ?? null`. That
+was right while the renderer was the only producer — the session's owner IS the person who acted —
+and wrong the moment `04-F21`'s tablet could reach it. Measured on a real store, waiter Sana at the
+pad and cashier Ayesha at the till: her SEND wrote `order.created`, `order.line_added` and
+`order.confirmed` naming SANA, and the `order.line_state_changed` it caused naming **AYESHA**.
+With the counter locked the same act named **nobody**. `02-F41` broken, permanent under `01-F1`,
+and invisible to every behavioural test in the repo because the order is still correct and only the
+envelope names the wrong person.
+
+**What changed here.** `gateway.ts` gains `createCausedAppend` — the FIFTH producer, on the same
+`checkedAppend` road as the other four, and `terminal-write-path.test.ts` §B2 lists it so it cannot
+fork. `LineAdvanceDeps.append` and `AggregatorSettlementDeps.append` take `caused_by` FIRST and
+REQUIRED (a trailing optional is satisfied by every closure that ignores it, which is the defect
+behind a signature that looks fixed), and `appended(req, caused_by)` is handed the actor by both
+producers: the renderer's handler passes the session it appended under, the terminal passes the
+waiter it verified.
+
+**THE COUNTER-VISIBLE CHANGE, stated rather than left to be discovered:** `printEvent`'s
+`kot.printed → in_prep` edge now appends with **`actor_user_id: null`** where it used to carry
+whoever was signed in when the paper came out. That is `02-F31`'s own case — *"line statuses
+auto-advance where no device exists to signal them"* — and the person at the till when a printer
+answered may have gone home since the confirm; `01-F1` would keep her name on it. The confirm and
+settlement edges are unchanged on this road: they carry the actor of the act, which for a renderer
+append IS the session.
+
+**What did NOT move, and why.** `kot.printed` / `kot.print_failed` / `printer.status_changed` and
+`audit.print_acknowledged` still go through `gateway.append`, because both printers share ONE
+`append` closure and one of the four is a genuine human act (`01-F5`: a human dismissed the band).
+Splitting them is a separate, surgical piece of work; `order.settlement_closed` likewise keeps the
+raw gateway, because the only road that reaches it is a renderer `payment.recorded`, whose session
+is the settling cashier. Both are named here rather than left to look intentional.
+
+**The measurement to keep:** restoring the defect in the HOST (`index.ts`'s closure back to
+`gateway.append`) kills exactly **one** test, and it is a source read — `main/index.ts` builds an
+Electron app at module scope, so `line-advance-seam.test.ts` §A is the only guard on that half.
+The MODULE half and the TERMINAL half are behavioural (`terminal-write-path.test.ts` §G, three
+rows, with G1/G2 attributing the pad's road and the counter's separately).
 
 ## `02-F31` — THE TIER, AND THE PRODUCER THAT DID NOT EXIST (August 2026)
 

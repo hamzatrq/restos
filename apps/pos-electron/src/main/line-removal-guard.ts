@@ -43,9 +43,22 @@
  * `refuseDoubleSettlement` is a wrapper because `DEC-MONEY-009` guards the RENDERER's write
  * channels and `main`'s own appends must not be caught by it. This is the opposite: `01-F1` makes
  * a post-confirm removal permanent no matter which caller wrote it, and there is no caller in this
- * app for which the act would be legitimate. The gateway is the one place every producer passes
- * through, so the boundary is drawn there — and `__acceptance__/line-correction-seam.test.ts`
- * drives `createGateway` directly, which is what makes the seam mutable and therefore testable.
+ * app for which the act would be legitimate. So the boundary is drawn where every producer passes
+ * through — and `__acceptance__/line-correction-seam.test.ts` drives `createGateway` directly,
+ * which is what makes the seam mutable and therefore testable.
+ *
+ * ⚠ **THAT SENTENCE WAS TRUE, THEN FALSE FOR A WHILE, AND IS TRUE AGAIN FOR A DIFFERENT REASON.**
+ * It read *"the GATEWAY is the one place every producer passes through"*, and it stopped being so
+ * the day `04-F21`'s terminal landed: `createVerifiedAppend` built its own envelope beside
+ * `Gateway.append`, reached `store.append` directly, and never called this guard — so a waiter's
+ * tablet removed a line off a confirmed, cooking order that the counter refuses by name (45000 →
+ * 0 on a real store, `order.line_removed` count 1, permanent under `01-F1`). `04-F27` moved every
+ * rule onto ONE road, `gateway.ts`'s `checkedAppend`, which both producers call and which is the
+ * only place an envelope is built for an arbitrary event type. **The lesson is the one this repo
+ * keeps paying for: a comment naming WHERE a boundary is drawn is a claim about every caller, and
+ * it goes stale the moment somebody adds one** — so what is written now is the property (one road)
+ * rather than the module, and `terminal-write-path.test.ts` §B asserts the single call site so a
+ * second copy is a red test instead of a silent fork.
  */
 
 import type { DeviceStore } from "@restos/sync-client";
