@@ -578,22 +578,39 @@ export const OMISSIONS: readonly Omission[] = [
       catalog_entry_fields: [],
     },
   },
+  /**
+   * ⚠ **REWRITTEN August 2026, NOT DELETED, and what changed is the REASON rather than the fact.**
+   * It read: *"no purchase, wastage, count or movement event can be emitted or ingested by anything
+   * shipping today: the `stock.*` family is `01 §4` catalog vocabulary with no payload schema in
+   * `packages/domain`."* `specs/10` slice 1 gave three of those four a schema, so that sentence
+   * became false the day it landed — and `omission-premises.test.ts` said so, which is the whole
+   * point of the premise being data. The block is **still** absent from this report, for reasons
+   * that are smaller and further downstream, and naming them is the honest edit.
+   */
   {
     block: "Purchases and wastage logged",
     reason:
-      "no purchase, wastage, count or movement event can be emitted or ingested by anything " +
-      "shipping today: the stock.* family is 01 §4 catalog vocabulary with no payload schema in " +
-      "packages/domain, so parseEvent refuses one at both ends of the ledger. Module 10 is Wave 3 " +
-      "(00 §1).",
+      "purchases, wastage and counts became RECORDABLE with specs/10 slice 1 — all three carry " +
+      "payload schemas in packages/domain now, so a device can append one and the gateway can " +
+      "ingest it. Nothing in the product records one yet: there is no receiving, wastage or count " +
+      "surface on any shipped device, and no inventory reference data by which an item could even " +
+      "be named (01-F75's resource set is closed and holds no inventory member), so every id " +
+      "would be unresolvable. stock.movement_recorded — the derived deduction row this block " +
+      "would total — still has no schema at all. What slice 1 does ship is the arithmetic " +
+      "(packages/inventory) and a gated variance read on this plane; this block is the nightly " +
+      "SUMMARY's purchases roll-up, which is 12-F10's and is not it.",
     fr: "12-F10",
     premise: {
-      unemittable_types: [
+      // The one that is still genuinely unemittable, and the one this block would total.
+      unemittable_types: ["stock.movement_recorded"],
+      // The three that are NOT, and the sentence above depends on them being recordable: if any
+      // lost its schema this entry would understate the product in the direction L4 names as the
+      // dangerous one — inviting a session to "add" an event type that already exists.
+      emittable_types: [
         "stock.purchase_recorded",
         "stock.wastage_recorded",
         "stock.count_recorded",
-        "stock.movement_recorded",
       ],
-      emittable_types: [],
       absent_line_states: [],
       catalog_entry_fields: [],
     },
@@ -651,29 +668,38 @@ export const OMISSIONS: readonly Omission[] = [
     reason:
       "13-F14a puts every alert class in this block from Wave 1, and no class can fire. " +
       "alert.raised has no payload schema in packages/domain — so nothing can emit or ingest one " +
-      "— and services/intelligence is a scaffold stub. Two of 13-F10's six detectors also read " +
-      "events that do not exist (stock variance after a count, supplier price spikes). The other " +
-      "four now read events that DO — voids, comps and discounts, cash over/short at shift " +
-      "close, no-sale drawer opens — and each still needs a threshold that 00 §7 places at layer " +
-      "2, with no default stated anywhere in the corpus and no layer-2 config plane built (00 §7 " +
-      "(f)). The anomalies reported above are the ledger's own 01-F31/02-F37/02-F43 facts. They " +
-      "are not alerts and are not labelled as any.",
+      "— and services/intelligence is a scaffold stub. Of 13-F10's six detectors, FIVE now read " +
+      "events that exist: voids, comps and discounts, cash over/short at shift close, no-sale " +
+      "drawer opens, and stock variance after a count, whose stock.count_recorded gained a schema " +
+      "with specs/10 slice 1. The variance detector still cannot fire for a different reason — no " +
+      "device records a count and no inventory reference data exists to resolve an item id — and " +
+      "the sixth, supplier price spikes, reads stock.price_spike_flagged, which has no schema at " +
+      "all. Each of the five also needs a threshold that 00 §7 places at layer 2, with no default " +
+      "stated anywhere in the corpus and no layer-2 config plane built (00 §7 (f)). The anomalies " +
+      "reported above are the ledger's own 01-F31/02-F37/02-F43 facts. They are not alerts and " +
+      "are not labelled as any.",
     fr: "13-F14a",
     premise: {
       unemittable_types: [
         "alert.raised",
         "alert.acknowledged",
-        // 13-F10's two detectors that still read nothing.
-        "stock.count_recorded",
-        "stock.purchase_recorded",
+        // 13-F10's ONE detector that still reads nothing at all. ⚠ This list held
+        // `stock.count_recorded` and `stock.purchase_recorded` until specs/10 slice 1 gave both a
+        // schema; the count of detectors moved with them, in this same edit, because a bare count
+        // in prose beside a premise list is exactly the clause that rots (this entry has been
+        // re-derived twice now for that reason).
+        "stock.price_spike_flagged",
       ],
-      // 13-F10's other four, which is the half this entry got wrong.
+      // 13-F10's other five. `stock.count_recorded` moved here from the list above: the sentence
+      // now says the variance detector's EVENT exists and its data does not, and that claim is
+      // false in the overstating direction if the schema ever goes away.
       emittable_types: [
         "void.recorded",
         "comp.recorded",
         "discount.recorded",
         "shift.closed",
         "cash.drawer_opened",
+        "stock.count_recorded",
       ],
       absent_line_states: [],
       catalog_entry_fields: [],

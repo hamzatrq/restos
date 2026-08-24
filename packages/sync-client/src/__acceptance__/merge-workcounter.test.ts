@@ -286,7 +286,22 @@ describe("registry growth must fail this suite before it can silently no-op (fix
   // working — and the session that landed the schemas is not the one that wrote this list. `03-F11`
   // declared the type in July and it sat schema-less for a month, so `05-F3`'s second alarm trigger
   // did not exist; giving it a payload is what made it fold-registry vocabulary at all.
-  const PINNED_NOT_FOLDED = ["catalog.changed", "printer.status_changed"] as const;
+  //
+  // `stock.purchase_recorded` / `stock.wastage_recorded` / `stock.count_recorded` (`specs/10`
+  // slice 1, August 2026) are members three, four and five, and they RED-AT-COMPILED the same way
+  // the moment `packages/domain` gave the family payload schemas. They are here rather than in
+  // `PINNED_FOLD_CONSUMED` for `printer.status_changed`'s structural reason plus a settled one:
+  // none names an order, their `item_id` is an `01-F21` InventoryItem rather than the sellable
+  // `availability.changed` keys on — and `10-F4` puts sale deduction in a CLOUD read model, so a
+  // device fold over them would be a second, wrong stock number beside the cloud's. `merge.ts`'s
+  // `NON_FOLD_TYPES` rows carry the full argument and the reopen trigger.
+  const PINNED_NOT_FOLDED = [
+    "catalog.changed",
+    "printer.status_changed",
+    "stock.purchase_recorded",
+    "stock.wastage_recorded",
+    "stock.count_recorded",
+  ] as const;
 
   type PinnedType = (typeof PINNED_FOLD_CONSUMED)[number] | (typeof PINNED_NOT_FOLDED)[number];
   // COMPILE-LEVEL PIN (F5): if the registry grows, this assignment stops
