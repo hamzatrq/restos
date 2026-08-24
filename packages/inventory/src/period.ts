@@ -313,11 +313,15 @@ export const costBasisOf = (
   // ⚠ **THIS GUARD WAS A TAUTOLOGY FOR ONE COMMIT AND ITS COMMENT CLAIMED A PROTECTION IT DID NOT
   // HAVE.** It read `opening !== null || openQty === 0` — and `openQty` is derived from `opening`
   // three lines up, so `opening === null` forced `openQty === 0` and the disjunction was
-  // unconditionally true. Mutating it to `true` killed **0 of 145** tests, and
-  // `costBasisOf(item, null, {value_paisa: 340_000, qty_base: 5 kg})` answered `receipted`, which
-  // is the exact case the comment said was disqualified. It was false from the `da263e2` fix round
-  // (August 2026) until here, and `variance.ts`'s `WithheldReason` had already retired the
-  // `opening_unknown` member on the strength of it.
+  // unconditionally true. Mutating it to `true` killed **0 of 145** tests, measured on that tree.
+  // The case it names could not even be EXPRESSED at the only call site: `carryPair` flattened an
+  // unvaluable carry to `null`, which this function reads as *there is no carry*, so a period
+  // opening with 10 kg nobody could price was valued as if the shelf had opened empty, at the
+  // incoming invoice's rate (`gap −3 kg`, `gap_value_paisa −204 000`). It was false from the
+  // `da263e2` fix round (August 2026) until here, and `variance.ts`'s `WithheldReason` had already
+  // retired the `opening_unknown` member on the strength of it. The case now arrives as
+  // `{value_paisa: null, qty_base: 5 kg}`; `opening === null` still means no carry at all, and
+  // still answers `receipted` when this period has receipts, which is correct.
   //
   // The case is real and now reaches this function: a carry from a period with NO basis brings a
   // quantity whose value is unknown. Dropping that quantity out of the denominator prices the
