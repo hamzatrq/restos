@@ -1185,13 +1185,44 @@ describe("§K 04-F36 (a) — no Electron-hosted file may leave a digest to the p
     );
   });
 
-  it("K2 — the wire's own verification NAMES sha256, so K1 cannot pass vacuously", () => {
+  /**
+   * `admit`'s own text, from its declaration to the next top-level statement.
+   *
+   * ⚠ **WINDOWED, and the window is the assertion.** K2's first draft read the WHOLE file, and a
+   * mutant restoring the bare `catch { return null; }` — `04-F36` (a)'s exact second half —
+   * **passed all 48 tests**: `catch (cause)` still matched the certificate-parse handler 60 lines
+   * below, and `verifyFaultLogged` still matched its own declaration at the top of the factory. A
+   * guard built correctly and pointed at the file instead of at the block. Found by mutating, not
+   * by reading, which is this round's own law reproducing inside the fix for it.
+   */
+  const admitBlock = (): string => {
+    const source = readFileSync(join(import.meta.dirname, "..", "terminal-server.ts"), "utf8");
+    const start = source.indexOf("  const admit = (");
+    const end = source.indexOf("  let https: Server;", start);
+    expect(start, "admit() moved — K2 is reading nothing").toBeGreaterThan(-1);
+    expect(end, "the window's closing anchor moved — K2 is reading nothing").toBeGreaterThan(start);
+    return source.slice(start, end);
+  };
+
+  it("K2 — the wire's own verification NAMES sha256 and RECORDS a fault it cannot run", () => {
     // K1 is a negative assertion and stays green against a file that stopped verifying at all.
     // This is the positive half, on the one call `04-F36` is about.
+    const block = admitBlock();
+    expect(block).toMatch(/verifySignature\(\s*"sha256"/);
+    // `04-F36` (a)'s second half: a signature that does not check RETURNS false, so reaching the
+    // catch means the primitive could not run — a defect of ours, and it may not leave by the same
+    // door as a rejected credential.
+    expect(block).toMatch(/catch \(cause\)/);
+    expect(block).toMatch(/deps\.log\(/);
+    // Still fails CLOSED. `04-F22` (b): the caller never learns which check failed.
+    expect(block).toMatch(/return null;/);
+  });
+
+  it("K3 — the narrowing BITES: the same tokens outside the window do not satisfy K2", () => {
+    // Without this, K2 could be satisfied by any `catch (cause)` anywhere in the file — which is
+    // exactly what the M4 mutant proved, and this is `§H2b`'s technique on a second seam.
     const source = readFileSync(join(import.meta.dirname, "..", "terminal-server.ts"), "utf8");
-    expect(source).toMatch(/verifySignature\(\s*"sha256"/);
-    // And the fault is RECORDED rather than swallowed — `04-F36` (a)'s second half.
-    expect(source).toMatch(/catch \(cause\)/);
-    expect(source).toMatch(/verifyFaultLogged/);
+    expect(source.match(/catch \(cause\)/g)?.length).toBeGreaterThan(1);
+    expect(admitBlock().match(/catch \(cause\)/g)?.length).toBe(1);
   });
 });
