@@ -259,7 +259,14 @@ const recordingLedger: DayLedger = {
   },
 };
 
-const reference: InventoryReference = { read: () => Promise.resolve(REFS) };
+const reference: InventoryReference = {
+  read: () => Promise.resolve(REFS),
+  // `InventoryReference` gained its writer half in August 2026 (`inventory.saveReference`). This
+  // file's subject is the READ, so the writer THROWS rather than recording: a fixture that quietly
+  // accepted a publish would let a future test believe it had changed `REFS` when it had not.
+  // No assertion in this file moved — only the port's arity.
+  publish: () => Promise.reject(new Error("this fixture is a reader; nothing here publishes")),
+};
 
 type Reply = { status: number; body: unknown };
 

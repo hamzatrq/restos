@@ -34,6 +34,16 @@
  * the non-atomicity; the acceptance suite asserts what actually happens rather than papering it.
  */
 
+import {
+  type AreaMembership,
+  BASE_UNITS,
+  type CountUnits,
+  type InventoryItem,
+  ITEM_TYPES,
+  type MenuRecipe,
+  type Recipe,
+  type ValueQtyPair,
+} from "@restos/inventory";
 import { z } from "zod";
 import type { CatalogEntry } from "./catalog.js";
 import {
@@ -43,6 +53,13 @@ import {
   DeviceRevokedPayload,
 } from "./devices.js";
 import { IntegrationError } from "./errors.js";
+import {
+  AreaMembershipWire,
+  type InventoryReference,
+  InventoryItemWire,
+  MenuRecipeWire,
+  RecipeWire,
+} from "./inventory.js";
 import type { DayLedger } from "./ledger.js";
 import type { CatalogPublisher, LedgerAppender, LedgerRecord } from "./publish.js";
 import type { TenancyDirectory } from "./tenancy.js";
@@ -700,5 +717,114 @@ export const createGatewayDayLedger = (link: GatewayLink): DayLedger => ({
       truncated: parsed.truncated,
       latest_arrival_ms: parsed.latest_arrival_ms,
     };
+  },
+});
+
+// ── `10-F18`'s reference source ────────────────────────────────────────────────────────────────
+
+const InventoryReferenceResponse = z.object({
+  version: z.number().int().nonnegative(),
+  entries: z.array(
+    z.object({
+      kind: z.enum(["item", "area", "recipe", "menu_recipe"]),
+      id: z.string(),
+      payload: z.record(z.string(), z.unknown()),
+    }),
+  ),
+});
+
+/**
+ * `10-F18`'s reference source, over the gateway's `/internal` contract.
+ *
+ * ⚠ **`version: 0` IS A REFUSAL HERE AND NOT AN EMPTY SET, AND THAT IS THE WHOLE POINT OF THIS
+ * FUNCTION.** An org that has published nothing has not answered the question; an empty
+ * `ReferenceData` would let `stockReport` render a complete, confident variance report with NO
+ * ROWS for a location that may be short any amount at all, with nothing on the screen saying
+ * anything is missing (`00 §5.7`, `10-F29`, and `inventory.ts`'s own header). `01-F77`'s
+ * omitted-never-zero rule is the same distinction one layer down. So an unpublished org gets the
+ * same refusal `unconfiguredInventoryReference` gives — a stated absence, not a smaller number.
+ */
+export const createGatewayInventoryReference = (link: GatewayLink): InventoryReference => ({
+  /**
+   * The whole set as the org's next version.
+   *
+   * **Flattened to `01-F75`'s row shape here and re-assembled on the way back**, because the
+   * gateway stores a publication LOG keyed by `(kind, entry_id)` and has no opinion about what a
+   * recipe is. The `area` id is the composite `(item_id, location_id, area_id)` — `10-F30`'s
+   * membership row has no identity of its own — and the `menu_recipe` id is
+   * `(sellable_kind, sellable_id)`, which is the key `14-F9` maps FROM.
+   *
+   * ⚠ **BOTH ARE `JSON.stringify` OF THE TUPLE, NOT A JOINED STRING, AND THAT IS `01-F71` (d).**
+   * That clause bans a separator-less/ambiguous concatenation because `("ab","c")` and
+   * `("a","bc")` are distinct keys a naive join maps onto one row — here that is one item's count
+   * folded into another item's. JSON is the cheapest encoding that is provably injective: the
+   * separator is a comma OUTSIDE the quoted strings, and a comma inside a component is escaped by
+   * the encoder rather than by a rule someone has to remember.
+   *
+   * ⚠ **A `\u0000` SEPARATOR WAS THE FIRST CHOICE AND POSTGRES REFUSES IT — measured, not
+   * predicted.** A `text` column cannot hold a NUL byte, so the insert failed with the whole
+   * statement in the message. Worth recording because NUL is the textbook "separator a caller
+   * cannot type" and it is unavailable in exactly the store this key lives in.
+   */
+  publish: async (org_id, refs, opts) => {
+    const rows = [
+      ...refs.items.map((item) => ({ kind: "item" as const, id: item.item_id, payload: item })),
+      ...refs.areas.map((area) => ({
+        kind: "area" as const,
+        id: JSON.stringify([area.item_id, area.location_id, area.area_id]),
+        payload: area,
+      })),
+      ...refs.recipes.map((recipe) => ({
+        kind: "recipe" as const,
+        id: recipe.recipe_id,
+        payload: recipe,
+      })),
+      ...refs.menu_recipes.map((mapping) => ({
+        kind: "menu_recipe" as const,
+        id: JSON.stringify([mapping.sellable_kind, mapping.sellable_id]),
+        payload: mapping,
+      })),
+    ];
+    const body = await postJson(
+      link,
+      "/internal/inventory/publish",
+      { org_id, entries: rows, actor_user_id: opts.actor_user_id, now: opts.now },
+      "inventory reference",
+    );
+    return PublishResponse.parse(body).version;
+  },
+  read: async (org_id) => {
+    const body = await getQuery(
+      link,
+      "/internal/inventory/reference",
+      { org_id },
+      "inventory reference",
+    );
+    const parsed = InventoryReferenceResponse.parse(body);
+    if (parsed.version === 0) {
+      throw new IntegrationError(
+        "inventory reference",
+        "this organisation has published no inventory reference data, so 10-F18's variance " +
+          "report cannot be computed. An empty answer would render a complete, confident report " +
+          "with no rows for a location that may be short any amount at all (00 §5.7, 10-F29). " +
+          "Author items and recipes in the back office first.",
+        // NOT retriable: the same request will go on failing until an owner publishes. `18 §5`'s
+        // flag is what tells a client to stop retrying, and telling one to wait out an absence of
+        // DATA is the shape `gateway-unreachable.test.ts`'s control assertion exists to refuse.
+        { retriable: false, cause: null },
+      );
+    }
+    // Parsed per kind, never spread — see the header's note on `catalog-fetch.ts`.
+    const items: InventoryItem[] = [];
+    const areas: AreaMembership[] = [];
+    const recipes: Recipe[] = [];
+    const menu_recipes: MenuRecipe[] = [];
+    for (const entry of parsed.entries) {
+      if (entry.kind === "item") items.push(InventoryItemWire.parse(entry.payload));
+      else if (entry.kind === "area") areas.push(AreaMembershipWire.parse(entry.payload));
+      else if (entry.kind === "recipe") recipes.push(RecipeWire.parse(entry.payload));
+      else menu_recipes.push(MenuRecipeWire.parse(entry.payload));
+    }
+    return { items, areas, recipes, menu_recipes };
   },
 });

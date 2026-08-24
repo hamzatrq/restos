@@ -23,6 +23,7 @@ import {
   createGatewayCatalogPublisher,
   createGatewayDayLedger,
   createGatewayDeviceDirectory,
+  createGatewayInventoryReference,
   createGatewayLedgerAppender,
   createGatewayTenancyDirectory,
   createGatewayUserDirectory,
@@ -91,24 +92,28 @@ export type ApiServerOptions = {
    * `10-F18`'s inventory reference source. Optional here for `ledger`'s reason — suites that
    * predate the variance report still have to boot — and REQUIRED once resolved.
    *
-   * @unreached-owed **`start()` SUPPLIES NOTHING, SO A REAL DEPLOYMENT REFUSES EVERY VARIANCE READ
-   * — deliberately, and it is on this rail's register rather than in a comment.** What is owed is
-   * amendment **A1** (`plans/inventory/design.md` §6): the `inventory` member of `01-F75`'s CLOSED
-   * resource set, which is the spec act that gives this data a wire at all — plus the back-office
-   * editors that write it (slice 1 step 5) and the device count surface that produces the events it
-   * is folded against (step 6). None was invented here: `01-F75` says in terms that a resource
-   * string an implementation invents is an `01-F4`-shaped error one layer down, and a name on the
-   * wire that nothing can serve is what that clause's own exclusions exist to prevent.
+   * ⚠ **`start()` SUPPLIES ONE NOW — `createGatewayInventoryReference` (2026-08-25) — AND THE
+   * `@unreached-owed` MARKER THAT STOOD HERE IS DELETED RATHER THAN AMENDED.** `seams:check` FAILS
+   * on a marker whose subject is reached, which is what stops the register rotting. Until that
+   * date a real deployment refused every variance read: measured on a four-process stack,
+   * `inventory.variance` answered **HTTP 500** for an authenticated owner.
+   *
+   * **What that marker said was owed is only PARTLY paid, and the unpaid half is named here rather
+   * than left to be re-measured.** The CLOUD reader is supplied — `kernel.inventory_*` stores the
+   * set and `/internal/inventory/reference` serves it. What is still owed is amendment **A1**, the
+   * `inventory` member of `01-F75`'s CLOSED resource set: no frame can carry this artifact to a
+   * DEVICE, so `10-F17`'s count sheet has no item list on the till. Nothing was invented — `01-F75`
+   * says in terms that a resource string an implementation invents is an `01-F4`-shaped error one
+   * layer down.
    *
    * **The fallback is `unconfiguredInventoryReference`, which refuses every read**, not a memory
    * stub, and on this surface the stub is the most dangerous shape in the file: an empty answer
    * renders a complete, confident variance report with NO ROWS for a location that may be short any
    * amount at all, and nothing on that screen says anything is missing.
    *
-   * ⚠ **No shipping host passes one yet, and that is scheduled rather than accidental.** The writer
-   * is slice 1 step 5 (the back-office editors) and both it and the device count surface are gated
-   * on amendment A1 — the `inventory` member of `01-F75`'s closed resource set. Until then this
-   * procedure is hosted, gated and correct over a source that refuses.
+   * ⚠ **The WRITER is `inventory.saveReference` on this service and the back-office editor that
+   * calls it is slice 1 step 5 — still owed.** An owner authors reference data through the API
+   * today; there is no screen for it.
    */
   readonly inventory?: InventoryReference;
   /**
@@ -553,6 +558,19 @@ const start = async (): Promise<FastifyInstance> => {
   // directory tables yet. That mutant is `tenancy-names.test.ts`'s N3.
   const tenancy: TenancyDirectory = createGatewayTenancyDirectory(link);
 
+  // `10-F18`. Same `/internal` link again. Swap it for `unconfiguredInventoryReference()` and the
+  // process still starts, still serves, still gates — and every variance read refuses loudly, which
+  // is exactly the state this deployment was in until 2026-08-25: `inventory.variance` answered
+  // **HTTP 500** for an authenticated owner because nothing anywhere stored the reference set.
+  //
+  // ⚠ **The DANGEROUS mutant here is not the refusing fallback — it is a stub that ANSWERS.** A
+  // source returning `{ items: [], areas: [], recipes: [], menu_recipes: [] }` renders a complete,
+  // confident variance report with NO ROWS for a location that may be short any amount at all, and
+  // nothing on that screen says anything is missing (`00 §5.7`, `10-F29`). `seams:check` cannot see
+  // it — Rule B asks whether a member is supplied, never whether the supply is real — so the
+  // hand-written assertion is `__acceptance__/inventory-reference-seam.test.ts`.
+  const inventory: InventoryReference = createGatewayInventoryReference(link);
+
   // `14-F14`. Same `/internal` link again. Swap it for `unconfiguredUserDirectory()` and the
   // process still starts, still serves, still gates — and every act on the staff roster refuses
   // loudly instead of reporting a cashier this deployment never wrote. ⚠ **This one is NOT the
@@ -578,6 +596,7 @@ const start = async (): Promise<FastifyInstance> => {
     catalog,
     devices,
     ledger,
+    inventory,
     tenancy,
     users: userDirectory,
   });

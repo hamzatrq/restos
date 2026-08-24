@@ -31,9 +31,135 @@
 
 import type { AuthSubject } from "@restos/domain";
 import { stockReportScope } from "@restos/domain";
-import type { InventoryEvent, ReferenceData, VarianceReport } from "@restos/inventory";
-import { referenceRefusals, sustainedHints, varianceReports } from "@restos/inventory";
+import type {
+  AreaMembership,
+  CountUnits,
+  InventoryEvent,
+  InventoryItem,
+  MenuRecipe,
+  Recipe,
+  ReferenceData,
+  ValueQtyPair,
+  VarianceReport,
+} from "@restos/inventory";
+import {
+  BASE_UNITS,
+  ITEM_TYPES,
+  referenceRefusals,
+  sustainedHints,
+  varianceReports,
+} from "@restos/inventory";
+import { z } from "zod";
 import type { SummaryEvent } from "./summary.js";
+
+// ── the reference set's shape, declared ONCE for both directions ───────────────────────────────
+
+/**
+ * `ReferenceData`'s four row shapes as Zod schemas — used by the WRITER (`inventory.saveReference`
+ * parses an owner's input through them) and by the READER (`createGatewayInventoryReference`
+ * re-parses what the gateway serves).
+ *
+ * ⚠ **ONE DECLARATION, REACHED FROM BOTH DIRECTIONS, AND THAT IS THE POINT.** `18 §2` allows a
+ * domain type to be declared once; `packages/inventory` exports TYPES and no schemas, so a boundary
+ * that parses untrusted bytes has to state the shape somewhere — and stating it twice (once at the
+ * writer, once at the reader) is `01-F60`'s two-declarations defect, which cost this repo three
+ * weeks. The explicit `z.ZodType<T>` annotations make the drift a COMPILE error rather than a
+ * discipline: the moment a `packages/inventory` type gains, loses or retypes a field, these stop
+ * compiling.
+ *
+ * ⚠ **THE ANNOTATION ALREADY EARNED ITS KEEP.** The first draft of `RecipeWire` wrote the line
+ * quantity as `qty_base`, matching every neighbouring field name in this module; the shipped
+ * `RecipeLine` calls it `qty`. That is exactly the wire→type reshape defect
+ * `packages/sync-client`'s `catalog-fetch.ts` shipped — it dropped `prices` and `station` and
+ * failed **0 of 579** pre-existing tests — and here it was a typecheck error on the first compile
+ * rather than a variance report that silently costed every recipe at zero.
+ */
+export const ValueQtyPairWire: z.ZodType<ValueQtyPair> = z.object({
+  value_paisa: z.number().int(),
+  qty_base: z.number().int(),
+});
+
+export const CountUnitsWire: z.ZodType<CountUnits> = z.object({
+  primary_label: z.string().min(1),
+  primary_size_base: z.number().int(),
+  partial: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("none") }),
+    z.object({ kind: z.literal("fraction") }),
+    z.object({ kind: z.literal("weight"), unit: z.enum(BASE_UNITS) }),
+  ]),
+});
+
+export const InventoryItemWire: z.ZodType<InventoryItem> = z.object({
+  item_id: z.string().min(1),
+  /** `00 §5.6` — user content, Unicode. An Urdu name renders and prints faithfully. */
+  name: z.string().min(1),
+  type: z.enum(ITEM_TYPES),
+  base_unit: z.enum(BASE_UNITS),
+  is_counted: z.boolean(),
+  is_costed: z.boolean(),
+  count_units: CountUnitsWire,
+  /** `null` is "no reference price typed", never "free" — `10-F31`. */
+  reference_cost: z.union([ValueQtyPairWire, z.null()]),
+});
+
+export const AreaMembershipWire: z.ZodType<AreaMembership> = z.object({
+  item_id: z.string().min(1),
+  location_id: z.string().min(1),
+  area_id: z.string().min(1),
+  sort: z.number().int(),
+});
+
+export const RecipeWire: z.ZodType<Recipe> = z.object({
+  recipe_id: z.string().min(1),
+  version: z.number().int(),
+  lines: z.array(
+    z.object({
+      line_no: z.number().int(),
+      component: z.discriminatedUnion("kind", [
+        z.object({ kind: z.literal("item"), id: z.string().min(1) }),
+        z.object({ kind: z.literal("recipe"), id: z.string().min(1) }),
+      ]),
+      /** In the COMPONENT's base unit. Named `qty` because `RecipeLine` names it `qty`. */
+      qty: z.number().int(),
+    }),
+  ),
+  yield_qty_base: z.union([z.number().int(), z.null()]),
+  produces_item_id: z.union([z.string().min(1), z.null()]),
+});
+
+export const MenuRecipeWire: z.ZodType<MenuRecipe> = z.object({
+  sellable_kind: z.string().min(1),
+  sellable_id: z.string().min(1),
+  recipe_id: z.string().min(1),
+});
+
+/**
+ * What an owner sends to `inventory.saveReference` — the WHOLE set, never a patch.
+ *
+ * **Whole-set and not incremental, deliberately.** `10-F31`'s R1–R5 are properties of the SET (a
+ * recipe leaf is costable only relative to the items beside it; a cycle exists only across
+ * recipes), so a patch would have to be validated against the stored set, which means the refusal
+ * depends on data the owner is not looking at. `14-F29`'s grid is the precedent: completeness is
+ * met where the owner types.
+ *
+ * `strictObject` so a field the caller believes it is sending cannot be silently dropped
+ * (`28-F13`'s argument, and `01-F60`'s two-declarations defect one layer up).
+ */
+export const InventoryReferenceInput = z.strictObject({
+  items: z.array(InventoryItemWire),
+  areas: z.array(AreaMembershipWire),
+  recipes: z.array(RecipeWire),
+  menu_recipes: z.array(MenuRecipeWire),
+});
+
+/**
+ * The parsed input as `ReferenceData`.
+ *
+ * A named function rather than a cast, so the assignment is CHECKED: `z.infer` of the input is
+ * structurally `ReferenceData` and the compiler says so here rather than at four call sites.
+ */
+export const toReferenceData = (input: z.infer<typeof InventoryReferenceInput>): ReferenceData =>
+  input;
 
 /**
  * Where an org's inventory reference data comes from (`01-F21`: edited only via the back office,
@@ -43,9 +169,31 @@ import type { SummaryEvent } from "./summary.js";
  */
 export type InventoryReference = {
   read(org_id: string): Promise<ReferenceData>;
+  /**
+   * Publish the whole set as the org's next version, returning that version.
+   *
+   * **On the SAME port as `read`, not a second one**, and `devices.ts` records the argument this
+   * follows: `14-F13` wants the list and the revocation together because *"a deployment that wired
+   * the registry half and forgot the ledger half would revoke correctly and attribute nothing"*.
+   * Here the halves are worse apart — a host that wired a real reader and a stub writer would serve
+   * a variance report over reference data no owner could ever change, and every gate would be
+   * green. One bag, both members required.
+   */
+  publish(
+    org_id: string,
+    refs: ReferenceData,
+    opts: { readonly actor_user_id: string | null; readonly now: number },
+  ): Promise<number>;
 };
 
 export const unconfiguredInventoryReference = (): InventoryReference => ({
+  publish: () => {
+    throw new Error(
+      "no inventory reference source is configured on this host, so 01-F21's reference set " +
+        "cannot be stored. Accepting the edit and discarding it would report success to an owner " +
+        "over data that never landed.",
+    );
+  },
   read: () => {
     throw new Error(
       "no inventory reference source is configured on this host, so 10-F18's variance report " +

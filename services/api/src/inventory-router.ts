@@ -23,9 +23,16 @@
  * the exact wall `05-F28` hit for the manager console.
  */
 
+import { referenceRefusals } from "@restos/inventory";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { StockScopeRefusal, stockBranchScope, stockReport } from "./inventory.js";
+import {
+  InventoryReferenceInput,
+  StockScopeRefusal,
+  stockBranchScope,
+  stockReport,
+  toReferenceData,
+} from "./inventory.js";
 import { authorized } from "./trpc.js";
 
 /**
@@ -52,6 +59,52 @@ const varianceInput = z.object({
 });
 
 export const inventoryProcedures = {
+  /**
+   * `01-F21`/`14-F9` — author the org's inventory reference set.
+   *
+   * **`catalog.edit_recipes`, and no action is minted.** It ships in `PERMISSION_ACTIONS` already
+   * (owner-only), it is the action `14-F9`'s recipe editor is named for, and `10-F31`'s two scope
+   * flags and `10-F29`'s count units are reference data on the same records. Minting a second
+   * action for "the same owner edits the same records through a different field" would be
+   * inventing policy (commandment 2) and would differ in nothing an implementation can observe —
+   * `02-F47`'s own argument for not splitting `customer.record`.
+   *
+   * ⚠ **THE REFUSALS RUN HERE, AT THE WRITER, AND NOWHERE ELSE.** `10-F31`'s R1–R5 — an
+   * `is_counted` item that is not `is_costed`, an uncostable recipe leaf, a cycle, a missing
+   * component, a duplicate item — are `referenceRefusals`' job, and this is the only place they
+   * are enforced. That is `14-F29`/`01-F60`'s precedent and it is load-bearing rather than
+   * stylistic: a REPORT that repaired an incomplete reference set would be guessing at exactly the
+   * values R5 forbids it to guess, and the owner is standing here with the fix one keystroke away.
+   *
+   * ⚠ **It refuses the WHOLE set or accepts the whole set.** A partial publish would leave a
+   * recipe pointing at an item that was refused, which is `01-F56`'s `malformed` arriving as a
+   * dangling reference instead of a refusal.
+   *
+   * ⚠ **There is no back-office SCREEN for this yet** (slice 1 step 5). An owner authors through
+   * the API. Named rather than left to look intentional.
+   */
+  saveReference: authorized("catalog.edit_recipes")
+    .input(InventoryReferenceInput)
+    .mutation(async ({ ctx, input }) => {
+      const refs = toReferenceData(input);
+      const refusals = referenceRefusals(refs);
+      if (refusals.length > 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          // Every refusal names its own FR — commandment 2: a refusal with no FR is invented
+          // policy — and the SUBJECT, because `10-F31`'s dish gate IS the repair queue and a
+          // refusal an owner cannot act on is a refusal she will route around.
+          message: refusals.map((r) => `${r.fr} ${r.code}: ${r.subject} — ${r.detail}`).join("; "),
+        });
+      }
+      return {
+        version: await ctx.inventory.publish(ctx.subject.org_id, refs, {
+          actor_user_id: ctx.subject.user_id,
+          now: ctx.now(),
+        }),
+      };
+    }),
+
   /**
    * Every closed `10-F28` period inside the window, ranked by `10-F33` (b) in PKR — with
    * `not counted` rows named rather than zeroed, the money total flagged a floor when any row could

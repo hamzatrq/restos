@@ -696,3 +696,56 @@ export const staffEntries = kernel.table(
     ),
   ],
 );
+
+/**
+ * `01-F21`'s inventory reference set — the VERSION axis, org-scoped (`01-F76`).
+ *
+ * `0013_inventory_reference.sql` carries the argument; the two load-bearing halves are that this
+ * row is the COMMIT POINT (written last, so a reader that sees version N sees every entry of N)
+ * and that the set is org-scoped because an item's identity, base unit and recipe are org facts.
+ */
+export const inventoryVersions = kernel.table(
+  "inventory_versions",
+  {
+    org_id: text("org_id").notNull(),
+    version: bigint("version", { mode: "number" }).notNull(),
+    published_at: bigint("published_at", { mode: "number" }).notNull(),
+    actor_user_id: text("actor_user_id"),
+  },
+  (t) => [primaryKey({ columns: [t.org_id, t.version] })],
+);
+
+/**
+ * What CHANGED at each version — `catalogEntries`' shape, and its reasons transfer whole.
+ *
+ * `payload` is `jsonb` and this service has NO opinion about what is in it. The six kinds share
+ * almost nothing structurally, and `packages/inventory`'s `ReferenceData` is the ONE declaration
+ * of their shape (`18 §2`); a column layout here would be a second one, free to drift. Every
+ * refusal that decides whether a reference set is publishable — `10-F31`'s R1–R5, carried by
+ * `referenceRefusals` — is enforced at the WRITER, which is `14-F29`/`01-F60`'s precedent and is
+ * where the owner is standing when the fix is one keystroke away.
+ *
+ * `deleted` is a TOMBSTONE (`01-F55`, R26). A retired item must still name itself in a CLOSED
+ * period's variance report, and `10-F18` is a difference of two counts — so an item that vanished
+ * between them would turn a real gap into a missing row.
+ */
+export const inventoryEntries = kernel.table(
+  "inventory_entries",
+  {
+    org_id: text("org_id").notNull(),
+    version: bigint("version", { mode: "number" }).notNull(),
+    kind: text("kind").notNull(),
+    entry_id: text("entry_id").notNull(),
+    payload: jsonb("payload").notNull(),
+    deleted: bigint("deleted", { mode: "number" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.org_id, t.version, t.kind, t.entry_id] }),
+    index("inventory_entries_org_kind_entry_version_idx").on(
+      t.org_id,
+      t.kind,
+      t.entry_id,
+      t.version,
+    ),
+  ],
+);

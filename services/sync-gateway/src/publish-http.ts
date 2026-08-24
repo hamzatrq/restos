@@ -5,6 +5,12 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { type CatalogEntry, catalogPage, publishCatalog } from "./catalog.js";
 import { readDayWindow } from "./day-ledger.js";
+import {
+  INVENTORY_KINDS,
+  type InventoryEntry,
+  inventoryReferenceAt,
+  publishInventoryReference,
+} from "./inventory-reference.js";
 import { appendOrgEvent, orgEventHistory } from "./org-events.js";
 import { listDevices } from "./registry.js";
 // `revoke-device.ts` carries a main-module entry guard, so importing it runs nothing. Reaching for
@@ -84,6 +90,30 @@ const OrgEventRequest = z.strictObject({
 });
 
 const OrgQuery = z.object({ org_id: z.string().min(1) });
+
+/**
+ * `01-F21`'s inventory reference set, as `services/api` publishes it.
+ *
+ * `strictObject` on the envelope for `28-F13`'s reason — a field the caller believes it is sending
+ * must not be silently dropped — but the ENTRY's `payload` is deliberately `looseObject`-shaped
+ * (`z.record`): this service has no opinion about what an item or a recipe is, and the one
+ * declaration of that shape is `packages/inventory`'s `ReferenceData`, validated at the writer in
+ * `services/api`. A schema here would be a second declaration free to drift, which is the defect
+ * `01-F60` cost three weeks and `03-F40`'s two sensor bit layouts is this corpus's own instance.
+ */
+const InventoryPublishRequest = z.strictObject({
+  org_id: z.string().min(1),
+  entries: z.array(
+    z.strictObject({
+      kind: z.enum(INVENTORY_KINDS),
+      id: z.string().min(1),
+      payload: z.record(z.string(), z.unknown()),
+      deleted: z.boolean().optional(),
+    }),
+  ),
+  actor_user_id: z.union([z.string().min(1), z.null()]),
+  now: z.number().int(),
+});
 
 /**
  * `14-F13`'s revocation, arriving from `services/api` on behalf of an AUTHENTICATED owner.
@@ -745,6 +775,61 @@ export const registerPublishRoutes = (app: FastifyInstance, deps: PublishDeps): 
    * `summary.ts`. `latest_arrival_ms` is the one exception and it is a scalar about the ORG's
    * freshness (`12-F8`), never attachable to an event.
    */
+  /**
+   * `01-F21` — publish the org's inventory reference set as the next version.
+   *
+   * The catalog's publish route one screen up is the shape and the reasons transfer; what does NOT
+   * transfer is the notice. `/internal/catalog/publish` calls `notifyCatalogVersion` after the
+   * commit so a connected till learns of a menu change without waiting for its next reconnect.
+   * **There is deliberately no equivalent here, and it is an ABSENCE with a reason rather than an
+   * omission:** `01-F75`'s resource set is closed and holds no `inventory` member, so no device can
+   * fetch this artifact at all yet (amendment **A1**, `plans/inventory/design.md` §6). A notice for
+   * a resource no device can request would be a producer with no consumer — this repo's own most
+   * recorded defect, built on purpose. It lands with A1, in the same change as the wire arm.
+   */
+  app.post("/internal/inventory/publish", async (request, reply) => {
+    const parsed = InventoryPublishRequest.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: `inventory publish: ${z.prettifyError(parsed.error)}` });
+    }
+    const { org_id, entries, actor_user_id, now } = parsed.data;
+    try {
+      const version = await publishInventoryReference(
+        deps.db,
+        org_id,
+        entries as InventoryEntry[],
+        { actor_user_id, now },
+      );
+      return reply.code(200).send({ version });
+    } catch (error: unknown) {
+      return reply.code(refusalStatus(error)).send({ error: messageOf(error) });
+    }
+  });
+
+  /**
+   * `10-F18`'s reference input — the whole current set, tombstones applied.
+   *
+   * A READ that `services/api` makes on the variance path, exactly as `/internal/ledger/window` is.
+   * ⚠ **`version: 0` with an empty `entries` means NOTHING HAS EVER BEEN PUBLISHED and the caller
+   * must not render it as an empty reference set.** They are the same bytes and different facts,
+   * and the difference is the whole reason `unconfiguredInventoryReference` refuses rather than
+   * answering `{ items: [] }` — a confident, complete, entirely empty variance report for a
+   * location that may be short any amount at all (`00 §5.7`). This service states the version and
+   * makes no judgement; `services/api` is where that becomes a refusal.
+   */
+  app.get("/internal/inventory/reference", async (request, reply) => {
+    const parsed = OrgQuery.safeParse(request.query);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "inventory reference: org_id required" });
+    }
+    try {
+      return reply.code(200).send(await inventoryReferenceAt(deps.db, parsed.data.org_id));
+    } catch (error: unknown) {
+      request.log.error({ err: error }, "inventory reference: database read failed");
+      return reply.code(500).send({ error: databaseFailure("inventory reference", error) });
+    }
+  });
+
   app.get("/internal/ledger/window", async (request, reply) => {
     const parsed = LedgerWindowQuery.safeParse(request.query);
     if (!parsed.success) {
