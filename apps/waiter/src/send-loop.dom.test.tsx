@@ -298,6 +298,43 @@ describe("§A 04-F29 — a lost confirm answer never re-rings a line that landed
     await waitFor(() => expect(confirms(rig.calls).length).toBe(1));
     expect(addLines(rig.calls), "it invented lines the waiter never captured").toHaveLength(0);
   });
+
+  /**
+   * ⚠ **THIS ROW EXISTS BECAUSE A MUTANT SURVIVED, and it is the round-3 law landing on the fix
+   * rather than on the original code.** Dropping the pad's own owed-confirm flag from SEND's
+   * enablement killed **0 of 13** tests: every other case here leaves the till holding lines it
+   * has never confirmed, and that third leg covers them. The case only the flag covers is the
+   * SECOND round — `04-F8`'s incremental KOT — where the order is already confirmed, so the till's
+   * own answer is *"nothing owed"* while a station has no ticket for the lines just sent. That is
+   * `03-F55`'s defect (*"a line added after Send to kitchen never reached the kitchen"*) arriving
+   * at the pad by a different door, and reading the suite would not have found it.
+   */
+  it("A6 — a SECOND round on an ALREADY-CONFIRMED order still owes the kitchen its addendum", async () => {
+    const rig = till({ dropConfirm: true });
+    rig.state.lines = 2;
+    rig.state.confirmed = true;
+    mounted(rig.client);
+    await signIn();
+    press("7");
+    press("Naan");
+    press(STRINGS.send);
+    await waitFor(() => expect(addLines(rig.calls).length).toBe(1));
+    await waitFor(() => expect(confirms(rig.calls).length).toBe(1));
+
+    // The till says CONFIRMED and holds the new line; only this pad knows the confirm it sent was
+    // never acknowledged. SEND must stay live, or the addendum is never fired.
+    await waitFor(() => {
+      const send = screen.getAllByText(STRINGS.send)[0]?.closest("button");
+      expect(
+        send?.getAttribute("aria-label") ?? "",
+        "SEND went quiet over an addendum the kitchen has no ticket for (04-F8/03-F55)",
+      ).not.toContain(STRINGS.nothingToSend);
+    });
+    press(STRINGS.send);
+    await waitFor(() => expect(confirms(rig.calls).length).toBe(2));
+    // …and it re-sent the CONFIRM alone. The line that landed is not rung twice.
+    expect(addLines(rig.calls)).toHaveLength(1);
+  });
 });
 
 describe("§B 04-F28/01-F59 — the pad captures an 86'd item and refuses only the unpriced one", () => {
