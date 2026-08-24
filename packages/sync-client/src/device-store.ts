@@ -39,6 +39,13 @@ import {
   projectCustomerFile,
 } from "./folds/customer-file.js";
 import {
+  type CustomerOrdersRow,
+  type CustomerOrdersState,
+  emptyCustomerOrders,
+  foldCustomerOrders,
+  projectCustomerOrders,
+} from "./folds/customer-orders.js";
+import {
   type AvailabilityRow,
   createMergeEngine,
   type DropPlan,
@@ -219,6 +226,22 @@ export type DeviceStore = {
    * FAILS the check; this comment is where the grep should land instead.
    */
   customers(): CustomerRow[];
+  /**
+   * `customer_orders` rows (`02-F64`'s order→customer link, `17-F23`'s loyalty counter) — the
+   * EIGHTH device fold, keyed by `01-F23`'s phone.
+   *
+   * **It projects COUNTS and never an ANSWER.** `17-F23` puts the division by `17-F14`'s `N` at
+   * RENDER time, because `01-F87` forbids a fold reading configuration and two tills at different
+   * `campaign` artifact versions would otherwise project different rewards from an identical event
+   * set. `@restos/domain`'s `loyaltyAvailable` is the one place that division happens.
+   *
+   * The seam that reaches it in production is `apps/pos-electron`'s `gateway.loyaltyFor` (the
+   * caller strip's reward line) and `linkCustomerToOrder` (the emitter of the link this fold
+   * consumes) — named here rather than left to a grep, because `pnpm seams:check` cannot see a
+   * method on a returned object under either rule, and `customers()` directly above spent a whole
+   * release with a comment saying its own loop was still open.
+   */
+  customerOrders(): CustomerOrdersRow[];
   refold(): void;
   /** Fold work counters (T-01-15 contract; events_folded is the real quantity). */
   foldStats(): FoldStats;
@@ -763,6 +786,13 @@ export const createDeviceStore = (options: {
   // reopen self-heal rebuilds it by the same replay that rebuilds every other fold table.
   let customerFile: CustomerFileState = emptyCustomerFile();
 
+  // The `customer_orders` accumulator (`02-F64`'s link, `17-F23`'s counter). In memory and
+  // projected on read for the same reasons as `shiftCash` and `customerFile` above: nothing
+  // queries it through SQL, and the reopen self-heal rebuilds it by the same replay that rebuilds
+  // every other fold table. **Projected on read is also what keeps `17-F23`'s division a RENDER** —
+  // a materialized table here is one keystroke from the `01-F87` break that FR names.
+  let customerOrders: CustomerOrdersState = emptyCustomerOrders();
+
   const readAllParsed = (): ParsedEvent[] =>
     // Audit events are fold-inert (01-F5/01-F6): they carry no order/line/money
     // state, so they never enter the fold feed.
@@ -821,9 +851,11 @@ export const createDeviceStore = (options: {
     engine.rebuild(events);
     shiftCash = emptyShiftCash();
     customerFile = emptyCustomerFile();
+    customerOrders = emptyCustomerOrders();
     for (const event of events) {
       shiftCash = foldShiftCash(shiftCash, event.envelope);
       customerFile = foldCustomerFile(customerFile, event.envelope);
+      customerOrders = foldCustomerOrders(customerOrders, event.envelope);
     }
     writeFullTables(engine.snapshot());
   };
@@ -919,6 +951,11 @@ export const createDeviceStore = (options: {
     // INSIDE ingest with no try/catch between, so it never throws — an unknown type changes
     // nothing and a customer event can never wedge the ingest of a real, rung-up sale (01-F17).
     customerFile = foldCustomerFile(customerFile, parsed.envelope);
+    // The `customer_orders` fold (`02-F64`, `17-F23`). Same position and the same obligation as the
+    // two folds above: it runs INSIDE ingest with no try/catch between, so it never throws — an
+    // unknown type changes nothing, and a loyalty event can never wedge the ingest of a real,
+    // rung-up sale (`01-F17`).
+    customerOrders = foldCustomerOrders(customerOrders, parsed.envelope);
   };
 
   // Lamport assignment and the durable insert are one transaction (01-F3): a
@@ -1320,6 +1357,10 @@ export const createDeviceStore = (options: {
 
     customers() {
       return projectCustomerFile(customerFile).customers;
+    },
+
+    customerOrders() {
+      return projectCustomerOrders(customerOrders).customers;
     },
 
     refold() {

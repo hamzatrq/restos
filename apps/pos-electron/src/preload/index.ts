@@ -48,6 +48,10 @@ const bridge: RestosBridge = {
   // would be a second writer of the key and two rules make one customer two identities.
   lookupCustomer: (dialled) => ipcRenderer.invoke(CHANNELS.lookupCustomer, dialled),
   recordCustomer: (req) => ipcRenderer.invoke(CHANNELS.recordCustomer, req),
+  linkCustomer: (req) => ipcRenderer.invoke(CHANNELS.linkCustomer, req),
+  loyaltyFor: (phone_e164) => ipcRenderer.invoke(CHANNELS.loyaltyFor, phone_e164),
+  // `17-F27` (a) — the campaign tiles the correction surface cites from. Display-only.
+  campaignOffers: (order_id) => ipcRenderer.invoke(CHANNELS.campaignOffers, order_id),
   // `02-F20`'s local manager-PIN path. Optional on the contract, always served here, for the
   // reason `cashState` and `alarms` record above: this bridge is the one main actually ships.
   // The offer is display data read off the matrix; the approval is the credential call.

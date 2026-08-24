@@ -390,4 +390,6 @@ export const voidExitsLine = (deps: LineVoidDeps): RendererWrites => ({
   addLine: (req: unknown): AppendResult => deps.writes.addLine(req),
   toggleAvailability: (req: unknown): AppendResult => deps.writes.toggleAvailability(req),
   recordCustomer: (req: unknown): AppendResult => deps.writes.recordCustomer(req),
+  // `02-F64` — passed straight through: this guard has no opinion about a customer link.
+  linkCustomer: (req: unknown): AppendResult => deps.writes.linkCustomer(req),
 });

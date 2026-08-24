@@ -2111,3 +2111,285 @@ was killed by `packages/domain` and by `apps/pos-electron` and by **nothing** in
 `order-tax.test.ts`, because no fixture there landed on an exact half — the round-3 shape exactly.
 `§E` now carries `Rs 45.50` at the rupee and `Rs 45.00` at ten rupees, and the mutant dies there too.
 Reading the suite would not have found that; running the mutant did.
+
+
+## ✅ `02-F64`'s LINK AND `17-F24`'s CAMPAIGN ARM REACH THE TILL (August 2026)
+
+`shared/ipc.ts` recorded the hole in a comment for the life of the gap — *"no event in the corpus can
+say which customer an order is for"* — and **four** features were blocked on that one field
+(`02-F10`'s search by phone, `02-F14`'s khata, `02-F27`'s order history, `17-F23`'s loyalty). The
+chain now runs: `Counter.tsx` `startOrder` → `CHANNELS.linkCustomer` → `authorizeWrites.linkCustomer`
+(matrix-guarded under `02-F47`'s `customer.record`) → `gateway.linkCustomer` (which derives `01-F23`'s
+key with the SAME `normalizeDialledPhone` the lookup uses) → the `customer_orders` fold →
+`gateway.loyaltyFor` → the caller strip's reward line.
+
+**`main/campaigns.ts` is the v0 seed for `17-F22`'s artifact** (`RESTOS_CAMPAIGNS`,
+`RESTOS_CAMPAIGNS_VERSION`), built on `tax-posture.ts`'s shape deliberately so `01-F87`'s carrier
+deletes two files with one argument. ⚠ **It differs from the tax cell in exactly ONE way and that is
+the point of `17-F22`:** a malformed tax cell THROWS and the till does not start; a malformed campaign
+artifact yields **no campaigns** and the till starts and sells. That is `01-F56`'s `malformed` scoped
+to the thing that was malformed, which is the whole argument for a fifth `01-F75` resource rather than
+a key inside `config`. An implementation that threw here would undo the FR it implements.
+
+### ✅ `17-F27` — THE CAMPAIGN ARM HAD NO PRODUCER, AND NOW IT DOES (August 2026, adversarial review)
+
+**⚠ THE SECTION ABOVE PRESENTED `17-F24`'s ARM AS SHIPPED AND IT WAS UNREACHABLE FROM THE
+BINARY.** `authorize.ts` read `payload.campaign_id`, `canDiscount` had an arm for it, and **nothing
+anywhere in the product produced that key**: the only emitter of `discount.recorded` is
+`Counter.tsx`'s `correctLine`, whose payload was five literal fields. Measured comment-blind and
+symbol-precise across every renderer, the back office, the manager and owner apps and
+`services/api`: **three hits, all comments.** So `campaign` was permanently `null`, the arm could
+never fire, and `campaignCitationFor` / `campaignApplies` / `campaignBenefitPaisa` were never asked
+a question with a non-null answer. That is `L8` in the one shape `seams:check` says out loud it
+cannot see — **a missing producer for a payload KEY** — and the owed list below did not name it.
+
+**What ships now:** `main/campaigns.ts` `campaignOffersFor` → `CHANNELS.campaignOffers` (a
+display-only read, `escalationFor`'s precedent) → `Counter.tsx` → `LineCorrection`'s *Under which
+offer?* panel → `campaign_id` on the payload → `stampCampaignVersion` (INSIDE `authorizeWrites`, on
+both the ordinary and the escalated route) stamping `campaign_version` from the device's own
+artifact. The offer list and the citation come from **one** resolution (`reachOf`), because two
+resolutions of one question disagree and the disagreement is a cashier offered a campaign the write
+guard then refuses (`02-F45`).
+
+**Three `17-F22` row fields are REFUSED rather than honoured, and that is the fix for a second
+defect.** `item_scope`, `use_limit` and `proof` were read by nothing while the resolver still
+answered *within bounds*: a *20% off pizzas* campaign pre-approved 20% of a Rs 10,000 bill
+(**20x its intended bound**, measured), one `once_per_order` citation repeated 50 times, and a
+`coupon` was pre-approved with no code. Each now resolves to `null` on `free_item`'s own precedent
+— *a bound this predicate cannot compute is not a blessing* — so a large scoped, limited or
+proof-carrying discount asks for a manager. **The class closed and the one not (`L11`):** the arm no
+longer blesses an amount it never bounded; none of the three is IMPLEMENTED, and whoever builds the
+scoped base, the use counter or the proof capture DELETES an arm rather than adding one.
+
+**`registry.ts`'s `discount.recorded` header claimed the writer-side pairing before it existed** —
+`campaigns.ts` contained the string `campaign_version` zero times, and a real store accepted and
+persisted both a citation with no version and `campaign_version: 999` against an artifact at
+version 1. Corrected in place, and the claim is true now.
+
+**The caller strip stopped rendering a claimable count** (`17-F23` as amended): `available` only
+ever goes up because nothing emits `loyalty.reward_redeemed`, so 50 settled linked orders read
+**"5 rewards to claim"** with `orders_consumed_total` `"0"` — to a regular who may already have
+taken five. The line states the fact and names the degradation instead, and
+`loyalty-seam.test.ts` §H is the **tripwire** that fails the day anything here emits a redemption.
+
+**⚠ THE LAYOUT COST OF THE NEW PANEL IS UNMEASURED, and it is a pre-existing gap rather than one
+this change created.** `layout:check` has never reached the correction surface at all — its fixture
+navigates the tabs, the unlock pad and `ManagerApproval`, and presses `Correct a line` nowhere — so
+`LineCorrection` was outside the sweep before this panel and is outside it now. It adds one `Panel`
+of chrome in the discount arm when a campaign reaches the order, on a surface that clips rather than
+scrolls (`27-F2`). Whoever puts that surface in the gate must drive it with a campaign served.
+The `27-F4` PR justification for the panel's position is in `LineCorrection.tsx` at the panel.
+
+### ✅ THE RE-REVIEW'S THREE (August 2026) — a guard aimed one case away, a bound that was never an order's, and a panel nobody had measured
+
+A second adversarial pass over `17-F27` confirmed the producer reaches the product and then found what
+the fix introduced. All three are closed here; the numbers below are kills ABOVE a control of
+**pos-electron 1397 pass / 5 env-red** (`startup-integrity.test.ts` spawns real Electron — an
+environment prerequisite, `T-01-07`), **domain 823 / 44 known-red**, **sync-client 1028 / 1**.
+
+**F1 — `unresolvableScope` refused three FIELDS and never asked about the `kind`, so the loyalty
+reward was given away on order #1.** `17-F22` closes `kind` at four values and three of them name
+something this device cannot check: `account_loyalty`'s benefit is EARNED (`17-F23`'s two counts,
+neither of which this path holds — its only production readers of `every_n` are `gateway.ts`'s
+caller strip and the schema), and `coupon`/`bearer_card` name a thing in her hand while `proof` is a
+SEPARATE field a writer may leave at `none`. Reproduced before the fix, with Como's own *custom
+punch card (%, fixed)* shape on a customer's first ever linked order:
+`offers [{"campaign_id":"camp-punch","bound_paisa":45000}]` and
+`cite {"campaign_id":"camp-punch","within_campaign_bounds":true}` — allow, again next order, with
+nothing decrementing anything. `{kind: "coupon", code: "ABCD", proof: "none"}` was pre-approved with
+no coupon presented, which is the defect the `proof` arm was written for arriving one field over.
+**Only `auto_deal` takes the arm now, as a WHITELIST** so a kind added later is refused rather than
+pre-approved by omission (`17-F24` as amended).
+
+**F2 — `within_campaign_bounds` bounds ONE ACT and not an order, and no FR said so.** Nothing counts
+citations: there is no `discount.recorded` projection on the device (`DEC-MONEY-010` holds `01-F30`'s
+discount term absent) and the whole-ledger read that would substitute is what `17-N3`'s 100 ms budget
+forbids. Measured with R71's own row (50% off, capped at Rs 10,000) against a Rs 30,000 bill:
+`1_000_000, 1_000_000, 500_000, 250_000, 125_000` = **Rs 28,750 pre-approved, no manager,
+permanently**. **Not closed in code, and that is the honest answer** — both jaws of the pincer
+`17-F24` now records need a per-order citation count (a `packages/sync-client` projection) plus a
+founder call on which to build, and the F2 row below measures what the nearer jaw costs today.
+`loyalty-seam.test.ts` §D pins the measurement so the day a counter lands, the FR and the assertion
+move together.
+
+**F3 — the correction surface entered `layout:check` for the first time, and the offer panel had
+taken the one shipping panel that was at zero off it.** Two fixture halves were needed and either
+alone measures nothing: `states` on a cart line (without it `correctionUnavailable` greys every line
+tile) and one served `campaignOffers` (without it the offer region does not render). The gate drives
+`Correct a line → the dish → Discount → cite → 3,0,0` and judges two states per panel, with a
+`24-F14` counter demanding 22 of them.
+
+| panel | pre-`17-F27` (no offer) | the shipped panel | **beside the pad (fixed)** |
+|---|---|---|---|
+| **laptop-1280** (`ships`) | 0 px, 0 unreachable | **34 px, 3 unreachable** (`C` `0` `⌫`) | **0 px, 0 unreachable** |
+| counter-1366 / 1920 | 2 painted-over | **19 painted-over** | 4 painted-over |
+| tablet-11.6 | 27 px | 73 px | 27 px |
+| laptop-13.3-hd | 30 px | 84 px | 30 px |
+| laptop-12.5 | 69 px | 119 px | 69 px |
+| netbook-1024 (`ships`) | 110 px | 147 px | 110 px |
+| tablet-10.1 (`ships`) | 125 px | 159 px | 125 px |
+| probe-below-floor (`ships: false`) | 177 px, 6 unreachable | 204 px, 6 | 177 px, **8** |
+
+**The fix is the AXIS and not the chrome.** The offers sit beside the `27-F8` keypad inside `How
+much` rather than in a region above it: the pad is four rows tall and the offer column two, so the
+region costs no height at all, and **every panel's overflow returns to its no-offer number exactly**.
+Trimming chrome was tried first and measured WORSE — merging the two regions into one un-shrinkable
+panel took `laptop-1280` to 321 px and 6 unreachable, because the surface's panels currently shrink
+past their content rather than overflowing. What the offers still cost is two controls: on panels
+where this surface already overlaps itself they land inside the overlap, and on the below-floor probe
+they are +2 unreachable.
+
+**⚠ AND THE MEASUREMENT FOUND A BIGGER DEFECT THAT IS NOT THIS CHANGE'S — REPORTED, NOT FIXED.**
+`LineCorrection` **overlaps its own controls on every panel with no offer served at all**: the
+pre-`17-F27` control reports 3 and 2 painted-over controls on `counter-1366`'s two states, 6 and 13
+on `laptop-1280`, 12 on `tablet-10.1` — while `main` reports NO overflow on the counter, because the
+root is `height: 100%` and its `Panel` children shrink below their content, so tiles spill and paint
+over the region beneath. The keypad's digit rows and the reason tiles land on the same pixels: a
+cashier reaching for *Wrong item* can hit `7`. That is a Wave-1 `02-F61` defect, invisible to all
+1,402 tests here and invisible to this gate until the fixture reached the surface, and the remedy is
+an arrangement decision for that surface's owner (`24 §3b`). **`27-F2` bans reaching a control by
+scrolling, so "make it scroll" is not the fix either.**
+
+**Two comments were pointing at assertions that do not exist (`L11`), both corrected in place:**
+`Counter.tsx`'s reward line cited `loyalty-seam.test.ts` §F for the redemption tripwire (it is §H;
+§F is the offer list), and `packages/sync-client`'s `customer-orders.ts` cited §I of a file whose
+sections run A–G. A third was worse and is recorded in `packages/domain/CLAUDE.md`.
+
+#### Mutation matrix — control **pos 1397 / 5 env-red**, **domain 823 / 44**, one branch per row
+
+In-tree, byte-exact restore with a **sha256 trap asserted after every row** and a no-op-mutant guard;
+`REAL_EXIT` inside each log and the counts read off vitest's own `Tests` line (`T2`). Nothing here is
+a security constant, which is the narrow case `T8` leaves in-tree.
+
+| # | mutant (exactly one branch) | pos | domain |
+|---|---|---|---|
+| NC | **NEGATIVE CONTROL** — `unresolvableRow` as an early-return chain | **0** | — |
+| NC2 | **NEGATIVE CONTROL** — `loyaltyOrdersToNextReward`'s guard destructured | — | **0** |
+| S1 | **THE SEAM DELETED** — `Counter.tsx`'s payload drops the citation spread | **2** | — |
+| S2 | **THE SEAM INERT** — the call site stays and the handler answers `[]` | **1** | — |
+| F1a | **THE DEFECT VERBATIM** — the guard back to its three fields | **2** | — |
+| F1b | **AIMED ONE CASE AWAY** — `kind === "account_loyalty"` only, so a coupon slips through | **1** | — |
+| F2 | the nearer jaw closed blind — a cap-carrying row refused | **11** | — |
+| F5a | the countdown back to `every_n − Number(remaining)` | — | **1** |
+| F5b | the benefit's money domain opened (`.int()` dropped) | — | **1** |
+| F4c | `campaignApplies` gains an `item_scope` arm — the "fix" the corrected comment invites | — | **1** |
+
+**In every row the only failing files beyond the control's known-red set are files this change
+authored or amended.** **S1 against S2 is `L7`'s pair and the two numbers the task asked for: the
+call site deleted kills 2 (one of them the behavioural DOM test), the supply made inert kills 1 —
+neither subsumes the other, and R71 has behaviour because both are non-zero.** **F2's 11 is the row
+to read before closing that jaw:** refusing a cap-carrying row is one of the two remedies the review
+named, and it is not free — it takes out eleven assertions that exist because R71's own case carries
+a cap.
+
+**Layout mutants (the fixture is the coverage boundary):** removing `states` from the fixture's cart
+line → **11 EMPTY MATCHes + `0 of 22 correction surfaces measured`**; `campaignOffers` back to `[]`
+→ **11 EMPTY MATCHes + the same counter**. Both directions, both loud. ⚠ **And one of them fired for
+real during the work:** writing the region's caption upper-case at the call site (instead of
+`Panel`'s rule — sentence case, capitals in CSS) made the probe blind and the gate reported 22 empty
+matches rather than a clean sweep. The tripwire caught the tripwire's own blind spot.
+
+⚠ **RUN THE GATE ON A DISPLAY LARGER THAN THE LARGEST PANEL.** Every number above was re-measured
+under `xvfb-run -a -s "-screen 0 2560x1600x24"`. The first pass used `xvfb-run`'s 1280x1024 default,
+which clamps the 1366- and 1920-wide windows and makes the gate accuse `useContentSize` of a defect
+that exists only in the rig — this file already records that trap and it cost a set of numbers here.
+
+#### Mutation matrix — control **pos 1394 pass / 5 env-red**, domain **820/44**, sync **1028/1**
+
+In-tree, one branch per mutant, restored from a pre-run SNAPSHOT (not `git checkout --`: the fixes
+under test are uncommitted, so the index is the pre-fix tree) with a **sha256 trap asserted after
+every row**. `REAL_EXIT` inside each log and the counts read off vitest's own `Tests` line (`T2`).
+Nothing here is a security constant — every mutant reds a test rather than silently downgrading a
+credential, which is the narrow case `T8` leaves in-tree.
+
+| # | mutant (exactly one branch) | pos | domain | sync |
+|---|---|---|---|---|
+| NC | **NEGATIVE CONTROL** — `unresolvableScope` as an early-return chain, the stamp's known-check destructured, `loyaltyOrdersToNextReward` destructured | **0** | **0** | **0** |
+| D1a | **THE SEAM DELETED** — `Counter.tsx`'s payload drops the citation (the pre-`17-F27` tree) | **2** | — | — |
+| D1b | **THE SEAM INERT** — the handler answers `[]` while the resolver stays constructed | **1** ⚠ *survived at 0 first* | — | — |
+| D1c | **THE SEAM INERT, deeper** — `campaignOffersFor` returns `[]` for every order | **2** | — | — |
+| D1d | **THE SEAM CUT AT THE SURFACE** — `Counter` passes `campaigns={[]}` | **5** | — | — |
+| D2a/b/c | the `item_scope` / `use_limit` / `proof` arm dropped, one at a time | **2** each | — | — |
+| D2d | all three dropped — the shipped resolver before this change | **4** | — | — |
+| D3a | **THE STAMP UNWIRED** — `authorizeWrites` back over `voidGuarded` | **3** | — | — |
+| D3b | the renderer's `campaign_version` TRUSTED instead of overwritten | **1** | — | — |
+| D3c | an unknown campaign keeps its id — a rule this device cannot state, recorded | **1** | — | — |
+| D3d | **THE ESCALATED ROUTE GOES ROUND IT** — `authorizeEscalation` back over `voidGuarded` | **1** | — | — |
+| D4 | **THE DEFECT VERBATIM** — the caller strip renders the claimable count again | **1** | — | — |
+| D5 | the quadratic scan restored — `rowOf` walks the whole order map | — | — | **1** |
+| S1 | `percent_bps`'s upper bound removed | — | **1** | — |
+| S2 | `loyaltyOrdersToNextReward` back to the modulo form | — | **1** | — |
+| RA2 | **THE REVIEW'S MUTANT A** — the link guard aimed at a channel that never occurs | **1** | — | — |
+| RC | **THE REVIEW'S MUTANT C** — `deviceCampaignArtifact` replaced by a constant | **1** | — | — |
+
+**In every row the only failing files beyond the control's known-red set are files this change
+authored or amended**, so every kill is attributable.
+
+**⚠ D1b SURVIVED ITS FIRST RUN AT 1,391/1,391 AND THAT IS THE MOST USEFUL ROW HERE.** The first
+draft of SEAM 5 asserted the channel NAME and the resolver's CONSTRUCTION as two independent
+strings — and a mutant that left both in place while answering the handler with a literal `[]`
+passed **every test in the package**, because §F builds its own resolver and never crosses the
+host's wiring. That is *a port supplied with a STUB* arriving one layer above where the rail looks:
+the resolver is reached, the channel is served, and **the two are not joined**. The assertion now
+pins them together within one expression. **Reading the suite would not have found it; running the
+mutant did.**
+
+**D1a against D1c is the `L7` pair on this producer:** the call site deleted (2 kills, one of them
+the behavioural DOM test) and the supply made inert (2 kills, none of them behavioural, because the
+DOM harness serves its own offers). Neither subsumes the other. **RA2 and RC are the two mutants an
+adversarial review left alive on this branch** — a source-string seam sees the CALL and never the
+CONDITION that reaches it, and a stub one indirection deeper than the rail looks is still a supply.
+Both die now, RA2 in a new behavioural §B in `phone-entry-save.dom.test.tsx` and RC in a new §C2
+that drives the shipping resolver against a real `process.env`.
+
+**⚠ ONE FORMULATION OF MUTANT A COULD NOT BE REPRODUCED AT 0 DELTA.** Aiming the guard at
+`"storefront"` kills **2** (the new §B *and* a pre-existing `confirm-idempotence.dom.test.tsx`
+assertion, which was green on the clean tree); aiming it at `"foodpanda"` — a real channel a caller
+never latches on — kills **1**, in §B alone. The review measured 0 for its own formulation; ours is
+not byte-identical to theirs, so **RA2 is the row to quote** and the discrepancy is recorded rather
+than smoothed over.
+
+**⚠ WHAT IS OWED AND IS NAMED RATHER THAN LEFT TO LOOK INTENTIONAL.**
+- **Only the PHONE channel links.** `startOrder` emits the link when `pendingChannel` is
+  `PHONE_CHANNEL` and a caller is latched, because the caller strip is the only surface that resolves
+  one. A counter walk-in who is on file cannot be linked, so `17-F14`'s coffee-shop regular — the
+  founder's own case — accrues nothing unless she orders by phone. The surface for that is doc 02's.
+- **Linking LATER is possible and has no surface.** `02-F64` chose a separate event precisely so
+  `02-F14`'s khata-after-eating and `17-F17`'s mid-order lookup work; the schema, the guard, the fold
+  and the channel all support it and nothing calls it after `startOrder`. **The expensive half of
+  Shape B is paid and the cheap half is unbuilt** — say so rather than letting the FR read as done.
+- **Applying a reward is not built.** `loyaltyFor` shows what is claimable; nothing emits
+  `loyalty.reward_redeemed`, so `17-F17`'s *"→ apply"* has no producer. The fold consumes the type,
+  the schema exists, and the act does not — which is this file's most-recorded shape and is recorded
+  here as owed rather than discovered later.
+- **`17-F25`'s bearer reconciliation has nothing to read.** Bearer redemptions carry
+  `phone_e164: null`, so they belong to no phone row and the fold holds no count of them; the
+  end-of-day *"6 bearer redemptions on this till"* is a report surface that does not exist.
+
+### Mutation matrix — control **pos 1372 pass / 5 env-red**, sync **1025/1**, domain **817/44**
+
+The 5 env-red are `startup-integrity.test.ts` spawning real Electron with no display (`T-01-07`) —
+**attributed, not assumed**: the same 5 fail at the parent commit with every file of this change
+reverted. In-tree, byte-exact restore, `sha256`-verified, full suites.
+
+| # | mutant (exactly one branch) | pos | sync/domain |
+|---|---|---|---|
+| M9 | **THE SEAM** — `index.ts` drops `campaignCitation` from a write guard | **1** | — |
+| M10 | **THE SEAM** — `Counter.tsx` never calls `linkCustomer` (the pre-`02-F64` tree) | **1** | — |
+| M11 | **THE SEAM** — the store never folds the link | **4** | **4** (sync) |
+| M12 | **THE STUB SUPPLY** — the citation resolver is handed an empty artifact literal | **1** | — |
+| M13 | a malformed artifact THROWS instead of yielding no campaigns (`17-F22` undone) | **1** | — |
+| M14 | one bad row SKIPPED instead of refusing the artifact (`01-F56`) | **2** | — |
+| M15 | two active programmes → pick the first (array position decides the reward) | **1** | — |
+| M16 | an UNSETTLED linked order counts toward the reward (`17-F15` says settled) | **1** | — |
+| M8 | `within_campaign_bounds := campaign_id !== null` — citing becomes being inside | **3** | 0 (domain) |
+| M20 | **NEGATIVE CONTROL** | **0** | **0** |
+
+**M9, M10 and M12 are the rows to re-run after any change here, and their column is the point: each
+kills exactly ONE test and leaves all 1371 others green.** `seams:check` Rule B sees M9 (an optional
+member of an options bag no call site passes) and is blind to M10 and M12 — a method on a returned
+object is neither an unreached export nor an optional member, and **a port supplied with a STUB is
+still a supply**. `__acceptance__/loyalty-seam.test.ts` is the hand-written assertion for all three.
+
+**M8's split with the domain package is the `L7` pair on one FR:** the cap computed wrong is domain's
+(M7, 2 kills there and 0 here), the cap not consulted is this app's (M8, 3 kills here and 0 there).

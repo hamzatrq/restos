@@ -583,6 +583,22 @@ const OTHER_FOLD_TYPES = {
   // by a fold whose projections this engine does not own.
   "customer.created": "01-F23",
   "customer.address_added": "02-F27",
+  // `folds/customer-orders.ts` (the `customer_orders` fold) consumes both, and both are here for
+  // the SAME structural reason as the two customer types above rather than as a judgement call:
+  // their projection is keyed by `01-F23`'s normalized phone, which is neither an order key nor an
+  // item key, so `26 §3`'s sidecar has no key this engine could answer with.
+  //
+  // ⚠ **`order.customer_linked` CARRIES an `order_id` and is still not order-keyed here, which is
+  // the one row in this set a reader will want to move.** The link is a fact about a CUSTOMER's
+  // orders and carries no money: `01-F30`'s conservation equation has nothing to do with it, and
+  // putting it through the order-keyed switch would mean designing a merge rule for it inside the
+  // money engine, whose dispositions `merge-workcounter.test.ts` pins. `02-F64` declares its merge
+  // rule (a G-set of claimant phones per order with `01-F31`'s contested disposition) and
+  // `customer-orders.ts` implements it. The day an ORDER projection needs to render its customer,
+  // this row moves and the sidecar answers two keys — which is exactly the shape `keysFor` returns
+  // a LIST for.
+  "order.customer_linked": "02-F64",
+  "loyalty.reward_redeemed": "17-F23",
 } as const satisfies Partial<Record<KnownEventType, string>>;
 type OtherFoldEventType = keyof typeof OTHER_FOLD_TYPES;
 const isOtherFold = (t: string): t is OtherFoldEventType => t in OTHER_FOLD_TYPES;

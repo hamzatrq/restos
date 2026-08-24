@@ -192,6 +192,22 @@ const ORDER: OpenOrder = {
       note: null,
       // `02-F20`'s corrective needs the line's own money; the engine projects it (`26 §8`).
       billed_paisa: 45_000,
+      /**
+       * **⚠ WITHOUT THIS ONE FIELD `02-F61`'s CORRECTION SURFACE CANNOT BE REACHED AT ALL, AND IT
+       * WAS UNREACHABLE FOR THE WHOLE LIFE OF THIS RAIL** (added August 2026, re-review).
+       *
+       * `LineCorrection`'s `correctionUnavailable` refuses a line whose `states` this device has
+       * not projected — *"this till has not projected this line yet"* — and both live lines here
+       * carried none while the third is `voided`. So every tile on the first step of that surface
+       * was greyed, no act tile could ever render, and the gate could have driven the surface and
+       * measured an empty shell. **The fixture was the coverage boundary and it was closed**,
+       * which is this rail's own most-recorded lesson (`L9`) arriving one surface further in.
+       *
+       * `confirmed` and not `placed`: a cashier reaching for `02-F61` has usually already pressed
+       * *Send to kitchen* — that is the whole reason `01-F1` makes the mis-ring permanent and the
+       * FR exists — and it is a non-terminal state, so the line is correctable.
+       */
+      states: ["confirmed"],
     },
     {
       line_id: "line-2",
@@ -623,6 +639,30 @@ const bridge: RestosBridge = {
           },
     ),
   recordCustomer: () => Promise.resolve({ id: "evt-gate-customer" }),
+  /**
+   * **`17-F27` (a) — ONE REACHING CAMPAIGN, because a panel nothing serves is a panel nothing
+   * measures** (added August 2026, re-review).
+   *
+   * `LineCorrection` draws its *Under which offer?* panel only when the host answers with at
+   * least one offer, so a fixture returning `[]` measures the pre-`17-F27` geometry and reports
+   * green for a surface that has gained a whole `Panel` of chrome in the discount arm. That is
+   * `escalationFor: () => null` verbatim — the line that kept `ManagerApproval`'s dead controls
+   * out of coverage for weeks — and it is why this is a fixture change and not a probe.
+   *
+   * **The id is a UUID and that is the measurement, not decoration.** `17-F27` (b) puts the
+   * campaign's own `campaign_id` on the tile because `17-F22`'s row carries no display name, and
+   * `01-F75` mints ids at the writer — so the widest tile a cashier can meet is one carrying a
+   * minted id, and a fixture using `camp-1` would measure a label no publisher produces.
+   *
+   * ONE offer rather than several: `17-F14` allows one active account programme per org and the
+   * `auto_deal` count is unbounded, so this is the modest case. A fixture with four would be
+   * measuring a state the corpus does not bound, and the honest report is that the multi-offer
+   * geometry is **not measured** — stated here rather than left for a reader to assume.
+   */
+  campaignOffers: () =>
+    Promise.resolve([
+      { campaign_id: "0198c1d4-7f2a-7a31-9c40-6b2e5d3f8a11", bound_paisa: 1_000_000 },
+    ]),
   escalationFor: (req) =>
     Promise.resolve(
       (req as { type?: string }).type === "cash.paid_out"

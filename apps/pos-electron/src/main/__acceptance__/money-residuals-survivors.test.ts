@@ -368,6 +368,8 @@ describe("§E 02-F48 — a NEGATIVE amount is malformed, not nothing", () => {
           addLine: () => ({ id: "unused" }),
           toggleAvailability: () => ({ id: "unused" }),
           recordCustomer: () => ({ id: "unused" }),
+          // `02-F64` stub — this fixture has no opinion about a customer link.
+          linkCustomer: () => ({ id: "unused" }),
         },
       }),
     };

@@ -836,6 +836,30 @@ export type DiscountRequest = {
   /** What comes off the bill, integer paisa (`01 §4`'s payload — a magnitude, never signed). */
   readonly amount_paisa: number;
   /**
+   * `17-F24` / `17-F12` — **the campaign this discount cites, already validated against the order,
+   * or `null` for a discretionary one.**
+   *
+   * ── WHY IT IS A PRE-COMPUTED VERDICT AND NOT THE CAMPAIGN ROW ───────────────────────────────
+   *
+   * The obvious shape is `campaign: CampaignRow | null`, and it is the wrong one. `campaignApplies`
+   * needs the branch, the channel, the business date and whether the order carries `02-F64`'s
+   * link — four facts this module cannot see and must not learn, because a permission predicate
+   * that resolves a business date grows a clock (`01-F45`) and one that reads the order's lines
+   * grows a fold. So the CALLER answers *"does this campaign reach this order, and is this amount
+   * within its cap"*, and hands the two booleans down. `canPayOut`'s `order_total_paisa` is the
+   * same shape of decision one field over: a reading the caller supplies from its own projection,
+   * never re-derived here.
+   *
+   * ⚠ **`within_campaign_bounds` IS NOT `campaign_id !== null`, AND CONFLATING THEM IS THE WHOLE
+   * DEFECT THIS FIELD EXISTS TO PREVENT.** `17-F12`'s last clause is explicit — *"outside its
+   * bounds the normal threshold rules apply untouched"* — so a discount that cites a real,
+   * active, in-scope campaign and asks for MORE than its `cap_paisa` is a discretionary discount
+   * wearing a campaign id, and must fall through to the percentage predicate. A caller that passed
+   * `within: true` merely because an id was present would turn every campaign into an unbounded
+   * pre-approval, permanently (`01-F1`).
+   */
+  readonly campaign: CampaignCitation | null;
+  /**
    * `01-F30`'s `billed_total` for the order being discounted, integer paisa — the base the
    * percentage is taken of. Supplied by the caller from the fold's own projection, never
    * re-derived (`26 §8`: fold logic lives in one module).
@@ -843,6 +867,27 @@ export type DiscountRequest = {
   readonly order_total_paisa: number;
   /** Appendix A's `X%` as integer basis points (`02-F20`; `00 §7` layer 2 per R63). */
   readonly threshold_bps: number;
+};
+
+/**
+ * `17-F24`'s campaign arm as `canDiscount` receives it — a verdict the caller has already reached,
+ * plus the identity it reached it about.
+ *
+ * **`campaign_id` is carried and DELIBERATELY NEVER BRANCHED ON.** `01-F85` bans a fold arm keyed
+ * on an owner-typed id, and the reasoning transfers to a permission predicate unchanged: renaming a
+ * campaign must not change an authorization outcome. It is here because a refusal a cashier cannot
+ * act on is a refusal she works around — the id travels so a surface can say *which* campaign, and
+ * so `17-F25`'s reconciliation can join this decision to the `discount.recorded` it produced.
+ * **Presence is not value**, and `17-F24` says so in terms.
+ */
+export type CampaignCitation = {
+  readonly campaign_id: string;
+  /**
+   * `17-F24`: within the campaign's own bounds. The caller computes this from `campaignApplies`
+   * (scope, window, minimum) AND from `campaignBenefitPaisa` against `benefit.cap_paisa` — both
+   * halves, because a campaign that reaches the order does not thereby bless any amount.
+   */
+  readonly within_campaign_bounds: boolean;
 };
 
 /**
@@ -869,6 +914,24 @@ export const canDiscount = (
   scope: AuthScope,
   request: DiscountRequest,
 ): AuthDecision => {
+  // `17-F24` / `17-F12` — **THE CAMPAIGN ARM, and it is checked FIRST because that is what
+  // "pre-approved by the campaign definition" means.** Within its bounds the act takes the
+  // within-threshold row **regardless of magnitude**: that is the whole of R71's *"50% off if you
+  // use visa signature with a cap of 10,000pkr … it will be stupid if manager has to give
+  // discounts every time"*. Outside its bounds this arm does not fire at all and the discretionary
+  // predicate below runs untouched — `17-F12`'s own last clause, and the reason
+  // `within_campaign_bounds` is a separate field from the id.
+  //
+  // ⚠ **IT WIDENS AUTHORIZATION, SO THE FAIL DIRECTION IS THE OTHER WAY FROM EVERYTHING ELSE IN
+  // THIS FILE.** `DISCOUNT_APPROVAL_THRESHOLD_BPS` fails toward the manager because a pin with no
+  // source should; this arm fails toward the manager too, but only because `within` must be
+  // affirmatively TRUE — a caller that cannot decide passes `null` and gets the ordinary
+  // predicate. There is no third state and no default: an optional-means-skip field here would be
+  // an unbounded discount every time a caller forgot to compute the cap (`01-F60`'s precedent, and
+  // the reason both of this file's other predicates take their figures as required positionals).
+  if (request.campaign !== null && request.campaign.within_campaign_bounds) {
+    return can(subject, "order.discount_within_threshold", scope);
+  }
   const within =
     BigInt(request.amount_paisa) * 10_000n <=
     BigInt(request.threshold_bps) * BigInt(request.order_total_paisa);

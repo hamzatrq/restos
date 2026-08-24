@@ -144,6 +144,8 @@ const till = (opts: { openShift?: boolean } = {}): Till => {
     addLine: () => ({ id: "unused" }),
     toggleAvailability: () => ({ id: "unused" }),
     recordCustomer: () => ({ id: "unused" }),
+    // `02-F64` stub — this fixture has no opinion about a customer link.
+    linkCustomer: () => ({ id: "unused" }),
   };
 
   return {
@@ -440,6 +442,8 @@ describe("§D 00 §5.1 / 01-F17 — the guard consults nothing", () => {
       addLine: () => ({ id: "ok" }),
       toggleAvailability: () => ({ id: "ok" }),
       recordCustomer: () => ({ id: "ok" }),
+      // `02-F64` stub — this fixture has no opinion about a customer link.
+      linkCustomer: () => ({ id: "ok" }),
     };
     const deps = new Proxy(
       { writes },
@@ -476,6 +480,8 @@ describe("§D 00 §5.1 / 01-F17 — the guard consults nothing", () => {
         addLine: () => ({ id: "unused" }),
         toggleAvailability: () => ({ id: "unused" }),
         recordCustomer: () => ({ id: "unused" }),
+        // `02-F64` stub — this fixture has no opinion about a customer link.
+        linkCustomer: () => ({ id: "unused" }),
       },
     });
 

@@ -10,6 +10,31 @@ export {
   businessDayBounds,
   businessDayBoundsOfDate,
 } from "./business-day.js";
+// `17-F22`/`17-F23`/`17-F24` — the campaign row, its closed vocabularies and the RENDER-TIME
+// loyalty arithmetic. Declared once here (`18 §2`/`18 §4`) because three planes need it and none
+// may import another: the writer that validates a `campaign` artifact, the till that validates a
+// redemption offline (`17-N3`), and the permission predicate that routes `17-F12`'s pre-approval.
+export {
+  BENEFIT_FORMS,
+  type BenefitForm,
+  CAMPAIGN_KINDS,
+  CAMPAIGN_PROOF_KINDS,
+  CAMPAIGN_STATUSES,
+  CAMPAIGN_USE_LIMITS,
+  type CampaignBenefit,
+  CampaignBenefitSchema,
+  type CampaignContext,
+  type CampaignKind,
+  type CampaignProofKind,
+  type CampaignRow,
+  CampaignRowSchema,
+  type CampaignStatus,
+  type CampaignUseLimit,
+  campaignApplies,
+  campaignBenefitPaisa,
+  loyaltyAvailable,
+  loyaltyOrdersToNextReward,
+} from "./campaign.js";
 export { canonicalJson } from "./canonical.js";
 // 01-F60 — the sellable-kind set, declared once here (18 §2) after three copies drifted apart.
 export { SELLABLE_KINDS } from "./catalog.js";
@@ -55,6 +80,7 @@ export {
   type AuthOutcome,
   type AuthScope,
   type AuthSubject,
+  type CampaignCitation,
   can,
   // `02-F20` + Appendix A's two rows — which discount row an act is an instance of. `02-F61`
   // names this predicate as the one thing owed before a discount surface can land.

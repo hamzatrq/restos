@@ -63,10 +63,13 @@ const DIALLED = "03001234567";
 
 let appended: AppendRequest[];
 let recorded: unknown[];
+/** `02-F64`'s link requests, so the SEAM below can assert the call and not only the code. */
+let linked: unknown[];
 
 const mount = () => {
   appended = [];
   recorded = [];
+  linked = [];
   const bridge = {
     deviceState: vi.fn(async () => DEVICE),
     openOrders: vi.fn(async (): Promise<OpenOrder[]> => []),
@@ -83,6 +86,11 @@ const mount = () => {
     recordCustomer: vi.fn(async (req: unknown) => {
       recorded.push(req);
       return { id: `evt-cust-${recorded.length}` };
+    }),
+    // `02-F64` — the link `startOrder` makes when a caller is latched. See §B.
+    linkCustomer: vi.fn(async (req: unknown) => {
+      linked.push(req);
+      return { id: `evt-link-${linked.length}` };
     }),
     onChanged: vi.fn(() => () => {}),
   };
@@ -127,5 +135,61 @@ describe("02-F27 — an unknown caller can actually be filed from the counter", 
     // while guessing an `order_type` that `01-F1` then makes permanent — and `02-F1` requires
     // BOTH axes at creation. It is also the same claim the oracle's §F makes about typing.
     expect(appended).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// §B — `02-F64`'s LINK, DRIVEN. **The mutant an adversarial review left alive.**
+//
+// ⚠ **THE SURVIVOR THIS SECTION EXISTS FOR (August 2026).** The only guard on *"does the product
+// ever link an order to a customer"* was a source-string match for
+// `window.restos.linkCustomer?.({ order_id, dialled })` in `loyalty-seam.test.ts` §E SEAM 3. A
+// string match sees the CALL and not the CONDITION that reaches it — so a review's mutant that
+// aimed the guard at a channel which never occurs left **all 1,372 tests green** while the
+// shipped product linked **no order at all**: no loyalty counter, no `02-F10` search by phone,
+// no `02-F14` khata, and every one of those features looking finished.
+//
+// It is the same lesson as this file's own header one feature over — a decorative control fails
+// nothing — and the answer is the same: press the real controls and read what crossed the bridge.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+describe("§B 02-F64 — starting an order with a caller latched LINKS it", () => {
+  it("the link crosses the bridge with the DIALLED digits and the order just minted", async () => {
+    mount();
+    render(<Counter />);
+    await screen.findByRole("button", { name: /^Call$/i });
+    tap(/^Call$/i);
+    await waitFor(() => enterNumber(DIALLED));
+    // The caller must actually resolve before the order starts — that is the state the link's
+    // condition reads, and a test that started the order first would assert nothing about it.
+    await waitFor(() => expect(screen.getByText(/\+92 300 1234567|\+923001234567/)).toBeTruthy());
+
+    tap(/^Takeaway$/i);
+
+    await waitFor(() => expect(appended).toHaveLength(1));
+    expect(appended[0]?.type).toBe("order.created");
+    const created = appended[0] as AppendRequest;
+    const order_id = (created.payload as { order_id: string }).order_id;
+
+    await waitFor(() => expect(linked).toHaveLength(1));
+    // The ORDER the tap just minted, and the digits as pressed — `registry.ts` puts `01-F23`'s
+    // normalization at the WRITER, so a renderer that sent the key would be the second writer of
+    // one identity and two rules make one customer two permanent rows.
+    expect(linked[0]).toEqual({ order_id, dialled: DIALLED });
+  });
+
+  it("⚠ THE CONTROL — an order started with NO caller links nothing", async () => {
+    // Without this, an implementation that linked unconditionally would pass the test above and
+    // attach a walk-in to whatever number was last on the glass — permanently (`01-F1`). It is
+    // also what makes the assertion above evidence about the CONDITION rather than about the call.
+    mount();
+    render(<Counter />);
+    await screen.findByRole("button", { name: /^In restaurant$/i });
+    tap(/^In restaurant$/i);
+    tap(/^Takeaway$/i);
+
+    await waitFor(() => expect(appended).toHaveLength(1));
+    expect(appended[0]?.type).toBe("order.created");
+    expect(linked, "02-F64: no caller, no link").toEqual([]);
   });
 });

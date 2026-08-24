@@ -751,6 +751,79 @@ export const RecordCustomerRequestSchema = z.object({
 export type RecordCustomerRequest = z.infer<typeof RecordCustomerRequestSchema>;
 
 /**
+ * `02-F64` — attach an order to `01-F23`'s identity, as ONE act.
+ *
+ * **A write channel of its own rather than an `append` payload, for `recordCustomer`'s reason
+ * exactly:** the event needs a field the renderer must not supply, and here it is `01-F23`'s KEY
+ * again. `registry.ts` puts normalization at the writer because two normalizers make one customer
+ * two identities permanently (`01-F1`), so a generic `append` would put the identity itself on the
+ * untrusted side of the bridge. It carries the digits as pressed and main decides what they key.
+ *
+ * ⚠ **AND IT MUST STAY THE ONLY WAY A LINK IS MADE.** `02-F64` declares the payload as
+ * `{ order_id, phone_e164 }` and nothing else — the moment a renderer can send a phone straight
+ * through `append`, the normalizer stops being the one door and `02-F28`'s repeat customer becomes
+ * invisible to the screen built to find her, while every unit test still passes.
+ */
+export const LinkCustomerRequestSchema = z.object({
+  order_id: z.string().min(1),
+  /** The digits as pressed. Unvalidated shape on purpose — main decides if it is a number. */
+  dialled: z.string(),
+});
+export type LinkCustomerRequest = z.infer<typeof LinkCustomerRequestSchema>;
+
+/**
+ * `17-F16`'s *"2 more orders to your free deal"* and `17-F17`'s *"reward visible"*, as the two
+ * planes see it — the RENDERED answer, computed in main from `17-F23`'s two counts and the device's
+ * `17-F22` artifact.
+ *
+ * ⚠ **THE DIVISION HAPPENS WHEN THIS IS ASKED, AND NOTHING STORES THE RESULT.** `17-F23` puts the
+ * division by `17-F14`'s `N` at render time because `01-F87` forbids a fold reading configuration:
+ * two tills at different artifact versions would otherwise project different rewards from an
+ * identical event set. So this type is a VIEW and never a projection, and the moment it is
+ * memoized into a state table the FR's named break has happened.
+ *
+ * `campaign_id` and `campaign_version` travel with it because `17-F25` requires a redemption to
+ * record the rule it was taken under, and the screen must cite the same version it was shown.
+ */
+export const LoyaltyStatusSchema = z.object({
+  campaign_id: z.string().min(1),
+  campaign_version: z.number().int().min(1),
+  /** `17-F23`'s `available` — whole rewards this customer may take right now. */
+  available: z.number().int().nonnegative(),
+  /** `17-F16`'s countdown. `0` when a reward is already available — say that instead. */
+  orders_to_next: z.number().int().nonnegative(),
+  /** Settled, uncontested, linked orders that met the campaign's minimum. The render's `eligible`. */
+  eligible: z.number().int().nonnegative(),
+});
+export type LoyaltyStatus = z.infer<typeof LoyaltyStatusSchema>;
+
+/**
+ * `17-F27` (a)/(b) — one campaign a cashier may CITE on this order, as the trusted side resolved it.
+ *
+ * ⚠ **THIS TYPE EXISTS BECAUSE `campaign_id` HAD NO PRODUCER.** `registry.ts` declared
+ * `discount.recorded.campaign_id`, `authorize.ts` read it and `canDiscount` gained an arm for it —
+ * and no surface in the product ever set it, so the arm could not fire and every campaign function
+ * behind it was asked a question with no non-null answer. A payload key with no producer is `L8`'s
+ * shape that no rail can see (a key in an object literal is not an export).
+ *
+ * **It carries no verdict and no amount to apply.** `bound_paisa` is what the campaign ALLOWS on
+ * this order — shown so a cashier knows what she may give — and the amount she enters stays hers
+ * (`17-F27` (b): a tile that set the amount would have to resolve `item_scope`'s base, which is the
+ * refusal `17-F24`'s amendment records). Whether the pair is pre-approved is decided again at the
+ * writer, from this device's own artifact, on every append (Commandment 8).
+ *
+ * **`campaign_id` is the label, because `17-F22`'s row has no display name.** Inventing one would
+ * be a field no FR asked for (Commandment 2); the authoring surface `14-F43` gates is where a name
+ * belongs.
+ */
+export const CampaignOfferSchema = z.object({
+  campaign_id: z.string().min(1),
+  /** `17-F24`'s bound for THIS order, integer paisa. `applyRateBps` then `min(cap)`, never a float. */
+  bound_paisa: z.number().int().nonnegative(),
+});
+export type CampaignOffer = z.infer<typeof CampaignOfferSchema>;
+
+/**
  * `02-F27`'s lookup answer — *"customer file lookup by normalized phone → name, saved
  * addresses"*.
  *
@@ -763,12 +836,20 @@ export type RecordCustomerRequest = z.infer<typeof RecordCustomerRequestSchema>;
  * `known: null` is `02-F27`'s *"unknown number"* — a number that resolves fine and has no file
  * yet, which is the branch that leads to inline creation.
  *
- * **`02-F27`'s ORDER HISTORY and "repeat last order" are deliberately absent.** They are
- * unbuildable today: `order.created`'s payload declares `order_id`, `channel`, `order_type?` and
- * `table_id?` and nothing else, and `01 §4`'s order family has no `order.customer_linked` — so no
- * event in the corpus can say which customer an order is for. `02-F10` (*"open orders searchable
- * by … customer phone"*) and `02-F14` (*"khata requires a linked customer"*) are the FRs that
- * would authorise the field; adding it is a `packages/domain` change and a protected-path review.
+ * ⚠ **THIS COMMENT SAID ORDER HISTORY WAS UNBUILDABLE AND THAT IS NO LONGER TRUE — `02-F64`
+ * (August 2026).** It read: *"`order.created`'s payload declares `order_id`, `channel`,
+ * `order_type?` and `table_id?` and nothing else, and `01 §4`'s order family has no
+ * `order.customer_linked` — so no event in the corpus can say which customer an order is for."*
+ * That sentence was the measurement four features waited on, it is quoted in `02-F64` as the
+ * record of the gap, and the type now exists: `order.customer_linked { order_id, phone_e164 }`,
+ * emitted through `CHANNELS.linkCustomer` and folded by `folds/customer-orders.ts`.
+ *
+ * **What is still absent from THIS type is a surface decision and not a kernel one.** `02-F27`'s
+ * order history and *repeat last order* need a projection joined onto this lookup, and nothing
+ * asks for one yet — the fold projects the linked orders, `customerOrders()` serves them, and the
+ * screen that reads them is doc 02's. Kept as a pointer rather than deleted, because *"an owed
+ * item filed as 'no FR exists' is one nobody re-checks"* is a lesson this app has already paid for
+ * once (`01-F56`'s refusal sat a whole wave behind exactly that).
  */
 export type CustomerLookup = {
   readonly phone_e164: string | null;
@@ -972,6 +1053,43 @@ export const CHANNELS = {
    */
   recordCustomer: "restos:record-customer",
   /**
+   * `02-F64` — *"which customer is this order for"*, the field four features waited on.
+   *
+   * A write channel of its own, for `recordCustomer`'s reason above (the renderer must not supply
+   * `01-F23`'s key). **Separate from `recordCustomer` and not folded into it**, because the two
+   * acts are genuinely independent in both directions: an order may be linked to a customer who was
+   * filed weeks ago (`02-F28`'s repeat caller — nothing to record), and a caller may be filed with
+   * no order in play at all. Folding them would make one impossible without the other.
+   */
+  linkCustomer: "restos:link-customer",
+  /**
+   * `17-F17`'s *"phone lookup → reward visible → apply"*, first half. A READ: nothing is appended
+   * and nothing is authorized on this channel.
+   *
+   * A channel of its own on `lookupCustomer`'s argument, one FR along: it answers a question about
+   * ONE phone number that only exists while an operator is looking at that caller, and it must not
+   * ride a read that fans out to the whole shell on every line added.
+   *
+   * ⚠ **It is asked, never cached.** See `LoyaltyStatus` — the answer is a render over the campaign
+   * artifact, and a renderer that held it across an artifact change would be showing a reward
+   * computed under a rule that no longer applies.
+   */
+  loyaltyFor: "restos:loyalty-for",
+  /**
+   * `17-F27` (a) — which campaigns reach THIS order, for the correction surface to cite one from.
+   * A READ: nothing is appended and nothing is authorized on this channel (`escalationFor`'s
+   * precedent, one FR over).
+   *
+   * ⚠ **A forged answer buys a renderer nothing**, and that is the property that makes a
+   * display-only read safe here: `authorizeWrites` resolves the citation again from this device's
+   * own `17-F22` artifact before the matrix is asked, so a screen that invents an offer gets a
+   * discount judged discretionary — the same verdict it would have got citing nothing.
+   *
+   * It is asked per order and per opening of the surface, never cached across one, for
+   * `loyaltyFor`'s reason directly above: the answer is a render over the campaign artifact.
+   */
+  campaignOffers: "restos:campaign-offers",
+  /**
    * `02-F20` — "would a manager credential close this?", asked of the matrix and answered for
    * display only. A READ: nothing is appended and nothing is authorized on this channel.
    *
@@ -1172,6 +1290,28 @@ export type RestosBridge = {
    */
   lookupCustomer?: (dialled: string) => Promise<CustomerLookup>;
   recordCustomer?: (req: RecordCustomerRequest) => Promise<AppendResult>;
+  /** `02-F64` — attach this order to a customer. Optional-chained like its two neighbours. */
+  linkCustomer?: (req: LinkCustomerRequest) => Promise<AppendResult>;
+  /**
+   * `17-F17` — what this customer may claim, rendered in main. `null` when there is no active
+   * account-loyalty campaign on this device, which is the ordinary case and never an error
+   * (`17-F22`: a device that has never received the artifact has no campaigns).
+   */
+  loyaltyFor?: (phone_e164: string) => Promise<LoyaltyStatus | null>;
+  /**
+   * `17-F27` (a) — the campaigns a discount on this order may cite. Empty when this device holds
+   * no artifact, when none reaches the order, or when the ones that do carry a scope this till
+   * cannot resolve (`17-F24` as amended) — all of which are ordinary states and never errors
+   * (`01-F17`).
+   *
+   * **OPTIONAL for the reason `escalationFor` records below**: three renderer oracles close their
+   * harnesses with `satisfies RestosBridge` and predate this channel. The cost is the same shape
+   * and is named: a host that does not serve it offers no campaign tile, so every discount is
+   * discretionary — which is exactly the behaviour that existed before `17-F27`, never a silent
+   * pre-approval. The shipped preload DOES serve it and `loyalty-seam.test.ts` §E fails if it
+   * stops.
+   */
+  campaignOffers?: (order_id: string) => Promise<readonly CampaignOffer[]>;
   /**
    * `02-F20`'s local path, and both members are **OPTIONAL for the reason `cashState` and
    * `alarms` above record**: `unlock-gate.dom.test.tsx` closes its harness with

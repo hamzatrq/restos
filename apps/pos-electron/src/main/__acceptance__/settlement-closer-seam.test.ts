@@ -119,7 +119,16 @@ describe("§C 02-F48 — the zero-tender guard is in the chain the renderer reac
     // are pinned rather than just the new outermost one — pinning the outermost alone is what
     // this test's own comment above says goes green on a chain that dropped a middle link.
     expect(mainSrc).toMatch(/voidExitsLine\(\{\s*writes:\s*tenderGuarded,\s*store\s*\}\)/);
-    expect(mainSrc).toMatch(/authorizeWrites\(\{\s*writes:\s*voidGuarded,/);
+    // ⚠ **THE OUTERMOST NAME MOVED IN AUGUST 2026 AND THE ASSERTION MOVED WITH IT — CORRECTED,
+    // NOT WEAKENED, on this file's own precedent two comments up.** `17-F27` (c) added
+    // `stampCampaignVersion` between the matrix and the void guard, so the chain is
+    // **matrix → campaign version → amount → duplicate → void exit → ledger**. BOTH new links are
+    // pinned — the stamp over `voidGuarded`, and the matrix over the stamp — because pinning only
+    // the outermost is what this file already says goes green on a chain that dropped a middle
+    // link. Nothing that stood here was removed.
+    expect(mainSrc).toMatch(/stampCampaignVersion\(\{\s*writes:\s*voidGuarded,/);
+    expect(mainSrc).toMatch(/authorizeWrites\(\{\s*writes:\s*campaignStamped,/);
+    expect(mainSrc).not.toMatch(/authorizeWrites\(\{\s*writes:\s*voidGuarded,/);
     expect(mainSrc).toMatch(/CHANNELS\.append[\s\S]{0,200}writes\.append\(req\)/);
   });
 });
@@ -177,6 +186,8 @@ describe("§D — the composed chain refuses exactly two things and lands the re
       addLine: () => ({ id: "unused" }),
       toggleAvailability: () => ({ id: "unused" }),
       recordCustomer: () => ({ id: "unused" }),
+      // `02-F64` stub — this fixture has no opinion about a customer link.
+      linkCustomer: () => ({ id: "unused" }),
     };
     // The composition `index.ts` ships, minus the matrix (commandment 8 is `authorization.test.ts`'s
     // subject and wrapping it here would test that instead of this).

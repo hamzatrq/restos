@@ -135,6 +135,16 @@ if (agents.split("\n").length > 120)
       // Withdrawn names, retained in prose for the audit trail (07-F7 / 07-F18).
       "whatsapp.optin_recorded",
       "whatsapp.optout_recorded",
+      // `17-F15` (ii) / `17-F23`, August 2026 — WITHDRAWN from the `01 §4` catalog on founder
+      // ruling R79's slice, and retained in doc 17's prose for the same audit-trail reason as the
+      // two names above. It is a DERIVATION dressed as an event: `17-F15` said progress is derived
+      // and then said crossing the threshold emits, so every device would compute the crossing
+      // independently and a projected value would depend on which folded first (`01-F34`,
+      // standing law 1). `17-F23` replaces it with arithmetic, so the event is unnecessary rather
+      // than unbuilt — and unlike the two above this is not a RENAME: no other name carries the
+      // fact, because the fact was never an emission. `loyalty.reward_redeemed` is untouched and
+      // stays in the catalog; only the earned half is gone.
+      "loyalty.reward_earned",
       // Code identifiers quoted in prose (18 §4, 26 §8, DEC-AUDIT-001).
       "console.log",
       "process.env",
@@ -162,6 +172,17 @@ if (agents.split("\n").length > 120)
       // likewise pass silently; the rule cannot tell them apart, and only the count above would.
       "order.price_override",
       "approval.grant",
+      // Appendix A's two discount rows as `permissions.ts` spells them (`02-F20`, `17-F24`).
+      // Both pass this block's own test: each is a NOUN PHRASE for a permission cell, while the
+      // event in that family is `00 §6`'s `noun.verb_past` — `discount.recorded`, already
+      // catalogued — so neither can ever become an emission. They arrived here when `17-F24`
+      // routed `17-F12`'s predicate and had to name the row a campaign discount takes.
+      "order.discount_within_threshold",
+      "order.discount_above_threshold",
+      // `14-F43`'s action, listed on `user.manage`'s exact argument: `config.manage` is the
+      // infinitive of an act and the event beside it in the family is `config.changed`, already
+      // catalogued (`01-F87`). Named by `17-F24` as the gate campaign authoring inherits.
+      "config.manage",
       // `02-F46`'s action and the row it copies. Both are infinitives of an act and both have a
       // past-tense event beside them in the same family — `availability.toggle` the action versus
       // `availability.changed` the event, `order.create` versus `order.created` — so by this

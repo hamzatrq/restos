@@ -19,12 +19,14 @@ import { useCallback, useEffect, useState } from "react";
 import type {
   Alarm,
   AppendRequest,
+  CampaignOffer,
   CashState,
   CustomerLookup,
   DeviceState,
   EscalationOffer,
   EscalationRefusal,
   KitchenState,
+  LoyaltyStatus,
   MenuItem,
   OpenOrder,
   RosterMember,
@@ -562,6 +564,14 @@ export const Counter = () => {
    * for which order this terminal is on).
    */
   const [correcting, setCorrecting] = useState(false);
+  /**
+   * `17-F27` (a) — the campaigns main says reach the order this surface is about to correct.
+   *
+   * Empty until asked, and empty is the ordinary answer (no artifact, none reaching this order, or
+   * a scope this till cannot resolve). It is renderer state and never a ledger fact: what the
+   * cashier cites travels on the payload and is re-resolved at the writer (Commandment 8).
+   */
+  const [campaignOffers, setCampaignOffers] = useState<readonly CampaignOffer[]>([]);
 
   const [pending, setPending] = useState<{ req: AppendRequest; offer: EscalationOffer } | null>(
     null,
@@ -715,6 +725,21 @@ export const Counter = () => {
    * moves the folds — this asks again exactly when the answer can have changed.
    */
   const [callerRevision, setCallerRevision] = useState(0);
+  /**
+   * `17-F17` — *"phone lookup → reward visible → apply"*, first half.
+   *
+   * **A RENDER and never a cache, which is why it is asked beside the lookup rather than derived
+   * from anything held here.** `17-F23` puts the division by `17-F14`'s `N` at read time because
+   * `01-F87` forbids a fold reading configuration; a renderer that held this across a campaign
+   * change would be showing a reward computed under a rule that no longer applies. It is re-asked
+   * on exactly the signals the lookup is.
+   *
+   * `null` covers every ordinary reason there is nothing to say — no campaign artifact on this
+   * device, no active `account_loyalty` programme, a programme scoped to another branch, or a
+   * number that is not yet a number. None of them is an error and none reaches the sale
+   * (`01-F17`).
+   */
+  const [loyalty, setLoyalty] = useState<LoyaltyStatus | null>(null);
   /**
    * `02-F6`/`02-F50` — the org's kitchen quick-tags, and in Wave 1 `C7`'s ONLY input.
    *
@@ -906,6 +931,89 @@ export const Counter = () => {
     // A record that succeeded changed the answer to this exact question, and nothing else in the
     // renderer re-asks it.
   }, [pendingChannel, dialled, callerRevision]);
+
+  /**
+   * `17-F17`'s reward, asked of MAIN for the number the trusted side resolved.
+   *
+   * ── IT KEYS ON `caller?.phone_e164`, NOT ON `dialled` — and that is the load-bearing part ────
+   *
+   * `dialled` is the digits as pressed; `caller.phone_e164` is `01-F23`'s key as
+   * `normalizeDialledPhone` resolved it. Asking with the raw digits would put a second
+   * normalization on the untrusted side of the bridge, and two normalizers that each look correct
+   * key one number two ways — the defect `registry.ts` spends a paragraph on, arriving through a
+   * reward line. It also means this asks once per resolved identity rather than once per keystroke.
+   *
+   * `orders` is a dependency for the reason `callerRevision` is one on the lookup: this reads a
+   * FOLD (`02-F64`'s links and `17-F23`'s redemptions), and the fold moves when the order this
+   * caller is on settles, and `reload` replaces `orders` on every one of main's `changed`
+   * pushes. Without it the strip would go on saying *"1 more order"* after the order that
+   * completed the tenth one was paid.
+   */
+  // `orders` is a RE-ASK signal rather than a value this effect reads — the same idiom, and the
+  // same lint exemption, as `callerRevision` on the lookup directly above. Biome sees a dependency
+  // the body never touches; what it is is *the answer to this question changed underneath it*.
+  // Dropping it is the change that reads as tidying and silently makes the reward line stale for
+  // the rest of the call.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a re-ask signal — see just above.
+  useEffect(() => {
+    const phone = caller?.phone_e164 ?? null;
+    if (phone === null) {
+      setLoyalty(null);
+      return;
+    }
+    const answer = window.restos.loyaltyFor?.(phone);
+    if (answer === undefined) return;
+    let live = true;
+    void answer
+      .then((a) => {
+        if (live) setLoyalty(a);
+      })
+      .catch(() => {
+        // `00 §5.7` / `01-F17` — a surface that cannot answer shows nothing rather than a stale
+        // reward. Offering a free coffee this till can no longer justify is the harmful direction.
+        if (live) setLoyalty(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [caller?.phone_e164, orders]);
+
+  /**
+   * `17-F27` (a) — asked when the correction surface opens, for the order it is about.
+   *
+   * **Asked, never cached across an order**, on `loyaltyFor`'s reason directly above: the answer
+   * is a render over this device's `17-F22` artifact against ONE order's total, channel and
+   * customer link, so a list held from a previous order would offer a campaign that does not reach
+   * this one — and the writer would then refuse the citation the screen had just shown.
+   *
+   * `orders` is a re-ask signal rather than a value this effect reads, exactly as it is on the
+   * loyalty effect: a line added or voided moves the order total, and the total decides both
+   * `min_order_paisa` and the bound each offer carries.
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a re-ask signal — see just above.
+  useEffect(() => {
+    const order_id = current?.order_id ?? null;
+    if (!correcting || order_id === null) {
+      setCampaignOffers([]);
+      return;
+    }
+    const answer = window.restos.campaignOffers?.(order_id);
+    if (answer === undefined) return;
+    let live = true;
+    void answer
+      .then((offers) => {
+        if (live) setCampaignOffers(offers);
+      })
+      .catch(() => {
+        // `00 §5.7` / `01-F17` — a surface that cannot answer offers nothing rather than a stale
+        // campaign. Every discount is then discretionary, which is the safe direction and is the
+        // behaviour that existed before `17-F27`.
+        if (live) setCampaignOffers([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [correcting, current?.order_id, orders]);
 
   // `01-F17` — a sale is never blocked. A shell that has not loaded its device state yet is
   // the one case where there is genuinely nothing to draw, so it says so in a word rather
@@ -1117,6 +1225,34 @@ export const Counter = () => {
         refs: [],
       }),
     );
+    /**
+     * `02-F64` — **THE LINK, and it is the field four features waited on.**
+     *
+     * Emitted here because this is the one moment the renderer holds both halves: the `order_id`
+     * it just minted, and the caller it is about to clear. `clearCaller()` three lines below is
+     * what used to throw the identity away — the hole `shared/ipc.ts` recorded in a comment for
+     * the life of the gap.
+     *
+     * ── IT IS SENT *AFTER* `order.created` AND THAT NEEDS NO ORDERING GUARANTEE ─────────────────
+     *
+     * `02-F64` carries `01-F23`'s key ON the link rather than a handle to anything, so a link that
+     * merges before its order is not parked and not lost (`01-F10`, `26 §4`). Nothing here depends
+     * on the two arriving in order — which is the whole reason the FR refused the cheaper shape.
+     *
+     * ── AND IT CANNOT BLOCK THE SALE (`01-F17`, Commandment 4) ──────────────────────────────────
+     *
+     * `write` swallows the rejection into `02-F57`'s refusal state, the order is already appended
+     * by the call above, and `setCartOrderId` below runs unconditionally. A refused link costs a
+     * loyalty counter, a phone search and a khata — never an order.
+     *
+     * ⚠ **The digits are sent, not `caller.phone_e164`.** Main normalizes, because
+     * `registry.ts` puts normalization at the WRITER: a renderer that sent a key it had resolved
+     * itself would be the second normalizer that makes one human two identities, permanently.
+     */
+    if (pendingChannel === PHONE_CHANNEL && caller?.phone_e164 != null && dialled !== "") {
+      const link = window.restos.linkCustomer?.({ order_id, dialled });
+      if (link !== undefined) write(link);
+    }
     // **THE ORDER THIS TILL JUST STARTED IS NOW ITS CART** — see `cartOrderId`. Set from the id
     // minted two lines above rather than from the reload that follows, because `orders` is a
     // BRANCH-wide list (`02-F11`) with no "mine" in it: picking the new row out of the refreshed
@@ -1311,6 +1447,26 @@ export const Counter = () => {
         reason: correction.reason,
         approver_user_id: null,
         adjustment_attempt_id: newId(),
+        /*
+          `17-F27` (b) — **THE CITATION, and this line is the producer `17-F24` did not have.**
+
+          Until it existed this payload was five literal fields, so `payload.campaign_id` was
+          `undefined` on every `discount.recorded` any surface in the product could emit,
+          `authorize.ts`'s `claimed` was never a string, `canDiscount`'s campaign arm could never
+          fire, and `campaignCitationFor` / `campaignApplies` / `campaignBenefitPaisa` were never
+          asked a question with a non-null answer. A missing producer for a payload KEY is the one
+          shape `seams:check` says out loud it cannot see.
+
+          **Spread conditionally so a discretionary discount carries NO key at all.** `registry.ts`
+          declares the field `.optional()` and states why: absence means discretionary, which is
+          the ordinary case, so there is nothing for a `null` to state. Writing `campaign_id: null`
+          would make the commonest event in this family carry a field that says nothing.
+
+          **It is a CLAIM.** `campaign_version` is not here and must not be: the writer stamps it
+          from this device's own artifact (`17-F27` (c)), because a version the renderer supplied
+          answers `17-F25`'s *"under what rule?"* with a number no publisher minted.
+        */
+        ...(correction.campaign_id === null ? {} : { campaign_id: correction.campaign_id }),
       },
       refs: [correction.line_id],
     });
@@ -1776,6 +1932,63 @@ export const Counter = () => {
                 {a.address_text}
               </p>
             ))}
+            {/*
+              `17-F17`'s *"reward visible"* and `17-F16`'s *"2 more orders to your free deal"*,
+              as ONE line with two arms.
+
+              **It is a WORD and a NUMBER and carries no control** — `27-F12`, and the same shape
+              `02-F47`'s *"Not filed"* line above takes. Applying the reward is a money act on the
+              Pay surface and belongs with the discount, not on a caller card; a tappable reward
+              here would put a `discount.recorded` behind a control the cashier meets before the
+              bill exists.
+
+              **Nothing renders when there is nothing to say** (`27-F16`): no campaign, no
+              programme, another branch's programme, or an unresolved number all read as `null`,
+              and a permanent `No rewards` line is the base-case spend that made two blocks on the
+              status strip meaningless.
+
+              ⚠ **`orders_to_next` is `0` exactly when `available` is positive**, so the two arms
+              cannot both be true and neither can be silently wrong: `loyaltyOrdersToNextReward`
+              returns 0 in that case precisely so this surface has to choose the reward sentence.
+            */}
+            {loyalty === null ? null : loyalty.available > 0 ? (
+              /*
+                `17-F23` as amended (August 2026) — **THIS ARM RENDERED A CLAIMABLE COUNT THAT
+                NOTHING IN THE PRODUCT CAN CONSUME, and the count is what had to go.**
+
+                `available` is `floor((eligible − orders_consumed_total) / every_n)` and
+                `orders_consumed_total` moves only on `loyalty.reward_redeemed`, which **no surface
+                here emits** (`17-F17`'s *"→ apply"* has no producer). So the subtrahend is
+                structurally zero and the number only ever climbs: measured on a real store at 50
+                settled linked orders it read **"5 rewards to claim"** against
+                `orders_consumed_total` `"0"`, so a regular who had already taken five free coffees
+                was presented to the cashier as owed five more — for the life of the ledger.
+                `use_limit: once_per_customer` bounds nothing, because the counter does not read
+                the row.
+
+                `00 §5.7` — the degradation is NAMED rather than hidden, and no number is offered
+                against a balance nobody can decrement. The countdown arm below is untouched and
+                correct: a customer who has redeemed nothing has consumed nothing.
+
+                **The day a producer lands, the count comes back.** Nothing in the code can see
+                that day arrive, so the tripwire is a hand-written assertion —
+                `__acceptance__/loyalty-seam.test.ts` **§H** fails the moment anything in this app
+                emits `loyalty.reward_redeemed`, and it names this line. ⚠ *This said §F, which is
+                the offer list. The tripwire is the one thing on this surface a reader has to be
+                able to find, so a pointer at the wrong section is the `L11` shape at its quietest:
+                the protection exists and the sentence sends you to the wrong place. Corrected on
+                re-review, August 2026.*
+              */
+              <p style={{ ...STATE_LINE, color: color["fgColor-default"], marginLeft: 0 }}>
+                Reward threshold passed — this till cannot record a redemption yet
+              </p>
+            ) : (
+              <p style={{ ...STATE_LINE, color: color["fgColor-muted"], marginLeft: 0 }}>
+                {loyalty.orders_to_next === 1
+                  ? "1 more order to a reward"
+                  : `${loyalty.orders_to_next} more orders to a reward`}
+              </p>
+            )}
           </Readout>
         )}
       </div>
@@ -2236,6 +2449,10 @@ export const Counter = () => {
           */
           <LineCorrection
             lines={current.lines}
+            // `17-F27` (a) — resolved in MAIN from this device's own `17-F22` artifact, never
+            // here: a renderer that assembled its own offer list would be reading configuration
+            // on the untrusted side of the plane (`18 §9`, Commandment 8).
+            campaigns={campaignOffers}
             onSubmit={correctLine}
             onCancel={() => setCorrecting(false)}
           />

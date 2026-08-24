@@ -257,6 +257,16 @@ describe("registry growth must fail this suite before it can silently no-op (fix
     "shift.closed",
     "shift.opened",
     "void.recorded",
+    // `02-F64` / `17-F23`, August 2026 — the order→customer link and the loyalty redemption. Both
+    // are FOLD-CONSUMED, by `folds/customer-orders.ts`, which is why they belong on this side of
+    // the partition and not beside `catalog.changed`. Neither reaches the order-keyed engine:
+    // their projection is keyed by `01-F23`'s phone, so `merge.ts` lists them in
+    // `OTHER_FOLD_TYPES` exactly as it lists `customer.created` and `customer.address_added`.
+    //
+    // ⚠ This pin RED-AT-COMPILED the moment the two types entered the registry — the design
+    // working, and the same thing it did for `printer.status_changed`.
+    "order.customer_linked",
+    "loyalty.reward_redeemed",
   ] as const;
 
   /**

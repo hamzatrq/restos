@@ -88,7 +88,10 @@ type Till = {
   /** Append straight into the ledger — what a device with no guard does. */
   raw: (device_id: string, type: string, payload: Record<string, unknown>) => void;
   /** The shipped guard, wrapping a minimal gateway that appends for `TILL_2`. */
-  guarded: Pick<Gateway, "append" | "addLine" | "toggleAvailability" | "recordCustomer">;
+  guarded: Pick<
+    Gateway,
+    "append" | "addLine" | "toggleAvailability" | "recordCustomer" | "linkCustomer"
+  >;
   /** Every request the guard let through to the ledger. */
   landed: { type: string; payload: Record<string, unknown> }[];
   /** `02-F23`'s system-expected cash for the open shift, in paisa — THE MONEY. */
@@ -169,7 +172,10 @@ const till = (): Till => {
   });
 
   const landed: { type: string; payload: Record<string, unknown> }[] = [];
-  const appends: Pick<Gateway, "append" | "addLine" | "toggleAvailability" | "recordCustomer"> = {
+  const appends: Pick<
+    Gateway,
+    "append" | "addLine" | "toggleAvailability" | "recordCustomer" | "linkCustomer"
+  > = {
     append: (req: unknown): AppendResult => {
       const r = req as { type: string; payload: Record<string, unknown> };
       landed.push(r);
@@ -181,6 +187,8 @@ const till = (): Till => {
     // `02-F27`/`02-F47` — the fourth member of the trusted write surface (August 2026). Not a
     // tender, so `DEC-MONEY-009` passes it straight through; stubbed here like the two above.
     recordCustomer: () => ({ id: "unused" }),
+    // `02-F64` stub — this fixture has no opinion about a customer link.
+    linkCustomer: () => ({ id: "unused" }),
   };
 
   return {
@@ -325,6 +333,8 @@ describe("§C 01-F17/00 §5.1 — the decision touches nothing but this device's
         addLine: () => ({ id: "x" }),
         toggleAvailability: () => ({ id: "x" }),
         recordCustomer: () => ({ id: "x" }),
+        // `02-F64` stub — this fixture has no opinion about a customer link.
+        linkCustomer: () => ({ id: "x" }),
       },
       store: watched,
     });
@@ -608,7 +618,16 @@ describe("§G — main/index.ts puts the guard between the renderer and the ledg
     // are pinned rather than just the new outermost one — pinning the outermost alone is what
     // this test's own comment above says goes green on a chain that dropped a middle link.
     expect(mainSrc).toMatch(/voidExitsLine\(\{\s*writes:\s*tenderGuarded,\s*store\s*\}\)/);
-    expect(mainSrc).toMatch(/authorizeWrites\(\{\s*writes:\s*voidGuarded,/);
+    // ⚠ **THE OUTERMOST NAME MOVED IN AUGUST 2026 AND THE ASSERTION MOVED WITH IT — CORRECTED,
+    // NOT WEAKENED, on this file's own precedent two comments up.** `17-F27` (c) added
+    // `stampCampaignVersion` between the matrix and the void guard, so the chain is
+    // **matrix → campaign version → amount → duplicate → void exit → ledger**. BOTH new links are
+    // pinned — the stamp over `voidGuarded`, and the matrix over the stamp — because pinning only
+    // the outermost is what this file already says goes green on a chain that dropped a middle
+    // link. Nothing that stood here was removed.
+    expect(mainSrc).toMatch(/stampCampaignVersion\(\{\s*writes:\s*voidGuarded,/);
+    expect(mainSrc).toMatch(/authorizeWrites\(\{\s*writes:\s*campaignStamped,/);
+    expect(mainSrc).not.toMatch(/authorizeWrites\(\{\s*writes:\s*voidGuarded,/);
     expect(mainSrc).toMatch(/refuseZeroTender\(\{\s*writes:\s*settlementGuarded\s*\}\)/);
     expect(mainSrc).not.toMatch(/authorizeWrites\(\{\s*writes:\s*gateway,/);
     expect(mainSrc).not.toMatch(/refuseZeroTender\(\{\s*writes:\s*gateway\s*\}\)/);

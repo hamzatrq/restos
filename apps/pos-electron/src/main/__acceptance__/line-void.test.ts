@@ -125,6 +125,8 @@ const till = (opts: { confirm?: boolean; failAppend?: number } = {}): Till => {
     addLine: () => ({ id: "unused" }),
     toggleAvailability: () => ({ id: "unused" }),
     recordCustomer: () => ({ id: "unused" }),
+    // `02-F64` stub — this fixture has no opinion about a customer link.
+    linkCustomer: () => ({ id: "unused" }),
   };
 
   const row = (order_id = ORDER_ID) => store.openOrders().find((o) => o.order_id === order_id);
@@ -526,7 +528,16 @@ describe("§E the product reaches this, on BOTH routes an approved write can tak
     // MUTATION THIS CATCHES: the layer deleted from the chain — the shipped product before this
     // work — which leaves every assertion in §A–§D green and no cashier able to void anything.
     expect(mainSrc).toMatch(/voidExitsLine\(\{\s*writes:\s*tenderGuarded,\s*store\s*\}\)/);
-    expect(mainSrc).toMatch(/authorizeWrites\(\{\s*writes:\s*voidGuarded,/);
+    // ⚠ **THE OUTERMOST NAME MOVED IN AUGUST 2026 AND THE ASSERTION MOVED WITH IT — CORRECTED,
+    // NOT WEAKENED, on this file's own precedent two comments up.** `17-F27` (c) added
+    // `stampCampaignVersion` between the matrix and the void guard, so the chain is
+    // **matrix → campaign version → amount → duplicate → void exit → ledger**. BOTH new links are
+    // pinned — the stamp over `voidGuarded`, and the matrix over the stamp — because pinning only
+    // the outermost is what this file already says goes green on a chain that dropped a middle
+    // link. Nothing that stood here was removed.
+    expect(mainSrc).toMatch(/stampCampaignVersion\(\{\s*writes:\s*voidGuarded,/);
+    expect(mainSrc).toMatch(/authorizeWrites\(\{\s*writes:\s*campaignStamped,/);
+    expect(mainSrc).not.toMatch(/authorizeWrites\(\{\s*writes:\s*voidGuarded,/);
   });
 
   it("the ESCALATION path travels it too, which is the route a cashier's void actually takes", () => {
@@ -536,7 +547,16 @@ describe("§E the product reaches this, on BOTH routes an approved write can tak
     // the bill unchanged, on the one path `02-F20` exists for, and the path `order.void_after_kot`
     // makes the ONLY one a cashier has. Found by asking which object each route appends through,
     // not by reading the guard.
-    expect(mainSrc).toMatch(/authorizeEscalation\(\{[\s\S]{0,2000}?writes:\s*voidGuarded,/);
+    // ⚠ **CORRECTED, NOT WEAKENED (August 2026).** `17-F27` (c)'s `stampCampaignVersion` wraps
+    // `voidGuarded`, and the escalation route is handed the wrapper — so the route still travels
+    // this guard, one link further out. The chain is pinned in BOTH halves here rather than the
+    // outer name alone: the stamp must be built over `voidGuarded` (asserted in the sibling test
+    // above) and the escalation must be built over the stamp. An escalation handed `voidGuarded`
+    // directly is now a DEFECT of its own — a cashier's escalated campaign discount would record
+    // no `campaign_version`, which is exactly the *"the recorded rule depends on whether a manager
+    // was asked"* split — so it is asserted negatively too.
+    expect(mainSrc).toMatch(/authorizeEscalation\(\{[\s\S]{0,2000}?writes:\s*campaignStamped,/);
+    expect(mainSrc).not.toMatch(/authorizeEscalation\(\{[\s\S]{0,2000}?writes:\s*voidGuarded,/);
     expect(mainSrc).not.toMatch(/authorizeEscalation\(\{[\s\S]{0,2000}?writes:\s*gateway,/);
   });
 });
