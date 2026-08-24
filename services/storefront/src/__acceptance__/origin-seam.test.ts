@@ -22,6 +22,7 @@ import { originIdentity, STOREFRONT_DEVICE_CLASS } from "../identity.js";
 import { createStorefrontOrigin, type LamportSource, ORIGIN_TIME_BASIS } from "../origin.js";
 import { inMemoryOutbox } from "../outbox.js";
 import { createPlacement } from "../placement.js";
+import { fixedCatalog } from "./catalog-fixture.js";
 
 const ORG = "org-karachi";
 const BRANCH = "branch-clifton";
@@ -40,9 +41,17 @@ const counter = (): LamportSource => {
 };
 
 let ids = 0;
+const PUBLISHED = { "item-burger": 45_000, "item-fries": 32_000 };
+
 const origin = (lamport: LamportSource = counter(), clock = () => 1_755_000_000_000) =>
   createStorefrontOrigin({
-    identity: originIdentity({ org_id: ORG, branch_id: BRANCH, device_id: STOREFRONT_DEVICE }),
+    identity: originIdentity({
+      org_id: ORG,
+      branch_id: BRANCH,
+      device_id: STOREFRONT_DEVICE,
+      public_host: "burger-house.restos.pk",
+    }),
+    catalog: fixedCatalog(PUBLISHED),
     lamport,
     clock,
     newId: () => `0193b0f0-0000-7000-8000-${String(++ids).padStart(12, "0")}`,
@@ -51,8 +60,8 @@ const origin = (lamport: LamportSource = counter(), clock = () => 1_755_000_000_
 const CART = {
   order_id: "order-sf-1",
   lines: [
-    { line_id: "line-1", item_id: "item-burger", qty: 1, unit_price_paisa: 45_000 },
-    { line_id: "line-2", item_id: "item-fries", qty: 2, unit_price_paisa: 32_000 },
+    { line_id: "line-1", item_id: "item-burger", qty: 1 },
+    { line_id: "line-2", item_id: "item-fries", qty: 2 },
   ],
 };
 
@@ -80,7 +89,12 @@ describe("§A 01-F62/06-F30 — the origin stamps a legal branch-scoped envelope
     // the event is branch-scoped and its `device_id` is a registered device that happens to run
     // in a data centre. A test that only checked "the envelope parses" could not tell these two
     // designs apart, so it checks the device identity explicitly.
-    const id = originIdentity({ org_id: ORG, branch_id: BRANCH, device_id: STOREFRONT_DEVICE });
+    const id = originIdentity({
+      org_id: ORG,
+      branch_id: BRANCH,
+      device_id: STOREFRONT_DEVICE,
+      public_host: "burger-house.restos.pk",
+    });
     expect(id.device_class).toBe(STOREFRONT_DEVICE_CLASS);
     expect(STOREFRONT_DEVICE_CLASS).toBe("storefront_cloud");
   });
@@ -149,8 +163,8 @@ describe("§C 01-F3/06-F30 — lamport slots are CONTIGUOUS per origin", () => {
 // §D — 01-F18/06-F6 and commandment 4's ordering.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
-describe("§D 01-F18/06-F6 — the price shown is the price written, verbatim", () => {
-  it("writes the captured unit price and never re-derives it", async () => {
+describe("§D 06-F33/01-F18 — the price is the CATALOG's, resolved by the origin", () => {
+  it("writes the published price for (this branch, storefront), and captures it once", async () => {
     const { events } = await origin().placeOrder(CART);
     const lines = events.filter((e) => e.type === "order.line_added");
     expect(lines.map((e) => (e.payload as { unit_price_paisa: number }).unit_price_paisa)).toEqual([
@@ -207,7 +221,10 @@ describe("§D 01-F18/06-F6 — the price shown is the price written, verbatim", 
         pending: outbox.pending,
         ack: outbox.ack,
       },
-      entitlement: async () => ({ capabilities: new Set([STOREFRONT_CAPABILITY]) }),
+      entitlement: async () => ({
+        status: "record",
+        record: { capabilities: new Set([STOREFRONT_CAPABILITY]) },
+      }),
     });
 
     const pending = placement.place(ORG, CART).then((r) => {

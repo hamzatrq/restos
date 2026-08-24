@@ -1,5 +1,5 @@
 import type { EntitlementSource } from "./entitlement.js";
-import { entitled, STOREFRONT_CAPABILITY } from "./entitlement.js";
+import { entitlementFor, STOREFRONT_CAPABILITY } from "./entitlement.js";
 import type { PlaceOrderInput, StorefrontOrigin } from "./origin.js";
 import type { Outbox } from "./outbox.js";
 
@@ -38,13 +38,61 @@ export class NotEntitledError extends Error {
   }
 }
 
+/**
+ * `28-F3`'s corollary and `28-F8`: the capability is refused because the state could not be READ,
+ * which is not the same answer as *"this org is not entitled"* and must not be reported as one.
+ * It is also the answer that clears by itself when the store comes back.
+ */
+export class EntitlementUnreadableError extends Error {
+  constructor(readonly org_id: string) {
+    super(
+      `28-F3/28-F8: org ${org_id}'s entitlement state could not be READ, so ` +
+        `${STOREFRONT_CAPABILITY} is refused as unreadable — an unreadable state is not proof of ` +
+        `entitlement, and it is not a finding that this org lacks the capability either.`,
+    );
+    this.name = "EntitlementUnreadableError";
+  }
+}
+
+/**
+ * `06-F34` (b) / `00 §5.4` — the org the gate resolved is not the org this origin stamps.
+ *
+ * Reproduced before this check existed: entitlement resolved and PASSED against `org-B`, and the
+ * events landed in `org-A`'s ledger, because `org_id` reached only the gate while the envelope
+ * took `deps.identity.org_id`. It is a **named** error rather than a generic one so it cannot be
+ * read as a commercial refusal (`28-F4`) or as a malformed request: this is isolation, `00 §5.4`
+ * makes org scoping absolute, and `01-F1` makes a wrong-tenant write permanent.
+ */
+export class CrossTenantError extends Error {
+  constructor(
+    readonly asked_org_id: string,
+    readonly origin_org_id: string,
+  ) {
+    super(
+      `06-F34/00 §5.4: this storefront origin stamps ${origin_org_id} and was asked to place an ` +
+        `order for ${asked_org_id}. Refused before any append: the gate and the envelope must ` +
+        `resolve ONE tenant, and 01-F1 makes a cross-tenant write permanent.`,
+    );
+    this.name = "CrossTenantError";
+  }
+}
+
+const admit = async (deps: PlacementDeps, org_id: string): Promise<void> => {
+  // `06-F34` (b) FIRST. Isolation is not a commercial question, and resolving entitlement for a
+  // tenant this process cannot write is answering the wrong question convincingly.
+  if (org_id !== deps.origin.identity.org_id) {
+    throw new CrossTenantError(org_id, deps.origin.identity.org_id);
+  }
+  // (ii) of `06-F32`'s two mechanisms — the RUNTIME resolution. The boot assertion in `router.ts`
+  // proves this procedure DECLARES a capability; only this line checks it.
+  const verdict = await entitlementFor(deps.entitlement, org_id, STOREFRONT_CAPABILITY);
+  if (verdict === "unreadable") throw new EntitlementUnreadableError(org_id);
+  if (verdict === "not_entitled") throw new NotEntitledError(org_id);
+};
+
 export const createPlacement = (deps: PlacementDeps) => ({
   place: async (org_id: string, input: PlaceOrderInput): Promise<{ order_id: string }> => {
-    // (ii) of `06-F32`'s two mechanisms — the RUNTIME resolution. The boot assertion in
-    // `router.ts` proves this procedure DECLARES a capability; only this line checks it.
-    if (!(await entitled(deps.entitlement, org_id, STOREFRONT_CAPABILITY))) {
-      throw new NotEntitledError(org_id);
-    }
+    await admit(deps, org_id);
 
     const batch = await deps.origin.placeOrder(input);
 
@@ -63,9 +111,7 @@ export const createPlacement = (deps: PlacementDeps) => ({
     org_id: string,
     input: { order_id: string; reason: string },
   ): Promise<{ order_id: string }> => {
-    if (!(await entitled(deps.entitlement, org_id, STOREFRONT_CAPABILITY))) {
-      throw new NotEntitledError(org_id);
-    }
+    await admit(deps, org_id);
     const batch = await deps.origin.cancelOrder(input);
     await deps.outbox.put(batch.events);
     return { order_id: batch.order_id };

@@ -23,7 +23,14 @@ import type { createPlacement } from "./placement.js";
  */
 
 export type StorefrontContext = {
-  /** Resolved from the HOST (`06-F1`), never from the request body. See `server.ts`. */
+  /**
+   * Resolved from the HOST (`06-F1`/`06-F34` (a)), never from the request body — `server.ts`'s
+   * `orgForHost`, called by the `createContext` the tRPC mount is registered with.
+   *
+   * ⚠ This comment said *"See `server.ts`"* while `server.ts` contained no host resolution of any
+   * kind and mounted no transport at all, so the sentence documented an intention. It is a claim
+   * with a call site now, and `server-seam.test.ts` §B drives an unknown `Host` through real HTTP.
+   */
   readonly org_id: string;
   readonly placement: ReturnType<typeof createPlacement>;
 };
@@ -55,13 +62,26 @@ const entitledProcedure = (capability: Capability) => t.procedure.meta({ entitle
  */
 export const ENTITLEMENT_EXEMPT = new Set<string>(["health"]);
 
+/**
+ * ⚠ **THERE IS NO PRICE FIELD HERE, AND ITS ABSENCE IS THE POINT (`06-F33`).**
+ *
+ * This schema declared `unit_price_paisa` and the origin wrote it into `order.line_added`
+ * verbatim, so the customer set the price: reproduced as a Rs 450 burger reaching a cashier's
+ * `02-F9` inbox at **1 paisa** (`0` was accepted too), where her only action is Accept and
+ * `01-F1` makes it permanent. `06-F6` binds the price to the catalog; `01-F60` keys it per
+ * `(branch, channel)` with no fallback; the origin resolves it (`catalog.ts`).
+ *
+ * The field is **unrepresentable**, not validated — a price that can be sent and is then compared
+ * is a price a later session trusts, and the comparison is one refactor from being dropped.
+ * `z.object` also STRIPS unknown keys, so a body that still carries the old field loses it here
+ * rather than carrying it one layer deeper; `entitlement-gate.test.ts` §D pins both halves.
+ */
 const CartLineInput = z.object({
   line_id: z.string().min(1),
   item_id: z.string().min(1),
-  // `00 §6` — integer units and integer paisa. Stated at the edge so a float never reaches the
-  // origin, where `parseEvent` would refuse it one layer deeper and with a worse message.
+  // `00 §6` — integer units. Stated at the edge so a float never reaches the origin, where
+  // `parseEvent` would refuse it one layer deeper and with a worse message.
   qty: z.number().int().positive(),
-  unit_price_paisa: z.number().int().nonnegative(),
 });
 
 export const storefrontRouter = t.router({

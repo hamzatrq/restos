@@ -37,6 +37,13 @@ describe("the storefront service is startable", () => {
         RESTOS_ORG_ID: "org-karachi",
         RESTOS_BRANCH_ID: "branch-clifton",
         RESTOS_DEVICE_ID: "device-storefront-clifton",
+        RESTOS_STOREFRONT_HOST: "burger-house.restos.pk",
+        // `06-F33` — the dev host builds the REAL gateway-backed catalog and refuses to start
+        // without somewhere to read prices from. Nothing is listening on this port in this test:
+        // booting does not read the catalog, placing an order does, and a boot that pre-flighted
+        // the gateway would make this service unstartable whenever the gateway was restarting.
+        RESTOS_GATEWAY_URL: "http://127.0.0.1:59999",
+        RESTOS_GATEWAY_TOKEN: "service-credential",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -57,6 +64,9 @@ describe("the storefront service is startable", () => {
             expect(out, "06-F31's ruling belongs on the boot line, not only in a doc").toContain(
               "branch_provisional",
             );
+            // `06-F34` (a): a storefront answering the wrong vhost 404s every real customer and
+            // reports a clean boot, so the host it serves is load-bearing on this line too.
+            expect(out).toContain("burger-house.restos.pk");
             resolve(Number(match[1]));
           }
         });
@@ -77,6 +87,42 @@ describe("the storefront service is startable", () => {
     }
   });
 
+  it("REFUSES to boot with no CATALOG to price against — 06-F33/01-F60 admit no fallback", async () => {
+    // The catalog is a price authority, not a convenience: a dev host that started without one
+    // would either refuse every order at runtime or (the dangerous shape) acquire a default.
+    const child = spawn("pnpm", ["start"], {
+      cwd: packageRoot,
+      env: {
+        ...process.env,
+        PORT: "0",
+        RESTOS_ORG_ID: "org-karachi",
+        RESTOS_BRANCH_ID: "branch-clifton",
+        RESTOS_DEVICE_ID: "device-storefront-clifton",
+        RESTOS_STOREFRONT_HOST: "burger-house.restos.pk",
+        RESTOS_GATEWAY_URL: "",
+        RESTOS_GATEWAY_TOKEN: "",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    try {
+      const { code, out } = await new Promise<{ code: number | null; out: string }>((resolve) => {
+        let out = "";
+        child.stdout.on("data", (c: Buffer) => {
+          out += c.toString();
+        });
+        child.stderr.on("data", (c: Buffer) => {
+          out += c.toString();
+        });
+        child.on("exit", (code) => resolve({ code, out }));
+      });
+      expect(code).not.toBe(0);
+      expect(out).toContain("06-F33");
+      expect(out).toContain("RESTOS_GATEWAY_URL");
+    } finally {
+      child.kill("SIGKILL");
+    }
+  });
+
   it("REFUSES to boot with no origin identity — 00 §5.4 admits no defaulted org", async () => {
     // The other half of `T12`. A storefront that defaulted its (org, branch) would push a real
     // tenant's ledger under a made-up name and report success, which is the failure mode with no
@@ -89,6 +135,7 @@ describe("the storefront service is startable", () => {
         RESTOS_ORG_ID: "",
         RESTOS_BRANCH_ID: "",
         RESTOS_DEVICE_ID: "",
+        RESTOS_STOREFRONT_HOST: "",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -106,6 +153,9 @@ describe("the storefront service is startable", () => {
       expect(code).not.toBe(0);
       expect(out).toContain("06-F30");
       expect(out).toContain("RESTOS_ORG_ID");
+      // `06-F34` (a) joined the join key: an origin with no public host cannot refuse a request
+      // that names another one, so it is refused at boot rather than defaulted to "any".
+      expect(out).toContain("RESTOS_STOREFRONT_HOST");
     } finally {
       child.kill("SIGKILL");
     }

@@ -27,6 +27,20 @@ export type OriginIdentity = {
   readonly branch_id: string;
   readonly device_id: string;
   readonly device_class: DeviceClass;
+  /**
+   * `06-F34` (a) / `06-F1` — the ONE host this deployment answers for, lower-cased.
+   *
+   * It is not a tenant lookup and it is not a fact *about* a tenant read from the environment
+   * (`28-F5` (a)): it is this process's vhost binding, the same layer-3 deployment configuration
+   * `01-F65` requires for a device's own identity, and the tenant it serves was already fixed by
+   * `06-F30`'s origin identity. What it buys is the refusal: with no configured host the service
+   * answers every `Host` header with one org's ordering surface, and `06-F1`'s *"unknown host →
+   * neutral 404"* has nothing to compare against.
+   *
+   * ⚠ When this deployment stops being one origin per process, this becomes a directory read —
+   * that is `28-F20`'s gap, inherited rather than invented here, and `06-F34` (c) records it.
+   */
+  readonly public_host: string;
 };
 
 /**
@@ -42,17 +56,26 @@ export const originIdentity = (input: {
   org_id: string;
   branch_id: string;
   device_id: string;
+  public_host: string;
 }): OriginIdentity => {
-  for (const field of ["org_id", "branch_id", "device_id"] as const) {
+  for (const field of ["org_id", "branch_id", "device_id", "public_host"] as const) {
     if (input[field].trim() === "") {
       throw new Error(
-        `06-F30: the storefront origin needs a non-empty ${field}. An origin missing any part ` +
-          `of its (org, branch, device) identity cannot stamp a legal 01-F62 envelope, and a ` +
-          `defaulted one would push a real branch's ledger under a made-up name.`,
+        `06-F30/06-F34: the storefront origin needs a non-empty ${field}. An origin missing any ` +
+          `part of its (org, branch, device) identity cannot stamp a legal 01-F62 envelope, and ` +
+          `a defaulted one would push a real branch's ledger under a made-up name; an origin ` +
+          `with no public host cannot refuse a request that names another one (06-F1).`,
       );
     }
   }
-  return { ...input, device_class: STOREFRONT_DEVICE_CLASS };
+  return {
+    ...input,
+    // Compared against a `Host` header, which is case-insensitive per RFC 9110 and arrives
+    // lower-cased from some proxies and not others. Normalised once, here, rather than at the
+    // comparison — two normalisations is how one of them stops matching.
+    public_host: input.public_host.trim().toLowerCase(),
+    device_class: STOREFRONT_DEVICE_CLASS,
+  };
 };
 
 /**
@@ -62,9 +85,9 @@ export const originIdentity = (input: {
  * a tenant that does not exist and report success (`00 §5.4`).
  */
 export const resolveOriginIdentity = (env: Record<string, string | undefined>): OriginIdentity => {
-  const missing = (["RESTOS_ORG_ID", "RESTOS_BRANCH_ID", "RESTOS_DEVICE_ID"] as const).filter(
-    (k) => (env[k] ?? "").trim() === "",
-  );
+  const missing = (
+    ["RESTOS_ORG_ID", "RESTOS_BRANCH_ID", "RESTOS_DEVICE_ID", "RESTOS_STOREFRONT_HOST"] as const
+  ).filter((k) => (env[k] ?? "").trim() === "");
   if (missing.length > 0) {
     throw new Error(
       `06-F30: the storefront origin is unconfigured — ${missing.join(", ")} not set. ` +
@@ -76,5 +99,6 @@ export const resolveOriginIdentity = (env: Record<string, string | undefined>): 
     org_id: env.RESTOS_ORG_ID as string,
     branch_id: env.RESTOS_BRANCH_ID as string,
     device_id: env.RESTOS_DEVICE_ID as string,
+    public_host: env.RESTOS_STOREFRONT_HOST as string,
   });
 };

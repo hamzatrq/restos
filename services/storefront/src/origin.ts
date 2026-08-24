@@ -1,4 +1,5 @@
 import { type EventEnvelopeT, parseEvent } from "@restos/domain";
+import type { StorefrontCatalog } from "./catalog.js";
 import type { OriginIdentity } from "./identity.js";
 
 /**
@@ -16,15 +17,42 @@ import type { OriginIdentity } from "./identity.js";
 export const ORIGIN_TIME_BASIS = "branch_provisional" as const;
 
 /**
- * A line as the storefront resolved it. `01-F18`/`06-F6`: the price is the one shown at
- * add-to-cart, captured then and written verbatim — **the till never re-resolves it** (`01-F53`).
+ * A line as the CUSTOMER sends it — **and note what is not here: a price.**
+ *
+ * `06-F33`. The first version of this type carried `unit_price_paisa` and the router declared it
+ * as a field of the public, unauthenticated request body, so a browser set the price and `01-F1`
+ * froze it (reproduced: a Rs 450 burger in a cashier's inbox at 1 paisa). The field is **gone from
+ * the type**, not validated in it: a price that can be sent and is then compared is a price a
+ * later session trusts. The origin resolves `(its own branch, storefront, item_id)` against the
+ * published catalog (`catalog.ts`), which is the same read `addLine` does on a till, and `01-F18`/
+ * `01-F53` then apply unchanged — captured once at line-add, never re-derived afterwards.
  */
 export type CartLine = {
   readonly line_id: string;
   readonly item_id: string;
   readonly qty: number;
-  readonly unit_price_paisa: number;
 };
+
+/**
+ * `06-F33`/`01-F60` — an item with no cell at `(this branch, storefront)` cannot be sold, and
+ * inventing a price is worse than refusing.
+ *
+ * **Not an `01-F17` breach, and the distinction is the FR's own:** `01-F17` forbids blocking a
+ * SALE, and the counter's `addLine` already refuses one unpriced item while the rest of the order
+ * completes — *"the sale is not blocked, this one item is"*. Here the whole cart is refused before
+ * anything is appended, because a storefront cart is submitted in one act and a partial order the
+ * customer never chose is a permanent row under `01-F1`.
+ */
+export class UnpricedItemsError extends Error {
+  constructor(readonly item_ids: readonly string[]) {
+    super(
+      `06-F33/01-F60: no storefront price for ${item_ids.join(", ")} on this branch. The order ` +
+        `is refused rather than priced: 01-F60 admits no fallback, 0 is a sellable price and ` +
+        `"unpriced" is not, and 01-F1 would make either mistake permanent.`,
+    );
+    this.name = "UnpricedItemsError";
+  }
+}
 
 export type PlaceOrderInput = {
   readonly order_id: string;
@@ -45,6 +73,13 @@ export type OriginDeps = {
   readonly identity: OriginIdentity;
   readonly lamport: LamportSource;
   readonly clock: OriginClock;
+  /**
+   * `06-F33` — the price authority. **Required, never optional with a default**: `seams:check`
+   * Rule B asks whether an optional member is SUPPLIED and never whether the supply is real, and
+   * an `catalog?: StorefrontCatalog` defaulting to anything at all is how a price stops coming
+   * from the catalog again, silently.
+   */
+  readonly catalog: StorefrontCatalog;
   /** Envelope ids. Injected so a test can pin them; production passes `crypto.randomUUID`. */
   readonly newId: () => string;
 };
@@ -121,9 +156,21 @@ export type OriginBatch = {
  * **No total is computed here and none is written.** `01-F17`'s money law puts the bill in the
  * fold, and `02-F63`'s charge rounding plus `16-F5`'s per-line tax are the till's arithmetic; a
  * second implementation of that in the cloud is the two-writers defect on the money path. What
- * the storefront writes is the LINES, at the prices it showed (`01-F18`).
+ * the storefront writes is the LINES, at the prices **the catalog holds** (`06-F33`, `01-F60`).
+ *
+ * **The price read happens BEFORE the lamport reservation, and the order is deliberate.** A
+ * refused cart must consume no slot: `handlePush` advances this origin's watermark only over a
+ * gap-free run, so a reservation abandoned by a refusal would wedge the outbox permanently.
  */
 export const createStorefrontOrigin = (deps: OriginDeps) => ({
+  /**
+   * `06-F34` (b) — exposed so a caller can compare the tenant it resolved against the tenant this
+   * origin will actually stamp. The first version kept the identity private, so `placement` could
+   * not have compared even if it had wanted to, and an entitlement check that passed for one org
+   * while the events landed in another's ledger was unreachable by any assertion.
+   */
+  identity: deps.identity,
+
   placeOrder: async (input: PlaceOrderInput): Promise<OriginBatch> => {
     if (input.lines.length === 0) {
       throw new Error(
@@ -131,6 +178,15 @@ export const createStorefrontOrigin = (deps: OriginDeps) => ({
           "written, because 01-F1 makes an empty order a permanent row nothing can clear.",
       );
     }
+    // `06-F33` — ONE read for the whole cart, so a publish landing mid-order cannot price half of
+    // it against each menu. `CatalogUnreadableError` propagates: a gateway that cannot be read is
+    // not an item with no price, and treating it as one would sell at whatever a default said.
+    const priced = await deps.catalog.priceLines(input.lines.map((line) => line.item_id));
+    const unpriced = input.lines
+      .map((line) => line.item_id)
+      .filter((item_id) => !priced.paisa.has(item_id));
+    if (unpriced.length > 0) throw new UnpricedItemsError([...new Set(unpriced)]);
+
     const first = await deps.lamport.reserve(1 + input.lines.length);
     const created = stamp(deps, first, "order.created", {
       order_id: input.order_id,
@@ -143,7 +199,10 @@ export const createStorefrontOrigin = (deps: OriginDeps) => ({
         line_id: line.line_id,
         item_id: line.item_id,
         qty: line.qty,
-        unit_price_paisa: line.unit_price_paisa,
+        // `06-F33` — the CATALOG's cell for this origin's `(branch, storefront)`, resolved above.
+        // `priced.paisa.get` cannot be undefined here: every missing item was refused already,
+        // and the `?? 0` an implementer reaches for at this line is the whole defect returning.
+        unit_price_paisa: priced.paisa.get(line.item_id) as number,
       }),
     );
     return { order_id: input.order_id, events: [created, ...lines] };

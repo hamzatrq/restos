@@ -34,8 +34,27 @@ export type Capability = typeof STOREFRONT_CAPABILITY;
  */
 export type EntitlementRecord = { readonly capabilities: ReadonlySet<Capability> };
 
-/** Resolved per org, from data (`28-F5`). `null` = no record — see `entitled()`. */
-export type EntitlementSource = (org_id: string) => Promise<EntitlementRecord | null>;
+/**
+ * ⚠ **THREE STATES, NOT TWO, AND THE TYPE IS WHERE THAT IS ENFORCED (`28-F3`'s corollary).**
+ *
+ * This was `Promise<EntitlementRecord | null>`, which has exactly two inhabitants — so a store
+ * timeout and *"this org has no record"* were the same value, and `28-F3` says in terms that
+ * *"a resolver that collapses them is wrong in the direction that stops service"*. `28-F8` then
+ * makes both refuse the capability, which is why collapsing them looks harmless and is not: the
+ * two refusals are different answers, and `28 §4`'s flow requires the surface to say **which**.
+ * An unreadable state also decays differently — it clears when the store comes back, and a
+ * customer told *"this restaurant does not have online ordering"* has been told something false.
+ */
+export type EntitlementLookup =
+  | { readonly status: "record"; readonly record: EntitlementRecord }
+  | { readonly status: "absent" }
+  | { readonly status: "unreadable"; readonly reason: string };
+
+/** Resolved per org, from data (`28-F5`) — never from the environment and never from the caller. */
+export type EntitlementSource = (org_id: string) => Promise<EntitlementLookup>;
+
+/** What the gate answers. Both refusals refuse; they are not the same refusal (`28-F8`). */
+export type EntitlementVerdict = "entitled" | "not_entitled" | "unreadable";
 
 /**
  * ⚠ **AN ABSENT RECORD IS REFUSED, AND THE OPPOSITE READING IS THE DANGEROUS ONE.**
@@ -51,13 +70,30 @@ export type EntitlementSource = (org_id: string) => Promise<EntitlementRecord | 
  *
  * So: no record ⇒ not entitled. `28-F3`'s identical service is satisfied by every org having a
  * record, which is `28-F5`'s job and not this gate's to paper over.
+ *
+ * ⚠ **The comment above cited `28-F3` as if it left this open; it does not.** Its third bullet
+ * already decides the flag half — *"a flag is a thing that is enabled … one never enabled is
+ * **not enabled**, and an absent record resolves each of `15-F5`'s three cloud channel flags to
+ * not enabled"* — and the storefront flag is one of those three. The verdict here was right and
+ * its stated reason was a reconstruction; the FR's own clause is the authority, and the argument
+ * is kept because the asymmetry with `01-F60`'s enabled set is still the thing worth knowing.
+ *
+ * **A source that THROWS is unreadable, not absent.** A store that times out is exactly the case
+ * `28-F3`'s corollary names, and a `try` that returned `false` would erase it at the one line
+ * where the distinction still exists.
  */
-export const entitled = async (
+export const entitlementFor = async (
   source: EntitlementSource,
   org_id: string,
   capability: Capability,
-): Promise<boolean> => {
-  const record = await source(org_id);
-  if (record === null) return false;
-  return record.capabilities.has(capability);
+): Promise<EntitlementVerdict> => {
+  let lookup: EntitlementLookup;
+  try {
+    lookup = await source(org_id);
+  } catch {
+    return "unreadable";
+  }
+  if (lookup.status === "unreadable") return "unreadable";
+  if (lookup.status === "absent") return "not_entitled";
+  return lookup.record.capabilities.has(capability) ? "entitled" : "not_entitled";
 };
