@@ -46,10 +46,20 @@ import type { ParsedEvent } from "@restos/domain";
 import { parseEvent } from "@restos/domain";
 import fc from "fast-check";
 import { beforeEach, describe, expect, it } from "vitest";
-import { consumption, deductionSet } from "../deduction.js";
+import { deductionSet } from "../deduction.js";
 import type { ReferenceData } from "../reference.js";
 import { varianceReports } from "../variance.js";
-import { count, emptyRefs, item, LOCATION, purchase, resetIds, sale, wastage } from "./fixtures.js";
+import {
+  consumption,
+  count,
+  emptyRefs,
+  item,
+  LOCATION,
+  purchase,
+  resetIds,
+  sale,
+  wastage,
+} from "./fixtures.js";
 
 beforeEach(resetIds);
 
@@ -264,6 +274,23 @@ describe("§B · a business key delivered with two payloads is CONTESTED, never 
     const used = consumption(twoPayloads(4, 7), REFS);
     expect(used.by_item.size).toBe(0);
     expect(used.unresolved_items).toEqual(["chicken", "oil"]);
+  });
+
+  it("⚠ …and it banks NO recipe version either — the probe deducted nothing", () => {
+    // The review's fourth finding, and it was a comment rather than an arithmetic defect: the fix
+    // round wrote *"a version banked for a dish that deducted nothing is a claim about a row that
+    // does not exist"* twelve lines above a loop that did exactly that, because the contested
+    // probe went through the same `explodeInto` and merged its versions into the shared map.
+    // Measured on this fixture before the correction: `by_item []`, `unresolved ["chicken","oil"]`
+    // and `recipe_versions [["karahi", 3]]`. `10-F3`'s key half may not name a version for an
+    // explosion no row was computed from.
+    const used = consumption(twoPayloads(4, 7), REFS);
+    expect([...used.recipe_versions]).toEqual([]);
+    // THE CONTROL, one branch away: the SAME dish uncontested banks its version, so this pair
+    // cannot be satisfied by a `recipe_versions` map that is empty for everything.
+    const clean = consumption(twoPayloads(4, 4), REFS);
+    expect(clean.by_item.get("chicken")).toBe(1_000_000);
+    expect([...clean.recipe_versions]).toEqual([["karahi", 3]]);
   });
 
   it("an IDENTICAL redelivery is not a contest — it is one act (01-F8, 01-F31)", () => {

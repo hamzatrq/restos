@@ -33,7 +33,7 @@
 import type { CountBasis } from "@restos/domain";
 import { type Paisa, paisa, sumPaisa } from "@restos/domain";
 import { type CountedItem, type NotCountedReason, rollUpCount } from "./count.js";
-import { consumption } from "./deduction.js";
+import { type ConsumptionAct, foldConsumption, resolveConsumption } from "./deduction.js";
 import type { InventoryEvent } from "./event.js";
 import {
   type HintKind,
@@ -67,6 +67,16 @@ import type { ReferenceData } from "./reference.js";
  * different label, `no_cost_basis`. A documented report variant a reader can look for and a
  * surface can render, which the arithmetic cannot produce, is `L8`'s shape wearing a union member;
  * it is deleted rather than re-aimed, because the case it claimed already has an owner.
+ *
+ * ⚠ **AND THAT LAST SENTENCE WAS FALSE WHEN IT WAS WRITTEN — THE OWNER IT NAMED COULD NOT FIRE.**
+ * `openingUsable` was a tautology from the `da263e2` fix round until the review that followed it
+ * (August 2026): a carry with a quantity and no value reached this file, was flattened to `null` by
+ * `carryPair`, and produced a **priced row on basis `receipted`** — measured at `gap −2 kg`,
+ * `gap_value_paisa −136 000`, `withheld: null`. So a documented report variant was retired on the
+ * strength of a guard that could not fire, which is one defect resting on another. The guard is
+ * real now and the case does land on `no_cost_basis` (or on `reference` where the item has a typed
+ * price), so the deletion stands **on a measurement rather than on a claim** — but the deletion was
+ * not justified when it was made, and that is worth more than the fact that it is justified now.
  */
 export type WithheldReason =
   | { readonly kind: "not_counted"; readonly reason: NotCountedReason }
@@ -160,8 +170,15 @@ type Carry = {
   readonly basis: CostBasis;
 };
 
+/**
+ * ⚠ **A CARRY THAT COULD NOT BE VALUED TRAVELS AS A QUANTITY WITH A `null` VALUE, AND IT USED TO
+ * TRAVEL AS NOTHING AT ALL.** Flattening it to `null` here threw away the one fact
+ * `costBasisOf`'s opening guard needs — the carried quantity — so the guard could not fire and the
+ * period was priced at the purchase rate as if the shelf had opened empty. `null` is now reserved
+ * for *there is no carry*, which is the first period and nothing else.
+ */
 const carryPair = (carry: Carry | undefined): OpeningPair | null =>
-  carry === undefined || carry.value_paisa === null
+  carry === undefined
     ? null
     : { value_paisa: carry.value_paisa, qty_base: carry.qty_base, basis: carry.basis };
 
@@ -175,9 +192,16 @@ export const varianceReports = (input: VarianceInput): readonly VarianceReport[]
   const counted = input.refs.items.filter((item) => item.is_counted);
   const carry = new Map<string, Carry>();
   const out: VarianceReport[] = [];
+  // ⚠ **RESOLVED ONCE FOR THE WHOLE CHAIN, AND THE PLACE THIS CALL SITS IS A MEASURED NUMBER.**
+  // The windowing fix below resolved consumption INSIDE `reportFor`, which made the walk
+  // O(periods × ledger): 49 561 events over 31 periods took **2 807 ms** with the call one level
+  // down and **86 ms** here, on one generated ledger at `inventory-router.ts`'s own
+  // `DEFAULT_WINDOW_DAYS = 30` and 50 000-row cap. Nothing about WHAT is resolved changed — the
+  // acts are still resolved over the full ledger and windowed by their own stamps.
+  const acts = resolveConsumption(input.events, input.refs);
 
   for (const period of periods) {
-    out.push(reportFor(input, period, counted, carry));
+    out.push(reportFor(input, period, counted, carry, acts));
   }
   return out;
 };
@@ -187,6 +211,7 @@ const reportFor = (
   period: Period,
   countedItems: ReferenceData["items"],
   carry: Map<string, Carry>,
+  acts: readonly ConsumptionAct[],
 ): VarianceReport => {
   // ⚠ **NOTHING IS WINDOWED EVENT BY EVENT HERE, AND THE PRE-WINDOWED LIST THAT USED TO STAND ON
   // THIS LINE IS THE REVIEW'S FIRST DEFECT.** `10-F3` deducts *"for every order for which an
@@ -200,9 +225,15 @@ const reportFor = (
   //
   // Every fact is now resolved over the FULL event list and windowed by its ACT's own stamp, which
   // is what `physicalFacts` has always done for a purchase and a wastage.
+  //
+  // ⚠ **AND THE RESOLUTION ITSELF IS NOT DONE HERE, WHICH IS THE REVIEW'S FIRST FINDING.** The
+  // first draft of this fix called `consumption(input.events, …)` on this line — correct, and 15×
+  // slower, because every period re-grouped every `order.line_added` and re-exploded every
+  // confirmed line to discard all but its own window. `varianceReports` resolves the acts once and
+  // hands them down; this line only WINDOWS them.
   const window = (stamp: number): boolean => inWindow(period, stamp);
   const facts = physicalFacts(input.events, input.location_id, period);
-  const used = consumption(input.events, input.refs, window);
+  const used = foldConsumption(acts, window);
   const rollup = rollUpCount(
     period.observation,
     countedItems.map((item) => item.item_id),

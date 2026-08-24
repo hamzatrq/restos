@@ -10,6 +10,13 @@
 
 import type { ParsedEvent } from "@restos/domain";
 import { paisa, parseEvent, sumPaisa } from "@restos/domain";
+import {
+  type Consumption,
+  foldConsumption,
+  resolveConsumption,
+  type WindowStamp,
+} from "../deduction.js";
+import type { InventoryEvent } from "../event.js";
 import type { InventoryItem, ReferenceData } from "../reference.js";
 
 export const ORG = "org-1";
@@ -186,3 +193,19 @@ export const item = (over: Partial<InventoryItem> & { item_id: string }): Invent
 });
 
 export const emptyRefs: ReferenceData = { items: [], areas: [], recipes: [], menu_recipes: [] };
+
+/**
+ * The whole-ledger consumption total in one call — `10-F3` + `10-F8`, resolved and folded.
+ *
+ * ⚠ **IT LIVES IN TEST SUPPORT BECAUSE NO SHIPPING CODE COMPOSES THE TWO HALVES THIS WAY.** It was
+ * `deduction.ts`'s `consumption` until the resolution was hoisted out of `reportFor` (the
+ * re-review's performance finding): `varianceReports` now resolves once per chain and windows per
+ * period, so the wrapper became an export only this suite reached, which `pnpm seams:check` Rule A
+ * reports as *"the defect, exactly"*. Keeping it here says what it is — a convenience for tests
+ * asserting over a whole ledger — instead of dressing it as product API.
+ */
+export const consumption = (
+  events: readonly InventoryEvent[],
+  refs: ReferenceData,
+  window?: WindowStamp,
+): Consumption => foldConsumption(resolveConsumption(events, refs), window);

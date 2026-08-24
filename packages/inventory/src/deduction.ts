@@ -204,6 +204,33 @@ const contestedCandidates = (
 export type WindowStamp = (stamp: number) => boolean;
 const ALL_TIME: WindowStamp = () => true;
 
+/**
+ * **One RESOLVED act of consumption, before any window has been applied.** The unit the report
+ * windows: a kept deduction line exploded into its leaves, or a contested line's probe.
+ *
+ * ⚠ **IT EXISTS BECAUSE RESOLVING IS EXPENSIVE AND WINDOWING IS NOT, AND THE FIRST FIX FOR THE
+ * WINDOWING DEFECT PAID THE EXPENSIVE HALF ONCE PER PERIOD.** `reportFor` called `consumption(all
+ * events, refs, window)` inside its per-period loop, so `deductionSet` re-grouped every
+ * `order.line_added` and `explodeRecipe` re-walked every confirmed line **for every period**,
+ * discarding all but the in-window ones. Measured on one generated ledger of 49 561 events over the
+ * 31 periods `inventory-router.ts`'s own `DEFAULT_WINDOW_DAYS = 30` and 50 000-row cap describe:
+ * **2 807 ms**, against **86 ms** for the same ledger once the resolution was hoisted — and
+ * `stockReport` is synchronous inside an `async` resolver, so that was ~2.8 s of blocked event loop
+ * for one authenticated read on the process serving the back office.
+ *
+ * The behavioural fix is untouched: every act is still resolved over the FULL ledger (`10-F3`'s
+ * unqualified *"for every order for which an `order.confirmed` exists"*) and windowed by its own
+ * `stamp`. What moved is WHEN — once per report set instead of once per period.
+ */
+export type ConsumptionAct = {
+  readonly stamp: number;
+  /** The leaves this act contributes. EMPTY when its explosion failed — see `explode`. */
+  readonly by_item: ReadonlyMap<string, Rational>;
+  readonly coverage_gaps: readonly string[];
+  readonly unresolved_items: readonly string[];
+  readonly recipe_versions: ReadonlyMap<string, number>;
+};
+
 export type Consumption = {
   /** Theoretical consumption per inventory item, in base units. Rounded ONCE, at the end. */
   readonly by_item: ReadonlyMap<string, number>;
@@ -324,11 +351,19 @@ const explodeRecipe = (
  * becomes a coverage gap and is named, which is `10-F8`'s existing shape and never a guess between
  * them.
  */
-export const consumption = (
+/** One dish's explosion: its leaves and the versions they were computed with, or nothing at all. */
+type Explosion =
+  | {
+      readonly ok: true;
+      readonly leaves: ReadonlyMap<string, Rational>;
+      readonly versions: ReadonlyMap<string, number>;
+    }
+  | { readonly ok: false };
+
+export const resolveConsumption = (
   events: readonly InventoryEvent[],
   refs: ReferenceData,
-  window: WindowStamp = ALL_TIME,
-): Consumption => {
+): readonly ConsumptionAct[] => {
   const set = deductionSet(events);
   const bySellable = new Map<string, string | "ambiguous">();
   for (const mapping of refs.menu_recipes) {
@@ -347,66 +382,112 @@ export const consumption = (
     else if (seen !== recipe.recipe_id) prepByItem.set(recipe.produces_item_id, "ambiguous");
   }
 
+  // ⚠ **THE EXPLOSION LANDS IN ITS OWN MAP AND IS HANDED BACK ONLY ON SUCCESS, AND THAT IS THE FIX
+  // FOR A DISH REPORTED AS NOT DEDUCTED AND PARTIALLY DEDUCTED AT ONCE.** `explodeRecipe` walks its
+  // lines in order and throws on the first one it cannot resolve; it used to write straight into
+  // the shared totals, so a karahi whose second line was unresolvable had already added its first
+  // line's chicken — 2 kg of consumption for a dish this function goes on to report as a
+  // `coverage_gap`. `10-F31` R2 is all-or-nothing PER DISH, and it has to hold in the arithmetic
+  // and not only on the plate-cost surface: a phantom 2 kg is 2 kg of unexplained usage, and on
+  // this report that is an accusation (`10-F19`). A failed explosion now returns `{ok: false}` and
+  // its half-filled map is dropped with it, so there is nothing to merge and nothing to undo.
+  const explode = (sellable_id: string, qty: Rational): Explosion => {
+    const recipe_id = bySellable.get(sellable_id);
+    if (recipe_id === undefined || recipe_id === "ambiguous") return { ok: false };
+    const leaves = new Map<string, Rational>();
+    const versions = new Map<string, number>();
+    try {
+      explodeRecipe(recipe_id, qty, refs, prepByItem, leaves, versions, new Set());
+    } catch (error) {
+      if (error instanceof ExplosionUnresolvable) return { ok: false };
+      throw error;
+    }
+    return { ok: true, leaves, versions };
+  };
+
+  const acts: ConsumptionAct[] = [];
+  for (const line of set.lines) {
+    const exploded = explode(line.sellable_id, fromInt(line.qty));
+    acts.push(
+      exploded.ok
+        ? {
+            stamp: line.stamp,
+            by_item: exploded.leaves,
+            coverage_gaps: [],
+            unresolved_items: [],
+            // `10-F3`'s key is *"the recipe version this row was computed with"*, so a version is
+            // banked only by an act that CONTRIBUTES a row — see the contested loop below.
+            recipe_versions: exploded.versions,
+          }
+        : {
+            stamp: line.stamp,
+            by_item: EMPTY_LEAVES,
+            coverage_gaps: [line.sellable_id],
+            unresolved_items: [],
+            recipe_versions: EMPTY_VERSIONS,
+          },
+    );
+  }
+
+  // A contested line's CANDIDATES are exploded purely to learn which items it could have touched.
+  // Those items' rows are then refused rather than computed from a consumption figure that is
+  // missing an unknown amount.
+  //
+  // ⚠ **AND THE PROBE BANKS NO RECIPE VERSION, WHICH IS THE REVIEW'S FOURTH FINDING.** The comment
+  // that stood beside the merge said *"a version banked for a dish that deducted nothing is a claim
+  // about a row that does not exist"* — and the probe, twelve lines below it, went through the same
+  // `explodeInto` and merged its versions into the shared map. **The comment was FALSE on the path
+  // under it from the moment it was written** (the `da263e2` fix round, August 2026): measured, a
+  // single contested `order.line_added` returned `by_item []`, `unresolved_items ["chicken"]` and
+  // `recipe_versions [["karahi", 7]]`. `10-F3`'s idempotency key half may not name a version for an
+  // explosion nothing was deducted from, so the probe's versions are discarded with it.
+  for (const contest of contestedCandidates(events).values()) {
+    const gaps: string[] = [];
+    const unresolved: string[] = [];
+    for (const sellable_id of contest.sellable_ids) {
+      const exploded = explode(sellable_id, fromInt(1));
+      if (exploded.ok) for (const item_id of exploded.leaves.keys()) unresolved.push(item_id);
+      else gaps.push(sellable_id);
+    }
+    acts.push({
+      stamp: contest.stamp,
+      by_item: EMPTY_LEAVES,
+      coverage_gaps: gaps,
+      unresolved_items: unresolved,
+      recipe_versions: EMPTY_VERSIONS,
+    });
+  }
+  return acts;
+};
+
+const EMPTY_LEAVES: ReadonlyMap<string, Rational> = new Map();
+const EMPTY_VERSIONS: ReadonlyMap<string, number> = new Map();
+
+/**
+ * Window the resolved acts and total what is left. Cheap by construction: one predicate call per
+ * act and a rational add per leaf it contributes, with **no re-resolution of anything**.
+ *
+ * The rounding is still ONE rounding at the very end (`10 §8`'s *"no cumulative drift vs exact
+ * rational computation"*), because the acts carry rationals and only this fold turns them into
+ * base units.
+ */
+export const foldConsumption = (
+  acts: readonly ConsumptionAct[],
+  window: WindowStamp = ALL_TIME,
+): Consumption => {
   const totals = new Map<string, Rational>();
   const versions = new Map<string, number>();
   const gaps = new Set<string>();
   const unresolved = new Set<string>();
 
-  const explodeInto = (
-    sellable_id: string,
-    qty: Rational,
-    target: Map<string, Rational>,
-  ): boolean => {
-    const recipe_id = bySellable.get(sellable_id);
-    if (recipe_id === undefined || recipe_id === "ambiguous") {
-      gaps.add(sellable_id);
-      return false;
+  for (const act of acts) {
+    if (!window(act.stamp)) continue;
+    for (const [item_id, value] of act.by_item) {
+      totals.set(item_id, add(totals.get(item_id) ?? ZERO, value));
     }
-    // ⚠ **THE EXPLOSION LANDS IN A SCRATCH MAP AND IS MERGED ONLY ON SUCCESS, AND THAT IS THE FIX
-    // FOR A DISH REPORTED AS NOT DEDUCTED AND PARTIALLY DEDUCTED AT ONCE.** `explodeRecipe` walks
-    // its lines in order and throws on the first one it cannot resolve; it used to write straight
-    // into `totals`, so a karahi whose second line was unresolvable had already added its first
-    // line's chicken — 2 kg of consumption for a dish this function goes on to report as a
-    // `coverage_gap`. `10-F31` R2 is all-or-nothing PER DISH, and it has to hold in the arithmetic
-    // and not only on the plate-cost surface: a phantom 2 kg is 2 kg of unexplained usage, and on
-    // this report that is an accusation (`10-F19`).
-    const scratch = new Map<string, Rational>();
-    const scratchVersions = new Map<string, number>();
-    try {
-      explodeRecipe(recipe_id, qty, refs, prepByItem, scratch, scratchVersions, new Set());
-    } catch (error) {
-      if (error instanceof ExplosionUnresolvable) {
-        gaps.add(sellable_id);
-        return false;
-      }
-      throw error;
-    }
-    for (const [item_id, value] of scratch) {
-      target.set(item_id, add(target.get(item_id) ?? ZERO, value));
-    }
-    // The version is recorded only for an explosion that CONTRIBUTED. `10-F3`'s key is *"the recipe
-    // version this row was computed with"*, and a version banked for a dish that deducted nothing
-    // is a claim about a row that does not exist.
-    for (const [recipe, version] of scratchVersions) versions.set(recipe, version);
-    return true;
-  };
-
-  for (const line of set.lines) {
-    if (!window(line.stamp)) continue;
-    explodeInto(line.sellable_id, fromInt(line.qty), totals);
-  }
-
-  // A contested line's CANDIDATES are exploded into a throwaway map purely to learn which items it
-  // could have touched. Those items' rows are then refused rather than computed from a consumption
-  // figure that is missing an unknown amount.
-  for (const contest of contestedCandidates(events).values()) {
-    if (!window(contest.stamp)) continue;
-    for (const sellable_id of contest.sellable_ids) {
-      const probe = new Map<string, Rational>();
-      if (explodeInto(sellable_id, fromInt(1), probe)) {
-        for (const item_id of probe.keys()) unresolved.add(item_id);
-      }
-    }
+    for (const sellable_id of act.coverage_gaps) gaps.add(sellable_id);
+    for (const item_id of act.unresolved_items) unresolved.add(item_id);
+    for (const [recipe, version] of act.recipe_versions) versions.set(recipe, version);
   }
 
   const rounded = new Map<string, number>();
@@ -419,3 +500,11 @@ export const consumption = (
     recipe_versions: versions,
   };
 };
+
+// ⚠ **`consumption(events, refs, window)` USED TO STAND HERE AS A ONE-CALL WRAPPER, AND
+// `pnpm seams:check` REFUSED IT THE MOMENT THE HOIST LANDED.** Once `varianceReports` resolved once
+// per chain and folded per period, nothing shipping composed the two halves in one call any more —
+// Rule A reported it as *"reached only by tests — the defect, exactly"*, and it was right: an export
+// only a suite reaches is `L8`'s shape however convenient it reads. The convenience survives where
+// it is true, as `__acceptance__/fixtures.ts`'s `consumption` helper, and the product's own two
+// phases are the API.

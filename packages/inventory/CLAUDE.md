@@ -55,7 +55,11 @@ the expensive kind.**
    basis must carry the **worst** provenance in it, as `worstBasis` already does for the count
    basis), and `10-F5`'s negative theoretical stock makes a pair whose signs disagree — a
    **negative unit cost** that inverts the money. `10-F31` is amended for both; the design's next
-   revision should follow.
+   revision should follow. ⚠ **And amended a THIRD time after the re-review:** the worst-provenance
+   rule binds *the opening HALF OF THE PAIR*, so an opening of zero value and zero quantity —
+   which is in neither the numerator nor the denominator — carries no provenance, and an opening
+   whose VALUE is unknown is not a usable half at all. Without the first clause `reference` is
+   **absorbing** and §5.6 (i)'s onboarding ramp can never be observed again.
 7. **NEITHER THE DESIGN NOR THE FRs SAID WHICH PERIOD A DERIVED FACT BELONGS TO, and the omission
    was worth Rs 3,400 an order.** §5.2 restates `10-F3` as an order-free set difference — correctly
    — and then says nothing about windowing it, so the first implementation windowed the EVENTS.
@@ -108,7 +112,7 @@ list.
   the window (commandment 2), so `10-F30` now records the consequence and the operational answer:
   **one closing act reuses one `count_id`.**
 
-## Mutation matrix — round-3 law. Control **145/145** green, negative controls **0 kills**
+## Mutation matrix — round-3 law. Control **154/154** green, negative controls **0 kills**
 
 In-tree with a **restore trap**: every row is sha256-verified byte-identical after the run, and the
 driver refuses to continue if one is not. ⚠ **The driver is a scratchpad script, not a committed
@@ -212,6 +216,87 @@ defect it repairs.**
   with one is how a rail teaches a session to write decorative code. The filter is gone, the export
   carries an `@unreached-owed` marker naming the surface that RENDERS a hint, and the binding
   assertion is `noise-floor.test.ts` §C's sweep over the closed `HINT_KINDS` set.
+
+### The RE-REVIEW round — the fix round's own four findings, measured 2026-08-24 on 154 tests
+
+The re-review returned SHIP WITH FIXES on four items the previous round **introduced or leaned on**,
+and the first was a performance regression its author did not measure. Same driver, same restore
+trap (every file sha256-verified byte-identical after every row; the pristine bytes are snapshotted
+in memory, because a `git checkout` restore would have thrown away the fix under test).
+
+| # | mutant (the defect, re-applied) | killed |
+|---|---|---|
+| **M1** | **the resolution moves back INSIDE `reportFor` — the O(periods × ledger) regression** | **2** |
+| **M1c** | **THE SEAM, kept and made INERT — the hoisted acts are passed as `[]`** | **17** |
+| **M2** | **an opening that contributes NOTHING still labels the pair (`reference` absorbing)** | **3** |
+| M2b | the opposite over-fix — the opening's basis is ignored entirely (F5's defect returning) | 4 |
+| **M3** | **`openingUsable = true` — the tautology, exactly as the review found it** | **4 (was 0 of 145)** |
+| M3b | the same case reached differently: `carryPair` flattens an unvalued carry to `null` again | 2 |
+| **M4** | **the contested PROBE banks its recipe versions again** | **1** |
+| V1 | REGRESSION — the blank-as-zero mutant, re-run per this file's own instruction | 9 |
+| V2 | REGRESSION — last-write-wins in `resolve()` | 4 |
+| **N1** | **NEGATIVE CONTROL — `minStamp` as a `reduce`, the basis ternary as an `if`** | **0** |
+| **N2** | **NEGATIVE CONTROL 2 — the fold's window test as a `filter`, the period loop indexed** | **0** |
+
+**M3's `was 0 of 145` is this session's own measurement, not the review's**: the mutant was applied
+to the pre-fix tree (`git stash`, mutate, run, restore) and the suite came back **145 passed,
+REAL_EXIT=0**. A guard whose `true` mutant kills nothing is not a guard, and its comment claimed a
+protection — `L11`, twice in one file (see below).
+
+**The performance numbers, both directions, one generated ledger** (31 periods — `DEFAULT_WINDOW_DAYS
+= 30` — and `ledger.ts`'s 50 000-row cap):
+
+| ledger | before | after | repeat | on the committed tree |
+|---|---|---|---|---|
+| 23 911 events | **1 386 ms** | **151 ms** | 154 ms | 152 ms |
+| 49 561 events | **2 807 ms** | **184 ms** | 185 ms | 188 ms |
+
+Three runs, because one is not a measurement (`T4`). The *before* column is this tree with the call
+one level down — reproduced here, not quoted from the review.
+
+The cost was never the windowing; it was resolving the deduction set and re-exploding every
+confirmed line **once per period**. `resolveConsumption` now runs once per chain and
+`foldConsumption` windows the resolved acts, so the walk is linear in the ledger and flat in the
+number of counts. ⚠ **A wall clock cannot be an assertion here** — `period-boundary.test.ts` §E
+counts the WORK instead (`refs.menu_recipes` is read exactly once per resolution and by nothing else
+on this path), and its liveness control is stated as a RATIO so that it survives M1 and the two
+kills are attributable to the assertions that own the property.
+
+### ⚠ THE HOIST MADE `consumption` A DEAD EXPORT, AND THE RAIL SAID SO ON THE FIRST RUN
+
+`pnpm seams:check` came back **`✗ packages/inventory/src/deduction.ts const consumption [reached
+only by tests — the defect, exactly]`**: with `varianceReports` resolving once and folding per
+period, nothing shipping composed the two halves in one call any more. The wrapper moved to
+`__acceptance__/fixtures.ts`, where the claim it makes is true — *a convenience for tests asserting
+over a whole ledger* — and `index.ts` now exports `resolveConsumption` / `foldConsumption` /
+`ConsumptionAct`, which are what the product and slice 2's read model actually use. **This is the
+rail's own promised behaviour** (`L8`: *closing one debt exposes the next*) and it is worth
+recording that it fired on a REFACTOR rather than on a new subsystem: hoisting a call can orphan
+the export it used to come through, and the register is what notices.
+
+### ⚠ TWO SHIPPED COMMENTS CLAIMED PROTECTIONS THAT DID NOT EXIST — WRITTEN BY THE ROUND THAT WAS FIXING EXACTLY THAT
+
+`L11` says a protection claimed in prose retires the assertion the next session would have written.
+Both instances below were written **by the `da263e2` fix round**, one of them in the same paragraph
+as its own `L11` correction, which is the failure mode reproducing inside its remedy.
+
+- **`period.ts`: *"A receipt overwrites it per period the moment one arrives — this function is why
+  that sentence is true."*** It was true when written and the SAME COMMIT falsified it: once the
+  carry travelled with its basis, `worstBasis` took the opening's provenance whether or not the
+  opening was part of the pair, so `reference` became absorbing. Corrected in place, and the
+  correction now names the class it closes (an opening contributing nothing) **and the neighbouring
+  case it does not** (an opening that contributes keeps imposing its basis — `10-F31`'s ratified
+  rule, amended August 2026 with the reading above, and asserted by §C's mixed pair).
+- **`deduction.ts`: *"a version banked for a dish that deducted nothing is a claim about a row that
+  does not exist."*** False on the path twelve lines below it from the moment it was written: the
+  contested probe went through the same `explodeInto` and merged its versions. Now true, and
+  `law-one.test.ts` §B asserts it with a one-branch control (the same dish uncontested still banks
+  its version).
+
+Beside them, `variance.ts`'s `WithheldReason` had retired the `opening_unknown` member on the
+strength of `openingUsable` — **a deletion resting on a guard that could not fire**. The guard is
+real now and the case lands on `no_cost_basis` as claimed, so the deletion stands on a measurement
+rather than on a claim; the comment says which of those two it was, and since when.
 
 ## What is NOT here, and what gates it
 

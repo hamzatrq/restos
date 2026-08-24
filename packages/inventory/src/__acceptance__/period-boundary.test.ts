@@ -318,6 +318,40 @@ describe("§C · 10-F31 / `00 §7 (e)` — `receipted` means a receipt, one peri
     expect(chicken(second)?.cost_basis).toBe("receipted");
   });
 
+  it("⚠ an opening that brings NOTHING to the pair does not get to LABEL it", () => {
+    // The review's second finding, in its sharpest form. `10-F31` hangs the worst-wins rule on
+    // *"the opening HALF OF THE PAIR"*, and a baseline that counted an empty shelf carries
+    // `(0 paisa, 0 kg)`: it is in neither the numerator nor the denominator and cannot move the
+    // rate by any amount. It still decided the label, so an org that counted before its first
+    // invoice read `reference` on a period whose money was 100 % one invoice — measured
+    // `cost_basis: "reference"` here before the fix.
+    const events = [
+      chickenCount("c0", 0, 1_000), // an empty shelf, counted honestly, before any receipt
+      purchase("p1", [{ item_id: "chicken", qty_base: 10 * KG, line_total_paisa: 680_000 }], 1_500),
+      chickenCount("c1", 10, 2_000),
+    ];
+    const [, second] = run(events);
+    expect(chicken(second)?.cost_basis).toBe("receipted");
+    expect(chicken(second)?.gap_qty_base).toBe(0);
+  });
+
+  it("⚠ `reference` is NOT an absorbing state — the ramp terminates when the shelf empties", () => {
+    // §5.6 (i) 1: *"receipts overwrite it per period the moment one arrives"*. Under the ratchet
+    // this fixture read `["reference", "reference"]` for ever: the carry stored the resolved basis
+    // and fed it back as the next opening's provenance whether or not the opening contributed. An
+    // item counted down to zero and then bought on an invoice is the case that must come back.
+    const events = [
+      chickenCount("c0", 10, 1_000), // no receipt yet — valued at the typed price
+      chickenCount("c1", 0, 2_000), // …and sold out by the next count
+      purchase("p1", [{ item_id: "chicken", qty_base: 10 * KG, line_total_paisa: 680_000 }], 2_500),
+      chickenCount("c2", 10, 3_000),
+    ];
+    const bases = run(events)
+      .slice(1)
+      .map((report) => chicken(report)?.cost_basis);
+    expect(bases).toEqual(["reference", "receipted"]);
+  });
+
   it("a MIXED pair reads the WORST of its halves — a reference opening plus this period's receipt", () => {
     // The rule `worstBasis` already applies to the count basis one file over: a report may not
     // claim more about a number than its weakest input supports. Here the opening was valued at the
@@ -332,6 +366,130 @@ describe("§C · 10-F31 / `00 §7 (e)` — `receipted` means a receipt, one peri
     // …and the money is still the PERIOD pair, not the typed rate: (10 kg × 6 800) + Rs 3 500 over
     // 15 kg. The basis names the provenance; it does not change the arithmetic.
     expect(chicken(second)?.gap_qty_base).toBe(0);
+  });
+
+  it("⚠ a carry with a quantity it could NOT value is not priced at this period's receipt", () => {
+    // The review's third finding, at the level a reader meets it. `costBasisOf`'s opening guard was
+    // a TAUTOLOGY (`opening !== null || openQty === 0`, where `openQty` is derived from `opening`),
+    // and `variance.ts` flattened an unvaluable carry to `null` before it ever got there — so a
+    // period opening with 10 kg whose cost nobody knows was priced as if the shelf had opened
+    // EMPTY, at the incoming invoice's rate. Measured on this fixture before the fix:
+    // `cost_basis "receipted"`, `gap −3 kg`, **`gap_value_paisa −204 000`** — Rs 2 040 of
+    // unexplained usage at a rate the period had no way to know, on `10-F19`'s accusation column.
+    // `10-F31` R5 refuses a zero standing in for an unknown cost; the row is withheld instead.
+    const noCost: ReferenceData = {
+      ...REFS,
+      items: [item({ item_id: "chicken", name: "Chicken", reference_cost: null })],
+    };
+    const events = [
+      chickenCount("c0", 10, 1_000), // no receipt, no typed price: basis `none`, value unknown
+      purchase("p1", [{ item_id: "chicken", qty_base: 5 * KG, line_total_paisa: 340_000 }], 1_500),
+      chickenCount("c1", 12, 2_000),
+    ];
+    const [, second] = varianceReports({ location_id: LOCATION, events, refs: noCost });
+    const row = chicken(second);
+    expect(row?.cost_basis).toBe("none");
+    expect(row?.withheld).toEqual({ kind: "no_cost_basis" });
+    // `10-F31`'s quantity column has NO gate and must survive the refusal.
+    expect(row?.gap_qty_base).toBe(-3 * KG);
+    expect(row?.gap_value_paisa).toBeNull();
+    expect(second?.unexplained_usage_paisa).toBe(0);
+    expect(second?.is_floor).toBe(true);
+  });
+
+  it("…and with a typed price it falls to `reference`, which is a rate an owner can defend", () => {
+    // THE CONTROL for the assertion above, one branch away: the same unvaluable carry — a baseline
+    // that skipped an item 10 kg of which had already been received — on an item that HAS a
+    // reference cost. It resolves to the typed Rs 680/kg and not to this invoice's Rs 700/kg, so
+    // "withhold everything" does not pass the pair, and the money moves by Rs 60 between them.
+    const events = [
+      purchase("p0", [{ item_id: "chicken", qty_base: 10 * KG, line_total_paisa: 680_000 }], 500),
+      count("c0", [{ item_id: "chicken", counted: false }], 1_000), // 10 kg carried, unvaluable
+      purchase("p1", [{ item_id: "chicken", qty_base: 5 * KG, line_total_paisa: 350_000 }], 1_500),
+      chickenCount("c1", 12, 2_000),
+    ];
+    const [, second] = run(events);
+    expect(chicken(second)?.cost_basis).toBe("reference");
+    expect(chicken(second)?.gap_qty_base).toBe(-3 * KG);
+    expect(chicken(second)?.gap_value_paisa).toBe(-204_000); // 3 kg × Rs 680, not 3 kg × Rs 700
+  });
+});
+
+// ── §E · the review's PERFORMANCE finding — resolved once per CHAIN, not once per period ───────
+
+describe("§E · 10-F3 / 10-F28 — the ledger is walked for the chain, not for every period", () => {
+  /**
+   * ⚠ **THE FIX FOR THE WINDOWING DEFECT WAS O(periods × ledger), AND NOTHING IN THIS SUITE COULD
+   * SEE IT.** `reportFor` called `consumption(input.events, …)` per period, so every period
+   * re-grouped every `order.line_added` and re-exploded every confirmed line to keep its own
+   * window: **2 807 ms** for 49 561 events over 31 periods, against **184 ms** hoisted — at
+   * `inventory-router.ts`'s own `DEFAULT_WINDOW_DAYS = 30` and 50 000-row cap, in a synchronous
+   * call inside an `async` resolver.
+   *
+   * A wall-clock assertion would be a flake, so what is asserted is the WORK: `refs.menu_recipes`
+   * is read exactly once per resolution and by nothing else on this path, so counting its reads
+   * counts the resolutions. The second test is the one that binds — it holds the ORDERS fixed and
+   * varies only the number of counts, so an implementation that resolves per period reads more.
+   */
+  const counting = (refs: ReferenceData) => {
+    const reads = new Map<string, number>();
+    const proxy = new Proxy(refs, {
+      get(target, property, receiver) {
+        reads.set(String(property), (reads.get(String(property)) ?? 0) + 1);
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    return { refs: proxy, reads };
+  };
+
+  /**
+   * The SAME twelve sold orders every time, closed by `counts` counts. Only the number of periods
+   * varies, which is the whole point: the orders are the work, and the periods must not multiply it.
+   */
+  const ledger = (counts: number) => {
+    const events = [chickenCount("c0", 100, 1_000)];
+    for (let index = 1; index <= 12; index += 1) {
+      const at = 1_000 + index * 100;
+      events.push(event("order.created", { order_id: `o${index}`, channel: "counter" }, { at }));
+      events.push(lineAdded(`o${index}`, `l${index}`, 2, at));
+      events.push(event("order.confirmed", { order_id: `o${index}` }, { at: at + 10 }));
+    }
+    for (let index = 1; index <= counts; index += 1) {
+      events.push(chickenCount(`c${index}`, 100 - index, 3_000 + index * 1_000));
+    }
+    return events;
+  };
+
+  it("a 12-period chain resolves the deduction set exactly ONCE", () => {
+    const { refs, reads } = counting(REFS);
+    const reports = varianceReports({ location_id: LOCATION, events: ledger(12), refs });
+    expect(reports).toHaveLength(13);
+    expect(reads.get("menu_recipes")).toBe(1);
+  });
+
+  it("⚠ THE BINDING ONE: the same orders cost the same walk however many counts there are", () => {
+    // Under the defect these two differ by the number of extra periods — the whole cost of the
+    // regression, expressed as a count instead of a stopwatch.
+    const twelve = counting(REFS);
+    varianceReports({ location_id: LOCATION, events: ledger(12), refs: twelve.refs });
+    const two = counting(REFS);
+    varianceReports({ location_id: LOCATION, events: ledger(2), refs: two.refs });
+    expect(twelve.reads.get("menu_recipes")).toBe(two.reads.get("menu_recipes"));
+    expect(twelve.reads.get("recipes")).toBe(two.reads.get("recipes"));
+  });
+
+  it("THE CONTROL: the counter is live — running the chain twice reads it exactly twice over", () => {
+    // Without this, a Proxy that counted nothing would leave the assertions above resting on
+    // `undefined`. It is stated as a RATIO on purpose, so it survives the defect the other two
+    // own: an implementation resolving per period doubles this number too, and only a dead
+    // counter breaks it. That is what makes the kills above attributable.
+    const { refs, reads } = counting(REFS);
+    const events = ledger(2);
+    varianceReports({ location_id: LOCATION, events, refs });
+    const once = reads.get("menu_recipes") ?? 0;
+    varianceReports({ location_id: LOCATION, events, refs });
+    expect(once).toBeGreaterThan(0);
+    expect(reads.get("menu_recipes")).toBe(once * 2);
   });
 });
 

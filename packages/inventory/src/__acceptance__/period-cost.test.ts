@@ -83,8 +83,41 @@ describe("§B · 10-F31 — receipted | reference | none, and exactly one of the
   it("an opening carried WITHOUT a value disqualifies `receipted` even when receipts exist", () => {
     // Averaging a known purchase value over a quantity that includes an unvalued carry understates
     // the cost of everything in the period — a confidently wrong rate, which is worse than none.
-    const resolved = costBasisOf(withReference, null, undefined);
+    //
+    // ⚠ **THIS TEST PASSED FOR A COMMIT WITHOUT EXERCISING ITS OWN TITLE.** It read
+    // `costBasisOf(withReference, null, undefined)` — no opening AND no receipts — so it was the
+    // test two above it in different words, and the guard it names (`openingUsable`) was a
+    // tautology that a `true` mutant could not kill. The opening below is the case the title
+    // describes: a quantity carried out of a period that had no basis, arriving beside a real
+    // receipt.
+    const resolved = costBasisOf(
+      withReference,
+      { value_paisa: null, qty_base: 5 * KG, basis: "none" },
+      { value_paisa: 340_000, qty_base: 5 * KG },
+    );
     expect(resolved.basis).toBe("reference");
+    expect(resolved.pair).toEqual({ value_paisa: 6_000, qty_base: KG });
+    // THE CONTROL: the SAME receipt with no carried quantity at all is `receipted`. Without it,
+    // an implementation that never answers `receipted` would pass.
+    expect(costBasisOf(withReference, null, { value_paisa: 340_000, qty_base: 5 * KG }).basis).toBe(
+      "receipted",
+    );
+  });
+
+  it("an opening of ZERO value and ZERO quantity is not a half of the pair, and labels nothing", () => {
+    // `10-F31`'s worst-provenance rule is about *"the opening HALF of the pair"*. An opening that
+    // is in neither the numerator nor the denominator cannot move the rate, so it does not decide
+    // the provenance either — the difference between an onboarding ramp that terminates and one
+    // that reads `reference` for ever.
+    const empty = { value_paisa: 0, qty_base: 0, basis: "reference" } as const;
+    expect(costBasisOf(withReference, empty, { value_paisa: 5_000, qty_base: KG }).basis).toBe(
+      "receipted",
+    );
+    // …and the moment it carries something, it decides again: 1 kg of reference-valued stock.
+    const carried = { value_paisa: 6_000, qty_base: KG, basis: "reference" } as const;
+    expect(costBasisOf(withReference, carried, { value_paisa: 5_000, qty_base: KG }).basis).toBe(
+      "reference",
+    );
   });
 
   it("an explicit ZERO reference price is a basis — 01-F60, one plane over", () => {

@@ -240,8 +240,17 @@ export type ResolvedCost = {
  * A period's opening is the previous period's close, so its value was produced by that period's
  * basis. Without this field the provenance is lost at the first boundary and every later period
  * calls a typed reference price a receipt — see `variance.ts`'s `Carry`.
+ *
+ * ⚠ **`value_paisa` IS NULLABLE, AND THAT IS WHAT MAKES `costBasisOf`'s OPENING GUARD REAL.** A
+ * carry whose period had no basis at all brings a QUANTITY it cannot value. It used to be flattened
+ * to `null` at the call site, so the guard that exists to refuse exactly that case never saw it —
+ * see `costBasisOf`. `null` here means *carried, unvaluable*; an absent opening is the `null`
+ * argument itself.
  */
-export type OpeningPair = ValueQtyPair & { readonly basis: CostBasis };
+export type OpeningPair = Omit<ValueQtyPair, "value_paisa"> & {
+  readonly value_paisa: number | null;
+  readonly basis: CostBasis;
+};
 
 /** `receipted` is a fact, `reference` is a price somebody typed, `none` is neither. Worst wins. */
 const BASIS_RANK: Readonly<Record<CostBasis, number>> = { receipted: 0, reference: 1, none: 2 };
@@ -257,9 +266,26 @@ const BASIS_RANK: Readonly<Record<CostBasis, number>> = { receipted: 0, referenc
  * *"a zero standing in for an unknown cost"* in its arithmetic form.
  *
  * `reference` is **a legitimate first answer, not a placeholder**: without it the onboarding ramp
- * cannot terminate, because salt bought quarterly never acquires a basis in a weekly period.
- * A receipt overwrites it per period the moment one arrives — this function is why that sentence
- * is true, and it is why `reference_cost` is not consulted at all when receipts exist.
+ * cannot terminate, because salt bought quarterly never acquires a basis in a weekly period. The
+ * typed `reference_cost` is not consulted at all when a usable pair exists.
+ *
+ * ⚠ **AND `reference` IS NOT A ONE-WAY DOOR, THOUGH IT WAS FOR ONE COMMIT.** The sentence that
+ * stood here — *"a receipt overwrites it per period the moment one arrives — **this function is why
+ * that sentence is true**"* — was written by the `da263e2` fix round and **falsified by that same
+ * round's other half**: once the carry began travelling with its basis, `worstBasis("receipted",
+ * opening.basis)` took the opening's provenance whether or not the opening was PART of the pair, so
+ * an org whose day-one count preceded its first invoice read `reference` for ever. Measured on the
+ * sharpest form: a baseline counting **0 kg** with no purchases carries `(0 paisa, 0 kg)` — no
+ * money, no quantity, nothing in the pair — and still decided the label on a period whose money was
+ * 100 % one invoice.
+ *
+ * **What is fixed and what is NOT.** An opening that contributes neither value nor quantity is not
+ * a half of the pair and carries no provenance into it, so the shelf that empties and is re-bought
+ * on an invoice reads `receipted` again — that is §5.6 (i) 1's ramp. An opening that DOES
+ * contribute still imposes its basis, and that is `10-F31`'s ratified amendment (*"the worst
+ * provenance in the pair wins"*), asserted one file over by `period-boundary.test.ts` §C's mixed
+ * pair. So a location whose counted stock never reaches zero keeps reading `reference` after its
+ * first typed price, and changing THAT is an FR act, not an implementation choice.
  */
 export const costBasisOf = (
   item: InventoryItem,
@@ -267,6 +293,7 @@ export const costBasisOf = (
   purchased: ValueQtyPair | undefined,
 ): ResolvedCost => {
   const openQty = opening?.qty_base ?? 0;
+  const openValue = opening?.value_paisa ?? null;
   const buyQty = purchased?.qty_base ?? 0;
   const qty = openQty + buyQty;
   // ⚠ **`totalPaisaOrNull` AND NOT `sumPaisa`, BECAUSE `10-F5` SAYS THE OPENING MAY BE NEGATIVE.**
@@ -283,11 +310,24 @@ export const costBasisOf = (
   // `totalPaisaOrNull` accumulates in **BigInt** exactly as `sumPaisa` does (it is the function
   // `sumPaisa` is built on) and answers `null` past exactness instead of drifting. Its `null` is
   // treated here as *no usable basis*, never as zero.
-  const value = totalPaisaOrNull([opening?.value_paisa ?? 0, purchased?.value_paisa ?? 0]);
-  // `opening === null` means the carry existed but could not be valued; treating it as zero value
-  // over a positive quantity is exactly the understatement above, so a null opening with a
-  // positive carried quantity disqualifies `receipted` even when this period has receipts.
-  const openingUsable = opening !== null || openQty === 0;
+  // ⚠ **THIS GUARD WAS A TAUTOLOGY FOR ONE COMMIT AND ITS COMMENT CLAIMED A PROTECTION IT DID NOT
+  // HAVE.** It read `opening !== null || openQty === 0` — and `openQty` is derived from `opening`
+  // three lines up, so `opening === null` forced `openQty === 0` and the disjunction was
+  // unconditionally true. Mutating it to `true` killed **0 of 145** tests, and
+  // `costBasisOf(item, null, {value_paisa: 340_000, qty_base: 5 kg})` answered `receipted`, which
+  // is the exact case the comment said was disqualified. It was false from the `da263e2` fix round
+  // (August 2026) until here, and `variance.ts`'s `WithheldReason` had already retired the
+  // `opening_unknown` member on the strength of it.
+  //
+  // The case is real and now reaches this function: a carry from a period with NO basis brings a
+  // quantity whose value is unknown. Dropping that quantity out of the denominator prices the
+  // period's whole stock at the purchase rate — a confidently wrong rate, `10-F31` R5's *"a zero
+  // standing in for an unknown cost"* in its arithmetic form — so the pair is refused and the
+  // resolution falls through to the typed reference price, or to `none`.
+  const openingUsable = openValue !== null || openQty === 0;
+  const value = openingUsable
+    ? totalPaisaOrNull([openValue ?? 0, purchased?.value_paisa ?? 0])
+    : null;
   if (openingUsable && qty > 0 && value !== null && value >= 0) {
     // ⚠ **THE PAIR'S BASIS IS THE WORST PROVENANCE IN IT, AND `receipted` IS NOT A DEFAULT.** The
     // opening half of this pair may itself have been valued at the owner's typed `reference` price
@@ -295,7 +335,15 @@ export const costBasisOf = (
     // built on it is not *"all from invoices"*, so it does not say so — the same worst-wins rule
     // `worstBasis` applies to the count basis one file over, and for the same reason: the report
     // may not claim more about a number than its weakest input supports.
-    const basis = worstBasis("receipted", opening?.basis ?? "receipted");
+    //
+    // ⚠ **"THE OPENING HALF OF THE PAIR" IS READ LITERALLY: A HALF THAT BRINGS NOTHING IS NOT A
+    // HALF.** `10-F31` hangs the rule on the opening being part of the pair, and an opening of
+    // `(0 paisa, 0 kg)` is in neither the numerator nor the denominator — it cannot move the rate
+    // by any amount, so letting it decide the label made `reference` absorbing and the onboarding
+    // ramp unable to terminate (see the header). Zero value AND zero quantity is the only case this
+    // excuses: an opening carrying quantity at a typed price still dilutes the rate, and still wins.
+    const openingContributes = opening !== null && (openQty !== 0 || (openValue ?? 0) !== 0);
+    const basis = openingContributes ? worstBasis("receipted", opening.basis) : "receipted";
     return { basis, pair: { value_paisa: value, qty_base: qty } };
   }
   if (item.reference_cost !== null && item.reference_cost.qty_base > 0) {

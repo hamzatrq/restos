@@ -35,10 +35,12 @@ export {
 export { type CountEntry, countEntryToBase, PartialTierError } from "./count-entry.js";
 export {
   type Consumption,
-  consumption,
+  type ConsumptionAct,
   type DeductionLine,
   type DeductionSet,
   deductionSet,
+  foldConsumption,
+  resolveConsumption,
 } from "./deduction.js";
 export type { InventoryEvent } from "./event.js";
 export {

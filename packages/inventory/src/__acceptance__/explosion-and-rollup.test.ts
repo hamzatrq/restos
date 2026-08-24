@@ -14,11 +14,10 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { consumption } from "../deduction.js";
 import { BANNED_VARIANCE_WORDS } from "../noise.js";
 import { type ReferenceData, referenceRefusals } from "../reference.js";
 import { varianceReports } from "../variance.js";
-import { count, event, item, LOCATION, resetIds } from "./fixtures.js";
+import { consumption, count, event, item, LOCATION, resetIds } from "./fixtures.js";
 
 beforeEach(resetIds);
 
