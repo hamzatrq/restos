@@ -383,15 +383,33 @@ describe("§F 04-F35 — what the pad-port comments claim is what the product do
     }
   });
 
-  it("F3 — and while that holds, the file states the limit rather than claiming the strip", () => {
+  it("F3 — and while that holds, BOTH comment sites state the limit rather than claiming the strip", () => {
+    /**
+     * The anti-rot direction: deleting the disclaimer while the gap remains is the defect coming
+     * back. There are TWO sites — the `failure()` declaration and the PEM branch that fills it —
+     * and each carried its own version of the false claim.
+     *
+     * ⚠ **THE FIRST DRAFT OF THIS ASSERTION SEARCHED THE WHOLE FILE FOR ONE PHRASE AND SURVIVED
+     * ITS MUTANT AT 0 KILLS** (measured): the phrase occurs at both sites, so deleting either one
+     * left the other satisfying it. That is the round-3 shape on this round's own work — the
+     * mechanism built correctly and aimed one case away — so each site is now asserted on its own.
+     */
     const src = readSrc("terminal-server.ts");
-    // The anti-rot direction: deleting the disclaimer while the gap remains is the defect
-    // returning. It must name the owed clause and say what does NOT read the value.
-    expect(src).toContain("04-F22");
-    expect(src).toContain("04-F35");
-    expect(
-      /only production caller/.test(src),
-      "terminal-server.ts no longer says who reads `failure()` — a comment that stops naming the limit is how the claim came back",
-    ).toBe(true);
+    const sites: [string, string][] = [
+      ["the `failure()` declaration", "  failure: () => string | null;"],
+      ["the PEM branch that fills it", "      failure: () => reason,"],
+    ];
+    for (const [what, anchor] of sites) {
+      const at = src.indexOf(anchor);
+      // `24-F14` — a slice that missed would make the assertion below vacuous.
+      expect(at, `no ${what} in terminal-server.ts`).toBeGreaterThan(-1);
+      const region = src.slice(Math.max(0, at - 1400), at + 200);
+      expect(region, `${what} no longer names 04-F35`).toContain("04-F35");
+      expect(
+        /the strip does not|no surface reads it|only production caller/i.test(region),
+        `${what} stopped saying that nothing renders the pad's failure — that sentence is what stops the claim coming back (04-F35)`,
+      ).toBe(true);
+      expect(region, `${what} no longer names the clause this is owed against`).toContain("04-F22");
+    }
   });
 });
