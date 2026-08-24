@@ -436,7 +436,7 @@ describe("§F 00 §6 — required fields are law, declared extras are not invent
    * (`06-F19`/`06-F27`) are both still schema-less and neither is any current track's FR.
    */
   it("the neighbours a session would be tempted to sweep in are still unregistered", () => {
-    for (const type of ["payment.split_recorded", "order.cancelled"]) {
+    for (const type of ["payment.split_recorded"]) {
       expect(() => parseEvent(envelope(type, {}))).toThrow(UnknownEventTypeError);
     }
   });

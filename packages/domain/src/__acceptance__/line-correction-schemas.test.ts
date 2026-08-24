@@ -197,7 +197,7 @@ describe("§A 01-F4 — the two types parse rather than throwing at emit", () =>
   });
 
   /**
-   * THE ANTI-SWEEP CONTROL. `01 §4` also carries `order.cancelled`, `order.merged`, `order.split`,
+   * THE ANTI-SWEEP CONTROL. `01 §4` also carries `order.merged`, `order.split`,
    * `order.channel_tagged` and `payment.split_recorded`, none of which is this track's FR. If
    * registering two types quietly registered everything — a `Proxy`, a catch-all, a `z.any()`
    * fallback in the schema map — that would be indistinguishable from the change actually made
@@ -206,10 +206,20 @@ describe("§A 01-F4 — the two types parse rather than throwing at emit", () =>
    * `order.channel_tagged` is deliberately in the list: `02-F1` names it in the same clause as
    * `order.created`, and it is the neighbour a session touching the order family is most likely to
    * sweep in.
+   *
+   * ── AMENDED August 2026 (`01-F84` landed) ────────────────────────────────────────────────────
+   * ⚠ `order.cancelled` has come OUT of the list, on the precedent
+   * `escalatable-write-schemas.test.ts` set when `order.rejected` and `order.unparked` came out of
+   * its own: **the list's job is to name types that are still unregistered.** `01-F84` registered
+   * this one with its own FR, its own oracle (`order-cancelled-schema.test.ts`) and its own
+   * `06-F31` producer — which is this tripwire WORKING, not being worked around: it named, at the
+   * point of the change, exactly which neighbours must not ride along, and the remaining names do
+   * that job unchanged. `payment.split_recorded` in particular is still schema-less and is still
+   * nobody's FR (`01-F84`'s own note records `order.split`/`order.merged`/`order.channel_tagged`
+   * and it as the four types `01-F4` still refuses).
    */
   it("the neighbours a session would be tempted to sweep in are still unregistered", () => {
     for (const type of [
-      "order.cancelled",
       "order.merged",
       "order.split",
       "order.channel_tagged",

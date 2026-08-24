@@ -266,6 +266,40 @@ const payloadSchemas = {
     reason: z.enum(ORDER_REJECTION_REASONS),
   }),
   /**
+   * `01-F84` — **the payload that makes `order.cancelled` EMITTABLE.** The type has been `01 §4`
+   * vocabulary since Draft 1 with no schema here, so `01-F4` made it *unemittable rather than
+   * merely unbuilt*: `store.append` runs `parseEvent`, so `06-F19`'s customer cancel and
+   * `06-F27`'s auto-close both threw `UnknownEventTypeError` before they could be written.
+   *
+   * Modelled on `order.rejected` directly above — its nearest sibling in both the catalog and this
+   * registry — and the two places the model is NOT followed are the whole of the design:
+   *
+   * **1. `reason` is FREE TEXT, not a closed enum.** `order.rejected`'s is closed *because
+   * `06-F20` supplies the list*. **No FR supplies a cancellation list**, and inventing one is
+   * commandment 2 — so `z.enum(ORDER_REJECTION_REASONS)` one line up is the wrong answer even
+   * though it is the nearest one: it would permanently refuse `06-F19`'s own scenario (*"customer
+   * changed their mind"*) at emit time, under `01-F1`. Required and `.min(1)` on
+   * `void.recorded`/`comp.recorded`/`discount.recorded`'s precedent, which `01-F84` cites by name:
+   * an empty reason is a writer filling a required field with nothing, frozen forever.
+   *
+   * **2. NO `supersedes` and NO `cancelled_by`.** `01 §4` makes `cancelled` a terminal exit state
+   * with no inverse event anywhere in the corpus — `order.parked` next door carries a `supersedes`
+   * because it is a REPEATABLE toggle, and this is not — and `02-F45` puts attribution on the
+   * envelope's `actor_user_id`, which is also the field that makes `06-F27`'s auto-close statable:
+   * there is no human, and `null` is the honest answer rather than a gap (`01-F84`).
+   *
+   * ⚠ **THE PRODUCER IS THE STOREFRONT AND NOTHING ELSE TODAY.** `01-F84` records that doc 02
+   * specifies no counter-side cancel at all, so this schema's only named producers are `06-F19`
+   * and `06-F27`. `06-F31`'s cloud origin is what makes them reachable; a counter-side cancel
+   * would be doc 02's act and is still owed.
+   */
+  "order.cancelled": z.looseObject({
+    // `26 §3`'s sidecar answers `order:<payload.order_id>`, so a cancellation naming no order
+    // reaches no projection at all — the identical reason `order.rejected` above carries it.
+    order_id: z.string().min(1),
+    reason: z.string().min(1),
+  }),
+  /**
    * `02-F4`: *"Park/resume open orders: `order.parked` / `order.unparked`. A parked order is
    * durable (00 §5.2) and visible to every terminal in the branch."* Both types were `01 §4`
    * vocabulary with no schema, so parking was an `01-F4` `UnknownEventTypeError` inside

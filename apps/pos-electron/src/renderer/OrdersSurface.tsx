@@ -9,13 +9,20 @@ import type { OpenOrder } from "../shared/ipc";
  * today and are named here rather than faked**, because a screen that looks complete is how a
  * missing catalog entry stops being visible:
  *
- * - **`C20` — reject a cloud order.** `order.rejected` reached the `01 §4` catalog in July 2026
- *   (the absorption note under the event list names C20 by number), but it has **no payload
- *   schema in `packages/domain/src/registry.ts`** — the registry carries six `order.*` types and
- *   this is not one — and `01-F4` makes producing an unknown type "a build-time and runtime
- *   error". Adding it is a SACRED-path change (`18 §2`, commandment 10) that must also decide
- *   the shape of `06-F20`'s reason list. **No Reject control is drawn**, because a control that
- *   cannot succeed is worse than an absent one (`ManagerApproval`'s own rule, one surface over).
+ * - **`C20` — reject a cloud order.** ⚠ **The blocker stated here was CLEARED and this comment
+ *   went on naming it** — it read *"no payload schema in `packages/domain/src/registry.ts`"*,
+ *   and `order.rejected`'s payload has been at `registry.ts` (with `06-F20`'s closed 3-member
+ *   reason set) since August 2026. Corrected 2026-08-24 while `services/storefront` landed,
+ *   because that module is what first puts rows in this inbox and makes the gap operational.
+ *   **The real blocker is one layer down and is genuinely UNDECIDED:** `packages/sync-client`'s
+ *   merge fold consumes `order.rejected` and is **projection-inert** for it, because `01 §4`'s
+ *   canonical states carry no `rejected` at all (its exit states are `voided / cancelled`) and
+ *   `26 §7` makes a merge rule an oracle-pinned decision rather than an implementer's. So a
+ *   Reject control today would append a legal event that **clears nothing** — the order would
+ *   stay in this list for ever. **No Reject control is drawn**, because a control that cannot
+ *   succeed is worse than an absent one (`ManagerApproval`'s own rule, one surface over) — and
+ *   note the same is true of `order.cancelled`, so a customer's own cancel does not clear a row
+ *   here either. This inbox currently has exactly one exit: Accept.
  * - **`C32` — mark that order ready.** Four independent blockers, any one of which is
  *   sufficient; see `apps/pos-electron/CLAUDE.md`. The one that decides it: nothing in this
  *   product advances a line past `placed`, and `LEGAL_NEXT.placed` is

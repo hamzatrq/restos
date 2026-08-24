@@ -975,6 +975,7 @@ export const createMergeEngine = (): MergeEngine => {
         // order row.
         return;
       }
+      case "order.cancelled":
       case "order.rejected":
       case "order.parked":
       case "order.unparked": {
@@ -991,6 +992,18 @@ export const createMergeEngine = (): MergeEngine => {
         //     status page, a cloud read model on the other plane (`18 §6`), and `01 §4`'s canonical
         //     states carry no `rejected` at all (its exit states are `voided / cancelled`). Guessing
         //     a removal here would invent an order state (commandment 2).
+        //   · `order.cancelled` (`01-F84`, August 2026) — joined this group when its payload landed,
+        //     and **its debt is SHARPER than its neighbours', not the same one wearing a new name.**
+        //     `order.rejected` above is undecided partly because `01 §4` has no `rejected` state to
+        //     land on. That argument DOES NOT APPLY here: `cancelled` **is** one of `01 §4`'s two
+        //     canonical exit states, so unlike its neighbour a removal rule is *expressible* today
+        //     and only the DECISION is missing. `26 §7` reserves that decision for an oracle, and
+        //     `01-F35`'s terminal-state monotonicity is exactly what it has to pin — so it is not
+        //     guessed here, and the consequence is stated instead of discovered: **an order
+        //     cancelled by `06-F19` or auto-closed by `06-F27` goes on appearing in every till's
+        //     inbox.** `06-F30`'s cloud origin is the first producer this type has ever had, so
+        //     that consequence becomes reachable in production the day the storefront ships and is
+        //     unreachable before it. Named in `06-F31` as owed.
         //   · `order.parked` / `order.unparked` — a parked order is indistinguishable from an active
         //     one, so a later `02-F10` recall surface cannot filter on it. **`02-F4`'s stated
         //     requirement needs no new projection**: "visible to every terminal in the branch" holds

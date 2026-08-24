@@ -247,6 +247,16 @@ describe("registry growth must fail this suite before it can silently no-op (fix
     //     only for the parked FLAG a later `02-F10` surface will want.
     //     `order-park-reject-fold.test.ts` asserts that visibility half by EXECUTION, because a
     //     comment claiming "the projection is unchanged" is not an assertion that it is.
+    // ── AMENDED August 2026 (`01-F84` — `order.cancelled`'s payload) ────────────────────
+    // The fourth member of the same growth event, pinned HERE for the same structural reason:
+    // it is ORDER-keyed, so `26 §3`'s sidecar answers `order:<order_id>` and it arrives at the
+    // order-keyed engine. Its disposition is projection-inert and its debt is **sharper** than
+    // the three below rather than identical: `cancelled` IS one of `01 §4`'s canonical exit
+    // states, so unlike `order.rejected` a removal rule is expressible today and only the
+    // DECISION is missing (`26 §7`, `01-F35`). Stated consequence: a cancelled or auto-closed
+    // order goes on appearing in every till's inbox — reachable in production only once
+    // `06-F30`'s cloud origin exists, which is the first producer this type has ever had.
+    "order.cancelled",
     "order.parked",
     "order.rejected",
     "order.unparked",
