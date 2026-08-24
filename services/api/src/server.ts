@@ -92,11 +92,17 @@ export type ApiServerOptions = {
    * `10-F18`'s inventory reference source. Optional here for `ledger`'s reason — suites that
    * predate the variance report still have to boot — and REQUIRED once resolved.
    *
-   * ⚠ **`start()` SUPPLIES ONE NOW — `createGatewayInventoryReference` (2026-08-25) — AND THE
-   * `@unreached-owed` MARKER THAT STOOD HERE IS DELETED RATHER THAN AMENDED.** `seams:check` FAILS
-   * on a marker whose subject is reached, which is what stops the register rotting. Until that
-   * date a real deployment refused every variance read: measured on a four-process stack,
-   * `inventory.variance` answered **HTTP 500** for an authenticated owner.
+   * ⚠ **`start()` SUPPLIES ONE NOW — `createGatewayInventoryReference` (2026-08-25) — AND THE DEBT
+   * MARKER THAT STOOD HERE IS DELETED RATHER THAN AMENDED.** `seams:check` FAILS on a marker whose
+   * subject is reached, which is what stops the register rotting. Until that date a real deployment
+   * refused every variance read: measured on a four-process stack, `inventory.variance` answered
+   * **HTTP 500** for an authenticated owner.
+   *
+   * ⚠ *The marker's own token is deliberately NOT written out anywhere in this paragraph.* The rail
+   * scans production modules for the literal and attributes it to the exports beside it, so prose
+   * ABOUT a marker re-declares the exception it is announcing the deletion of — and fails as STALE.
+   * `services/sync-gateway/CLAUDE.md` records the identical trap costing `provision-device`'s first
+   * clean run; it was read before this comment was written and reproduced anyway.
    *
    * **What that marker said was owed is only PARTLY paid, and the unpaid half is named here rather
    * than left to be re-measured.** The CLOUD reader is supplied — `kernel.inventory_*` stores the

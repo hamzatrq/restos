@@ -55,8 +55,8 @@ import {
 import { IntegrationError } from "./errors.js";
 import {
   AreaMembershipWire,
-  type InventoryReference,
   InventoryItemWire,
+  type InventoryReference,
   MenuRecipeWire,
   RecipeWire,
 } from "./inventory.js";
