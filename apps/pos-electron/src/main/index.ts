@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,6 +55,7 @@ import { recordApprovals } from "./approval-record";
 import {
   authorizeEscalation,
   authorizeReads,
+  authorizeTerminal,
   authorizeWrites,
   DISCOUNT_APPROVAL_THRESHOLD_BPS,
   PAID_OUT_APPROVAL_THRESHOLD_PAISA,
@@ -66,7 +69,7 @@ import {
   stationResolver,
 } from "./catalog";
 import { printerTransport } from "./file-printer";
-import { createGateway, createVerifiedAppend } from "./gateway";
+import { createGateway, createVerifiedAddLine, createVerifiedAppend } from "./gateway";
 import {
   describeHardwareTier,
   HARDWARE_TIER_ENV,
@@ -99,6 +102,8 @@ import {
   type StationRouting,
 } from "./station-routing";
 import { createUplink } from "./sync";
+import { createTerminal } from "./terminal";
+import { createTerminalServer, type TerminalTls } from "./terminal-server";
 import { counterWindowOptions, describePanelFit, resolvePanelFit } from "./window-options";
 import { refuseZeroTender } from "./zero-tender-guard";
 
@@ -186,6 +191,47 @@ const IDLE_LOCK_MS = 10 * 60_000;
  * keeping online guessing at ~13 bits hopeless against the five-minute cooldown.
  */
 const MAX_FAILED_ATTEMPTS = 5;
+
+/**
+ * `04-F22` (a) — the terminal port, a `00 §7` layer-3 device setting.
+ *
+ * Not 443: this is an Electron app running as an ordinary user on a Windows till, and a privileged
+ * port would need the app to be elevated for a feature most branches will not use. Not the mesh's
+ * port either — `01-F72`'s listener must keep its own socket and its own admission, and sharing
+ * one would be the weakening this FR forbids by name.
+ */
+const TERMINAL_PORT = Number(process.env.RESTOS_TERMINAL_PORT ?? 8443);
+
+/**
+ * `04-F22` (a) — **the certificate, and there is deliberately no fallback that invents one.**
+ *
+ * Both halves must be present or the answer is `null` and nothing listens. A half-configured
+ * install (a cert path with no key, a typo in one of the two) is the case that must not silently
+ * become something else: `01-F48`'s direction is that a state which cannot be read is refused, and
+ * the alternative here — a self-signed certificate minted on the spot — trains an operator to tap
+ * through a browser warning, which is worth more to an attacker on the shop Wi-Fi than the
+ * certificate is to us.
+ *
+ * ⚠ **Which certificate to put here is a FOUNDER CALL that `04-F22` (a) names and this file does
+ * not answer**: cloud-issued and publicly trusted (zero tablet setup, costs a DNS zone and an ACME
+ * pipeline), or an org root CA installed on each tablet (no cloud work, costs a manual step and a
+ * root CA on a staff tablet). Neither can be borrowed from `01-F73`'s branch PKI, because
+ * `store.setLanCredential` has no shipping caller and therefore no till holds one.
+ *
+ * Read at construction rather than cached at module scope so a test can drive both states, and
+ * failures are swallowed to `null`: an unreadable file is "no pad", never a till that will not
+ * start (`01-F17`).
+ */
+const terminalTls = (): TerminalTls | null => {
+  const certPath = process.env.RESTOS_TERMINAL_CERT;
+  const keyPath = process.env.RESTOS_TERMINAL_KEY;
+  if (!certPath || !keyPath) return null;
+  try {
+    return { cert: readFileSync(certPath, "utf8"), key: readFileSync(keyPath, "utf8") };
+  } catch {
+    return null;
+  }
+};
 
 /**
  * `03-F25` — how often the counter re-reads its own aging timers. See the interval itself for why
@@ -879,6 +925,15 @@ const counterBoot = app.whenReady().then(async () => {
   const businessDay = (): string =>
     businessDate(wallClock.now() + store.branchTimeStatus().offset_ms);
 
+  /**
+   * `01-F60`'s resolver, built ONCE and shared by the gateway and by `04-F21`'s terminal.
+   *
+   * It was inline in the gateway's deps until the terminal landed. Two constructions would be two
+   * readings of the same catalog at two moments, which is `02-F45`'s "two sources for one fact" on
+   * the one input that decides what a line costs.
+   */
+  const priceOf = priceResolver(store);
+
   const gateway = createGateway({
     store,
     // T-C6 — all three read the device catalog the uplink fills, and all three live in
@@ -887,7 +942,7 @@ const counterBoot = app.whenReady().then(async () => {
     // `01-F55`'s sellable set, `01-F60`'s own-branch price.
     catalog: catalogResolver(store),
     menu: sellableMenu(store),
-    priceOf: priceResolver(store),
+    priceOf,
     /**
      * The LOCKED value of `DeviceState.actor`, and nothing else — `gateway.ts` derives the
      * operator's name from `session` below.
@@ -1358,6 +1413,81 @@ const counterBoot = app.whenReady().then(async () => {
     store,
     appendAs: createVerifiedAppend({ store }),
   });
+
+  /**
+   * `04-F21`/`04-F22` — **the waiter's order pad, as a terminal of this till.**
+   *
+   * Constructed UNCONDITIONALLY, exactly as the spooler above is and for the same reason: a
+   * subsystem built only when some option is set is this wave's recurring defect wearing a
+   * configuration flag. What the configuration decides is whether it LISTENS, not whether it
+   * exists — `createTerminalServer` reports `listening: false` with a reason when there is no
+   * certificate, and `04-F22` (a) makes that the required behaviour rather than a degradation:
+   * absent means OFF, never absent means plaintext.
+   *
+   * ── The three arguments that carry the security model ────────────────────────────────────────
+   *
+   * **`verifyWaiter` is a THIRD `createPinSession`, and it must not be either of the other two.**
+   * `pins` above holds the counter's session and `unlock()` MOVES it, so verifying a waiter
+   * through it would sign the cashier out of the till she is standing at and re-attribute her next
+   * orders (`02-F41` + `01-F1` — permanently). `approvals` is the escalation's, and sharing it
+   * would be harmless today and wrong tomorrow: the two surfaces have different lifetimes and one
+   * is reachable from the shop Wi-Fi. What all three DO share is the thing that matters — the same
+   * `store.staff` Argon2id hashes (`01-F28`) and the same **durable** `store.pinAttempts`, so
+   * `01-F61`'s per-(device, user) lockout counts a waiter's failures at the pad and at the counter
+   * once, and survives a relaunch. A hand-rolled verifier here would be a third credential surface
+   * with its own lockout to forget.
+   *
+   * **`authorize` is `authorize.ts`'s, not a second reading.** Commandment 8 is asked of the
+   * terminal by the same module, the same `subjectOf` and the same matrix the renderer's writes go
+   * through; `04-F23`'s closed event set is the extra gate, and it sits beside that reading rather
+   * than replacing it.
+   *
+   * **`appendAs` / `addLineAs` name the actor explicitly.** Every one of `gateway`'s own append
+   * sites reads `deps.session()`, which is right for the counter and wrong here: the pad's act is
+   * the WAITER's while the till's session is a cashier's or nobody's. Wiring either of these to
+   * anything session-reading is the defect this whole surface exists to avoid, and — as the
+   * approval record's own note says one screen up — it is invisible to every behavioural test:
+   * the order would still be correct and only the envelope would name the wrong person.
+   */
+  const terminal = createTerminal({
+    verifyWaiter: (user_id, pin) =>
+      createPinSession({
+        registry: store.staff,
+        device: { device_id: store.identity.device_id, registered: true },
+        idle_lock_ms: IDLE_LOCK_MS,
+        max_failed_attempts: MAX_FAILED_ATTEMPTS,
+        now: () => wallClock.now(),
+        // `01-F5`'s `audit.login` is deliberately not written here, on the same reasoning the
+        // escalation's session records: a waiter authenticating at a pad HAS logged in, so this is
+        // a genuine gap rather than a wrong record — but the sink hardcodes the till's own device
+        // and the subtype question is `01-F5`'s, not this surface's. OWED and named.
+        audit: () => {},
+        attempts: store.pinAttempts,
+      }).unlock(user_id, pin),
+    authorize: authorizeTerminal({ store }),
+    appendAs: createVerifiedAppend({ store }),
+    addLineAs: createVerifiedAddLine({ store, priceOf }),
+    reads: gateway,
+    store,
+    idle_lock_ms: IDLE_LOCK_MS,
+    now: () => wallClock.now(),
+    newHandle: () => randomBytes(32).toString("base64url"),
+  });
+
+  const terminalServer = createTerminalServer({
+    terminal,
+    tls: terminalTls(),
+    port: TERMINAL_PORT,
+    bundleDir: process.env.RESTOS_TERMINAL_BUNDLE ?? null,
+    now: () => wallClock.now(),
+    log: (line) => console.log(line),
+  });
+  if (terminalServer.listening) {
+    // `04-F22` (b) — the operator reads this off the till once per tablet. It is a BOOT LINE and
+    // not a screen, which is the honest limit of build 1: `14-F13`'s device list is where an
+    // owner-facing enrolment belongs, and putting it there is owed rather than done.
+    console.log(`terminal: enrolment code ${terminalServer.mintEnrolmentCode()} (04-F22 (b))`);
+  }
 
   /**
    * `03-F4`/`03-F5` — the durable print spooler and the thing that feeds it.

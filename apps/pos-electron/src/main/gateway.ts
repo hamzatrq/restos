@@ -482,6 +482,75 @@ const checked = <T>(schema: { parse: (v: unknown) => T }, value: unknown, what: 
   }
 };
 
+/**
+ * `04-F12` — the fold's `table_ids_json` column as a set of labels.
+ *
+ * Degrades to EMPTY on anything unreadable rather than throwing, on `01-F54`'s rule: this column
+ * decides a LABEL, and a till that refused to project an order because its table string was
+ * corrupt would take the order's lines off the kitchen queue and its money off the shift. Filtered
+ * to non-empty strings so a `null` member — which `merge.ts` writes for an order created with no
+ * table — never renders as a table called nothing.
+ */
+const tableIdsOf = (json: string): string[] => {
+  try {
+    const parsed: unknown = JSON.parse(json);
+    return Array.isArray(parsed)
+      ? parsed.filter((v): v is string => typeof v === "string" && v !== "")
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+/**
+ * `C5`'s money decision, extracted so that TWO actors can make it ONCE.
+ *
+ * Everything money-bearing about a line is decided here: the channel comes from the ORDER
+ * (`02-F1`, fixed at creation and never inferred), the branch from this device's own identity
+ * (`01-F60`), and the price from the catalog those two key into. **No caller supplies any of it**
+ * — not the renderer over IPC, and not a `04-F21` terminal over the wire.
+ *
+ * ⚠ **It was inline in `addLine` until `04-F21`, and it is extracted rather than COPIED for the
+ * reason `02-F45` gives: two sources for one fact can disagree.** A waiter's line and a cashier's
+ * line must resolve the same price from the same catalog against the same order's channel; a
+ * second implementation beside this one is how `01-F60`'s resolution comes to differ by surface,
+ * permanently under `01-F1`. The only thing the two append sites may differ on is the ACTOR, and
+ * that is why the actor is the one thing this function does not touch.
+ */
+const linePayloadFor = (
+  deps: { store: Pick<DeviceStore, "openOrders">; priceOf: PriceResolver },
+  req: unknown,
+): Record<string, unknown> => {
+  const parsed: AddLineRequest = AddLineRequestSchema.parse(req);
+  const order = deps.store.openOrders().find((row) => row.order_id === parsed.order_id);
+  if (order === undefined) {
+    // An orphan line is unremovable under 01-F1, so this refuses rather than appending against
+    // an order id nothing holds.
+    throw new Error(
+      `addLine: no open order ${parsed.order_id} (01-F1 — a line cannot be orphaned)`,
+    );
+  }
+  const unit_price_paisa = deps.priceOf(parsed.item_id, order.channel);
+  if (unit_price_paisa === null) {
+    // 01-F60: selling requires a number and inventing one is worse than refusing. NOT an
+    // 01-F17 violation — the sale is not blocked, this one item is, and the rest of the order
+    // completes normally. `menu()` has already greyed it with this reason.
+    throw new Error(
+      `addLine: ${parsed.item_id} has no price for channel ${order.channel} on this branch ` +
+        `(01-F60) — it cannot be sold until the menu prices it`,
+    );
+  }
+  return {
+    order_id: parsed.order_id,
+    line_id: newId(),
+    item_id: parsed.item_id,
+    qty: parsed.qty,
+    // 01-F53 — captured at line-add and never re-read. A later price edit cannot retro-price
+    // this order, which is what 14-F6 promises the owner as "open orders keep their price".
+    unit_price_paisa,
+  };
+};
+
 export const createGateway = (deps: GatewayDeps): Gateway => ({
   deviceState: () => {
     const b = deps.blockedCursor();
@@ -638,6 +707,18 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
           order_type: row.order_type,
           confirmed_at: row.confirmed_at,
           settled: row.settled,
+          /*
+            `04-F12`/`04-F25` — the fold's own table set, parsed out of the column it is stored in
+            and carried through UNCHANGED. `01-F19` allows two orders on one table and `merge.ts`
+            refuses to pick between divergent assignments, so this is a set and `table_conflict` is
+            the fold's own flag for the case where it has more than one member.
+
+            A malformed column degrades to an EMPTY set rather than throwing (`01-F54`): the table
+            is a label on an order, and an order that cannot say which table it is on is still an
+            order whose lines must reach the kitchen and whose money must settle (`01-F17`).
+          */
+          table_ids: tableIdsOf(row.table_ids_json),
+          table_conflict: row.table_conflict,
           /*
             `03-F25` — the aging timer, derived HERE because both of its inputs live on this side
             of the plane (`shared/ipc.ts`'s `aging` field says why at length).
@@ -923,25 +1004,6 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
    * price from the catalog those two key into. The renderer supplied none of it.
    */
   addLine: (req: unknown): AppendResult => {
-    const parsed: AddLineRequest = AddLineRequestSchema.parse(req);
-    const order = deps.store.openOrders().find((row) => row.order_id === parsed.order_id);
-    if (order === undefined) {
-      // An orphan line is unremovable under 01-F1, so this refuses rather than appending against
-      // an order id nothing holds.
-      throw new Error(
-        `addLine: no open order ${parsed.order_id} (01-F1 — a line cannot be orphaned)`,
-      );
-    }
-    const unit_price_paisa = deps.priceOf(parsed.item_id, order.channel);
-    if (unit_price_paisa === null) {
-      // 01-F60: selling requires a number and inventing one is worse than refusing. NOT an
-      // 01-F17 violation — the sale is not blocked, this one item is, and the rest of the order
-      // completes normally. `menu()` has already greyed it with this reason.
-      throw new Error(
-        `addLine: ${parsed.item_id} has no price for channel ${order.channel} on this branch ` +
-          `(01-F60) — it cannot be sold until the menu prices it`,
-      );
-    }
     const identity = deps.store.identity;
     const envelope = deps.store.append({
       id: newId(),
@@ -954,15 +1016,7 @@ export const createGateway = (deps: GatewayDeps): Gateway => ({
       device_created_at: wallClock.now(),
       type: "order.line_added",
       schema_version: 1,
-      payload: {
-        order_id: parsed.order_id,
-        line_id: newId(),
-        item_id: parsed.item_id,
-        qty: parsed.qty,
-        // 01-F53 — captured at line-add and never re-read. A later price edit cannot retro-price
-        // this order, which is what 14-F6 promises the owner as "open orders keep their price".
-        unit_price_paisa,
-      },
+      payload: linePayloadFor(deps, req),
       refs: [],
     });
     return { id: envelope.id };
@@ -1154,6 +1208,57 @@ export const createVerifiedAppend =
       schema_version: 1,
       payload: parsed.payload,
       refs: parsed.refs,
+    });
+    return { id: envelope.id };
+  };
+
+/**
+ * `04-F21`/`04-F22` (c) — **`addLine` for an actor the caller has just verified**, and it is the
+ * `C5` half of what `createVerifiedAppend` above is for the general append.
+ *
+ * A `04-F21` terminal appends a waiter's line while the till's own session holds whoever is
+ * standing at the counter — often nobody, because the counter auto-locks (`01-F26`). Every one of
+ * `addLine`'s three shipped append sites reads `deps.session()`, which is exactly right for
+ * `02-F41` at the counter and exactly wrong here: the line is the waiter's act and the envelope
+ * must say so.
+ *
+ * **The three alternatives `createVerifiedAppend`'s header refuses are refused here for the same
+ * reasons and are not restated.** The one worth naming again is the second: a terminal is further
+ * from trusted than the renderer, so `AddLineRequestSchema` must never gain an actor field, and
+ * that is why the actor is a SEPARATE POSITIONAL ARGUMENT.
+ *
+ * ── What it does not do ──────────────────────────────────────────────────────────────────────
+ *
+ * It takes no `session` dep, so it cannot read, move or refresh one — structural, not a promise.
+ * It decides no price of its own: `linePayloadFor` is the same function `addLine` calls, so a
+ * waiter's naan and a cashier's naan resolve one number from one catalog against one order's
+ * channel (`01-F60`, `02-F45`). And it writes `actor_user_id` verbatim, so an empty string is
+ * refused by `envelope.ts` one layer down rather than landing as an UNATTRIBUTED line claiming a
+ * sale (`01-F1` — there is no unwinding it).
+ */
+export type VerifiedAddLine = (actor_user_id: string, req: unknown) => AppendResult;
+
+export type VerifiedAddLineDeps = {
+  /** No session — see above. `priceOf` is `01-F60`'s resolver, the host's own. */
+  store: Pick<DeviceStore, "identity" | "append" | "openOrders">;
+  priceOf: PriceResolver;
+};
+
+export const createVerifiedAddLine =
+  (deps: VerifiedAddLineDeps): VerifiedAddLine =>
+  (actor_user_id: string, req: unknown): AppendResult => {
+    const identity = deps.store.identity;
+    const envelope = deps.store.append({
+      id: newId(),
+      org_id: identity.org_id,
+      branch_id: identity.branch_id,
+      device_id: identity.device_id,
+      actor_user_id,
+      device_created_at: wallClock.now(),
+      type: "order.line_added",
+      schema_version: 1,
+      payload: linePayloadFor(deps, req),
+      refs: [],
     });
     return { id: envelope.id };
   };

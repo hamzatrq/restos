@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      No user scaling: `27-F11c` designs in millimetres and renders in pixels, and a pinch-zoomable
+      viewport puts a second, invisible scale factor between the two. A tablet held at 40 cm is a
+      fixed physical surface, exactly as a counter panel is.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <!--
+      `04-F22` — this page reaches ONE origin, the till that served it, and nothing else. `connect-src
+      'self'` is the belt to `04-F21`'s brace: a pad that could talk to a second host would be a pad
+      an attacker on the shop Wi-Fi could redirect, and there is nothing on this page that needs the
+      WAN (`00 §5.1`).
+
+      `font-src 'self' data:` is `27-F26`'s typeface arriving as bytes. Without it the `@font-face`
+      rules parse cleanly and every face is blocked — a failure that looks exactly like success.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'"
+    />
+    <title>RestOS — Order pad</title>
+    <style>
+      /*
+        The height chain, and `border-box`. Both are copied deliberately from the counter's own
+        `index.html` rather than re-derived: `packages/ui` declares every box as the number it
+        means, and under the CSS default those numbers are never the box that renders — which is
+        the defect that put a 1418 px band in a 1392 px window and clipped an alarm's only control.
+      */
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+        /* `27-F2` — paging replaces scrolling for anything actionable. A scrollbar here would mean
+           the layout is wrong and hiding it. */
+        overflow: hidden;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
