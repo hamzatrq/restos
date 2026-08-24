@@ -561,6 +561,28 @@ describe("§H the SEAM — the shipped host reaches all of this, or none of it m
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/(^|[^:])\/\/.*$/gm, "$1");
 
+  /**
+   * ⚠ **THE TERMINAL'S OWN WIRING BLOCK, AND THE NARROWING IS THE ASSERTION.**
+   *
+   * The first draft of §H2 read the WHOLE file for `appendAs: createVerifiedAppend(`. It passed
+   * under the mutant that points the terminal's `appendAs` at the session-reading gateway —
+   * because `recordApprovals` twenty lines up wires an IDENTICAL line for `05-F29`'s grant, and a
+   * file-wide `toMatch` cannot tell the two apart. That is the round-3 law's shape on this
+   * session's own work: the mechanism was built correctly and aimed one call site away. Reading
+   * the suite did not find it; running the mutant did.
+   */
+  const terminalWiring = (): string => {
+    const source = host();
+    const start = source.indexOf("createTerminal({");
+    const end = source.indexOf("createTerminalServer({");
+    // `24-F14` — if the block cannot be located the assertions below would pass against an empty
+    // string, so this fails loudly instead.
+    if (start === -1 || end === -1 || end <= start) {
+      throw new Error("the host no longer contains a createTerminal wiring block to read");
+    }
+    return source.slice(start, end);
+  };
+
   it("H1 — the host CONSTRUCTS the terminal and its server", () => {
     const source = host();
     expect(source).toMatch(/\bcreateTerminal\s*\(/);
@@ -568,7 +590,7 @@ describe("§H the SEAM — the shipped host reaches all of this, or none of it m
   });
 
   it("H2 — 04-F22 (c): the host wires the VERIFIED appends, not the session-reading ones", () => {
-    const source = host();
+    const source = terminalWiring();
     // The defect this whole surface exists to avoid, and the one invisible to every behavioural
     // test in the repo: the order would still be correct and only the envelope would name the
     // wrong person (`approval-record`'s own note says the same one screen up).
@@ -580,14 +602,13 @@ describe("§H the SEAM — the shipped host reaches all of this, or none of it m
   });
 
   it("H3 — 04-F23: the host reaches the matrix through authorize.ts, not a local rule", () => {
-    expect(host()).toMatch(/authorize:\s*authorizeTerminal\(/);
+    expect(terminalWiring()).toMatch(/authorize:\s*authorizeTerminal\(/);
   });
 
   it("H4 — 01-F61: the pad's verifier is a createPinSession over the DURABLE counter", () => {
-    const source = host();
     // A hand-rolled `verifyPin` here would be a third credential surface with its own lockout to
     // forget. The durable store is what makes `01-F61`'s persistence real.
-    const wiring = source.slice(source.indexOf("verifyWaiter:"));
+    const wiring = terminalWiring();
     expect(wiring).toMatch(/createPinSession\(/);
     expect(wiring.slice(0, wiring.indexOf("authorize:"))).toMatch(/attempts:\s*store\.pinAttempts/);
   });
@@ -598,6 +619,14 @@ describe("§H the SEAM — the shipped host reaches all of this, or none of it m
     // A self-signing fallback would train an operator to tap through a browser warning, which is
     // worth more to an attacker than the certificate is to us.
     expect(source).not.toMatch(/createSelfSigned|generateKeyPairSync/);
+  });
+
+  it("H2b — the narrowing BITES: the approval record's identical wiring is outside the window", () => {
+    // Without this, H2 could be satisfied by any `appendAs: createVerifiedAppend(` in the file and
+    // the terminal's own could be anything at all — which is exactly what the M2 mutant proved.
+    const whole = host();
+    expect(whole.match(/appendAs:\s*createVerifiedAppend\(/g)?.length).toBeGreaterThan(1);
+    expect(terminalWiring().match(/appendAs:\s*createVerifiedAppend\(/g)?.length).toBe(1);
   });
 
   it("H6 — 24-F14: this file's own reads are not vacuous", () => {
