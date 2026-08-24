@@ -3,7 +3,9 @@
 **Owning spec: `specs/04-waiter-app.md` — read it before modifying anything here (AGENTS.md routing).**
 
 **Build 1 of `plans/waiter/design.md` landed August 2026 and was returned DO NOT SHIP by adversarial
-review; the fixes are `04-F27`..`04-F32` and are written up below.** ~~T3 BYOD handheld. Scoped sync slice
+review; the fixes are `04-F27`..`04-F32`. The RE-REVIEW of those fixes returned SHIP WITH FIXES and
+its three findings are `04-F27` (c) and `04-F33`..`04-F35` — two of the three were created by the
+fix round itself. Both rounds are written up below, newest first among the review sections.** ~~T3 BYOD handheld. Scoped sync slice
 (01-F39) — never hub, never full branch window.~~ **⚠ SUPERSEDED by `04-F21` and `04-F26`, and both
 halves of that line are now wrong rather than merely dated:** this is a **landscape tablet**, not a
 BYOD phone, and it is a **browser terminal of the till**, not a device with a slice. It holds no
@@ -182,6 +184,133 @@ with no listener — an uncaught exception in the main process, reproduced as `E
 and certificate material that will not parse threw *synchronously* out of `createHttpsServer`, out
 of `counterBoot` and into `fatal`, which exits non-zero saying *"The device store could not be
 opened"*. Both are "no pad" now, logged, and the till goes on selling (`01-F17`).
+
+
+## ⚠ THE RE-REVIEW OF THE FIX ROUND — SHIP WITH FIXES, AND TWO OF THE THREE WERE MADE BY THAT ROUND
+
+The adversarial re-review confirmed `02-F49`'s confirm boundary is genuinely closed on both roads
+and returned three findings. **Two of them the fix round created**, which is the most useful thing
+in this section: closing `04-F27` (b) — one consequence function for both producers — put the pad
+on a road whose appends read the till's live session, and closing `04-F29` — SEND trims what has
+landed — replaced a re-ring with a pad-local flag that one ordinary gesture cleared.
+
+**1. EVERY PAD SEND WROTE A PERMANENT EVENT NAMING THE WRONG PERSON (`04-F27` (c)).** Reproduced on
+a real store, waiter Sana at the pad and cashier Ayesha at the till:
+
+```
+AYESHA SIGNED IN AT THE TILL — a pad SEND by Sana:
+  order.created            -> SANA(waiter)
+  order.line_added         -> SANA(waiter)
+  order.confirmed          -> SANA(waiter)
+  order.line_state_changed -> AYESHA(cashier at the till)     ← 02-F41, permanent under 01-F1
+TILL LOCKED — the same act: order.line_state_changed -> null
+```
+
+So **the actor of a permanent record depended on who happened to be standing at an unrelated
+screen**, and it is invisible to every behavioural test in the repo: the order is still correct and
+only the envelope names the wrong person. The fix threads the actor of the act that caused a
+consequence — `onAppended` carries it, `appended` takes it, `LineAdvance` and `AggregatorSettlement`
+take it FIRST and REQUIRED (a trailing optional is satisfied by the closure that ignores it), and
+`gateway.ts` gains `createCausedAppend`, whose actor is `string | null` because `null` is a real
+answer: `02-F31` defines its auto-advance as *"where no device exists to signal them"*, so a line
+advanced because a KOT printed was advanced by nobody. **`VerifiedAppend` deliberately did NOT gain
+that nullability** — `05-F29`'s grant is the caller whose whole safety property is that an
+unattributed approval cannot be expressed.
+
+**2. SEND WENT QUIET OVER AN UNTICKETED ADDENDUM AFTER ONE ORDINARY GESTURE (`04-F34`).** `sendable`
+asked *"has this order ever been confirmed?"*; `04-F24` asks *"does any station lack a chit?"*
+Reproduced on the pad's own harness:
+
+```
+P1 after SEND:       tillLines=3 kitchen=owed  sendLabel="Send to kitchen"
+P1 after RE-SELECT:  tillLines=3 kitchen=owed  sendLabel="Send to kitchen — Nothing new to send"
+P1 pressing SEND anyway: new confirms=0
+```
+
+A browser reload, a sign-out or a second pad reach the same state. `02-F55` had already projected
+the answer on the order row and forbidden a client-side flag **by name** (*"a renderer flag is
+defeated by a relaunch and by `02-F11`'s second terminal"*) — and `tableOf` dropped the field, which
+is `04-F28`'s defect (a fact the till sends, lost at the terminal's plane boundary) one field over,
+in the same file, in the same round. The row carries `kitchen`, SEND reads it, `owedConfirm` is
+deleted. A host that supplies no projector degrades to `04-F29`'s third fact (`01-F54`).
+
+**3. THE PAD COULD ACT ON AN ORDER ITS OWN VIEW DOES NOT LIST (`04-F33`).** `04-F23` bounds this
+surface by EVENT TYPE and every intent but `open` carries an order id nothing checked. Reproduced
+with `view()` listing **no tables at all**:
+
+```
+PAD VIEW LISTS: []
+PAD REMOVE ON A COUNTER ORDER: {"ok":true,…}   ORDER TOTAL AFTER: 0     ← Rs 450 off a bill
+PAD CONFIRM ON FOODPANDA ORDER: {"ok":true,…}
+PAYMENT: actor=null amount_paisa=45000 method=aggregator_receivable purpose=settles_order
+```
+
+Both acts are correct *per the type gate*: what was appended was `order.line_removed` and
+`order.confirmed`, and the settlement is `08-F17`'s CONSEQUENCE of the second — so gate 1 refusing
+`payment.recorded` by name never saw it. **The closed event set bounds what the pad may do and not
+what it may do it TO.** The scope is the pad's own view, read from the same list `view()` serves.
+
+**4. A COMMENT CLAIMED A PROTECTION THAT DOES NOT EXIST (`04-F35`).** `terminal-server.ts` said of a
+configured pad that did not come up: *"this is a failure and the strip says so"*. It does not —
+`failure()`'s only production caller is the TTY console — and `04-F22` (a)'s strip clause is
+recorded in the FR as OWED. Both sites corrected saying what was false; `terminal-operations.test.ts`
+§F binds the words to the fact in both directions.
+
+## Mutation matrix — THE RE-REVIEW ROUND (August 2026)
+
+Control: `apps/pos-electron` **1444 pass / 5 env-red (1449)** — the five are
+`startup-integrity.test.ts` spawning real Electron with no display, an environment prerequisite
+(`T-01-07`), red on the untouched tree. `apps/waiter` **16/16**. Every mutant is exactly one
+behavioural branch applied to a **committed** tree, restored with `git checkout --` and verified by
+`sha256`; the driver refuses a no-op mutant. Both package suites run whole under every row, and the
+columns are kills **above** the control.
+
+| # | mutant (exactly one branch) | pos | waiter | what dies |
+|---|---|---|---|---|
+| M1 | **F1 DEFECT VERBATIM** — the line advance appends through the session-reading gateway | **1** | 0 | `line-advance-seam` §A |
+| M1b | **THE MODULE DROPS THE ACTOR** — `deps.append(null, …)` whatever it was handed | **2** | 0 | G1, G2 |
+| M1c | **THE TERMINAL DROPS IT** — the pad's consequence is announced with nobody's id | **1** | 0 | G1 |
+| M1d | **THE ACTOR HARDCODED to the waiter** — the counter's road loses its cashier | **1** | 0 | G2 |
+| M2 | **THE HELPFUL WRONG FIX** — the consequence re-reads the session instead of carrying it | **3** | 0 | aggregator §H, `line-advance-seam` §A, D3 |
+| M3 | **THE SEAM INERT** — `onAppended: (req) => appended(req, null)` | **3** | 0 | D1, D2, D3 |
+| M4 | **F2 DEFECT VERBATIM** — SEND ignores the till's kitchen state again | 0 | **2** | A6, A7 |
+| M5 | **F2 SEAM** — the terminal drops `02-F55`'s field at the plane boundary | **1** | 0 | F6 |
+| M6 | **F4 DEFECT VERBATIM** — the view-scope gate deleted | **3** | 0 | H1, H2, H4 |
+| M7 | **F4 AIMED ONE CASE AWAY** — the gate covers `remove_line` and nothing else | **2** | 0 | H2, H4 |
+| M8 | **F3** — an existing reader of `failure()` gains a strip symbol | **1** | 0 | ops §F2 |
+| M8b | **F3** — a NEW production file starts reading `failure()` | **2** | 0 | ops §F1, §F2 |
+| M9 | **F3 ANTI-ROT** — the disclaimer deleted while the gap remains | **1** | 0 | ops §F3 |
+| M10 | **THE FIFTH PRODUCER FORKS** — `createCausedAppend` builds its own envelope | **1** | 0 | §B2 |
+| N1 | **NEGATIVE CONTROL** — a real restructuring of `visibleOrders` and `kitchenOwes` | **0** | **0** | — |
+
+**N1 is what makes every red row mean anything**: genuine restructurings of the two functions this
+round added (the scope read as a loop; SEND's enablement split into two named locals) redden
+nothing, so the suites hold behaviour rather than shape.
+
+**M1c against M1d is the attribution for `04-F27` (c), and neither subsumes the other.** G1 owns
+*the pad's road names the waiter* and G2 owns *the counter's road still names its cashier*; a fix
+that hardcoded either answer passes one and dies on the other. M1b, which drops the actor
+altogether, is the only row that kills both.
+
+**⚠ M1's column is the honest weakness and it is the number to remember: restoring the DEFECT
+VERBATIM in the host kills exactly ONE test, and it is a source read.** `main/index.ts` builds an
+Electron app at module scope and no suite in this package can import it, so §G's behavioural rows
+construct their own consequence block and stay green under a host that reverts. That is the same
+shape `line-advance-seam.test.ts` §A already records for `02-F31`, and it is stated rather than
+dressed up: the MODULE half and the TERMINAL half of `04-F27` (c) are behavioural (M1b, M1c, M1d);
+the HOST half has one guard.
+
+**M6 against M7 is the attribution for `04-F33`'s SHAPE.** M7 is the fix a session writes when it
+aims at the defect it was shown — the removal — and it leaves the confirm, and therefore
+`08-F17`'s receivable, exactly as reproduced. H1 is the only assertion that separates them.
+
+**⚠ M9 SURVIVED AT 0 KILLS ON ITS FIRST RUN, inside the guard written for `04-F35`.** The tripwire
+searched the whole file for one phrase, and that phrase stands at BOTH comment sites — so deleting
+the disclaimer from either left the other satisfying it. The round-3 law landing on this round's own
+work: the mechanism built correctly and pointed at the file rather than at either site. Each site is
+asserted separately now, with a `24-F14` slice check so a missed anchor is a red test.
+**A second lesson from the same row:** the FIRST M9 only *reworded* the sentence, and a mutant that
+does not reproduce the defect proves nothing about the guard — the corrected mutant deletes it.
 
 ## Mutation matrix — THE REVIEW ROUND (August 2026)
 
