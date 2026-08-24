@@ -26,9 +26,10 @@
  * originally asked for.
  */
 
-import { type Paisa, type ParsedEvent, paisa, sumPaisa } from "@restos/domain";
+import { type Paisa, paisa, sumPaisa } from "@restos/domain";
 import { groupByKey, resolve } from "./contested.js";
 import { type CountObservation, countObservations } from "./count.js";
+import type { InventoryEvent } from "./event.js";
 import { valueAt } from "./rational.js";
 import type { InventoryItem, ValueQtyPair } from "./reference.js";
 
@@ -50,7 +51,7 @@ export type Period = {
 };
 
 export const periodsFor = (
-  events: readonly ParsedEvent[],
+  events: readonly InventoryEvent[],
   location_id: string,
 ): readonly Period[] =>
   countObservations(events, location_id).map((observation, index, all) => ({
@@ -113,7 +114,7 @@ export type PhysicalFacts = {
  * reason `countObservations` states: a re-append is a redelivery of an act, not a second act.
  */
 export const physicalFacts = (
-  events: readonly ParsedEvent[],
+  events: readonly InventoryEvent[],
   location_id: string,
   period: Period,
 ): PhysicalFacts => {

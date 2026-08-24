@@ -190,6 +190,22 @@ if (agents.split("\n").length > 120)
       // rather than wildcarded, on this block's own rule, so a real `export.*` event landing later
       // is still caught.
       "export.request",
+      // `10-F34`'s action, and it passes this block's test the way `export.request` does rather
+      // than the way `user.manage` does: the `report.*` family contains **no event at all** in the
+      // `01 §4` catalog, so neither `report.sales_view` (which has been an action since Wave 0 and
+      // was never listed here, because doc 10 is the first module doc to name it in prose) nor
+      // `report.stock_view` can become an emission without a spec act landing under a different
+      // prefix entirely. Listed by name rather than wildcarded, on this block's own rule.
+      //
+      // ⚠ `stock.count_entry` is listed for a DIFFERENT and sharper reason, and it is the case
+      // this block's own header warns about: the `stock.*` family DOES contain events, ten of them,
+      // so the wildcard argument is unavailable. It survives on the infinitive test alone —
+      // `stock.count_entry` is the act of entering a count and `stock.count_recorded` is the
+      // emission, `00 §6`'s `noun.verb_past` — and it is listed by name so a real
+      // `stock.count_*` event landing later is still caught.
+      "report.sales_view",
+      "report.stock_view",
+      "stock.count_entry",
       "order.create",
       "shift.open_close",
       "cash.count",

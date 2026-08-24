@@ -33,7 +33,19 @@ import { type CostBasis, type ResolvedCost, valueOrNull } from "./period.js";
 import { add, fromInt, mul, type Rational, rational, roundHalfUp, ZERO } from "./rational.js";
 import type { ReferenceData } from "./reference.js";
 
-/** `10-F31`'s ITEM unit. The whole predicate — there is nothing else to it. */
+/**
+ * `10-F31`'s ITEM unit. The whole predicate — there is nothing else to it.
+ *
+ * @unreached-owed The three completeness predicates in this file are slice 1 step 3's deliverable
+ * and their CONSUMERS are step 5 and slice 2: the recipe editor's plate cost (`14-F9`/`14-F10`,
+ * which is also the repair queue), `15-F9`'s onboarding workbench, and `12-F11`'s margin line.
+ * Slice 1 ships the arithmetic and the honest surface and NOT the figure —
+ * `plans/inventory/design.md` §7's omit list is explicit that "the food-cost / gross-margin figure
+ * itself" leaves slice 1, because `10-F31`'s window gate is unreachable on day one by construction
+ * (an org has to complete first). Writing them here rather than in the editor is `18 §2`: the gate
+ * belongs in ONE place, and implementing it per screen is how `01-F60`'s two declarations of the
+ * enabled set happened.
+ */
 export const itemCostable = (cost: ResolvedCost): boolean => cost.basis !== "none";
 
 export type DishCost =
@@ -65,6 +77,10 @@ class ExplosionFailed extends Error {}
  * prep recipe divides by a yield, and rounding at each hop is the drift `10 §8` forbids. Here the
  * rounding happens once per LEAF (each leaf's quantity is valued at its own pair), because two
  * leaves may resolve to different bases and there is no single pair to value the dish at.
+ *
+ * @unreached-owed With `itemCostable` above — the DISH gate's consumer is `14-F9`/`14-F10`'s recipe
+ * editor (slice 1 step 5), where R2's blocking-item list IS the repair queue and `14-F29`'s
+ * precedent puts completeness where the owner types.
  */
 export const dishCost = (
   sellable_id: string,
@@ -169,6 +185,11 @@ export type WindowCompleteness = {
  * `01-F63`'s attested `billed_paisa` is the number `services/api/src/summary.ts` already uses and a
  * second derivation of the same figure is what `12-F21` exists to prevent. The caller supplies the
  * billed revenue per sellable; this function does not re-derive it.
+ *
+ * @unreached-owed The WINDOW gate's consumer is `12-F11`'s margin line, which slice 1 deliberately
+ * does not ship (`plans/inventory/design.md` §7's omit list) — the gate is unreachable on day one
+ * by construction, because an org has to COMPLETE first. `10-F31` also puts it in `13-F5`'s metric
+ * registry rather than on a screen, and that registry does not exist. Slice 2 wires both.
  */
 export const windowCompleteness = (
   billedBySellable: ReadonlyMap<string, number>,

@@ -16,6 +16,9 @@ import type { CountBasis } from "@restos/domain";
 import { rational, roundHalfUp } from "./rational.js";
 import type { CountUnits } from "./reference.js";
 
+/**
+ * @unreached-owed With `countEntryToBase` — the COUNT SCREEN is slice 1 step 6 and is not built.
+ */
 export class PartialTierError extends Error {}
 
 export type CountEntry = {
@@ -35,6 +38,12 @@ export type CountEntry = {
  * label, and `10-F33` (a) computes the noise floor FROM the basis, so an unlabelled estimate and an
  * exact reading become the same number on the wire and a factor of ~10 apart in what they license
  * anyone to say. `directedPaisa` in `packages/domain` pairs its two halves for the same reason.
+ *
+ * @unreached-owed The COUNT SCREEN is slice 1 step 6 (`plans/inventory/design.md` §7) and is not
+ * built: it is gated on amendment **A1**, the `inventory` member of `01-F75`'s closed resource set,
+ * without which a device has no item list to render and no area to name. `10-F29`'s tier arithmetic
+ * is written here rather than there because `18 §2` puts one declaration in a package, and because
+ * the back-office item editor validates a declared tier against the same walk.
  */
 export const countEntryToBase = (
   entry: CountEntry,

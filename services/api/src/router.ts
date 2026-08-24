@@ -16,6 +16,7 @@ import { z } from "zod";
 import { catalogProcedures } from "./catalog-router.js";
 import { deviceProcedures } from "./device-router.js";
 import { exportProcedures } from "./export-router.js";
+import { inventoryProcedures } from "./inventory-router.js";
 import { issueSessionToken } from "./session.js";
 import { summaryBranchScope, summaryProcedures } from "./summary-router.js";
 import {
@@ -239,12 +240,31 @@ const userRouter = router(userProcedures);
  */
 const governanceRouter = router(exportProcedures);
 
+/**
+ * `specs/10` slice 1's cloud read model — `10-F18`'s variance report, gated on `10-F34`'s
+ * `report.stock_view`.
+ *
+ * ⚠ **`10-F34` had to be WRITTEN before this router could exist**, and that is the news rather than
+ * the wiring: `assertEveryProcedureIsGated` refuses at boot to host a procedure naming no action,
+ * the three shipped `stock.*` actions are all WRITES, and `permissions.ts` had deliberately
+ * declined to invent a stock-report reach from Appendix A's row about SALES. So slice 1's own
+ * headline surface was **unbuildable rather than merely unbuilt** — the fifth instance of the shape
+ * `02-F46`, `02-F47`, `14-F30` and `14-F39` each record, and one `plans/inventory/design.md` §6
+ * missed while correctly naming the same gap for `stock.production_recorded`.
+ *
+ * Built with `authorized(...)` like everything else, so `assertEveryProcedureIsGated` sees it and
+ * **neither exemption list changed**: a location's unexplained usage is not the caller's own
+ * identity, and putting it on `PUBLIC_PROCEDURES` needs no explanation.
+ */
+const inventoryRouter = router(inventoryProcedures);
+
 export const appRouter = router({
   auth: authRouter,
   session: sessionRouter,
   catalog: catalogRouter,
   devices: deviceRouter,
   governance: governanceRouter,
+  inventory: inventoryRouter,
   summary: summaryRouter,
   tenancy: tenancyRouter,
   users: userRouter,

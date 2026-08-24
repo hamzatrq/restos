@@ -28,11 +28,10 @@ export {
   rollUpCount,
   worstBasis,
 } from "./count.js";
-// @unreached-owed The COUNT SCREEN is slice 1 step 6 (`plans/inventory/design.md` §7) and is not
-// built: it is gated on amendment A1, the `inventory` member of `01-F75`'s closed resource set,
-// without which a device has no item list to render and no area to name. `10-F29`'s tier arithmetic
-// is written here rather than there because `18 §2` puts one declaration in a package and because
-// the same walk is what the back-office editor validates against.
+// The debt markers for `count-entry.ts` and `completeness.ts` live at their DECLARATIONS, not here.
+// `packages/domain/src/index.ts` records why: a marker above a barrel re-export is INERT —
+// `check-seams` reports Rule A at the declaration site, and "a barrel re-export is not a use" cuts
+// both ways. A marker that looks like a rail exception and is not is the worst kind of comment.
 export { type CountEntry, countEntryToBase, PartialTierError } from "./count-entry.js";
 export {
   type Consumption,
@@ -41,6 +40,7 @@ export {
   type DeductionSet,
   deductionSet,
 } from "./deduction.js";
+export type { InventoryEvent } from "./event.js";
 export {
   BANNED_VARIANCE_WORDS,
   BASIS_ERROR_BP,

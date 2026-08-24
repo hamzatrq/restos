@@ -30,10 +30,11 @@
  * the second report meaningful, and that is the industry's own rule as well as this FR's.
  */
 
-import type { CountBasis, ParsedEvent } from "@restos/domain";
+import type { CountBasis } from "@restos/domain";
 import { type Paisa, paisa, sumPaisa } from "@restos/domain";
 import { type CountedItem, type NotCountedReason, rollUpCount } from "./count.js";
 import { consumption } from "./deduction.js";
+import type { InventoryEvent } from "./event.js";
 import {
   type HintKind,
   hintText,
@@ -41,6 +42,7 @@ import {
   isSustainedRun,
   noiseFloor,
   SUSTAINED_RUN_PERIODS,
+  vocabularyViolations,
 } from "./noise.js";
 import {
   type CostBasis,
@@ -125,7 +127,7 @@ export type VarianceInput = {
    * as given, because `order.*` names a branch and not a `01-F25` location, and `10-F3` deducts
    * "at the selling location". The CALLER scopes them — in slice 1 a branch is its own location.
    */
-  readonly events: readonly ParsedEvent[];
+  readonly events: readonly InventoryEvent[];
   readonly refs: ReferenceData;
 };
 
@@ -413,6 +415,15 @@ export const sustainedHints = (
   reports: readonly VarianceReport[],
   wastageLoggedByItem: ReadonlySet<string>,
 ): readonly SustainedHint[] => {
+  // `10-F33` (f) says the vocabulary rule is a **checkable invariant**, and a rule checked only by
+  // a test is a rule about the strings that test remembered. So it runs HERE, on the way out: a
+  // hint that names a banned word or a role never reaches a caller at all.
+  //
+  // ⚠ It DROPS rather than throws. A read model that crashed on its own prose would take the
+  // numbers down with the wording, and the numbers are the part an owner needs; and it never
+  // rewrites, because a hint quietly reworded to pass is the rule defeated with better manners.
+  const emit = (hints: readonly SustainedHint[]): readonly SustainedHint[] =>
+    hints.filter((hint) => vocabularyViolations(hint.text).length === 0);
   const history = new Map<string, (-1 | 0 | 1 | null)[]>();
   const basis = new Map<string, CountBasis | null>();
   for (const report of reports) {
@@ -457,5 +468,5 @@ export const sustainedHints = (
       });
     }
   }
-  return hints;
+  return emit(hints);
 };

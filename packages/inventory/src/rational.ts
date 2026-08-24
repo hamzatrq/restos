@@ -64,12 +64,11 @@ export const add = (a: Rational, b: Rational): Rational =>
 
 export const mul = (a: Rational, b: Rational): Rational => rational(a.n * b.n, a.d * b.d);
 
-export const negate = (a: Rational): Rational => ({ n: -a.n, d: a.d });
-
-export const isZero = (a: Rational): boolean => a.n === 0n;
-
-/** Sign of the rational: `-1`, `0` or `1`. `10-F33` (c)'s discriminator, exactly. */
-export const sign = (a: Rational): -1 | 0 | 1 => (a.n === 0n ? 0 : a.n < 0n ? -1 : 1);
+// `negate`, `isZero` and `sign` were written here and DELETED before this file first landed:
+// `pnpm seams:check` reported all three as unreached, and they were — the sign discriminator
+// `10-F33` (c) needs operates on integer gaps in `variance.ts`, not on rationals, and nothing
+// negates one. Speculative helpers on a money-adjacent path are exactly what `24 §3b` forbids, and
+// a rail finding them before the first commit is the cheapest moment to remove them.
 
 /** `|a| >= |b|`, exact and float-free — the noise-floor comparison (`10-F33` (a)). */
 export const absAtLeast = (a: Rational, b: Rational): boolean => {

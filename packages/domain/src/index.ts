@@ -70,6 +70,9 @@ export {
   type Role,
   type RoleAssignment,
   reportScope,
+  // `10-F34` — how wide a STOCK report may be. A separate reach from `reportScope`: the two tables
+  // differ in the cashier and storekeeper columns, and a `10-F28` period is not a shift.
+  stockReportScope,
 } from "./permissions.js";
 // 01-F26 / 01-F61 — the PIN credential primitive. `01-F28` verifies against these hashes
 // on-device, offline, so the algorithm is platform law and lives here (18 §2).

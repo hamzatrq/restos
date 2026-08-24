@@ -27,6 +27,7 @@ import {
   createGatewayTenancyDirectory,
   createGatewayUserDirectory,
 } from "./gateway-client.js";
+import { type InventoryReference, unconfiguredInventoryReference } from "./inventory.js";
 import { type DayLedger, unconfiguredDayLedger } from "./ledger.js";
 import {
   type CatalogDeps,
@@ -86,6 +87,30 @@ export type ApiServerOptions = {
    * restaurant that traded normally, and nothing about the screen says anything is missing.
    */
   readonly ledger?: DayLedger;
+  /**
+   * `10-F18`'s inventory reference source. Optional here for `ledger`'s reason — suites that
+   * predate the variance report still have to boot — and REQUIRED once resolved.
+   *
+   * @unreached-owed **`start()` SUPPLIES NOTHING, SO A REAL DEPLOYMENT REFUSES EVERY VARIANCE READ
+   * — deliberately, and it is on this rail's register rather than in a comment.** What is owed is
+   * amendment **A1** (`plans/inventory/design.md` §6): the `inventory` member of `01-F75`'s CLOSED
+   * resource set, which is the spec act that gives this data a wire at all — plus the back-office
+   * editors that write it (slice 1 step 5) and the device count surface that produces the events it
+   * is folded against (step 6). None was invented here: `01-F75` says in terms that a resource
+   * string an implementation invents is an `01-F4`-shaped error one layer down, and a name on the
+   * wire that nothing can serve is what that clause's own exclusions exist to prevent.
+   *
+   * **The fallback is `unconfiguredInventoryReference`, which refuses every read**, not a memory
+   * stub, and on this surface the stub is the most dangerous shape in the file: an empty answer
+   * renders a complete, confident variance report with NO ROWS for a location that may be short any
+   * amount at all, and nothing on that screen says anything is missing.
+   *
+   * ⚠ **No shipping host passes one yet, and that is scheduled rather than accidental.** The writer
+   * is slice 1 step 5 (the back-office editors) and both it and the device count surface are gated
+   * on amendment A1 — the `inventory` member of `01-F75`'s closed resource set. Until then this
+   * procedure is hosted, gated and correct over a source that refuses.
+   */
+  readonly inventory?: InventoryReference;
   /**
    * `01-F68`/`01-F69`'s naming directory. Optional here for `devices`' reason — suites that predate
    * it still have to boot — and REQUIRED once resolved.
@@ -175,6 +200,7 @@ export const createApiServer = async (options: ApiServerOptions): Promise<Fastif
   const catalog = createCatalogRuntime(options.catalog ?? unconfiguredCatalog(options.now));
   const devices = options.devices ?? unconfiguredDeviceDirectory();
   const ledger = options.ledger ?? unconfiguredDayLedger();
+  const inventory = options.inventory ?? unconfiguredInventoryReference();
   const tenancy = options.tenancy ?? unconfiguredTenancyDirectory();
   const users = options.users ?? unconfiguredUserDirectory();
   const exportRequests = options.exports ?? unconfiguredExportRequests();
@@ -191,6 +217,7 @@ export const createApiServer = async (options: ApiServerOptions): Promise<Fastif
         catalog,
         devices,
         ledger,
+        inventory,
         tenancy,
         users,
         exports: exportRequests,
