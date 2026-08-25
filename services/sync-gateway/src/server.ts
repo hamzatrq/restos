@@ -83,6 +83,14 @@ export const buildServer = (
     notifyStaffVersion: (org_id, branch_id, version) => {
       gateway.notifyStaffVersion(org_id, branch_id, version);
     },
+    // `01-F87`'s producer, wired at the SAME composition root and for the same recorded reason.
+    // On this artifact the freshness the notice buys is the sharpest of the three: an owner who
+    // corrects a tax rate mid-service has every connected till charging the corrected rate on its
+    // next order rather than after a reconnect, and `01-F87` argues a wrong rate is a legal
+    // exposure. Required in the deps bag, so a build that forgets it does not compile.
+    notifyConfigVersion: (org_id, version) => {
+      gateway.notifyConfigVersion(org_id, version);
+    },
     // `01-F80` (a)'s mint derives its blind index from this (`pairing.ts`); it signs nothing here.
     tokenSecret,
   });

@@ -46,6 +46,7 @@ import {
 } from "@restos/inventory";
 import { z } from "zod";
 import type { CatalogEntry } from "./catalog.js";
+import type { ConfigPlane, ConfigRow } from "./config.js";
 import {
   type DeviceDirectory,
   type DeviceRecord,
@@ -86,6 +87,22 @@ const PublishResponse = z.object({ version: z.number().int().positive() });
 const PublishedResponse = z.object({
   version: z.number().int().nonnegative(),
   entries: z.array(z.unknown()),
+});
+
+/**
+ * `01-F87`'s artifact as the gateway serves it.
+ *
+ * **`version: 0` is legal and is a real answer** — `01-F77`'s omitted-never-zero rule is about the
+ * WIRE's per-key set, not about this internal read, and here `0` states *this org has published
+ * nothing*, which is `01-F87` (b)'s specified starting state rather than an error. The rows are
+ * `unknown` for `PublishedResponse`'s reason one artifact over: the value is typed BY THE KEY at
+ * the writer, so a schema here would be a second copy of `@restos/domain/config`'s.
+ */
+const ConfigPublishedResponse = z.object({
+  version: z.number().int().nonnegative(),
+  entries: z.array(
+    z.object({ key: z.string(), value: z.unknown().optional(), deleted: z.boolean().optional() }),
+  ),
 });
 
 /**
@@ -889,5 +906,64 @@ export const createGatewayInventoryReference = (link: GatewayLink): InventoryRef
       else menu_recipes.push(MenuRecipeWire.parse(entry.payload));
     }
     return { items, areas, recipes, menu_recipes };
+  },
+});
+
+/**
+ * `01-F87`'s `ConfigPlane`, bound to a real gateway.
+ *
+ * **Three endpoints on two tables, and the split is `01-F62`'s** — the same one
+ * `createGatewayDeviceDirectory` records. `read`/`save` reach `/internal/config*`, which is the
+ * published artifact every till fetches; `recordChange` reaches `/internal/org-events`, the
+ * org-scoped store, because `01-F87` (a) puts the CHANGE on `config.changed` and the VALUE on
+ * `01-F75`'s frames, and neither carries the other.
+ *
+ * ⚠ **`read` answers what a DEVICE would receive**, so R60's `cloud_only` commission rows are not
+ * in it — see `configPage` in the gateway for why that filter is a property of the one artifact
+ * rather than a second one.
+ *
+ * The response is PARSED rather than cast, for `OrgEventResponse`'s reason: this crosses a service
+ * boundary, and an unparsed body would let a gateway-side rename reach the tax editor as
+ * `undefined` beside a real rate — the failure that looks like data rather than like a bug. The
+ * ROWS inside it are re-typed and not re-validated, on `createGatewayCatalogPublisher`'s stated
+ * ground: `refuseConfigWrite` already refused anything else at the writer, and a second copy of
+ * those schemas here is the third-copy problem `18 §2` names.
+ */
+export const createGatewayConfigPlane = (link: GatewayLink): ConfigPlane => ({
+  read: async (org_id) => {
+    const body = await getJson(link, "/internal/config/published", org_id, "config published");
+    const parsed = ConfigPublishedResponse.parse(body);
+    return { version: parsed.version, entries: parsed.entries as readonly ConfigRow[] };
+  },
+  save: async (org_id, entries, opts) => {
+    const body = await postJson(
+      link,
+      "/internal/config/publish",
+      { org_id, entries, actor_user_id: opts.actor_user_id, now: opts.now },
+      "config publish",
+    );
+    return PublishResponse.parse(body).version;
+  },
+  recordChange: async (record) => {
+    await postJson(
+      link,
+      "/internal/org-events",
+      {
+        org_id: record.org_id,
+        // Sent rather than assumed, on `createGatewayLedgerAppender`'s stated ground: the
+        // gateway's `01-F62` scope check is the one that decides, not this client's confidence.
+        type: "config.changed",
+        actor_user_id: record.actor_user_id,
+        server_received_at: record.server_received_at,
+        payload: {
+          key: record.key,
+          layer: record.layer,
+          version: record.version,
+          before: record.before,
+          after: record.after,
+        },
+      },
+      "config history append",
+    );
   },
 });

@@ -17,10 +17,12 @@ import {
 import { type CreateFastifyContextOptions, fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import Fastify, { type FastifyInstance } from "fastify";
 import { createMemoryStagedEditStore } from "./catalog.js";
+import { type ConfigPlane, unconfiguredConfigPlane } from "./config.js";
 import { type DeviceDirectory, unconfiguredDeviceDirectory } from "./devices.js";
 import { type ExportRequests, unconfiguredExportRequests } from "./exports.js";
 import {
   createGatewayCatalogPublisher,
+  createGatewayConfigPlane,
   createGatewayDayLedger,
   createGatewayDeviceDirectory,
   createGatewayInventoryReference,
@@ -78,6 +80,20 @@ export type ApiServerOptions = {
    * entire subject is a stolen tablet.
    */
   readonly devices?: DeviceDirectory;
+  /**
+   * `01-F87`/`14-F43`'s layer-2 configuration plane. Optional here for `devices`' reason — suites
+   * that predate it still have to boot — and REQUIRED once resolved.
+   *
+   * **The fallback is `unconfiguredConfigPlane`, which refuses every call**, not a memory stub,
+   * and on this surface the stub is the most dangerous in the file for a reason none of the others
+   * has: `{ version: 0, entries: [] }` is **the TRUE answer for every org on day one** (`01-F87`
+   * (b): a device that has never received the artifact holds every key on its declared default and
+   * never blocks). So a stub would be indistinguishable from a correct implementation, and would
+   * stay indistinguishable after the plane landed — while a `save` reporting success told an owner
+   * her tax rate was set and every till went on charging `16-F1`'s nothing, permanently under
+   * `01-F1` for every order settled in between.
+   */
+  readonly config?: ConfigPlane;
   /**
    * `12-F10`'s ledger reader. Optional here for `devices`' reason — suites that predate the
    * summary still have to boot — and REQUIRED once resolved.
@@ -210,6 +226,7 @@ export const createApiServer = async (options: ApiServerOptions): Promise<Fastif
   // pending set than the sweep reads (`14-F28`).
   const catalog = createCatalogRuntime(options.catalog ?? unconfiguredCatalog(options.now));
   const devices = options.devices ?? unconfiguredDeviceDirectory();
+  const config = options.config ?? unconfiguredConfigPlane();
   const ledger = options.ledger ?? unconfiguredDayLedger();
   const inventory = options.inventory ?? unconfiguredInventoryReference();
   const tenancy = options.tenancy ?? unconfiguredTenancyDirectory();
@@ -227,6 +244,7 @@ export const createApiServer = async (options: ApiServerOptions): Promise<Fastif
         bearer: bearerOf(req.headers.authorization),
         catalog,
         devices,
+        config,
         ledger,
         inventory,
         tenancy,
@@ -553,6 +571,13 @@ const start = async (): Promise<FastifyInstance> => {
   // `__acceptance__/device-seam.test.ts` exists to redden.
   const devices: DeviceDirectory = createGatewayDeviceDirectory(link);
 
+  // `01-F87`/`14-F43`. Same `/internal` link again. Swap it for `unconfiguredConfigPlane()`
+  // and the process still starts, still serves, still gates — and every settings request
+  // refuses loudly rather than reporting a tax rate this deployment never published. That
+  // mutant is `config-seam.test.ts`'s C1, and it is the one whose stub-shaped alternative is
+  // undetectable: an empty settings set is the true answer for a new org.
+  const config: ConfigPlane = createGatewayConfigPlane(link);
+
   // `12-F10`. Same `/internal` link again. Swap it for `unconfiguredDayLedger()` and the process
   // still starts, still serves, still gates — and every summary request refuses loudly instead of
   // rendering `Rs 0` over a day that traded. That mutant is `summary-seam.test.ts`'s S3.
@@ -600,6 +625,7 @@ const start = async (): Promise<FastifyInstance> => {
     // The real clock, injected here and nowhere else (`18 §4`).
     now,
     catalog,
+    config,
     devices,
     ledger,
     inventory,

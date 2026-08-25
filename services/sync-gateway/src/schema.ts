@@ -736,6 +736,29 @@ export const inventoryVersions = kernel.table(
 );
 
 /**
+ * `01-F87` — **the published `config` artifact's COMMIT POINT.** `catalogVersions`' shape and
+ * `catalogVersions`' reasoning: entries are written first and this row last, inside the publish
+ * transaction, so a reader that can see version N is guaranteed to see every entry of version N.
+ *
+ * ORG-scoped with no branch column, and that is `01-F87`'s ruling rather than a simplification:
+ * layer-2 keys with a branch axis are ordinary (`03-F51`'s routes, `01-F60`'s enabled set) and
+ * that axis is **DATA inside one org artifact**, because a branch-scoped artifact would make one
+ * version number mean different bytes on different devices and destroy the premise `01-F56`'s
+ * divergence detection rests on.
+ */
+export const configVersions = kernel.table(
+  "config_versions",
+  {
+    org_id: text("org_id").notNull(),
+    version: bigint("version", { mode: "number" }).notNull(),
+    published_at: bigint("published_at", { mode: "number" }).notNull(),
+    /** `14-F3`'s history has an author without reading the ledger — `catalogVersions`' field. */
+    actor_user_id: text("actor_user_id"),
+  },
+  (t) => [primaryKey({ columns: [t.org_id, t.version] })],
+);
+
+/**
  * What CHANGED at each version — `catalogEntries`' shape, and its reasons transfer whole.
  *
  * `payload` is `jsonb` and this service has NO opinion about what is in it. The six kinds share
@@ -780,7 +803,7 @@ export const inventoryEntries = kernel.table(
  * device row". A row here is a **waiting row**; the claim is what writes `device_registry`.
  *
  * **`code_index` is the key and `code_hash` is the check, and the split is the one design decision
- * in this table** — see `0013`'s header for the three candidates and why a keyed blind index wins.
+ * in this table** — see `0014`'s header for the three candidates and why a keyed blind index wins.
  * The index makes the lookup one SELECT; the Argon2id verifier at `01-F61`'s cost floor is what
  * actually admits the claim. Neither is the code (`01-F80` (b): "never the code").
  *
@@ -836,3 +859,33 @@ export const orgPki = kernel.table("org_pki", {
   roster_signing_private_key_pem: text("roster_signing_private_key_pem").notNull(),
   created_at: bigint("created_at", { mode: "number" }).notNull(),
 });
+
+/**
+ * What CHANGED at each version — a delta per version, never a full settings set per version.
+ * `catalogEntries`' shape: a DELTA from A to B is `A < version <= B` and a SNAPSHOT at V is the
+ * greatest `version <= V` per key, both out of one table.
+ *
+ * `value` is `jsonb` and NULL on a `deleted` row. **No CHECK constrains what is in it**, and that
+ * is deliberate: `01-F87` (a) makes the KEY SPACE open and the value typed BY THE KEY, and the
+ * validation is `@restos/domain/config`'s `refuseConfigWrite` at the writer — one declaration,
+ * which `14-F48` requires by name after measuring what a second, silently-disagreeing copy costs.
+ * A CHECK here would be that second copy, in SQL, where no FR id can be cited.
+ */
+export const configEntries = kernel.table(
+  "config_entries",
+  {
+    org_id: text("org_id").notNull(),
+    version: bigint("version", { mode: "number" }).notNull(),
+    key: text("key").notNull(),
+    value: jsonb("value"),
+    /** `01-F75` — a RESET travels as a MARKED entry, never as an absence. */
+    deleted: bigint("deleted", { mode: "number" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.org_id, t.version, t.key] }),
+    // The snapshot fold's access path (org + key, greatest version). The delta scan's leading
+    // range condition is served by the PRIMARY KEY, which orders `version` second — the
+    // measurement `staffEntries`' index note records, applied here rather than assumed.
+    index("config_entries_org_key_version_idx").on(t.org_id, t.key, t.version),
+  ],
+);

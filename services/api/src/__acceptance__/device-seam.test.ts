@@ -219,6 +219,67 @@ describe("the device surface reaches the gateway (the seam, out of process)", ()
     ).toBe(true);
   });
 
+  /**
+   * **THE CONFIGURATION SEAM (`01-F87`/`14-F43`), and it rides this block for the reason the
+   * tenancy seam directly above does: this file is the only one in the package that drives the
+   * DECLARED `scripts.start`, and the question is what the SHIPPED PROCESS wires.**
+   *
+   * ⚠ **IT IS HERE BECAUSE THE MUTANT SURVIVED (round-3 law, mutant C7 — 0 of 418).**
+   * `config-plane.test.ts` beside this file proves the two procedures do the right thing when they
+   * are HANDED a real `ConfigPlane` — and it builds its own host with
+   * `createApiServer({ config: createGatewayConfigPlane(…) })`, so `server.ts` swapping
+   * `createGatewayConfigPlane(link)` for `unconfiguredConfigPlane()` left **every one of its 418
+   * tests green**. A test that supplies the wiring cannot observe whether the product supplies it.
+   * That is this wave's named defect (`L8`) reproduced inside the fix for it, exactly as
+   * `journey-catalog.test.ts` records of its own first draft, and only mutation found it.
+   *
+   * **On this surface the QUIETER twin is worse than the loud one.** A memory stub would answer
+   * `{ version: 0, entries: [] }`, which is **the true answer for every org on day one**
+   * (`01-F87` (b): a device that has never received the artifact holds every key on its declared
+   * default and never blocks) — so it is indistinguishable from a correct implementation by VALUE,
+   * and would stay indistinguishable after the plane landed. What separates them is not the value:
+   * it is that a request actually left the process.
+   */
+  it("`config.save` reaches the gateway — the layer-2 plane is WIRED, not stubbed (01-F87)", async () => {
+    const saved = await mutate(
+      running.base,
+      "config.save",
+      { entries: [{ key: "charge.rounding_paisa", value: 1000 }] },
+      auth,
+    );
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    expect(dataOf(saved)).toMatchObject({ version: expect.any(Number) });
+
+    expect(
+      gateway.received.some((entry) => entry.path === "/internal/config/publish"),
+      "no /internal/config/publish request ever left the process — the composition root supplied " +
+        "a plane that writes nowhere, so an owner's tax rate reaches no till while every gate is " +
+        "green",
+    ).toBe(true);
+    // …and the artifact ACTUALLY MOVED at the peer. A request that arrived and did nothing is the
+    // shape `L7` names: a seam test alone blesses a decorative object.
+    expect(gateway.config(ORG).entries).toContainEqual({
+      key: "charge.rounding_paisa",
+      value: 1000,
+    });
+    // `01-F87` (a)'s other half: the CHANGE is recorded, with the actor a shell could not supply.
+    expect(
+      gateway
+        .orgEvents()
+        .filter((event) => event.type === "config.changed" && event.org_id === ORG),
+    ).not.toEqual([]);
+  });
+
+  it("`config.read` reaches the gateway — the READ this plane was built to make possible", async () => {
+    const read = await query(running.base, "config.read", auth);
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    expect(
+      gateway.received.some((entry) => entry.path === "/internal/config/published"),
+      "no /internal/config/published request left the process — a cloud surface still cannot " +
+        "resolve this org's tax posture, which is the gate 01-F87 exists to close",
+    ).toBe(true);
+  });
+
   it("`devices.revoke` writes to the gateway's REGISTRY — the act that stops the till", async () => {
     const revoked = await mutate(running.base, "devices.revoke", { device_id: DEVICE }, auth);
     expect(revoked.status, JSON.stringify(revoked.body)).toBe(200);

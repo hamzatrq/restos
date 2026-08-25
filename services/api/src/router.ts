@@ -14,6 +14,7 @@ import { verifyPin } from "@restos/domain";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { catalogProcedures } from "./catalog-router.js";
+import { configProcedures } from "./config-router.js";
 import { deviceProcedures } from "./device-router.js";
 import { exportProcedures } from "./export-router.js";
 import { inventoryProcedures } from "./inventory-router.js";
@@ -258,10 +259,29 @@ const governanceRouter = router(exportProcedures);
  */
 const inventoryRouter = router(inventoryProcedures);
 
+/**
+ * `01-F87`'s configuration plane, gated on `14-F43`'s `config.manage` — **owner-only**, and
+ * a PINNED INTERPRETATION rather than a transcription (R63 says *"the owner or ops lead"*
+ * and `ROLES` has no ops lead).
+ *
+ * ⚠ **`14-F43` had to be WRITTEN before this router could exist**, which is the news rather
+ * than the wiring — the sixth instance of the shape `02-F46`, `02-F47`, `14-F30`, `14-F39`
+ * and `10-F34` each record: `assertEveryProcedureIsGated` refuses at boot to host a
+ * procedure naming no action, and `PERMISSION_ACTIONS` carried nothing about
+ * configuration, a setting, a rate or a threshold. So `00 §7` (f) could say in terms that
+ * the back-office write *"cannot be built or booted"*.
+ *
+ * Built with `authorized(...)` like everything else, so `assertEveryProcedureIsGated` sees
+ * it and **neither exemption list changed**: an org's tax rates and approval thresholds are
+ * not the caller's own identity.
+ */
+const configRouter = router(configProcedures);
+
 export const appRouter = router({
   auth: authRouter,
   session: sessionRouter,
   catalog: catalogRouter,
+  config: configRouter,
   devices: deviceRouter,
   governance: governanceRouter,
   inventory: inventoryRouter,

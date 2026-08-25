@@ -304,3 +304,39 @@ on; that file's sections run **A–G** and the assertions are **§G**. Corrected
 here rather than fixed quietly because it is `L11`'s weakest and commonest form: the claim is TRUE,
 and a reader who goes looking for it finds nothing and concludes the protection is missing. No
 behaviour changed and no assertion moved.
+
+
+## `01-F87`'s `config` artifact on the device — and the fold ban that is a MODULE BOUNDARY
+
+`config.ts` + `config-fetch.ts` are `01-F75`'s fourth resource on this device: one row of
+`config_state`, `01-F56`'s four refusals, and `00 §7` (e)'s `{ value, source }` on every read.
+`cloud-session.ts` carries the fourth `request` / `versionIn` / `reconcile` triple and two new
+status slots — `config_refusal` and `config_keys_on_default`.
+
+- **ONE ROW, not a table per key**, because `01-F87` (b) makes a malformed known key refuse the
+  WHOLE artifact: the all-or-nothing apply is the storage shape rather than a transaction someone
+  must remember to open.
+- **`00 §7` (e)'s SOURCE is the only shape `resolve()` hands out.** A caller that could get a bare
+  value could not say whether the owner ever set it, and `01-F87` (b) says why that is sharper
+  than staleness: *a value that never arrived has no age to show.*
+- **THE FOLD BAN IS STRUCTURAL AND `01-F87` RULES OUT A PROPERTY TEST FOR IT.** `01-F34`'s
+  relabel-and-clock-injection harness *"structurally cannot catch this"* — both devices hold the
+  same configuration. So: the value lives behind `@restos/domain/config` (a second `exports` entry
+  that **no fold imports**), `merge.ts` classifies `config.changed` in `NON_FOLD_TYPES` at
+  `catalog.changed`'s strength, and `__acceptance__/fold-config-ban.test.ts` asserts both halves
+  plus the arity of every shipped fold.
+  - ⚠ **The arity assertion's FIRST DRAFT stayed RED under a CORRECT implementation** — `L10`'s
+    other failure mode. `F extends (a, b) => …` resolves to `never` for a 2-arity function, because
+    TypeScript makes fewer parameters assignable to more; it passed under `vitest` (esbuild strips
+    types) and failed `tsc`. It is `Parameters<F>["length"] extends 2` now, plus `Function.length`
+    at runtime, plus a source scan — three mechanisms, because a third parameter with a DEFAULT is
+    invisible to the first two.
+  - ⚠ **`§A1b` states the class it does NOT close** (`L11`): a fold's second parameter is `unknown`
+    (a wire envelope, narrowed inside), so §A's claim is *"there is no THIRD input"* and not *"the
+    second cannot be an artifact"*. §C is what closes that half.
+
+**The mutation matrix for the whole plane lives in `packages/domain/CLAUDE.md`** — one declaration,
+because the rows span four packages and a per-package copy is a table free to drift. The two rows
+that bite here: **C3** (`source` derived by comparing against the default) SURVIVED this package on
+its first run and §A3 was written because of it, and **C8/C9** (the fold classification moved, the
+root barrel re-exporting the module) each kill one.

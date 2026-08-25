@@ -308,6 +308,74 @@ const DeviceRosterEntryWire = z.object({
 });
 
 /**
+ * `01-F87` — **one layer-2 setting as the `config` artifact carries it.**
+ *
+ * `config` is `01-F75`'s FOURTH member (`01-F75`'s closed-set clause, amended by `01-F87`), org
+ * scoped with `branch_id: null`, on the frame triple that already exists and adding **zero**
+ * message kinds.
+ *
+ * ⚠ **`value` IS DELIBERATELY LOOSE HERE AND STRICT AT BOTH ENDS, WHICH IS THE ONE PLACE THIS ARM
+ * DEPARTS FROM `staff`'s SHAPE.** `01-F75` says a resource whose row is loose at the wire is a
+ * resource whose rules live at the writer, and for THIS resource that is forced rather than
+ * chosen: `01-F87` (a) makes the KEY SPACE OPEN — *"no FR supplies a closed list"*, because
+ * `00 §7` grows it with every module doc — so a discriminated union over key names could not be
+ * written without freezing a set the corpus keeps open, and a device would then refuse a key
+ * added by a newer cloud instead of ignoring it (`01-F87` (b)).
+ *
+ * The strictness is at the two ends where it can be exercised, and both are ONE declaration:
+ * `@restos/domain/config`'s `refuseConfigWrite` at the writer (`14-F48`, `01-F60`'s precedent —
+ * *"a typo is caught once at a failed save instead of frozen forever in an append-only ledger"*)
+ * and `parseConfigArtifact` at the device, where `01-F87` (b)'s split lives: **an unknown key is
+ * ignored, a MALFORMED KNOWN key refuses the whole artifact.** That split is only expressible
+ * because this field is loose — a frame that refused a malformed value would turn `01-F56`'s
+ * observable `malformed` into a dropped socket, which is the stopped-till-through-a-validator
+ * `01-F75` names.
+ *
+ * `deleted` is `01-F75`'s **marked entry, never an absence**, applied to a setting: it is a key
+ * the owner has RESET to its declared default. It is a field rather than an omission for the same
+ * reason `DeviceRosterEntryWire.revoked` is one — a delta carries one entry per changed key, so a
+ * key that merely stopped appearing is a change a delta has no way to state.
+ */
+const ConfigEntryWire = z
+  .object({
+    /**
+     * `00 §7`'s setting name. `min(1)` and nothing more, on `01-F87` (a)'s open-key-space rule —
+     * a pattern asserted here would be a closed key space wearing a regex.
+     */
+    key: z.string().min(1),
+    value: z.unknown().optional(),
+    deleted: z.boolean().optional(),
+  })
+  .check((ctx) => {
+    // A reset carries no value and a set carries one. Without this, `{ key }` alone is a legal
+    // frame meaning neither — and `parseConfigArtifact` would read it as `value: undefined`, which
+    // every key's schema refuses, so a writer that forgot the value would take an org's whole
+    // configuration down at every till through `01-F87` (b)'s refusal. Making it unrepresentable
+    // is `01-F75`'s own argument for typing `entries[]` per resource.
+    const marked = ctx.value.deleted === true;
+    const hasValue = ctx.value.value !== undefined;
+    if (marked && hasValue)
+      ctx.issues.push({
+        code: "custom",
+        input: ctx.value,
+        path: ["value"],
+        message:
+          "01-F75/01-F87: a RESET key carries no value — a marked entry with a value states two " +
+          "different things about one setting",
+      });
+    if (!marked && !hasValue)
+      ctx.issues.push({
+        code: "custom",
+        input: ctx.value,
+        path: ["value"],
+        message:
+          "01-F87: a configured key carries its value. An entry with neither a value nor " +
+          "`deleted: true` states nothing, and would reach the device as a malformed known key " +
+          "and refuse the org's whole artifact (01-F87 (b))",
+      });
+  });
+
+/**
  * `01-F81` (b)/(d) — **the signature envelope, a REQUIRED member of the `device_roster` arm and
  * absent from the others.**
  *
@@ -439,6 +507,19 @@ const ReferenceVersionKey = z.discriminatedUnion("resource", [
     scope: BranchScope,
     version: z.number().int().min(1),
   }),
+  // `01-F87` — `config`, ORG-scoped, and the scope is the FR's own ruling rather than a default:
+  // `00 §7` names layer 2 *"Organization (back office)"* and `01-F62`'s emitter test already puts
+  // `config.changed` on the org side, so the artifact and the event agree. Layer-2 keys with a
+  // BRANCH axis are ordinary and already shipping (`03-F51`'s routes, `01-F60`'s enabled set), and
+  // that axis is **DATA inside one org artifact** — a branch-scoped artifact would make one
+  // version number mean different bytes on different devices, destroying the premise `01-F56`'s
+  // divergence detection rests on. The roster's opposite answer does not transfer, and `01-F87`
+  // makes the reason checkable rather than stylistic: `staff` is branch-scoped *because it carries
+  // an Argon2id hash and its scope is its blast radius*, and measured against `00 §7`'s layer-2
+  // list no layer-2 key carries key material, a hash or a credential. ⚠ That is a measurement of
+  // today's key set: a layer-2 key that ever carries a secret is a re-scoping act in `01-F87`,
+  // never an implementer's judgement.
+  z.object({ resource: z.literal("config"), scope: OrgScope, version: z.number().int().min(1) }),
 ]);
 
 export const messageSchemas = {
@@ -576,6 +657,9 @@ export const messageSchemas = {
     // never a `reference_response` typed for another resource (`01-F74` (b)'s smuggling ban
     // survives its own unblocking).
     z.object({ ...referenceRequestBody, resource: z.literal("device_roster"), scope: BranchScope }),
+    // `01-F87` — `config` on the SAME triple, adding zero message kinds. ORG-scoped; see
+    // `ReferenceVersionKey` for why the scope is not the roster's.
+    z.object({ ...referenceRequestBody, resource: z.literal("config"), scope: OrgScope }),
   ]),
   /**
    * `01-F75`/`01-F76` — `catalog_response`'s body plus the artifact key, which the response
@@ -616,6 +700,16 @@ export const messageSchemas = {
         // staff publisher at once.
         signature: ReferenceSignature,
       }),
+      // `01-F87` — the `config` artifact. No signature: `01-F81` (d) requires one for the roster
+      // because that artifact decides LAN admission, and this one carries no credential, so the
+      // question `01-F81` (d) answers does not arise here and `01-F87` says so in terms. Its
+      // `entries[]` is `ConfigEntryWire`, whose `value` is loose for the reason stated there.
+      z.object({
+        ...referenceResponseBody,
+        resource: z.literal("config"),
+        scope: OrgScope,
+        entries: z.array(ConfigEntryWire),
+      }),
     ])
     .superRefine((frame, ctx) => {
       // `01-F56`/`01-F75`: `base_version` rides a DELTA and only a delta. A delta with no base
@@ -635,6 +729,26 @@ export const messageSchemas = {
           path: ["base_version"],
           message: "01-F75: a snapshot REPLACES, so it applies to no base",
         });
+      if (frame.resource === "config") {
+        // `01-F75` — **unique within the artifact**, and on this resource that rule is money.
+        // Two rows for one key make ARRAY POSITION decide a tax rate, which is `01-F34`'s hazard
+        // arriving through a settings screen; `StaffEntryWire`'s `user_id` rule is the same
+        // sentence one resource over. A frame sees ONE page, so the writer and the device enforce
+        // it across a paged snapshot too.
+        const keys = new Set<string>();
+        for (const [index, entry] of frame.entries.entries()) {
+          if (keys.has(entry.key))
+            ctx.addIssue({
+              code: "custom",
+              path: ["entries", index, "key"],
+              message:
+                "01-F75/01-F87: one row per setting within the artifact — two rows for one key " +
+                "let array position decide the value",
+            });
+          keys.add(entry.key);
+        }
+        return;
+      }
       if (frame.resource !== "staff") return;
 
       // `01-F78` half two: **only the assignments that REACH this branch.** The frame can express
@@ -713,6 +827,18 @@ export const messageSchemas = {
       kind: z.literal("reference_notice"),
       resource: z.literal("device_roster"),
       scope: BranchScope,
+      version: seq,
+    }),
+    // `01-F87` — `config` on the third frame of `01-F75`'s triple. ORG-scoped, so fan-out reaches
+    // every device of the org rather than one branch's (`01-F76`: fan-out is keyed by the artifact
+    // key). A notice is a freshness optimisation and the system is correct without it — an owner
+    // who changes a rate at 14:00 has it on every connected till without waiting for a reconnect,
+    // and a dropped notice costs latency because `hello_ack.reference_versions` reconciles anyway.
+    z.object({
+      v,
+      kind: z.literal("reference_notice"),
+      resource: z.literal("config"),
+      scope: OrgScope,
       version: seq,
     }),
   ]),

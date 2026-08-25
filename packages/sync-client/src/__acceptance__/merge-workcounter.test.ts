@@ -315,8 +315,20 @@ describe("registry growth must fail this suite before it can silently no-op (fix
   // `availability.changed` keys on — and `10-F4` puts sale deduction in a CLOUD read model, so a
   // device fold over them would be a second, wrong stock number beside the cloud's. `merge.ts`'s
   // `NON_FOLD_TYPES` rows carry the full argument and the reopen trigger.
+  //
+  // `config.changed` (`01-F87`, August 2026) is the SIXTH member and it RED-AT-COMPILED the same
+  // way the moment `packages/domain` gave it a payload schema — which is this pin doing the one
+  // thing `01-F87` says a property test cannot. The FR bans a fold from reading configuration FOR
+  // ANY KEY, and records that `01-F34`'s relabel-and-clock-injection property *"structurally
+  // cannot catch this"*, because both harness devices hold the same configuration. So the
+  // enforcement is *"what a fold is allowed to take as input"*, and its two halves are this line
+  // (the compiler refuses a fold arm) plus `fold-config-ban.test.ts` (nothing under `src/folds/`
+  // reaches the value at all). Its claim is at `catalog.changed`'s STRENGTH rather than
+  // `printer.status_changed`'s: `01-F52` and `01-F87` both forbid a fold for all time, where
+  // `03-F53`'s row only records that none exists today.
   const PINNED_NOT_FOLDED = [
     "catalog.changed",
+    "config.changed",
     "printer.status_changed",
     "stock.purchase_recorded",
     "stock.wastage_recorded",

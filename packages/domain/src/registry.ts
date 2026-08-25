@@ -493,6 +493,86 @@ const payloadSchemas = {
      */
     price_changes: z.array(CatalogPriceChange).optional(),
   }),
+  /**
+   * `01-F87` (a) — **the LEDGER record of one layer-2 change**, and the half of the configuration
+   * plane that is not the artifact.
+   *
+   * It was in the `01 §4` catalog with **no payload schema here**, which `01-F4` turns into a
+   * runtime error at emit: `16-F1`'s *"enabling any posture … recorded as `config.changed`"* and
+   * `16-F29`'s rate change were **unauditable rather than unbuilt**, and `14-F2`'s *"no silent
+   * edits exist"* was violated by every screen in the `14-F43` block. `00 §7` (f) measured the
+   * absence and routed it here; `14 §9.16` calls the payload *"a precondition of that block, not a
+   * follow-up"*.
+   *
+   * **Modelled on `catalog.changed` directly above, its nearest sibling in both `§4`'s admin
+   * family and this registry**, and org-scoped for the same reason (`01-F62`): it carries
+   * `org_id`, no `branch_id` and no branch stamp, its ordering authority is `server_received_at`
+   * (`01-F18`), it never enters a branch stream and **no device folds it**.
+   *
+   * ⚠ **THE EVENT IS NOT THE DEVICE PATH AND MUST NEVER BE READ AS ONE.** `01-F87` is explicit:
+   * `01-F62` says of every org-scoped type that it *"never enters a branch stream and no device
+   * folds it"*, so the event **cannot** carry a value to a till without contradicting the FR that
+   * governs it, and there is no stream carrying it to a till to ride. The value rides `01-F75`'s
+   * frames as the `config` artifact. This is the division `catalog.changed` already draws
+   * (`01-F52`: *"announces that a new version exists; it does not carry the catalog"*), and it is
+   * enforced structurally rather than by comment — `packages/sync-client/src/folds/merge.ts` lists
+   * this type in `NON_FOLD_TYPES` beside `catalog.changed`, so the engine's `assertNever` makes a
+   * fold arm for it a **compile** error.
+   */
+  "config.changed": z.looseObject({
+    /**
+     * The setting that changed. **The key space is OPEN, and that is commandment 2 rather than
+     * laxity** (`01-F87` (a)): no FR supplies a closed list, because `00 §7` says *"every module
+     * doc's Customizability section lists exactly which settings it exposes at which layer"* — so
+     * the space is the union over every module doc and grows with each one. `01-F84`'s precedent
+     * is exact: `order.rejected`'s `reason` is closed **because `06-F20` supplies the list**, and
+     * `order.cancelled`'s is open because nothing does.
+     *
+     * A closed enum here would additionally make every future module's first setting an `01-F4`
+     * runtime error until doc 01 is amended. **The check moves to the WRITER** —
+     * `@restos/domain/config`'s `refuseConfigWrite`, which refuses a key this build does not
+     * declare — on `01-F60`'s move for prices and `01-F85`'s for tenders and for their reason: *a
+     * typo caught once at a failed save instead of frozen forever under `01-F1`.*
+     */
+    key: z.string().min(1),
+    /**
+     * `00 §7`'s layer, as its own numerals (`01-F87` (a): *"an integer is transcription where a
+     * name would be invention"*). **CLOSED**, and required because this type already spans layers:
+     * `15-F25` routes an org's `active ⇄ suspended` through it, which is layer 1, while R55/R60/R63
+     * are layer 2 — and a reader that cannot tell them apart can neither render `14-F3`'s history
+     * nor scope an isolation check.
+     */
+    layer: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+    /**
+     * The `01-F76` artifact version this change produced, so the ledger record and the published
+     * artifact are **joinable**.
+     *
+     * Not because a device reads the event — `01-F62` forbids that — but because `14-F3`'s history
+     * and `20 §4.2`'s refold must be able to say which version carried a change.
+     */
+    version: z.number().int().positive(),
+    /**
+     * The key's value before and after, **each the value or `null`, where `null` means *the key
+     * was on its declared default*** (`01-F87` (a)).
+     *
+     * Both states have to be statable, and that is (b)'s requirement rather than a convenience: a
+     * first configuration is `null → v` and a reset is `v → null`, and a schema that could not
+     * express the second would make `configKeysOnDefault`'s answer unauditable.
+     *
+     * **The value is LOOSE here and typed BY THE KEY at the writer** — the same two-level split
+     * `catalog.changed`'s own `price_changes` makes directly above (*"optional HERE and required at
+     * the WRITER"*). Commandment 1 requires it: a closed value union is a closed key space wearing
+     * a type, and re-typing it later would retroactively refuse the history this schema exists to
+     * read. **`00 §6` is not weakened by that** — a money-valued key is integer paisa and a
+     * rate-valued key is integer basis points, declared in the key's own schema in
+     * `@restos/domain/config` and refused at the writer.
+     */
+    before: z.union([z.unknown(), z.null()]),
+    after: z.union([z.unknown(), z.null()]),
+    // **No actor field.** The envelope's `actor_user_id` is the one home for who acted (`01-F84`,
+    // `02-F45`), and a registry row is not where an authorization is decided (commandment 8,
+    // `18 §5`).
+  }),
   "order.table_assigned": z.looseObject({
     order_id: z.string().min(1),
     table_id: z.string().min(1),

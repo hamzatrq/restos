@@ -126,8 +126,16 @@ describe("§J — the golden fixtures at v: 2 (20 §2.7, 01-F77)", () => {
       .filter((frame) => String(frame.kind).startsWith("reference_"));
     for (const kind of ["reference_request", "reference_response", "reference_notice"]) {
       const forKind = reference.filter((frame) => frame.kind === kind);
+      // ⚠ **`config` (`01-F87`) IS THE THIRD, AND THE COUNT MOVED BY A SPEC ACT.** `01-F75`'s
+      // resource set is CLOSED and its clause makes each new member *"an amendment to this clause
+      // plus its own golden fixture"* — so this set grows only when doc 01 says so, never when an
+      // implementation adds a wire arm. `device_roster` (`01-F81`) is deliberately NOT here: its
+      // fixture is owed with the gateway serve path that can produce a REAL signature, because a
+      // golden file carrying a fabricated one would pin a contract no signer has ever made.
+      // `campaign` (`17-F22`) is not here for the same reason its own clause records — spec-closed,
+      // wire-owed.
       expect(new Set(forKind.map((frame) => frame.resource)), kind).toEqual(
-        new Set(["catalog", "staff"]),
+        new Set(["catalog", "config", "staff"]),
       );
     }
     const scopes = reference.map((frame) => (frame.scope as Frame).branch_id);
@@ -193,12 +201,21 @@ describe("§J — the golden fixtures at v: 2 (20 §2.7, 01-F77)", () => {
       .map(asJson)
       .filter((frame) => String(frame.kind).startsWith("reference_"));
     expect(reference.length).toBeGreaterThan(0);
-    const seen = { catalog: 0, staff: 0 };
+    // `01-F87` pairs `config` with ORG scope, and the reason is checkable rather than
+    // stylistic: `01-F76` scopes `staff` to a branch BECAUSE that artifact carries an Argon2id
+    // hash and its scope is its blast radius, and measured against `00 §7`'s layer-2 list no
+    // layer-2 key carries key material. A branch-scoped configuration artifact would also make one
+    // version number mean different bytes on different devices, which is the premise `01-F56`'s
+    // divergence detection rests on.
+    const seen = { catalog: 0, config: 0, staff: 0 };
     for (const frame of reference) {
       const branch = (frame.scope as Frame).branch_id;
       const label = `${String(frame.kind)}/${String(frame.resource)}`;
       if (frame.resource === "catalog") {
         seen.catalog += 1;
+        expect(branch, label).toBeNull();
+      } else if (frame.resource === "config") {
+        seen.config += 1;
         expect(branch, label).toBeNull();
       } else {
         seen.staff += 1;
@@ -207,6 +224,7 @@ describe("§J — the golden fixtures at v: 2 (20 §2.7, 01-F77)", () => {
     }
     // Anti-vacuity: a set holding only one resource satisfies every branch of the loop above.
     expect(seen.catalog).toBeGreaterThan(0);
+    expect(seen.config).toBeGreaterThan(0);
     expect(seen.staff).toBeGreaterThan(0);
   });
 });

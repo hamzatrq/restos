@@ -553,6 +553,35 @@ const PARKING_TYPES: ReadonlySet<string> = new Set(["order.confirmed", "kot.prin
 const NON_FOLD_TYPES = {
   "catalog.changed": "01-F52",
   /**
+   * `01-F87` (August 2026) — **the configuration plane's ledger half, and the STRONGEST row in
+   * this set.**
+   *
+   * `01-F52` forbids any fold from reading the catalog for all time; `01-F87` says the same of
+   * configuration in wider terms — *"NO FOLD READS CONFIGURATION, FOR ANY KEY"* — because *"a
+   * renamed tender, an edited rate or a moved threshold would otherwise change a projected
+   * value"*. `01-F62` reaches the same place from the other side: this type is org-scoped, so it
+   * *"never enters a branch stream and no device folds it"*, and there is no branch stream
+   * carrying it to a till at all.
+   *
+   * **This row IS the enforcement `01-F87` asks for, and the FR is explicit that a test cannot
+   * be.** `01-F34`'s bijective-relabel-plus-clock-injection property *"structurally cannot catch
+   * this"*: a configuration read makes a projection a function of `(delivered set, artifact
+   * version)`, both harness devices hold the same configuration, relabel invariance holds, and two
+   * real tills at different versions still project different money. So the enforcement is *"what a
+   * fold is allowed to take as input"* — and here that is the compiler: `OrderKeyedEventType`
+   * excludes this row, `keysFor` answers `[]`, and writing a fold arm for `config.changed` is a
+   * `TS2345` at `assertNever` rather than a review comment.
+   *
+   * ⚠ **THE HOLE THIS SET'S `printer.status_changed` ENTRY MEASURED APPLIES HERE UNCHANGED:**
+   * deleting this row reddens `typecheck`, but MOVING it to `OTHER_FOLD_TYPES` is runtime-identical
+   * and reddens nothing, so membership of THIS set rather than that one is a sentence a reader
+   * believes. `packages/sync-client/src/__acceptance__/fold-config-ban.test.ts` is the
+   * hand-written assertion that closes it for this row specifically — it pins the membership, and
+   * it pins the other half the compiler cannot see: that no file under `src/folds/` imports
+   * `@restos/domain/config`, which is the module boundary the value itself lives behind.
+   */
+  "config.changed": "01-F87",
+  /**
    * `03-F53` (August 2026) — `03-F11`'s printer transition, which got a payload schema and a till
    * producer and therefore entered this registry for the first time.
    *

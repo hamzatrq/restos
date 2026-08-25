@@ -1,0 +1,30 @@
+{
+  "v": 2,
+  "kind": "reference_response",
+  "resource": "config",
+  "scope": {
+    "org_id": "01980000-0000-7000-8000-0000000000a1",
+    "branch_id": null
+  },
+  "form": "snapshot",
+  "version": 4,
+  "entries": [
+    {
+      "key": "charge.rounding_paisa",
+      "value": 1000
+    },
+    {
+      "key": "paid_out.approval_threshold_paisa",
+      "deleted": true
+    },
+    {
+      "key": "tax.posture_matrix",
+      "value": {
+        "default": { "posture": "exclusive", "rate_bps": 1600 },
+        "by_tender": [{ "tender": "card", "cell": { "posture": "exclusive", "rate_bps": 800 } }]
+      }
+    }
+  ],
+  "complete": true,
+  "next_from": 0
+}

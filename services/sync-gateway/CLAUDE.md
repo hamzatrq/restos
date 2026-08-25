@@ -13,7 +13,7 @@
       @restos/sync-gateway listening on http://0.0.0.0:8080
       @restos/sync-gateway database postgres://gateway:*****@127.0.0.1:5432/restos (opened lazily …)
       @restos/sync-gateway publish surface enabled (PUBLISH_TOKEN configured)
-      @restos/sync-gateway schema up to date — all 14 migrations applied
+      @restos/sync-gateway schema up to date — all 16 migrations applied
 
   **The first line is load-bearing** — `__acceptance__/startable.test.ts` spawns the declared script
   with `PORT=0` and finds the ephemeral port by reading it. The other three exist because each
@@ -45,7 +45,8 @@
     transactional, so a failed run is all-or-nothing: verified by planting a colliding
     `kernel.events` before migrating — the run failed on `CREATE SCHEMA "kernel"` and left **zero**
     journal rows and no new tables. A second run on a migrated database applies nothing (journal
-    row count unchanged — 11 when that was the count, 13 after `0012`, 14 since `0013`) and says
+    row count unchanged — 11 when that was the count, 13 after `0012`, 14 after `0013`, 15 after
+    `0014`, 16 since `0015`) and says
     `nothing to apply`.
   - ⚠ **What the boot check does NOT prove — the honest boundary.** It answers *"has this build's
     journal been applied"*, **not** *"is the schema intact"*. drizzle keeps ONE `created_at`
@@ -194,7 +195,7 @@
     accident — that module never sees the secret.
   - **THE ONE DESIGN DECISION NO FR MAKES: how a claim FINDS its row.** `01-F80` (b) requires an
     Argon2id verifier, and an Argon2id hash carries a random salt, so it cannot be looked up by. The
-    three candidates and the choice are argued in `drizzle/0013_device_pairing.sql`'s header:
+    three candidates and the choice are argued in `drizzle/0014_device_pairing.sql`'s header:
     scanning every live row costs one verification **per row per guess** (the denial of service (e)
     refuses by name), a cleartext selector spends the entropy (b) sizes against an online guess, and
     a **keyed blind index** — `HMAC-SHA256(key derived from the device-token secret under a label,
@@ -1557,3 +1558,50 @@ global `select count(*) from kernel.orgs` reading 3 where 1 was expected — is 
 isolation rule being broken: *"per-test isolation is fresh org_ids, never truncation"*, and vitest's
 `forks` pool runs FILES in parallel against one database. **A global row count in this suite is a
 race by construction.** The assertion is per-`org_id` now.
+
+
+## `01-F87`'s CONFIG PLANE — `0015`, `config.ts`, and the fourth `01-F75` resource served
+
+`00 §7`'s layer 2 now has a carrier. Two tables (`config_versions` the COMMIT POINT written LAST,
+`config_entries` holding what CHANGED per version — `0007_catalog_publication`'s shape and its
+reasoning), `publishConfig` / `configVersion` / `configPage`, two `/internal` routes, the
+`hello_ack` key, the `reference_request` arm and `notifyConfigVersion`.
+
+- **ORG-scoped with NO branch column**, which `01-F87` rules rather than leaving to an implementer:
+  a branch-scoped artifact would make one version number mean different bytes on different devices
+  and destroy the premise `01-F56`'s divergence detection rests on. Layer-2 keys WITH a branch axis
+  (`03-F51`'s routes, `01-F60`'s enabled set) are DATA inside the one org artifact.
+- **`14-F48`'s refusals are at `publishConfig` and are `@restos/domain/config`'s
+  `refuseConfigWrite`, imported and never re-implemented.** `14-F48`'s own closing note measures
+  what a second, silently-disagreeing copy costs: **0 of 95 tests.** `value` therefore carries no
+  CHECK in SQL either — that would be the same copy, expressed where no FR id can be cited.
+- **`configPage` FILTERS `cloud_only` rows out of a DEVICE page** — `02 §Layer 2` says of R60's
+  commission, in terms, *"never sent to the till"*. The filter runs **after** the page is cut and
+  before the reply: doing it in SQL would put the key registry in this service (`18 §2`), and doing
+  it after the cursor arithmetic would make `next_from` skip rows on the following page — a partial
+  artifact committed at a full version number. ⚠ **An UNKNOWN key passes the filter on purpose**:
+  `01-F87` (b) gives the DEVICE the disposition for a key a newer writer stored (ignore it), and it
+  cannot exercise that for bytes it never receives.
+- **`publishConfig` writes NO event.** `01-F87` (a) divides the plane and the `config.changed`
+  record is `services/api`'s act, where there is an authenticated actor — `15-F27`'s recorded
+  reason that a shell on the service host can only ever write `null`.
+- ⚠ **`migratable.test.ts`'s table census and its TEAR-OFF both moved with `0015`, as that file's
+  own comment instructs** (*"the timestamp and the tables both name the LAST migration and move
+  with it"* — drizzle resumes from `max(created_at)`, so tearing off an earlier one re-applies
+  nothing and the test silently stops exercising resumption). `0015` has **no ALTER and no
+  backfill**, unlike `0012` (which relaxed `users.email`) and unlike `0014` immediately below it
+  (which added two columns to `device_registry`), so its tear-off drops two tables and restores
+  nothing: a session that copies the previous block would be undoing a change this migration never
+  made. ⚠ **The witness moved too** — the migration IMMEDIATELY below is `0014`, so the "still
+  applied" assertion names `device_pairings` rather than the `staff_entries` it named while config
+  was `0013`.
+
+**The mutation matrix lives in `packages/domain/CLAUDE.md`** (one declaration for a table spanning
+four packages). The rows that bite here: **C5** (the audience filter deleted — the commission rate
+served to a till) kills 3, **C10** (the writer stops refusing) kills 5, and **C6** — `server.ts`
+wiring `notifyConfigVersion: () => {}`, which is `notifyCatalogVersion`'s original defect on this
+resource — kills exactly 1, the `SEAM (CONFIG)` test in `journey-catalog.test.ts`. That test is in
+THAT file rather than in `config-plane-http.test.ts` because this package's own record says why:
+the catalog's first seam draft mounted `registerPublishRoutes` itself and **survived** the mutant
+that matters, so the assertion has to be built on `buildServer`, a real socket and a real
+`createCloudSession`.

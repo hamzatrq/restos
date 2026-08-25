@@ -32,7 +32,7 @@
  * ── THE ONE DESIGN DECISION NO FR MAKES: HOW A CLAIM FINDS ITS ROW ──────────────────────────────
  *
  * An Argon2id verifier carries a random salt and cannot be looked up by. The alternatives and the
- * choice are argued in `drizzle/0013_device_pairing.sql`'s header; the short form is that scanning
+ * choice are argued in `drizzle/0014_device_pairing.sql`'s header; the short form is that scanning
  * every live row costs one Argon2id verification per row **per guess** (a denial of service
  * `01-F80` (e) refuses by name), storing a selector spends the entropy (b) sizes against an online
  * guess, and a **keyed blind index** — `HMAC-SHA256(deployment key, code)` — costs one SELECT and
@@ -170,7 +170,7 @@ const pairingIndexKey = (tokenSecret: string): Buffer =>
 
 /**
  * `code` → the row key. Deterministic (so one SELECT finds it) and keyed (so a database dump does
- * not yield it). See this file's header and `0013`'s.
+ * not yield it). See this file's header and `0014`'s.
  */
 const codeIndexOf = (code: string, tokenSecret: string): string =>
   createHmac("sha256", pairingIndexKey(tokenSecret)).update(code).digest("hex");

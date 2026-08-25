@@ -120,7 +120,29 @@ export type FakeGateway = {
   seedTenancy(org_id: string, org: FakeOrgRow | null, branches: readonly FakeBranchRow[]): void;
   /** The registry as it stands now, so a test can assert `revoked_at` actually MOVED. */
   devices(org_id: string): readonly FakeDeviceRow[];
+  /**
+   * `01-F87` — the org's published layer-2 configuration as this fake holds it, so a test can
+   * assert the SAVE actually shipped rather than that a 200 came back.
+   */
+  config(org_id: string): { version: number; entries: readonly FakeConfigRow[] };
   close(): Promise<void>;
+};
+
+/**
+ * `01-F87` — one layer-2 row as the `/internal/config/*` contract carries it.
+ *
+ * ⚠ **THIS FAKE STORES AND SERVES EVERY ROW, INCLUDING `cloud_only` ONES, AND THAT IS DELIBERATE.**
+ * The real gateway's `configPage` withholds R60's commission from a DEVICE page (`02 §Layer 2`),
+ * and reproducing that filter here would make the API-side suite pass on THIS FILE's opinion of
+ * the rule — the same reason the `01-F62` scope refusal is not reproduced here either. The filter
+ * is asserted against real Postgres in `services/sync-gateway`'s own suite (§C1). What is
+ * reproduced is only what the API-side assertions depend on: that a save carrying these rows left
+ * the process, and that the read reaches the peer.
+ */
+export type FakeConfigRow = {
+  readonly key: string;
+  readonly value?: unknown;
+  readonly deleted?: boolean;
 };
 
 const TOKEN = "fake-gateway-service-credential-at-least-32-bytes-long";
@@ -134,6 +156,9 @@ export const startFakeGateway = async (): Promise<FakeGateway> => {
   const ledgerRows = new Map<string, FakeLedgerRow[]>();
   const ledgerArrival = new Map<string, number>();
   const orgRows = new Map<string, FakeOrgRow>();
+  /** `01-F87`'s artifact per org: the folded rows and the version the last save minted. */
+  const configRows = new Map<string, Map<string, FakeConfigRow>>();
+  const configVersions = new Map<string, number>();
   const branchRows = new Map<string, FakeBranchRow[]>();
   /**
    * The real gateway stamps `revoked_at` from the DATABASE clock. A monotonic counter here keeps
@@ -271,6 +296,38 @@ export const startFakeGateway = async (): Promise<FakeGateway> => {
         });
         return;
       }
+      /**
+       * `01-F87` — the layer-2 configuration publish and read.
+       *
+       * The fold is the real one's: one row per key, newest wins, and a `deleted` row is a RESET
+       * that is CARRIED rather than dropped (`01-F75`: a departure is a marked entry, never an
+       * absence). It refuses nothing — `14-F48`'s refusals are `publishConfig`'s and are asserted
+       * against real Postgres in the gateway's own suite; a copy here would let the API suite pass
+       * on this file's opinion of them, which is the mistake `fake-gateway.ts` already refuses to
+       * make for `01-F62`'s scope check.
+       */
+      if (req.method === "POST" && url.pathname === "/internal/config/publish") {
+        const input = body as {
+          org_id: string;
+          entries: readonly FakeConfigRow[];
+        };
+        const held = configRows.get(input.org_id) ?? new Map<string, FakeConfigRow>();
+        for (const row of input.entries) held.set(row.key, row);
+        configRows.set(input.org_id, held);
+        const version = (configVersions.get(input.org_id) ?? 0) + 1;
+        configVersions.set(input.org_id, version);
+        send(200, { version });
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/internal/config/published") {
+        send(200, {
+          version: configVersions.get(org_id) ?? 0,
+          entries: [...(configRows.get(org_id) ?? new Map<string, FakeConfigRow>()).values()].sort(
+            (a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
+          ),
+        });
+        return;
+      }
       if (req.method === "GET" && url.pathname === "/internal/devices") {
         send(200, { devices: [...(registry.get(org_id) ?? [])] });
         return;
@@ -365,6 +422,12 @@ export const startFakeGateway = async (): Promise<FakeGateway> => {
       branchRows.set(org_id, [...branches]);
     },
     devices: (org_id) => [...(registry.get(org_id) ?? [])],
+    config: (org_id) => ({
+      version: configVersions.get(org_id) ?? 0,
+      entries: [...(configRows.get(org_id) ?? new Map<string, FakeConfigRow>()).values()].sort(
+        (a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
+      ),
+    }),
     close: () =>
       new Promise<void>((done, fail) => {
         server.close((error) => (error === undefined ? done() : fail(error)));

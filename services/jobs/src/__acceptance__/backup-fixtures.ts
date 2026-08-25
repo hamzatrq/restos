@@ -3,7 +3,7 @@
  * construction for `tenant-backup-restore.test.ts` (`R38`, `22-F2`/`22-F8`/`22-F16`/`22-F22`,
  * `01-F1`, `01-F71`, `28-F1`).
  *
- * ── WHY THE SEEDS COVER FIFTEEN TABLES AND NOT ONE ───────────────────────────────────────────
+ * ── WHY THE SEEDS COVER TWENTY-ONE TABLES AND NOT ONE ────────────────────────────────────────
  *
  * R38 says *per-tenant backup*, and `28-F1` says **a tenant is an org** — *"`org_id` is the tenancy
  * key on both planes — the same key the envelope, the device registry, the catalog and every one of
@@ -15,13 +15,22 @@
  * `helpers.ts`'s `orgSnapshot` reads the table list **from `information_schema`** rather than from a
  * hand-copied array, so the equality assertions in `§D` widen automatically the day a table is
  * added. That property is only worth anything if the FIXTURE also populates broadly: an assertion
- * over fifteen tables of which fourteen are empty is an assertion about one table wearing a bigger
- * number. Hence the seeds below touch every kernel table that carries an `org_id`, measured
- * 2026-08-20 against `services/sync-gateway/src/schema.ts`:
+ * over twenty-one tables of which twenty are empty is an assertion about one table wearing a
+ * bigger number. Hence the seeds below touch every kernel table that carries an `org_id`, measured
+ * 2026-08-25 against `services/sync-gateway/src/schema.ts`:
  *
  *   events · org_sequences · device_watermarks · quarantine · device_registry · catalog_versions ·
  *   catalog_entries · org_events · quarantine_notices · orgs · branches · users ·
- *   user_credentials · staff_versions · staff_entries
+ *   user_credentials · staff_versions · staff_entries · inventory_versions · inventory_entries ·
+ *   device_pairings · org_pki · config_versions · config_entries
+ *
+ * ⚠ **The list moved from fifteen to TWENTY-ONE across three branches that landed together, and
+ * the oracle reports only the FIRST unseeded table it meets.** `inventory_*` (`0013`),
+ * `device_pairings`/`org_pki` (`0014`) and `config_*` (`0015`) each arrived on their own branch;
+ * two of the three shipped WITHOUT a seed here, and §0's failure named `device_pairings` alone
+ * because `expect` stops at the first miss. Seeding one table would have moved the failure to the
+ * next and read as a fresh regression. Re-measure the set from `information_schema` — which is
+ * what §0 itself does — rather than trusting this list.
  *
  * ⚠ **The fixture takes the tenant as an ARGUMENT and every tenant is fully populated.** That is
  * `01-F71`'s own lesson from the reference-serve round, quoted in the FR: *"every fixture in the
@@ -259,8 +268,11 @@ export const seedTenant = async (sql: Sql, t: Tenant): Promise<void> => {
             ${claimed}, 'org_mismatch', ${BASE_T + 11}, null)`;
 
   /**
-   * `01-F62`'s org-scoped log. `catalog.changed` is the one member of the five that has a payload
-   * schema in `packages/domain` today, which is why it is the one seeded here.
+   * `01-F62`'s org-scoped log. ⚠ **`catalog.changed` was the ONE member of the five with a payload
+   * schema in `packages/domain` when this comment was written; `01-F87` (a) gave `config.changed`
+   * one, so it is now TWO — and the second is seeded below beside its artifact**, because a
+   * restore that carried the ledger record of a rate change without the rate itself would be a
+   * tenant whose history says a tax rate moved and whose configuration says it never did.
    */
   for (const version of [1, 2]) {
     await sql`
@@ -268,6 +280,121 @@ export const seedTenant = async (sql: Sql, t: Tenant): Promise<void> => {
       values (${t.org_id}, 'catalog.changed', ${t.user_ids[0]}, ${BASE_T + version},
               ${sql.json({ version, entry_id: t.item_id, name: t.item_name })})`;
   }
+
+  /**
+   * `01-F87`'s layer-2 CONFIGURATION — the org's tax posture, its charge-rounding step and its
+   * approval thresholds, as the fourth `01-F75` reference-data resource stores them.
+   *
+   * ⚠ **THE MOST DAMAGING TABLE ON THIS LIST TO LOSE, AND THE EASIEST TO MISS.** A restore that
+   * dropped it leaves the tenant's ledger, menu, roster and quarantine intact while every till in
+   * the org silently falls back to `01-F87` (b)'s DECLARED BUILD DEFAULTS — `16-F1`'s no tax at
+   * all and `05-F33`'s approve-every-paid-out — with no error anywhere and nothing on any screen
+   * that is wrong, because an unconfigured org is a perfectly ordinary org. `tenant-artifact.ts`
+   * enumerates `information_schema` rather than a hand-written list precisely so this table is
+   * carried the moment it exists; what the fixture owes is a ROW, because §0's own message says an
+   * equality assertion over an empty table is an assertion about nothing.
+   *
+   * The values differ per tenant (the marker is the rate), so a leak between A and B is visible in
+   * the artifact rather than only in a row count — which is what §B3 and §D2 rest on.
+   */
+  const rate_bps = t.org_id.includes("kababjees") ? 1600 : 800;
+  await sql`
+    insert into kernel.config_versions (org_id, version, published_at, actor_user_id)
+    values (${t.org_id}, 1, ${BASE_T + 20}, ${t.user_ids[0]})`;
+  await sql`
+    insert into kernel.config_entries (org_id, version, key, value, deleted)
+    values (${t.org_id}, 1, 'tax.posture_matrix',
+            ${sql.json({ default: { posture: "exclusive", rate_bps }, by_tender: [] })}, 0)`;
+  await sql`
+    insert into kernel.config_entries (org_id, version, key, value, deleted)
+    values (${t.org_id}, 1, 'charge.rounding_paisa', ${sql.json(100)}, 0)`;
+  await sql`
+    insert into kernel.org_events (org_id, type, actor_user_id, server_received_at, payload)
+    values (${t.org_id}, 'config.changed', ${t.user_ids[0]}, ${BASE_T + 21},
+            ${sql.json({
+              key: "tax.posture_matrix",
+              layer: 2,
+              version: 1,
+              before: null,
+              after: { default: { posture: "exclusive", rate_bps }, by_tender: [] },
+            })})`;
+
+  /**
+   * `01-F21`/`10-F18`'s inventory reference set — the org's items, areas and recipes, stored as
+   * `0013`'s publication log.
+   *
+   * It is seeded for `config`'s reason one table over: `10-F18`'s variance report is a difference
+   * of two counts, and `services/api` turns `version: 0` into a REFUSAL rather than an empty
+   * answer precisely because a report with no rows for a location that may be short any amount is
+   * worse than no report. A restore that dropped this leaves the org unable to compute variance at
+   * all, and the failure is a stated absence rather than a wrong number — which is the honest half,
+   * and still a restaurant that cannot count its stock.
+   */
+  await sql`
+    insert into kernel.inventory_versions (org_id, version, published_at, actor_user_id)
+    values (${t.org_id}, 1, ${BASE_T + 30}, ${t.user_ids[0]})`;
+  await sql`
+    insert into kernel.inventory_entries (org_id, version, kind, entry_id, payload, deleted)
+    values (${t.org_id}, 1, 'item', ${`inv-${t.org_id.slice(-8)}-chicken`},
+            ${sql.json({
+              item_id: `inv-${t.org_id.slice(-8)}-chicken`,
+              name: `Chicken for ${t.item_name}`,
+              base_unit: "g",
+            })}, 0)`;
+  await sql`
+    insert into kernel.inventory_entries (org_id, version, kind, entry_id, payload, deleted)
+    values (${t.org_id}, 1, 'recipe', ${`inv-${t.org_id.slice(-8)}-recipe`},
+            ${sql.json({
+              recipe_id: `inv-${t.org_id.slice(-8)}-recipe`,
+              yields: t.item_id,
+              components: [{ item_id: `inv-${t.org_id.slice(-8)}-chicken`, qty_mg: 250_000 }],
+            })}, 0)`;
+
+  /**
+   * `01-F80`'s PENDING PAIRING and `01-F73` (b) / `01-F81` (c)'s ORG PKI — the two tables `0014`
+   * added, and the pair a backup is most likely to be written without.
+   *
+   * ⚠ **`org_pki` IS THE ONE ROW ON THIS WHOLE LIST THAT CANNOT BE RECONSTRUCTED FROM ANYTHING
+   * ELSE.** Every other table here is either history (which the ledger holds) or a published
+   * artifact (which an owner can re-author from the back office). An org's issuing key is neither:
+   * lose it and every device certificate it ever signed becomes unverifiable, `01-F81`'s signed
+   * device roster stops validating on every till at once, and the only repair is a new issuer plus
+   * re-pairing every device in the estate — which `01-F80` says needs an owner standing at each
+   * one. `01-F73` (b·i) also makes it the most dangerous row to carry carelessly: the two private
+   * columns never leave that table, so a backup that holds them is a backup that holds the org's
+   * private key material, and `22-F10`'s at-rest encryption and KMS key custody are the same
+   * question one layer out — asked of the artifact rather than of the table.
+   *
+   * The pairing row is left **UNCLAIMED on purpose** (`claimed_at` null). `01-F80` (c) says an
+   * unclaimed code "leaves nothing — no registry row, no certificate, no device", so this is the
+   * one state where the pairing table is the ONLY record that the act happened: drop it and an
+   * owner mid-installation loses the code she is reading off her screen with no trace anywhere
+   * that she ever minted one, and `14-F41`'s waiting row simply disappears.
+   *
+   * ⚠ **`code_index` is the table's GLOBAL primary key, not an org-scoped one**, so it is derived
+   * from the tenant here — two tenants sharing a fixture constant would collide across the seed
+   * rather than fail an assertion. The value is a plausible HMAC shape and is NOT one: it is a
+   * fixture, exactly as `pinHashOf` is, and neither the index nor the hash is ever verified here.
+   */
+  await sql`
+    insert into kernel.org_pki
+      (org_id, issuer_cert_pem, issuer_private_key_pem, roster_signing_public_key_pem,
+       roster_signing_private_key_pem, created_at)
+    values (${t.org_id},
+            ${`-----BEGIN CERTIFICATE-----\nfixture-issuer-${t.org_id.slice(-8)}\n-----END CERTIFICATE-----`},
+            ${`-----BEGIN PRIVATE KEY-----\nfixture-issuer-key-${t.org_id.slice(-8)}\n-----END PRIVATE KEY-----`},
+            ${`-----BEGIN PUBLIC KEY-----\nfixture-roster-pub-${t.org_id.slice(-8)}\n-----END PUBLIC KEY-----`},
+            ${`-----BEGIN PRIVATE KEY-----\nfixture-roster-key-${t.org_id.slice(-8)}\n-----END PRIVATE KEY-----`},
+            ${BASE_T + 40})`;
+  await sql`
+    insert into kernel.device_pairings
+      (code_index, org_id, branch_id, device_id, device_class, display_name, code_hash,
+       minted_at, expires_at, actor_user_id, claimed_at, claimed_key_fingerprint)
+    values (${`pairing-index-${t.org_id.slice(-8)}`}, ${t.org_id}, ${t.branch_ids[1]},
+            ${`device-${t.org_id.slice(-8)}-waiting`}, 'counter',
+            ${`${t.display_name} second till`},
+            ${`$argon2id$v=19$m=65536,t=3,p=4$${RUN}$fixture-not-a-real-hash-pairing-${t.org_id.slice(-8)}`},
+            ${BASE_T + 41}, ${BASE_T + 41 + 15 * 60 * 1000}, ${t.user_ids[0]}, null, null)`;
 };
 
 /**
