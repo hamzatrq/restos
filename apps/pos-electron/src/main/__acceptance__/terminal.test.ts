@@ -38,6 +38,7 @@
 // why §K exists: `verify(null, …)` answers on Node and throws on BoringSSL, so a suite on this
 // platform can never be the rail for that class.
 
+import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { request as httpsRequest } from "node:https";
 import { tmpdir } from "node:os";
@@ -60,7 +61,7 @@ import { createTerminalClient } from "../../../../waiter/src/terminal-client";
 import { authorizeTerminal } from "../authorize";
 import { createGateway, createVerifiedAddLine, createVerifiedAppend } from "../gateway";
 import { createTerminal, normalizeTableLabel, type Terminal } from "../terminal";
-import { createTerminalServer } from "../terminal-server";
+import { createTerminalServer, signedBytes } from "../terminal-server";
 
 const WAITER = "00000000-0000-7000-8000-0000000000a1";
 const CASHIER = "00000000-0000-7000-8000-0000000000a2";
@@ -664,21 +665,23 @@ describe("§I 04-F22 (b) — proof of possession over a real TLS socket", () => 
   });
 
   /**
-   * The LENGTH-PREFIXED bytes both ends agree on: `len32BE(nonce) || nonce || body`.
+   * The bytes both ends agree on — **read out of the SHIPPING function, not restated here**
+   * (`04-F36` (d)).
    *
-   * The prefix, rather than a separator character, is deliberate on both sides and this suite found
-   * out why the hard way: the shipped file was first written with a SEPARATOR and one byte of it
-   * was silently a NUL instead of a space. Every honest signature was rejected and the failure was
-   * indistinguishable from an attack, which is exactly what that function's own header predicted. A
-   * length prefix has no character anyone can get wrong invisibly, and it also removes the
-   * concatenation ambiguity a separator carries whenever it can occur in the nonce.
+   * This was a hand-copy: `prefixed()`, a third declaration of `len32BE(nonce) || nonce || body`
+   * beside the till's and the pad's. Measured, that made the length prefix — documented at both
+   * ends as the thing that *"removes the concatenation ambiguity a separator carries"* — asserted
+   * by NOTHING: dropping it in the server alone reddened 9 tests, dropping it in the server and
+   * the client reddened 5, and dropping it in all three copies left the suite **49/49 GREEN**. A
+   * suite that hand-copies a wire convention asserts that three copies agree, which is precisely
+   * the *"re-statement of it"* `04-F36` forbids a test of this wire from being — the same defect
+   * as the digest hand-copy in `signAs` below, one field along.
+   *
+   * The property itself is asserted in `I13`, and `I12` refuses the un-prefixed concatenation from
+   * the wire with bytes built HERE, so neither assertion can be satisfied by the copies agreeing.
    */
-  const prefixed = (nonce: string, body: string): Uint8Array<ArrayBuffer> => {
-    const n = Buffer.from(nonce, "utf8");
-    const length = Buffer.alloc(4);
-    length.writeUInt32BE(n.length);
-    return new Uint8Array(Buffer.concat([length, n, Buffer.from(body, "utf8")]));
-  };
+  const prefixed = (nonce: string, body: string): Uint8Array<ArrayBuffer> =>
+    new Uint8Array(signedBytes(nonce, Buffer.from(body, "utf8")));
 
   /**
    * ⚠ **SIGNED WITH THE BROWSER'S OWN PRIMITIVE, AND `04-F36` IS WHY THAT SENTENCE IS THE WHOLE
@@ -715,20 +718,24 @@ describe("§I 04-F22 (b) — proof of possession over a real TLS socket", () => 
     const r = await rig();
     // A real certificate, so this is a real TLS handshake rather than a claim about one.
     const issuer = await createOrgIssuer("terminal-test", NOW);
+    // `04-F36` (c) — kept rather than discarded: the ONE thing `04-F36` (a)'s latch produces is a
+    // log line, so a suite that throws the log away cannot tell a burnt latch from a healthy one.
+    const lines: string[] = [];
     const server = createTerminalServer({
       terminal: r.terminal,
       tls: { cert: issuer.certPem, key: issuer.privateKeyPem },
       port: 0,
       bundleDir: null,
       now: () => r.now.value,
-      log: () => {},
+      log: (line) => lines.push(line),
     });
     servers.push(server);
     const port = await server.boundPort();
     if (port === null) throw new Error("the terminal server did not bind");
     const keys = await padKeys();
     const spki = Buffer.from(await crypto.subtle.exportKey("spki", keys.publicKey));
-    return { r, server, port, keys, spki };
+    const faults = (): string[] => lines.filter((l) => l.includes("could not RUN"));
+    return { r, server, port, keys, spki, lines, faults };
   };
 
   const post = (
@@ -933,6 +940,216 @@ describe("§I 04-F22 (b) — proof of possession over a real TLS socket", () => 
     expect(res.status).toBe(200);
     expect(JSON.parse(res.body)).toEqual({ ok: false, reason: "not_permitted" });
     expect(w.r.events()).toEqual([]);
+  });
+
+  /**
+   * `04-F22` (b) specifies *"a non-extractable **P-256** keypair"* and `/enrol` pinned no key type
+   * at all. Measured against the shipping module over a real TLS socket: `ec-p384`, `rsa2048`,
+   * `ed25519` and `x25519` every one enrolled with **200**.
+   *
+   * The SPKI is generated here rather than hand-copied as base64 so this reads as "a key of that
+   * kind", not "these particular bytes" — a pinned blob would go on passing against a gate that
+   * started refusing on length or on a prefix rather than on the curve.
+   */
+  const spkiOfKind = (kind: string): Buffer => {
+    const options: Record<string, unknown> = {
+      "ec-p384": { namedCurve: "secp384r1" },
+      "ec-p521": { namedCurve: "secp521r1" },
+      rsa2048: { modulusLength: 2048 },
+    };
+    const nodeType = kind.startsWith("ec-") ? "ec" : kind === "rsa2048" ? "rsa" : kind;
+    const { publicKey } = generateKeyPairSync(nodeType as "ec", (options[kind] ?? {}) as never) as {
+      publicKey: KeyObject;
+    };
+    return publicKey.export({ format: "der", type: "spki" }) as Buffer;
+  };
+
+  const enrolKey = (w: Awaited<ReturnType<typeof wired>>, spki: Buffer) =>
+    post(
+      w.port,
+      "/enrol",
+      JSON.stringify({
+        code: w.server.mintEnrolmentCode(),
+        public_key: spki.toString("base64url"),
+      }),
+    );
+
+  const REFUSED_KINDS = ["ec-p384", "ec-p521", "rsa2048", "ed25519", "x25519"] as const;
+
+  it("I10 — 04-F22 (b): a key that is not P-256 never enrols, whatever else it is", async () => {
+    const w = await wired();
+    const statuses: Record<string, number> = {};
+    for (const kind of REFUSED_KINDS) statuses[kind] = (await enrolKey(w, spkiOfKind(kind))).status;
+    expect(statuses).toEqual({
+      "ec-p384": 400,
+      "ec-p521": 400,
+      rsa2048: 400,
+      ed25519: 400,
+      x25519: 400,
+    });
+    // Nothing was admitted, so the gate is not merely answering 400 while keeping the key.
+    expect(w.server.enrolments()).toEqual([]);
+    // THE CONTROL, and without it a gate refusing every key on earth passes the lines above: the
+    // curve the FR names still enrols, and the pad the product ships still works (I1).
+    const p256 = await enrolKey(w, w.spki);
+    expect(p256.status).toBe(200);
+    expect(w.server.enrolments()).toHaveLength(1);
+  });
+
+  it("I11 — 04-F36 (a): a STRANGER cannot burn the fault latch, and the message stays true", async () => {
+    const w = await wired();
+    // Deliberately no status assertion here: this test is about the LATCH, so it must go on
+    // driving whatever the till admitted rather than stopping at the enrolment. Under a till with
+    // no curve gate every one of these enrols, an Ed25519 signature is 64 bytes and clears
+    // `P1363_SIGNATURE_BYTES`, and `verify("sha256", …)` then THROWS — one request, latch gone.
+    for (const kind of REFUSED_KINDS) {
+      const res = await enrolKey(w, spkiOfKind(kind));
+      const admitted = (JSON.parse(res.body) as { terminal_id?: string }).terminal_id;
+      if (typeof admitted !== "string") continue;
+      const nonce = await nonceFor(w.port, admitted);
+      await post(w.port, "/rpc", JSON.stringify({ op: "roster" }), {
+        "x-restos-terminal": admitted,
+        "x-restos-nonce": nonce,
+        "x-restos-signature": Buffer.alloc(64, 7).toString("base64url"),
+      });
+    }
+    // `04-F36` (a) exists so a BUILD fault cannot be invisible. A latch a stranger can pre-consume
+    // makes the next genuine one silent for ever, which is the FR inverted.
+    expect(w.faults(), "a request burned 04-F36 (a)'s one-shot fault latch").toEqual([]);
+
+    // And the words that latch prints — *every pad is refused until this is fixed* — are only
+    // true while no OTHER pad works. This is the half `04-F35` is about: the claim in the comment
+    // and the state of the product are one fact.
+    const terminal_id = await enrolled(w);
+    expect((await rpc(w, terminal_id, { op: "roster" })).status).toBe(200);
+  });
+
+  it("I12 — the LENGTH PREFIX is the till's, not three copies agreeing", async () => {
+    const w = await wired();
+    const terminal_id = await enrolled(w);
+    const raw = JSON.stringify({ op: "roster" });
+    const nonce = await nonceFor(w.port, terminal_id);
+
+    // The bare concatenation, built HERE and from nothing the product exports. A till that dropped
+    // its prefix would admit this — which is exactly what "dropping it in all three copies leaves
+    // the suite 49/49 green" measured, and this line is what stops that being true again.
+    const bare = new Uint8Array(
+      Buffer.concat([Buffer.from(nonce, "utf8"), Buffer.from(raw, "utf8")]),
+    );
+    const signature = Buffer.from(
+      await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, w.keys.privateKey, bare),
+    ).toString("base64url");
+    const res = await post(w.port, "/rpc", raw, {
+      "x-restos-terminal": terminal_id,
+      "x-restos-nonce": nonce,
+      "x-restos-signature": signature,
+    });
+    expect(res.status, "the till verified an UNPREFIXED concatenation (04-F36 (d))").toBe(401);
+
+    // ⚠ The ambiguity that prefix removes is unreachable from the wire TODAY only because every
+    // nonce this till issues is the same length, and nothing pinned that either. Pinned here with
+    // the reason, because a variable-length nonce is what makes the collision case live.
+    const lengths = new Set<number>();
+    for (let i = 0; i < 8; i++) lengths.add((await nonceFor(w.port, terminal_id)).length);
+    expect(lengths.size, "issued nonces vary in length — I13's collision is now reachable").toBe(1);
+  });
+
+  it("I13 — 04-F36 (d): the signed bytes name where the nonce ends, and are not a digest", async () => {
+    // The PROPERTY, against the shipping function: two different splits of one byte string must
+    // not sign the same. `"AB" + "CDEF" === "ABC" + "DEF"`, so a wire that concatenated without
+    // saying where the nonce ends would let a signature made for one split stand for the other.
+    const left = signedBytes("AB", Buffer.from("CDEF", "utf8"));
+    const right = signedBytes("ABC", Buffer.from("DEF", "utf8"));
+    expect("AB" + "CDEF", "the fixture stopped colliding — I13 measures nothing").toBe(
+      "ABC" + "DEF",
+    );
+    expect(left.equals(right), "one byte string, two splits, one signature (04-F36 (d))").toBe(
+      false,
+    );
+    // Deterministic, so "they differ" cannot be satisfied by a function returning fresh randomness.
+    expect(signedBytes("AB", Buffer.from("CDEF", "utf8")).equals(left)).toBe(true);
+    // `04-F36` (b) — RAW bytes, one hash later. WebCrypto cannot pre-hash, so a function that
+    // returned a digest here would be the shipped double-hash defect back again; a digest also
+    // could not contain these.
+    expect(left.includes(Buffer.from("CDEF", "utf8"))).toBe(true);
+    expect(left.includes(Buffer.from("AB", "utf8"))).toBe(true);
+  });
+
+  /**
+   * `04-F36` (f) — **A PASSING TEST WHOSE SUBJECT IS THE RESIDUAL** (`double-settlement.test.ts`
+   * §F's shape). A session handle is bound to no terminal: `admit` returns the authenticated
+   * `terminal_id`, `handle()` null-checks it and it is never used again, so any OTHER enrolled
+   * tablet — with its own key and its own nonce — drives it, and revoking the tablet that signed
+   * in leaves the SESSION alive under a comment invoking `01-F48`'s eviction posture.
+   *
+   * It is not directly exploitable and that is measured, not assumed: a handle is 32 unguessable
+   * bytes over TLS, `04-F22` (c)'s property — *no actor is ever taken from anything the tablet
+   * sends* — holds either way, and a second tablet must already be enrolled. The cases it does
+   * cost are a handle observed by the man-in-the-middle `04-F22` (b) says it does not defeat, and
+   * a tablet that is revoked and re-enrols: `revoke()` cuts its credential and not its session.
+   *
+   * **Recorded rather than built, and the reason is the size:** binding it belongs in `terminal.ts`
+   * — the trust boundary, not this wire, whose own header forbids it acquiring a rule of its own —
+   * and that is a required argument on `signIn`/`view`/`act`/`signOut` and **81 call sites** across
+   * two acceptance suites. `04-F36` (f) carries the decision. This test is what makes the day it
+   * changes a day the FR and the assertion move together.
+   */
+  it("I14 — RESIDUAL: a session is bound to no terminal, and outlives its tablet's revocation", async () => {
+    const w = await wired();
+    const alpha = await enrolled(w);
+
+    // A SECOND tablet, enrolled in its own right with its own non-extractable key.
+    const beta = await padKeys();
+    const betaSpki = Buffer.from(await crypto.subtle.exportKey("spki", beta.publicKey));
+    const betaId = JSON.parse(
+      (
+        await post(
+          w.port,
+          "/enrol",
+          JSON.stringify({
+            code: w.server.mintEnrolmentCode(),
+            public_key: betaSpki.toString("base64url"),
+          }),
+        )
+      ).body,
+    ).terminal_id as string;
+    expect(betaId).not.toBe(alpha);
+
+    const asBeta = async (body: unknown) => {
+      const raw = JSON.stringify(body);
+      const nonce = await nonceFor(w.port, betaId);
+      const signature = Buffer.from(
+        await crypto.subtle.sign(
+          { name: "ECDSA", hash: "SHA-256" },
+          beta.privateKey,
+          prefixed(nonce, raw),
+        ),
+      ).toString("base64url");
+      return post(w.port, "/rpc", raw, {
+        "x-restos-terminal": betaId,
+        "x-restos-nonce": nonce,
+        "x-restos-signature": signature,
+      });
+    };
+
+    const signIn = await rpc(w, alpha, { op: "sign_in", user_id: WAITER, pin: PIN });
+    const handle = JSON.parse(signIn.body).handle as string;
+
+    // TODAY: beta drives alpha's session. When `04-F36` (f) is built this is `ok: false`.
+    const borrowed = await asBeta({ op: "view", handle });
+    expect(borrowed.status).toBe(200);
+    expect(JSON.parse(borrowed.body).ok, "the session became terminal-bound — see 04-F36 (f)").toBe(
+      true,
+    );
+
+    // TODAY: revoking alpha cuts alpha's credential and leaves alpha's SESSION standing.
+    expect(w.server.revoke(alpha)).toBe(true);
+    expect((await rpc(w, alpha, { op: "view", handle })).status, "the revoked tablet").toBe(401);
+    const afterRevoke = await asBeta({ op: "view", handle });
+    expect(
+      JSON.parse(afterRevoke.body).ok,
+      "revocation now evicts the session — 04-F36 (f) is built, move the FR",
+    ).toBe(true);
   });
 });
 
@@ -1168,14 +1385,28 @@ describe("§K 04-F36 (a) — no Electron-hosted file may leave a digest to the p
    * than found by reading. Each floor sits a few files under its root's real population, so a
    * deletion or two is legal and a root going dark is not.
    */
+  const pkg = (name: string): string =>
+    join(import.meta.dirname, "..", "..", "..", "..", "..", "packages", name, "src");
+
+  /**
+   * ⚠ **THE ROOTS WERE THINNER THAN K1's OWN SENTENCE, and that is a false protection in the shape
+   * `04-F35` is about (`04-F36` (e)).** K1 claims *"everywhere the main process can reach"*. The
+   * main process imports FIVE workspace packages — `@restos/device-config`, `@restos/domain`,
+   * `@restos/escpos`, `@restos/lan-pki`, `@restos/sync-client` — and this list named **three roots
+   * covering one of them**. The stated exclusion (*"`services/` really does run on Node"*) does not
+   * reach `packages/lan-pki`, which is the mTLS and X509 package and the likeliest place for a
+   * second instance. Measured when the roots were widened: **no offender anywhere** — `lan-pki`
+   * signs through `webcrypto.subtle` with `hash: "SHA-256"` named in its algorithm object — so this
+   * widening found no defect and removed a claim the rail was not making good on.
+   */
   const ELECTRON_HOSTED: readonly (readonly [string, string, number])[] = [
     ["the counter's main process", join(import.meta.dirname, "..", ".."), 20],
     ["the pass screen", join(import.meta.dirname, "..", "..", "..", "..", "pass-kds", "src"), 10],
-    [
-      "sync-client, which both Electron hosts load",
-      join(import.meta.dirname, "..", "..", "..", "..", "..", "packages", "sync-client", "src"),
-      35,
-    ],
+    ["sync-client, which both Electron hosts load", pkg("sync-client"), 35],
+    ["domain, which both Electron hosts load", pkg("domain"), 14],
+    ["escpos, which the counter loads", pkg("escpos"), 13],
+    ["device-config, which both Electron hosts load", pkg("device-config"), 5],
+    ["lan-pki — the mTLS and X509 package", pkg("lan-pki"), 1],
   ];
 
   it("K1 — sign/verify name their digest, everywhere the main process can reach", () => {
@@ -1196,6 +1427,113 @@ describe("§K 04-F36 (a) — no Electron-hosted file may leave a digest to the p
     expect(offenders, "a defaulted digest is ERR_OSSL_EVP_NO_DEFAULT_DIGEST on BoringSSL").toEqual(
       [],
     );
+  });
+
+  /**
+   * `04-F36` (e) — **K1 is a text grep and a text grep is ONE INDIRECTION from silent.** Measured:
+   * restoring the shipped defect as `const digest = … ? null : "sha256";` and passing `digest`
+   * leaves K1 **green** and reds only K2, and no behavioural test on Node can see defect (a) at
+   * all — so on that mutant the whole class protection was one file-scoped assertion.
+   *
+   * This is the narrow closure and its narrowness is deliberate. It resolves the LOCAL NAMES a
+   * file binds to `node:crypto`'s digest-taking calls — including `verify as verifySignature`,
+   * which is the shipping alias, and a namespace import's `crypto.verify` — and requires the
+   * digest argument at every one of those call sites to be a quoted string LITERAL. `null`,
+   * `undefined` and a variable are all refused; K1's own sweep stays as the belt, because it also
+   * catches a call reached through a binding this resolver does not model.
+   *
+   * **What it still does not own, stated rather than left to be discovered.** It is a grep: a
+   * literal `"sha256"` is checked for being a literal and never for being RIGHT, a digest reached
+   * through an object property or a re-export is invisible to it, and nothing here runs on
+   * BoringSSL — `04-F36`'s own reason for a rail rather than a test. The behaviour is owned by K2
+   * on the one call this FR is about, and by nothing else.
+   */
+  const DIGEST_TAKING = ["sign", "verify", "createSign", "createVerify"] as const;
+
+  const nodeCryptoDigestNames = (source: string): string[] => {
+    const names: string[] = [];
+    for (const m of source.matchAll(/import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+"node:crypto"/g)) {
+      for (const part of (m[1] ?? "").split(",")) {
+        const [exported, alias] = part.split(" as ").map((t) => t.trim().replace(/^type\s+/, ""));
+        if (DIGEST_TAKING.includes((exported ?? "") as (typeof DIGEST_TAKING)[number])) {
+          names.push(alias === undefined || alias === "" ? (exported as string) : alias);
+        }
+      }
+    }
+    for (const m of source.matchAll(/import\s+(?:\*\s+as\s+)?(\w+)\s+from\s+"node:crypto"/g)) {
+      for (const fn of DIGEST_TAKING) names.push(`${m[1]}.${fn}`);
+    }
+    return names;
+  };
+
+  it("K1c — the roots are DERIVED from what the main process imports, not typed from memory", () => {
+    /**
+     * `24-F14` for `K1`'s own scope. The list above went three rounds naming *"everywhere the main
+     * process can reach"* while covering one of the five packages that process loads, and a list a
+     * human maintains against a growing import graph rots in exactly one direction — quietly, and
+     * towards a smaller sweep. This derives the answer from the imports themselves, so a package
+     * the main process starts loading is a root or this fails.
+     *
+     * ⚠ **AND IT CORRECTS THE FINDING THAT PROMPTED IT.** The review named `@restos/lan-pki` among
+     * the main process's imports; measured comment-blind, its only importers anywhere are three
+     * suites and `packages/testing` — **no production file in this repo imports it**. It is swept
+     * regardless, because `01-F73`'s branch PKI is built and hosted by nothing and the day a host
+     * constructs it that code runs in this process. The correction is the lesson (`AGENTS.md`
+     * `L5`): a package named in a review is not a package the product imports until the grep says
+     * so, and the answer is derived here rather than restated.
+     */
+    const mainRoot = join(import.meta.dirname, "..");
+    const production = readdirSync(mainRoot, { withFileTypes: true, recursive: true }).filter(
+      (e) =>
+        e.isFile() &&
+        e.name.endsWith(".ts") &&
+        !e.name.includes(".test.") &&
+        !e.parentPath.includes("__acceptance__"),
+    );
+    expect(production.length, "K1c read no main-process files — it went inert").toBeGreaterThan(20);
+    const imported = new Set<string>();
+    for (const e of production) {
+      const source = readFileSync(join(e.parentPath, e.name), "utf8");
+      for (const m of source.matchAll(/from "@restos\/([a-z-]+)"/g)) imported.add(m[1] as string);
+    }
+    // The `24-F14` half: a regex that stopped matching would make the sweep below vacuous.
+    expect(imported, "no workspace import found in src/main — K1c is reading nothing").toContain(
+      "sync-client",
+    );
+    const roots = ELECTRON_HOSTED.map(([, root]) => root);
+    for (const name of imported) {
+      expect(
+        roots.some((root) => root.endsWith(join("packages", name, "src"))),
+        `the main process imports @restos/${name} and K1 does not sweep it — the rail claims "everywhere the main process can reach" (04-F36 (e))`,
+      ).toBe(true);
+    }
+  });
+
+  it("K1b — a digest reached through a VARIABLE is the same defect one indirection along", () => {
+    const offenders: string[] = [];
+    let sites = 0;
+    const filesWithSites: string[] = [];
+    for (const [, root] of ELECTRON_HOSTED) {
+      for (const { file, source } of hosted(root)) {
+        for (const name of nodeCryptoDigestNames(source)) {
+          const call = new RegExp(`\\b${name.replace(".", "\\.")}\\(\\s*([^,)]*)`, "g");
+          for (const m of source.matchAll(call)) {
+            sites++;
+            filesWithSites.push(file);
+            const first = (m[1] ?? "").trim();
+            if (!/^("|')/.test(first)) offenders.push(`${file}: ${name}(${first} …`);
+          }
+        }
+      }
+    }
+    // `24-F14` — with no call site found this rail asserts that an empty list is empty. The
+    // shipping call is the one it exists for, so it is named rather than counted.
+    expect(
+      sites,
+      "K1b found no node:crypto sign/verify call at all — it went inert",
+    ).toBeGreaterThan(0);
+    expect(filesWithSites.some((f) => f.endsWith("terminal-server.ts"))).toBe(true);
+    expect(offenders, "the digest is not a literal at this call site (04-F36 (a))").toEqual([]);
   });
 
   /**
@@ -1229,6 +1567,49 @@ describe("§K 04-F36 (a) — no Electron-hosted file may leave a digest to the p
     expect(block).toMatch(/deps\.log\(/);
     // Still fails CLOSED. `04-F22` (b): the caller never learns which check failed.
     expect(block).toMatch(/return null;/);
+  });
+
+  it("K4 — 04-F35: the latch's claim and /enrol's curve gate are ONE fact, or the comment lies", () => {
+    /**
+     * `admit`'s catch says the fault it logs *"is a property of the build rather than of the
+     * request"* and its line says *"every pad is refused until this is fixed"*. Both sentences are
+     * true only because every enrolled key is P-256: with no curve gate an `ed25519` key enrolled
+     * with **200**, its 64-byte signature cleared `P1363_SIGNATURE_BYTES`, `verify("sha256", …)`
+     * threw, and ONE request from anyone holding an enrolment code burned `04-F36` (a)'s one-shot
+     * latch while nine honest pads went on being admitted — a claim in prose the product did not
+     * have, in the same file and the same round that added the FR about that class.
+     *
+     * So the two move together or the comment goes back to lying. `I10`/`I11` own the behaviour;
+     * this is the `04-F35` pairing, and it fails in BOTH directions — widen the gate and this
+     * assertion falls over before the sentence can quietly become false again.
+     */
+    const admitText = admitBlock();
+    expect(admitText).toContain("every pad is refused until this is fixed");
+    /**
+     * COMMENT-BLIND and NOT windowed, deliberately, and the two decisions pull opposite ways.
+     * Comment-blind because this very paragraph names `prime256v1`, and a rail satisfied by prose
+     * about a gate is the defect it exists to catch (`AGENTS.md` `L5`). Unwindowed because K4 is
+     * about whether the PRODUCT pins the curve, not about which function holds the expression —
+     * `I10` and `I11` own where it sits, so a genuine refactor that lifts the predicate out of
+     * `enrol` must not red this.
+     */
+    const stripped = readFileSync(join(import.meta.dirname, "..", "terminal-server.ts"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/[^\n]*/g, "");
+    expect(stripped, "the comment stripper ate the file — K4 is reading nothing").toContain(
+      "createPublicKey",
+    );
+    expect(
+      /asymmetricKeyType/.test(stripped) && /prime256v1/.test(stripped),
+      "the till no longer pins 04-F22 (b)'s P-256 curve — admit()'s catch comment and its log line both claim a property the product has just lost (04-F35)",
+    ).toBe(true);
+    // WHERE it sits is deliberately not pinned here — `I10` refuses a non-P-256 key at `/enrol`
+    // over a real socket, which is the behaviour, and a source read cannot improve on it.
+    // The catch must SAY what it rests on, so the next reader of that paragraph is sent here.
+    expect(
+      /04-F35|enrol/i.test(admitText),
+      "admit()'s catch stopped naming what its claim rests on (04-F35)",
+    ).toBe(true);
   });
 
   it("K3 — the narrowing BITES: the same tokens outside the window do not satisfy K2", () => {

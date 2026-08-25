@@ -1,4 +1,10 @@
-import { createHash, createPublicKey, randomBytes, verify as verifySignature } from "node:crypto";
+import {
+  createHash,
+  createPublicKey,
+  type KeyObject,
+  randomBytes,
+  verify as verifySignature,
+} from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer as createHttpsServer, type Server } from "node:https";
 import { extname, join, normalize, resolve as resolvePath, sep } from "node:path";
@@ -140,8 +146,18 @@ const MIME: Readonly<Record<string, string>> = {
  * exactly once, and WebCrypto offers no way to pre-hash. So the till verified `sha256(sha256(x))`
  * against a signature over `sha256(x)`, every signed request was `401 not admitted`, and no tablet
  * had ever made an authenticated request. **One byte string, one hash, named at both ends.**
+ *
+ * ⚠ **EXPORTED FOR ONE REASON: SO THE PROPERTY CAN BE ASSERTED AGAINST THIS FUNCTION AND NOT
+ * AGAINST A THIRD HAND-COPY OF IT (`04-F36` (d)).** The length prefix is documented at BOTH ends as
+ * a security property — *"it removes the concatenation ambiguity a separator carries"* — and was
+ * asserted by nothing: dropping it here alone reddened 9 tests, dropping it here AND in the pad's
+ * client reddened 5, and dropping it in all THREE copies (here, the pad, and the suite's own
+ * `prefixed()` helper) left the suite **49/49 green**. Three hand-copies agreeing is not the
+ * property; `terminal.test.ts` §I now signs with THIS function and asserts the ambiguity is gone
+ * from it. The honest end state is still the shared wire module `04-F36` records as owed — one
+ * declaration both ends import — and this export is the cheaper half of it, not a substitute.
  */
-const signedBytes = (nonce: string, rawBody: Buffer): Buffer => {
+export const signedBytes = (nonce: string, rawBody: Buffer): Buffer => {
   const n = Buffer.from(nonce, "utf8");
   const length = Buffer.alloc(4);
   length.writeUInt32BE(n.length);
@@ -260,8 +276,21 @@ export const createTerminalServer = (deps: TerminalServerDeps): TerminalServer =
        *
        * Still `null`: gate 2 fails CLOSED, and `04-F22` (b)'s caller must not learn which check
        * failed. Logged ONCE, latched, because this socket is open to the shop Wi-Fi and a line per
-       * request is a lever a stranger can pull — and once is all a fault of this kind needs, since
-       * it is a property of the build rather than of the request.
+       * request is a lever a stranger can pull.
+       *
+       * ⚠ **THE LATCH AND `/enrol`'s CURVE GATE ARE ONE MECHANISM, AND THIS PARAGRAPH USED TO
+       * CLAIM ONLY HALF OF IT (`04-F35`, `04-F36` (c)).** It said *"once is all a fault of this
+       * kind needs, since it is a property of the build rather than of the request"* — true only
+       * because every enrolled key is now P-256, so the arguments to this call cannot vary in any
+       * way this primitive can refuse to run on. It was FALSE when written: `/enrol` pinned no key
+       * type, an Ed25519 key enrolled with 200, and one request from anyone holding an enrolment
+       * code burned this latch for the life of the process. **What is closed is the class "a
+       * REQUEST can reach this catch"; what is not closed is that the latch remains one-shot, so
+       * a future change admitting a second key type re-opens it in one keystroke.** The sentence
+       * below — *every pad is refused until this is fixed* — is likewise true only while that gate
+       * stands: it was false against a till with one Ed25519 enrolment and nine working ones.
+       * `terminal.test.ts` §K4 pins the two together, so the day the gate is widened this comment
+       * fails rather than quietly becoming a lie again.
        */
       if (!verifyFaultLogged) {
         verifyFaultLogged = true;
@@ -423,12 +452,31 @@ export const createTerminalServer = (deps: TerminalServerDeps): TerminalServer =
       return json(res, 403, { error: "not admitted" });
     }
     let spki: Buffer;
+    let key: KeyObject;
     try {
       spki = Buffer.from(body.public_key, "base64url");
       // Parsed HERE so a key that cannot be imported is refused at enrolment rather than at every
       // later request, where it would look like a signature failure.
-      createPublicKey({ key: spki, format: "der", type: "spki" });
+      key = createPublicKey({ key: spki, format: "der", type: "spki" });
     } catch {
+      return json(res, 400, { error: "malformed" });
+    }
+    /**
+     * `04-F22` (b)/`04-F36` (c) — **the CURVE is pinned here, and this is the whole of that fix.**
+     *
+     * The FR specifies *"a non-extractable **P-256** keypair"* and this gate accepted whatever
+     * `createPublicKey` would parse: `ec-p384`, `rsa2048`, `ed25519` and `x25519` all enrolled with
+     * **200** (measured). None of them can be ADMITTED — an Ed25519 signature is 64 bytes, so it
+     * clears `P1363_SIGNATURE_BYTES` untouched, and `verify("sha256", …)` against that key THROWS
+     * on both platforms — so the damage was not a bypass. It was that a stranger holding an
+     * enrolment code could make `admit`'s catch fire, and that catch is `04-F36` (a)'s ONE-SHOT
+     * latch: one such request burned it, and a genuine build fault afterwards was silent for ever.
+     *
+     * Refused at ENROLMENT rather than at verification, for the reason the parse above is already
+     * here: a key this wire cannot use must be a `400` to the operator typing the code, not a
+     * `401` on every request for the life of the till.
+     */
+    if (key.asymmetricKeyType !== "ec" || key.asymmetricKeyDetails?.namedCurve !== "prime256v1") {
       return json(res, 400, { error: "malformed" });
     }
     // The id is the key's own fingerprint, not a counter: two enrolments of one key are one
