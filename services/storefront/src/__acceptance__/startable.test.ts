@@ -84,6 +84,34 @@ const postTo = (
   });
 };
 
+/**
+ * `06-F36` — the container `global-setup.ts` published. A spawned host needs a REAL database now:
+ * the whole point of the FR is that there is no in-memory fallback to boot on.
+ */
+const outboxUrl = (): string => {
+  const value = process.env.STOREFRONT_TEST_DATABASE_URL;
+  if (value === undefined) throw new Error("global-setup did not publish a database url");
+  return value;
+};
+
+/**
+ * ⚠ **A DISTINCT `(org, branch)` PER SPAWNED HOST, and it is `06-F30`'s lock doing its job rather
+ * than a test-isolation nicety.** Sharing one pair across cases made the second host refuse to
+ * boot by name: a `SIGKILL`ed host's Postgres session outlives its process for a moment, so it was
+ * still holding the origin lock when the next case dialled. Reproduced 2026-08-25 — the failure
+ * was the FR working, measured against a fixture that assumed it did not exist.
+ */
+let spawnSeq = 0;
+const freshOrigin = () => {
+  spawnSeq += 1;
+  return {
+    RESTOS_ORG_ID: `org-karachi-${spawnSeq}`,
+    RESTOS_BRANCH_ID: `branch-clifton-${spawnSeq}`,
+    RESTOS_DEVICE_ID: `device-storefront-${spawnSeq}`,
+    RESTOS_STOREFRONT_HOST: "burger-house.restos.pk",
+  };
+};
+
 describe("the storefront service is startable", () => {
   it("declares `start` and `dev` — the scripts whose absence was the defect", () => {
     expect(pkg.scripts.start, "no `start` script is how a plane never runs").toBeDefined();
@@ -91,21 +119,27 @@ describe("the storefront service is startable", () => {
   });
 
   it("`pnpm start` boots, prints its origin identity, and answers /health", async () => {
+    const origin = freshOrigin();
     const child = spawn("pnpm", ["start"], {
       cwd: packageRoot,
       env: {
         ...process.env,
         PORT: "0",
-        RESTOS_ORG_ID: "org-karachi",
-        RESTOS_BRANCH_ID: "branch-clifton",
-        RESTOS_DEVICE_ID: "device-storefront-clifton",
-        RESTOS_STOREFRONT_HOST: "burger-house.restos.pk",
+        ...origin,
         // `06-F33` — the dev host builds the REAL gateway-backed catalog and refuses to start
         // without somewhere to read prices from. Nothing is listening on this port in this test:
         // booting does not read the catalog, placing an order does, and a boot that pre-flighted
         // the gateway would make this service unstartable whenever the gateway was restarting.
         RESTOS_GATEWAY_URL: "http://127.0.0.1:59999",
         RESTOS_GATEWAY_TOKEN: "service-credential",
+        // `06-F36` — the outbox and the uplink are both REQUIRED at boot now. ⚠ FIXTURE ONLY: no
+        // assertion in this file is relaxed by these three, and the two REFUSALS they create have
+        // their own cases below. Nothing is listening on the ws port, exactly as nothing is
+        // listening on the gateway port above: booting must not pre-flight either, or the
+        // storefront becomes unstartable whenever the gateway is restarting.
+        DATABASE_URL: outboxUrl(),
+        RESTOS_CLOUD_URL: "ws://127.0.0.1:59998/sync",
+        RESTOS_DEVICE_TOKEN: "device-token",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -121,7 +155,9 @@ describe("the storefront service is startable", () => {
             // The boot line is load-bearing (`T12`): it names the (org, branch) this origin
             // pushes under, because a storefront on the wrong join key reports success at every
             // layer and no till ever sees an order.
-            expect(out).toContain("org-karachi/branch-clifton");
+            // Against the identity this host was CONFIGURED with, never a literal: a hard-coded
+            // pair passes for a host that prints someone else's, which is the whole hazard.
+            expect(out).toContain(`${origin.RESTOS_ORG_ID}/${origin.RESTOS_BRANCH_ID}`);
             expect(out).toContain("storefront_cloud");
             expect(out, "06-F31's ruling belongs on the boot line, not only in a doc").toContain(
               "branch_provisional",
@@ -157,10 +193,7 @@ describe("the storefront service is startable", () => {
       env: {
         ...process.env,
         PORT: "0",
-        RESTOS_ORG_ID: "org-karachi",
-        RESTOS_BRANCH_ID: "branch-clifton",
-        RESTOS_DEVICE_ID: "device-storefront-clifton",
-        RESTOS_STOREFRONT_HOST: "burger-house.restos.pk",
+        ...freshOrigin(),
         RESTOS_GATEWAY_URL: "",
         RESTOS_GATEWAY_TOKEN: "",
       },
@@ -224,6 +257,88 @@ describe("the storefront service is startable", () => {
   });
 
   /**
+   * `06-F36` (a) — **the boot refusal that exists because its absence was the defect.**
+   *
+   * Before this FR the dev host started happily with nowhere durable to put an order, warned about
+   * it on stderr, and returned `200 {"order_id":…}` for three orders no restaurant ever saw. A
+   * warning is not a refusal. `06-N5`: never a fake success.
+   */
+  it("REFUSES to boot with nowhere DURABLE to put an order — 06-F36/06-N5", async () => {
+    const child = spawn("pnpm", ["start"], {
+      cwd: packageRoot,
+      env: {
+        ...process.env,
+        PORT: "0",
+        ...freshOrigin(),
+        RESTOS_GATEWAY_URL: "http://127.0.0.1:59999",
+        RESTOS_GATEWAY_TOKEN: "service-credential",
+        RESTOS_CLOUD_URL: "ws://127.0.0.1:59998/sync",
+        RESTOS_DEVICE_TOKEN: "device-token",
+        DATABASE_URL: "",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    try {
+      const { code, out } = await new Promise<{ code: number | null; out: string }>((resolve) => {
+        let out = "";
+        child.stdout.on("data", (c: Buffer) => {
+          out += c.toString();
+        });
+        child.stderr.on("data", (c: Buffer) => {
+          out += c.toString();
+        });
+        child.on("exit", (code) => resolve({ code, out }));
+      });
+      expect(code).not.toBe(0);
+      expect(out).toContain("06-F36");
+      expect(out).toContain("DATABASE_URL");
+    } finally {
+      child.kill("SIGKILL");
+    }
+  });
+
+  /**
+   * `06-F36` (c) — **and the other half, which is the reported defect itself.**
+   *
+   * An outbox nothing drains is exactly what was measured: durable rows, a confirmed order id, and
+   * no path to the branch. A host with no uplink configuration must not accept the first order.
+   */
+  it("REFUSES to boot with no way to DELIVER an order to the branch — 06-F36", async () => {
+    const child = spawn("pnpm", ["start"], {
+      cwd: packageRoot,
+      env: {
+        ...process.env,
+        PORT: "0",
+        ...freshOrigin(),
+        RESTOS_GATEWAY_URL: "http://127.0.0.1:59999",
+        RESTOS_GATEWAY_TOKEN: "service-credential",
+        DATABASE_URL: outboxUrl(),
+        RESTOS_CLOUD_URL: "",
+        RESTOS_DEVICE_TOKEN: "",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    try {
+      const { code, out } = await new Promise<{ code: number | null; out: string }>((resolve) => {
+        let out = "";
+        child.stdout.on("data", (c: Buffer) => {
+          out += c.toString();
+        });
+        child.stderr.on("data", (c: Buffer) => {
+          out += c.toString();
+        });
+        child.on("exit", (code) => resolve({ code, out }));
+      });
+      expect(code).not.toBe(0);
+      expect(out).toContain("06-F36");
+      expect(out).toContain("RESTOS_CLOUD_URL");
+      expect(out).toContain("RESTOS_DEVICE_TOKEN");
+    } finally {
+      child.kill("SIGKILL");
+    }
+  });
+
+  /**
    * ⚠ **THE PRICE AUTHORITY OF THE ONLY SHIPPING HOST, ASSERTED THROUGH THE SPAWNED PROCESS —
    * AND THIS IS `L7`, ONE LAYER OUT FROM THE `F1` FIX THAT CLOSED IT FOR THE OUTBOX.**
    *
@@ -242,6 +357,10 @@ describe("the storefront service is startable", () => {
    */
   it("prices from the REAL gateway artifact — the shipping host's catalog is not a stub (06-F33)", async () => {
     const seen: Array<{ url: string; auth: string | undefined }> = [];
+    // ⚠ The published artifact prices THIS host's branch. `01-F60` keys a price per
+    // `(branch, channel)` with no fallback, so a fixture whose branch is a literal while the host
+    // runs as another is a `06-F33` refusal wearing a test failure — measured 2026-08-25.
+    const origin = freshOrigin();
     const gateway: Server = createServer((req, res) => {
       seen.push({ url: req.url ?? "", auth: req.headers.authorization });
       if (req.headers.authorization !== "Bearer service-credential") {
@@ -259,8 +378,16 @@ describe("the storefront service is startable", () => {
               id: "item-burger",
               name: "Zinger Burger",
               prices: [
-                { branch_id: "branch-clifton", channel: "counter", price_paisa: 40_000 },
-                { branch_id: "branch-clifton", channel: "storefront", price_paisa: 45_000 },
+                {
+                  branch_id: origin.RESTOS_BRANCH_ID,
+                  channel: "counter",
+                  price_paisa: 40_000,
+                },
+                {
+                  branch_id: origin.RESTOS_BRANCH_ID,
+                  channel: "storefront",
+                  price_paisa: 45_000,
+                },
               ],
             },
           ],
@@ -275,12 +402,13 @@ describe("the storefront service is startable", () => {
       env: {
         ...process.env,
         PORT: "0",
-        RESTOS_ORG_ID: "org-karachi",
-        RESTOS_BRANCH_ID: "branch-clifton",
-        RESTOS_DEVICE_ID: "device-storefront-clifton",
-        RESTOS_STOREFRONT_HOST: "burger-house.restos.pk",
+        ...origin,
         RESTOS_GATEWAY_URL: `http://127.0.0.1:${gatewayPort}`,
         RESTOS_GATEWAY_TOKEN: "service-credential",
+        // `06-F36`, fixture only — see the note on the first spawned host above.
+        DATABASE_URL: outboxUrl(),
+        RESTOS_CLOUD_URL: "ws://127.0.0.1:59998/sync",
+        RESTOS_DEVICE_TOKEN: "device-token",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });

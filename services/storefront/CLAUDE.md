@@ -236,31 +236,54 @@ behaviour it pins changes is a comment with a test's name on it.
 
 ## What is OWED here, named so it is not discovered in the field
 
-- **The durable outbox.** `outbox.ts` is a PORT and the only implementation is `inMemoryOutbox`,
-  named test-support. `06-F30`'s Postgres outbox and its **per-(org, branch) advisory lock** — the
-  single-writer clause, because two storefront processes sharing one lamport counter is `01-F66`'s
-  defect in a data centre — are **not built**. ⚠ `seams:check` cannot see this: Rule B asks whether
-  a member is *supplied*, never whether the supply is REAL. That is why `outbox` (and now `catalog`)
-  is a **required** option, and why `server-seam.test.ts` asserts the events land in the outbox the
-  server was HANDED — a required option proves a value was passed, never that it was used (M9).
+- ~~**The durable outbox.**~~ **CLOSED (2026-08-25, `06-F36` (a)/(b))** — `outbox-postgres.ts`,
+  `drizzle/0000_storefront_outbox.sql`, `pnpm -C services/storefront migrate`. The paragraph that
+  stood here was correct and the boot banner agreed with it in so many words (*"a restart loses
+  every order this process accepted"*), which is worth keeping in mind: **the debt was named
+  accurately, in three places, and shipped anyway.** Naming a hole is not closing one. What is now
+  true: one `(org, branch)` row holding the lamport counter and `19 §5`'s checkpoint, one outbox
+  table keyed by the lamport SLOT, and `06-F30`'s advisory lock at **both** its scales — a
+  session-level `pg_try_advisory_lock` at boot (a second process refuses to start) and a
+  `pg_advisory_xact_lock` for the life of each append. ⚠ The two need **different key classes** or
+  the boot lock deadlocks this process's own first order; see `outbox-postgres.ts`'s header for the
+  `pg_stat_activity` output that found it.
 - **The entitlement source.** `28-F6`'s record has no writer anywhere in this corpus and no decided
   home (`28 §9.4`), so the dev host ships a **development** source and a real deployment must pass
   its own. This is the one place where a stub still reaches a shipping start path, it is named on
   stderr at every boot, and it is the first thing to replace when doc 15 or doc 28 lands a writer.
-- **The push client.** Nothing here yet speaks `hello`/`push` to the gateway. The protocol needs no
-  new kind (that is `06-F30`'s strongest argument) but the client, the `push_ack` write-checkpoint
-  and device registration via `provision-device --class storefront_cloud` are unbuilt. **So the
-  outbox fills and nothing drains it** — an order placed today reaches no till until this lands.
+- ~~**The push client.**~~ **CLOSED (2026-08-25, `06-F36` (c)/(d)/(e))** — `uplink.ts`. It speaks
+  the `hello`/`push`/`push_ack` `01-F8` already defines, over the same `CloudTransport` seam and the
+  same `createWsCloudTransport` adapter a till dials with; **no new message kind**, which was
+  `06-F30`'s strongest argument for making this thing a device. It is deliberately **not**
+  `createCloudSession`: that takes a `DeviceStore` of **44 members**, twenty of them folds, where
+  the drain uses **four** — constructing the rest would give a public internet-facing service the
+  branch mirror `06-F30` forbids it in terms. It never sends `catchup_request` and **drops every
+  `event_batch`**. Device registration is `provision-device --class storefront_cloud`, which
+  already worked.
+  - ⚠ **THE WAKE IS THE PART THAT WILL BE DELETED BY ACCIDENT.** `server.ts`'s
+    `durable.onPut(() => uplink.notifyAppended())` is one line, and without it the host drains at
+    connect and never again — verbatim the `apps/pos-electron` defect (`notifyAppended` with zero
+    production callers, a till that pushed its outbox once). **Measured: deleting that line fails
+    2 of 115 tests, both in `drain-seam.test.ts`, and nothing else in this package notices.**
 - **`apps/storefront`** — the Next.js customer surface — is still a two-line stub, and **three**
   things travel with it: `06-F5`'s cart invalidation (which is what closes `06-F33`'s stated
   residual — the price is resolved at APPEND and `06-F6` says add-to-cart); **`06-F35` (c)'s cancel
   ownership**, which needs `06-F12`'s signed session for *whose order is this* and `§5`'s
   order-status read model for *has the branch confirmed it* (both are that surface's, neither is
   invented here, and `order-identity.test.ts` §B fails the day either lands); and the **refusal →
-  HTTP status mapping**. Today `UnpricedItemsError`, `NotEntitledError`, `EntitlementUnreadableError` and
-  `CrossTenantError` all reach a caller as a tRPC `INTERNAL_SERVER_ERROR`; only `06-F1`'s 404 is
+  HTTP status mapping**. `UnpricedItemsError`, `NotEntitledError`, `EntitlementUnreadableError` and
+  `CrossTenantError` still reach a caller as a tRPC `INTERNAL_SERVER_ERROR`; only `06-F1`'s 404 is
   specified, and inventing codes for the rest ahead of the surface that renders them would be
-  inventing policy.
+  inventing policy (`06-F37` (c) records that choice rather than leaving it silent).
+  - ⚠ **WHAT IS NOT OWED ANY MORE IS THE BODY.** `06-F37` closed a live leak, reproduced on the
+    running service: every refusal on this unauthenticated route returned the **full Node stack** —
+    absolute repository paths (`…/src/origin.ts:206`) and the `node_modules` layout — and so did
+    `06-F1`'s 404, which was neutral in its status code and a map in its body. `refusal.ts` is an
+    **allowlist**: a message reaches a customer only because this module wrote it for one
+    (`UnpricedItemsError` alone today, because `06-F33` requires the items to be named), everything
+    else becomes one neutral sentence, and the real error goes to stderr via the mount's `onError`.
+    ⚠ It is **not** conditioned on `NODE_ENV` — tRPC's own stack suppression is, and the variable
+    was unset on the day this was measured.
 - **`06-F10`'s `source` attribution** (`direct | qr | instagram | whatsapp`) is required by the FR
   on every order and is **not implemented** — it was absent from this list at the first landing too.
   `order.created`'s payload is a `looseObject`, so it is legal to add, but which fields an order
@@ -284,20 +307,50 @@ behaviour it pins changes is a comment with a test's name on it.
 
 ## Running it
 
+**Two steps now, and the first one is a separate deliberate act** — a service that migrates its own
+database on boot races its own replicas (`services/sync-gateway`'s recorded reasoning, copied):
+
 ```
+DATABASE_URL=postgres://…  pnpm -C services/storefront migrate
+
 RESTOS_ORG_ID=…  RESTOS_BRANCH_ID=…  RESTOS_DEVICE_ID=…  RESTOS_STOREFRONT_HOST=shop.example.pk \
-RESTOS_GATEWAY_URL=http://127.0.0.1:8080  RESTOS_GATEWAY_TOKEN=…  pnpm -C services/storefront start
+RESTOS_GATEWAY_URL=http://127.0.0.1:8080  RESTOS_GATEWAY_TOKEN=… \
+DATABASE_URL=postgres://…  RESTOS_CLOUD_URL=wss://gateway/sync  RESTOS_DEVICE_TOKEN=… \
+  pnpm -C services/storefront start
 ```
+
+Mint the token with `pnpm -C services/sync-gateway provision-device --class storefront_cloud`.
+
+⚠ **`RESTOS_GATEWAY_URL` AND `RESTOS_CLOUD_URL` ARE TWO LEGS TO ONE SERVICE AND BOTH ARE REQUIRED.**
+The first is the `/internal` HTTP hop prices are read over (`06-F33`); the second is the
+`hello`/`push` socket orders are delivered over (`06-F36`). One variable for both would make a
+deployment that can PRICE but cannot DELIVER indistinguishable from a healthy one — which is exactly
+what the reproduced defect looked like from outside: `200 {"order_id":…}` on every request and zero
+rows in the branch's ledger.
 
 It refuses to boot without **all four** identity values (`00 §5.4` admits no defaulted org; `T12`'s
 join key has three ends and no error message, and `06-F34` (a) added the fourth: an origin with no
-public host cannot refuse a request naming another one). It also refuses without a gateway link,
-because that is where prices come from and `01-F60` admits no fallback — `01-F65`'s posture, one
-service over. The boot line names the origin, its class, `06-F31`'s clock ruling **and the host it
-serves**. `__acceptance__/startable.test.ts` spawns the **declared** script for all three refusals,
-for the happy path, and — since the re-review — for one whole order placed **through the spawned
-process** against a fake gateway, which is the only thing that can tell a real price authority from
-a stub (N2).
+public host cannot refuse a request naming another one), without a gateway link (that is where
+prices come from and `01-F60` admits no fallback — `01-F65`'s posture, one service over), **without
+`DATABASE_URL`** (`06-F36` (a): an order acknowledged out of a heap is `06-N5`'s fake success) and
+**without the uplink pair** (`06-F36` (c): accepting orders into an outbox nothing drains is the
+defect itself). The boot line is four lines now — origin identity, schema state, and the socket the
+uplink dials. `__acceptance__/startable.test.ts` spawns the **declared** script for all five
+refusals and for the happy path; `drain-seam.test.ts` spawns it against a real WebSocket gateway and
+asserts the order arrives.
+
+⚠ **A NOTE ON WHAT "OFFLINE" MEANS FOR THIS SERVICE, because it is not what it means for a till.**
+Two different outages, two correct and *different* behaviours, measured on a real stack:
+
+  · the **branch/uplink** unreachable  -> the order is ACCEPTED, persisted, and drains on reconnect
+                                         (commandment 4, `00 §5.1`)
+  · the **gateway** unreachable        -> the order is REFUSED, because that is where the PRICE
+                                         comes from (`06-F33`, `01-F60`: no fallback) — `06-N5`'s
+                                         "never a fake success", and `06-F37` now makes it a
+                                         neutral body rather than a stack trace
+
+A reader who expects "offline-first" to mean the second case is refused a sale is reading a till's
+law onto a cloud origin. The till holds its own catalog; this service does not, by `06-F30`.
 
 The ordering surface is `POST /trpc/placeOrder` and `POST /trpc/cancelOrder`, and the `Host` header
 decides the tenant — a request that does not name `RESTOS_STOREFRONT_HOST` gets a neutral 404.

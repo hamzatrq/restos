@@ -2,6 +2,7 @@ import { initTRPC } from "@trpc/server";
 import { z } from "zod";
 import { type Capability, STOREFRONT_CAPABILITY } from "./entitlement.js";
 import type { createPlacement } from "./placement.js";
+import { publicErrorShape } from "./refusal.js";
 
 /**
  * `06-F32` — **the storefront's own tRPC host, and why it is not `services/api`.**
@@ -37,7 +38,23 @@ export type StorefrontContext = {
 
 type StorefrontMeta = { readonly entitlement?: Capability };
 
-const t = initTRPC.context<StorefrontContext>().meta<StorefrontMeta>().create();
+/**
+ * `06-F37` (a)/(b) — **the error formatter is on the ROUTER's `create`, which is the only place
+ * that catches every path.**
+ *
+ * Measured before it existed: every refusal on this unauthenticated route returned the full Node
+ * stack, absolute repository paths and the `node_modules` layout — **including `06-F1`'s 404**,
+ * which is thrown from `createContext` in `server.ts` and therefore never reaches a procedure at
+ * all. A guard placed at a procedure, or on the route's own handler, would have missed exactly
+ * that one; `errorFormatter` is where tRPC serializes all of them.
+ *
+ * `refusal.ts` holds the reading and the allowlist. `refusal.test.ts` and `server-seam.test.ts`
+ * §F drive real HTTP through both the 404 and the 500 and assert on the BYTES.
+ */
+const t = initTRPC
+  .context<StorefrontContext>()
+  .meta<StorefrontMeta>()
+  .create({ errorFormatter: publicErrorShape });
 
 /**
  * The declaration half of `06-F32`. Every procedure built through this helper stamps

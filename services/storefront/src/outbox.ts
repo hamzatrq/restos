@@ -32,6 +32,12 @@ export type Outbox = {
 };
 
 /**
+ * @unreached-by-design TEST SUPPORT. `06-F36` (a) landed `createPostgresOutbox`, so `server.ts`
+ * no longer constructs this and `seams:check` Rule A can now SEE that no shipping code reaches it.
+ * That is the register working: this export was always test-only and the rail could not tell while
+ * the shipping host happened to call it. **Do not close this by giving it a caller** — a shipping
+ * caller here is the defect `06-F36` closed.
+ *
  * ⚠ **TEST SUPPORT ONLY — never construct this in a shipping host.**
  *
  * It is exported so the acceptance suite can drive the origin without Postgres, and it is named
