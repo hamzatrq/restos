@@ -658,17 +658,43 @@ export const CashSurface = ({ cash, onAppend }: CashSurfaceProps) => {
                       // `02-F24` — "manager cash count + deposit record → day.closed,
                       // cash.deposit_recorded". TWO facts and TWO events: a close that emitted
                       // only the first leaves the night's cash in no deposit record at all.
-                      onAppend({
-                        type: "day.closed",
-                        payload: { day_id, counted_cash_paisa: counted },
-                        refs: [],
-                      });
+                      //
+                      // ── THE DEPOSIT GOES FIRST, AND THE ORDER IS LOAD-BEARING ────────────────
+                      //
+                      // ⚠ **IT USED TO GO SECOND AND THE DAY SUMMARY PRINTED `Deposit Rs 0`.**
+                      // Reproduced on a real device store, August 2026: the day row carried
+                      // `deposit_paisa: 610200` and the ESC/POS bytes handed to the transport
+                      // read `Deposit Rs 0` — beside `Counted cash Rs 6,102`, two rows apart, on
+                      // the document a manager reconciles against the bank. `main/index.ts` hangs
+                      // the summary off the COMPLETED append of `day.closed` (`02-F24`'s ticket
+                      // needs the fold's carried facts, so it cannot run before the event is in),
+                      // and the deposit had not been appended yet, so the printer read a day row
+                      // that was a fact behind. Nothing was wrong with the ledger or the fold.
+                      //
+                      // The trigger must therefore be the LAST event of the act, which makes this
+                      // the whole fix: `day.closed` is the event that makes a day summary exist
+                      // (`02-F24` names it), so the deposit is appended before it rather than the
+                      // trigger being moved onto the deposit — moving the trigger would make a
+                      // `day.closed` from any other writer print nothing at all.
+                      //
+                      // **The residue of an interrupted act is the survivable one, and that is
+                      // why this direction and not the other.** A deposit recorded against a day
+                      // still open is visible on the Cash surface and the day can still be
+                      // closed; a day closed with no deposit is the defect above — permanent
+                      // under `01-F1`, and it prints a false Rs 0 rather than nothing.
+                      // `01-F17` is untouched: neither append is gated on the other.
+                      //
                       // The FR names a deposit record and no rule for its VALUE (all of it? the
                       // takings above the float?), so what is recorded is the counted cash and the
                       // question is reported rather than guessed at silently.
                       onAppend({
                         type: "cash.deposit_recorded",
                         payload: { day_id, amount_paisa: counted },
+                        refs: [],
+                      });
+                      onAppend({
+                        type: "day.closed",
+                        payload: { day_id, counted_cash_paisa: counted },
                         refs: [],
                       });
                     }

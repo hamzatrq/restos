@@ -113,14 +113,18 @@ export type DocumentType = (typeof DOCUMENT_TYPES)[number];
  *   * `shift_close_slip` = **35**: its widest label is 21 columns — `Aggregator receivable`, the
  *     longest `PAYMENT_METHODS` member `02-F23` requires "by method", tied by `02-F43`'s
  *     `Unbound no-sale opens` — so 21 + 1 + 13.
- *   * `day_summary` = **34**: its widest line is `Voids/comps/discounts NOT RECORDED` — 21 + 1 +
+ *   * `day_summary` = **34**: its widest line is `Voids/comps/discounts NOT TOTALLED` — 21 + 1 +
  *     12, a CONSTANT line rather than a money row, because `02-F24` names that group and nothing
  *     PROJECTS it. ⚠ **The reason quoted here was `26 §7`'s "`void/comp/discount.recorded` … have
  *     no payload schema at all", and that stopped being true**: `registry.ts` carries all three
  *     schemas and `apps/pos-electron` emits all three (`plans/v0.md` gap 1). What is still missing
  *     is the fold — `DEC-MONEY-010`'s gate condition (iii) is unmet, so `01-F30`'s `void_value`,
- *     `comp_value` and `discounts` terms do not exist and there is no number. Same width, same
- *     line, a true reason.
+ *     `comp_value` and `discounts` terms do not exist and there is no number. ⚠ **The WORD then
+ *     moved too (August 2026) and the derivation did not:** the line said `NOT RECORDED`, which
+ *     had become a false claim on a manager's slip, and it now says `NOT TOTALLED` — the same
+ *     twelve columns, chosen at that width precisely so this floor stays 34 and no `03-F49` number
+ *     moves. `RECORDED, NOT TOTALLED` was the clearer sentence at 21 columns and would have taken
+ *     the floor to 43.
  *
  *     ⚠ **THE FLOOR IS NOW A TIE AND THAT IS DELIBERATE (August 2026).** `02-F43`'s undated-sales
  *     bucket added `Undated sales so far` — 20 columns — so its money row is 20 + 1 + 13 = **34**
@@ -131,7 +135,12 @@ export type DocumentType = (typeof DOCUMENT_TYPES)[number];
  *     before it was written. `Undated orders so far` is 21 columns against an unbounded COUNT, the
  *     same unbounded shape `Shifts closed` has always had on this document.
  *     Its channel rows stay narrower: `Storefront` is the longest `ORDER_CHANNELS` label at 10,
- *     so 10 + 1 + 13 = 24.
+ *     so 10 + 1 + 13 = 24. ⚠ **And the undated bucket gained channel rows of its own (August
+ *     2026), which is the widest thing added to this document since the tie above and still does
+ *     not move it:** `Undated Storefront` is 18 columns, so 18 + 1 + 13 = **32**. It was checked
+ *     before it was written, exactly as the tie above was — a prefix one word longer (`Undated
+ *     sales Storefront`, 24) would have taken the floor to 38 and made an honesty fix into an
+ *     `03-F49` spec act.
  *
  * **`as const` is load-bearing, not decoration.** `03-F49` puts `min_columns` on the
  * `DocumentSpec` too, and two declarations of one number is the defect — so a spec SOURCES its

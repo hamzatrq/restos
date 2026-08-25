@@ -250,6 +250,18 @@ const DAY: DaySummaryData = {
   shifts_open: 1,
   undated_sales_paisa: 52_100,
   undated_orders: 1,
+  // The same Rs 521, decomposed. `phone` carries all of it because that is the shape the defect
+  // was measured in and because it is the DANGEROUS fixture: `sales_by_channel.phone` above is
+  // Rs 222, so an implementation that folded the undated money into the dated row, or that
+  // rendered one map where it meant the other, produces a different number here rather than the
+  // same one twice. A breakdown spread evenly over five channels would not separate those.
+  undated_by_channel: {
+    counter: 0,
+    phone: 52_100,
+    storefront: 0,
+    whatsapp: 0,
+    foodpanda: 0,
+  },
   reprint: false,
 };
 
@@ -518,12 +530,28 @@ describe("02-F43 — an unbound drawer event reaches the slip, because a slip is
     expect(text).toContain("Foodpanda Rs 555");
   });
 
-  it("02-F24: the group the FR names and 01 §4 cannot record is NAMED, not zeroed", () => {
-    // `26 §7`: "`void/comp/discount.recorded` … have **no payload schema at all**". So there is
-    // no number. `Voids Rs 0` on a night with twelve voids is the "logged but uncounted" shape
-    // `02-F43` forbids, moved onto paper; `00 §5.7` says the device reports what it knows.
+  it("02-F24: the group the FR names and no fold TOTALS is NAMED, not zeroed", () => {
+    // `00 §5.7` says the device reports what it knows. There is no number for this group —
+    // `merge.ts`'s three arms are projection-inert while `DEC-MONEY-010`'s gate condition (iii)
+    // is unmet — so `Voids Rs 0` on a night with twelve voids would be the "logged but uncounted"
+    // shape `02-F43` forbids, moved onto paper.
+    //
+    // ⚠ **THE ASSERTION THAT STOOD HERE READ `NOT RECORDED` AND IT WAS RETIRED IN AUGUST 2026,
+    // NOT WEAKENED — RECORDED IN FULL BECAUSE THE REASON IS THE POINT (`L3`).** Its title said
+    // "01 §4 cannot record" and its comment quoted `26 §7`'s *"`void/comp/discount.recorded` …
+    // have **no payload schema at all**"*. Both stopped being true: `packages/domain`'s registry
+    // has carried all three schemas since `plans/v0.md` gap 1 landed, `apps/pos-electron` emits
+    // all three with an actor and an approver, and `26 §7` itself was amended 2026-08-23 to say
+    // so. **A green test was therefore defending a claim the ledger had overruled**, and the claim
+    // was on a manager's own paper: reproduced on a real device store, a slip printed
+    // `Voids/comps/discounts NOT RECORDED` for a day holding one void, one comp and one discount.
+    // The GAP is unchanged and only its size is now stated correctly — the acts are recorded and
+    // this document cannot total them.
     const text = documentText(okOf(renderDay(DAY), "adjustments").blocks);
-    expect(text).toContain("Voids/comps/discounts NOT RECORDED");
+    expect(text).toContain("Voids/comps/discounts NOT TOTALLED");
+    // The stronger claim must not come back by any route: `NOT RECORDED` is a statement about the
+    // LEDGER and this document has no standing to make it.
+    expect(text).not.toContain("NOT RECORDED");
     expect(text).not.toMatch(/Voids[^\n]*Rs/);
   });
 
@@ -553,10 +581,26 @@ describe("02-F43 — an unbound drawer event reaches the slip, because a slip is
   });
 
   it("02-F43: the undated rows print at ZERO too, on the shift slip's stated reason", () => {
-    const quiet: DaySummaryData = { ...DAY, undated_sales_paisa: 0, undated_orders: 0 };
+    const quiet: DaySummaryData = {
+      ...DAY,
+      undated_sales_paisa: 0,
+      undated_orders: 0,
+      undated_by_channel: { counter: 0, phone: 0, storefront: 0, whatsapp: 0, foodpanda: 0 },
+    };
     const text = documentText(okOf(renderDay(quiet), "quiet undated").blocks);
     expect(text).toContain("Undated sales so far Rs 0");
     expect(text).toContain("Undated orders so far 0");
+    // The breakdown obeys the same rule as the aggregate and as the channel rows above it: a row
+    // that appears only on bad nights teaches readers to stop looking for it.
+    for (const label of [
+      "Undated Counter",
+      "Undated Phone",
+      "Undated Storefront",
+      "Undated WhatsApp",
+      "Undated Foodpanda",
+    ]) {
+      expect(text, `${label} vanished on a quiet night`).toContain(`${label} Rs 0`);
+    }
   });
 
   it("27-F58: the undated rows are INSIDE the sales group — no BLANK LINE before them", () => {
@@ -571,17 +615,33 @@ describe("02-F43 — an unbound drawer event reaches the slip, because a slip is
     // inserted one between the channel rows and these two changed the paper and passed the test.
     // That is the round-3 shape reproduced inside the guard written for it: the mechanism was
     // right and it was pointed one case away. Found by running the mutant, not by reading.
+    //
+    // ⚠ **EXTENDED (August 2026) WHEN `undated_by_channel` LANDED, AND THE PROPERTY IS UNCHANGED.**
+    // The five breakdown rows sit between the aggregate and the count, so the two positional
+    // assertions that read `last + 2` were re-pointed rather than relaxed: the sequence is still
+    // asserted row by row with no gap admitted anywhere in it, and the group is still asserted to
+    // CLOSE after the last of them. Nothing about "no blank line before the undated rows" moved.
     const lines = linesOf(okOf(renderDay(DAY), "grouping").blocks);
     const last = lines.findIndex((line) => line.text.startsWith("Foodpanda"));
     expect(last, "the channel rows are not on the paper at all").toBeGreaterThan(-1);
-    expect(lines[last + 1]?.text).toBe("Undated sales so far Rs 521");
-    expect(lines[last + 2]?.text).toBe("Undated orders so far 1");
+    const after = [
+      "Undated sales so far Rs 521",
+      "Undated Counter Rs 0",
+      "Undated Phone Rs 521",
+      "Undated Storefront Rs 0",
+      "Undated WhatsApp Rs 0",
+      "Undated Foodpanda Rs 0",
+      "Undated orders so far 1",
+    ];
+    after.forEach((text, i) => {
+      expect(lines[last + 1 + i]?.text, `row ${i} after the channel block`).toBe(text);
+    });
     // And the group DOES end after them — a break that never arrives is the opposite defect.
-    expect(lines[last + 3]?.blank, "the sales group never closes").toBe(true);
+    expect(lines[last + 1 + after.length]?.blank, "the sales group never closes").toBe(true);
   });
 
   it("03-F49: the undated money row TIES the floor at 34 columns and does not move it", () => {
-    // `min-columns.ts` derives `day_summary`'s 34 from `Voids/comps/discounts NOT RECORDED`, and
+    // `min-columns.ts` derives `day_summary`'s 34 from `Voids/comps/discounts NOT TOTALLED`, and
     // this row is 20 + 1 + 13 at the pinned eight-digit display bound — exactly 34. A label one
     // column wider would have made this a spec act on `03-F49` rather than an addition, so the
     // number is asserted rather than trusted to have been counted correctly once.
@@ -590,6 +650,73 @@ describe("02-F43 — an unbound drawer event reaches the slip, because a slip is
     const row = linesOf(out.blocks).find((line) => line.text.startsWith("Undated sales so far"));
     expect(row?.text).toBe("Undated sales so far Rs 99,999,999");
     expect(row?.columns).toBe(MIN_COLUMNS.day_summary);
+  });
+
+  // ── 02-F24's channel completeness — added August 2026 with `undated_by_channel` ──────────────
+  //
+  // PROVENANCE, on the four rows above's own terms: authored by the session that added the field,
+  // which is NOT the `24 §3` split (`20 §4.3` as amended by R66 — a new field on an existing
+  // document). Mutants and kills are in the session report. The rest of this file stays read-only,
+  // and the ONE pre-existing assertion this session changed is marked in place where it lives.
+
+  it("02-F24: a channel that took UNDATED money does not read Rs 0 with nothing beside it", () => {
+    // THE DEFECT VERBATIM, reproduced on a real device store before the fix: a phone order settled
+    // with no confirm (`01-F17` — a bill rung after the food went out) has no delivered branch
+    // stamp, so `01-F46` cannot date it. The slip printed `Phone Rs 0` five rows above `Undated
+    // sales so far Rs 893`. Both figures are true and together they tell a manager the phone took
+    // nothing on a night it took Rs 893 — while the ledger and the back office agreed exactly.
+    const text = documentText(okOf(renderDay(DAY), "undated by channel").blocks);
+    expect(text).toContain("Phone Rs 222");
+    expect(text).toContain("Undated Phone Rs 521");
+  });
+
+  it("01-F45: undated money is NAMED by channel and never DATED into that channel's row", () => {
+    // The fix must not become the other defect. A stamp this device does not hold is not one it
+    // may invent, so the money stays out of `sales_by_channel` — filing it under this business day
+    // would choose a day by whichever one happened to close next, and the figure is cumulative and
+    // branch-wide (`so far`), so it would be added again tomorrow.
+    const text = documentText(okOf(renderDay(DAY), "not folded in").blocks);
+    // Rs 222 dated + Rs 521 undated. Rs 743 anywhere on this paper is the two added together.
+    expect(text).not.toContain("Rs 743");
+  });
+
+  it("03-F49: the widest breakdown row is 32 columns — inside the floor, which does not move", () => {
+    // `Undated Storefront` is 18 columns, so 18 + 1 + 13 = 32 at the pinned eight-digit display
+    // bound, against `day_summary`'s 34. Asserted rather than counted once in a comment: a prefix
+    // one word longer would have taken the document to 38 and made an honesty fix into a spec act.
+    const wide: DaySummaryData = {
+      ...DAY,
+      undated_by_channel: { ...DAY.undated_by_channel, storefront: 9_999_999_900 },
+    };
+    const out = okOf(renderDay(wide, WIDE), "widest breakdown row");
+    const row = linesOf(out.blocks).find((line) => line.text.startsWith("Undated Storefront"));
+    expect(row?.text).toBe("Undated Storefront Rs 99,999,999");
+    expect(row?.columns).toBeLessThanOrEqual(MIN_COLUMNS.day_summary);
+  });
+
+  it("02-F42: the breakdown is EXHAUSTIVE over the closed channel set, in the same order", () => {
+    // A partial map cannot tell "no undated phone sales" from "the phone figure was never
+    // computed" — `sales_by_channel`'s own contract, one field down — and reading the two blocks
+    // as a pair only works if they list the same channels in the same order.
+    const lines = linesOf(okOf(renderDay(DAY), "exhaustive").blocks).map((line) => line.text);
+    const dated = ["Counter", "Phone", "Storefront", "WhatsApp", "Foodpanda"].map((label) =>
+      lines.findIndex((text) => text.startsWith(`${label} Rs`)),
+    );
+    const undated = ["Counter", "Phone", "Storefront", "WhatsApp", "Foodpanda"].map((label) =>
+      lines.findIndex((text) => text.startsWith(`Undated ${label} Rs`)),
+    );
+    expect(
+      dated.every((i) => i > -1),
+      "a dated channel row is missing",
+    ).toBe(true);
+    expect(
+      undated.every((i) => i > -1),
+      "an undated channel row is missing",
+    ).toBe(true);
+    // Same order in both blocks, and the whole undated block sits below the whole dated one.
+    expect(dated).toEqual([...dated].sort((a, b) => a - b));
+    expect(undated).toEqual([...undated].sort((a, b) => a - b));
+    expect(Math.min(...undated)).toBeGreaterThan(Math.max(...dated));
   });
 });
 

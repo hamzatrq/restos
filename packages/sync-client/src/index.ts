@@ -70,7 +70,15 @@ export type {
 // order total from the engine's own derivation rather than summing `json_lines` themselves
 // (26 §8 / 01-F34, and the T-01-11 ruling that deleted the Auditor's mirror of this sum:
 // two implementations of one total is how a money anomaly becomes a false finding).
-export { billedEffectiveFromJsonLines, billedLinePaisa } from "./folds/merge.js";
+// `lineExited` rides the same door and for a sharper version of the same reason: `01-F30`'s
+// "exited lines excluded" is a fold rule, and the two DOCUMENTS that need it — the kitchen chit
+// and the customer's receipt — were each deriving it from the NUMBER above, which collapses
+// "voided", "free" and "zero quantity" onto one `0`. See the declaration.
+export {
+  billedEffectiveFromJsonLines,
+  billedLinePaisa,
+  lineExited,
+} from "./folds/merge.js";
 export { electHub } from "./hub-election.js";
 export {
   createLanAdmission,
