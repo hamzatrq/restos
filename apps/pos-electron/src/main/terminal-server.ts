@@ -128,22 +128,32 @@ const MIME: Readonly<Record<string, string>> = {
  * item, or the quantity. `01-F1` makes whatever lands permanent, so the thing that must be
  * authenticated is the ACT, not the connection.
  *
- * The raw request bytes are hashed rather than a re-serialization of the parsed object: two JSON
+ * The raw request bytes are signed rather than a re-serialization of the parsed object: two JSON
  * encoders disagree about key order and number formatting, and a signature over a *different*
  * string than the one the tablet signed fails closed but for the wrong reason — which is a bug
  * that looks exactly like an attack.
+ *
+ * ⚠ **THIS RETURNS THE BYTES, NOT A DIGEST OF THEM, AND `04-F36` (b) IS WHAT THAT COST.** It used
+ * to return `sha256(…)` and hand that to a verification with a NULL algorithm, which on Node
+ * applies the key's default digest and so hashed a second time. The pad cannot reach that shape
+ * from any direction: `crypto.subtle.sign({ ECDSA, SHA-256 }, key, bytes)` hashes its input
+ * exactly once, and WebCrypto offers no way to pre-hash. So the till verified `sha256(sha256(x))`
+ * against a signature over `sha256(x)`, every signed request was `401 not admitted`, and no tablet
+ * had ever made an authenticated request. **One byte string, one hash, named at both ends.**
  */
 const signedBytes = (nonce: string, rawBody: Buffer): Buffer => {
   const n = Buffer.from(nonce, "utf8");
   const length = Buffer.alloc(4);
   length.writeUInt32BE(n.length);
-  return createHash("sha256").update(length).update(n).update(rawBody).digest();
+  return Buffer.concat([length, n, rawBody]);
 };
 
 export const createTerminalServer = (deps: TerminalServerDeps): TerminalServer => {
   const enrolments = new Map<string, Enrolment>();
   const codes = new Map<string, number>();
   const nonces = new Map<string, { terminal_id: string; expires: number }>();
+  /** `04-F36` (a) — see `admit`'s catch. Latched: one line per till, not one per request. */
+  let verifyFaultLogged = false;
 
   const mintEnrolmentCode = (): string => {
     // Six bytes of base32-ish text: short enough to read across a counter, long enough that
@@ -223,16 +233,43 @@ export const createTerminalServer = (deps: TerminalServerDeps): TerminalServer =
 
     try {
       const key = createPublicKey({ key: enrolment.spki, format: "der", type: "spki" });
+      /**
+       * `04-F36` (a) — **the digest is NAMED, because a defaulted one is a different function on
+       * the two platforms.** `null` here meant *this key's default digest*, which Node's OpenSSL
+       * supplies and Electron's BoringSSL refuses outright (`ERR_OSSL_EVP_NO_DEFAULT_DIGEST`).
+       * The suites run on the first and the till runs on the second, so the call that every
+       * assertion in this repo exercised was not the call the product made.
+       *
+       * `ieee-p1363` stays: WebCrypto emits the raw `r||s` pair and Node's default is DER.
+       */
       return verifySignature(
-        null,
+        "sha256",
         signedBytes(nonce, raw),
-        //
         { key, dsaEncoding: "ieee-p1363" },
         sig,
       )
         ? terminal_id
         : null;
-    } catch {
+    } catch (cause) {
+      /**
+       * `04-F36` (a) — **a fault of ours may not leave by the same door as a rejected credential.**
+       * A signature that does not check RETURNS false; reaching here means the primitive could not
+       * run at all, and the bare `catch { return null; }` that used to stand here is what turned
+       * a platform defect into `401 not admitted` on every request, for ever, with nothing on the
+       * boot line, the console or the glass to say so.
+       *
+       * Still `null`: gate 2 fails CLOSED, and `04-F22` (b)'s caller must not learn which check
+       * failed. Logged ONCE, latched, because this socket is open to the shop Wi-Fi and a line per
+       * request is a lever a stranger can pull — and once is all a fault of this kind needs, since
+       * it is a property of the build rather than of the request.
+       */
+      if (!verifyFaultLogged) {
+        verifyFaultLogged = true;
+        const detail = cause instanceof Error ? cause.message : String(cause);
+        deps.log(
+          `terminal: signature verification could not RUN — every pad is refused until this is fixed: ${detail} (04-F36 (a))`,
+        );
+      }
       return null;
     }
   };
