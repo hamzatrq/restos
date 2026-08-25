@@ -1304,6 +1304,104 @@ tidy-up that folds it into `sync.ts` will be green.
   `27-F5`'s own failure mode, and the `M4` row of the `shift_id` matrix measured that the plausible
   safe repair — gating settlement on a precondition — kills six existing `02-F37` tests that exist
   precisely to stop an `01-F17` violation. A finding for the `02-F13`/`02-F37` owner.
+## ✅ THREE PLACES THE PAPER CONTRADICTED THE LEDGER, AND THE LEDGER WAS RIGHT (August 2026)
+
+Reproduced against a REAL `openStore`, the real fold and the real ESC/POS encoder BEFORE anything
+changed. `main/__acceptance__/paper-vs-ledger.test.ts` is that rig, kept — and it uses a real store
+rather than the stub stores its neighbours use for a reason worth stating: **all three defects live
+at a seam between a fold and a document, and a stub store is a hand-copy of the fold's answer.** It
+can be written to say whatever the test wants and therefore cannot witness the disagreement. That
+is `L8` in the shape this file keeps recording: the modules were correct, and nothing asserted that
+the application reached them with the right facts.
+
+**1. A VOIDED LINE WAS SENT TO THE KITCHEN AND COOKED.** `owedChits` walked every entry of
+`json_lines` unconditionally and `LineCell` declared no `states` field, so the print path
+**structurally could not see a void**. Measured: the fold row carried
+`"l-naan": {"states":["voided"], …}` while the transport got `TANDOOR 13:00 / 1 Naan`. `02-F8`'s
+two ways of taking a line off an order produced two different chits — a pre-confirm
+`order.line_removed` is tombstoned out of `json_lines` by the fold and never reaches the walk.
+Closed with the predicate this file had already SIZED against `packages/sync-client` (`lineExited`),
+which also closes the receipt hole `billedOnPaper`'s own comment recorded: the price arm
+short-circuited before the exit was consulted, so a VOIDED line at `unit_price_paisa: 0` printed on
+a customer's copy. **What is NOT closed and is named rather than left to look intentional
+(`L11`): a line voided AFTER its chit printed.** `03-F55` records what a job committed to paper and
+nothing un-commits it; cancelling a dish already sent needs a document `03` does not specify. This
+walk stops an exited line being SENT and never recalls one that WAS.
+
+**2. THE DAY SUMMARY CONTRADICTED THE DAY ROW IT WAS ASSEMBLED FROM, in three places.**
+- **`Deposit Rs 0` against `deposit_paisa: 610200`.** `02-F24` is one act and two events, the
+  ticket hangs off the completed append of `day.closed`, and `CashSurfaces.tsx` emitted them in the
+  FR's written order — so the printer read a `days` row that was **one append behind its own act**,
+  two rows from `Counted cash Rs 6,102`. The deposit is appended FIRST now, making the trigger the
+  LAST event of the act. Moving the trigger onto `cash.deposit_recorded` instead was refused in
+  place: `day.closed` is the event that makes a day summary exist, and a `day.closed` from any
+  other writer would then print nothing. **Whoever adds a THIRD event to this act inherits the
+  hazard** — every fact the document prints must be appended before the event that fires it.
+- **`Voids/comps/discounts NOT RECORDED`** on a day holding a void, a comp and a discount, each
+  with an actor and an approver. True while `01 §4` carried no such event; **false since the
+  `plans/v0.md` gap-1 emitters shipped**, and still on the paper. It reads `NOT TOTALLED` — the
+  same twelve columns, so `MIN_COLUMNS.day_summary` stays 34 and no `03-F49` floor moves.
+- **`Phone Rs 0` five rows above `Undated sales so far Rs 893`.** The undated bucket surfaced the
+  money and not the CHANNEL. It is broken down per channel now, exhaustive over `02-F42`'s closed
+  set. **The money is NAMED, never DATED** (`01-F45`): it stays out of `sales_by_channel`, because
+  filing it under this business day would choose a day by whichever one happened to close next and
+  the figure is cumulative. The root fix — a settlement branch stamp on `OpenOrderRow`, which would
+  date these orders properly and close `Date NOT RECORDED` on their receipts too — is a
+  `packages/sync-client` cell-shape change under `26 §8`'s oracle and is **NOT taken here**.
+
+**3. NOT FIXED, AND THE CORPUS IS WHY.** A comped line prints as an ordinary sold line and a
+discount appears nowhere on the receipt. `receipt-document.ts` already rules that: `merge.ts`'s
+comp and discount arms are projection-inert (`DEC-MONEY-010` gate (iii)), so neither act moves
+`billed_total`, the customer WAS charged in full, and a `Comp Rs 180` row above an unchanged total
+is the **second, implied total `16-F33` (c) refuses by name** for a settled receipt. The cart's
+silence is the same blocker: `Cart.tsx` and `Counter.tsx` both record that there is no projected
+per-line comp to read and that a device-local marker is refused because it would die on reload,
+disagree with every other till, and mean *"money came off"* beside a bill that still carries it.
+
+### Mutation matrix — control **pos-electron 1514/1514**, escpos 422/422, sync-client 1038 pass / 1 known-red
+
+In-tree, `sha256`-verified restore after every row, `tsc --noEmit` clean under every mutant, full
+package suites throughout. Kills are ABOVE that control. **The right-hand columns are the point.**
+
+| # | mutant (exactly one branch) | pos | escpos | sync |
+|---|---|---|---|---|
+| M1 | **THE DEFECT VERBATIM** — the KOT walk loses its exit test | **3** | 0 | 0 |
+| M2 | **THE RECEIPT HALF** — `billedOnPaper` back to its pre-fix expression | **1** | 0 | 0 |
+| M5 | `day_summary` says `NOT RECORDED` again | **1** | **1** | 0 |
+| M6 | **THE SEAM, SUPPLIED WITH A STUB** — the caller sends an all-zero breakdown | **2** | 0 | 0 |
+| M7 | **THE DOCUMENT** — the breakdown rows are never rendered | **2** | **6** | 0 |
+| M8 | **THE OVER-CORRECTION** — undated money DATED into its channel row (`01-F45`) | **4** | 0 | 0 |
+| M9 | **THE DEFECT VERBATIM** — the day close appends in the pre-fix order | **1** | 0 | 0 |
+| M12b | `EXITED` widened to `served` — the CROSS-PLANE drift | **1** | 0 | **1** |
+| NC | **NEGATIVE CONTROL** — both predicates rewritten as early-return chains | **0** | **0** | **0** |
+
+**M9's column is the number to remember and it is `L7` exactly: the emission order that printed
+`Deposit Rs 0` is invisible to all 1,513 other tests**, including `cash-tab.dom.test.tsx`'s own C34
+day-close test — which asserts that BOTH events land and against which day, with `only(...)`
+lookups that are order-agnostic by construction. That file is a real `24 §3` oracle ("authored from
+spec text only, by a session that does not implement it") and was not edited; the one property it
+does not pin lives in `renderer/day-close-order.dom.test.tsx` instead.
+
+**M6 against M7 is the `L7` pair on the breakdown**: the supply made inert (an all-zero map is a
+SUPPLY, the rail's documented blind spot) and the document made silent. Neither subsumes the other,
+and M7's escpos column includes a **pre-existing** kill — `render.test.ts`'s `03-F36` data-axis
+control, *"every leaf of the shipped example is on paper"*, which defended the new field unprompted.
+
+**M8 is the fix becoming the other defect** and is the row to re-run after any change to that walk:
+folding undated money into its dated channel row satisfies every "the channel is named" assertion
+and reds four, three of them **pre-existing** `cash-slip-printing.test.ts` assertions that already
+owned `01-F46`'s binding.
+
+**M5's two columns are one defect on two planes.** The word is `packages/escpos`'s and the
+document is assembled here, so the claim had to be retired in both suites; each is invisible to the
+other package.
+
+**NC is what makes every red row mean anything:** a genuine restructuring of both predicates under
+test reddens nothing and reproduces the control's three numbers exactly.
+
+**⚠ OWED — commandment 10.** `packages/sync-client` and `packages/escpos` are `20 §4.4` protected
+paths and an **adversarial review in a separate agent context** has not been run on this diff.
+
 ## ✅ `01-F33`'s CLOSING ACT FINALLY HAS A PRODUCER — `01-F63` (August 2026)
 
 `order.settlement_closed` had a payload schema in `packages/domain`, a fold arm and a **ratified

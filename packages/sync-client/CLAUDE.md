@@ -40,6 +40,66 @@ frames"* — which is false on a phone, because zstd is `node:zlib`. Uncorrected
 compression and the device connects, hellos, reports `connected: true` and then **silently receives
 nothing for ever**. Reproduced against a real `ws` server before the fix.
 
+## `lineExited` — `01-F30`'s exit rule, exported so more than MONEY can ask it (August 2026)
+
+The guard `states.length === 1 && EXITED.has(states[0])` was the first line of `billedCellPaisa`
+and lived nowhere else, so the only question a host app could ask about an exit was *how much is
+this line worth* — and `billedLinePaisa` answers that with a **NUMBER**, which collapses three
+different facts onto one `0`: **exited**, **free** (`01-F60`'s explicit zero) and **zero
+quantity**. Two shipping documents read that zero as their exit test:
+
+* `apps/pos-electron`'s KOT walk had **no exit test at all** (`LineCell` declared no `states`),
+  so a line voided before *Send to kitchen* was printed and cooked. Reproduced against a real
+  device store: `json_lines` carried `"l-naan": {"states":["voided"], …}` while the bytes handed
+  to the transport read `TANDOOR 13:00 / 1 Naan`. **`02-F8`'s two ways of taking a line off an
+  order therefore produced two different chits** — a pre-confirm `order.line_removed` is
+  tombstoned out of `json_lines` here and never reaches the walk at all.
+* the receipt's `billedOnPaper` was `unit_price_paisa === 0 || billedLinePaisa(cell) > 0`, whose
+  FIRST arm short-circuits **before** the exit is consulted, so a VOIDED line priced at zero
+  printed on a customer's copy. `printing.ts` had recorded that hole and SIZED this fix.
+
+`lineExited` is that one declaration; `billedCellPaisa` calls it rather than restating it, so the
+money and both documents cannot disagree (`02-F45`). **It takes `Pick<BilledLineCell, "states">`
+and not the whole cell — `03-F32` reaching one package over:** the kitchen chit's data model has
+no price in it by rule, so a signature demanding `unit_price_paisa` would force its one
+price-free caller to fabricate a zero. **It deliberately says nothing about a CONTESTED terminal
+set**: `CONTESTED_LINE_BILLABLE` is a money POLICY and a cook has no business reading it.
+
+**⚠ THE EXIT RULE NOW EXISTS IN A THIRD PLACE AND THE PLANE BOUNDARY IS WHY.** `Counter.tsx`'s
+`offBillWord` decides whether a cart row reads `VOIDED  Rs 0`, and the renderer may not import
+this package (`18 §9`, commandment 5), so it restates the shape. Its own comment claimed the two
+*"cannot disagree"* — a protection asserted in prose (`L11`). A TEST may cross the boundary where
+production code may not, so `apps/pos-electron/src/renderer/exit-rule-agreement.dom.test.tsx`
+sweeps every single state and every contested pair `01 §4` can produce and requires the two to
+answer identically. **Measured: widening `EXITED` to include `served` reds that file and NOTHING
+else in `apps/pos-electron` (1 of 1,517).** ⚠ Its first mutant used a state outside
+`ORDER_LINE_STATES` and **survived all 1,517** — the round-3 shape reproduced inside the guard
+written for it.
+
+### Mutation matrix — control **sync-client 1038 pass / 1 known-red**, escpos 422/422, pos-electron 1514/1514
+
+In-tree, `sha256`-verified restore after every row, `tsc --noEmit` clean under every mutant
+(a mutant that does not compile is a type error wearing a behavioural costume), full package
+suites throughout. Kills are ABOVE that control.
+
+| # | mutant (exactly one branch) | sync | escpos | pos |
+|---|---|---|---|---|
+| M1 | **THE SEAM / THE DEFECT VERBATIM** — the KOT walk loses its exit test | 0 | 0 | **3** |
+| M2 | **THE RECEIPT HALF** — `billedOnPaper` back to its pre-fix expression | 0 | 0 | **1** |
+| M3 | a CONTESTED set reads as exited (`01-F31` broken) | **1** | 0 | **0** |
+| M4 | TERMINAL read as EXITED — `served` stops billing | **1** | 0 | **0** |
+| M12b | `EXITED` widened to `served` — the CROSS-PLANE drift | **1** | 0 | **1** |
+| NC | **NEGATIVE CONTROL** — both predicates rewritten as early-return chains | **0** | **0** | **0** |
+
+**M1 and M2 are two halves of one defect and neither subsumes the other** — one cooks a dish
+nobody is charged for, the other puts it on a customer's paper — and each is invisible to the
+other's assertion. **M3's and M4's `pos` columns are the honest limit:** no fixture in
+`apps/pos-electron` bills a `served` line or carries a contested pair, so the fold-level
+assertions in `__acceptance__/line-exited.test.ts` are the only guard on those two, which is
+where `26 §8` puts them. **M4's `sync` column is a finding about the pre-existing suite:** making
+`billedCellPaisa` treat every terminal state as an exit — which zeroes every served line's bill —
+was killed by the new file and by **nothing** among the 1,028 tests that already existed.
+
 ## `catalog-fetch.ts` dropped the price and the station, and 579 green tests could not see it
 
 **Found by RUNNING the four-process stack, not by reading anything** (August 2026 — the runbook is
