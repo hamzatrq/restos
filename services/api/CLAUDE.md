@@ -803,3 +803,51 @@ WORTH KEEPING.**
   consumption is the one term a leak can move: BRANCH_B now sells 20 karahis, and leaked in they turn
   a 1 kg shortfall into a 4 kg surplus. Three layers of "the mechanism was aimed one case away" in
   one section.
+
+
+## `14-F43`'s config surface — and THE SEAM MUTANT THAT SURVIVED 0 OF 418
+
+`config.read` / `config.save`, both `authorized("config.manage")` (`14-F43`, **owner-only**), over
+a `ConfigPlane` port with a REFUSING fallback. `01-F87` is the carrier; this plane owns who may
+write, whose org it lands in, and `01-F87` (a)'s one `config.changed` per changed KEY.
+
+- ⚠ **`14-F43` HAD TO BE WRITTEN BEFORE THIS ROUTER COULD EXIST** — the sixth instance of the shape
+  `02-F46`, `02-F47`, `14-F30`, `14-F39` and `10-F34` each record: `assertEveryProcedureIsGated`
+  refuses at boot to host a procedure naming no action, and `PERMISSION_ACTIONS` carried nothing
+  about configuration. `00 §7` (f) could therefore say the back-office write *"cannot be built or
+  booted"*, which is a stronger claim than *unbuilt*.
+- **The fallback REFUSES and is not a memory stub, and on this surface that matters more than
+  anywhere else in the file**: `{ version: 0, entries: [] }` is **the true answer for every org on
+  day one** (`01-F87` (b)), so a stub is indistinguishable from a correct implementation BY VALUE
+  and would stay indistinguishable after the plane landed.
+- **The artifact goes first, the history second** — the opposite ordering to `devices.revoke` and
+  for `publishEdits`' reason rather than that one: `01-F87` (a) makes the ledger row carry the
+  artifact version it produced, so the version must exist before the record can name it.
+
+### ⚠ THE SEAM MUTANT SURVIVED — 0 of 418 — AND THE FIX WAS TO MOVE THE ASSERTION
+
+`__acceptance__/config-plane.test.ts` builds its own host with
+`createApiServer({ config: createGatewayConfigPlane(…) })`. Swapping `server.ts`'s
+`createGatewayConfigPlane(link)` for `unconfiguredConfigPlane()` left **every one of its 418 tests
+green**, because a test that supplies the wiring cannot observe whether the product supplies it —
+this wave's named defect reproduced inside the fix for it, exactly as `journey-catalog.test.ts`
+records of its own first draft, and **only mutation found it.**
+
+The seam assertion now lives in `device-seam.test.ts`, which drives the DECLARED `scripts.start`
+out of process against a fake gateway and asks what the PEER received. Re-measured against a
+control of **420/420**:
+
+| # | mutant (exactly one branch) | killed |
+|---|---|---|
+| C7 | **`server.ts` supplies `unconfiguredConfigPlane()`** | **2** |
+| C7b | the QUIETER twin — a memory stub answering `{version, entries: []}` and reporting success | **2** |
+| P1 | **`config.manage` widened to `branch_manager: "allow"`** (OUT-OF-TREE, `permissions.ts` untouched) | **1** |
+
+**P1's single kill is the honest number and it is the assertion this package has twice measured as
+MISSING.** `config.save` states no `branch_id`, so a branch-scoped subject is refused by scope
+resolution *before any cell is read* — which is exactly why `A11` (`device.manage`) and `E4`
+(`export.request`) both passed with their cells widened. `§A3` uses an **org-wide** branch manager,
+the only subject shape that reaches the cell, and `§A2`'s title says in terms that it is about
+scope and is NOT evidence about the cell.
+
+The full matrix across all four packages is in `packages/domain/CLAUDE.md`.

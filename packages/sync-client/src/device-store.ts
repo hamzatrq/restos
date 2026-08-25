@@ -31,6 +31,7 @@ import {
   type TimeBasis,
 } from "@restos/domain";
 import { CATALOG_SCHEMA, type CatalogStore, createCatalogStore } from "./catalog.js";
+import { CONFIG_SCHEMA, type ConfigStore, createConfigStore } from "./config.js";
 import {
   type CustomerFileState,
   type CustomerRow,
@@ -261,6 +262,38 @@ export type DeviceStore = {
   /** Device catalog — reference data, display only (01-F52..F56). Never read by a fold. */
   readonly catalog: CatalogStore;
   /**
+   * `01-F87` — the org's LAYER-2 CONFIGURATION (`00 §7`): tax cells, charge-rounding granularity,
+   * approval thresholds. The fourth `01-F75` resource, on the same `01-F21` chain as the catalog
+   * and the staff registry.
+   *
+   * **Never read by a fold, and here that is a rule about EVERY key rather than about this
+   * artifact.** `01-F52` bans catalog state as a fold input; `01-F87` bans configuration *"for any
+   * key"*, because a projection that read one would become a function of `(delivered set, artifact
+   * version)` — two tills at different versions projecting different money from an identical event
+   * set. `01-F87` records that `01-F34`'s relabel-and-clock-injection property **structurally
+   * cannot catch that**, so the enforcement is structural: the value lives behind
+   * `@restos/domain/config` (which no fold imports), and `merge.ts` lists `config.changed` in
+   * `NON_FOLD_TYPES` so a fold arm for the event is a compile error.
+   *
+   * Every read is `00 §7` (e)'s `{ value, source }` — a caller that could get a bare value could
+   * not say whether the owner ever set it, which is the honesty `00 §5.7` requires and which a
+   * value that never arrived cannot show as staleness.
+   *
+   * ⚠ **`keysOnDefault()` IS `01-F87` (b)'s HEALTH MINIMUM AND NO SHIPPING SURFACE READS IT YET —
+   * stated here because this is where a grep for it lands, and because `pnpm seams:check` is blind
+   * to it by construction** (a method on a returned object is neither a value export nor an
+   * optional member of an options bag — the same blind spot `customers()` above spent a release
+   * inside). The FR requires the device's health surface to name every key still on its declared
+   * default, so an operator can tell *the owner set this* from *the owner never has*; the surface
+   * is the honesty strip that already carries `CatalogHealth` and `PanelHealth`, and the chip is
+   * owed there alongside the four `01-F56` refusal slots `cloud-session.ts` records as owed for the
+   * same reason. ⚠ It was briefly reported through `CloudSessionStatus` instead, and that was
+   * wrong in a way worth knowing: it made a per-second `reachability()` poll do a SQLite read, and
+   * it gave `status()` a store dependency every other slot on that type does without. See the note
+   * above `CloudSessionStatus`.
+   */
+  readonly config: ConfigStore;
+  /**
    * Synced staff credentials + role assignments (01-F26/F28) — reference data on the same
    * `01-F21` chain as the catalog, and never read by a fold for the same reason. This is what
    * makes offline PIN verification possible after a reboot with the WAN down.
@@ -359,6 +392,7 @@ export type DeviceStore = {
 
 const SCHEMA = `
 ${CATALOG_SCHEMA}
+${CONFIG_SCHEMA}
 ${STAFF_SCHEMA}
 ${ROSTER_SCHEMA}
 ${LAN_CREDENTIAL_SCHEMA}
@@ -596,6 +630,13 @@ export const createDeviceStore = (options: {
   // event permanent and therefore unrotatable. 01-F61: the PIN failure counter is durable
   // because an in-memory one is defeated by relaunching the app.
   const staff = createStaffRegistry(db as never);
+  // `01-F87`: the fourth `01-F75` resource on the same reference-data chain — and the one that is
+  // separated from the ledger by TWO rules rather than one. `01-F52`'s *"never an input to any
+  // fold"* is the catalog's; `01-F87` says the same of configuration FOR ANY KEY, because a
+  // renamed tender, an edited rate or a moved threshold would otherwise change a projected value.
+  // Nothing below hands this store to `applyFold`, and nothing can: `merge.ts` lists
+  // `config.changed` in `NON_FOLD_TYPES`, so a fold arm for it is a compile error.
+  const config = createConfigStore(db as never);
   // 01-F74: same chain again, and durable for the reason the field's own note gives.
   const lanRoster = createLanRoster(db as never);
   const pinAttempts = createPinAttemptStore(db as never);
@@ -1445,6 +1486,7 @@ export const createDeviceStore = (options: {
     },
 
     catalog,
+    config,
     staff,
     lanRoster,
     pinAttempts,

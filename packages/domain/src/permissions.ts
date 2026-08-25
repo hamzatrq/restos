@@ -246,6 +246,34 @@ export const PERMISSION_ACTIONS = [
   // unexplained usage, which is the surface `10-F19` exists to keep away from the people a gap
   // would otherwise accuse.
   "report.stock_view",
+  // ── Layer-2 configuration (`14-F43`, which decides it alone). ──────────────────────────
+  // Appendix A has no configuration, setting, rate or threshold row either, so before `14-F43`
+  // this matrix could not answer a request about `00 §7` layer 2 at all — and `services/api`'s
+  // `assertEveryProcedureIsGated` refuses at BOOT to host a procedure naming no action, so R55's
+  // tax cells, R60's commission and R63's thresholds were **unbuildable and unbootable**, not
+  // merely unbuilt. Sixth instance of the shape `device.manage` introduced, named rather than
+  // pointed at (`user.manage`'s own note records why "directly above" goes wrong as this list
+  // grows).
+  //
+  // **OWNER-ONLY, and `14-F43` records it as a PINNED INTERPRETATION rather than a
+  // transcription.** R63's words are *"the owner or ops lead"* and `ROLES` is
+  // `cashier · branch_manager · storekeeper · owner`: **there is no ops lead**, and minting one —
+  // or reading *ops lead* onto `branch_manager` — would answer doc 14 §9.1's open question
+  // (*"whether managers get a scoped back-office slice on phones (thresholds, users)"*) by
+  // accident. The failure directions are not symmetric: widening later is additive and safe,
+  // while the wrong guess in the permissive direction lets one branch set the tender set, a tax
+  // rate or an approval threshold for the whole org, and `01-F1` makes every order settled under
+  // it permanent.
+  //
+  // **ONE action and `14-F30`'s test was RUN rather than assumed** (`14-F43`): the candidate
+  // splits are one action per settings group (tenders · tax cells · commission · thresholds) and
+  // read-versus-write, and under the cells below **every cell of every candidate half is
+  // identical**, so a split would differ in nothing an implementation could observe. ⚠ The named
+  // trigger for the split is sharper here than anywhere else in doc 14, because §9.1 names the
+  // axis in terms: if any role is ever widened into this block, the THRESHOLD group separates
+  // from the tender and tax groups **in the same change as the widening**, never after it — a
+  // manager who may raise her own paid-out ceiling has configured `05-F19`'s approval gate away.
+  "config.manage",
 ] as const;
 
 export type PermissionAction = (typeof PERMISSION_ACTIONS)[number];
@@ -564,6 +592,34 @@ const VERDICTS: Readonly<Record<VerdictAction, Readonly<Record<Role, AuthOutcome
   // self-scope arm on `02-F38`'s `requested_by_user_id` precedent, and inventing either now would
   // be commandment 2 (`01-F79` records the same gap from the protocol side).
   "user.manage": {
+    cashier: "deny",
+    branch_manager: "deny",
+    storekeeper: "deny",
+    owner: "allow",
+  },
+  // No Appendix A row — `14-F43` decides it, and like `14-F30` and `14-F39` above it records
+  // itself as a PINNED INTERPRETATION, CONTESTABLE, rather than a transcription. See the
+  // declaration in `PERMISSION_ACTIONS` for the full argument; the two facts that decide the
+  // cells are that **`ROLES` has no ops lead** to give R63's *"the owner or ops lead"* to, and
+  // that doc 14 §9.1 leaves a manager's back-office reach explicitly undecided.
+  //
+  // **`deny`, not `escalate`**, for `device.manage`'s and `user.manage`'s stated reason: `02-F20`
+  // enumerates the escalating acts and configuration is not among them, and `services/api`
+  // refuses `escalate` anyway because the cloud plane cannot collect a second credential.
+  //
+  // ⚠ **What this row gates is wider than one screen and `14-F43` states it as a reading:** every
+  // layer-2 **write** doc 14 specifies that no more specific action already covers —
+  // `14-F16`..`14-F19`, `14-F21`..`14-F23` and `14-F44`..`14-F47`. The specific actions keep their
+  // surfaces unchanged (`catalog.edit_menu_prices`, `catalog.edit_recipes`, `device.manage`,
+  // `user.manage`), `14-F20` is a read, and `14-F25`'s export schedule sits beside
+  // `export.request`. That reach applies `14-F30`'s *"a later act added here inherits it
+  // deliberately rather than by omission"* across a block wider than one heading, which is the
+  // clause to dispute if this row is ever argued.
+  //
+  // The org axis is `01-F71`'s and is not this row's: the org comes from the authenticated
+  // subject and never from the request, so an owner of one org cannot reach another's rates
+  // through a procedure this action allows.
+  "config.manage": {
     cashier: "deny",
     branch_manager: "deny",
     storekeeper: "deny",

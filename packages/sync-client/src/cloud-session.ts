@@ -28,6 +28,7 @@ import type {
   CloudTransportHandlers,
 } from "@restos/sync-protocol/transport";
 import { type CatalogFetch, createCatalogFetch } from "./catalog-fetch.js";
+import { type ConfigFetch, createConfigFetch } from "./config-fetch.js";
 import { type DeviceStore, DivergentDuplicateError, type PageItem } from "./device-store.js";
 import { createDeviceRosterFetch, type DeviceRosterFetch } from "./roster-fetch.js";
 import { createStaffFetch, type StaffFetch } from "./staff-fetch.js";
@@ -155,7 +156,46 @@ export type CloudSessionStatus = {
    * otherwise write.
    */
   device_roster_refusal: { reason: string; have_version: number } | null;
+  /**
+   * `01-F87` (b) — the `config` artifact's refusal slot, and the one whose `malformed` reason has
+   * the widest blast radius of the four: it means the org's WHOLE configuration was refused over
+   * one bad key, so this till is charging on declared defaults.
+   *
+   * ⚠ Same honest state as `device_roster_refusal` directly above: produced correctly by the
+   * response arm, and its CONSUMER is owed — one honesty-strip chip per artifact on
+   * `catalogRefusal`'s shipped chain (`Uplink` → `GatewayDeps` → `deviceState()`). Stated rather
+   * than claimed, on this file's own recorded lesson about comments that promise a surface.
+   */
+  config_refusal: { reason: string; have_version: number } | null;
 };
+
+/**
+ * ⚠ **`00 §7` (e)'s DEFAULTED-KEY LIST IS DELIBERATELY NOT ON THIS TYPE, AND THE FIRST DRAFT PUT
+ * IT HERE — recorded rather than quietly removed, because the reason generalises to every future
+ * field on this bag.**
+ *
+ * `01-F87` (b) requires the device's health surface to name every key still on its declared
+ * default (*"a value that never arrived has no age to show"*). That is a fact about **what this
+ * DEVICE HOLDS**, not about what this CONNECTION knows — and `status()` reports the second. Two
+ * things went wrong the moment the two were conflated, and only one of them was a type error:
+ *
+ *   1. **`status()` acquired a STORE dependency it never had.** Every other slot on this type is a
+ *      session-local (`connected`, `blocked`, the four refusals); adding `store.config.…` made a
+ *      partial-store host a runtime `TypeError`, which is how `apps/pos-electron`'s
+ *      `uplink-push-seam.test.ts` found it — a suite that hands `createCloudSession` exactly the
+ *      store members the session is supposed to need.
+ *   2. **It put a SQLite read plus a per-key `safeParse` on a ONE-SECOND POLL.** `main/sync.ts`
+ *      calls `status()` from `reachability()`, and `config.ts` re-parses on every read by design
+ *      (*"a value read once at boot is a value that disagrees with the artifact the cloud has
+ *      since delivered"*). Cheap per call; not free per second, for ever, on a till.
+ *
+ * **Where the health minimum actually reads from: `store.config.keysOnDefault()`**, which is one
+ * call on the same handle `01-F11`'s surface already holds — exactly as it reads
+ * `store.catalog.version()`. Its CONSUMER is owed alongside the four refusal slots' above and for
+ * the same reason (one honesty-strip chip per artifact, on `catalogRefusal`'s shipped chain
+ * `Uplink` → `GatewayDeps` → `deviceState()`), and that debt is stated at the store member's own
+ * declaration in `device-store.ts` rather than only here.
+ */
 
 export type CloudSession = {
   start(): void;
@@ -231,6 +271,16 @@ export const createCloudSession = (options: {
   let deviceRosterRefusal: { reason: string; have_version: number } | null = null;
   let deviceRosterRetries = 0;
   const DEVICE_ROSTER_MAX_RETRIES = 3;
+  /**
+   * `01-F87`'s three, separate for the reason given above the roster's: `01-F76` says a device
+   * holds one version PER KEY, and `config` is a different key from `catalog` even though both are
+   * this org's. Sharing a fetch slot would make an owner's rate edit cancel a menu fetch — and on
+   * a live till the menu fetch is the one carrying the prices she just published.
+   */
+  let configFetch: ConfigFetch | null = null;
+  let configRefusal: { reason: string; have_version: number } | null = null;
+  let configRetries = 0;
+  const CONFIG_MAX_RETRIES = 3;
   /**
    * **NO FORWARD PROGRESS on an incomplete page — ONE declaration, for every resource** (`01-F17`).
    *
@@ -410,6 +460,58 @@ export const createCloudSession = (options: {
     catalogFetch = createCatalogFetch(have);
     catalogRetries = 0;
     requestCatalog(have);
+  };
+
+  /**
+   * `01-F87` — start (or continue) a CONFIG fetch (`01-F75`/`01-F76`/`01-F77`).
+   *
+   * `requestCatalog`'s frame one resource over, and deliberately the SAME triple and the SAME
+   * ORG scope: `01-F87` puts `config` on `01-F76`'s shape with `branch_id: null`, because a
+   * branch-scoped artifact would make one version number mean different bytes on different
+   * devices and destroy the premise `01-F56`'s divergence detection rests on. The org comes from
+   * this store's own bound identity and never from a parameter (`01-F71` (e), commandment 8).
+   */
+  const requestConfig = (have_version: number, from = 0, at_version?: number): void => {
+    transport.send({
+      v: 2,
+      kind: "reference_request",
+      resource: "config",
+      scope: { org_id: store.identity.org_id, branch_id: null },
+      have_version,
+      ...(from === 0 ? {} : { from }),
+      ...(at_version === undefined ? {} : { at_version }),
+    });
+  };
+
+  /**
+   * `01-F77` — this device's config version out of `hello_ack`'s per-artifact set.
+   *
+   * Absence is the same signal it is for the catalog: an artifact the org has published nothing
+   * for is OMITTED, never sent as `0`, so the device simply never asks — which is right both for
+   * an org that has configured nothing (every key on its declared default, `01-F87` (b)) and for a
+   * gateway that does not serve the resource. A `?? 0` here would have every till in the fleet
+   * asking a gateway that has nothing to answer with, for ever.
+   */
+  const configVersionIn = (
+    keys: Extract<ProtocolMessage, { kind: "hello_ack" }>["reference_versions"],
+  ): number | undefined =>
+    keys?.find((key) => key.resource === "config" && key.scope.org_id === store.identity.org_id)
+      ?.version;
+
+  /**
+   * Compare and fetch if behind — the ONE place that decides a config fetch is needed, called from
+   * both `hello_ack` (the correctness path) and `reference_notice` (the freshness path).
+   * `reconcileCatalog`'s reasoning holds unchanged, including why a fetch in flight is never
+   * restarted.
+   */
+  const reconcileConfig = (serverVersion: number | undefined): void => {
+    if (serverVersion === undefined) return; // a gateway that serves no config, or an org with none
+    if (configFetch !== null) return;
+    const have = store.config.version();
+    if (serverVersion <= have) return;
+    configFetch = createConfigFetch(have);
+    configRetries = 0;
+    requestConfig(have);
   };
 
   /**
@@ -748,6 +850,13 @@ export const createCloudSession = (options: {
         // for the new member: this device asks for `device_roster` only if this session advertised
         // it, and every reconnection reconciles the key whether or not a notice ever arrived.
         reconcileDeviceRoster(deviceRosterVersionIn(message.reference_versions));
+        // `01-F87` — and the same sentence a FOURTH time. On THIS artifact the correctness path is
+        // the whole design rather than an optimisation: `01-F87` chose a version over a stream
+        // precisely because *"a device that missed one event holds a silently wrong rate forever,
+        // while a device that missed a version learns so on its next `hello_ack`"* — and on
+        // `16-F27`'s owner-typed rate a silent miss is a legal exposure, on `05-F19`'s threshold an
+        // unapproved paid-out.
+        reconcileConfig(configVersionIn(message.reference_versions));
         return;
       }
       case "push_ack": {
@@ -870,6 +979,16 @@ export const createCloudSession = (options: {
           reconcileCatalog(message.version);
           return;
         }
+        // `01-F87` — ORG-scoped like the catalog, so the scope test is the org rather than the
+        // branch. Fan-out is keyed by the artifact key (`01-F76`), so a notice for another org's
+        // configuration cannot reach this session at all; the check is the belt to that brace, and
+        // it is the same shape the `device_roster` arm below states — a SCOPE test, never
+        // `01-F81` (e)'s membership test, which the paragraph above measures as undecidable from
+        // what this wire carries.
+        if (message.resource === "config") {
+          if (message.scope.org_id === store.identity.org_id) reconcileConfig(message.version);
+          return;
+        }
         // `01-F76` — one version PER KEY: a notice for another branch's roster is about an
         // artifact this device does not hold and starts nothing. No refusal is recorded for it
         // either: a notice carries no artifact, so there is nothing that could have been applied
@@ -884,6 +1003,76 @@ export const createCloudSession = (options: {
         return;
       }
       case "reference_response": {
+        if (message.resource === "config") {
+          /**
+           * `01-F76`'s device-side refusal, checked BEFORE "a fetch we did not start", on the
+           * `staff` arm's stated reasoning. On THIS artifact a mis-routed frame is another org's
+           * TAX RATES applied as our own — silently, as version N, after which every later
+           * comparison agrees with itself and the divergence `01-F56` exists to detect is
+           * undetectable by construction. It is the BELT to `01-F71` (e)'s brace (the server
+           * derives the key from the session and refuses a request stating another), never a
+           * substitute for it (commandment 8).
+           *
+           * The key is the ORG and not the branch: `01-F87` scopes this artifact with
+           * `branch_id: null`, so `isOwnBranchKey` would refuse every legitimate frame.
+           */
+          if (message.scope.org_id !== store.identity.org_id) {
+            configRefusal = { reason: "foreign_artifact", have_version: store.config.version() };
+            return;
+          }
+          // A frame for a fetch we did not start — a late page from a previous connection, or a
+          // server volunteering one. Ignored rather than applied: applying it would splice pages
+          // from two different fetches into one commit.
+          if (configFetch === null) return;
+          const configStep = configFetch.accept(message);
+          if (!configStep.done) {
+            // NO FORWARD PROGRESS — `noForwardProgress` is the ONE declaration for every resource;
+            // see it for the measurement and for the defect all three arms shipped before it.
+            if (noForwardProgress(message)) {
+              configFetch = null;
+              configRefusal = { reason: "no_progress", have_version: store.config.version() };
+              return;
+            }
+            requestConfig(
+              configStep.fetchMore.have_version,
+              configStep.fetchMore.from,
+              configStep.fetchMore.at_version,
+            );
+            return;
+          }
+          configFetch = null;
+          if (configStep.update === null) return;
+          const configResult = store.config.apply(configStep.update);
+          if (configResult.applied) {
+            configRefusal = null;
+            configRetries = 0;
+            return;
+          }
+          if (configResult.reason === "needs_snapshot") {
+            // The belt to the server's brace: it decided a delta was constructible and this device
+            // disagrees about the base. Ask again from where we actually are — BOUNDED, because
+            // the frame cannot REQUEST a form and a server answering with the same bad delta would
+            // be asked for ever.
+            configRefusal = { reason: configResult.reason, have_version: configResult.version };
+            if (configRetries >= CONFIG_MAX_RETRIES) return;
+            configRetries += 1;
+            configFetch = createConfigFetch(configResult.version);
+            requestConfig(configResult.version);
+            return;
+          }
+          // `01-F56` + DEC-SYNC-011: a refusal is OBSERVABLE. `stale` is not a fault — it means a
+          // redelivery of something we already hold — so only the real refusals are surfaced.
+          //
+          // ⚠ **`malformed` HERE MEANS THE ORG'S WHOLE CONFIGURATION WAS REFUSED OVER ONE BAD
+          // KEY** (`01-F87` (b)), which is deliberate and is why campaigns were given their own
+          // resource rather than a key in this one. The till keeps what it held, or falls back to
+          // declared defaults, and goes on selling (`01-F17`) — but a manager needs to see it, and
+          // this line is the only place that fact exists on the device.
+          if (configResult.reason !== "stale") {
+            configRefusal = { reason: configResult.reason, have_version: configResult.version };
+          }
+          return;
+        }
         if (message.resource === "device_roster") {
           /**
            * `01-F76`'s device-side refusal, before "a fetch we did not start". On THIS artifact a
@@ -1210,6 +1399,12 @@ export const createCloudSession = (options: {
       // `staffRefusal`'s reason.
       deviceRosterFetch = null;
       deviceRosterRetries = 0;
+      // And a fourth time for `01-F87`'s configuration, whose splice would put a device on half
+      // one org's tax matrix and half another version's under one number — the exact divergence
+      // `01-F87` chose a version over a stream to make detectable. `configRefusal` survives the
+      // disconnect for `staffRefusal`'s reason.
+      configFetch = null;
+      configRetries = 0;
     },
     onMessage: (message) => {
       if (running) dispatch(message);
@@ -1280,6 +1475,12 @@ export const createCloudSession = (options: {
         // `01-F28`'s roster of PEOPLE, and a surface that conflated them would send an operator
         // hunting a PIN problem when what stopped was LAN admission.
         device_roster_refusal: deviceRosterRefusal === null ? null : { ...deviceRosterRefusal },
+        // Four slots, never three, and this one is the loudest: `01-F87` (b) refuses the org's
+        // WHOLE configuration over one malformed key, so `reason: "malformed"` here means the till
+        // is charging on declared defaults — `16-F1`'s no tax at all, `05-F33`'s approve-every-
+        // paid-out — while every other artifact looks healthy. Conflating it with a menu problem
+        // would send an operator to the catalog while the drawer arithmetic is what moved.
+        config_refusal: configRefusal === null ? null : { ...configRefusal },
       };
     },
   };

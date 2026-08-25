@@ -1,0 +1,10 @@
+{
+  "v": 2,
+  "kind": "reference_request",
+  "resource": "config",
+  "scope": {
+    "org_id": "01980000-0000-7000-8000-0000000000a1",
+    "branch_id": null
+  },
+  "have_version": 2
+}

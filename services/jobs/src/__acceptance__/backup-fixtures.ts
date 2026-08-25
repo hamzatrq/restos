@@ -21,7 +21,8 @@
  *
  *   events · org_sequences · device_watermarks · quarantine · device_registry · catalog_versions ·
  *   catalog_entries · org_events · quarantine_notices · orgs · branches · users ·
- *   user_credentials · staff_versions · staff_entries
+ *   user_credentials · staff_versions · staff_entries · config_versions · config_entries
+ *   (the last two joined at `0013`, `01-F87`)
  *
  * ⚠ **The fixture takes the tenant as an ARGUMENT and every tenant is fully populated.** That is
  * `01-F71`'s own lesson from the reference-serve round, quoted in the FR: *"every fixture in the
@@ -259,8 +260,11 @@ export const seedTenant = async (sql: Sql, t: Tenant): Promise<void> => {
             ${claimed}, 'org_mismatch', ${BASE_T + 11}, null)`;
 
   /**
-   * `01-F62`'s org-scoped log. `catalog.changed` is the one member of the five that has a payload
-   * schema in `packages/domain` today, which is why it is the one seeded here.
+   * `01-F62`'s org-scoped log. ⚠ **`catalog.changed` was the ONE member of the five with a payload
+   * schema in `packages/domain` when this comment was written; `01-F87` (a) gave `config.changed`
+   * one, so it is now TWO — and the second is seeded below beside its artifact**, because a
+   * restore that carried the ledger record of a rate change without the rate itself would be a
+   * tenant whose history says a tax rate moved and whose configuration says it never did.
    */
   for (const version of [1, 2]) {
     await sql`
@@ -268,6 +272,44 @@ export const seedTenant = async (sql: Sql, t: Tenant): Promise<void> => {
       values (${t.org_id}, 'catalog.changed', ${t.user_ids[0]}, ${BASE_T + version},
               ${sql.json({ version, entry_id: t.item_id, name: t.item_name })})`;
   }
+
+  /**
+   * `01-F87`'s layer-2 CONFIGURATION — the org's tax posture, its charge-rounding step and its
+   * approval thresholds, as the fourth `01-F75` reference-data resource stores them.
+   *
+   * ⚠ **THE MOST DAMAGING TABLE ON THIS LIST TO LOSE, AND THE EASIEST TO MISS.** A restore that
+   * dropped it leaves the tenant's ledger, menu, roster and quarantine intact while every till in
+   * the org silently falls back to `01-F87` (b)'s DECLARED BUILD DEFAULTS — `16-F1`'s no tax at
+   * all and `05-F33`'s approve-every-paid-out — with no error anywhere and nothing on any screen
+   * that is wrong, because an unconfigured org is a perfectly ordinary org. `tenant-artifact.ts`
+   * enumerates `information_schema` rather than a hand-written list precisely so this table is
+   * carried the moment it exists; what the fixture owes is a ROW, because §0's own message says an
+   * equality assertion over an empty table is an assertion about nothing.
+   *
+   * The values differ per tenant (the marker is the rate), so a leak between A and B is visible in
+   * the artifact rather than only in a row count — which is what §B3 and §D2 rest on.
+   */
+  const rate_bps = t.org_id.includes("kababjees") ? 1600 : 800;
+  await sql`
+    insert into kernel.config_versions (org_id, version, published_at, actor_user_id)
+    values (${t.org_id}, 1, ${BASE_T + 20}, ${t.user_ids[0]})`;
+  await sql`
+    insert into kernel.config_entries (org_id, version, key, value, deleted)
+    values (${t.org_id}, 1, 'tax.posture_matrix',
+            ${sql.json({ default: { posture: "exclusive", rate_bps }, by_tender: [] })}, 0)`;
+  await sql`
+    insert into kernel.config_entries (org_id, version, key, value, deleted)
+    values (${t.org_id}, 1, 'charge.rounding_paisa', ${sql.json(100)}, 0)`;
+  await sql`
+    insert into kernel.org_events (org_id, type, actor_user_id, server_received_at, payload)
+    values (${t.org_id}, 'config.changed', ${t.user_ids[0]}, ${BASE_T + 21},
+            ${sql.json({
+              key: "tax.posture_matrix",
+              layer: 2,
+              version: 1,
+              before: null,
+              after: { default: { posture: "exclusive", rate_bps }, by_tender: [] },
+            })})`;
 };
 
 /**

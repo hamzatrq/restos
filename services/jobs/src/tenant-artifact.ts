@@ -56,7 +56,7 @@
  * looks complete, the restore reports success, and one table of the restaurant is simply gone.
  * The acceptance fixture reads the same view for the same reason, so the two cannot drift.
  *
- * ⚠ **Measured 2026-08-21: all fifteen `kernel` tables carry `org_id`, so "every table carrying an
+ * ⚠ **Measured 2026-08-25: all SEVENTEEN `kernel` tables carry `org_id`, so "every table carrying an
  * `org_id`" and "every kernel table" name the same set today.** They are not the same CLAIM — the
  * day a kernel table without an `org_id` lands, this backup silently stops covering it — so the
  * gap is named here rather than left for a reader to discover from a restore. `01-F68`'s ban on

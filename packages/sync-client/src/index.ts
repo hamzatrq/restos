@@ -43,6 +43,27 @@ export {
 // caller to ask the question and ignore the answer. Hosts get the two things a host needs — the
 // boot refusal and the boot line.
 export { type CloudUrlVerdict, cloudUrlRefusal, describeCloudUrl } from "./cloud-url.js";
+// `01-F87` — the `config` artifact's device half. The per-key SCHEMAS, DEFAULTS and the
+// `{ value, source }` resolution live in `@restos/domain/config` and are deliberately NOT
+// re-exported here or from `@restos/domain`'s root: that module boundary is half of the FR's
+// structural fold ban (see `packages/domain/src/config.ts`'s header), and a convenience re-export
+// through this barrel would put configuration one `import` from every fold in the package.
+export {
+  CONFIG_SCHEMA,
+  type ConfigApplyResult,
+  type ConfigDelta,
+  type ConfigSnapshot,
+  type ConfigStore,
+  type ConfigUpdate,
+  createConfigStore,
+} from "./config.js";
+export {
+  type ConfigFetch,
+  type ConfigFetchStep,
+  createConfigFetch,
+  type WireConfigEntry,
+  type WireConfigResponse,
+} from "./config-fetch.js";
 export {
   AckBeyondAppendedError,
   type AppendInput,

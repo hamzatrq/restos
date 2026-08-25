@@ -27,6 +27,7 @@ import { sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { DEVICE_TOKEN_TTL_MS, issueDeviceToken, verifyDeviceToken } from "./auth.js";
 import { catalogPage, catalogVersion } from "./catalog.js";
+import { configPage, configVersion } from "./config.js";
 import { AuthRejectedError, ProtocolViolationError, type QuarantineReason } from "./errors.js";
 import { type DeviceRegistryRow, readRegistryRow, recordTokenExpiry } from "./registry.js";
 import { staffPage, staffVersion } from "./staff.js";
@@ -95,6 +96,18 @@ export type Gateway = {
    * affected key, with the version that write minted — never a predicted one; never by a device.
    */
   notifyStaffVersion(org_id: string, branch_id: string, version: number): void;
+  /**
+   * `01-F87`/`01-F75` — announce a new `config` artifact version to every live session of the
+   * org. ORG-scoped like the catalog's, for the FR's stated reason: a branch-scoped artifact
+   * would make one version number mean different bytes on different devices.
+   *
+   * FRESHNESS ONLY, and on this artifact the distinction has teeth: `hello_ack`'s per-key set
+   * is what makes a device that missed this notice converge anyway, and `01-F87` chose a
+   * version over an event stream precisely because *"a device that missed one event holds a
+   * silently wrong rate forever"*. So a dropped notice costs an owner the seconds until the
+   * till's next reconnect; a dropped EVENT would have cost her the rate.
+   */
+  notifyConfigVersion(org_id: string, version: number): void;
 };
 
 type Sink = (message: ProtocolMessage) => void;
@@ -491,6 +504,10 @@ export const createGateway = ({
       org_id: claims.org_id,
       branch_id: claims.branch_id,
     });
+    // `01-F77`, the CONFIG key — ORG-scoped (`01-F87`), so the org from the authenticated session
+    // and `branch_id: null`. A DRAINING session is told its version for the catalog's stated
+    // reason, unchanged: a version NUMBER is not branch data.
+    const configVersionAtHello = await configVersion(db, claims.org_id);
     // `01-F77`: OMITTED, never `0` — per KEY. An artifact this key has published nothing for is
     // indistinguishable from a gateway that does not serve the resource, and in both the device
     // simply never asks, which is right for both. The field itself stays absent when there is no
@@ -514,6 +531,24 @@ export const createGateway = ({
               resource: "staff",
               scope: { org_id: claims.org_id, branch_id: claims.branch_id },
               version: staffVersionAtHello,
+            },
+          ]
+        : []),
+      // `01-F87` — the config key, ORG-scoped with `branch_id: null` like the catalog's.
+      //
+      // ⚠ **OMITTED WHEN NOTHING HAS BEEN PUBLISHED, AND ON THIS ARTIFACT THAT IS A DESIGNED
+      // STATE RATHER THAN AN EMPTY ONE.** `01-F77`'s omitted-never-zero rule applies unchanged,
+      // and `01-F87` (b) says what the device does with the silence: it holds every key on its
+      // DECLARED BUILD DEFAULT and never blocks (`01-F17`, `00 §5.1`), because the alternative is
+      // a till that cannot act until the WAN has been up once. So an org that has configured
+      // nothing is not a degraded org — it is `16-F1`'s ordinary Pakistani restaurant, charging no
+      // tax and rounding to the rupee, and the till can SAY so through `store.config.keysOnDefault()`.
+      ...(configVersionAtHello > 0
+        ? [
+            {
+              resource: "config",
+              scope: { org_id: claims.org_id, branch_id: null },
+              version: configVersionAtHello,
             },
           ]
         : []),
@@ -1310,6 +1345,33 @@ export const createGateway = ({
           "by that clause: a reconnect, after which hello_ack reconciles every key it does serve",
       );
     }
+    if (message.resource === "config") {
+      // `01-F87` — the fourth member, served. The key is DERIVED from the session and never
+      // echoed (`01-F71` (e)); on this resource the scope is the org with `branch_id: null`, and
+      // the two-axis check above has already refused any frame stating another.
+      const page = await configPage(
+        db,
+        session.orgId,
+        message.have_version,
+        message.from ?? 0,
+        message.at_version,
+      );
+      record.sink(
+        parseMessage({
+          v: 2,
+          kind: "reference_response",
+          resource: "config",
+          scope: { org_id: session.orgId, branch_id: null },
+          form: page.form,
+          version: page.version,
+          ...(page.base_version === undefined ? {} : { base_version: page.base_version }),
+          entries: page.entries,
+          complete: page.complete,
+          next_from: page.next_from,
+        }),
+      );
+      return;
+    }
     const artifact =
       message.resource === "staff"
         ? {
@@ -1473,6 +1535,30 @@ export const createGateway = ({
           // produce a refusal it cannot act on. It reconciles on its next hello instead, which
           // is the mechanism that makes dropping any notice cost freshness and never
           // correctness.
+          if (record.session.draining) continue;
+          record.sink(notice);
+        }
+      }
+    },
+    notifyConfigVersion(org_id, version) {
+      // `notifyCatalogVersion`'s body one resource over, and ORG-scoped for the same reason: it
+      // walks every branch set and filters by org rather than using `branchSets` as an index,
+      // because fan-out is branch-keyed for event delivery (`01-F13`, a security property) and
+      // this artifact deliberately is not (`01-F87`).
+      const notice = parseMessage({
+        v: 2,
+        kind: "reference_notice",
+        resource: "config",
+        scope: { org_id, branch_id: null },
+        version,
+      });
+      for (const set of branchSets.values()) {
+        for (const record of set) {
+          if (!record.open || record.session?.orgId !== org_id) continue;
+          // A DRAINING session is skipped, on `notifyCatalogVersion`'s stated reason and
+          // `notifyStaffVersion`'s second one: a drain session's READ is refused (`01-F47` sole
+          // purpose) and a refusal inside `handle` closes the socket, so telling it to fetch would
+          // take down the session `01-F47` admitted so the device could drain its backlog.
           if (record.session.draining) continue;
           record.sink(notice);
         }

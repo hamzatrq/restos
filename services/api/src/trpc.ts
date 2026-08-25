@@ -37,6 +37,7 @@ import { type AuthDecision, type AuthSubject, can, type PermissionAction } from 
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { z } from "zod";
+import type { ConfigPlane } from "./config.js";
 import type { DeviceDirectory } from "./devices.js";
 import { IntegrationError } from "./errors.js";
 import type { ExportRequests } from "./exports.js";
@@ -71,6 +72,16 @@ export type ApiContext = {
    * that reports success. See `unconfiguredDeviceDirectory`.
    */
   readonly devices: DeviceDirectory;
+  /**
+   * `01-F87`/`14-F43`. Required for `catalog`'s reason and one sharper than any of the
+   * others: the fallback `createApiServer` resolves REFUSES every call, because an empty
+   * settings set is **the true answer for every org on day one** — so a memory stub would
+   * be indistinguishable from a correct implementation and would STAY indistinguishable
+   * after the plane landed, while a `save` that reported success told an owner her tax
+   * rate was set and every till went on charging `16-F1`'s nothing. See
+   * `unconfiguredConfigPlane`.
+   */
+  readonly config: ConfigPlane;
   /**
    * `12-F10`. Required for `catalog`'s reason and one sharper: the fallback `createApiServer`
    * resolves REFUSES every read rather than answering emptily, so an unconfigured host cannot

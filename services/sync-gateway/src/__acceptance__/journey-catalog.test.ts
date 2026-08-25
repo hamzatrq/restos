@@ -33,6 +33,7 @@ import { parseMessage } from "@restos/sync-protocol";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CATALOG_PAGE_SIZE, type CatalogEntry, publishCatalog } from "../catalog.js";
+import { publishConfig } from "../config.js";
 import { createGateway, type Gateway, issueDeviceToken, registerDevice } from "../index.js";
 import { buildServer } from "../server.js";
 import {
@@ -473,6 +474,102 @@ describe("JOURNEY — a device fetches its org's catalog over the wire (01-F9, T
         () => store.catalog.version() === 2,
         "the device was never told about a menu published through the surface services/api uses",
       );
+    } finally {
+      session.stop();
+      await app.close();
+    }
+  });
+
+  it("SEAM (CONFIG) — a layer-2 setting published through /internal reaches a LIVE device (01-F87)", async () => {
+    // **THE SAME SEAM, ONE RESOURCE OVER, AND IT IS HERE RATHER THAN IN `config-plane-http.test.ts`
+    // BECAUSE THIS FILE OWNS THE HARNESS THAT CAN SEE IT.** That suite drives `/internal` and reads
+    // `configPage` — it can prove the writer stored what it was sent and cannot prove a CONNECTED
+    // till was ever told, which is precisely the gap `notifyCatalogVersion` sat in for months.
+    //
+    // The mutant this exists for is `server.ts` wiring `notifyConfigVersion: () => {}`. Under it
+    // every `/internal/config/publish` answers 200, `configPage` serves the new rates, the gateway
+    // suite is green — and an owner who corrects a tax rate mid-service has every connected till
+    // charging the OLD one until its next reconnect. On `16-F27`'s owner-typed rate that is a legal
+    // exposure, which is why `01-F87` argues the version-and-notice design at all.
+    //
+    // ⚠ Built on `buildServer` — the production composition root — and a real socket, for the
+    // reason the catalog's seam records: its own first draft mounted `registerPublishRoutes`
+    // itself and SURVIVED the mutant that matters, because a test that supplies the wiring cannot
+    // observe whether the product supplies it.
+    const id = freshIdentity();
+    await registerDevice(db, { ...id, device_class: "counter_electron" });
+    // A first version BEFORE the device connects, so `hello_ack`'s correctness path can reach
+    // parity and the NOTICE path is what is on trial below.
+    await publishConfig(db, id.org_id, [{ key: "charge.rounding_paisa", value: 100 }], {
+      now: BASE_T,
+    });
+
+    const app = buildServer(
+      testDatabaseUrl(),
+      TEST_TOKEN_SECRET,
+      undefined,
+      undefined,
+      PUBLISH_SECRET,
+    );
+    const origin = await app.listen({ port: 0, host: "127.0.0.1" });
+    const store = openStore({
+      path: join(mkdtempSync(join(tmpdir(), "restos-journey-config-")), "device.db"),
+      identity: id,
+    });
+    stores.push(store);
+    const session = createCloudSession({
+      store,
+      transport: createWsCloudTransport({
+        url: `${origin.replace("http", "ws")}/sync`,
+        clock: wallClock,
+      }),
+      clock: wallClock,
+      device_class: "counter_electron",
+      // `Date.now()`, NOT `BASE_T` — the catalog seam's recorded trap: `buildServer` builds
+      // `createGateway` with the REAL clock, so a `BASE_T` token opens straight into `01-F47`
+      // drain mode where reads are refused, and the assertions would go green off the reconnect.
+      token: await issueDeviceToken(id, TEST_TOKEN_SECRET, { now: Date.now() }),
+    });
+    session.start();
+
+    try {
+      // PARITY FIRST (`01-F77`'s correctness path), so the assertion below cannot pass on a device
+      // that was simply late to its initial fetch.
+      await until(
+        () => store.config.version() === 1,
+        "the device never reached config version 1 through hello_ack",
+      );
+      expect(store.config.resolve("charge.rounding_paisa")).toEqual({
+        value: 100,
+        source: "configured",
+      });
+
+      const published = await fetch(`${origin}/internal/config/publish`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${PUBLISH_SECRET}` },
+        body: JSON.stringify({
+          org_id: id.org_id,
+          entries: [{ key: "charge.rounding_paisa", value: 1000 }],
+          actor_user_id: null,
+          now: BASE_T + 1,
+        }),
+      });
+      // Asserted, because a publish that 400s would make the version assertion below pass for the
+      // wrong reason — a device that was never told looks identical to one there was nothing to
+      // tell.
+      expect(published.status, JSON.stringify(await published.json())).toBe(200);
+
+      await until(
+        () => store.config.version() === 2,
+        "the device was never told about a setting published through the surface services/api uses",
+      );
+      // …and the VALUE moved, not just the number. `01-F87` chose a version over an event stream
+      // because a version is a completeness claim; a device that bumped its counter and held the
+      // old rate would satisfy the line above and charge the wrong tax.
+      expect(store.config.resolve("charge.rounding_paisa")).toEqual({
+        value: 1000,
+        source: "configured",
+      });
     } finally {
       session.stop();
       await app.close();

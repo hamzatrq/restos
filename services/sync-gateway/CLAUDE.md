@@ -1450,3 +1450,46 @@ global `select count(*) from kernel.orgs` reading 3 where 1 was expected — is 
 isolation rule being broken: *"per-test isolation is fresh org_ids, never truncation"*, and vitest's
 `forks` pool runs FILES in parallel against one database. **A global row count in this suite is a
 race by construction.** The assertion is per-`org_id` now.
+
+
+## `01-F87`'s CONFIG PLANE — `0013`, `config.ts`, and the fourth `01-F75` resource served
+
+`00 §7`'s layer 2 now has a carrier. Two tables (`config_versions` the COMMIT POINT written LAST,
+`config_entries` holding what CHANGED per version — `0007_catalog_publication`'s shape and its
+reasoning), `publishConfig` / `configVersion` / `configPage`, two `/internal` routes, the
+`hello_ack` key, the `reference_request` arm and `notifyConfigVersion`.
+
+- **ORG-scoped with NO branch column**, which `01-F87` rules rather than leaving to an implementer:
+  a branch-scoped artifact would make one version number mean different bytes on different devices
+  and destroy the premise `01-F56`'s divergence detection rests on. Layer-2 keys WITH a branch axis
+  (`03-F51`'s routes, `01-F60`'s enabled set) are DATA inside the one org artifact.
+- **`14-F48`'s refusals are at `publishConfig` and are `@restos/domain/config`'s
+  `refuseConfigWrite`, imported and never re-implemented.** `14-F48`'s own closing note measures
+  what a second, silently-disagreeing copy costs: **0 of 95 tests.** `value` therefore carries no
+  CHECK in SQL either — that would be the same copy, expressed where no FR id can be cited.
+- **`configPage` FILTERS `cloud_only` rows out of a DEVICE page** — `02 §Layer 2` says of R60's
+  commission, in terms, *"never sent to the till"*. The filter runs **after** the page is cut and
+  before the reply: doing it in SQL would put the key registry in this service (`18 §2`), and doing
+  it after the cursor arithmetic would make `next_from` skip rows on the following page — a partial
+  artifact committed at a full version number. ⚠ **An UNKNOWN key passes the filter on purpose**:
+  `01-F87` (b) gives the DEVICE the disposition for a key a newer writer stored (ignore it), and it
+  cannot exercise that for bytes it never receives.
+- **`publishConfig` writes NO event.** `01-F87` (a) divides the plane and the `config.changed`
+  record is `services/api`'s act, where there is an authenticated actor — `15-F27`'s recorded
+  reason that a shell on the service host can only ever write `null`.
+- ⚠ **`migratable.test.ts`'s table census and its TEAR-OFF both moved with `0013`, as that file's
+  own comment instructs** (*"the timestamp and the tables both name the LAST migration and move
+  with it"* — drizzle resumes from `max(created_at)`, so tearing off an earlier one re-applies
+  nothing and the test silently stops exercising resumption). `0013` has **no ALTER and no
+  backfill**, unlike `0012`, so its tear-off drops two tables and restores nothing: a session that
+  copies the previous block would be undoing a change this migration never made.
+
+**The mutation matrix lives in `packages/domain/CLAUDE.md`** (one declaration for a table spanning
+four packages). The rows that bite here: **C5** (the audience filter deleted — the commission rate
+served to a till) kills 3, **C10** (the writer stops refusing) kills 5, and **C6** — `server.ts`
+wiring `notifyConfigVersion: () => {}`, which is `notifyCatalogVersion`'s original defect on this
+resource — kills exactly 1, the `SEAM (CONFIG)` test in `journey-catalog.test.ts`. That test is in
+THAT file rather than in `config-plane-http.test.ts` because this package's own record says why:
+the catalog's first seam draft mounted `registerPublishRoutes` itself and **survived** the mutant
+that matters, so the assertion has to be built on `buildServer`, a real socket and a real
+`createCloudSession`.

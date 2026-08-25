@@ -276,3 +276,98 @@ qty_base: 0}` through as an extra key — the `.check` is what refuses at RUNTIM
 the union arm's value is at COMPILE time: a consumer typed against it cannot reach a quantity that
 is not there, which is what `packages/inventory`'s `rollUpCount` relies on. Both are kept and only
 one is measurable by a runtime test. Recorded rather than left as an unexplained survivor.
+
+
+## `01-F87`'s CONFIGURATION PLANE — the layer-2 key registry, and the mutant that survived
+
+`00 §7` layer 2 had **no carrier**: every per-restaurant setting a device needed was a per-DEVICE
+environment variable (`apps/pos-electron/src/main/tax-posture.ts` reads `RESTOS_TAX_POSTURE`,
+`RESTOS_TAX_RATE_BPS`, `RESTOS_CHARGE_ROUNDING_PAISA`). That works for a till and **fails for
+everything cloud-side** — measured: `services/api` and `services/sync-gateway` held no tax
+configuration of any kind, so `12-F9`'s owner summary could not tell two restaurants apart.
+
+`01-F87` decides **both** carriers with a division that is the catalog's: `config.changed` carries
+the CHANGE (org-scoped ledger record) and **`config` joins `01-F75`'s closed resource set** as a
+member carrying the VALUE, on the existing frame triple with **zero new message kinds**.
+
+- **`src/config.ts` is the registry** — five keys, each with its owning FR, its Zod schema, its
+  declared default (`00 §7` (d)) and its AUDIENCE. It is reachable only as
+  **`@restos/domain/config`**, a second entry in this package's `exports` map, and is deliberately
+  **not** re-exported from `index.ts`. That module boundary is half of `01-F87`'s structural fold
+  ban — see below.
+- **`config.changed`'s payload** (`registry.ts`): `key` · `layer` · `version` · `before` · `after`.
+  The **key space is OPEN** (`01-F87` (a): `00 §7` grows it with every module doc, so a closed enum
+  would make every future module's first setting an `01-F4` runtime error) and the typo check moves
+  to the WRITER, which is `01-F60`'s move for prices and `01-F85`'s for tenders.
+- **`config.manage`** (`permissions.ts`, `14-F43`): **owner-only**, a PINNED INTERPRETATION and not
+  a transcription — R63's words are *"the owner or ops lead"* and `ROLES` has no ops lead.
+- **THE FOLD BAN IS STRUCTURAL, AND `01-F87` RULES OUT THE OBVIOUS TEST.** `01-F34`'s
+  relabel-plus-clock-injection property *"structurally cannot catch this"*: a configuration read
+  makes a projection a function of `(delivered set, artifact version)`, both harness devices hold
+  the same configuration, relabel invariance holds, and two real tills at different versions still
+  project different money. So the enforcement is *"what a fold is allowed to take as input"* —
+  the module boundary above, plus `merge.ts` listing `config.changed` in `NON_FOLD_TYPES` (a fold
+  arm for it is a `TS2345` at `assertNever`), plus
+  `packages/sync-client/src/__acceptance__/fold-config-ban.test.ts`.
+
+### Mutation matrix — control **domain 930 pass / 20 known-red** (`open-tender-set.test.ts`, pre-existing)
+
+In-tree with byte-exact backups and an **sha256 restore trap the driver ASSERTS** after every row;
+nothing here is a security constant — each mutant reds a test rather than downgrading a credential,
+which is the narrow case `T8`'s out-of-tree rule leaves in-tree. **The `config.manage` PERMISSION
+CELL was mutated OUT of tree** and is the last row. Every row is the FULL package suite, `REAL_EXIT`
+written INSIDE the log and read back from there. Counts are kills ABOVE the control.
+
+| # | mutant (exactly one branch) | domain | sync-client | gateway | api |
+|---|---|---|---|---|---|
+| C2 | **`01-F87` (b) INVERTED — an UNKNOWN key REFUSES instead of being ignored** | **2** | **1** | — | — |
+| C3 | **`source` derived by COMPARING the value against the default** | **1** | **1 — see below** | — | — |
+| C4 | **`05-F33` reverted: the paid-out default carried forward as Rs 2,000** | **1** | **2** | — | — |
+| C1 | the device applies without validating — a malformed key lands | — | **1** | — | — |
+| C8 | `config.changed` MOVED from `NON_FOLD_TYPES` to `OTHER_FOLD_TYPES` | — | **1** | — | — |
+| C9 | the root barrel re-exports the config module — a fold could import it | — | **1** | — | — |
+| C11 | the wire drops `01-F75`'s one-row-per-key rule | — | **1** | — | — |
+| C5 | **`02 §Layer 2` broken: the commission rate is served to a DEVICE** | — | — | **3** | — |
+| C6 | **`server.ts` wires `notifyConfigVersion: () => {}`** — the `notifyCatalogVersion` defect | — | — | **1** | — |
+| C10 | the writer stops calling `refuseConfigWrite` — `14-F48` deleted | — | — | **5** | — |
+| C7 | **THE SEAM — `server.ts` supplies `unconfiguredConfigPlane()`** | — | — | — | **2** |
+| C7b | the QUIETER twin — a memory stub that reports success | — | — | — | **2** |
+| P1 | **`config.manage` widened to `branch_manager: "allow"`** (OUT-OF-TREE) | — | — | — | **1** |
+| CTRL | **NEGATIVE CONTROL — two behaviour-preserving rewrites** | **0** | **0** | **0** | — |
+
+**C7 is the row to re-run after any change here, and it SURVIVED ITS FIRST RUN — 0 of 418.**
+`services/api/src/__acceptance__/config-plane.test.ts` built its own host with
+`createApiServer({ config: createGatewayConfigPlane(…) })`, so swapping the composition root's
+adapter for the refusing fallback left **every one of its 418 tests green**: a test that supplies
+the wiring cannot observe whether the product supplies it. That is this wave's named defect (`L8`)
+reproduced inside the fix for it, exactly as `journey-catalog.test.ts` records of its own first
+draft, and **only mutation found it — reading the file did not.** Closed by moving the assertion
+into `device-seam.test.ts`, which drives the DECLARED `scripts.start` out of process and asks what
+the PEER received; C7 and C7b then kill 2 each.
+
+**C3 also survived on the DEVICE side first.** `packages/domain`'s §C2 killed it and
+`config-artifact.test.ts` did not, because every fixture there configured a value that DIFFERS from
+the default (1000 against 100) — so the comparison and the truth agreed. The case that separates
+them is the owner who deliberately sets the rounding step to Rs 1: she HAS configured it, and a
+device reporting `default` tells an operator *the owner never set this* about a value she chose.
+§A3 now carries it.
+
+**CTRL is what makes every red row mean anything:** a genuine restructuring of
+`configKeysOnDefault` and of the gateway's `isCloudOnly` reproduces the control exactly, in all
+three packages.
+
+⚠ **P1 was run OUT-OF-TREE and `permissions.ts` was NEVER edited** (`T8`): the package was copied to
+a scratchpad, the cell widened there, and only the gitignored
+`services/api/node_modules/@restos/domain` symlink was repointed for the run. `permissions.ts` was
+verified byte-identical by checksum before and after (`7ccbe9a54361` → `7ccbe9a54361`). Its ONE kill
+is the honest number and it is the assertion this repo has twice measured as MISSING: an **org-wide**
+branch manager is the only subject shape that REACHES the cell, because `config.save` states no
+`branch_id` so a branch-scoped subject is refused by scope resolution before any cell is read
+(`A11` on `device.manage` and `E4` on `export.request` both passed with their cells widened, for
+exactly this reason).
+
+⚠ **`taxCellForTender` carries an `@unreached-owed` marker and that is not an oversight.**
+`16-F32` (R58) puts the tender-channel choice before the unpaid bill prints and **no surface offers
+it**, so nothing in this product can select a non-default cell yet — which is why `tax-posture.ts`
+seeds ONE cell for the whole device and records that a seeded matrix would be *"a branch no caller
+could reach"*. The register moved 35 → 36 and `seams:check` is clean at exit 0.

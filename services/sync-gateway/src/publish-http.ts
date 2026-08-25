@@ -1,9 +1,11 @@
 import { timingSafeEqual } from "node:crypto";
 import { DisplayName, PersonAssignment } from "@restos/domain";
+import type { ConfigEntry } from "@restos/domain/config";
 import { CatalogEntryWire } from "@restos/sync-protocol";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { type CatalogEntry, catalogPage, publishCatalog } from "./catalog.js";
+import { configPage, publishConfig } from "./config.js";
 import { readDayWindow } from "./day-ledger.js";
 import { appendOrgEvent, orgEventHistory } from "./org-events.js";
 import { listDevices } from "./registry.js";
@@ -81,6 +83,31 @@ const OrgEventRequest = z.strictObject({
   actor_user_id: z.union([z.string().min(1), z.null()]),
   server_received_at: z.number().int(),
   payload: z.unknown(),
+});
+
+/**
+ * `01-F87` — one layer-2 change as the writer states it.
+ *
+ * **The VALUE is `z.unknown()` here and refused by key one layer down**, which is the same
+ * two-level split `catalog.changed`'s `price_changes` makes and which `01-F87` (a) requires: the
+ * key space is OPEN (`00 §7` grows it with every module doc), so a discriminated union here would
+ * freeze a set the corpus keeps open. `publishConfig` calls `refuseConfigWrite` — the ONE
+ * declaration of `14-F48`'s refusals — and a bad row is a 400 naming the key and the cell.
+ *
+ * `deleted: true` is a RESET to the declared default (`01-F75`: a departure is a MARKED entry).
+ */
+const ConfigEntryRequest = z.object({
+  key: z.string().min(1),
+  value: z.unknown().optional(),
+  deleted: z.boolean().optional(),
+});
+
+const ConfigPublishRequest = z.object({
+  org_id: z.string().min(1),
+  entries: z.array(ConfigEntryRequest).min(1),
+  actor_user_id: z.union([z.string().min(1), z.null()]),
+  /** The CALLER's instant, on `CatalogPublishRequest.now`'s recorded reasoning, unchanged. */
+  now: z.number().int(),
 });
 
 const OrgQuery = z.object({ org_id: z.string().min(1) });
@@ -347,6 +374,18 @@ type PublishDeps = {
    * after the publish is committed and its failure cannot fail the write.
    */
   readonly notifyStaffVersion: (org_id: string, branch_id: string, version: number) => void;
+  /**
+   * `01-F87`/`01-F75` — the CONFIG notice, and REQUIRED for `notifyStaffVersion`'s stated reason:
+   * an optional member here is precisely the unsupplied seam `seams:check` Rule B exists for, and
+   * this repo has already paid for that shape once — `notifyCatalogVersion` had zero production
+   * callers, so *Apply now* reached a connected till only on its next reconnect, under a screen
+   * promising every till would change as soon as it saved.
+   *
+   * Correctness does not depend on it and must not: `01-F77` makes `hello_ack.reference_versions`
+   * the correctness mechanism per key, which is why this is called only after the publish commits
+   * and its failure cannot fail the write.
+   */
+  readonly notifyConfigVersion: (org_id: string, version: number) => void;
 };
 
 /** Rows per internal page. Matches `CATALOG_PAGE_SIZE`, which is what `catalogPage` serves. */
@@ -456,6 +495,81 @@ export const registerPublishRoutes = (app: FastifyInstance, deps: PublishDeps): 
       return reply.code(200).send({ version });
     } catch (error: unknown) {
       return reply.code(refusalStatus(error)).send({ error: messageOf(error) });
+    }
+  });
+
+  /**
+   * `01-F87` / `14-F43`..`14-F48` — **the layer-2 configuration publish.**
+   *
+   * `/internal/catalog/publish`'s shape one resource over, including the ordering: the notice
+   * fires AFTER the publish commits and never in front of the reply's failure path, because a
+   * notice for a version that did not land sends every till in the org after an artifact that
+   * does not exist. The worst case in this order is a landed version nobody was told about, which
+   * `hello_ack` reconciles on the next connect (`01-F77`).
+   *
+   * **Authorization is NOT here and must not be.** This surface is behind the service credential
+   * only; the `config.manage` check (`14-F43`, owner-only) is `services/api`'s, where there is an
+   * authenticated subject to check — commandment 8 and `18 §5`, and the same division every other
+   * `/internal` route on this server already makes.
+   */
+  app.post("/internal/config/publish", async (request, reply) => {
+    const parsed = ConfigPublishRequest.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: `config publish: ${z.prettifyError(parsed.error)}` });
+    }
+    const { org_id, entries, actor_user_id, now } = parsed.data;
+    try {
+      // The reshape drops an `undefined` rather than carrying it, which `exactOptionalPropertyTypes`
+      // makes a type error and which matters beyond the compiler: `01-F87` (b) treats a `value` of
+      // `undefined` on an unmarked row as a malformed known key, so a carried `undefined` would
+      // refuse an org's whole artifact at every till. ⚠ **This is a RESHAPE, and this repo's
+      // measured lesson about reshapes is `catalog-fetch.ts`'s `toEntry`, which dropped `prices`
+      // and `station` and failed 0 of 579 tests** — so it copies every field the schema declares
+      // and adds none.
+      const rows: ConfigEntry[] = entries.map((entry) => ({
+        key: entry.key,
+        ...(entry.value === undefined ? {} : { value: entry.value }),
+        ...(entry.deleted === undefined ? {} : { deleted: entry.deleted }),
+      }));
+      const version = await publishConfig(deps.db, org_id, rows, { actor_user_id, now });
+      deps.notifyConfigVersion(org_id, version);
+      return reply.code(200).send({ version });
+    } catch (error: unknown) {
+      return reply.code(refusalStatus(error)).send({ error: messageOf(error) });
+    }
+  });
+
+  /**
+   * What this org currently holds, as the DEVICE would receive it — the read `14-F45`'s editor
+   * fills its grid from and `services/api` resolves an org's posture through.
+   *
+   * ⚠ **IT ANSWERS `configPage`, WHICH FILTERS `cloud_only` KEYS**, so a caller that needs R60's
+   * commission rate does NOT get it here. That is deliberate and it is the honest shape: this
+   * route exists so a cloud reader and a till resolve the SAME bytes, and a second route that
+   * answered a wider set would be a second declaration of what an org's configuration is. The
+   * commission read is owed with `14-F24`'s channel-economics report, which is the only thing that
+   * needs it, and it will need its own route rather than a widened flag on this one.
+   */
+  app.get("/internal/config/published", async (request, reply) => {
+    const parsed = OrgQuery.safeParse(request.query);
+    if (!parsed.success)
+      return reply.code(400).send({ error: "config published: org_id required" });
+    try {
+      // One page, then onward while the server says there is more — the same walk
+      // `foldPublished` makes for the catalog. `01-F87` measures this artifact as a handful of
+      // scalars, so the loop is expected to run once; it is written anyway because assuming one
+      // page is the per-resource carve-out `01-F75` closed its resource set to prevent.
+      const first = await configPage(deps.db, parsed.data.org_id, 0, 0);
+      const entries = [...first.entries];
+      let cursor = first;
+      while (!cursor.complete) {
+        cursor = await configPage(deps.db, parsed.data.org_id, 0, cursor.next_from, cursor.version);
+        entries.push(...cursor.entries);
+      }
+      return reply.code(200).send({ version: first.version, entries });
+    } catch (error: unknown) {
+      request.log.error({ err: error }, "config published: database read failed");
+      return reply.code(500).send({ error: databaseFailure("config published", error) });
     }
   });
 
