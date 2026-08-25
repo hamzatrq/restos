@@ -144,6 +144,12 @@ export const startFakeGateway = async (): Promise<FakeGateway> => {
   let tick = 1_700_000_000_000;
   const revocationClock = (): number => ++tick;
 
+  /** `01-F21`'s publication log, per org — see the two routes below for why it is a LOG. */
+  const inventoryLog = new Map<
+    string,
+    { version: number; kind: string; id: string; payload: unknown; deleted?: boolean }[]
+  >();
+
   const server: Server = createServer((req, res) => {
     void (async () => {
       const url = new URL(req.url ?? "/", "http://localhost");
@@ -226,6 +232,42 @@ export const startFakeGateway = async (): Promise<FakeGateway> => {
         send(200, {
           org: org === undefined ? null : { org_id, ...org },
           branches: (branchRows.get(org_id) ?? []).map((row) => ({ ...row, org_id })),
+        });
+        return;
+      }
+      /**
+       * `01-F21`'s reference set. It reproduces the real gateway's **publication log** — a version
+       * per publish, the greatest `version <= current` per `(kind, entry_id)`, tombstones applied —
+       * and not a `Map` of the last thing posted, because the fold IS what the reader depends on: a
+       * fake that simply echoed the newest publish could not tell a correct snapshot from one that
+       * resurrected a deleted row (`01-F55`).
+       *
+       * `version: 0` with no entries is the never-published answer, and the API turns THAT into a
+       * refusal. A fake that answered `1` for an org nobody published to would make the most
+       * dangerous case in this seam untestable.
+       */
+      if (req.method === "POST" && url.pathname === "/internal/inventory/publish") {
+        const input = body as {
+          org_id: string;
+          entries: readonly { kind: string; id: string; payload: unknown; deleted?: boolean }[];
+        };
+        const log = inventoryLog.get(input.org_id) ?? [];
+        const version = (log.at(-1)?.version ?? 0) + 1;
+        for (const entry of input.entries) log.push({ version, ...entry });
+        inventoryLog.set(input.org_id, log);
+        send(200, { version });
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/internal/inventory/reference") {
+        const log = inventoryLog.get(org_id) ?? [];
+        const version = log.at(-1)?.version ?? 0;
+        const latest = new Map<string, (typeof log)[number]>();
+        for (const row of log) latest.set(`${row.kind}\u0000${row.id}`, row);
+        send(200, {
+          version,
+          entries: [...latest.values()]
+            .filter((row) => row.deleted !== true)
+            .map((row) => ({ kind: row.kind, id: row.id, payload: row.payload })),
         });
         return;
       }
