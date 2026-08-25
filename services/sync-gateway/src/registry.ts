@@ -36,6 +36,21 @@ export type DeviceRegistration = {
   display_name?: string;
   /** Optional issuance expiry (01-F47); defaults to the standard lifetime when absent. */
   token_expires_at?: number;
+  /**
+   * `01-F73` (b) — the LAN certificate this device was issued, **as issued**.
+   *
+   * ⚠ **OPTIONAL HERE AND SUPPLIED ONLY BY `01-F80`'s CLAIM, and the split is the same one
+   * `display_name` already makes.** A device admitted by `provision-device` receives an `01-F47`
+   * token and no LAN credential at all — that command mints none and never has — so absent is a
+   * TRUE statement about those rows rather than a missing value. `01-F80` (f)'s "one act, two
+   * credentials" is what fills them, and it fills both together: a certificate stored without its
+   * fingerprint leaves `01-F81` (a)'s roster row unbuildable, and a fingerprint without the
+   * certificate makes `01-F80` (d)'s "the same certificate" on a retry impossible.
+   */
+  certificate_pem?: string;
+  /** `01-F81` (a) — lowercase hex SHA-256 of the certificate's DER. Supplied with the PEM or not
+   * at all. */
+  certificate_fingerprint?: string;
 };
 
 /** One registry row as the auth checks read it; undefined = never registered. */
@@ -97,11 +112,13 @@ export const registerDevice = async (
     // DR replay, the rewound-clock pin, every deterministic test — a seeded device can
     // read as permanently not-due and never renew. Pass the value.
     sql`insert into kernel.device_registry
-          (org_id, branch_id, device_id, device_class, display_name, revoked_at, token_expires_at)
+          (org_id, branch_id, device_id, device_class, display_name, revoked_at, token_expires_at,
+           certificate_pem, certificate_fingerprint)
         values (${registration.org_id}, ${registration.branch_id}, ${registration.device_id},
           ${registration.device_class}, ${registration.display_name ?? null}, null,
           coalesce(${registration.token_expires_at ?? null}::bigint,
-                   (extract(epoch from now()) * 1000)::bigint + ${DEVICE_TOKEN_TTL_MS}))`,
+                   (extract(epoch from now()) * 1000)::bigint + ${DEVICE_TOKEN_TTL_MS}),
+          ${registration.certificate_pem ?? null}, ${registration.certificate_fingerprint ?? null})`,
   );
 };
 

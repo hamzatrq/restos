@@ -99,6 +99,13 @@
       "when": 1785000900000,
       "tag": "0013_inventory_reference",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1785000960000,
+      "tag": "0014_device_pairing",
+      "breakpoints": true
     }
   ]
 }

@@ -683,6 +683,9 @@ importers:
       '@restos/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@restos/lan-pki':
+        specifier: workspace:*
+        version: link:../../packages/lan-pki
       '@restos/sync-client':
         specifier: workspace:*
         version: link:../../packages/sync-client

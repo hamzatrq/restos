@@ -96,9 +96,63 @@ export const DeviceRevokedPayload = z.object({
   device_class: z.string().min(1),
 });
 
+/**
+ * `14-F41`'s **waiting row** — a pairing code an owner minted and no device has claimed.
+ *
+ * ⚠ **It is not a device and must never be rendered as one.** `01-F80` (c): an unclaimed code that
+ * expires "leaves nothing — no registry row, no certificate, no device"; `14-F41`: "Before a claim
+ * there is no device" and "the waiting row BECOMES `14-F12`'s device row". So this type is separate
+ * from `DeviceRecord` rather than a nullable variant of it: a screen that folded the two together
+ * would show a fleet of tills that do not exist.
+ *
+ * **There is no `code` field, and its absence is the FR.** `14-F41` "requires **no** ability of the
+ * cloud to reproduce a live code, deliberately — so doc 01's credential half stays free to store a
+ * verifier and never the secret". The code crosses exactly once, in the reply to the mint.
+ */
+export type PairingRecord = {
+  readonly device_id: string;
+  readonly branch_id: string;
+  readonly device_class: string;
+  /** `01-F70`/`14-F41`: the name she typed, which is what the waiting row is listed under. */
+  readonly display_name: string;
+  readonly minted_at: number;
+  /** `01-F80` (c). The row states its own age against this, and reads *expired* past it. */
+  readonly expires_at: number;
+};
+
+/** What a mint answers with. The `code` is here and nowhere else, ever again. */
+export type MintedPairing = {
+  readonly code: string;
+  readonly device_id: string;
+  readonly expires_at: number;
+};
+
 export type DeviceDirectory = {
   /** `14-F12` — every device the org has registered, active and revoked alike. */
   list(org_id: string): Promise<readonly DeviceRecord[]>;
+  /**
+   * `01-F80` (a) / `14-F41` — mint a pairing code for a device the owner has just described.
+   *
+   * Writes **no** registry row: the claim is what admits. The reply carries the code once.
+   */
+  mintPairing(input: {
+    readonly org_id: string;
+    readonly branch_id: string;
+    readonly device_class: string;
+    readonly display_name: string;
+    readonly actor_user_id: string;
+    readonly now: number;
+  }): Promise<MintedPairing>;
+  /** `14-F41` — the waiting rows for this org, so an issued code is never a value with nowhere to
+   * see it. */
+  pairings(org_id: string): Promise<readonly PairingRecord[]>;
+  /**
+   * `14-F41` — cancel an UNCLAIMED code. **Cancel is not revoke**: before a claim there is no
+   * device, so this destroys a credential nobody holds, emits nothing and may be repeated freely.
+   * It cannot touch a claimed pairing (the gateway's `and claimed_at is null` is what makes that
+   * structural), and `cancelled: false` is how a screen learns the claim beat the press.
+   */
+  cancelPairing(org_id: string, device_id: string): Promise<{ readonly cancelled: boolean }>;
   /**
    * `14-F13` — set `revoked_at`. The REGISTRY write and nothing else: this is what `01-F48`'s
    * ≤30 s sweep reads, so it is the act that actually stops the till.
@@ -195,6 +249,9 @@ export const unconfiguredDeviceDirectory = (): DeviceDirectory => {
   };
   return {
     list: async () => refuse(),
+    mintPairing: async () => refuse(),
+    pairings: async () => refuse(),
+    cancelPairing: async () => refuse(),
     revoke: async () => refuse(),
     recordRevocation: async () => refuse(),
     revocations: async () => refuse(),

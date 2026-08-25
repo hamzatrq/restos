@@ -22,6 +22,7 @@ import { cn } from "../lib/utils";
 import { CatalogScreen } from "./catalog-screen";
 import { DeviceList } from "./device-list";
 import { OwnerSummary } from "./owner-summary";
+import { PairingPanel } from "./pairing-panel";
 import { StaffScreen } from "./staff-screen";
 
 type Section = "menu" | "devices" | "summary" | "staff";
@@ -97,7 +98,18 @@ export const Workspace = (): ReactNode => {
       {section === "menu" ? (
         <CatalogScreen />
       ) : section === "devices" ? (
-        <DeviceList />
+        /*
+          `14-F41` puts the pairing task ON `14-F12`'s device list — "It is a task on `14-F12`'s
+          list", not a fifth section. The panel is rendered FIRST because it is the act an owner
+          comes here to perform when she has no tills yet, and the register below is what she comes
+          back to afterwards. The two are separate components and separate reads deliberately: a
+          waiting row is not a device (`14-F41`: "Before a claim there is no device"), and a screen
+          that merged them would show a fleet containing tills that do not exist.
+        */
+        <div className="flex flex-col gap-6">
+          <PairingPanel />
+          <DeviceList />
+        </div>
       ) : section === "summary" ? (
         <OwnerSummary />
       ) : (

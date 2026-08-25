@@ -58,12 +58,6 @@ const derOf = (certPem: string): Uint8Array<ArrayBuffer> => {
 };
 
 /** The one definition of a certificate's identity on this platform. Used by both ends. */
-// @unreached-owed `01-F73`'s pairing path. The FRs specify how a device gets this credential —
-// keypair on-device, public key to the cloud, certificate back — and the command that issues it
-// does not exist yet, so nothing shipping calls this. The device SIDE is closed (the store holds
-// it, the transport presents it, both hosts fail closed without it); what is owed is the cloud
-// side: `services/sync-gateway`'s pair-device command, `01-F25`'s back-office pairing code.
-// DELETE these markers when that command lands — a marker on something reached fails this rail.
 export const fingerprintOfPem = (certPem: string): string =>
   createHash("sha256").update(derOf(certPem)).digest("hex");
 
@@ -78,12 +72,6 @@ export const fingerprintOfPem = (certPem: string): string =>
  * one day, and nothing about a restaurant's operations gives anyone a reason to notice beforehand.
  * The device certificates below are the short-lived half (`01-F73` (d)).
  */
-// @unreached-owed `01-F73`'s pairing path. The FRs specify how a device gets this credential —
-// keypair on-device, public key to the cloud, certificate back — and the command that issues it
-// does not exist yet, so nothing shipping calls this. The device SIDE is closed (the store holds
-// it, the transport presents it, both hosts fail closed without it); what is owed is the cloud
-// side: `services/sync-gateway`'s pair-device command, `01-F25`'s back-office pairing code.
-// DELETE these markers when that command lands — a marker on something reached fails this rail.
 export const createOrgIssuer = async (
   org_id: string,
   now: number,
@@ -117,12 +105,6 @@ export const createOrgIssuer = async (
  * The subject names three facts: `CN` the device, `OU` the branch, `O` the org. Not four —
  * `device_class` is the roster's (`01-F73` (b)).
  */
-// @unreached-owed `01-F73`'s pairing path. The FRs specify how a device gets this credential —
-// keypair on-device, public key to the cloud, certificate back — and the command that issues it
-// does not exist yet, so nothing shipping calls this. The device SIDE is closed (the store holds
-// it, the transport presents it, both hosts fail closed without it); what is owed is the cloud
-// side: `services/sync-gateway`'s pair-device command, `01-F25`'s back-office pairing code.
-// DELETE these markers when that command lands — a marker on something reached fails this rail.
 export const issueDeviceCertificate = async (
   issuer: IssuerMaterial,
   device: { org_id: string; branch_id: string; device_id: string },

@@ -13,7 +13,7 @@
       @restos/sync-gateway listening on http://0.0.0.0:8080
       @restos/sync-gateway database postgres://gateway:*****@127.0.0.1:5432/restos (opened lazily …)
       @restos/sync-gateway publish surface enabled (PUBLISH_TOKEN configured)
-      @restos/sync-gateway schema up to date — all 13 migrations applied
+      @restos/sync-gateway schema up to date — all 14 migrations applied
 
   **The first line is load-bearing** — `__acceptance__/startable.test.ts` spawns the declared script
   with `PORT=0` and finds the ephemeral port by reading it. The other three exist because each
@@ -45,7 +45,8 @@
     transactional, so a failed run is all-or-nothing: verified by planting a colliding
     `kernel.events` before migrating — the run failed on `CREATE SCHEMA "kernel"` and left **zero**
     journal rows and no new tables. A second run on a migrated database applies nothing (journal
-    row count unchanged — 11 when that was the count, 13 since `0012`) and says `nothing to apply`.
+    row count unchanged — 11 when that was the count, 13 after `0012`, 14 since `0013`) and says
+    `nothing to apply`.
   - ⚠ **What the boot check does NOT prove — the honest boundary.** It answers *"has this build's
     journal been applied"*, **not** *"is the schema intact"*. drizzle keeps ONE `created_at`
     watermark and never re-checks the objects, so dropping `kernel.org_events` by hand while
@@ -94,8 +95,10 @@
   - **stdout is the TOKEN and nothing else; every readable line is on stderr.** The emission of a
     credential is made as narrow as it can be, so `TOKEN=$(…)` captures a credential and not a
     paragraph.
-  - ⚠ **What it does NOT close.** `01-F25`'s pairing code (an owner still needs shell access on the
-    service host); device-side persistence of `01-F47`'s silent renewal (the FR puts it in
+  - ⚠ **What it does NOT close. ⚠ THE FIRST ITEM IS CLOSED as of August 2026** — `01-F80`'s
+    pairing code has a model, a claim endpoint and a back-office surface (see the pairing block
+    below), so an owner no longer needs shell access to admit a device. This command survives as the
+    OPERATOR tool it always was. Still open: device-side persistence of `01-F47`'s silent renewal (the FR puts it in
     `sync-client`; `apps/pos-electron` re-reads `RESTOS_DEVICE_TOKEN` from env every launch); the
     <25%-remaining warning; and `hub_relay`, which this never grants because no mesh session exists
     to use it. *(The revocation half — "`revokeDevice` still has no shipping caller at all" — was the
@@ -173,6 +176,110 @@
     defect in an operator's sentence instead of a test's. Mutant R5 is that row.
   - Everything goes to **stdout** here, unlike `provision-device`, whose prose is on stderr only
     because stdout carries a credential. A revocation produces no token, so this follows `migrate.ts`.
+- **`01-F80`'s PAIRING CODE — THE CLOUD HALF (August 2026): `pairing.ts` + `pairing-http.ts`,
+  three `/internal` routes and ONE route that is deliberately not `/internal`.** `01-F25` has
+  specified *"registration is a one-time pairing via back office code"* since Draft 1 and nothing
+  anywhere specified the credential half, so `provision-device` — a shell on the service host —
+  stayed the only way a till came into existence, and `28-F13` named that as the point where a
+  self-onboarded restaurant STOPS. Oracle: `__acceptance__/pairing-claim.test.ts` (**35**, authored
+  from spec text by a session that wrote no implementation, RED as handed over). Package **568/568**.
+  - `POST /internal/devices/pairing-codes` (the MINT, behind `PUBLISH_TOKEN`),
+    `GET /internal/devices/pairings` and `POST /internal/devices/pairings/cancel` for `14-F41`'s
+    waiting row — and **`POST /pair/claim`, which is NOT under `/internal/` and must never move
+    there.** `registerPublishRoutes`' `onRequest` hook demands the publish credential for every path
+    under that prefix; `01-F80` (f) makes the claim an unauthenticated write **by construction**, so
+    a claim registered there would answer `401` to every till in the world at the one moment it
+    holds nothing, and `503` on a deployment that declared no publish credential. It lives in its
+    own module with its own registrar so no future edit can put it behind `publishSecret` by
+    accident — that module never sees the secret.
+  - **THE ONE DESIGN DECISION NO FR MAKES: how a claim FINDS its row.** `01-F80` (b) requires an
+    Argon2id verifier, and an Argon2id hash carries a random salt, so it cannot be looked up by. The
+    three candidates and the choice are argued in `drizzle/0013_device_pairing.sql`'s header:
+    scanning every live row costs one verification **per row per guess** (the denial of service (e)
+    refuses by name), a cleartext selector spends the entropy (b) sizes against an online guess, and
+    a **keyed blind index** — `HMAC-SHA256(key derived from the device-token secret under a label,
+    code)` — costs one SELECT and is not reversible from a database dump. The verifier still gates
+    the claim; the index only finds the row.
+  - **AN EXPIRED PENDING ROW IS KEPT AND IS NOT SWEPT.** `01-F80` (c)'s *"leaves nothing"* is about
+    DEVICES. Deleting the row would make `expired` and `unknown_code` indistinguishable, and (f)
+    distinguishes them deliberately — *"an owner reading yesterday's code off a note needs to be
+    told to re-issue rather than left doubting her typing"*.
+  - ⚠ **A PINNED READING WITH A SECURITY CONSEQUENCE: a claim never resurrects a revoked device, and
+    `01-F80` does not rule on it.** Derived from `01-F47`, `01-F48` and `01-N5`, and it is the exact
+    defect `running-the-stack.md` §6b shipped (`on conflict … do update set revoked_at = null`).
+    Refused `already_claimed`, chosen among the closed five because its next action is the right one.
+  - **`packages/lan-pki`'s three `@unreached-owed` markers are DELETED** — `createOrgIssuer` and
+    `issueDeviceCertificate` have a shipping caller at last, and a marker on something reached fails
+    the rail. That is `01-F73`'s pairing-path debt paid.
+  - ⚠ **It emits no event.** `14-F41` names this act as what unblocks `device.registered` and then
+    records that the type has no payload schema in `packages/domain`, so `01-F4` makes the emit a
+    build-time error — unbuildable, not unbuilt. The mint's `actor_user_id` is stored on the pending
+    row so the emit has an actor the day that schema lands.
+  - ⚠ **RE-ISSUE AND CANCEL ARE THE SURFACE'S, and the ORACLE says so.** `pairing-claim.test.ts`
+    deliberately asserts neither, because `01-F80` names no parameter for *which* waiting row is
+    being re-issued. `cancelPairing`/`listWaitingPairings` here are `14-F41`'s, and their coverage is
+    `apps/backoffice`'s.
+
+### Mutation matrix — `01-F80`'s cloud half (round-3 law), control **568/568** green
+
+In-tree with `git checkout --` as the restore and `restore-dirty=0` verified after every row; the
+two mutants that touch a hashing choice were run **OUT OF TREE** on a full copy of the worktree
+(`T8`: an agent killed between "weaken" and "revert" strands live weakened crypto). Every in-tree
+row is the FULL package suite, `REAL_EXIT` read from a marker written INSIDE the log. **In every
+killing row the failing FILE was `pairing-claim.test.ts` alone, so all 533 pre-existing tests
+stayed green under every mutant.**
+
+| # | mutant (exactly one branch) | killed (of 568) | which |
+|---|---|---|---|
+| SEAM-CLAIM | **`server.ts` never calls `registerPairingRoutes` — the claim route unmounted** | **27** | every test that pairs |
+| SEAM-MINT | **the mint route registered under another path — `14-F41` has nothing to call** | **31** | all but §F's two free-standing refusals and §I |
+| P1 | **the MINT writes the registry row** — a device nobody paired | **24** | §A's "no registry row" + the claim's duplicate-key blast radius |
+| P8 | **a token and no certificate** — a till that syncs and can never join its own branch LAN | **20** | every test that pairs (`mustClaim`'s completeness check) |
+| P2 | TTL 60 minutes | 4 | §C ×2, §D, §I |
+| P3 | the TTL never enforced | 3 | §C, §D, §I |
+| P4 | the retry RE-ISSUES instead of returning the stored certificate | 3 | §D ×2, §H |
+| P5 | a second public key gets its own certificate | 5 | §D ×3, §H, §I |
+| P6 | `device_class` in the certificate subject | 1 | §E "THREE facts" |
+| P7 | **the roster-signing key IS the issuer's** — `01-F81` (c)'s refused design | **1** | §E |
+| P9 | a fresh issuer per claim | 2 | §E "PER ORG and STABLE", §D |
+| P9b | ONE platform issuer for every org | 1 | §E |
+| P10 | the issued certificate is not recorded | 3 | §E `01-F81` (a)/(f), §D ×2 |
+| P11 | no rate limit | 2 | §G, §I |
+| P12 | a GLOBAL rate-limit counter | 1 | §G "it never locks the deployment" |
+| P13 | the org's PRIVATE issuing key in the response | 1 | §E "no private key material" |
+| P14 | **a revoked device re-credentialled** | **1** | §H |
+| P15 | one refusal for every cause | 3 | §C, §D, §I |
+| P16 | `01-F70`'s name dropped at the registry write | 1 | §H `14-F12` |
+| P17 | the claim honours a caller's `now` | 1 | §C |
+| P18 | a 6-digit code | 1 | §B |
+| P19 | a sequential counter instead of a CSPRNG | 3 | §B, §G, §I |
+| P20 | the code stored in a column | 4 | §B "never the code" + three that read the name |
+| P23 | the mint NOT behind the `/internal` credential | 1 | §A |
+| P24 | the claim demands a bearer token | 27 | §A ×2 + every test that pairs |
+| P25 | a stated `org_id`/`device_class` honoured | 1 | §A |
+| P21 | **SHA-256 instead of Argon2id (OUT OF TREE)** | **1 of 35** | §B `01-F61` cost floor |
+| P22 | **Argon2id at m=8,t=1,p=1 (OUT OF TREE)** | **1 of 35** | §B `01-F61` cost floor |
+| NC | **NEGATIVE CONTROL: every refusal sentence reworded, same states, same writes** | **0** | — |
+
+**SEAM-CLAIM, P8 and P14 are the three to re-run after any change here.** SEAM-CLAIM is `L7`
+("mutate the SEAM, not the logic") on this act. P8 is the brief's own headline case and the reason
+`mustClaim` enforces `01-F80` (f)'s completeness **in the fixture**: a token without a certificate
+fails every test that pairs rather than only the one that thought to check. P14 is the security row
+and it is not hypothetical — it restores exactly what the runbook instructed for months.
+
+⚠ **P23 AND P24 MOVE THE ORACLE'S PINNED ROUTE CONSTANT ALONGSIDE THE PRODUCTION ROUTE, and that is
+what makes them one branch rather than two.** Moving only the production route reproduces
+SEAM-MINT (a 404), which measures the absence of a route rather than the presence of a guard;
+moving both keeps the request reaching the handler, so what is measured is the credential.
+
+⚠ **P9's FIRST DESIGN HUNG THE SUITE INSTEAD OF FAILING IT, AND IT FOUND A REAL DEFECT.**
+`orgPkiMaterial` recursed into itself after its `on conflict do nothing` insert; under a mutant that
+skips the read, that recursion never terminates. A hang is not a result (`migratable`'s N5 records
+the same lesson from the other side: **check what a mutant does before recording what its survival
+means**), and the shape it exposed is real — a recursion whose base case is *"the row I just
+inserted is readable"* is unbounded on any state where that is false, inside a credential writer. It
+is one re-read and a named throw now, and P9 was rebuilt to terminate.
+
 - **THE AUDITOR IS SCHEDULED, AND IT NO LONGER LIVES HERE (August 2026).** `runAuditor` had **zero
   production callers** from Wave 0 — AGENTS.md's recurring defect, and `20 §4.2` puts the Auditor in
   Wave 0 *"with the kernel, not later"*, so it was overdue rather than deferred. `services/jobs` now

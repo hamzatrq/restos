@@ -2,8 +2,9 @@
 // owning spec 01 §3/§5): the four original kernel-schema tables, plus the
 // T-01-08 quarantine-notice outbox (DEC-SYNC-008), the T-01-09 device
 // registry, the T-C2 catalog pair, 01-F62's org-scoped store, 01-F68/01-F69/11-F20's
-// tenancy directory and 01-F75/01-F76/11-F23's staff-roster publication log with its
-// credential table — FIFTEEN in all. sync-gateway is the sole writer of all fifteen (18 §4).
+// tenancy directory, 01-F75/01-F76/11-F23's staff-roster publication log with its
+// credential table, and 01-F80/01-F73/01-F81's pending-pairing table beside an org's two
+// keypairs — SEVENTEEN in all. sync-gateway is the sole writer of all seventeen (18 §4).
 // (`kernel.users` has a second READER, `services/api`'s login path, and exactly one writer —
 // this service. See the table's own comment; `0011`'s header states the split in full.)
 // (This header read "six in all" while the file declared nine: a count in a comment rots
@@ -168,6 +169,25 @@ export const deviceRegistry = kernel.table(
     // never reaches the cloud, so this column — not the credential — is how its
     // remaining life is judged (18 §5). Written at mint and at renewal only.
     token_expires_at: bigint("token_expires_at", { mode: "number" }),
+    /**
+     * `01-F73` (b) — the LAN certificate this device was issued at pairing, as issued.
+     *
+     * **Kept rather than re-derived, and `01-F80` (d) is why:** re-presenting a code with the same
+     * public key inside the TTL must return *the same certificate*, and a certificate's validity
+     * window is stamped from the issuing instant — so re-issuing produces different bytes for the
+     * same identity, which is `01-F73` (e)'s refusal read from the other end.
+     *
+     * Null for every device `provision-device` registered: that command mints an `01-F47` token
+     * and no LAN credential, which is TRUE of those devices rather than missing from this row.
+     */
+    certificate_pem: text("certificate_pem"),
+    /**
+     * `01-F81` (a) — "the certificate fingerprint as lowercase hex SHA-256 of the DER", on the row
+     * (f) names as the roster artifact's producer. Without it `01-F74` (c)'s pin half is
+     * unbuildable and the chain alone "admits anything the issuer ever signed, including a device
+     * revoked an hour ago".
+     */
+    certificate_fingerprint: text("certificate_fingerprint"),
   },
   (t) => [primaryKey({ columns: [t.org_id, t.device_id] })],
 );
@@ -749,3 +769,70 @@ export const inventoryEntries = kernel.table(
     ),
   ],
 );
+
+/**
+ * `01-F80` (a)/(b)/(c)/(d) — ONE PENDING PAIRING: a device an owner has described and nobody has
+ * claimed yet.
+ *
+ * **It is not a device.** `01-F80` (c): "An unclaimed code that expires leaves nothing — no
+ * registry row, no certificate, no device, nothing to clean up", and `14-F41` draws the same line
+ * at the surface — "Before a claim there is no device" and "the waiting row BECOMES `14-F12`'s
+ * device row". A row here is a **waiting row**; the claim is what writes `device_registry`.
+ *
+ * **`code_index` is the key and `code_hash` is the check, and the split is the one design decision
+ * in this table** — see `0013`'s header for the three candidates and why a keyed blind index wins.
+ * The index makes the lookup one SELECT; the Argon2id verifier at `01-F61`'s cost floor is what
+ * actually admits the claim. Neither is the code (`01-F80` (b): "never the code").
+ *
+ * **`claimed_at` + `claimed_key_fingerprint` are `01-F80` (d) verbatim** — "the pending row records
+ * the fingerprint of the key it issued over" — and they are why a dropped response is a retry
+ * rather than a burned device.
+ */
+export const devicePairings = kernel.table(
+  "device_pairings",
+  {
+    /** HMAC-SHA256(deployment key, code), lowercase hex. See `pairing.ts`. */
+    code_index: text("code_index").primaryKey(),
+    org_id: text("org_id").notNull(),
+    branch_id: text("branch_id").notNull(),
+    /** `01-F80` (a): minted HERE, by the owner's act — the claim never supplies one. */
+    device_id: text("device_id").notNull(),
+    device_class: text("device_class").notNull(),
+    /** `01-F70`/`14-F41`: required at the mint, because nobody types a name on a till. */
+    display_name: text("display_name").notNull(),
+    /** Argon2id PHC at `01-F61`'s cost floor, over the eight digits. Never the digits. */
+    code_hash: text("code_hash").notNull(),
+    minted_at: bigint("minted_at", { mode: "number" }).notNull(),
+    /** `01-F80` (c): `minted_at + 15 min`, stamped from the MINT's own instant. */
+    expires_at: bigint("expires_at", { mode: "number" }).notNull(),
+    /** `14-F41`'s issuing owner. Nullable for the same reason `actOf` is: a caller with no human. */
+    actor_user_id: text("actor_user_id"),
+    claimed_at: bigint("claimed_at", { mode: "number" }),
+    /** Lowercase hex SHA-256 of the claimant's SPKI DER (`01-F80` (d)). */
+    claimed_key_fingerprint: text("claimed_key_fingerprint"),
+  },
+  (t) => [index("device_pairings_org_branch_idx").on(t.org_id, t.branch_id)],
+);
+
+/**
+ * `01-F73` (b) + `01-F81` (c) — an org's TWO keypairs.
+ *
+ * The issuer signs device certificates; the roster-signing key signs the device roster. They are
+ * **distinct by requirement**: `01-F81` (c) refuses the obvious one-key design by name, because
+ * `01-F74` (c)'s "a compromised issuer still cannot admit a device the roster does not name" is
+ * false the moment one key does both jobs.
+ *
+ * Per **org**, never platform-wide (`01-F73` (b), `01-F71`, `00 §5.4`).
+ *
+ * ⚠ **The two private columns never leave this table.** `01-F73` (b·i): the device "never holds
+ * issuing material". The claim reply carries the issuer's CERTIFICATE and the roster-signing
+ * PUBLIC key and nothing else from this row.
+ */
+export const orgPki = kernel.table("org_pki", {
+  org_id: text("org_id").primaryKey(),
+  issuer_cert_pem: text("issuer_cert_pem").notNull(),
+  issuer_private_key_pem: text("issuer_private_key_pem").notNull(),
+  roster_signing_public_key_pem: text("roster_signing_public_key_pem").notNull(),
+  roster_signing_private_key_pem: text("roster_signing_private_key_pem").notNull(),
+  created_at: bigint("created_at", { mode: "number" }).notNull(),
+});
