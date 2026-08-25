@@ -30,7 +30,7 @@ All measurements taken **2026-08-24** on `1beafcf`, with `grep -a`, comment-blin
 **0.3 The hard gates any design here must pass.**
 
 - `PUBLIC_PROCEDURES` on `services/api` = **`{ "auth.login" }`**, and `assertEveryProcedureIsGated` (`services/api/src/router.ts:271`) **refuses to boot** a host carrying an ungated procedure. `services/api/src/__acceptance__/signup-admission.test.ts` is a deliberate tripwire against widening that set.
-- `DEVICE_CLASSES` = **6** (`counter_electron · counter_rn · kitchen · manager · waiter · rider`) and `registerDevice` (`services/sync-gateway/src/registry.ts:82`) refuses anything else with a `01-F39` message.
+- `DEVICE_CLASSES` = **6** (`counter_electron · counter_rn · kitchen · manager · waiter · rider`) and `registerDevice` (`services/sync-gateway/src/registry.ts:82`) refuses anything else with a `01-F39` message. (⚠ **This gate was CLEARED by the work this document designed** — `01-F39` gained `storefront_cloud` in August 2026 and `DEVICE_CLASSES` is **7**; §2 row 2 is the ✔. Kept as the design-time measurement it was, marked because it is written in the present tense.)
 - `TIME_BASES` = **`branch · branch_provisional`**; `packages/domain/src/envelope.ts:29`: *"`server` is NOT one of these — a device cannot know server time at append."*
 - `MESSAGE_KINDS` = **16** literals (`05-F28` still calls it *"a closed 14-member vocabulary"* — stale by the two `reference_*` additions).
 - `ROLES` = **4** (`cashier · branch_manager · storekeeper · owner`). A customer is not one and must never become one.

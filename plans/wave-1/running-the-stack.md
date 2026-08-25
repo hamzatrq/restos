@@ -146,23 +146,40 @@ DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/restos' \
 Healthy — one line, and the DSN is password-redacted (`18 §5`):
 
 ```
-@restos/sync-gateway migrate applied 13 of 13 migrations · postgres://postgres:*****@127.0.0.1:5432/restos
+@restos/sync-gateway migrate applied 16 of 16 migrations · postgres://postgres:*****@127.0.0.1:5432/restos
 ```
 
-and fifteen tables in `kernel`:
+⚠ **THE TWO COUNTS IN THIS SECTION ARE MEASUREMENTS, AND BOTH HAVE NOW GONE STALE TWICE** (`L1`).
+They said *13 migrations* and *fifteen tables* through three branches that landed together
+(`0013` `inventory_*`, `0014` `device_pairings`/`org_pki`, `0015` `config_*`). **Read them off their
+sources rather than off this page** — the migration count is `ls services/sync-gateway/drizzle/*.sql
+| wc -l`, and the table census is asserted at **exact equality** against a freshly-migrated database
+by `services/sync-gateway/src/__acceptance__/migratable.test.ts`'s `EXPECTED_TABLES`, which is where
+a table that has just been added shows up first. **`migratable.test.ts` is the census; this section
+quotes it**, and for a while the citation ran the other way — the test named §2 as the source of a
+number §2 had copied from the migrations. A number in an operator's runbook is a transcription of a
+fact that lives in the tree, never the fact.
+
+and, measured 2026-08-25, **21 tables** in `kernel`:
 
 ```sh
 docker exec restos-pg psql -U postgres -d restos -c '\dt kernel.*'
-# branches · catalog_entries · catalog_versions · device_registry · device_watermarks
-# events · org_events · org_sequences · orgs · quarantine · quarantine_notices
-# staff_entries · staff_versions · user_credentials · users
+# branches · catalog_entries · catalog_versions · config_entries · config_versions
+# device_pairings · device_registry · device_watermarks · events · inventory_entries
+# inventory_versions · org_events · org_pki · org_sequences · orgs · quarantine
+# quarantine_notices · staff_entries · staff_versions · user_credentials · users
 ```
 
 `orgs` and `branches` arrived at `0010` (`01-F68`/`01-F69` — the tenancy directory), `users` at
-`0011` (`11-F20`/`15-F26`), and `staff_entries`/`staff_versions`/`user_credentials` at `0012`
+`0011` (`11-F20`/`15-F26`), `staff_entries`/`staff_versions`/`user_credentials` at `0012`
 (`01-F75`/`01-F76` — the staff roster's publication log per artifact key; `11-F23` — the
 device-plane PIN credential in its own table, which nothing writes or serves yet: the wire and the
-CRUD are steps 4–6 of `plans/saas-pivot/staff-over-the-wire.md`). ⚠ **This paragraph said "nothing fills them yet" and that stopped being
+CRUD are steps 4–6 of `plans/saas-pivot/staff-over-the-wire.md`), `inventory_entries`/
+`inventory_versions` at `0013` (`01-F21`/`10-F18` — the inventory reference set's publication log),
+`device_pairings`/`org_pki` at `0014` (`01-F80` — a pending pairing an owner minted and nobody has
+claimed; `01-F73` (b) + `01-F81` (c) — an org's issuer and its separate roster-signing keypair), and
+`config_entries`/`config_versions` at `0015` (`01-F87` — `00 §7`'s layer-2 configuration as the
+fourth `01-F75` reference-data resource). ⚠ **This paragraph said "nothing fills them yet" and that stopped being
 true in August 2026** — §2b's four declared commands are the writer. They are still empty on a fresh
 stack, and a run that skips §2b still comes up: `01-F68` makes an org with events and no record
 **UNNAMED, not invalid**, no ledger table references any of the three, and `\d kernel.events` shows
@@ -172,7 +189,7 @@ owner all render as UUIDs (`21-F15`).
 **It is idempotent.** A second run says so and changes nothing:
 
 ```
-@restos/sync-gateway migrate nothing to apply — all 13 migrations were already present · postgres://…
+@restos/sync-gateway migrate nothing to apply — all 16 migrations were already present · postgres://…
 ```
 
 ⚠ **Postgres `NOTICE` objects on the second run are not errors.** `42P06 schema "drizzle" already
@@ -188,8 +205,8 @@ a fourth boot line reports the schema state, so forgetting this step is a senten
 bringing the stack up rather than a `500` somewhere else later.
 
 ```
-@restos/sync-gateway schema up to date — all 13 migrations applied
-@restos/sync-gateway schema NOT MIGRATED — 13 of 13 migrations are unapplied. Run `pnpm -C services/sync-gateway migrate`; …
+@restos/sync-gateway schema up to date — all 16 migrations applied
+@restos/sync-gateway schema NOT MIGRATED — 16 of 16 migrations are unapplied. Run `pnpm -C services/sync-gateway migrate`; …
 ```
 
 ---
@@ -291,7 +308,7 @@ pnpm -C services/sync-gateway start          # `dev` to watch
 @restos/sync-gateway listening on http://127.0.0.1:8080
 @restos/sync-gateway database postgres://postgres:*****@127.0.0.1:5432/restos (opened lazily …)
 @restos/sync-gateway publish surface enabled (PUBLISH_TOKEN configured)
-@restos/sync-gateway schema up to date — all 13 migrations applied
+@restos/sync-gateway schema up to date — all 16 migrations applied
 ```
 
 ⚠ **The first line reads `127.0.0.1`, not `0.0.0.0` — this doc said `0.0.0.0` and that string is

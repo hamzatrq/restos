@@ -37,13 +37,23 @@ describe("electHub directed cases (01-F13; HUB-ELECTION.md)", () => {
     expect(electHub([peer("aaa", "waiter"), peer("aab", "rider"), peer("zzz", "counter_rn")])).toBe(
       "zzz",
     );
+    // `01-F39`'s FOURTH never-hub class (August 2026, `06-F30`). A cloud origin is not on the
+    // branch LAN and has no branch to serve a clock to, so it loses to a `kitchen` peer whose
+    // device_id sorts AFTER it — the case a lexicographic tiebreak would get wrong.
+    expect(electHub([peer("aaa", "storefront_cloud"), peer("zzz", "kitchen")])).toBe("zzz");
   });
 
   it("01-F13: null when no hub-eligible peer is visible", () => {
     expect(electHub([])).toBeNull();
     expect(electHub([peer("dev-a", "manager")])).toBeNull();
+    expect(electHub([peer("dev-a", "storefront_cloud")])).toBeNull();
     expect(
-      electHub([peer("dev-a", "waiter"), peer("dev-b", "rider"), peer("dev-c", "manager")]),
+      electHub([
+        peer("dev-a", "waiter"),
+        peer("dev-b", "rider"),
+        peer("dev-c", "manager"),
+        peer("dev-d", "storefront_cloud"),
+      ]),
     ).toBeNull();
   });
 });
@@ -62,7 +72,18 @@ const peersArb = fc.array(peerArb, { maxLength: 12 });
 const scopedArb = fc
   .record({
     n: fc.integer({ min: 0, max: 30 }),
-    device_class: fc.constantFrom("manager" as const, "waiter" as const, "rider" as const),
+    // `01-F39`'s never-hub-eligible complement, listed as the FR lists it. ⚠ It read
+    // `manager | waiter | rider` through the August 2026 amendment that added a FOURTH
+    // (`storefront_cloud`, for `06-F30`) — so this property swept a class set the FR had
+    // moved, and the inertness of a cloud origin went unexercised. The closed-set
+    // assertion itself lives in `sync-protocol`'s `device-classes.test.ts`; this
+    // arbitrary quantifies over it.
+    device_class: fc.constantFrom(
+      "manager" as const,
+      "waiter" as const,
+      "rider" as const,
+      "storefront_cloud" as const,
+    ),
   })
   .map(({ n, device_class }) => peer(`scoped-${String(n).padStart(2, "0")}`, device_class));
 

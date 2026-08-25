@@ -24,13 +24,14 @@
  *   user_credentials · staff_versions · staff_entries · inventory_versions · inventory_entries ·
  *   device_pairings · org_pki · config_versions · config_entries
  *
- * ⚠ **The list moved from fifteen to TWENTY-ONE across three branches that landed together, and
- * the oracle reports only the FIRST unseeded table it meets.** `inventory_*` (`0013`),
- * `device_pairings`/`org_pki` (`0014`) and `config_*` (`0015`) each arrived on their own branch;
- * two of the three shipped WITHOUT a seed here, and §0's failure named `device_pairings` alone
- * because `expect` stops at the first miss. Seeding one table would have moved the failure to the
- * next and read as a fresh regression. Re-measure the set from `information_schema` — which is
- * what §0 itself does — rather than trusting this list.
+ * ⚠ **The list moved from fifteen to TWENTY-ONE across three branches that landed together.**
+ * `inventory_*` (`0013`), `device_pairings`/`org_pki` (`0014`) and `config_*` (`0015`) each arrived
+ * on their own branch; two of the three shipped WITHOUT a seed here, and §0's failure named
+ * `device_pairings` alone, because a loop of `expect`s stops at the first miss. Seeding the one
+ * table it named would have moved the failure to the next and read as a fresh regression. **§0 now
+ * collects every miss and asserts once**, so that shape can no longer understate; this LIST is
+ * still the thing that rots. Re-measure the set from `information_schema` — which is what §0
+ * itself does — rather than trusting this list.
  *
  * ⚠ **The fixture takes the tenant as an ARGUMENT and every tenant is fully populated.** That is
  * `01-F71`'s own lesson from the reference-serve round, quoted in the FR: *"every fixture in the

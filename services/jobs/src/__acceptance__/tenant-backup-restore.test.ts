@@ -700,22 +700,45 @@ describe("R38: a per-tenant backup, a restore that has actually been run, and an
      * something to prove: the fixture check failed because the fixture had been demolished on
      * purpose, and once a restore existed it would have started passing *because the restore
      * worked* — a fixture assertion silently depending on the thing it exists to make meaningful.
+     *
+     * ⚠ **IT COLLECTS EVERY MISS AND ASSERTS ONCE, BECAUSE A LOOP OF `expect`s UNDERSTATES BY
+     * DESIGN.** This was a nested `for` of `expect(...).toBeGreaterThan(0)`, so the first empty
+     * (table, tenant) pair threw and every pair after it went unevaluated. Measured August 2026:
+     * it reported `device_pairings` alone while **four (table, tenant) pairs** were unseeded.
+     * Three migrations arrived on their own branches and landed together — `inventory_*` (`0013`),
+     * `device_pairings`/`org_pki` (`0014`), `config_*` (`0015`) — and TWO of the three shipped
+     * without a seed here; that clause names the branches, not the four. Seeding the one table it named would have moved the failure to
+     * the next and read as a **fresh regression** on a green branch, three times over. A failure
+     * here names the whole set, so one edit closes it.
      */
     it("both tenants are populated across every kernel table that carries an org_id", () => {
+      // ⚠ A FLOOR, not the census — `migratable.test.ts`'s `EXPECTED_TABLES` owns that at exact
+      // equality, and duplicating it here would be two writes of one fact. But the floor read
+      // **15** while all **21** kernel tables carry `org_id`, so six could have dropped out of
+      // this census silently — a stale count inside the very assertion this file exists to keep
+      // honest. It only ever rises: a future table WITHOUT an `org_id` does not lower it.
       expect(
         tableNames.length,
-        "fewer than 15 kernel tables carry an org_id",
-      ).toBeGreaterThanOrEqual(15);
+        `only ${String(tableNames.length)} kernel tables carry an org_id; 21 did on 2026-08-25 — ` +
+          "if a table legitimately lost its org_id, lower this floor deliberately and say why",
+      ).toBeGreaterThanOrEqual(21);
+      const unseeded: string[] = [];
       for (const tenant of [A, B]) {
         for (const table_name of tableNames) {
-          expect(
-            populated[tenant.org_id]?.[table_name] ?? 0,
-            `kernel.${table_name} had no row for ${tenant.org_id} when the fixture was seeded — ` +
-              "an equality assertion over an empty table is an assertion about nothing, and this " +
-              "fixture is what makes §D bite",
-          ).toBeGreaterThan(0);
+          // `!(n > 0)`, not `n === 0`: the faithful negation of the assertion this replaced.
+          // `=== 0` would pass a negative count or a NaN through as "seeded".
+          if (!((populated[tenant.org_id]?.[table_name] ?? 0) > 0)) {
+            unseeded.push(`kernel.${table_name} (${tenant.org_id})`);
+          }
         }
       }
+      expect(
+        unseeded,
+        `${String(unseeded.length)} of ${String(tableNames.length * 2)} (table, tenant) pairs had ` +
+          `no row when the fixture was seeded:\n  ${unseeded.join("\n  ")}\n` +
+          "An equality assertion over an empty table is an assertion about nothing, and this " +
+          "fixture is what makes §D bite. THE WHOLE SET IS NAMED ON PURPOSE — see the note above.",
+      ).toEqual([]);
     });
   });
 

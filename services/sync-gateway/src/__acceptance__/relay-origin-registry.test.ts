@@ -48,6 +48,7 @@
 //   with T-01-12): its next operation is AuthRejectedError — session-level
 //   rejection, nothing persisted, no quarantine row.
 // ─────────────────────────────────────────────────────────────────────────────
+import type { DeviceClass } from "@restos/domain";
 import { type ProtocolMessage, parseMessage } from "@restos/sync-protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Gateway } from "../index.js";
@@ -128,7 +129,10 @@ const sameBranchDevice = (of: Identity): Identity => ({
 /** hello with a TRUTHFUL declared class (registry-vs-declared conflict handling is an open ruling — no pin here depends on misdeclaration). */
 const helloWithClass = (
   identity: Identity,
-  deviceClass: "counter_electron" | "counter_rn" | "kitchen" | "manager" | "waiter" | "rider",
+  // `01-F39`'s vocabulary is declared once in `packages/domain`; this was a hand-copied
+  // six-member union that silently went stale when the FR gained `storefront_cloud`
+  // (August 2026, `06-F30`). A copy of a closed set is a second declaration of it.
+  deviceClass: DeviceClass,
   token: string,
 ): ProtocolMessage =>
   parseMessage({

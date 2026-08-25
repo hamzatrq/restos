@@ -50,9 +50,15 @@ const PKG_DIR = resolve(import.meta.dirname, "..", "..");
 const DEVICE_SECRET = "a-device-token-secret-of-at-least-32-bytes-for-the-migratable-suite";
 
 /**
- * The twenty-one tables `plans/wave-1/running-the-stack.md` §2 tells an operator to expect. Written
- * out rather than derived from `schema.ts`: a list derived from the same source the migrations were
- * generated from would agree with itself no matter what the migrations actually did.
+ * The twenty-one tables the shipped migrations create. Written out rather than derived from
+ * `schema.ts`: a list derived from the same source the migrations were generated from would agree
+ * with itself no matter what the migrations actually did.
+ *
+ * ⚠ **THIS LIST IS THE CENSUS AND `plans/wave-1/running-the-stack.md` §2 QUOTES IT — the citation
+ * used to run the other way.** This comment named §2 as the source of a number §2 had itself copied
+ * off the migrations, so a runbook that had been stale twice was standing in as the authority for
+ * an assertion (`L2`: a derived document is not the source). §2 now says where it is measured from
+ * and points here.
  *
  * `branches` and `orgs` joined at `0010` (01-F68/01-F69 — the tenancy directory), `users` at
  * `0011` (11-F20/15-F26 — the person, and the org's first owner), `staff_entries` /
