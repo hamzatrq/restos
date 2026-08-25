@@ -23,11 +23,39 @@
  * port — and is additive when a role that needs it exists.
  */
 
+import { DEVICE_CLASSES, DisplayName } from "@restos/domain";
 import { z } from "zod";
 import { withActors } from "./devices.js";
 import { authorized } from "./trpc.js";
 
 const revokeInput = z.object({ device_id: z.string().min(1) });
+
+/**
+ * `01-F80` (a) / `14-F41` — *"The form asks three facts and no more."*
+ *
+ * ⚠ **`device_id` is absent and there is nowhere to put one.** `01-F80` (a) mints it; a caller
+ * that could supply one would be choosing an identity `01-F68` never reuses.
+ *
+ * ⚠ **`branch_id` IS taken here, and `14-F30`'s §9.6 ordering point is why it is safe where
+ * `revoke`'s was not.** This file's header records that `revoke` refuses a `branch_id` because this
+ * service learns a device's branch only by reading the registry, so a caller-stated branch would be
+ * checked *after* the destructive act. The mint has no such problem: the branch is an INPUT to the
+ * act rather than a fact about an existing row, so `trpc.ts`'s middleware scopes
+ * `can("device.manage")` to the branch the caller named **before the code is minted** — which is
+ * exactly what `14-F41` requires ("the branch is checked before the code is minted, because a check
+ * that runs after the mint authorizes nothing and the credential already exists").
+ */
+const mintInput = z.object({
+  branch_id: z.string().min(1),
+  /**
+   * `01-F39`'s vocabulary, from `packages/domain` and never redeclared. It is a *vendor* string and
+   * `14-F38` forbids rendering it — the screen offers "connect a till" / "connect a kitchen screen"
+   * and maps to this here, so the closed set has one declaration and the words have another.
+   */
+  device_class: z.enum(DEVICE_CLASSES),
+  /** `01-F70`, required at registration, through `packages/domain`'s one authority. */
+  display_name: DisplayName,
+});
 
 export const deviceProcedures = {
   /**
@@ -45,6 +73,73 @@ export const deviceProcedures = {
     ]);
     return withActors(devices, revocations);
   }),
+
+  /**
+   * `14-F41` — the waiting rows, beside `list`'s device rows.
+   *
+   * **Two reads and no join**, because they are two different kinds of thing and `14-F41` says so:
+   * *"Before a claim there is no device"*, and *"the waiting row BECOMES `14-F12`'s device row"*.
+   * A screen that merged them would render a fleet containing tills that do not exist — the
+   * `00 §5.7` failure of showing something as present when it is only expected.
+   */
+  pairings: authorized("device.manage").query(async ({ ctx }) => {
+    return ctx.devices.pairings(ctx.subject.org_id);
+  }),
+
+  /**
+   * `01-F80` (a) / `14-F41` — **mint a pairing code.**
+   *
+   * This is the act that lets an owner put a till on the floor without anybody holding a shell on
+   * the service host. Until it landed, `provision-device` was the only path and `28-F13` recorded
+   * where a self-onboarded restaurant stopped: *an org, an owner, and no way to reach a till.*
+   *
+   * **The code is returned and never stored on this plane either.** `14-F41` requires no ability of
+   * the cloud to reproduce a live code, so there is no read that can fetch it back; the way out of
+   * a lost code is to mint another, which kills the first (`01-F80` (c)).
+   *
+   * ⚠ **It emits NO event, and `14-F41` is explicit that this is blocked one layer down rather than
+   * chosen.** That FR names this act as what unblocks `device.registered` — the authenticated
+   * moment an audit trail wants — and then records that the type has **no payload schema in
+   * `packages/domain`**, so `01-F4` makes the emit a build-time *and* runtime error: unbuildable,
+   * not unbuilt. The actor is carried to the gateway and stored on the pending row, so the emit has
+   * an actor the day that schema lands; adding the event here would need the doc-01 act first
+   * (`14 §9.12` records that its ROUTING is stated in two documents that do not agree).
+   */
+  mintPairing: authorized("device.manage")
+    .input(mintInput)
+    .mutation(async ({ ctx, input }) => {
+      return ctx.devices.mintPairing({
+        org_id: ctx.subject.org_id,
+        branch_id: input.branch_id,
+        device_class: input.device_class,
+        display_name: input.display_name,
+        // Commandment 8: the SUBJECT's id. A client-supplied actor is a role claim in another
+        // costume, and this is the field `14-F41` says an audit trail wants.
+        actor_user_id: ctx.subject.user_id,
+        // ONE reading, so `01-F80` (c)'s fifteen minutes are measured from this act's instant
+        // rather than from whenever the writer happened to run (`18 §4`).
+        now: ctx.now(),
+      });
+    }),
+
+  /**
+   * `14-F41` — **cancel an unclaimed code, and it is NOT revocation.**
+   *
+   * The FR's own sentence is the whole specification: *"Before a claim there is no device:
+   * cancelling an unclaimed code destroys a credential nobody holds, emits nothing, and may be
+   * repeated freely. After a claim the act is `14-F13`'s revocation, which is permanent."*
+   *
+   * **So this appends nothing**, unlike `revoke` beside it — there is no device to attribute a
+   * `device.revoked` to, and writing one would put a permanent record of a till being switched off
+   * where no till ever existed (`01-F1`). `cancelled: false` means a claim beat the press, and the
+   * screen must then say the device is real and that removing it is the other, permanent act.
+   */
+  cancelPairing: authorized("device.manage")
+    .input(revokeInput)
+    .mutation(async ({ ctx, input }) => {
+      const outcome = await ctx.devices.cancelPairing(ctx.subject.org_id, input.device_id);
+      return { device_id: input.device_id, cancelled: outcome.cancelled };
+    }),
 
   /**
    * `14-F13` — "Revocation is immediate ('stolen tablet' flow)".

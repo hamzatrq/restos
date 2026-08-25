@@ -90,7 +90,12 @@ import superjson from "superjson";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { CatalogEntry, EnabledPairs } from "../catalog.js";
 import { createMemoryStagedEditStore } from "../catalog.js";
-import type { DeviceDirectory, DeviceRecord, DeviceRevocationRecord } from "../devices.js";
+import type {
+  DeviceDirectory,
+  DeviceRecord,
+  DeviceRevocationRecord,
+  PairingRecord,
+} from "../devices.js";
 import type { DayLedger, LedgerWindow } from "../ledger.js";
 import type { CatalogDeps } from "../publish.js";
 import { createMemoryCatalogPublisher, createMemoryLedgerAppender } from "../publish.js";
@@ -238,6 +243,7 @@ type DeviceFixture = DeviceDirectory & { seed(org_id: string, device: DeviceReco
 const memoryDeviceDirectory = (now: () => number): DeviceFixture => {
   const byOrg = new Map<string, Map<string, DeviceRecord & { revoked_at: number | null }>>();
   const revocations = new Map<string, DeviceRevocationRecord[]>();
+  const pending = new Map<string, PairingRecord[]>();
   const of = (org_id: string) => {
     const existing = byOrg.get(org_id);
     if (existing !== undefined) return existing;
@@ -250,6 +256,32 @@ const memoryDeviceDirectory = (now: () => number): DeviceFixture => {
       of(org_id).set(device.device_id, { ...device, revoked_at: device.revoked_at ?? null });
     },
     list: async (org_id) => [...of(org_id).values()],
+    // `01-F80`/`14-F41`'s three pairing methods, kept PER ORG like everything else in this
+    // fixture, so a procedure that read the org off the request would reach across here too.
+    mintPairing: async (input) => {
+      const device_id = `pairing-${of(input.org_id).size}-${input.branch_id}`;
+      pending.set(input.org_id, [
+        ...(pending.get(input.org_id) ?? []),
+        {
+          device_id,
+          branch_id: input.branch_id,
+          device_class: input.device_class,
+          display_name: input.display_name,
+          minted_at: input.now,
+          expires_at: input.now + 15 * 60 * 1000,
+        },
+      ]);
+      return { code: "12345678", device_id, expires_at: input.now + 15 * 60 * 1000 };
+    },
+    pairings: async (org_id) => pending.get(org_id) ?? [],
+    cancelPairing: async (org_id, device_id) => {
+      const held = pending.get(org_id) ?? [];
+      pending.set(
+        org_id,
+        held.filter((row) => row.device_id !== device_id),
+      );
+      return { cancelled: held.some((row) => row.device_id === device_id) };
+    },
     revoke: async (org_id, device_id) => {
       const row = of(org_id).get(device_id);
       // A registry row that is not in this org simply is not there — the same answer Postgres

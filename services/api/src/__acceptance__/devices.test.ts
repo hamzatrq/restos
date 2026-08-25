@@ -352,10 +352,26 @@ describe("§B — the revocation is attributed to the authenticated owner (14-F1
     // revoked device — no FR, no `DECISIONS.md` row — and `01-N5`'s replacement path is a fresh
     // `device_id`. A restore control would be inventing security policy (Commandment 2), and it is
     // exactly the defect `provision-device` removed (`on conflict … set revoked_at = null`).
+    //
+    // ⚠ **THE LIST MOVED, AND WHAT IT ASSERTS DID NOT — recorded rather than quietly edited.**
+    // `14-F41` (`01-F25`'s pairing code, founder ruling R40) adds three FR-decided procedures to
+    // this same §3 block, all on `14-F30`'s `device.manage` cell ("so a later act added here
+    // (01-F25 pairing, station-class assignment) inherits it deliberately rather than by
+    // omission"). They are named here because the assertion is EXACT EQUALITY and must stay exact
+    // equality: a `devices.restore` / `devices.unrevoke` / anything else still fails this line.
+    // `devices.cancelPairing` is deliberately in the set and is NOT an un-revoke — `14-F41`:
+    // "CANCEL IS NOT REVOKE … Before a claim there is no device", and the gateway's writer carries
+    // `and claimed_at is null` so it cannot reach a claimed row at all.
     const procedures = Object.keys(appRouter._def.procedures)
       .filter((name) => name.startsWith("devices."))
       .sort();
-    expect(procedures).toEqual(["devices.list", "devices.revoke"]);
+    expect(procedures).toEqual([
+      "devices.cancelPairing",
+      "devices.list",
+      "devices.mintPairing",
+      "devices.pairings",
+      "devices.revoke",
+    ]);
   });
 });
 

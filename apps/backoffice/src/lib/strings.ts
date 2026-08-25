@@ -626,6 +626,76 @@ export const strings = {
     alreadyRevoked: "This device was already revoked; nothing changed and no actor was recorded.",
     refused: "The server refused this revocation:",
   },
+  /**
+   * `14-F41` — `01-F25`'s pairing code, as the owner reads it.
+   *
+   * ⚠ **Not one word here names a device CLASS, an org, a branch id or a code format.** `14-F38`:
+   * owner-facing text names no internal identifier, and `14-F32`'s rule (extended to this surface
+   * by `14-F41`) puts the task in her vocabulary — *connect a till*, not *register a
+   * `counter_electron`*.
+   *
+   * ⚠ **The code is SPOKEN, and the sentences are written for that.** `14-F41`: the person holding
+   * the device is in the kitchen and she is at a desk, so *"the surface requires of `01-F25`'s
+   * format only that it survive being said by one person and typed by another"*, and the screen
+   * *"states, in the owner's terms, where the code goes; a code read to somebody staring at a
+   * screen with no box for it is a support call."*
+   */
+  pairing: {
+    heading: "Connect a device",
+    /** The task list. One task per thing being connected — `14-F41` on `14-F32`'s precedent. */
+    connectTill: "Connect a till",
+    connectKitchen: "Connect a kitchen screen",
+    /** `01-F70` asks for the name in her terms, because the person reading the list later is not
+     * standing in front of the device. */
+    nameLabel: "What will you call it?",
+    namePlaceholder: "Front counter",
+    nameHelp:
+      "You will see this name in this list. Pick something whoever is standing at the device " +
+      "would recognise.",
+    branchLabel: "Which branch is it in?",
+    branchHelp: "Everything this device rings is recorded against this branch, permanently.",
+    create: "Get a code",
+    creating: "Getting a code…",
+    cancel: "Not now",
+    /** `14-F41`: on commit, the code renders large enough to read from arm's length. */
+    codeHeading: "Read this code to whoever is at the device",
+    codeWhere: 'On the device: "Connect this device", then type the code.',
+    codeLife: "It works for 15 minutes.",
+    /** `14-F41`: "A reload loses it, and the surface says so instead of pretending." */
+    codeGone:
+      "This code is shown once. If you lose it, get a new one — that cancels this one, so a " +
+      "device can never be waiting on two codes at the same time.",
+    codeDone: "Done",
+    waitingHeading: "Waiting for a device",
+    waitingEmpty: "No codes are waiting to be used.",
+    /** `14-F4`/`00 §5.7`: the row states its own age rather than looking like a device. */
+    waitingSince: "Code given",
+    expiresIn: "Expires in",
+    expiringSoon: "Expires in under a minute",
+    expired: "This code has expired.",
+    reissue: "Get a new code",
+    /**
+     * `14-F41`: "CANCEL IS NOT REVOKE, and the surface never blurs them … the surface states which
+     * side of that line the owner is on before she presses."
+     */
+    cancelCode: "Cancel this code",
+    cancelling: "Cancelling…",
+    cancelSafe:
+      "Nothing has used this code yet, so cancelling it takes nothing away and you can get " +
+      "another whenever you like.",
+    /** The claim beat the press: the pairing is a device now, and removing it is the other act. */
+    cancelTooLate:
+      "A device used this code just now, so there was nothing left to cancel. It is in the device " +
+      "list above. Stopping it is a different thing and it cannot be undone.",
+    refused: "The server refused this:",
+    /**
+     * `14-F41` + `01-F80` (g): what the person at the device is looking at. Said here because a
+     * code with no destination is a support call.
+     */
+    deviceSide:
+      "A device with nothing set up on it asks for this code as soon as it starts. It does not " +
+      "need anything else typed into it.",
+  },
 
   /**
    * **`14-F14` — the roster, and the four acts an owner performs on it.**

@@ -205,6 +205,33 @@ const DeviceRevokeResponse = z.object({
   already: z.boolean(),
 });
 
+/**
+ * `01-F80` (a)'s mint reply. The `code` crosses this boundary exactly once and is stored nowhere on
+ * this side either — it goes to the screen that shows it and is gone on the next render.
+ */
+const MintedPairingResponse = z.object({
+  code: z.string(),
+  device_id: z.string(),
+  expires_at: z.number().int(),
+});
+
+/** `14-F41`'s waiting rows, as the gateway's pending-pairing table answers them. Parsed, for
+ * `OrgEventResponse`'s reason: this crosses a service boundary. */
+const PairingListResponse = z.object({
+  pairings: z.array(
+    z.object({
+      device_id: z.string(),
+      branch_id: z.string(),
+      device_class: z.string(),
+      display_name: z.string(),
+      minted_at: z.number().int(),
+      expires_at: z.number().int(),
+    }),
+  ),
+});
+
+const CancelPairingResponse = z.object({ cancelled: z.boolean() });
+
 const endpoint = (link: GatewayLink, path: string): string =>
   `${link.base_url.replace(/\/+$/, "")}${path}`;
 
@@ -390,6 +417,42 @@ export const createGatewayDeviceDirectory = (link: GatewayLink): DeviceDirectory
   list: async (org_id) => {
     const body = await getJson(link, "/internal/devices", org_id, "device list");
     return DeviceListResponse.parse(body).devices as readonly DeviceRecord[];
+  },
+  /**
+   * `01-F80` (a)'s mint, `14-F41`'s create task.
+   *
+   * `now` and `actor_user_id` ride because that surface's `actOf` requires them, and the first is
+   * load-bearing rather than conventional: `01-F80` (c)'s fifteen minutes are measured from the
+   * act's instant, so the CALLER's one reading is what the TTL is stamped against.
+   */
+  mintPairing: async (input) => {
+    const body = await postJson(
+      link,
+      "/internal/devices/pairing-codes",
+      {
+        org_id: input.org_id,
+        branch_id: input.branch_id,
+        device_class: input.device_class,
+        display_name: input.display_name,
+        actor_user_id: input.actor_user_id,
+        now: input.now,
+      },
+      "pairing code",
+    );
+    return MintedPairingResponse.parse(body);
+  },
+  pairings: async (org_id) => {
+    const body = await getJson(link, "/internal/devices/pairings", org_id, "waiting pairings");
+    return PairingListResponse.parse(body).pairings;
+  },
+  cancelPairing: async (org_id, device_id) => {
+    const body = await postJson(
+      link,
+      "/internal/devices/pairings/cancel",
+      { org_id, device_id },
+      "cancel pairing",
+    );
+    return CancelPairingResponse.parse(body);
   },
   revoke: async (org_id, device_id) => {
     const body = await postJson(
