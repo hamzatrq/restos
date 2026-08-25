@@ -378,6 +378,15 @@ export const LineCorrection = ({ lines, campaigns, onSubmit, onCancel }: LineCor
                 <p
                   style={{
                     ...label,
+                    // ⚠ **`lineHeight` MUST BE RE-STATED IN `px` AFTER EVERY SPREAD OF A TYPE
+                    // TOKEN, AND THIS FILE WAS THE ONLY PLACE IN THE PRODUCT THAT DID NOT.**
+                    // `TypeStyle.lineHeight` is a NUMBER of dp (20 here) and React does not
+                    // append a unit to `lineHeight` — it is on React's unitless list — so
+                    // `{...label}` alone emits `line-height: 20`, a MULTIPLIER. Measured in
+                    // Blink on `counter-1366`: `line-height` computed to **280px** on a 14 px
+                    // font and this one-line caption occupied **280 dp** instead of 20. See the
+                    // footer paragraph at the bottom of this file for what that cost.
+                    lineHeight: `${label.lineHeight}px`,
                     // `Panel`'s own rule, and its reason: the capitals are applied in CSS so an
                     // acceptance oracle (and this surface's `24-F14` layout probe) keeps matching
                     // natural-language text. Written upper-case at the call site, the gate's
@@ -455,7 +464,29 @@ export const LineCorrection = ({ lines, campaigns, onSubmit, onCancel }: LineCor
       */}
       <div style={{ display: "flex", alignItems: "center", gap: space["space-3"] }}>
         <Tile posture="counter" label="Back" onPress={onCancel} />
-        <p style={{ ...label, color: color["fgColor-muted"], margin: 0 }}>
+        {/*
+          ⚠ **THIS PARAGRAPH MADE THREE KEYPAD KEYS UNPRESSABLE, and the cause is one missing
+          unit.** `{...label}` emits `line-height: 20` — unitless, because React does not add
+          `px` to `lineHeight` — which Blink resolves against the 14 px font as **280px**. So
+          this single line of text claimed a **280 dp** box; the row it is in is the LAST flex
+          item of a `height: 100%` column whose `Panel` siblings all set `minHeight: 0`, so the
+          panels (not this row) absorbed every pixel of the shortfall, shrank below their own
+          content, and — having no `overflow` — PAINTED that content over the region beneath.
+          Measured on `counter-1366` under `03-F5`'s band: `How much` held 580 dp in a 381 dp
+          box, this row sat at y=582 across the keypad's bottom rank, and `elementFromPoint` at
+          the centres of `C`, `0` and `⌫` returned this `div` and this `<p>` rather than the
+          keys. `0` is needed for every round discount (Rs 150, Rs 200, Rs 50), so the surface
+          was unusable for its most ordinary amounts. With the unit restored the row is 73 dp —
+          the `Back` tile's own height — and the surface fits with room to spare.
+        */}
+        <p
+          style={{
+            ...label,
+            lineHeight: `${label.lineHeight}px`,
+            color: color["fgColor-muted"],
+            margin: 0,
+          }}
+        >
           {act === null ? "Pick the dish, then what happened, then why." : ACT_WORDS[act].effect}
         </p>
       </div>

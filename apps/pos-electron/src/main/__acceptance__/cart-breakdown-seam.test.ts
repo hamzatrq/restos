@@ -168,7 +168,26 @@ describe("§B — 02-F63's rounding crosses as a MAGNITUDE and a WORD, and only 
     seed("exclusive", "1000", "1000");
     const order = projected();
     expect(order?.total_paisa).toBe(94_000);
-    expect(order?.charge_rounding).toEqual({ magnitude_paisa: 170, direction: "up" });
+    /*
+      ⚠ **THIS ASSERTION READ `magnitude_paisa: 170` AND IT WAS A SECOND INSTANCE OF THE DEFECT
+      `cart-breakdown-closes.test.ts` CLOSES — kept here rather than quietly re-typed (`L3`).**
+
+      170 is the LEDGER's adjustment in paisa (Rs 1.70). `27-F23` gives this screen no decimals,
+      so `MoneyValue` truncated it to **Rs 1**, and the surface then read
+      `Subtotal Rs 853 · Tax Rs 85 · TOTAL Rs 940` with a `Rounded up Rs 1` between them —
+      **853 + 85 + 1 = 939**, one rupee short of the total the cashier charges. The missing
+      rupee is the Rs 0.30 truncated off a Rs 85.30 tax, which no row mentioned.
+
+      `02-F63` (b) defines the adjustment as `billed_total − (subtotal + tax)`; evaluated over
+      the figures this surface actually DISPLAYS that is Rs 2, and 853 + 85 + 2 = 940 closes.
+      So the value moved 170 → 200 because the field is now a GLASS quantity in whole rupees
+      (the printed receipt keeps the exact paisa — `02-F63` (f) allows paper decimals).
+
+      **The property this test exists for is untouched**: the direction still arrives as a WORD
+      and the magnitude is still non-negative under both directions, which is what the mutant
+      note below is about. Only the incidental figure moved.
+    */
+    expect(order?.charge_rounding).toEqual({ magnitude_paisa: 200, direction: "up" });
     // MUTANT THIS KILLS: a signed `rounding_paisa` at the seam. `ipc-money-seam.test.ts`'s
     // closing row states the shape that is blessed — *"a signed field reaches the screen as a
     // MAGNITUDE"* — and `magnitude_paisa` is non-negative under both directions.
