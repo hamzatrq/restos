@@ -14,6 +14,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { DATABASE_URL_DEFAULT } from "./database-url.js";
 import { createGateway, REVOCATION_SWEEP_INTERVAL_MS } from "./gateway.js";
 import { pendingMigrations } from "./migrate.js";
+import { registerPairingRoutes } from "./pairing-http.js";
 import { registerPublishRoutes } from "./publish-http.js";
 
 export const buildServer = (
@@ -82,7 +83,16 @@ export const buildServer = (
     notifyStaffVersion: (org_id, branch_id, version) => {
       gateway.notifyStaffVersion(org_id, branch_id, version);
     },
+    // `01-F80` (a)'s mint derives its blind index from this (`pairing.ts`); it signs nothing here.
+    tokenSecret,
   });
+
+  // `01-F80` (f)'s CLAIM, and it is registered SEPARATELY on purpose — see `pairing-http.ts`'s
+  // header. It is an unauthenticated write by construction, so it must not sit under `/internal/`,
+  // where `registerPublishRoutes`' hook would answer 401 to every till in the world and 503 to a
+  // deployment that declared no publish credential. The clock is this composition root's, the same
+  // one `createGateway` was built with (`18 §4`).
+  registerPairingRoutes(app, { db, tokenSecret, now: () => Date.now() });
 
   void app.register(websocket);
   void app.register(async (instance) => {

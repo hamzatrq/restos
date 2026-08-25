@@ -49,14 +49,16 @@ const PKG_DIR = resolve(import.meta.dirname, "..", "..");
 const DEVICE_SECRET = "a-device-token-secret-of-at-least-32-bytes-for-the-migratable-suite";
 
 /**
- * The fifteen tables `plans/wave-1/running-the-stack.md` §2 tells an operator to expect. Written out
- * rather than derived from `schema.ts`: a list derived from the same source the migrations were
+ * The seventeen tables `plans/wave-1/running-the-stack.md` §2 tells an operator to expect. Written
+ * out rather than derived from `schema.ts`: a list derived from the same source the migrations were
  * generated from would agree with itself no matter what the migrations actually did.
  *
  * `branches` and `orgs` joined at `0010` (01-F68/01-F69 — the tenancy directory), `users` at
- * `0011` (11-F20/15-F26 — the person, and the org's first owner), and `staff_entries` /
+ * `0011` (11-F20/15-F26 — the person, and the org's first owner), `staff_entries` /
  * `staff_versions` / `user_credentials` at `0012` (01-F75/01-F76 — the roster's publication log per
- * artifact key; 11-F23 — the device-plane PIN credential in its own table). This list is a FACT
+ * artifact key; 11-F23 — the device-plane PIN credential in its own table), and `device_pairings` /
+ * `org_pki` at `0013` (01-F80 — a pending pairing an owner minted and nobody has claimed; 01-F73
+ * (b) + 01-F81 (c) — an org's issuer and its separate roster-signing keypair). This list is a FACT
  * about the shipped migrations, so it moves with them; the assertions using it are unchanged and
  * are still exact equality, which is why adding a table cannot pass here unnoticed.
  */
@@ -64,10 +66,12 @@ const EXPECTED_TABLES = [
   "branches",
   "catalog_entries",
   "catalog_versions",
+  "device_pairings",
   "device_registry",
   "device_watermarks",
   "events",
   "org_events",
+  "org_pki",
   "org_sequences",
   "orgs",
   "quarantine",
@@ -297,37 +301,33 @@ describe("services/sync-gateway migrations are runnable as a deploy step (the se
     // ⚠ THE TIMESTAMP AND THE TABLES BOTH NAME THE **LAST** MIGRATION AND MOVE WITH IT. drizzle
     // resumes from `max(created_at)`, so tearing off any EARLIER migration re-applies nothing and
     // this test would silently stop exercising resumption while still passing its exit-code
-    // assertion. `1785000800000` is `0012_staff_roster`' `when`; it was `1785000700000`
-    // (`0011_tenancy_users`) until 0012 landed, `1785000600000` (`0010_tenancy_records`) before
-    // that, and `1785000500000` (`0009_org_events`) before that.
+    // assertion. `1785000900000` is `0013_device_pairing`'s `when`; it was `1785000800000`
+    // (`0012_staff_roster`) until 0013 landed, `1785000700000` (`0011_tenancy_users`) before that,
+    // `1785000600000` (`0010_tenancy_records`) before that, and `1785000500000` (`0009_org_events`)
+    // before that.
     const sql = postgres(url);
     try {
-      await sql`delete from drizzle.__drizzle_migrations where created_at = 1785000800000`;
-      // `0012` is three CREATE TABLEs, one CREATE INDEX, two ALTER TABLEs and one UPDATE (⚠ this
-      // said "three ALTERs"; counted 2026-08-18 off `0012_staff_roster.sql`, the ALTERs are the
-      // `staff_entries` PRIMARY KEY the generator emits separately and R30's `email DROP NOT NULL`);
-      // dropping a table takes its indexes
-      // with it, and the tear-off has to undo ALL of a migration because it ran as one
-      // transaction. Leaving any object behind would make the re-apply fail on `already exists` —
-      // a real property of every migration in this folder, none of which is written
-      // `IF NOT EXISTS`. Idempotency here is JOURNAL-level (drizzle's `max(created_at)`
-      // watermark), never statement-level.
+      await sql`delete from drizzle.__drizzle_migrations where created_at = 1785000900000`;
+      // `0013` is two CREATE TABLEs, one CREATE INDEX and two ALTER TABLE ADD COLUMNs (counted off
+      // `0013_device_pairing.sql`); dropping a table takes its indexes with it, and the tear-off
+      // has to undo ALL of a migration because it ran as one transaction. Leaving any object behind
+      // would make the re-apply fail on `already exists` — a real property of every migration in
+      // this folder, none of which is written `IF NOT EXISTS`. Idempotency here is JOURNAL-level
+      // (drizzle's `max(created_at)` watermark), never statement-level.
       //
-      // ⚠ THE **ALTER** HAS TO COME OFF TOO, and it is the half a tear-off written from the table
-      // list alone would miss: `0012` also relaxes `users.email` to nullable, and a re-apply has to
-      // find the schema as the migration expects it. (`0012`'s other non-CREATE statement is a
-      // jsonb BACKFILL rather than DDL — it adds `11-F22`'s participation status inside each
-      // element of `users.assignments`, guarded by `? 'status'`, so re-running it over already
-      // backfilled rows is a no-op and there is nothing to undo. Participation is per-(person,
-      // branch) and there is deliberately no `users.status` COLUMN to drop.)
-      await sql`drop table kernel.staff_entries`;
-      await sql`drop table kernel.staff_versions`;
-      await sql`drop table kernel.user_credentials`;
-      await sql`alter table kernel.users alter column email set not null`;
+      // ⚠ THE **ALTERS** HAVE TO COME OFF TOO, and they are the half a tear-off written from the
+      // table list alone would miss: `0013` also adds `certificate_pem` and
+      // `certificate_fingerprint` to `device_registry` (01-F81 (a)/(f) — what the claim issued,
+      // recorded where the roster is folded from), and a re-apply has to find the schema as the
+      // migration expects it.
+      await sql`drop table kernel.device_pairings`;
+      await sql`drop table kernel.org_pki`;
+      await sql`alter table kernel.device_registry drop column certificate_pem`;
+      await sql`alter table kernel.device_registry drop column certificate_fingerprint`;
     } finally {
       await sql.end({ timeout: 5 });
     }
-    expect(await kernelTables(url)).not.toContain("staff_entries");
+    expect(await kernelTables(url)).not.toContain("device_pairings");
     // The migration BELOW the tear-off is untouched and must stay applied — without this, tearing
     // off the whole tail would look identical to tearing off the last one.
     expect(await kernelTables(url)).toContain("orgs");

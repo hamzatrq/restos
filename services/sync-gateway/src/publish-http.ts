@@ -6,6 +6,7 @@ import { z } from "zod";
 import { type CatalogEntry, catalogPage, publishCatalog } from "./catalog.js";
 import { readDayWindow } from "./day-ledger.js";
 import { appendOrgEvent, orgEventHistory } from "./org-events.js";
+import { cancelPairing, listWaitingPairings, mintPairingCode } from "./pairing.js";
 import { listDevices } from "./registry.js";
 // `revoke-device.ts` carries a main-module entry guard, so importing it runs nothing. Reaching for
 // the CLI's own function is the point — see the route below.
@@ -258,6 +259,30 @@ const UserStatusRequest = z.strictObject({
 });
 
 /**
+ * **`01-F80` (a)'s MINT — the four facts the owner fixes, plus this surface's `actOf` pair.**
+ *
+ * ⚠ **`device_id` IS ABSENT AND `strictObject` REFUSES IT BY NAME, exactly as `UserCreateRequest`
+ * refuses a `user_id`.** `01-F80` (a) says the mint "mints the `device_id` — UUIDv7, never reused,
+ * on `01-F68`'s reasoning", so only the writer may assign one; a caller-supplied id would let two
+ * owners in two browser tabs collide, and `01-F68` makes every collision permanent.
+ *
+ * `now` rides for `actOf`'s own recorded reason and it is load-bearing here rather than
+ * conventional: `01-F80` (c)'s fifteen minutes are measured from the act's instant, so reading a
+ * clock inside the writer would make a code's life depend on how long the request queued.
+ *
+ * `display_name` is `packages/domain`'s `DisplayName` for `UserCreateRequest`'s stated reason,
+ * reached one layer earlier so an empty or unrenderable name comes back as a `400` naming the field
+ * (`01-F70`, `21-F15`).
+ */
+const DevicePairingCodeRequest = z.strictObject({
+  org_id: z.string().min(1),
+  branch_id: z.string().min(1),
+  device_class: z.string().min(1),
+  display_name: DisplayName,
+  ...actOf,
+});
+
+/**
  * `12-F10`'s window query. `branch_ids` is a comma-separated list, and its ABSENCE is what means
  * "every branch" — an empty string is refused, because a `reportScope` narrowing that resolved to
  * nothing must never widen into an org roll-up (`day-ledger.ts` states the same rule at the
@@ -347,6 +372,16 @@ type PublishDeps = {
    * after the publish is committed and its failure cannot fail the write.
    */
   readonly notifyStaffVersion: (org_id: string, branch_id: string, version: number) => void;
+  /**
+   * The deployment's device-token secret — needed here for **one** act, `01-F80`'s mint.
+   *
+   * ⚠ **It is not used to sign anything on this surface.** The mint derives `pairing.ts`'s blind
+   * index from it under a label, so a pending pairing can be found by code without the code being
+   * stored; the token itself is minted at the CLAIM, one route over. **REQUIRED, never optional**,
+   * on `notifyCatalogVersion`'s measured precedent: an optional secret is a deployment that mints
+   * pairing codes nothing can ever look up, and a build that forgets it would compile.
+   */
+  readonly tokenSecret: string;
 };
 
 /** Rows per internal page. Matches `CATALOG_PAGE_SIZE`, which is what `catalogPage` serves. */
@@ -605,6 +640,91 @@ export const registerPublishRoutes = (app: FastifyInstance, deps: PublishDeps): 
    * `sweepRevocations` re-reads the registry, so a revocation written *here* evicts a live session
    * within the same bound a CLI one does. This route sets `revoked_at`; nothing else changes.
    */
+  /**
+   * **`01-F80` (a) / `14-F41` — THE OWNER MINTS A PAIRING CODE.**
+   *
+   * This is the act that ends `01-F25`'s decade-old *"registration is a one-time pairing via back
+   * office code"* sitting unbuilt while `provision-device.ts` — a shell command on the service
+   * host — stayed the only way a till came into existence. `28-F13` names the same block from the
+   * tenancy end: a self-onboarded restaurant reached an org, an owner and no way to reach a till.
+   *
+   * **It sits behind `PUBLISH_TOKEN` and the CLAIM does not**, and the asymmetry is the FR's:
+   * `01-F80` (f) makes the claim one of exactly two unauthenticated writes *by construction*
+   * (the device holds no credential yet), while (a) puts minting in the hands of an authenticated
+   * owner. `14-F41` gates the human at `services/api` with `can("device.manage")`, owner-only, and
+   * this credential is the second layer under that — the same three-part argument
+   * `/internal/devices/revoke` records above, with the same honest limit: **this service authorizes
+   * SERVICES, never people.**
+   *
+   * ⚠ **It is NOT `provision-device`'s act behind a route.** That command was refused an
+   * `/internal` route on the recorded ground that admission behind the menu credential would make
+   * that credential the entire security story. This is not that: minting writes **no registry row**
+   * (`01-F80` (c), `14-F41`: "Before a claim there is no device"), grants no session, and the
+   * credential it produces dies in fifteen minutes unclaimed and leaves nothing behind. What it
+   * hands out is a claim on a device an owner has already described, and the claim is the act that
+   * admits.
+   */
+  app.post("/internal/devices/pairing-codes", async (request, reply) => {
+    const parsed = DevicePairingCodeRequest.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: `pairing code: ${z.prettifyError(parsed.error)}` });
+    }
+    try {
+      const minted = await mintPairingCode(deps.db, parsed.data, deps.tokenSecret);
+      // The CODE crosses exactly once, here, and is never stored, logged or reproducible
+      // (`01-F80` (b), `14-F41`: "This FR requires no ability of the cloud to reproduce a live
+      // code, deliberately"). `14-F41`'s way out of a lost code is to issue another.
+      return reply.code(200).send(minted);
+    } catch (error: unknown) {
+      return reply.code(refusalStatus(error)).send({ error: messageOf(error) });
+    }
+  });
+
+  /**
+   * `14-F41`'s **waiting rows** — the codes this org has minted and nobody has claimed.
+   *
+   * It carries no code and no verifier; see `listWaitingPairings`. A claimed pairing is not a
+   * waiting row any more, it is `14-F12`'s device row, so the two lists never render one device
+   * twice.
+   */
+  app.get("/internal/devices/pairings", async (request, reply) => {
+    const parsed = OrgQuery.safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ error: "pairings: org_id required" });
+    try {
+      return reply
+        .code(200)
+        .send({ pairings: await listWaitingPairings(deps.db, parsed.data.org_id) });
+    } catch (error: unknown) {
+      request.log.error({ err: error }, "pairings: database read failed");
+      return reply.code(500).send({ error: databaseFailure("pairings", error) });
+    }
+  });
+
+  /**
+   * `14-F41`'s **cancel** — and the FR's own words are why it is a separate route from revocation:
+   * *"CANCEL IS NOT REVOKE, and the surface never blurs them."*
+   *
+   * Before a claim there is no device, so this destroys a credential nobody holds, emits nothing
+   * and may be repeated freely. After a claim the act is `14-F13`'s revocation and is
+   * **permanent**. `cancelPairing`'s `and claimed_at is null` makes that structural: this route
+   * cannot revoke, whatever it is handed.
+   */
+  app.post("/internal/devices/pairings/cancel", async (request, reply) => {
+    const parsed = DeviceRevokeRequest.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: `cancel pairing: ${z.prettifyError(parsed.error)}` });
+    }
+    try {
+      const outcome = await cancelPairing(deps.db, {
+        org_id: parsed.data.org_id,
+        device_id: parsed.data.device_id,
+      });
+      return reply.code(200).send(outcome);
+    } catch (error: unknown) {
+      return reply.code(refusalStatus(error)).send({ error: messageOf(error) });
+    }
+  });
+
   app.post("/internal/devices/revoke", async (request, reply) => {
     const parsed = DeviceRevokeRequest.safeParse(request.body);
     if (!parsed.success) {
