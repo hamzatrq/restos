@@ -58,13 +58,23 @@ type Waiting = {
   expires_at: number;
 };
 
+/**
+ * ⚠ **A default row is LIVE against the REAL clock, not against `NOW`.**
+ *
+ * The first draft defaulted to `NOW + TTL_MS`, and `NOW` is a fixed PAST instant — so every row in
+ * every section except §C rendered as EXPIRED, and the happy path this file is mostly about was
+ * never on screen. It surfaced as a mutant's blast radius rather than as a failure (BO3, which
+ * filters expired rows, killed six tests instead of one), which is `L10`'s point exactly: a fixture
+ * that does not produce the state its assertions are about passes for the wrong reason. §C pins the
+ * clock explicitly and states its own instants against `NOW`.
+ */
 const waitingRow = (over: Partial<Waiting> = {}): Waiting => ({
   device_id: over.device_id ?? "pairing-1",
   branch_id: over.branch_id ?? "branch-main",
   device_class: over.device_class ?? "counter_electron",
   display_name: over.display_name ?? "Front counter",
-  minted_at: over.minted_at ?? NOW,
-  expires_at: over.expires_at ?? NOW + TTL_MS,
+  minted_at: over.minted_at ?? Date.now(),
+  expires_at: over.expires_at ?? Date.now() + TTL_MS,
 });
 
 /**
