@@ -508,6 +508,20 @@ for (const f of ["build/Release/better_sqlite3.node",
 
 ### 6b. Provision the device — ONE DECLARED COMMAND (August 2026)
 
+⚠ **THIS IS THE OPERATOR PATH, AND IT IS NO LONGER THE ONLY ONE (2026-08-25).** `01-F80`'s pairing
+code has a model and a claim endpoint on the gateway (`pairing.ts`, `POST /pair/claim`) and a
+surface an owner can reach: **Devices → *Connect a till*** in the back office mints an 8-digit code
+she reads down a phone, and `14-F41`'s waiting row states its own age, offers a replacement and
+distinguishes *cancel a code* from `14-F13`'s permanent revocation.
+
+⚠ **AND THE WALK IS STILL NOT CLOSED, so this section stays.** `01-F80` (g)'s UNCOMMISSIONED
+device state and the till's claim keypad are **not built**: nothing in `apps/pos-electron` presents
+a code box or calls `/pair/claim`, so the identity keys below are still how a till learns who it
+is. Until that half lands, a minted code has no claimant but a test. Two things pairing does not
+remove even then, and both are recorded rather than implied: `RESTOS_CLOUD_URL` (a pairing code
+does not commission a till that does not know where the cloud is), and this command itself, which
+survives as the operator tool it always was.
+
 The gateway needs **both** halves of admission: an HS256 token signed with `DEVICE_TOKEN_SECRET`,
 **and** an unrevoked, branch-matching row in `kernel.device_registry`. The registry has the veto, so
 a valid token alone opens nothing. One command now does both:

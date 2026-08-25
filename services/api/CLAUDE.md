@@ -496,6 +496,51 @@ test green). The package was copied to a scratchpad, mutated there, and only
 `services/api/node_modules/@restos/domain` — a gitignored symlink, not source — was repointed at the
 copy for the two runs. `permissions.ts` was verified byte-identical by checksum before and after.
 
+## `14-F41` — the pairing mint, and the two mutants that SURVIVED the whole suite
+
+`devices.mintPairing` / `devices.pairings` / `devices.cancelPairing`, three procedures on the
+existing `DeviceDirectory` port, all `authorized("device.manage")`. **No action was minted and
+neither exemption list moved** — `14-F30` names the action after this §3 block *"so a later act
+added here (01-F25 pairing, station-class assignment) inherits it deliberately rather than by
+omission"*, and this is that act.
+
+- **`mintInput` TAKES a `branch_id` where `revokeInput` refuses one, and `14-F41` is why that is
+  safe here.** This file's header records that `revoke` cannot take one because the service learns a
+  device's branch by reading the registry, *inside* the revocation — so a caller-stated branch would
+  be checked after the destructive act. A mint has no such problem: the branch is an INPUT rather
+  than a fact about an existing row, so `trpc.ts` scopes `can()` to it **before the code is
+  minted**, which is exactly what `14-F41` demands (*"a check that runs after the mint authorizes
+  nothing and the credential already exists"*).
+- **`device_id` is absent and there is nowhere to put one** — `01-F80` (a) mints it, UUIDv7, and
+  `01-F68` never gives one back.
+- **`cancelPairing` appends NOTHING**, unlike `revoke` beside it: there is no device to attribute a
+  `device.revoked` to, and writing one would put a permanent record of a till being switched off
+  where no till ever existed (`01-F1`).
+- ⚠ **The mint emits no event either.** `14-F41` names it as what unblocks `device.registered`, then
+  records that the type has no payload schema in `packages/domain` — `01-F4` makes the emit a
+  build-time error. The actor travels to the gateway and is stored on the pending row.
+
+### Mutation matrix — `14-F41`'s mint (round-3 law). Control **403/403**, then **406/406**
+
+| # | mutant (exactly one branch) | killed, BEFORE | killed, AFTER |
+|---|---|---|---|
+| BO8 | **the mint's `actor_user_id` becomes a constant, not `ctx.subject.user_id`** | **0 of 403** | **1 of 406** |
+| BO9 | **the mint's `org_id` is read from the REQUEST (subject as fallback)** | **0 of 403** | **1 of 406** |
+
+**BO9 is `01-F71` (b) verbatim on the one act that hands out device identities**, and it survived
+because `__acceptance__/tenant-isolation.test.ts` §3 is correct and BLIND to it: that sweep
+re-snapshots *what tenant B can observe*, and a pairing minted into B's org is not in the snapshot,
+because the snapshot predates this procedure. `01-F71` says exactly what to do about that — *"each
+point carries a test that FAILS when that point alone is removed. Reading is not evidence and
+neither is a green suite"* — so the assertions are `src/pairing-authority.test.ts`.
+
+⚠ **That file is NOT an oracle and says so**, filed outside `__acceptance__/` on
+`packages/domain/src/export-permission.test.ts`'s precedent: the FR, the procedure and the assertion
+were written in one change. Its port is a **recorder** rather than a fake gateway, because both
+properties are about what the RESOLVER passed and a round trip only shows what survived one —
+`01-F71`'s own distinction between *"the answer was scoped"* and *"the request was scoped"*. A
+control asserts the recorder is reached, so the two absences are evidence.
+
 ## `12-F10` — the nightly owner summary, and the two mutants that SURVIVED the first run
 
 `summary.ts` (the fold), `summary-router.ts` (the gated procedure), `ledger.ts` (the port).

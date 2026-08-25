@@ -488,6 +488,68 @@ stamps the signed-in owner on every revoked row — so the CLI-revoked fixture i
 it is the only row that discriminates. AGENTS.md's "guard that was never pointed at the dangerous
 case", answered by choosing the fixture rather than by adding assertions.
 
+## `14-F41` — the pairing task, and the shell command an owner no longer needs
+
+`components/pairing-panel.tsx`, rendered above `DeviceList` in the Devices section. Until it
+existed, putting a till on the floor meant `pnpm -C services/sync-gateway provision-device` on the
+service host plus five environment keys typed on the machine itself — which `28-F13` records as the
+point where a self-onboarded restaurant **stops**: an org, an owner, and no way to reach a till.
+
+- **A WAITING ROW IS NOT A DEVICE, and the two lists are never merged.** `14-F41`: *"Before a claim
+  there is no device"* and *"The waiting row becomes `14-F12`'s device row."* Two components, two
+  reads, one section. A merged list would show an owner a fleet containing tills that do not exist.
+- **The code is shown ONCE and no read can fetch it back**, because `14-F41` requires no such
+  ability of the cloud *deliberately* — that is what keeps doc 01's credential half free to store a
+  verifier and never the secret. The way out costs one press: *Get a new code*, which **cancels the
+  old one first**, so one waiting row never has two live codes (`01-F80` (c)).
+- **CANCEL IS NOT REVOKE and the surface says which side of the line she is on BEFORE she presses.**
+  The two controls look identical and only one is undoable; a claim that beat the press answers
+  `cancelled: false`, and the screen then says the device is real and that stopping it is the other,
+  permanent act.
+- **No class string reaches the screen** (`14-F38`). The task is *Connect a till* / *Connect a
+  kitchen screen* and the mapping to `01-F39`'s vocabulary lives in ONE place, `TASKS`. ⚠ `14 §9.14`
+  — *which* classes the list should offer — is open, and two is a stated reading rather than a
+  transcription.
+
+⚠ **`pairing.dom.test.tsx` DECLARES ITS AUTHORSHIP DEPARTURE**, on `device-list.dom.test.tsx`'s
+precedent: written by the session that wrote the component, so it is not `24 §3`'s independent
+oracle. §A drives `Workspace` rather than `PairingPanel` — a file that mounts the component it tests
+is structurally incapable of noticing whether the PRODUCT mounts it.
+
+**One defect the test found in the component while it was being written**, worth keeping because it
+is a shape rather than a typo: the branch choice was SEEDED from `branches[0]` at the moment the
+task opened, and `tenancy.directory` is a separate query — so opening the form before it answered
+left the state at `""` for ever, a permanently disabled *Get a code* under a `<select>` displaying a
+branch the state did not hold. It is DERIVED now, so the default follows the data whenever the data
+arrives.
+
+### Mutation matrix — `14-F41`'s surface (round-3 law), control **392/392** green, 0 survivors
+
+Every row is one branch and the FULL app suite, `REAL_EXIT` read from a marker written INSIDE the
+log; in every killing row the failing FILE was `pairing.dom.test.tsx` alone.
+
+| # | mutant (exactly one branch) | killed (of 392) | which |
+|---|---|---|---|
+| BO-SEAM | **`workspace.tsx` renders `DeviceList` alone — the panel exists and nothing mounts it** | **2** | §A ×2 |
+| BO1 | a waiting row RENDERS a code — the credential back on the screen | 1 | §B |
+| BO2 | the `01-F39` class string rendered on the row | 1 | §B `14-F38` |
+| BO3 | an EXPIRED row filtered out instead of read as expired | 1 | §C |
+| BO4 | cancel is ONE tap — the safe sentence never read | 1 | §D |
+| BO5 | the claim-beat-the-press answer is silent | 1 | §D |
+| BO6 | re-issue mints WITHOUT cancelling — two live codes on one row | 1 | §C |
+| BO7 | the client states a `device_id` and the procedure accepts one | 1 | §B |
+| BO-NC | **NEGATIVE CONTROL: three behaviour-preserving restructurings of the panel** | **0** | — |
+
+**BO-SEAM is the row to re-run after any change here** — it is `L8` on this work, and the reason §A
+drives the shell. **BO3's first measurement killed SIX and that was a FIXTURE defect, not a kill**:
+`waitingRow()` defaulted to a fixed past instant plus fifteen minutes, so every row outside §C
+rendered as expired and the waiting state most of the file asserts about was never on screen. Rows
+are live against the real clock now and BO3 kills exactly the one test it is aimed at. *A kill count
+that changes when you fix a fixture was measuring the fixture.*
+
+The server half's matrix (including two mutants that SURVIVED and the assertions written for them)
+lives in `services/api/CLAUDE.md`.
+
 ## `21-F15` — the naming law, and the fourteen slots that were rendering keys
 
 `lib/names.tsx`. **Every name slot in this app goes through it; nothing else may resolve a name or
