@@ -6,20 +6,27 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
+    "migrate": "tsx src/migrate.ts",
     "test": "vitest run",
-    "build": "echo 'no build yet \u2014 scaffold stub'"
+    "build": "echo 'no build yet — scaffold stub'"
   },
   "dependencies": {
+    "@restos/config": "workspace:*",
     "@restos/domain": "workspace:*",
+    "@restos/sync-client": "workspace:*",
     "@restos/sync-protocol": "workspace:*",
     "@trpc/server": "11.18.0",
+    "drizzle-orm": "0.45.2",
     "fastify": "5.10.0",
+    "postgres": "3.4.9",
     "superjson": "2.2.6",
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@restos/sync-client": "workspace:*",
+    "@types/ws": "8.18.1",
+    "testcontainers": "12.0.4",
     "tsx": "4.23.1",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "ws": "8.21.1"
   }
 }

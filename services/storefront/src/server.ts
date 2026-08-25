@@ -1,19 +1,24 @@
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
+import { redactedDsn } from "@restos/config";
+import { createWsCloudTransport, wallClock } from "@restos/sync-client";
 import { TRPCError } from "@trpc/server";
 import { type CreateFastifyContextOptions, fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import Fastify from "fastify";
 import { createGatewayCatalog, type GatewayLink, type StorefrontCatalog } from "./catalog.js";
 import { type Capability, type EntitlementSource, STOREFRONT_CAPABILITY } from "./entitlement.js";
 import { type OriginIdentity, resolveOriginIdentity } from "./identity.js";
+import { pendingMigrations } from "./migrate.js";
 import { createStorefrontOrigin, type LamportSource } from "./origin.js";
-import { inMemoryOutbox, type Outbox } from "./outbox.js";
+import type { Outbox } from "./outbox.js";
+import { createPostgresOutbox } from "./outbox-postgres.js";
 import { createPlacement } from "./placement.js";
 import {
   assertEveryProcedureDeclaresEntitlement,
   type StorefrontContext,
   storefrontRouter,
 } from "./router.js";
+import { createUplink } from "./uplink.js";
 
 /**
  * `06-F32` — the storefront service host.
@@ -114,6 +119,21 @@ export const createStorefrontServer = (options: ServerOptions) => {
         }
         return { org_id, placement };
       },
+      /**
+       * `06-F37` (b)'s other half — **the refusal a customer no longer sees has to go SOMEWHERE.**
+       *
+       * The formatter in `router.ts` collapses every unauthored message to one neutral sentence;
+       * without this, the named errors `06-F34` (b) exists to produce would be constructed, thrown
+       * and then destroyed, and an isolation failure would leave no trace anywhere. `error.cause`
+       * carries the original — operator-facing, on stderr, never on the wire.
+       */
+      onError: (opts: { error: Error & { cause?: unknown }; path?: string | undefined }) => {
+        const { error, path } = opts;
+        console.error(
+          `storefront refusal on ${path ?? "(no procedure)"}: ${error.name}: ${error.message}` +
+            (error.cause === undefined ? "" : ` — cause: ${String(error.cause)}`),
+        );
+      },
     },
   });
 
@@ -166,11 +186,15 @@ const developmentEntitlement =
       : { status: "absent" };
 
 /**
- * A start path that runs. ⚠ It supplies the IN-MEMORY outbox, a process-local lamport counter and
- * the development entitlement stub above, and it says so on stderr every time, because `06-F30`'s
- * durable half and its single-writer advisory lock are **owed**. The warning is here rather than
- * in a doc because AGENTS.md `L11` records what a protection claimed in prose does to the next
- * reader.
+ * A start path that runs.
+ *
+ * ⚠ **THE OUTBOX AND THE UPLINK ARE BOTH REAL NOW (`06-F36`), AND THE WARNING THAT USED TO STAND
+ * HERE WAS TRUE.** It read *"IN-MEMORY outbox, a process-local lamport counter … a restart loses
+ * every order this process accepted"*, and it was measured on a real stack in August 2026: three
+ * carts, three `200 {"order_id":…}` responses, **zero rows from this origin** in the gateway's
+ * ledger, and the till's Orders tab reading *"No new orders from the website or WhatsApp."* The
+ * remaining stub is the ENTITLEMENT source, and it is the only one — `28-F6`'s record still has no
+ * writer anywhere.
  *
  * **The catalog is NOT stubbed** (`06-F33`): the price authority is the real published artifact,
  * read from the gateway, and a host that was not told where the gateway is refuses to start rather
@@ -191,11 +215,11 @@ const developmentEntitlement =
  */
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
   console.error(
-    "storefront: ⚠ DEV HOST — in-memory outbox, a process-local lamport counter and a " +
-      "DEVELOPMENT ENTITLEMENT STUB (28-F6's record has no writer yet, 28-F4). 06-F30's durable " +
-      "outbox and its per-(org,branch) advisory lock are OWED; do not deploy this. A restart " +
-      "loses every order this process accepted. The catalog is real: prices come from the " +
-      "gateway's published artifact (06-F33), never from a request.",
+    "storefront: ⚠ DEV HOST — the entitlement source is a DEVELOPMENT STUB (28-F6's record has " +
+      "no writer yet, 28-F4); a real deployment passes its own. The outbox is DURABLE and the " +
+      "uplink is REAL (06-F36): an accepted order survives a restart and drains to the gateway " +
+      "when it is reachable. The catalog is real too — prices come from the gateway's published " +
+      "artifact (06-F33), never from a request.",
   );
   const identity = resolveOriginIdentity(process.env);
   const link: GatewayLink = {
@@ -209,20 +233,83 @@ if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.a
         "01-F60 admits no price fallback, and a guessed price is permanent under 01-F1.",
     );
   }
-  let next = 0;
-  const lamport: LamportSource = {
-    reserve: async (count) => {
-      const first = next;
-      next += count;
-      return first;
-    },
-  };
+  /**
+   * `06-F36` (a) — **REQUIRED, with no default, and the reason is the defect this FR was written
+   * against.** An absent `DATABASE_URL` used to mean "run on the heap and warn about it", and that
+   * is precisely the configuration that returned three confirmed order ids for three orders no
+   * restaurant ever saw. `06-N5` calls it a fake success. A storefront with nowhere durable to put
+   * an order must not start, exactly as one with no price authority must not.
+   */
+  const databaseUrl = (process.env.DATABASE_URL ?? "").trim();
+  if (databaseUrl === "") {
+    throw new Error(
+      "06-F36: the storefront has nowhere durable to put an accepted order — set DATABASE_URL " +
+        "and run `pnpm -C services/storefront migrate` first. There is deliberately no default " +
+        "and no in-memory fallback: an order acknowledged out of a heap is 06-N5's fake success, " +
+        "and 01-F1 leaves no row for anyone to notice was missing.",
+    );
+  }
+  /**
+   * `06-F36` (c) — the uplink's own leg. Separate from `RESTOS_GATEWAY_URL` because they are two
+   * protocols to the same service: that one is the `/internal` HTTP hop `06-F33` reads prices over,
+   * this one is the `wss://…/sync` socket `01-F8` pushes over. One variable for both would make a
+   * deployment that can PRICE but cannot DELIVER indistinguishable from a healthy one — which is
+   * exactly what the reproduction looked like from outside.
+   */
+  const cloudUrl = (process.env.RESTOS_CLOUD_URL ?? "").trim();
+  const deviceToken = (process.env.RESTOS_DEVICE_TOKEN ?? "").trim();
+  if (cloudUrl === "" || deviceToken === "") {
+    throw new Error(
+      "06-F36: the storefront has no way to deliver an order to the branch — set " +
+        "RESTOS_CLOUD_URL and RESTOS_DEVICE_TOKEN (mint one with `pnpm -C services/sync-gateway " +
+        "provision-device --class storefront_cloud`). Refused at boot rather than accepting " +
+        "orders into an outbox nothing drains, which is the defect 06-F36 exists to close.",
+    );
+  }
+
+  const durable = await createPostgresOutbox({ database_url: databaseUrl, identity });
+  const uplink = createUplink({
+    identity,
+    outbox: durable.outbox,
+    transport: createWsCloudTransport({ url: cloudUrl, clock: wallClock }),
+    token: deviceToken,
+    report: (line) => console.error(line),
+  });
+  /**
+   * `06-F36` (e) — **THE SEAM. A drain with no wake runs at connect and never again.**
+   *
+   * `apps/pos-electron` shipped exactly that: `CloudSession.notifyAppended` with zero production
+   * callers, five events durably appended, the gateway's ledger at 0 rows, and the whole
+   * replication path correct with nothing to trigger it. Deleting this ONE line leaves every
+   * assertion about envelope content, durability and the wire green. `server-seam.test.ts` §E is
+   * what reddens.
+   */
+  durable.onPut(() => uplink.notifyAppended());
+  uplink.start();
+
   const server = createStorefrontServer({
-    outbox: inMemoryOutbox(),
+    outbox: durable.outbox,
     entitlement: developmentEntitlement(identity),
     catalog: createGatewayCatalog(link, identity),
-    lamport,
+    lamport: durable.lamport,
     port: Number(process.env.PORT ?? 0),
   });
   await server.listen();
+
+  // `00 §5.7` and `services/sync-gateway`'s precedent: the schema state is a line a human reads
+  // while bringing the stack up, rather than a 500 later and somewhere else.
+  const schema = await pendingMigrations(databaseUrl).catch(() => null);
+  console.log(
+    schema === null
+      ? `storefront: ⚠ outbox database UNREACHABLE at ${redactedDsn(databaseUrl)} — orders are ` +
+          `REFUSED until it is back (06-N5: never a fake success)`
+      : schema.pending === 0
+        ? `storefront: outbox schema up to date — all ${schema.total} migrations applied · ` +
+          `${redactedDsn(databaseUrl)}`
+        : `storefront: ⚠ outbox schema NOT MIGRATED — ${schema.pending} of ${schema.total} ` +
+          `migrations unapplied. Run \`pnpm -C services/storefront migrate\``,
+  );
+  console.log(
+    `storefront: uplink dialling ${cloudUrl} (06-F36 — push-only, holds no branch slice)`,
+  );
 }
