@@ -320,25 +320,32 @@ const readPending = async (db: GatewayDb, code_index: string): Promise<PendingRo
  * "nothing … no certificate, no device" (`01-F80` (c)); generating an org's issuing key for a code
  * nobody ever typed would leave key material behind for a device that never existed.
  */
+const readOrgPki = async (
+  db: GatewayDb,
+  org_id: string,
+): Promise<{ issuer: IssuerMaterial; rosterSigningPublicKeyPem: string } | undefined> => {
+  const rows = await db.execute(
+    sql`select issuer_cert_pem, issuer_private_key_pem, roster_signing_public_key_pem
+        from kernel.org_pki where org_id = ${org_id}`,
+  );
+  const held = [...rows][0];
+  if (held === undefined) return undefined;
+  return {
+    issuer: {
+      certPem: String(held.issuer_cert_pem),
+      privateKeyPem: String(held.issuer_private_key_pem),
+    },
+    rosterSigningPublicKeyPem: String(held.roster_signing_public_key_pem),
+  };
+};
+
 const orgPkiMaterial = async (
   db: GatewayDb,
   org_id: string,
   now: number,
 ): Promise<{ issuer: IssuerMaterial; rosterSigningPublicKeyPem: string }> => {
-  const existing = await db.execute(
-    sql`select issuer_cert_pem, issuer_private_key_pem, roster_signing_public_key_pem
-        from kernel.org_pki where org_id = ${org_id}`,
-  );
-  const held = [...existing][0];
-  if (held !== undefined) {
-    return {
-      issuer: {
-        certPem: String(held.issuer_cert_pem),
-        privateKeyPem: String(held.issuer_private_key_pem),
-      },
-      rosterSigningPublicKeyPem: String(held.roster_signing_public_key_pem),
-    };
-  }
+  const held = await readOrgPki(db, org_id);
+  if (held !== undefined) return held;
 
   const issuer = await createOrgIssuer(org_id, now);
   // `01-F81` (c): a SEPARATE keypair, and its public half is PINNED at pairing rather than
@@ -358,8 +365,25 @@ const orgPkiMaterial = async (
         on conflict (org_id) do nothing`,
   );
   // Re-read unconditionally: on a lost race the row above is somebody else's, and returning the
-  // material we just generated would hand two devices in one org two different issuers.
-  return orgPkiMaterial(db, org_id, now);
+  // material we just generated would hand two devices in one org two different issuers — which
+  // `01-F73` (b) makes a branch LAN that never forms.
+  //
+  // ⚠ **ONE re-read and then a THROW, never a recursive call, and this shape was found by a
+  // MIS-DESIGNED MUTANT rather than by reading.** The first draft recursed into `orgPkiMaterial`
+  // here; the mutant that skips the read (a fresh issuer per claim) then never terminated — the
+  // suite hung instead of failing, which is not a result. A recursion whose base case is "the row
+  // I just inserted is readable" is unbounded on any state where that is false, and a gateway
+  // spinning inside a credential writer is worse than one that says it could not issue.
+  const settled = await readOrgPki(db, org_id);
+  if (settled === undefined) {
+    throw new Error(
+      `orgPkiMaterial: kernel.org_pki has no row for org ${org_id} immediately after an insert ` +
+        "that conflicted with nothing (01-F73 (b) — the issuer is per org and stable). This is a " +
+        "broken database rather than a race, and issuing under freshly generated material would " +
+        "hand two devices in one org two different issuers.",
+    );
+  }
+  return settled;
 };
 
 /** The stored certificate for an already-claimed pairing, or undefined when the row is gone. */
