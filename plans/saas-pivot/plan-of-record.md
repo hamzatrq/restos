@@ -170,6 +170,39 @@ contain — which is why consequences are recorded separately from decisions.* N
 
 ---
 
+## §0b — The branch consolidation (2026-08-28), and the one thing it left owed
+
+**Founder instruction: main is the only branch.** Executed — 53 local branches, 30 worktrees and
+5 remote branches gone; `origin/HEAD` repointed (it was still aimed at `feat/wave-1-ui-foundation`).
+**Nothing was lost, and the checking is the point of this section**, because "delete the branches"
+and "make sure main has everything" are different acts and only the second one is hard.
+
+- **Three branches held commits main did not.** Two were **fully superseded** — main had developed
+  the same work further by another route, which a three-dot diff HIDES and a two-dot diff shows.
+  `feat/inventory-slice-1` looked unique (`COUNT_BASES`, three stock schemas, a 412-line oracle) and
+  main had every one of them, plus `10-F34`, plus `services/sync-gateway/src/inventory-reference.ts`
+  which the branch lacked entirely. `feat/step-2b-participation-status` had landed as `c10271b` and
+  **could not** have been merged anyway: its own commit message measures 63 + 98 test failures,
+  which is `01-F17` and a restaurant that cannot sell.
+- **`w6/counter-ux` is ARCHIVED, NOT superseded — tag `archive/w6-counter-ux`, pushed.** It holds
+  spec acts main never got, and it is unmergeable for two independent reasons: its `02-F49`/`F50`/
+  `F51` are **different rules from main's** ids of the same number (`docs:lint` C2 rejects the
+  merge, and the working rules forbid renumbering), and `Counter.tsx` went 1930 → 3113 lines on
+  main while it sat, so its 403 changed lines target a shape that no longer exists. Its *"Sold out,
+  never 86"* had already landed independently as `02-F52`.
+- ⚠ **OWED, and it is design law rather than an old patch:** re-apply, renumbered to the next free
+  ids in doc 02 — the row order IS the instruction (channel above order-type, because the till
+  refuses a type tap with no channel latched and the two hint lines contradicted each other with
+  the false one on top); a refused act states its reason where the operator is already looking; no
+  line may state a price basis other than the one the next line-add will use; the exact amount is
+  ONE press with the numeral on the control; and `27-F4` (e)(f)'s two positional approvals.
+  **R96 rebuilds this surface, so these bind the rebuild — do not patch the old one.**
+- **17 worktrees held uncommitted work.** Archived as patches at
+  `/opt/apps/restos/worktree-archive-2026-08-28` (outside the repo), then removed.
+- `pnpm verify` **exit 0** on the consolidated trunk, `REAL_EXIT` read from inside the log (`T2`).
+
+---
+
 ## §1 — Before anything else, this week
 
 **S0 · LAN peer authentication.** `mesh-session.ts`'s `hello` arm admits a peer after checking only
