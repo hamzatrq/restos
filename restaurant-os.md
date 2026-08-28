@@ -12,7 +12,7 @@
 
 RestOS is a **complete operating system for Pakistani restaurants** — not an ops tool, not a POS, not a dashboard, but all layers of running a food business on one kernel: every sales channel, the service floor, the kitchen, delivery riders, inventory and supply, staff, and an AI intelligence layer that knows what's going on everywhere and tells the owner where the opportunities and leaks are.
 
-**Strategy decision (founder, final):** this is a *gigantic tool, not an MVP*. Public launch is the full suite. The market's incumbents are fragmented single-layer tools; "one system that runs everything" is the positioning no local competitor can match. Internally the build still follows a strict dependency order with continuous embedded-restaurant validation (§8) — "no MVP" means we don't launch thin, not that we build blind.
+**Strategy decision ~~(founder, final): this is a *gigantic tool, not an MVP*. Public launch is the full suite.~~ — AMENDED 2026-08-27 by R85/R86/R97.** The *positioning* below is unchanged and still correct; what is retired is *“public launch is the full suite”*. **Launch is ~10 restaurants trading — Friday nights included — on SIX complete surfaces:** counter, kitchen, back office, inventory, CRM + loyalty, waiter pad. Complete working software, not a demo, and not the whole suite either. Storefront, WhatsApp, aggregators, riders, self-serve signup, the control plane and the AI layer follow launch. The full suite remains the destination: The market's incumbents are fragmented single-layer tools; "one system that runs everything" is the positioning no local competitor can match. Internally the build still follows a strict dependency order with continuous embedded-restaurant validation (§8) — "no MVP" means we don't launch thin, not that we build blind.
 
 **Dual promise:** *"Your restaurant runs its rush without shouting — and you see everything, everywhere, from your phone."*
 
@@ -24,7 +24,7 @@ RestOS is a **complete operating system for Pakistani restaurants** — not an o
 2. **Append-only truth.** No role, including owner, silently edits history. Corrections are new linked records (Appendix A hard rule — all intelligence credibility depends on it).
 3. **Presets, not knobs.** Restaurants choose operating profiles and hardware tiers; they never configure infinite options. Signal ownership (who marks "ready") is role assignment at onboarding, not per-restaurant custom design.
 4. **One storefront, many doors.** Every own channel (web, WhatsApp, Instagram, QR, phone) is a door into one commerce core — one menu, one customer file, one order queue. A new channel is a new driver, never a new system.
-5. **LAN-first real-time.** In-branch coordination (sub-second state propagation across devices) works with the internet dead; cloud is the exhaust and cross-branch path. This is the hardest engineering problem and the technical moat.
+5. ~~**LAN-first real-time.** In-branch coordination (sub-second state propagation across devices) works with the internet dead; cloud is the exhaust and cross-branch path. This is the hardest engineering problem and the technical moat.~~ **— OVERRULED 2026-08-27 by R82. Every device syncs directly to cloud; there is no LAN mesh.** The pillar fell on a field fact rather than on cost: **two devices in one branch cannot be assumed to share a network** — a waiter on the third floor is on mobile data while the counter is on that floor's wifi, so in-branch coordination over LAN is undeliverable for most restaurants. **What replaces it (R83):** the till sells indefinitely offline; the counter↔kitchen link is best-effort and degrades to paper; everything else is cloud-first with an optimistic local buffer that says honestly when it is stale. ⚠ **This sentence named the technical moat, so read the replacement as a positioning change too**, not only an architecture one — the moat is now the completeness of one kernel across every channel (pillar 4), which is the claim no local competitor can match anyway.
 6. **AI honesty.** The analyst answers only from the event ledger through a semantic layer of computable, citable metrics; it says "not enough data yet" when true. Autonomy is earned by data maturity, never shipped on day one of a restaurant's history.
 7. **Visual-first, low-training.** Any staff-facing flow learnable in under 15 minutes; works on PKR 25k Android hardware. UI language is **English only** (a launch decision that **reversed** the original draft's Urdu+English plan — English is the operating language of this market; staff who read little navigate by memorized visual position, which the stable-layout and icon+number laws in `specs/21-ux-system.md` serve directly).
 
@@ -32,7 +32,7 @@ RestOS is a **complete operating system for Pakistani restaurants** — not an o
 
 | Layer | Contents |
 |---|---|
-| **Kernel** | Append-only event ledger (orders w/ line-level states, inventory movements, money movements, staff actions) · catalog (menu/recipes/modifiers) · customer file (one identity across all channels) · sync mesh (LAN-first, cloud exhaust) |
+| **Kernel** | Append-only event ledger (orders w/ line-level states, inventory movements, money movements, staff actions) · catalog (menu/recipes/modifiers) · customer file (one identity across all channels) · ~~sync mesh (LAN-first, cloud exhaust)~~ **direct device→cloud sync with a durable per-device outbox (R82)** |
 | **Drivers** | Channel adapters: storefront, WhatsApp, Instagram, phone/call-center, foodpanda, dine-in POS · Hardware endpoints: printers (ESC/POS), KDS, pass screens, handhelds, rider app |
 | **System services** | Inventory & forecasting · purchasing & wastage · prep planning · staff ledger & scheduling · payments & shifts · delivery dispatch & COD settlement · restaurant memory (checklists/SOPs/handovers) |
 | **Apps** | Owner dashboard & multi-branch roll-up · manager console · conversational analyst (WhatsApp + app) · marketing & loyalty |
@@ -56,7 +56,7 @@ RestOS is a **complete operating system for Pakistani restaurants** — not an o
 - **Foodpanda**: manual quick-entry from day one; Delivery Hero POS API ingestion when partnership lands (Appendix E). Same queue, channel-tagged, commission tracked for channel economics.
 - **Customer file** (kernel): every channel writes to one identity (phone number as key); order history, addresses, lifetime value — the asset aggregators withhold.
 
-### 4.3 Delivery & riders (in scope — launch requirement)
+### 4.3 Delivery & riders (in scope — ~~launch requirement~~ **after launch; R86's six do not include riders**)
 - Rider app (Android): assigned orders, address/phone, status (picked up → delivered), **COD due-back per order**.
 - Dispatch surface at counter/manager: assign order → rider; batch assignment.
 - Cash-with-rider settlement: rider returns, system shows expected cash, over/short recorded and attributed (same pattern as cashier shifts).
@@ -78,12 +78,12 @@ RestOS is a **complete operating system for Pakistani restaurants** — not an o
 - **Autonomy ladder** (earned by data maturity per restaurant): describe (alerts/brief) → prescribe (prep/reorder/staffing suggestions) → act with approval (draft POs, suggest 86) → act autonomously (auto-86 on stockout, auto-pause channel on kitchen overload, auto-reorder). Each rung unlocks when the layer below has proven accurate for that restaurant.
 
 ### 4.7 Owner layer
-- Live view + nightly summary + exception alerts + weekly/monthly reports (item profitability, channel economics net of commission/take-rate, branch comparison) per the dashboard seed (Appendix C); honest sync-status always shown.
+- Live view + nightly summary + exception alerts + weekly/monthly reports (item profitability, channel economics net of commission ~~/take-rate~~ — the restaurant's cost, not ours (R87), branch comparison) per the dashboard seed (Appendix C); honest sync-status always shown.
 - Multi-branch roll-up; identical per-branch structure for one-glance comparison.
-- **Marketing & loyalty** (in 18-month scope): WhatsApp broadcasts w/ opt-out, promos, simple loyalty, campaign-vs-lift view — riding on the customer file + WhatsApp rail.
+- **Marketing & loyalty** (~~in 18-month scope~~ **the customer file + account loyalty + bearer card are IN the launch set, R86; broadcasts stay later**): WhatsApp broadcasts w/ opt-out, promos, simple loyalty, campaign-vs-lift view — riding on the customer file + WhatsApp rail.
 
 ### 4.8 Tax module
-- Per the tax seed (Appendix F), unchanged: off by default, honest FBR/PRA compliance as paid add-on, legal red line on suppression.
+- Per the tax seed (Appendix F), unchanged: off by default, honest FBR/PRA compliance as an add-on ~~(paid)~~ (R87 retires the price, not the add-on), legal red line on suppression.
 
 ## 5. Explicitly OUT (first 18 months)
 
@@ -98,31 +98,39 @@ RestOS is a **complete operating system for Pakistani restaurants** — not an o
 |---|---|---|---|
 | Cloud kitchen | 100% channels (foodpanda + own doors + phone) | No floor; kitchen queue + riders | Commerce core, dispatch, channel pulse |
 | Small dine-in (5–20 seats) — **beachhead** | Dine-in + phone/WhatsApp + storefront + foodpanda | T1/T2 | Simple fabric, own channels, analyst |
-| Large single-branch (100 seats) | Dine-in heavy + all channels | T3 full mesh | Floor coordination, manager console, supply |
+| Large single-branch (100 seats) | Dine-in heavy + all channels | ~~T3 full mesh~~ T3 (several tills, R93) | Floor coordination, manager console, supply |
 | Scaling fast food (2–5 branches) | Everything + call center | T3 + multi-branch | Roll-up, forecasting, consistency, riders |
 
 Profile = channel mix × hardware tier × org size, chosen at onboarding. Same kernel everywhere.
 
 ## 7. Business model
 
-- **PKR 8,000 / branch / month** base subscription (full platform). Single plan, no tiers (plan shape: `specs/15` 15-F5a).
-- **Own-channel take-rate up to 5%** on storefront/WhatsApp/QR order value — **admin-settable** per restaurant. Pitch: "foodpanda costs 30%; your own channel costs ≤5%."
-- Tax compliance add-on priced separately. Done-for-you onboarding (menu, recipes, printer setup, training) bundled or one-time fee per unit economics at pilots.
+⚠ **RETIRED 2026-08-27 by R87 — every number below is out of the plan, not deferred within it.** Pilots are free;
+there is no subscription, no take-rate and no metering, and monetization is revisited only after product-market fit.
+The commercial figures are retained rather than deleted because they record what was once intended and a future
+pricing act should start from them knowingly. ⚠ **One distinction R87 draws by name and this section must not blur:**
+*take-rate* (our cut of a restaurant's sales) is gone, but **commission** — foodpanda's cut and the card provider's
+cut of the restaurant's own money — is the restaurant's real cost, stays in every report, and drives `01-F60`'s
+per-channel pricing. Deleting it would break the product.
+
+- ~~**PKR 8,000 / branch / month** base subscription (full platform). Single plan, no tiers (plan shape: `specs/15` 15-F5a).~~
+- ~~**Own-channel take-rate up to 5%** on storefront/WhatsApp/QR order value — **admin-settable** per restaurant. Pitch: "foodpanda costs 30%; your own channel costs ≤5%."~~
+- ~~Tax compliance add-on priced separately.~~ The tax add-on itself is **statutory and stays** (`16-F25`'s certification gate, `16 §7`'s layer-1 enablement); only its *price* is retired. ~~Done-for-you onboarding (menu, recipes, printer setup, training) bundled or one-time fee per unit economics at pilots.~~ Onboarding for the pilots is performed by R92's superadmin at no charge.
 - Rider app, analyst, storefront included in base — the "gigantic tool" is the pitch; no nickel-and-diming layers.
 
-## 8. Build strategy — no public MVP, strict internal order
+## 8. Build strategy — ~~no public MVP,~~ **launch on R86's six surfaces**, strict internal order
 
 **Stack (settled):** TypeScript end-to-end — Node backend + event-log sync, React for web surfaces, React Native for the Android device fleet, Electron for the Windows counter. Full stack detail, repository layout, and development approach: `specs/00-platform-overview.md`.
 
-Build proceeds in dependency waves (overlapping across the team), each validated live in real dev-pilot restaurants from Wave 1 onward — **dev-pilots are development instruments, not launches**:
+Build proceeds in dependency waves (overlapping across the team), each validated live in real dev-pilot restaurants from Wave 1 onward ~~— **dev-pilots are development instruments, not launches**~~ **— AMENDED by R85: the ~10 pilot restaurants ARE the launch, they trade real money, and `01-F1` makes every day they sell permanent** (R21):
 
-- **Wave 0 — Foundation:** kernel (ledger, catalog, customer file), LAN-first sync mesh, printing layer, auth/roles. *The hardest engineering; hire for this.*
-- **Wave 1 — Service:** ops fabric T1/T2, payments/shifts, aging timers, availability, manager alarms+approvals, nightly owner summary, **plus POS quick-entry for phone and foodpanda orders** (channel-tagged, ≤30 s — so the "one queue, all channels" law holds from the first pilot day). *A restaurant can run on it.*
+- **Wave 0 — Foundation:** kernel (ledger, catalog, customer file), ~~LAN-first sync mesh~~ **device→cloud sync (R82)**, printing layer, auth/roles. *The hardest engineering; hire for this.*
+- **Wave 1 — Service:** ops fabric T1/T2, payments/shifts, aging timers, availability, ~~manager alarms+approvals, nightly owner summary~~ **— both move AFTER launch (R97): they live on the manager console and the owner app, and R86's six include neither** — **plus POS quick-entry for phone and foodpanda orders** (channel-tagged, ≤30 s — so the "one queue, all channels" law holds from the first pilot day; this one stays, because it is a COUNTER feature and the counter is in the six). *A restaurant can run on it.*
 - **Wave 2 — Commerce + delivery:** storefront + all doors (QR/WhatsApp/Instagram-link), full phone/call-center surfaces with customer file, rider app + COD settlement. *A restaurant can sell everywhere on it.*
-- **Wave 3 — Supply + people:** inventory/recipes/counts/variance, purchasing, wastage, prep planning, staff ledger, restaurant memory. *The restaurant's back-of-house runs on it.*
-- **Wave 4 — Intelligence + scale:** conversational analyst (both surfaces), forecasting, autonomy ladder rungs 2+, T3 mesh, foodpanda API, multi-branch, marketing/loyalty. *The OS thinks.*
+- **Wave 3 — Supply + people:** ⚠ **inventory/recipes/counts/variance is IN THE LAUNCH SET (R86) and no longer waits for Wave 3.** Purchasing, wastage, prep planning, staff ledger, restaurant memory stay here. *The restaurant's back-of-house runs on it.*
+- **Wave 4 — Intelligence + scale:** conversational analyst (both surfaces), forecasting, autonomy ladder rungs 2+, ~~T3 mesh~~, foodpanda API, multi-branch. ⚠ **marketing/loyalty (the CRM half) is IN THE LAUNCH SET (R86)**; broadcast campaigns, which need the WhatsApp rail, stay here. *The OS thinks.*
 
-Public launch when Wave 4 is pilot-proven. Per-module software specifications live in `specs/` (§10) — one document per separable app/module; build order is decided module by module from those documents.
+~~Public launch when Wave 4 is pilot-proven.~~ **Launch when R86's six surfaces are complete and ~10 restaurants are trading on them (R85/R97).** Per-module software specifications live in `specs/` (§10) — one document per separable app/module; build order is decided module by module from those documents.
 
 ## 9. Risks (stated plainly)
 
@@ -130,7 +138,7 @@ Public launch when Wave 4 is pilot-proven. Per-module software specifications li
 2. **Foodpanda API access** — apply at project start; manual entry is the standing fallback (Appendix E).
 3. **Analyst trust** — one confident wrong answer to an owner kills the brain's credibility; semantic-layer guardrails are non-negotiable, and the brief ships before free-form chat is promoted.
 4. **Count adherence** still gates variance value; prep planning and low-stock value soften the ask by making counts useful to staff, not just to the owner. Owner-visible count-skipped nags back it up.
-5. **Pilot coverage gap** — dev-pilot restaurants cover the small-dine-in profile. Cloud kitchen, large single-branch, and multi-branch profiles need pilots recruited deliberately, or their subsystems (channel pulse, T3 mesh, multi-branch roll-up, call center) reach market launch untested in the field. **Launch gate:** a public operating profile (§6) is marketed only after at least one pilot of that profile has field evidence for its defining workflows.
+5. **Pilot coverage gap** — dev-pilot restaurants cover the small-dine-in profile. Cloud kitchen, large single-branch, and multi-branch profiles need pilots recruited deliberately, or their subsystems (channel pulse, ~~T3 mesh~~, multi-branch roll-up, call center) reach market launch untested in the field. **Launch gate:** a public operating profile (§6) is marketed only after at least one pilot of that profile has field evidence for its defining workflows.
 
 ## 10. Module documentation set
 
@@ -204,12 +212,12 @@ Design principle: **staff gain at most two new habits** — photographing purcha
 ## Appendix F — Tax module seed
 
 - Tax **off by default**; owner configures behavior per channel and per payment method; internal "true" numbers always complete regardless of external posture.
-- **FBR + PRA compliance add-on (paid):** when enabled, fully faithful — real-time fiscalization, FBR invoice number + QR on receipt, correct PRA rate handling (rates as versioned configuration, verified against current notifications at build time), returns-ready reports.
+- **FBR + PRA compliance add-on ~~(paid)~~:** when enabled, fully faithful — real-time fiscalization, FBR invoice number + QR on receipt, correct PRA rate handling (rates as versioned configuration, verified against current notifications at build time), returns-ready reports.
 - **Legal red line (verbatim, binding):** "the product never implements sales suppression, dual-billing, or under-reporting mechanics in the compliant path, and never markets concealment as a feature." Vendors that build skimming into software face penal provisions under the Sales Tax Act.
 
 ## Appendix G — Field reality: hardware & printing
 
 - **BYO hardware, no proprietary hardware, ever.** Android 10+ tablets/phones (PKR 20–40k devices; 2–3 GB RAM must be usable — the PKR ~25k tablet is the reference device); Windows 10+ PCs (the old counter PC is common).
 - **Printers:** ESC/POS thermal 58 mm & 80 mm over USB, Bluetooth SPP/BLE, and network (9100). Black Copper and generic Chinese brands are the installed base — maintain a compatibility list from field devices. Cash drawer via printer RJ11.
-- **Branch scale:** up to 5 concurrent POS devices per branch, LAN-coherent; up to 5 branches per org (soft limit; schema unlimited).
+- **Branch scale:** up to 5 concurrent POS devices per branch, ~~LAN-coherent~~ **each syncing independently to cloud (R82)**; up to 5 branches per org (soft limit; schema unlimited). ⚠ **Three or four tills in one branch is normal and is inside the launch set** (R93) — this is not a headroom figure.
 - **Silent print failure is forbidden:** a lost KOT is a lost order and a support fire — spooler with retry + loud on-device alert.
